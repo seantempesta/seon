@@ -4,11 +4,76 @@ The design for users, worlds within worlds: not built yet, and the one place the
 
 A user is an agent, a session is a branch of its user's branch, and the system is one mechanism used in different data configurations. State is always in the database and the system is a function of that state: there are no runs and no objects, only entities, attributes and refs. Owner: the Web session. Words are git's and Clojure's ([vocabulary](vocabulary.md)).
 
+## One system of agents: the design (agreed 2026-11-09)
+
+Nothing here is a new concept: every part of Seon is the same few pieces, and what makes one part differ from another is its data and its pull (owner, 2026-11-09: "We are designing one system for agents that we are re-using everywhere"; "make sure you repeat back to me the plan on how we are NOT INVENTING ANY NEW CONCEPTS"). Agreed by the Web, Context and Optimization sessions; the stages and who builds each are [below](#the-stages-agreed-2026-11-09).
+
+**The pieces, reused everywhere:**
+1. **An entity:** an id, its attributes and its refs, each ref naming what it points at (`:seon.db/to`, [data modeling](data-modeling.md#things-relate-by-refs)); one schema registry; every entry optional unless essential, what is there validated.
+2. **An agent:** an entity with a key, its own branch and a process forked from the fork server, running its Flow graph (transport, REPL, tests). The user, root and every working agent are this; none is a separate kind of process.
+3. **A pull pattern on the entity** (`:seon.ctx/pattern`), giving `@ctx`: the agent's context and its page, keyed by attributes (no `:as`, no `*`), its joins the ones its refs imply (```seon.db/implied-pattern```).
+4. **A render:** a function of data (and the db) answering hiccup, named by the entity's schema (`:seon.render/hiccup`) or the value's own key; it may call other renders, composed. The walk (```seon.render/walker``` over ```seon.ratom```) reruns only the components whose `@ctx` paths or db reads moved. There are no layout functions: an entity is drawn by its render, a joined entity by its own. The model reads the same hiccup: its request is the elements that match the message schemas (a message element: its role, call id, field, ref and turn; an element for the person alone), each a schema entry defined once, never keys checked in code (owner, 2026-11-09: "it's data that matches a spec"; "make sure all of this custom shit is gone"). Where the model should read something other than what the person sees, the entity's schema names a model render (`:seon.render/model`). Merging an entity's two renders into one keeps the data the model reads, and test/seon/recorded_requests.edn holds the request byte for byte.
+5. **Messages and requests** over the agent's socket and Flow channels: the existing `:render` and `:eval` requests.
+6. **One merge function**, branch to main and back, its options syncing or private ([sharing](sharing.md)).
+7. **One reconciler**, desired state against observed: it starts, parks and restarts agents.
+
+**What makes each part differ is its data and its pull:**
+- **The user** is an agent with a branch, like any other (owner, 2026-11-09: "User should have a branch just like the other agents"), and always a process (owner: "I want the user to have a process regardless. Anything that's user focused should be handled by this agent too so separate users don't take down the system"). Its pull reaches itself, root and the agents it started (`:seon.agent/agents`, their main half: status, task, messages). Its tree is read only: it changes nothing of another agent's, it sends requests, and agents change their own branches (owner: "The user isn't modifying anything it's sending the requests to agents"). Its walk is the person's whole view. It holds, beside `@ctx`, the renders it asked its agents for, in a ratom of its own diffed as ctx is (```seon.ctx/changes```), read through a view so each component reruns on its own agent's paths. For now it only renders and serves; a model that reads the whole view and routes everything the person types is later (owner: "in a future version we might want to have that agent do routing of all requests").
+- **Root** is the agent keyed `"root"`, an ordinary agent working its task `request/root`; its pull reaches the sessions it started.
+- **A working agent's** pull reaches its task, its evals, model calls, messages, cites and searches; its render is its page and its model's context. It renders its own context in its own process, by its own definitions: asked to render (its existing `:render` request, with the commit it last answered), it answers its whole expanded hiccup (every render call run there, so the answer holds no var or fn head, each component's element carrying its key-id and its walk revision as `data-rev`). A `:render` proc of its own answers while its REPL waits on a model call; the REPL stays the walk's one flusher; a render reads the db at ctx's own point; each render goes on a sliding buffer of one, so only the newest is held; an ask is the credit, so with no ask nothing renders (owner: "since we are sending everything every time it's okay to drop intermediate renders").
+- **The system entity** (`:seon.root/root-fact` today, the `seon.system` namespace at stage 3): boot, config, quiescence; data root's procs read, not an agent.
+- **Root's process** is the go-between (owner: "root I think is mostly the go between for flow communication and isn't doing anything that can allow an agent or the user to take down the system"): the writer, the reconciler, the fork server, the web transport (html and Datastar patches from the user agent's hiccup, a malformed answer an error on that user's page) and the merge gate. It runs no render of an agent or a user.
+
+**Gone, because each was a special case:** root's render walks of pages (`root-walk`, `user-walk`, `branch-walk!`, the cold draw); every layout, ```seon.render/layout-of``` and `:seon.render/layout`; an entity's second render; root's session as a thing apart (```seon.root/root-session-pattern```, its refresh, the special message path); `:seon.agent/root`; an opened eval written on main (opening is an eval with origin `:context` the user agent sends the agent); `:as` and `*` in patterns.
+
+## The data model: schemas, refs and pulls
+
+Every part of the design is entities, attributes and refs, each defined once in the schema registry ([data modeling](data-modeling.md)): an attribute is its own schema, an entity schema names which attributes go together and may extend another (```seon.db/parents```), and a ref names its targets (`:seon.db/to`). Every entry is optional unless it is the entity's identity: what is present is validated at the write, nothing is demanded (owner, 2026-11-09: "If the data is there, it's validated. Very few things should be required unless they are essential"). An entity has a render when, and only when, we want it drawn, and the pull names only what a reader reads: no `*`, no `:as` (stage 1a). The schemas live in [seon.facts.edn](../resources/seon/schemas/seon.facts.edn), [seon.doc.edn](../resources/seon/schemas/seon.doc.edn) and [seon.schema.edn](../resources/seon/schemas/seon.schema.edn) (the ref, `:seon.db/ref`); ```seon.db/targets```, ```seon.db/reaching``` and ```seon.db/implied-pattern``` read the links.
+
+### The entities
+
+Each is its own definition, linked to the others by refs. "Refs out" are its attributes that point at another entity; "reached by" are the refs that point at it, read in reverse in a pull.
+
+- **An agent**, `:seon.db/agent-fact`: identity `:seon.agent/key` (a content id). Refs out: `:seon.agent/task` (a task), `:seon.agent/agents` (the agents it started), `:seon.agent/system` (doc sections). Reached by: `:seon.eval/agent`, `:seon.model-call/agent`, `:seon.message/to`, `:seon.cite/of`, `:seon.search/of`, `:seon.task/agent`, `:seon.task/started-by`, `:seon.process/agent`, `:seon.task/examples`. Render: `seon.render.ui/agent` today, its page once stage 2a gives one render per schema.
+  - Root is an agent keyed `"root"` (stage 3): the same schema, no schema of its own; what makes it root is its data (its task `request/root`) and its pull.
+  - A started agent, `:seon.db/agent-start-fact`, extends it with the boot and time a root started it.
+- **A user**, `:seon.db/user-fact`: extends the agent schema with `:seon.user/name` (an identity). An entity holding both identities is a user, whatever its keys' order (```seon.db/most-specific```). It gets a branch and a process like any agent (stages 4).
+- **The system**, `:seon.root/root-fact` today, renamed to the `seon.system` namespace at stage 3: identity `:seon.root/id`; boot, generation, quiescence, source, the config in force (its `seon.config.*` keys), who is signed in (`:seon.root/signed-in`, a user). Data root's procs read; not an agent, so nothing pulls it as one.
+- **A task**, `:seon.task/task-fact`: identity `:seon.task/id`. Refs out: `:seon.task/needs` (tasks), `:seon.task/examples` (agents), `:seon.task/agent`, `:seon.task/started-by` (agents). Reached by: `:seon.agent/task`, `:seon.cite/of`, `:seon.search/of`. Its proofs, `:seon.task/proofs`, are names, joined to their vars by value.
+- **An eval**, `:seon.db/eval-fact`: identity `:seon.eval/id`. Refs out: `:seon.eval/agent`, `:seon.eval/call` (its model call), `:seon.eval/result`. Its value's render schema is `:seon.eval/schema`.
+- **A result**, `:seon.result/result-fact`: identity `:seon.result/hash` (a content id: the same value is one entity on every branch). The eval tile is its render (stage 2a).
+- **A model call** (a turn), `:seon.model-call/fact`: identity `:seon.model-call/id`. Refs out: `:seon.model-call/agent`. Reached by: `:seon.eval/call`, `:seon.message/call`. Each turn's diff is its model render (stage 2b).
+- **A message**, `:seon.message/fact`: identity `:seon.message/id`. Refs out: `:seon.message/to` (agents), `:seon.message/call` (the turn that took it).
+- **A cite**, `:seon.cite/cite-fact`: identity `:seon.cite/id` (a content id). Ref out: `:seon.cite/of` (a task or an agent). What it cites is a value (`:seon.cite/address`, `:seon.cite/name`, `:seon.cite/task`) joined by value; whether it becomes a ref is open with the owner.
+- **A search**, `:seon.search/search-fact`: identity `:seon.search/id`. Ref out: `:seon.search/of` (a task or an agent).
+- **A doc section**, `:seon.doc/fact`: identity `:seon.doc/address`. Ref out: `:seon.doc/parent`.
+- **A var**, `:seon.db/var-fact`: identity `:var/name`; refs out `:var/ns`, `:var/form`; its test facts (`:seon.test/*`) are a proof's verdict.
+- **A process**, `:seon.process/process-fact`: identity `:seon.process/id`; ref out `:seon.process/agent`. Root's observation of a spawn.
+
+Missing renders, written in stage 2a: a cite, a doc section, a search, a result, a var with its verdict.
+
+### Who writes what, and where
+
+One writer per attribute (docs/sharing.md#where-a-fact-lives). The same agent entity holds attributes written in two places:
+- **Main, by root's writer:** what root observes of an agent (`:seon.agent/status`, `:seon.agent/boot`, `:seon.agent/branch`, `:seon.agent/task`, `:seon.agent/model`, `:seon.agent/max-turns`, `:seon.agent/holder`), process entities, the system entity, messages as sent, who started what (`:seon.agent/agents`, from `:seon.task/started-by`).
+- **The agent's own branch, by its process:** its work: `:seon.agent/turn`, `:seon.agent/ns`, the commits it heard (`:seon.agent/main-commit`, `:seon.agent/main-program`, `:seon.agent/base-commit`), its evals and results, model calls, cites, searches, the messages delivered to it, an eval opened (stage 4). The user's own data and UI state go on the user's branch.
+- **Every branch alike:** content-id entities (results, cites, messages), the same id and value wherever they are.
+
+An agent reads its main half at `:seon.agent/main-commit`, the main its turn opened on. A pull through a ref only another branch holds answers nothing, so the user's walk reads each agent's main half from main and asks the agent for the rest (stage 4).
+
+### Each role's pull
+
+A pattern is data on the entity's schema (`:seon.ctx/pattern`), or the entity's own when it edits it; each join is one its refs imply (```seon.db/implied-pattern```). After stage 1a each is read straight from its schema entry:
+
+- **A working agent:** the pattern of `:seon.db/agent-fact`: the attributes its readers use, its task by `:seon.agent/task` (the pattern of `:seon.task/task-fact`), and, read in reverse, its evals, model calls, messages, cites and searches, its system's doc sections, and the agents it started, as references only.
+- **Root**: the agent's pattern; the sessions it started are its `:seon.agent/agents`.
+- **The user** (stage 4): the pattern of `:seon.db/user-fact`: its name, and the agents it started by `:seon.agent/agents`, root among them, each with its main half (key, status, description, its task's id and name). Each agent's work the user agent asks for and holds beside its pull, not in the db: derived, evictable, keyed by agent and commit.
+
 ## What each thing is
 
 A thing is its data structure: any entity holding the shape is that thing, however it got there, and where each part is stored is then ours to choose.
 
-- **User:** an agent entity holding ``:seon.user/name``, its lookup ref and what makes it a user; until there is a login, boot writes one named for the OS account running root, keeping one entity across boots. On main: no branch yet. Same key, same entity: login decides later who may be ``sean``. It has a process only while something needs one, and it can run with a model to act for its person, recording like any agent. Marking each record as the person's or their agent's is open.
+- **User:** an agent entity holding ``:seon.user/name``, its lookup ref and what makes it a user; until there is a login, boot writes one named for the OS account running root, keeping one entity across boots. Today on main with no branch; by the design above it gets a branch and a process like any agent. Same key, same entity: login decides later who may be ``sean``.
 - **Who started what:** a task names who started it (``:seon.task/started-by``, the person asking or the agent launching it), and its agent, when it starts, joins that one's ``:seon.agent/agents``. Ended tasks tell them how they stand.
 - **Who points at what:** ``:seon.agent/agents``, a set of refs on the user, on main. Many users can point at one agent, and any agent can hold the same refs to those it started; there is no owner attribute; removing a ref keeps its history. Windows over it must order by when each joined, since agent ids are content-derived (lab: the newest fell out of a window of 20 at 1,000).
 - **Session:** an agent on a temp branch of its user's branch.
@@ -65,12 +130,7 @@ A lazy value realized later can pin a db (160 MB per proc, measured), miss read 
 
 ## Sharing
 
-A branch should be main plus its own changes, so everything is a fork of a shared base; today's merges don't keep it that way, because a merge writes its own copy of each leaf.
-
-- After 200 program merges, 84% of a user's index was its own (lab, real merges, 1,080 forms).
-- Content addressing got 12-15% merged every time but 59% merged once, and a write phase went from 29 s to 52 s, so it's not recommended (lab).
-- Rebase keeps a branch's own nodes flat, tracking its data: about 885 to 930 at 5,000 entities, about 6.2 s each, flat in how far behind; a retraction, an own function and an old commit all survived (lab). As a lazy step on a count, checked at an agent's start, a branch nobody uses never pays.
-- Rebase isn't proved safe: it sits on main's whole head, so it takes main's platform records too, and a message's presence on a branch is its delivery, so a message could read as delivered before it's taken (read). With content-addressed nodes a plain merge makes the same nodes a rebase would ([sharing](sharing.md#what-a-branchs-nodes-are)), so neither a tree merge nor a rebase is needed for sharing; Optimization owns the choice.
+A branch is main plus its own changes: an index node's address is the hash of its content, so a plain merge shares every node a branch did not change, with no rebase and no tree-level merge; how it works and what each operation costs are in [sharing](sharing.md#what-a-branchs-nodes-are) and [sharing](sharing.md#what-each-operation-should-cost).
 
 ## Messages
 
@@ -86,6 +146,8 @@ A message is delivered to an agent's entity and stays there until the agent remo
 
 ## What's on screen
 
+What runs today, which stages 1b, 2a and 4 of [the stages](#the-stages-agreed-2026-11-09) replace: root's render proc walks the user's page and root's, and draws an agent's from its branch.
+
 What a person sees is a reflection of the database: a click or a URL writes a fact, the commit causes the re-render, and the patch sets the address bar too, so no UI state is held in a process. Today's isn't: the open sections, the turn in view and "more" are in ``seon.render.proc``'s memory and go on a restart, and the URL is the only thing that survives.
 
 - **Each tab is an entity,** ``:seon.tab/user``, ``:seon.tab/view``, ``:seon.tab/open``. With one current view on the user, tab A would flip when tab B navigated. A tab reconnecting with its id gets everything back, and `/` opens the user's newest. Which tabs to ignore as they pile up is open.
@@ -98,6 +160,8 @@ What a person sees is a reflection of the database: a click or a URL writes a fa
 - **A click costs main a commit:** about 24 ms of CPU across a root's processes (lab: 150 facts, 3.58 s against 0.09 s idle over 30 s, with no agent working), and no bytes on another agent's stream. A running agent reads main as moved after one, and its turn's merge check stays about 3 ms up to 5,000 unmerged facts, since they aren't program (lab, three runs each). Nothing like a hover should write. Not measured: many agents working at once.
 
 ## Root's session
+
+What runs today, which stage 3 of [the stages](#the-stages-agreed-2026-11-09) replaces: root becomes the agent keyed `"root"` itself, and the system entity holds what root's entity holds now.
 
 **Root's session is an ordinary agent a person talks to Seon through** (owner, 2026-11-08: "root should be it's own agent session with it's own custom context"; "a valid agent just like any other agent, it just has some different additional context and links"; "DO NOT MAKE A PARALLELL SYSTEM FOR ROOT"). It is an agent entity keyed `"root"`, a reserved key as the user's is their name, linked to root by `:seon.agent/root` as every agent is, and it works the task `request/root`, made from the chat template. The first message to root makes both, parked, in the same write, and that write's wake spawns it (```seon.root/root-session-tx```, in root's api's `:message`; owner, 2026-11-08: made at the first message, so a root no one talks to, every test root among them, has none). Later messages wake it as one wakes any waiting agent, and the ordinary spawn continues it by its key (``seon.task/session-key``); each boot writes its pattern again when it has one (```seon.root/root-session-refresh-tx```). It is a normal agent that tracks main as the others do (owner, 2026-11-08): its record is on its own branch, and it reads main's sessions at the point its turn heard (`:seon.agent/main-commit`); working on main itself would make it a second writer of main and put its every turn on main (Optimization's measure). What makes it root's is data alone: its own `:seon.ctx/pattern`, the agent's with a join to root's sessions, and its task's plan, which says what it is for. Its task list shows those sessions (```seon.render.ui/sessions```: each by its address, what it works on and how it stands), so it knows what is already being done.
 
@@ -120,16 +184,27 @@ A branch is correct when, read on its value alone, every datom fits its schema, 
 
 A commit is one transaction, so a branch is never half-merged, and one behind main is a consistent older value that knows it's behind. A pull brings a schema and the functions using it in one commit, and loads changed forms into a live process in the same step: a live function returned 1, its agent could see main had moved, and it returned 2 only after merging (lab).
 
-## The steps
+## The stages (agreed 2026-11-09)
 
-The steps below merge one at a time, each usable alone, with today's agents unchanged by proof, and each says what it deletes: no step adds a mechanism beside one that exists (owner, 2026-11-07). Each has its task entry, or gets one once its shape has been tried at the REPL.
+The design above lands in stages, each merged alone with main green, each saying what it deletes; a stage starts when what it needs has merged (owner, 2026-11-09: "We've talked about a lot of ideas so we need to carefully stage it and agree on dividing up the work"). One writer per function at a time: a session names the functions it will change before building, by message; Context reviews what changes what the model reads, Web what a person sees, Optimization the data model, merges and boot.
 
-1. Done: the write check holds a value to its branch's schema, and a merged schema entry brings its attribute's declaration.
-2. Done: an eval's result is one entity per value on every branch, and an eval's id is issued by the store. Two shapes remain, a whole old response that ``seon.db/response-of`` still reads and ``:seon.eval/id`` repeating the eid; how they go is Optimization's call, with how results are stored (owner, 2026-11-07).
-3. Messages, Web's next: one send, delivery and removal by data, a wake rule; the first, one send as one fact on main, is done, and the two tasks after it remain. Functions that mutate behind a read-looking name go with them, by the owner's ruling: task ``my.agent/no-function-does-what-ctx-can``.
-4. Users, and input through ``forgive``.
-5. Sessions and merging them.
-6. The home page from the user's ``@ctx``, with layouts as data: done, each entity schema names its layout (`docs/render.md#the-page`). Tabs as entities were dropped (owner, 2026-11-08: "Why are we solving tabs right now?"): every page of a view is sent the same patches.
+0. **Done: each ref names what it points at** (Web, 4531d84d48): `:seon.db/to`, ```seon.db/targets```, ```seon.db/reaching```, ```seon.db/implied-pattern```.
+1. **In parallel, each needing only stage 0:**
+   - a. **A context is keyed by attributes** (Context; task ``seon.ctx/a-context-is-keyed-by-attributes``): no `:as` on a ref join and no `*` in any pattern, every reader moved to the attribute; the renders stage 2 replaces renamed mechanically; root's patterns excepted until stage 3; the docs' paths moved in the same commit.
+   - b. **An agent renders its own context, and root carries it** (Optimization the agent side, Web root's, one merge; task ``seon.repl/an-agents-process-renders-data-to-hiccup``): the `:render` proc, `:since`, the whole expanded hiccup, `data-rev`, an ask's take-and-flush; root serves html from it; `branch-walk!`, the cold draw and the units answer go.
+   - c. **The boot race** (Optimization): Jolt's main carrier, fixed in our fork (task ``seon.check/a-forked-test-child-died-stuck``).
+   - d. **Boot resumes from the db; files are written, never read** (Optimization; task ``seon.root/a-boot-resumes-from-the-db``; owner, 2026-11-09: "Boot's job is to resume the existing system or if it's fresh to index it and get it to the point that everything is running off the db. From that point on we are syncing data TO files not reading from them"): a running system runs off the db and writes files from it, and a boot resumes from the db and reads no file and no git; indexing from files is an explicit act a person chooses, seeding a fresh store (```seon.root/seed-program!```) or re-indexing one on purpose, never something a boot or a running root does by itself (owner: "Of course we can re-index if we want. But I mean as a functioning system concept"); root's following of the checkout (the watcher of ```seon.root/import-source!```) goes; a binary built from another program than main's is a problem fact, never imported to catch up. Until Seon agents write the system's updates themselves, a Claude session's landing enters the db as data: `bin/land` submits the landed change to root, which merges it into main and writes the files back (owner, 2026-11-09: a temporary bridge).
+2. **After 1a and 1b:**
+   - a. **One render per entity schema** (Web): layouts deleted (```seon.render/layout-of```, `:seon.render/layout`, the page layouts and their lists); each entity drawn by its schema's render, recognized by its schema (```seon.render/entity-schema```, the refs' targets), never by keys checked in code, which leaves each joined entity to its own; an entity's second render merged into one; renders written for a cite, a doc section, a search, a result and a var with its verdict; an entity held only by its id drawn as a link to where the entity is, never again; eval tiles: an eval whose value has a render is its result's render in the sidebar.
+   - b. **The model reads the hiccup by schema** (Context, with 2a): the model's request is the page hiccup's elements that match the message schemas; every place that recognizes model data by hand-written key checks goes (listed in the task); each turn's diff is its model call's model render, between its `:seon.model-call/basis` and the previous call's (task ``seon.render/a-model-render-draws-each-turns-diff``).
+3. **The system entity and root as an agent** (Optimization the store and boot, Web root's session code; task ``seon.root/the-system-entity-and-root-as-an-agent``; one store erase, the other sessions warned): root's entity becomes the system entity, in the `seon.system` namespace; root is the agent keyed `"root"` made with the user's link to it; root's patterns lose their aliases; `:seon.agent/root` goes, liveness read from `:seon.agent/boot`.
+4. **The user agent, rendering only** (Optimization its lifecycle and branch, task ``seon.agent/the-user-agent-lives-on-its-own-branch``; Web its walk and root's transport of it, task ``seon.render/the-user-agent-renders-the-users-view``): always a process, kept by the reconciler, counted in max-running and exempt from task admission, on a branch of its own; its read-only walk of its pull, holding the renders it asks its agents for; root serves its hiccup; opening an eval is an eval it sends the agent, and ```seon.root/opened!```, `:seon.agent/opened` and ```seon.agent/untaken-facts``` go. Two agents whose patterns reach each other each answer with the other's last render.
+5. **A session syncs with main unless private** (Optimization; task ``seon.merge/a-session-syncs-with-main-unless-private``): independent of 1-4, open questions with the owner below.
+- **Later, not now:** the user agent's model, reading the whole view and routing what the person types; login and other users.
+
+Open with the owner: whether a person opening an eval on a working agent changes what that agent's model reads (it does if the opened state is in the hiccup the model walks) or stays page-only (Context's pick: page-only, `:wire/for "page"` on the opened body); a cite's target, a value or a ref (stage 1a keeps `:by` joins named until then); when a syncing session's data goes up, each turn or the task's end; who sets a session private; whether opening an eval on a working agent may wait for its run's request (else its REPL takes `:context` evals at its parks).
+
+Done before these stages: the write check holds a value to its branch's schema; an eval's result is one entity per value, its id issued by the store; one send of a message as one fact on main; tabs as entities dropped (owner, 2026-11-08).
 
 Merges are Optimization's, because its tree merge may change them (owner, 2026-11-07): ``seon.merge/a-branch-holds-its-merge-bases-as-facts`` and ``seon.merge/a-merge-takes-options`` wait on it. As written they'd add a function and facts beside what exists, three merge entry points (``seon.agent/merge-main!``, ``seon.writer/branch-merge``, ``:merge-candidate``), ``:seon.agent/base-commit`` and six walks of the commit graph; whatever lands replaces those. Sharing is content-addressed nodes ([sharing](sharing.md#what-a-branchs-nodes-are)). So far the tree merge shares about as well as a rebase, costs far less at a large delta, and rewrites no history (Optimization, prototype). Steps 4 and 5 need the two merge cases above, so they build on today's merge only where that's one small change.
 
