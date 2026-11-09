@@ -14,7 +14,7 @@
  ;; the section's own text: the lines after its heading, up to the next heading of any level
  :seon.doc/text :string
  ;; the enclosing section
- :seon.doc/parent :seon.db/ref
+ :seon.doc/parent [:and {:seon.db/to [:seon.doc/fact]} :seon.db/ref]
  ;; what its own text cites and resolves to: a section (a link) or a var (a name)
  :seon.doc/references [:set :seon.db/ref]
  ;; the names its own text cites as references (seon.ref/kept: a text word only when it named

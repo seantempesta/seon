@@ -8,7 +8,7 @@
  ;; written again (a changed text, another model) replaces it in place (Datahike's upsert on a
  ;; unique identity ref; a [of model] tuple would keep a vector of each model, which nothing reads:
  ;; a vector of another model is due again, docs/vector.md#what-is-embedded)
- :seon.vector/of [:and {:seon.db/identity true :description "The entity this vector embeds (docs/vector.md#a-vector-is-its-own-entity)."} :seon.db/ref]
+ :seon.vector/of [:and {:seon.db/to [:seon.db/form-fact :seon.doc/fact :seon.task/task-fact :seon.db/eval-fact] :seon.db/identity true :description "The entity this vector embeds (docs/vector.md#a-vector-is-its-own-entity)."} :seon.db/ref]
  ;; the model that made it (its file's sha256): a vector of another model is due again
  :seon.vector/model :string
  ;; the whole vector, f16 (768 dims, 1,536 bytes)

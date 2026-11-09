@@ -106,7 +106,7 @@
   keys; :required-keys {schema [attribute ...]}, the keys each requires, its own and those of the schemas it extends, and
   :own-required, only its own}.
   See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :map] [:map [:entity-schemas :map] [:identity-schemas :map] [:required-keys :map] [:own-required :map]]]}
+  {:malli/schema [:=> [:cat :map] [:map [:entity-schemas :map] [:identity-schemas :map] [:required-keys :map] [:own-required :map] [:targets :map]]]}
   [forms]
   (let [entity? #(:seon.db/attributes (form-props forms %))
         required (fn [form] (for [e (own-entries form) :let [p (second e)] :when (not (and (map? p) (:optional p)))] (first e)))
@@ -115,7 +115,9 @@
      :identity-schemas (into {} (filter #(:seon.db/identity (form-props forms (key %)))) es)
      :required-keys (into {} (for [k (distinct (vals es))]
                                [k (vec (distinct (mapcat #(required (get forms %)) (filter entity? (tree-seq (constantly true) #(parents-in forms %) k)))))]))
-     :own-required (into {} (for [k (distinct (vals es))] [k (vec (required (get forms k)))]))}))
+     :own-required (into {} (for [k (distinct (vals es))] [k (vec (required (get forms k)))]))
+     ;; each ref attribute's target entity schemas, as its own schema states them ({:seon.db/to [...]}), once
+     :targets (into {} (for [[a _] es :let [to (:seon.db/to (form-props forms a))] :when to] [a to]))}))
 
 (def ^:private index
   "The binary's `entity-index`, derived once from its registry: what every write is held to, unless its branch changed an
@@ -135,6 +137,40 @@
 (def schema-identities
   "{schema identity-attribute}: each entity schema's own upsert key, `identity-schemas` turned around. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   (into {} (map (fn [[a k]] [k a])) identity-schemas))
+
+(def targets
+  "{ref attribute [entity schema ...]}: what each ref attribute points at, as its own schema states it (:seon.db/to). See
+  docs/data-modeling.md#things-relate-by-refs."
+  (:targets index))
+
+(declare extends?)
+
+(defn reaching
+  "The ref attributes whose targets entity schema s is or extends: the refs that reach an s, each read in reverse
+  (:ns/_name) to pull what points at it. See docs/data-modeling.md#things-relate-by-refs."
+  {:malli/schema [:=> [:cat :qualified-keyword] [:vector :qualified-keyword]]}
+  [s] (vec (sort (for [[a ts] targets :when (some #(extends? s %) ts)] a))))
+
+(defn attributes-of
+  "The attributes entity schema s names, its own and those of the schemas it extends. See
+  docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :qualified-keyword] [:vector :qualified-keyword]]}
+  [s] (vec (distinct (concat (mapcat attributes-of (parents s)) (own-keys (get contract/forms s))))))
+
+(defn- reverse-attr {:malli/schema [:=> [:cat :qualified-keyword] :qualified-keyword]} [a] (keyword (namespace a) (str "_" (name a))))
+
+(defn implied-pattern
+  "The pull entity schema s implies: its own attributes, each ref it names followed to its first target and each ref
+  that reaches it followed back to the schema that owns it, a schema already walked not followed again (Malli's
+  ::walked-refs), so no join loops. What can relate to an s; an entity's :seon.ctx/pattern chooses from it. See
+  docs/data-modeling.md#things-relate-by-refs."
+  {:malli/schema [:function [:=> [:cat :qualified-keyword] [:vector :any]] [:=> [:cat :qualified-keyword [:set :any]] [:vector :any]]]}
+  ([s] (implied-pattern s #{}))
+  ([s walked]
+   (let [w (conj walked s) as (attributes-of s)]
+     (vec (concat (remove targets as)
+                  (for [a as :when (targets a) :let [t (first (remove w (targets a)))] :when t] {a (implied-pattern t w)})
+                  (for [a (reaching s) :let [o (entity-schemas a)] :when (and o (not (w o)))] {(reverse-attr a) (implied-pattern o w)}))))))
 
 (defn extends?
   "Does schema a extend schema b, itself or through the schemas it extends (`parents`)? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
