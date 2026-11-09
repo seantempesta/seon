@@ -42,6 +42,34 @@ The owner's rulings of 2026-11-09, on one system of agents, rendering from data,
 
 "I want regular audits on all worktrees before merging confirming that we are not building hand wired custom code everywhere"; "The code base should actually get smaller after we remove all the custom parts and focus on reusing and refining"; "Do not force the square peg through the round hole. If you find yourself needing heroics and writing a shitload of code we are doing the wrong thing and we need to fix the design. I want algorithmic estimates for all work we are doing and not to accept anything that's outside of a reasonable version of that". Stated in: AGENTS.md section 3 (audit every branch before it lands).
 
+### One pass over the pull renders the page and the model's context (owner, 2026-11-09)
+
+"maybe we render both the hiccup and the agents context as the processing of the pull? By the end of the hiccup render on the agent we have all the data identified and the hiccup formed. Rather than walking the hiccup we can just treat it as the hiccup on the page"; "Then we have the model context deterministic from the pull and we can send back the hiccup as a composable part that the user pull can integrate"; "The pull doesn't need to be in order the render functions for the data being processed can order them. We still have separate render functions for everything"; "Once we know what something is it's just a db query to find what its render function is". Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09, item 4.
+
+### What an entity is: recognized as the write check does, the best match winning (owner, 2026-11-09)
+
+"Redo this so we are looking up what something is the same way our tx processor looks up and validates data. That is hand rolled shit"; "I think if an entity is several things the best matching one should win. So a single attribute vs two matching vs more is more specific right?" Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09, item 4.
+
+### Render functions take what they read; the cache is never relied on (owner, 2026-11-09)
+
+"I want less magic though so update the my.render/render-ctx function needs to pass in args that likely pass in the pull and whatever else it needs? No magic functions"; "I think this works even without the cache? It's pretty fast right?"; "don't write data until you understand it". Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09, item 4.
+
+### A session syncs by default; a private one reaches main only by a save; only valid data goes up (owner, 2026-11-09)
+
+"I do want options for agents to be private (experimental not syncing with main the entire time) and an auto sync feature (likely the default behavior) which is always trying to sync everything that we can except for the conflicts which they have to resolve"; "I like the idea of only syncing data that's not invalid. If we aren't testing something and there's no conflict I guess it just goes through"; "an agent can modify their own view, but they can't modify the whole system without an explicit save?" Stated in: docs/users.md#the-stages-agreed-2026-11-09 (stage 5), task seon.merge/a-session-syncs-with-main-unless-private.
+
+### The user agent generates the page; root relays and renders nothing (owner, 2026-11-09)
+
+"The user is the center of the world in this example. We are pulling from the users entity through root and the other agents to generate the hiccup and all the agents are generating their own context based on their own version of their pulls. So what does root have to do with anything if the user is the one generating the html?" An agent answers a render ask with the components that moved, by id. Stated in: docs/users.md#the-stages-agreed-2026-11-09 (stages 1b and 4).
+
+### A message is delivered when it is on the recipient's branch (owner, 2026-11-09)
+
+"just deliver the message and the message being in the agents branch is the proof of delivery?" No delivery entity and no mark of the turn that took it; that turn is derived from when the message first appeared on the branch. Stated in: docs/users.md#the-stages-agreed-2026-11-09 (settled).
+
+### A cite is a ref to what exists; an opened eval reaches the model (owner, 2026-11-09)
+
+"I think logically it doesn't make sense to cite something that isn't there?"; "You can transact with temp ids and it'll resolve in the transaction. Referring to a doc can create the doc at the same time if it doesn't exist." Files are a cite target; library vars are literals for now; dead citations are refused at the write. On opening an eval: "Model reads it too"; "I always want to see the current state including a waiting state". Stated in: docs/users.md#the-stages-agreed-2026-11-09 (settled).
+
 ### A private session takes only what main held when it branched (owner, 2026-11-09)
 
 "The private session only takes from main what is on main at the time it is branched." Stated in: task seon.merge/a-session-syncs-with-main-unless-private.
