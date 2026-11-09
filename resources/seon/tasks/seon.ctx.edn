@@ -53,4 +53,8 @@ Owner: the context session (the ctx pull and its render); the optimization sessi
   :seon.task/kind :work
   :seon.task/needs #{"seon.problems/the-names-change"}
   :seon.task/proofs #{}}
+ {:seon.task/name "the-models-readers-follow-the-re-models"
+  :seon.task/plan "Context's readers that move when Optimization's re-models land (owner, 2026-11-09, docs/users.md#the-stages-agreed-2026-11-09, settled): (1) a run's measures become entities of their own, a ref to what they measured, summed when read (re-model 1, Optimization builds it and sends the list): seon.ctx.status's readers of :seon.test/ticks, :seon.test/bytes and :seon.fn/stats (status, task-of's :proved, the var pattern's :seon.test/* attributes) read the measures by their ref; (2) a cite's target is a ref to an entity that exists (Optimization plans the schema): the joins by value in the cite and task patterns (:proved, :section, :var, :callers, a cite's :task, :schema, :ns) become ref joins keyed by their attribute, and their readers in seon.ctx.status, seon.ctx.search, seon.render.ui's cite renders and my.agent/cites move; seon.ctx-test/a-pattern-joins-refs-by-their-attribute then holds no :by join at all. Each lands with the schema change it follows, in the same branch or right after it."
+  :seon.task/proofs #{}
+  :seon.task/kind :work}
 ]
