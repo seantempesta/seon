@@ -9,7 +9,7 @@
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (session D1)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.db.utils :as dbu] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
-            [seon.print :as print] [seon.ref :as ref] [seon.program :as program] [seon.config :as cfg] [seon.lib :as lib]))
+            [seon.print :as print] [seon.ref :as ref] [seon.program :as program] [seon.config :as cfg] [seon.lib :as lib] [clojure.walk :as walk]))
 
 ;; ---- identity --------------------------------------------------------------------
 
@@ -310,9 +310,31 @@
                       (for [[member a] process-attrs :when (and (contains? m member) (nil? (get m member)))]
                         [:db.fn/retractAttribute [:seon.process/id pk] a])))))))
 
+(defn- canonical
+  "Value v with every map sorted by its keys' text, so the same value is the same text however it was built."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [v] (walk/postwalk #(if (map? %) (into (sorted-map-by (fn [a b] (compare (str a) (str b)))) %) %) v))
+
+(defn config-tx
+  "Config c and its sources as facts on main (platform records: never carried by a merge in
+  either direction): the config as an entity of its own, named by the content id of c (`:seon.config/id`, so the same config
+  is one entity on every branch), holding every key (each collection-valued key, the manifest among them, as data);
+  main's root entity with the layer each key came from and its one ref to that entity (`:seon.root/config`); and an
+  entity per provider and per model (:seon.ai.model/provider-id, :seon.ai.model/id). Root's boot writes it
+  with the boot fact, and again when a config entry moves (seon.config/moved). See docs/config.md#facts-on-main."
+  {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] [:vector :map]]}
+  [c srcs]
+  (into [{:seon.root/id :root :seon.config/sources srcs :seon.root/config "config"}
+         (assoc c :db/id "config" :seon.config/id (lib/id (lib/digest (sedn/encode (canonical c)))))]
+        (concat (for [[id p] (:seon.config.ai/providers c)]
+                  (-> (select-keys p [:seon.config.ai/base-url :seon.config.ai/api-key-variable :seon.ai.model/output-token-wire-key])
+                      (assoc :seon.ai.model/provider-id id)))
+                (for [[id m] (:seon.config.ai/models c)]
+                  (-> (dissoc m :seon.config.ai/max-in-flight :seon.config.ai/max-tokens) (assoc :seon.ai.model/id id))))))
+
 (defn boot-tx
   "Root's boot: its id for this process lifetime (the config in force, max-running among its keys, is written with it,
-  seon.config/facts), and the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
+  config-tx), and the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
   makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.root/signed-in). See docs/users.md#what-each-thing-is."
   {:malli/schema [:=> [:cat :string :string] [:vector :any]]}
   [boot name]

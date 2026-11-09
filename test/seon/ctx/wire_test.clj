@@ -813,7 +813,7 @@
   ;; byte for byte, after later turns, evals and a change of the task's own config
   (ts/test-branch!
     (fn [_ conn]
-      (d/transact conn (into (task/boot-tx "boot-1" "sean") (seon.config/facts (merge seon.config/config {:seon.config.ai/provider :openai-compat}) {})))
+      (d/transact conn (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx (merge seon.config/config {:seon.config.ai/provider :openai-compat}) {})))
       (d/transact conn (doc/load-tx @conn "docs" {wire/system-page (slurp (str (seon.config/checkout) "/" wire/system-page))}))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g."
                                                :seon.task/proofs #{'demo-test/g-test}}]))

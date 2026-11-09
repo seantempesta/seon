@@ -231,7 +231,7 @@
   (ts/test-branch! (fn [cfg conn] (let [child (keyword (str (name (:branch cfg)) "-a1"))
         c (assoc config/config :seon.config.agent/max-running 6)]
     (is (nil? (config/from-db @conn)))
-    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (config/facts c {:seon.config.web/port "--set"}))})
+    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx c {:seon.config.web/port "--set"}))})
     (is (= c (config/from-db @conn)))
     (is (= {:seon.config.web/port "--set"} (d/q '[:find ?s . :where [?e :seon.root/id :root] [?e :seon.config/sources ?s]] @conn)))
     ;; the reconciler's root read sees the same config keys
@@ -244,7 +244,7 @@
 ;; entity is root, not the config by the best match of its attributes (the entity index's :entity-schemas)
 (deftest the-config-in-force-is-its-own-entity
   (ts/test-branch! (fn [cfg conn]
-    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (config/facts config/config {}))})
+    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx config/config {}))})
     (let [ix (pdb/index)
           best (fn [m] (key (apply max-key val (frequencies (keep (:entity-schemas ix) (keys m))))))
           root (d/entity @conn [:seon.root/id :root])]
@@ -262,7 +262,7 @@
     (let [a (keyword (str (name (:branch cfg)) "-a")) b (keyword (str (name (:branch cfg)) "-b"))
           _ (do (d/branch! conn (:branch cfg) a) (d/branch! conn (:branch cfg) b))
           on (fn [br] (let [c (pdb/connect (assoc cfg :branch br))]
-                        (d/transact c {:tx-data (config/facts config/config {})})
+                        (d/transact c {:tx-data (seon.task/config-tx config/config {})})
                         (:db/id (:seon.root/config (d/entity @c [:seon.root/id :root])))))
           [ea eb] [(on a) (on b)]]
       (is (some? ea))
@@ -273,8 +273,8 @@
 (deftest the-provider-is-the-config-as-it-stands-at-the-call
   (ts/test-branch! (fn [cfg conn]
     (let [c (merge config/config {:seon.config.ai/provider :none})
-          tick! (fn [m] (d/transact conn {:tx-data (config/facts (merge c m) {})}))]
-      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (config/facts c {}))})
+          tick! (fn [m] (d/transact conn {:tx-data (seon.task/config-tx (merge c m) {})}))]
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx c {}))})
       (is (= {:kind :none} (config/provider-at @conn @conn nil)) "main's config at the first turn")
       (testing "a change to main's config applies at the next call, with no restart"
         (tick! {:seon.config.ai/provider :scripted :seon.config.ai/script 'seon.fixtures/reply})
@@ -291,7 +291,7 @@
   (ts/test-branch! (fn [_ conn]
     (let [vs '#{app.a/one app.b/two app.c/three}
           c (assoc config/config :seon.config.source/process-vars vs)]
-      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (config/facts c {}))})
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx c {}))})
       (is (= vs (:seon.config.source/process-vars (config/from-db @conn))))
       (is (set? (:seon.config.source/process-vars (config/from-db @conn))))
       (is (= c (config/from-db @conn)) "and the whole config is its db copy")))))
@@ -359,7 +359,7 @@
     (is (= :scripted (get-in scripted [:config :seon.config.root/profile])))
     (is (= "--profile scripted" (get-in scripted [:sources :seon.config.root/profile])))
     (is (= "no --profile" (get-in none [:sources :seon.config.root/profile])))
-    (is (= :deepseek (:seon.config.root/profile (some #(when (:seon.config/id %) %) (config/facts (:config deepseek) (:sources deepseek))))))
+    (is (= :deepseek (:seon.config.root/profile (some #(when (:seon.config/id %) %) (seon.task/config-tx (:config deepseek) (:sources deepseek))))))
     ;; a later layer still wins over the profile's value
     (is (= :none (get-in (under ["--profile" "scripted" "--set" ":seon.config.ai/provider=:none"]) [:config :seon.config.ai/provider])))))
 
@@ -449,7 +449,7 @@
   (is (= :invalid (:problem (first (:seon.config/problems
                                     (refused #(config/resolved (assoc-in config/config [:seon.config.ai/models "deepseek-flash" :seon.ai.model/input-usd-per-mtok] "cheap"))))))))
   (ts/test-branch! (fn [cfg conn]
-    (d/transact conn {:tx-data (config/facts config/config config/sources)})
+    (d/transact conn {:tx-data (seon.task/config-tx config/config config/sources)})
     (is (= 0.15 (d/q '[:find ?p . :where [?m :seon.ai.model/id "deepseek-flash"] [?m :seon.ai.model/input-usd-per-mtok ?p]] @conn)))
     (is (= "DEEPSEEK_API_KEY" (d/q '[:find ?v . :where [?p :seon.ai.model/provider-id "deepseek"] [?p :seon.config.ai/api-key-variable ?v]] @conn)))
     (is (= config/config (config/from-db @conn))))))

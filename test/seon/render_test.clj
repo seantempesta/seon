@@ -3351,7 +3351,7 @@
 (clojure.test/deftest the-config-panel-names-each-source
   ;; task seon.render/config-shows-where-each-value-came-from (docs/config.md#layers): beside a value, the layer root recorded for it on main, a fact, so no test depends on the process it runs in
   (ts/test-branch! (fn [_ conn]
-    (d/transact conn {:tx-data (seon.config/facts (assoc seon.config/config :seon.config.agent/max-running 6) {:seon.config.agent/max-running "--set"})})
+    (d/transact conn {:tx-data (seon.task/config-tx (assoc seon.config/config :seon.config.agent/max-running 6) {:seon.config.agent/max-running "--set"})})
     (let [db @conn
           sources (:seon.config/sources (d/pull db [:seon.config/sources] [:seon.root/id :root]))
           html (h/html (ui/config-panel {:seon.render/index (seon.db/index) :seon.config/sources sources} (seon.config/from-db db)))]

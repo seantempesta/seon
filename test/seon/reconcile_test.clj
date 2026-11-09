@@ -13,8 +13,8 @@
 
 (defn- empty-db [] (ts/test-db))
 (defn- booted-tx
-  "Root's boot fact on a test's main, with the one config key the reconciler reads, max-running n (the config in force, seon.config/facts, holds the rest)."
-  [boot n] (into (task/boot-tx boot "sean") (cfg/facts {:seon.config.agent/max-running n} {})))
+  "Root's boot fact on a test's main, with the one config key the reconciler reads, max-running n (the config in force, seon.task/config-tx, holds the rest)."
+  [boot n] (into (task/boot-tx boot "sean") (seon.task/config-tx {:seon.config.agent/max-running n} {})))
 
 
 (defn- actions-for
@@ -1020,7 +1020,7 @@
   ;; DECISIONS: octopus merges stay off (one merge at a time) until the octopus merge's combined test run
   ;; and the par-200 hang are fixed; the config value in force is a fact on main a person can read
   (let [n (cfg/value :seon.config.agent/max-running)
-        db (d/db-with (empty-db) (into (task/boot-tx "boot-1" "sean") (cfg/facts cfg/config {})))]
+        db (d/db-with (empty-db) (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx cfg/config {})))]
     (is (= 1 (cfg/value :seon.config.merge/max-running)))
     (is (= {:boot "boot-1" :max-running n :max-merging 1} (task/root db)) "both config keys are recorded at boot")))
 
