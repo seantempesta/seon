@@ -401,7 +401,7 @@
                  [{:task/name (keyword (str "app.m" k) "tidy") :task/plan (str "Tidy module " k ": name every value by its schema.")
                    :task/status :held :task/refs [[:var/name (symbol (str nsym) "f0")] [:var/name (symbol (str nsym) "f1")]]}]]))
             (range nns)))
-      (pos? nns) (conj [{:db/id "agent" :seon.doc/address "docs/agent.md#agent" :seon.doc/heading "Agent" :seon.doc/level 1 :seon.doc/position 0 :seon.doc/lead "An agent works one task on its own branch."}
+      (pos? nns) (conj [{:db/id "agent" :seon.doc/address "docs/agent.md#the-agent" :seon.doc/heading "The agent" :seon.doc/level 1 :seon.doc/position 0 :seon.doc/lead "An agent works one task on its own branch."}
                         {:seon.doc/address "docs/agent.md#merging" :seon.doc/heading "Merging" :seon.doc/level 2 :seon.doc/position 0 :seon.doc/parent "agent"
                          :seon.doc/lead "A merge task brings main's work into its branch and keeps the proofs green."}
                         {:seon.doc/address "docs/agent.md#designing-a-task" :seon.doc/heading "Designing a task" :seon.doc/level 2 :seon.doc/position 1 :seon.doc/parent "agent"

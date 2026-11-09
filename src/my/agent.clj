@@ -120,7 +120,7 @@
   (boolean (and (simple-symbol? sym) (not (var? (ns-resolve *ns* sym))) (or (find-ns sym) (pdb/eid db :ns/name sym)))))
 
 (defn- plan-cites
-  "Does task id's plan cite sym, as it stands (a design rewrites it with update!), read on db by the one
+  "Does task id's plan name sym (a cite, or a two-backtick literal: a name it will create), as it stands (a design rewrites it with update!), read on db by the one
   parser (its stored cites leave out a new namespace's function: seon.ref/kept reads it as an alias form)?
   A parser the agent broke while it inspects its change answers from the stored cites (seon.task/task-cites)
   and :threw its message, so the answer names it, never a quietly weaker one. No task cites nothing."

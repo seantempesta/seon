@@ -753,8 +753,11 @@
   ([db path text] (kept db (cited (:seon.ref/citations (parse path text))))))
 
 (defn names
-  "The qualified symbols text cites, at any depth, once each in first-mention order."
+  "The qualified symbols text names, once each in first-mention order: what it cites, at any depth, and what it mentions as
+  a two-backtick literal (a name a plan will create, which cites nothing: docs/references.md#task-references)."
   {:malli/schema [:=> [:cat :string] [:vector :qualified-symbol]]}
   [text]
-  (into [] (comp (map :seon.ref/name) (filter qualified-symbol?) (distinct))
-        (:seon.ref/citations (parse nil text))))
+  (into [] (comp (keep (fn [{:seon.ref/keys [code width] :as span}]
+                         (if (= 2 width) (qualified-name code) (:seon.ref/name (candidate nil span)))))
+                 (filter qualified-symbol?) (distinct))
+        (:seon.ref/spans (scan text))))
