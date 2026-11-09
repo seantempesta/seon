@@ -54,6 +54,10 @@ The owner's rulings of 2026-11-09, on one system of agents, rendering from data,
 
 "I want less magic though so update the my.render/render-ctx function needs to pass in args that likely pass in the pull and whatever else it needs? No magic functions"; "I think this works even without the cache? It's pretty fast right?"; "don't write data until you understand it". Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09, item 4.
 
+### A session syncs by default; a private one reaches main only by a save; only valid data goes up (owner, 2026-11-09)
+
+"I do want options for agents to be private (experimental not syncing with main the entire time) and an auto sync feature (likely the default behavior) which is always trying to sync everything that we can except for the conflicts which they have to resolve"; "I like the idea of only syncing data that's not invalid. If we aren't testing something and there's no conflict I guess it just goes through"; "an agent can modify their own view, but they can't modify the whole system without an explicit save?" Stated in: docs/users.md#the-stages-agreed-2026-11-09 (stage 5), task seon.merge/a-session-syncs-with-main-unless-private.
+
 ### A private session takes only what main held when it branched (owner, 2026-11-09)
 
 "The private session only takes from main what is on main at the time it is branched." Stated in: task seon.merge/a-session-syncs-with-main-unless-private.
