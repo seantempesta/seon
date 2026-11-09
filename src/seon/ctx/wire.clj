@@ -248,11 +248,14 @@
 
 (defn eval-wire
   "An eval (:seon.db/eval-fact) as the model reads it: the model's call (its code, and its intent when it said one) and the
-  tool message its result is, printed by the one printer; an eval of another hand, one user message of who ran what and what
+  tool message its result is, printed by the one printer, within its budget, or whole once a person opened it (:seon.eval/opened); an eval of another hand, one user message of who ran what and what
   came of it. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :seon.model/message]]}
-  [{db :seon.db/db} {:seon.eval/keys [id by code intent call-id] :as e}]
-  (let [mark (result-mark db e) said? (not (str/blank? intent))]
+  [{db :seon.db/db} {:seon.eval/keys [id by code intent call-id opened] :as e}]
+  (let [mark (cond-> (result-mark db e)
+               ;; opened by a person: the model reads it whole, as the person does (owner, 2026-11-09: "Model reads it too")
+               opened (update-in [:record :seon.eval/response] vary-meta assoc :seon.print/full true))
+        said? (not (str/blank? intent))]
     (if (or call-id said?)
       [(cond-> {:role "assistant" :content "" :tool-calls [(cond-> {:id id :code code} said? (assoc :intent intent))]}
          (and call-id (reply-of db e)) (assoc :reply (reply-of db e)))

@@ -2112,3 +2112,16 @@
                                   "\n want " (pr-str (cut (get want i))) "\n got  " (pr-str (cut (get got i))))))
           (is (every? #(seon.contract/fits? :seon.model/message %) ms) (str nm ": every one a message"))
           (is (seq (filter page-message? ms)) (str nm ": the page reaches the model as a turn's page message")))))))
+
+(deftest an-opened-eval-reads-whole-to-the-model
+  ;; owner, 2026-11-09: opening an eval changes what the agent's model reads ("Model reads it too"): its result whole, not budgeted
+  (let [[db] (tree-world)
+        big (vec (range 40000))
+        e {:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/code "(range 40000)" :seon.eval/call-id "c9" :seon.eval/intent "Count."
+           :seon.eval/response {:handle 'result/e9 :value big}}
+        tool (fn [e] (:content (peek (wire/eval-wire {:seon.db/db db} e))))
+        closed (tool e) opened (tool (assoc e :seon.eval/opened true))]
+    (is (str/includes? opened "39999") "opened: the whole value")
+    (is (not (str/includes? closed "39999")) "closed: within its budget")
+    (is (< (count closed) (count opened)))))
+
