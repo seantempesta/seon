@@ -235,32 +235,32 @@
       (some-> (stored db e :schema/key) str)))
 
 (defn- due-among
-  "Of the text datoms ds, those whose vector is due for model, made (an entity's
-  :seon.vector/text-t), of (its :seon.vector/model) and title-of (its title) read as functions of the entity:
-  [[e text t] ...] in entity order."
-  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn :seon.host/fn :seon.host/fn :string] [:vector [:tuple :int :string :int]]]}
+  "Of the text datoms ds, those whose vector is due for model, made (an entity's :seon.vector/text, the digest of the text it
+  embeds), of (its :seon.vector/model) and title-of (its title) read as functions of the entity: [[e text digest] ...] in entity
+  order. See docs/vector.md#what-is-embedded."
+  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn :seon.host/fn :seon.host/fn :string] [:vector [:tuple :int :string :string]]]}
   [ds made of title-of model]
-  (vec (sort (for [{:keys [e a v tx]} ds
-                   :when (or (not= model (of e)) (not= tx (made e)))]
-               [e ((texts a) (title-of e) v) tx]))))
+  (vec (sort (for [{:keys [e a v]} ds
+                   :let [text ((texts a) (title-of e) v) h (lib/digest text)]
+                   :when (or (not= model (of e)) (not= h (made e)))]
+               [e text h]))))
 
 (defn due
   "The texts on db whose vector is due for model: each form's source, wiki section's text, schema
-  entry's form and task's plan with no vector, a vector made from an earlier text (its :seon.vector/text-t is not
-  the text's transaction), or another model's. [[e text t] ...] in entity order, t the text's
-  transaction. With ds, only those of the text datoms ds (`written`), each one's vector read by
+  entry's form and task's plan with no vector, a vector made from another text (its :seon.vector/text is not the text's
+  digest), or another model's. [[e text digest] ...] in entity order. With ds, only those of the text datoms ds (`written`), each one's vector read by
   one seek: the cost of ds, not of the store."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector [:tuple :int :string :int]]]
-                  [:=> [:cat :seon.host/db :string [:sequential :any]] [:vector [:tuple :int :string :int]]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector [:tuple :int :string :string]]]
+                  [:=> [:cat :seon.host/db :string [:sequential :any]] [:vector [:tuple :int :string :string]]]]}
   ([db model]
    (let [on (vectors-of db)
          by-e (fn [a] (into {} (keep (fn [d] (when-let [e (on (:e d))] [e (:v d)]))) (d/datoms db :aevt a)))
-         made (by-e :seon.vector/text-t)
+         made (by-e :seon.vector/text)
          of (by-e :seon.vector/model)]
      (let [title-of (titles db)]
        (due-among (for [a (keys texts) d (d/datoms db :aevt a)] d) #(made %) #(of %) #(title-of %) model))))
   ([db model ds]
-   (due-among (filter (comp texts :a) ds) #(stored-of db % :seon.vector/text-t) #(stored-of db % :seon.vector/model) #(title db %) model)))
+   (due-among (filter (comp texts :a) ds) #(stored-of db % :seon.vector/text) #(stored-of db % :seon.vector/model) #(title db %) model)))
 
 (defn written
   "The text datoms db holds that db from does not (datahike.api/datoms-diff, which skips the
@@ -270,19 +270,19 @@
   [from db] (filterv (comp texts :a) (second (d/datoms-diff from db :eavt []))))
 
 (defn fact
-  "The vector entity of entity e (an id, tempid or lookup ref): its vector v of the text at transaction t, made by
+  "The vector entity of entity e (an id, tempid or lookup ref): its vector v of the text whose digest is h, made by
   model. Its identity is :seon.vector/of, so a vector written again replaces e's
   (docs/vector.md#a-vector-is-its-own-entity)."
-  {:malli/schema [:=> [:cat :seon.db/ref :int [:vector {:min 1} number?] :string] :map]}
-  [e t v model]
-  (assoc (pack v) :seon.vector/of e :seon.vector/model model :seon.vector/text-t t))
+  {:malli/schema [:=> [:cat :seon.db/ref :string [:vector {:min 1} number?] :string] :map]}
+  [e h v model]
+  (assoc (pack v) :seon.vector/of e :seon.vector/model model :seon.vector/text h))
 
 (defn tx-data
-  "The vector entities of embedded texts: entity es[i]'s vector vs[i] of the text at transaction ts[i], made by
+  "The vector entities of embedded texts: entity es[i]'s vector vs[i] of the text whose digest is hs[i], made by
   model (`fact`)."
-  {:malli/schema [:=> [:cat [:sequential :int] [:sequential :int] [:sequential [:vector {:min 1} number?]] :string] [:vector :map]]}
-  [es ts vs model]
-  (mapv (fn [e t v] (fact e t v model)) es ts vs))
+  {:malli/schema [:=> [:cat [:sequential :int] [:sequential :string] [:sequential [:vector {:min 1} number?]] :string] [:vector :map]]}
+  [es hs vs model]
+  (mapv (fn [e h v] (fact e h v model)) es hs vs))
 
 ;; ---- the model (native/embed.c over llama.cpp: only the exec'd helper loads it) ------------
 ;; Bound here, resolved on the first call: the library is loaded by `open-model`, in the helper

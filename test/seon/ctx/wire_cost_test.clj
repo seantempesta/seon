@@ -108,7 +108,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Say it."}]))
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range n)] (pdb/eid db :seon.doc/address (str "docs/p.md#s" i))))]
-    [(d/db-with db (vector/tx-data es (repeat (count es) 1) (mapv unit (range (count es))) "m")) te]))
+    [(d/db-with db (vector/tx-data es (repeat (count es) "1") (mapv unit (range (count es))) "m")) te]))
 
 (defn task-data-of
   "seon.ctx.status/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db and
