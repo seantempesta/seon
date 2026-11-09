@@ -152,8 +152,11 @@
     feed))
 
 (defn- await-feed
-  "true once (pred @feed) holds, false when the feed ended first (:ended, set by watch-feed!): the
-  wait ends with its producer, and the caller's check is red naming what it awaited. No deadline."
+  "true once (pred @feed) holds, false when the feed ended first (:ended, set by watch-feed!): a wait
+  whose producer died (root stopped, the peer closed) ends, and the caller's check is red naming what it
+  awaited. No deadline: a live producer that owes the mark and never sends it is its own defect, fixed
+  there (the render proc's keyframe to a stale tab: seon.web/a-tabs-first-keyframe-settles-on-its-own),
+  never by a timeout here (AGENTS.md §4, nothing hangs)."
   [feed pred]
   (await-ref feed #(or (pred %) (:ended %)))
   (boolean (pred @feed)))

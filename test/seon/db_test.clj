@@ -2,7 +2,7 @@
   "One store, many branches, as in production (owner, 2026-10-21): bin/test seeds one test
   store and each test takes a branch of it through one helper (seon.test-store/test-branch!)."
   (:require [seon.task :as task] [seon.vector] [seon.test-store :as ts] [my.test :as mt] [seon.profile :as profile] [clojure.test :refer [deftest is testing]]
-            [clojure.java.shell] [clojure.java.io] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
+            [clojure.java.shell] [clojure.java.io] [clojure.walk] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
             [datahike.datom :as dd] [datahike.index.persistent-set :as psi]
@@ -1292,12 +1292,53 @@
               "a ref to an incomplete entity is a datom of the referrer only")
           (is (nil? (pdb/invalid-entity (d/with db [{:seon.agent/key "half" :seon.agent/status :idle}])))
               "an entity incomplete before is not refused for a write that broke nothing")
+          (is (nil? (pdb/invalid-entity (d/with db [{:seon.agent/key "half" :seon.agent/boot "b2"}])))
+              "nor for one that writes again an attribute of the very schema it was incomplete in (the audit of 2026-11-09)")
+          (let [plain (:db-after (d/with @conn [{:seon.agent/key "plain"}]))]
+            (is (= [:seon.agent/started-ms] (:missing (pdb/invalid-entity (d/with plain [{:seon.agent/key "plain" :seon.agent/boot "b"}]))))
+                "an agent a write makes a started one holds what a started agent requires: what the entity held before of another schema counts for nothing"))
           (is (= [:seon.agent/boot] (:missing (pdb/invalid-entity (d/with @conn [[:db/retract [:seon.agent/key "whole"] :seon.agent/boot "b"]]))))
               "retracting a key the entity held and still needs is refused")
           (is (nil? (pdb/invalid-entity (d/with @conn [[:db.fn/retractEntity [:seon.agent/key "whole"]]])))
               "an entity retracted whole has stopped being that thing")))
       (testing "an upsert of an unknown identity is no stub (seon.root's release! of a task id main does not hold)"
         (is (= :seon.task/task-fact (:schema (pdb/invalid-entity (d/with @conn (task/execution-tx ["no/such"] :running))))))))))
+
+(defn written-tasks
+  "The arguments of seon.db/invalid-entity for n whole tasks written at once on the world: the transaction's report."
+  {:malli/schema [:=> [:cat :int] [:vector :any]]}
+  [n]
+  [(d/with (mt/world) (vec (for [i (range n)] {:seon.task/id (str "app/t" i) :seon.task/ns 'app :seon.task/name (str "t" i) :seon.task/plan "p"
+                                                 :seon.task/execution :held :seon.task/branch (keyword (str "task-app-t" i)) :seon.task/kind :work})))])
+
+(deftest the-entity-check-costs-the-entities-a-write-touches
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches: one seek per (touched entity, required key) on the value after,
+  ;; and per own attribute on the value before; never an entity's size or the store's (the audit of 2026-11-09: no proof)
+  (cost/proof
+    {:of 'seon.db/invalid-entity :input 'seon.db-test/written-tasks
+     :n "whole task entities one write touches"
+     :work "per entity: its datoms grouped by the schema that owns them; a required key the write added is read from its datoms, any other one :eavt seek after (and before, where it is missing)"
+     :growth :linear
+     ;; 15.7k ticks and 43 KB a task with a seek for every required key; reading the keys a write added from its own datoms
+     ;; made a creating write seek nothing (2026-11-09)
+     :per-n {:ticks 3500 :bytes 14000}
+     :sizes [30 100 300]}))
+
+(deftest a-branchs-own-entity-schema-is-the-one-its-writes-are-held-to
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches: the per-datom check read a branch's own schemas and the
+  ;; entity check the binary's, so an agent that changed what an entity is was judged by the old definition (the audit of
+  ;; 2026-11-09); a write's {:forms :registry} give the entity index for that write too
+  (let [db (ts/test-db)
+        half [{:seon.agent/key "half" :seon.agent/boot "b"}]
+        ;; the branch's agent-start-fact: started-ms optional
+        own (clojure.walk/postwalk #(if (and (vector? %) (= :seon.agent/started-ms (first %)) (= 2 (count %)))
+                                      [:seon.agent/started-ms {:optional true} (second %)] %)
+                                   (get seon.contract/forms :seon.db/agent-start-fact))]
+    (is (not= own (get seon.contract/forms :seon.db/agent-start-fact)) "the branch's form differs")
+    (is (thrown? clojure.lang.ExceptionInfo (pdb/with db half)) "the binary's definition refuses a boot with no start time")
+    (is (map? (pdb/with db half {:forms {:seon.db/agent-start-fact own} :registry nil})) "the branch's own accepts it")
+    (is (thrown? clojure.lang.ExceptionInfo (pdb/with db half {:forms {:app.m0/note [:string]} :registry nil}))
+        "a branch whose changes name no entity schema is held to the binary's")))
 
 (deftest an-entity-named-by-a-ref-ends-with-its-target
   ;; docs/storage.md#the-write-checks-every-entity-it-touches: a vector's identity is a ref to the entity it embeds

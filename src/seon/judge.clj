@@ -113,10 +113,10 @@
 
 (defn fact
   "The :seon.judge fact of task id's first move: its request's digest, the version that
-  served the context, the reply's calls and the score with what it cost (:usd). The provider's token counts are the model
-  call's own attributes, on its entity: copied here they made this record read as a model call with no id, which the
-  write refuses (docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together)."
-  {:malli/schema [:=> [:cat :string :seon.task/id :map [:vector :string] :map [:maybe number?]] :map]}
-  [dg id version calls sc usd]
+  served the context, the reply's calls and the score with what it cost: :usage, the provider's token counts by the model
+  call's own names (seon.turn/usage), and :usd. Inside the score, a value of the judge's, never attributes of its record,
+  which a model call's schema owns (docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together)."
+  {:malli/schema [:=> [:cat :string :seon.task/id :map [:vector :string] :map [:maybe :map] [:maybe number?]] :map]}
+  [dg id version calls sc usage usd]
   {:seon.judge/digest dg :seon.judge/task id
-   :seon.judge/score (cond-> (assoc sc :version version :calls calls) usd (assoc :usd usd))})
+   :seon.judge/score (cond-> (assoc sc :version version :calls calls) (seq usage) (assoc :usage usage) usd (assoc :usd usd))})

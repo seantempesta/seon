@@ -72,8 +72,10 @@
   (let [[r] (at/in-agent #(vector {:op :eval :agent "root"
                                    :code (str "(let [n0 (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/digest)) a (my.root/first-moves! sys [" (pr-str (:task %)) "]) b (my.root/first-moves! sys [" (pr-str (:task %)) "])]"
                                               " [(get-in a [:error :seon.error/type]) (mapv :reused? (:rows a)) (boolean? (:acted (first (:rows a))))"
-                                              " (mapv :reused? (:rows b)) (:usd b) (- (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/digest)) n0)])")}))]
-    (is (= [:seon.judge/cost-unknown [false] true [true] 0.0 1] (:value r)) (pr-str r))))
+                                              " (mapv :reused? (:rows b)) (:usd b) (- (count (datahike.api/datoms @(:conn sys) :aevt :seon.judge/digest)) n0)"
+                                              ;; the provider's token counts are kept on the score (seon.judge/fact), never dropped
+                                              " (boolean (some #(when (= (:v %) " (pr-str (:task %)) ") (pos-int? (get-in (datahike.api/entity @(:conn sys) (:e %)) [:seon.judge/score :usage :seon.model-call/tokens]))) (datahike.api/datoms @(:conn sys) :aevt :seon.judge/task)))])")}))]
+    (is (= [:seon.judge/cost-unknown [false] true [true] 0.0 1 true] (:value r)) (pr-str r))))
 
 (deftest a-pass-stops-at-its-bound
   ;; at :seon.config.ai/judge-pass-usd the pass makes no further call and writes what it left.

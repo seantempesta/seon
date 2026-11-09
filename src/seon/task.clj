@@ -588,9 +588,10 @@
   {:malli/schema [:=> [:cat :seon.db/agent-fact] :seon.reconcile/agent]}
   [a]
   (let [{:seon.agent/keys [branch model max-turns holder]} a]
-    ;; an environment only with a branch: a task's start always writes one, an agent root starts with no task has none
+    ;; an environment only with a branch: a task's start always writes one, an agent root starts with no task has none.
+    ;; A branch with no max-turns is no environment the reconciler can compare, so the contract refuses it, never a quiet nil
     (cond-> (select-keys a [:seon.agent/key :seon.agent/boot])
-      (and branch max-turns) (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
+      branch (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
 
 (defn agents
   "Every agent root started on db, by key: the entities a start recorded (start-tx: :seon.agent/boot among them). See docs/reconcile.md#a-task-holds-how-its-work-ended."

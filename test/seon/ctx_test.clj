@@ -1054,10 +1054,12 @@
      :growth :constant
      ;; +1: a task's plan and instructions are parsed apart, each its own text (seon.task/cited-texts, md-scan bench-b17);
      ;; +1: seon.doc/carry-index! keeps the search's text index across the transaction (the owner accepted it, 2026-11-01)
-     ;; +3: the swap's transaction is checked once, where it becomes data (seon.db/with, seon.db/invalid-datom,
-     ;; seon.db/invalid-entity; docs/storage.md#the-write-checks-every-entity-it-touches); the owner accepted validation at
-     ;; transaction time, 2026-11-08 ("a small price to pay. Make sure that implementation is efficient")
-     :fixed {:calls 116}
+     ;; +5: the swap's transaction is checked once, where it becomes data (docs/storage.md#the-write-checks-every-entity-it-touches):
+     ;; seon.db/with, the plan's citations' seon.db/speculate and seon.db/invalid-entity (af7ee29464; seon.db/invalid-datom was
+     ;; paid before it), then seon.db/checked and seon.db/index-of (the check a function, not a macro shaped to this count, and
+     ;; a branch's own entity schemas: the audit of 2026-11-09); read from the path, 118 measured. The owner accepted
+     ;; validation at transaction time, 2026-11-08 ("a small price to pay. Make sure that implementation is efficient")
+     :fixed {:calls 118}
      :sizes [100 300 1000 3000]})
   ;; no record left behind: an empty state builds none (as-agent!'s callers leave theirs too)
   (end-agent!))

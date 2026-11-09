@@ -561,11 +561,11 @@
               (= (judge/scorer db) (:scorer (:seon.judge/score held))) (recur more (conj rows (row held true)) spent)
               ;; held, but scored by other scoring: scored again from its calls, no model call
               (:seon.judge/score held)
-              (let [{:keys [calls version usd]} (:seon.judge/score held)
+              (let [{:keys [calls version usage usd]} (:seon.judge/score held)
                     sc (score db t calls)]
                 (if (contract/error? sc)
                   {:rows rows :usd spent :error sc}
-                  (let [f {:seon.judge/digest dg :seon.judge/score (cond-> (assoc sc :version version :calls calls) usd (assoc :usd usd))}]
+                  (let [f {:seon.judge/digest dg :seon.judge/score (cond-> (assoc sc :version version :calls calls) usage (assoc :usage usage) usd (assoc :usd usd))}]
                     @(root/transact-main! sys [f])
                     (recur more (conj rows (row (assoc f :seon.judge/task id) :rescored)) spent))))
               (>= spent bound)
@@ -586,7 +586,7 @@
                                           {:rows rows :usd spent :error r})
                   (contract/error? sc) {:rows rows :usd spent :error sc}
                   :else
-                  (let [f (judge/fact dg id version calls sc usd)]
+                  (let [f (judge/fact dg id version calls sc usage usd)]
                     @(root/transact-main! sys [f])
                     ;; a cost the provider's usage cannot price is unknown, never 0: the bound
                     ;; cannot hold over it, so the pass ends there, recorded

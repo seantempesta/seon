@@ -66,14 +66,6 @@
   {:malli/schema [:=> [:cat :any] [:maybe [:map [:value :any]]]]}
   [v] (when (some-> (:seon.render/schema (meta v)) (contract/fits? v)) (model v)))
 
-(defn map-keys
-  "The keys a schema's [:map ...] form names (inline, or in its [:and ...] members)."
-  {:malli/schema [:=> [:cat :any] [:vector :any]]}
-  [form]
-  (cond (and (vector? form) (= :map (first form))) (vec (keep #(when (vector? %) (first %)) (rest form)))
-        (and (vector? form) (#{:and :merge} (first form))) (vec (mapcat #(map-keys (if (keyword? %) (get contract/forms %) %)) (rest form)))
-        :else []))
-
 (def ^:private drawn-schemas
   "The entity schemas a render draws (declared, theirs or a parent's): what schema-of names a pulled entity by. Derived once."
   (into #{} (filter declared) (vals identity-schemas)))
