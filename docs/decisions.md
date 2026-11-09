@@ -2,6 +2,34 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-09 rulings
+
+The owner's rulings of 2026-11-09, on one system of agents, rendering from data, the user and root. Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09, staged in docs/users.md#the-stages-agreed-2026-11-09.
+
+### One system of agents, and no new concepts (owner, 2026-11-09)
+
+"We are designing one system for agents that we are re-using everywhere"; "make sure you repeat back to me the plan on how we are NOT INVENTING ANY NEW CONCEPTS HERE. Explain the building blocks that we are resuing everywhere and how it's the data and the pull that makes each part different"; "We've talked about a lot of ideas so we need to carefully stage it and agree on dividing up the work". Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09.
+
+### A page is the pull drawn recursively; no layouts (owner, 2026-11-09)
+
+"No layout-of. No seon.render/layout I want to remove all the manual layout work. A hiccup render can override anywhere we are walking and rendering recursively. It's just more data that we are detecting and rendering"; "Entities should have renders IFF we want them rendered. But why are we attaching data to the agent's entity if we don't want it rendered?"; "Ditch the 'draw' term ... We need a simple way from the system process to render data and get back hiccup". Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09.
+
+### Separate definitions, linked by refs; accretion (owner, 2026-11-09)
+
+"I want the separate components that we need to process maybe separately as separate definitions that are linked"; "I'm not saying make everything required. That's bad data modeling. Clojure and datomic are designed for accretion. If the data is there, it's validated"; "There are no 'rows'" and no "record": entities, attributes, values, refs. Stated in: docs/data-modeling.md#things-relate-by-refs.
+
+### An agent renders its own context; the whole render each time (owner, 2026-11-09)
+
+"we can have the agents rendering their own context and just sending that back? Do we need the :op made up protocol or can we just return the hiccup directly?"; "since we are sending everything every time it's okay to drop intermediate renders"; "Datastar teaches it's cheap to compress and send everything rather than diffing"; "I want efficient and smart render functions that are always focused on showing the right data". Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09.
+
+### The user is an agent with a branch and a process; root is the go-between (owner, 2026-11-09)
+
+"I want the user to have a process regardless. Anything that's user focused should be handled by this agent too so separate users don't take down the system"; "User should have a branch just like the other agents"; "it's a read only ctx tree. The user isn't modifying anything it's sending the requests to agents"; "root I think is mostly the go between for flow communication and isn't doing anything that can allow an agent or the user to take down the system"; "The user doesn't need to be an agent under root"; the system's entity is `:seon.system/*` ("sure"). The user agent's model and routing are later ("I don't want to tackle the live aspects of the user agent right now"). Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09.
+
+### A private session takes only what main held when it branched (owner, 2026-11-09)
+
+"The private session only takes from main what is on main at the time it is branched." Stated in: task seon.merge/a-session-syncs-with-main-unless-private.
+
 ## 2026-11-08 rulings
 
 The owner's rulings of 2026-11-08, on what the model knows, erasing the store, and how a reply's evals run.
