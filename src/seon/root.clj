@@ -337,7 +337,7 @@
         branch (pdb/on-main (pdb/conn-main (:conn st)) (or branch (keyword (str "agent-" (name id)))))
         [r a] (sock/socketpair)
         ;; fiber pumps: an end costs no thread of its own (root may run a thousand agents)
-        end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :buf (cfg/value :seon.config.agent/inbox-size)})]
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :encode-error ap/unencodable :buf (cfg/value :seon.config.agent/inbox-size)})]
     [(-> st (assoc ::update true)
          (assoc-in [:agents id] {:branch branch})
          (assoc-in [:agent-procs id] {:proc agent-launcher

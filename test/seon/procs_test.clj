@@ -146,6 +146,24 @@
         (is (= at (get-in problem [:error :commit])))
         (remote/close! end) (sock/close! a'))))))
 
+(deftest a-reply-the-wire-cannot-encode-answers-its-asker-and-the-end-serves-on
+  ;; task jolt.async/a-value-a-remote-end-cannot-encode-answers-its-asker: root's end sent an agent
+  ;; a reply holding a sorted map (no stable encoding), and the writer pump closed the end, which
+  ;; root read as the agent's death. The reply goes in the end's :encode-error, ap/unencodable: the
+  ;; asker's :k gets the typed error, and the next frame follows on the same end.
+  (let [[r a'] (sock/socketpair)
+        codec' {:encode codec/encode :decode codec/decode}
+        root-end (remote/open r {:codec codec' :pump :fiber :encode-error ap/unencodable})
+        agent-end (remote/open a' {:codec codec' :pump :fiber})
+        take! #(first (a/alts!! [(:in agent-end) (a/timeout 5000)]))]
+    (a/>!! (:out root-end) {:op :reply :k 7 :result (sorted-map :a 1)})
+    (a/>!! (:out root-end) {:op :reply :k 8 :result {:ok true}})
+    (let [x (take!) y (take!)]
+      (is (= [:reply 7 :seon.agent/unencodable] [(:op x) (:k x) (get-in x [:result :seon.error/type])]) (pr-str x))
+      (is (re-find #"cannot encode|no stable encoding" (get-in x [:result :seon.error/message])) (pr-str x))
+      (is (= {:op :reply :k 8 :result {:ok true}} y) "the end carries the next frame"))
+    (remote/close! root-end) (remote/close! agent-end)))
+
 (deftest an-agent-root-cannot-interrupt-is-a-problem-and-memory-rides-its-commits
   ;; shrink brief 3, rows 19 and 34: an agent whose boot check found root's interrupt cannot
   ;; reach it says so in its hello, and root records :seon.agent/interrupt-unreachable (the

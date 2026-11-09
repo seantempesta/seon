@@ -9,6 +9,23 @@
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.config :as cfg] [seon.sock :as sock] [seon.step :as step]
             [jolt.async.remote :as remote] [clojure.core.async :as a] [clojure.core.async.flow :as flow]))
 
+(defn unencodable
+  "What root's end sends the agent in place of message v, which the codec threw t encoding (the
+  end's :encode-error, jolt.async.remote): the typed :seon.agent/unencodable, as the answer v was
+  (a :reply's :result, an :fx-reply's outcome, under v's :k, so the agent's wait for it gets it),
+  or, for any other message, an answer under v's :id that no wait holds (the agent's transport
+  takes it as an unawaited one; the request it was is root's pending one, owed its answer). The
+  end stays open. See docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data."
+  {:malli/schema [:=> [:cat :map :seon.host/throwable] :seon.wire/seon-msg]}
+  [v t]
+  (let [e (contract/error :seon.agent/unencodable #'seon.agent-proc/unencodable
+                          (str "a " (pr-str (:op v)) " message holds a value the wire cannot encode: " (ex-message t))
+                          {:message-op (:op v)})]
+    (case (:op v)
+      :fx-reply (merge e (select-keys v [:op :k]))
+      (:reply :fd :branched) (assoc (select-keys v [:op :k]) :result e)
+      {:op :reply :id (:id v) :result e})))
+
 (defn- to-proc!
   "Send m to the agent's process: onto the end's :out (its writer pump frames it). While a
   descriptor is in its handshake (:holding), m waits in :held."
