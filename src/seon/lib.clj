@@ -316,13 +316,15 @@
         (let [k (max 0 (- n note)) body (String. b (- (alength b) (min k (alength b))) (min k (alength b)) "UTF-8")]
           (str "[" (- total k) " earlier bytes left out] " body))))))
 
-(def digest
-  "The first 16 hex digits of the SHA-256 of s (seon.edn/digest, which seon.config uses below this namespace): a content identity (docs/source.md#a-result-is-a-function-of-its-digest). The one hash of a string; hasch is for store ids."
-  sedn/digest)
+(defn digest
+  "The first 16 hex digits of the SHA-256 of s: a content identity (docs/source.md#a-result-is-a-function-of-its-digest). The one hash of a string (seon.edn/digest, defined there for seon.config, which sits below this namespace); hasch is for store ids."
+  {:malli/schema [:=> [:cat :string] [:string {:min 16 :max 16}]]}
+  [s] (sedn/digest s))
 
-(def id
-  "A name made of hex text h (seon.edn/id, which seon.config uses below this namespace): a digest as a name every Clojure reader reads. See docs/storage.md#ids."
-  sedn/id)
+(defn id
+  "A name made of hex text h (a digest, a hash), safe in every Clojure reader: seon.edn/id, defined there for seon.config, which sits below this namespace. See docs/storage.md#ids."
+  {:malli/schema [:=> [:cat [:re "^[0-9a-f]+$"]] [:re "^[a-p][0-9a-f]*$"]]}
+  [h] (sedn/id h))
 
 (defn unique-id
   "A fresh id that must never repeat (an agent, a root's boot): the digest of a random UUID, the one id form (docs/decisions.md, the ruling named An id is the content of the facts that make it: always unique, a UUID's hash; the same content, its digest). Minted once, where its entity is made."

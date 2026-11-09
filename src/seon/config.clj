@@ -103,7 +103,7 @@
 (defn- closed
   "The compiled config map s as a config is read: closed at its top (an unknown key refuses it) and every key but those it
   `may-be-absent` required (a missing one refuses it, at boot, never at its first read). The schema itself is open and its
-  keys optional, as every entity schema's are (root's entity holds the config beside its own facts, and a task holds single
+  keys optional, as every entity schema's are (the config in force is an entity of its own, and a task holds single
   keys as its overrides); nested values keep their own shape. See docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat :any] :any]}
   [s] (mu/required-keys (mu/update-properties s assoc :closed true) (remove may-be-absent (map first (m/entries s)))))
@@ -538,7 +538,7 @@
                         [k (if (dbu/multival? db k) (set v) v)]))))
 
 (defn provider-at
-  "The model provider as the config stands now: main's root entity on main (from-db: what root wrote
+  "The model provider as the config stands now: main's config entity (from-db: what root wrote
   at boot and any change since), over this process's own config for a key it does not hold, and the
   task's own settings over both (the declared :seon.config.* keys its entity holds on task-db, the
   flattened :seon.task/config): the one resolver (resolve-in: task, model, provider, config) read at

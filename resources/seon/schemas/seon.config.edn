@@ -7,7 +7,7 @@
 ;; :seon.config/config is the whole resolved config: open, as every entity schema is, and every key optional, since a task holds single keys as its overrides; a write is held to the
 ;; keys it holds. The loader closes it at its top (seon.config's `closed`), so an unknown key refuses boot; that the
 ;; shipped file states every key is seon.config-test/the-shipped-file-validates-under-every-profile's,
-;; and its entries declare the attributes root writes on main's root entity (seon.config/facts).
+;; and its entries declare the attributes root writes on the config entity on main (seon.config/facts).
 {:seon.config/config
  [:map {:seon.db/attributes true
         :description "The resolved config: every limit, bound and default of the platform, one key each."}
