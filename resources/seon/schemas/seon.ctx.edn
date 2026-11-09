@@ -34,4 +34,6 @@
  ;; ([attribute value] keys, :watch) and its reverse (:watching); each a map checked shallowly: a contract
  ;; checked on every call of the walk must not cost what the walk is proven not to (the record's size)
  :seon.ctx/ix [:map [:held {:optional true} :map] [:at {:optional true} :map] [:spec {:optional true} :map]
-               [:watch {:optional true} :map] [:watching {:optional true} :map] [:patching {:optional true} :boolean] [:relocate {:optional true} :boolean]]}
+               [:watch {:optional true} :map] [:watching {:optional true} :map] [:patching {:optional true} :boolean] [:relocate {:optional true} :boolean]
+               ;; the entity index (seon.db/index-of) the record's pattern and joins read schemas in; built again by a patch that moved a schema entry
+               [:index {:optional true} :map]]}

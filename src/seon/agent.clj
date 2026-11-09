@@ -339,13 +339,19 @@
   [st attrs] (cond-> st (some #(and (keyword? %) (= "schema" (namespace %))) attrs) (dissoc :schema-registry)))
 
 (defn branch-schemas
-  "This agent's branch's schema changes and their registry, {:key changes :registry r}: held until a write moves a schema entry (`schema-moved`), a new agent holding main's from its fork (seon.fork-server/warm-start). Reading the changes is two passes over every schema entry, so no eval or write reads them while none moved. See docs/machine.md#an-agents-first-write."
+  "This agent's branch's schema changes, their registry and the entity index they make, {:key changes :registry r :index ix}: held until a write moves a schema entry (`schema-moved`), a new agent holding main's from its fork (seon.fork-server/warm-start). Reading the changes is two passes over every schema entry, and the index is derived again from the registry (seon.db/index-of: the binary's when the branch changed nothing), so no eval or write builds either while none moved. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat] :map]}
   []
   (or (:schema-registry @state)
-      (let [k (program/schema-changes (:db @state)) v {:key k :registry (program/schema-registry k)}]
+      (let [k (program/schema-changes (:db @state)) v {:key k :registry (program/schema-registry k) :index (pdb/index-of {:forms k})}]
         (swap! state assoc :schema-registry v)
         v)))
+
+(defn branch-index
+  "This agent's branch's entity index (`branch-schemas`): what its renders and its recognition of a value take as ix (seon.db/index-of);
+  the binary's when no branch is held (root, a scratch session: it has no schema entries of its own). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat] :map]}
+  [] (if (:db @state) (:index (branch-schemas)) (pdb/index)))
 
 (defn- config-moved!
   "This process's config held again when a transaction of its own branch wrote attrs naming an entry or a schema entry (a schema its config is read against): one set lookup otherwise. See docs/config.md#a-process-holds-its-branchs-config."

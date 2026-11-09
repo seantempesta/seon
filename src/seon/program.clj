@@ -1085,6 +1085,13 @@
                    :when (some? v)]
                [(:v dt) v]))))
 
+(defn index-of-db
+  "The entity index (seon.db/entity-index) of the registry with db's own schema entries over it (`schema-changes`): what an
+  entity is on that db's branch, built here and never kept: its holder (a walk, an agent's state) keeps it until a schema entry
+  moves. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db] (pdb/index-of {:forms (schema-changes db)}))
+
 (defn schema-registry
   "The registry an evaluation on db binds as malli.registry/*registry*: the binary's forms
   with changes (schema-changes) recompiled whole, since a schema naming a changed key keeps

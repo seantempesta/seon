@@ -4,7 +4,7 @@
   (:require [seon.contract :as contract :refer [defn defn-]]
             [clojure.string :as str]
             [datahike.api :as d]
-            [seon.render :as render]
+            [seon.render :as render] [seon.program :as program]
             [clojure.data.json :as json]
             [seon.db :as pdb]
             [seon.print.select :as select]
@@ -59,13 +59,13 @@
   seon.ctx/build), drawn by the schema e kept: what the eval answered, rebuilt from what exists, since no copy of the
   session is stored at each @ctx. A value as of t never changes: its reads are not the reader's (no later transaction
   touches them), so it is built when asked and never because the branch moved. See docs/render.md#a-render-is-a-value-printed-once."
-  {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
-  [db e]
+  {:malli/schema [:=> [:cat :map :seon.host/db :map] :map]}
+  [ix db e]
   (let [{:keys [t branch]} (:seon.eval/basis e)
         ;; the agent of the eval's record, else (an eval not yet recorded, whose text is made first) the one this process is
         a (or (d/q '[:find ?a . :in $ ?id :where [?e :seon.eval/id ?id] [?e :seon.eval/agent ?a]] db (:seon.eval/id e))
               (pdb/eid db :seon.agent/key (:key @agent/state)))]
-    (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (ctx/build (d/as-of db t) a branch))) :t t)
+    (with-meta (assoc (:tree (binding [datahike.index.interface/*reads* nil] (ctx/build ix (d/as-of db t) a branch))) :t t)
       {:seon.render/schema (:seon.eval/schema e)})))
 
 (defn result-mark
@@ -76,8 +76,8 @@
 
 (defn tool-text
   "What came of eval e as the model reads it, the same printing a request's reading does (seon.render/result-text): for a reader of its text outside the tree. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map] :string]}
-  [db e] (render/result-text db (result-mark db e)))
+  {:malli/schema [:=> [:cat :map [:maybe :seon.host/db] :map] :string]}
+  [ix db e] (render/result-text ix db (result-mark db e)))
 
 (def render-calls
   "What Seon runs to show an agent its page, each [intent code]: :whole, the page whole (an agent's first eval, and an outside
@@ -124,14 +124,15 @@
   (let [nothing? (nil? (first chain)) pts (vec (remove nil? chain))
         start (first pts) branch (:branch start)
         db0 (db-at db start)
-        c0 (ctx/build db0 a branch)
-        layout (render/layout-of (assoc (:tree c0) :seon.agent/key (:seon.agent/key (d/entity db0 a))))
+        ix (program/index-of-db db0)
+        c0 (ctx/build ix db0 a branch)
+        layout (render/layout-of ix (assoc (:tree c0) :seon.agent/key (:seon.agent/key (d/entity db0 a))))
         at (volatile! db0) r (ratom/atom (:tree c0))
-        w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [layout {}]) :model-only true)]
+        w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [layout {}] ix) :model-only true)]
     (try
       (render/flush! w nil)
       (let [f0 (page-forms w)]
-        (loop [c c0 prev f0 ps (rest pts) out (if nothing? [(render/page-edits (render/forms-moved {} f0))] [])]
+        (loop [c c0 prev f0 ps (rest pts) out (if nothing? [(render/page-edits ix (render/forms-moved {} f0))] [])]
           (if-let [p (first ps)]
             (let [db1 (db-at db p)
                   moved (ctx/moved @at db1 nil)
@@ -140,7 +141,7 @@
               (reset! r (:tree c1))
               (render/flush! w moved)
               (let [f1 (page-forms w)]
-                (recur c1 f1 (rest ps) (conj out (render/page-edits (render/forms-moved prev f1))))))
+                (recur c1 f1 (rest ps) (conj out (render/page-edits (:index (:ix c1)) (render/forms-moved prev f1))))))
             out)))
       (finally (render/dispose-walk! w)))))
 
@@ -172,7 +173,7 @@
         ps (cond-> ps
              parts (into (let [[_ code] (:whole render-calls) id "render"
                                record {:seon.eval/schema :seon.render/parts :seon.eval/response {:value (render/parts-value parts)}}]
-                           (render/hiccup-wire [:li {:wire/role "assistant" :wire/call-id id :wire/ref [:render] :wire/result {:record record}}
+                           (render/hiccup-wire @(:index w) [:li {:wire/role "assistant" :wire/call-id id :wire/ref [:render] :wire/result {:record record}}
                                                 [:pre {:wire/field "code"} code]]))))]
     {:messages (into [] (mapcat second) ps) :parts ps}))
 
@@ -187,15 +188,16 @@
 (defn render
   "What a turn's reader got, from its basis b (seon.turn records it on the turn's model call, :seon.model-call/basis) on db,
   the commit b names: the request (`request`) of b's :agent, how its work stands among it (the page's evals, `status` in the first). The one maker of a context: the model's request is this, and so is every
-  later reading of it. opts :walk, the agent's live walk, drawn to db (else the tree drawn cold, of opts :ctx, its @ctx at db, or of its record there). {:messages :parts} (`request`)."
+  later reading of it. opts :walk, the agent's live walk, drawn to db (else the tree drawn cold, of opts :ctx, its @ctx at db, or of its record there, its schemas read in opts :index, the agent's held branch index, else built from db). {:messages :parts} (`request`)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]
                   [:=> [:cat :seon.host/db :seon.model-call/basis :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]]}
   ([db basis] (render db basis {}))
-  ([db {:keys [agent]} {:keys [walk ctx]}]
+  ([db {:keys [agent]} {:keys [walk ctx index]}]
    (if walk
      (request walk)
-     (let [t (or ctx (ctx/agent-ctx db (pdb/eid db :seon.agent/key agent)))
-           w (render/draw t ctx/changes db (render/layout-of (merge {:seon.agent/key agent} t)) {:model-only true :once true})]
+     (let [ix (or index (program/index-of-db db))
+           t (or ctx (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key agent)))
+           w (render/draw t ctx/changes db (render/layout-of ix (merge {:seon.agent/key agent} t)) {:model-only true :once true :index ix})]
        (try (request w) (finally (render/dispose-walk! w)))))))
 
 (defn provider-of

@@ -1687,7 +1687,7 @@
      (let [body (str "once " (random-uuid))
            _ (d/transact conn (task/message-tx "m-once" "owner" [ka] body 1000))
            says (fn [] (let [db (agent/db) a (pdb/eid db :seon.agent/key ka)
-                             w (seon.render/draw (:tree (seon.ctx/build db a (:branch @agent/state))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx) {:model-only true :once true})]
+                             w (seon.render/draw (:tree (seon.ctx/build (seon.db/index) db a (:branch @agent/state))) seon.ctx/changes db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {:model-only true :once true})]
                          (try (pr-str (into [] (mapcat second) (seon.render/wire w))) (finally (seon.render/dispose-walk! w)))))]
        (as ka #(do (is (= [{:id "m-once" :from "owner" :body body :sent-ms 1000}] (agent/undelivered)) "main holds it for this agent")
                    (is (= 1 (count (agent/deliver! 1))))
@@ -1723,7 +1723,7 @@
    (fn [{:keys [conn as ka kb cfg heads]}]
      (let [body (str "late " (random-uuid))
            says (fn [] (let [db (agent/db) a (pdb/eid db :seon.agent/key ka)
-                             w (seon.render/draw (:tree (seon.ctx/build db a (:branch @agent/state))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx) {:model-only true :once true})]
+                             w (seon.render/draw (:tree (seon.ctx/build (seon.db/index) db a (:branch @agent/state))) seon.ctx/changes db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {:model-only true :once true})]
                          (try (vec (mapcat second (seon.render/wire w))) (finally (seon.render/dispose-walk! w)))))
            texts (fn [ms] (mapv #(pr-str (select-keys % [:role :content :tool-calls])) ms))]
        (as ka #(agent/transact! (into (ts/turn-tx ka 1 {:seon.model-call/reply "Looking."})
@@ -2334,7 +2334,7 @@
                    " db @(:conn sys) t (seon.task/task db \"" % "/ws\")"
                    " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/ws\")}}))"
                    " a (seon.db/eid b :seon.agent/key (:seon.task/agent t))]"
-                   " [(:seon.task/outcome t) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/ws\") (mapv (juxt :reason :symbol) (:reasons (seon.ctx.status/status b (:tree (seon.ctx/build b a :b)) {})))])")
+                   " [(:seon.task/outcome t) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/ws\") (mapv (juxt :reason :symbol) (:reasons (seon.ctx.status/status b (:tree (seon.ctx/build (seon.db/index) b a :b)) {})))])")
         [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
                         {})
         [outcome state reasons] (:value r)]
@@ -2354,7 +2354,7 @@
                    " db @(:conn sys) t (seon.task/task db \"" % "/wr\")"
                    " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/wr\")}}))"
                    " a (seon.db/eid b :seon.agent/key (:seon.task/agent t))]"
-                   " [(:seon.task/outcome t) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/wr\") (mapv :reason (:reasons (seon.ctx.status/status b (:tree (seon.ctx/build b a :b)) {})))])")
+                   " [(:seon.task/outcome t) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/wr\") (mapv :reason (:reasons (seon.ctx.status/status b (:tree (seon.ctx/build (seon.db/index) b a :b)) {})))])")
         [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
                         {})
         [outcome state reasons] (:value r)]
@@ -2719,7 +2719,7 @@
         [_ _ swapped before drawn after gone]
         (in-agent #(vector "(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/hiccup lab.ui/steps} :string])"
                    "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat :map [:vector :string]] :any]} [_ v] [:ol (for [s v] [:li s])])"
-                   "(do (swap! seon.ctx/ctx assoc :seon.ctx/pattern (conj (seon.render/schema-property :seon.db/agent-fact :seon.ctx/pattern) :lab.ctx/steps)) (swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"]))"
+                   "(do (swap! seon.ctx/ctx assoc :seon.ctx/pattern (conj (seon.render/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) :lab.ctx/steps)) (swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"]))"
                    n
                    {:op :eval :agent "root"
                     :code (str "(let [id :" (:agent %) "]"
@@ -2969,3 +2969,10 @@
            (:records v))
         "three ordinary evals at turn 0 in order, by whoever asked, none a model's call; the throw recorded, and the next still runs")
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (take 6 (:roles v))) "each reaches the request as a call and its result")))
+
+(deftest a-schema-write-drops-the-branch-index-with-its-registry
+  ;; docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together: the agent holds its branch's entity index in the slot of its
+  ;; registry (seon.agent/branch-schemas), so the write that moves a schema entry drops both and no other write does
+  (let [st {:schema-registry {:key {} :registry {} :index (seon.db/index)}}]
+    (is (some? (:index (:schema-registry (seon.agent/schema-moved st #{:seon.eval/id})))) "a write of another attribute keeps it")
+    (is (nil? (:schema-registry (seon.agent/schema-moved st #{:schema/form}))) "a schema entry's drops it")))

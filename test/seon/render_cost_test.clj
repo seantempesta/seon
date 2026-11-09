@@ -301,10 +301,10 @@
                                   :seon.message/call (seon.task/call-ref k (inc i)))))))
         base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :b})])
         db (reduce (fn [db i] (d/db-with db (vec (turn i)))) base (range (dec n)))
-        c (seon.ctx/build db (seon.db/eid db :seon.agent/key k) :b)
+        c (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.agent/key k) :b)
         at (volatile! db)
         a (seon.ratom/atom (:tree c))
-        w (seon.render/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [(requiring-resolve (seon.render/declared :seon.render/render-ctx)) {}])]
+        w (seon.render/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [(requiring-resolve (seon.render/declared (seon.db/index) :seon.render/render-ctx)) {}])]
     (seon.render/flush! w nil)
     (swap! kept-walks conj w)
     [{:w w :a a :c c :at at} db (d/db-with db (vec (turn (dec n))))]))
@@ -384,7 +384,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
   [n]
   (let [a (seon.ratom/atom {:db/id 1 :ids (vec (range n))})
-        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'gone-list {}])]
+        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'gone-list {}] (seon.db/index))]
     (seon.render/flush! w nil)
     [w a]))
 
@@ -497,8 +497,8 @@
                                               :seon.eval/code (str "(f " i ")") :seon.eval/call-id (str "c" i) :seon.eval/response {:handle (symbol "result" (str "e" i)) :value i}}]))
                    db (range n))
         a (:db/id (d/entity db [:seon.agent/key k]))
-        src (seon.ratom/atom (:tree (seon.ctx/build db a :b)))
-        w (seon.render/walker {:ref src :changes seon.ctx/changes} (constantly db) [(seon.render/declared-var :seon.render/render-ctx) {}])
+        src (seon.ratom/atom (:tree (seon.ctx/build (seon.db/index) db a :b)))
+        w (seon.render/walker {:ref src :changes seon.ctx/changes} (constantly db) [(seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {}])
         prints (fn [f] (seon.profile/measure! f (fn [_])) (or (some (fn [x] (when (= 'seon.print/record-text (:var x)) (:calls x))) (seon.profile/touched)) 0))]
     (try
       (clojure.test/is (zero? (prints #(do (seon.render/flush! w nil) (seon.render/placed-units w)))) "a page drawn and written prints none")
@@ -522,7 +522,7 @@
       (when (even? i)
         (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) "user" [k] (str "note " i) 1000) 0 assoc :seon.message/call (seon.task/call-ref k (inc i))))))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
-      (into [(:tree (seon.ctx/build db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx)] (some-> *sels* vector)))))
+      (into [(:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx)] (some-> *sels* vector)))))
 
 ;; See docs/render.md#the-render-is-an-eval
 (deftest a-cold-request-draws-what-the-model-reads
@@ -598,16 +598,16 @@
         p1 (assoc p0 :commit #uuid "00000000-0000-0000-0000-000000000001" :t 2) p2 (assoc p0 :commit #uuid "00000000-0000-0000-0000-000000000002" :t 3)
         pages {nil {} p0 {"status" '[f {} "was"]} p1 {"status" '[f {} "now"]} p2 {"status" '[f {} "later"]}}
         through (fn [chain] (swap! passes conj chain)
-                  (mapv (fn [[a b]] (seon.render/page-edits (seon.render/forms-moved (pages a) (pages b)))) (partition 2 1 chain)))
+                  (mapv (fn [[a b]] (seon.render/page-edits (seon.db/index) (seon.render/forms-moved (pages a) (pages b)))) (partition 2 1 chain)))
         w (seon.render/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes :points (fn [] [p0 p1 p2]) :diffs-through through} (constantly nil)
                               [#'two-askers {:from p1 :to p2}])]
     (seon.render/flush! w nil)
     (clojure.test/is (= [[nil p0 p1 p2]] @passes) "two components, one pair, cold: one pass from nothing through p2, filling the pairs before it")
     (let [again ((seon.render/changes-of w) p0 p1)]
       (clojure.test/is (= [[nil p0 p1 p2]] @passes) "an earlier pair of the pass: held")
-      (clojure.test/is (= (seon.render/page-edits (seon.render/forms-moved (pages p0) (pages p1))) again) "the edits of the two pages"))
+      (clojure.test/is (= (seon.render/page-edits (seon.db/index) (seon.render/forms-moved (pages p0) (pages p1))) again) "the edits of the two pages"))
     ((seon.render/changes-of w) p0 p2)
     (clojure.test/is (= [[nil p0 p1 p2] [p0 p2]] @passes) "a pair that is not between neighbours is drawn alone")
     (seon.render/dispose-walk! w)
-    (let [no-source (seon.render/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly nil) [#'identity {}])]
+    (let [no-source (seon.render/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly nil) [#'identity {}] (seon.db/index))]
       (clojure.test/is (= :seon.render/no-diffs-through (:seon.error/type ((seon.render/changes-of no-source) p0 p1))) "no way to draw a point: a typed error, not nothing"))))

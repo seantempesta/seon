@@ -685,7 +685,7 @@
     ;; counted before anything is copied: a value past the bound costs the bound, whatever its size
     (if (contract/within? v bound)
       [(contract/plainly v bound) false]
-      (let [m (some-> (render/model v) :value (contract/plainly bound))]
+      (let [m (some-> (render/model (agent/branch-index) v) :value (contract/plainly bound))]
         (if (and (some? m) (contract/within? m bound))
           [m true]
           [{:seon.value/gone {:type (.getName (class v)) :over bound}} false])))))
@@ -694,7 +694,7 @@
   "A form's value among a call's several, as `kept` but drawn by its model render when its schema declares one: the record holds one schema a value, so a member is its render here, as a whole value's is when it prints."
   {:malli/schema [:=> [:cat :any] :any]}
   [v]
-  (let [drawn (when (:seon.render/schema (meta v)) (some-> (render/model v) :value (contract/plainly (cfg/value :seon.config.store/max-value-chars))))]
+  (let [drawn (when (:seon.render/schema (meta v)) (some-> (render/model (agent/branch-index) v) :value (contract/plainly (cfg/value :seon.config.store/max-value-chars))))]
     (if (some? drawn) drawn (first (kept v)))))
 
 (defn record-details
@@ -768,7 +768,7 @@
   the handle. Made only for a reader: an eval makes and stores data, and a model's is printed where its request is
   assembled. See docs/render.md#a-render-is-a-value-printed-once."
   {:malli/schema [:=> [:cat :map] :string]}
-  [rec] (wire/tool-text (:db @agent/state) rec))
+  [rec] (wire/tool-text (agent/branch-index) (:db @agent/state) rec))
 
 (defn- handled
   "Response r of code, as eval id answers it, with its handle, and its record: [r rec]. A plain answer's handle is result/ and the first eight hex digits of its result's hash (seon.db/with-response, the same in every process) of what the record keeps of it (value, error, output, error output, forms; not its cost), so a cut or a replay leaves every handle where it was, a run again names its new answer while the old handle still reads the old one, and two evals with one answer have one. An answer not kept as it is (a host object, a value past :seon.config.store/max-value-chars: the record holds what stands for it) is named by its id, so it never shares a handle. An edit!'s value is its inner eval's response, whose cost differs each time: nothing else is walked. See docs/agent.md#your-turn."
@@ -1183,7 +1183,7 @@
   :seon.render/render-ctx, root's :seon.render/root-ctx), its own var when its branch defines one; its key names it
   before its branch holds its entity. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat] :any]}
-  [] (render/layout-of (merge {:seon.agent/key (:key @agent/state)} @ctx/ctx)))
+  [] (render/layout-of (agent/branch-index) (merge {:seon.agent/key (:key @agent/state)} @ctx/ctx)))
 
 (defn- the-walk
   "This agent's walk of its render of ctx (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
@@ -1198,7 +1198,7 @@
       (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes
                               :points (fn [] (wire/points-of (agent/db) (:db/id @ctx/ctx) (:branch @agent/state)))
                               :diffs-through (fn [chain] (wire/diffs-through (agent/db) (:db/id @ctx/ctx) chain))}
-                             agent/db [l {}])
+                             agent/db [l {}] (agent/branch-index))
                 (or (nil? held) (:model-only held)) (assoc :model-only true))]
         (some-> held render/dispose-walk!)
         (swap! agent/state assoc :walk w)

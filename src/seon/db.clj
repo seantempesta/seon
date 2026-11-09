@@ -82,9 +82,10 @@
       [])))
 
 (defn parents
-  "The named schemas k's form extends ([:and p ...] or [:merge p ...]). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:vector :qualified-keyword]]}
-  [k] (parents-in contract/forms k))
+  "The named schemas k's form extends ([:and p ...] or [:merge p ...]), in the forms index ix was built from (`entity-index`: the
+  binary's `index`, or a branch's, `index-of`, `index-of-db`). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] [:vector :qualified-keyword]]}
+  [ix k] (parents-in (:forms ix) k))
 
 (defn- own-entries
   "The [key props? schema] entries a schema's form names itself: its [:map ...] members, inline or in an [:and ...] arm,
@@ -104,58 +105,49 @@
   "What schema forms say an entity is: {:entity-schemas {attribute schema}, each attribute an entity schema
   ({:seon.db/attributes true}) names itself (`own-keys`), to that schema; :identity-schemas, those of them that are upsert
   keys; :required-keys {schema [attribute ...]}, the keys each requires, its own and those of the schemas it extends, and
-  :own-required, only its own}.
+  :own-required, only its own; :schema-identities, :identity-schemas turned around; :targets, each ref attribute's target
+  entity schemas ({:seon.db/to}); and :forms, the forms it was built from}. It is the one value every reader of what an entity
+  is takes first (ix): a branch's own entity schema is recognized by its own index, never the binary's.
   See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :map] [:map [:entity-schemas :map] [:identity-schemas :map] [:required-keys :map] [:own-required :map] [:targets :map]]]}
+  {:malli/schema [:=> [:cat :map] [:map [:forms :map] [:entity-schemas :map] [:identity-schemas :map] [:schema-identities :map] [:required-keys :map] [:own-required :map] [:targets :map]]]}
   [forms]
   (let [entity? #(:seon.db/attributes (form-props forms %))
         required (fn [form] (for [e (own-entries form) :let [p (second e)] :when (not (and (map? p) (:optional p)))] (first e)))
-        es (into {} (for [[k form] forms :when (entity? k) a (own-keys form)] [a k]))]
-    {:entity-schemas es
-     :identity-schemas (into {} (filter #(:seon.db/identity (form-props forms (key %)))) es)
+        es (into {} (for [[k form] forms :when (entity? k) a (own-keys form)] [a k]))
+        ids (into {} (filter #(:seon.db/identity (form-props forms (key %)))) es)]
+    {:forms forms
+     :entity-schemas es
+     :identity-schemas ids
+     :schema-identities (into {} (map (fn [[a k]] [k a])) ids)
      :required-keys (into {} (for [k (distinct (vals es))]
                                [k (vec (distinct (mapcat #(required (get forms %)) (filter entity? (tree-seq (constantly true) #(parents-in forms %) k)))))]))
      :own-required (into {} (for [k (distinct (vals es))] [k (vec (required (get forms k)))]))
      ;; each ref attribute's target entity schemas, as its own schema states them ({:seon.db/to [...]}), once
      :targets (into {} (for [[a _] es :let [to (:seon.db/to (form-props forms a))] :when to] [a to]))}))
 
-(def ^:private index
-  "The binary's `entity-index`, derived once from its registry: what every write is held to, unless its branch changed an
-  entity schema (`index-of`). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+(def ^:private binary-index
+  "The binary's `entity-index`, derived once from its registry. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   (entity-index contract/forms))
 
-(def entity-schemas
-  "{attribute schema}: each attribute an entity schema names itself, to that schema (`entity-index`): what an entity is,
-  from the attributes it holds; the map the renders read (seon.render's most-specific;
-  seon.render-test/a-walk-is-its-entity-and-its-units). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  (:entity-schemas index))
-
-(def identity-schemas
-  "{identity-attribute schema}: the entity schemas by the upsert keys they name. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  (:identity-schemas index))
-
-(def schema-identities
-  "{schema identity-attribute}: each entity schema's own upsert key, `identity-schemas` turned around. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  (into {} (map (fn [[a k]] [k a])) identity-schemas))
-
-(def targets
-  "{ref attribute [entity schema ...]}: what each ref attribute points at, as its own schema states it (:seon.db/to). See
-  docs/data-modeling.md#things-relate-by-refs."
-  (:targets index))
+(defn index
+  "The binary's `entity-index`: what every write is held to unless its branch changed an entity schema (`index-of`), and what
+  a caller with no branch of its own reads (`index-of-db` is a db's). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat] :map]}
+  [] binary-index)
 
 (declare extends?)
 
 (defn reaching
-  "The ref attributes whose targets entity schema s is or extends: the refs that reach an s, each read in reverse
-  (:ns/_name) to pull what points at it. See docs/data-modeling.md#things-relate-by-refs."
-  {:malli/schema [:=> [:cat :qualified-keyword] [:vector :qualified-keyword]]}
-  [s] (vec (sort (for [[a ts] targets :when (some #(extends? s %) ts)] a))))
+  "The ref attributes whose targets entity schema s is or extends, in the entity index ix: the refs that reach an s, each read in
+  reverse (:ns/_name) to pull what points at it. See docs/data-modeling.md#things-relate-by-refs."
+  {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector :qualified-keyword]]}
+  [ix s] (vec (sort (for [[a ts] (:targets ix) :when (some #(extends? ix s %) ts)] a))))
 
 (defn attributes-of
-  "The attributes entity schema s names, its own and those of the schemas it extends. See
+  "The attributes entity schema s names in the entity index ix, its own and those of the schemas it extends. See
   docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :qualified-keyword] [:vector :qualified-keyword]]}
-  [s] (vec (distinct (concat (mapcat attributes-of (parents s)) (own-keys (get contract/forms s))))))
+  {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector :qualified-keyword]]}
+  [ix s] (vec (distinct (concat (mapcat #(attributes-of ix %) (parents ix s)) (own-keys (get (:forms ix) s))))))
 
 (defn- reverse-attr {:malli/schema [:=> [:cat :qualified-keyword] :qualified-keyword]} [a] (keyword (namespace a) (str "_" (name a))))
 
@@ -164,45 +156,54 @@
   that reaches it followed back to the schema that owns it, a schema already walked not followed again (Malli's
   ::walked-refs), so no join loops. What can relate to an s; an entity's :seon.ctx/pattern chooses from it. See
   docs/data-modeling.md#things-relate-by-refs."
-  {:malli/schema [:function [:=> [:cat :qualified-keyword] [:vector :any]] [:=> [:cat :qualified-keyword [:set :any]] [:vector :any]]]}
-  ([s] (implied-pattern s #{}))
-  ([s walked]
-   (let [w (conj walked s) as (attributes-of s)]
+  {:malli/schema [:function [:=> [:cat :map :qualified-keyword] [:vector :any]] [:=> [:cat :map :qualified-keyword [:set :any]] [:vector :any]]]}
+  ([ix s] (implied-pattern ix s #{}))
+  ([ix s walked]
+   (let [w (conj walked s) as (attributes-of ix s) targets (:targets ix)]
      (vec (concat (remove targets as)
-                  (for [a as :when (targets a) :let [t (first (remove w (targets a)))] :when t] {a (implied-pattern t w)})
-                  (for [a (reaching s) :let [o (entity-schemas a)] :when (and o (not (w o)))] {(reverse-attr a) (implied-pattern o w)}))))))
+                  (for [a as :when (targets a) :let [t (first (remove w (targets a)))] :when t] {a (implied-pattern ix t w)})
+                  (for [a (reaching ix s) :let [o ((:entity-schemas ix) a)] :when (and o (not (w o)))] {(reverse-attr a) (implied-pattern ix o w)}))))))
 
 (defn extends?
-  "Does schema a extend schema b, itself or through the schemas it extends (`parents`)? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :qualified-keyword :qualified-keyword] :boolean]}
-  [a b] (boolean (or (= a b) (some #(extends? % b) (parents a)))))
+  "Does schema a extend schema b, itself or through the schemas it extends (`parents`, in the entity index ix)? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :map :qualified-keyword :qualified-keyword] :boolean]}
+  [ix a b] (boolean (or (= a b) (some #(extends? ix % b) (parents ix a)))))
 
 (defn most-specific
   "The entity schemas the identity attributes of map e name, as one: the one that extends all the others, nil for none,
-  or {:ambiguous [s ...]} when none does. The order of e's keys never decides. See docs/ctx.md#the-pattern."
-  {:malli/schema [:=> [:cat :map] :any]}
-  [e]
-  (let [ss (distinct (keep identity-schemas (keys e)))]
+  or {:ambiguous [s ...]} when none does, as the entity index ix says. The order of e's keys never decides. See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :map :map] :any]}
+  [ix e]
+  (let [ss (distinct (keep (:identity-schemas ix) (keys e)))]
     (when (seq ss)
-      (or (some (fn [s] (when (every? #(extends? s %) ss) s)) ss) {:ambiguous (vec ss)}))))
+      (or (some (fn [s] (when (every? #(extends? ix s %) ss) s)) ss) {:ambiguous (vec ss)}))))
 
-(defn- index-of
+(defn index-of
+  "The `entity-index` of a branch's own schema changes (schemas, {:forms :registry}, or nil): the binary's (`index`) when it
+  changed none, else derived again from the registry with the branch's forms over it, a cost of the registry's size (about
+  1.8 MB, 0.9 ms), built, never kept here: its holder (a walk, an agent) keeps it until a schema entry moves. See
+  docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat [:maybe :map]] :map]}
+  [schemas]
+  (if (seq (:forms schemas)) (entity-index (merge contract/forms (:forms schemas))) binary-index))
+
+(defn- write-index
   "The `entity-index` a write is held to, given its branch's own schema changes ({:forms :registry}, or nil): the binary's
-  (`index`), unless the branch changed an entity schema or an attribute one names, when it is derived again from the
-  registry with the branch's forms over it: a cost of the registry's size, paid only by the writes of a branch that changed
-  what an entity is. See docs/storage.md#the-write-checks-every-entity-it-touches."
+  (`index`), unless the branch changed an entity schema or an attribute one names, when it is `index-of` them: a cost of the
+  registry's size, paid only by the writes of a branch that changed what an entity is. See
+  docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat [:maybe :map]] :map]}
   [schemas]
   (let [forms (:forms schemas)]
-    (if (some (fn [k] (or (contains? (:entity-schemas index) k) (contains? (:required-keys index) k)
+    (if (some (fn [k] (or (contains? (:entity-schemas binary-index) k) (contains? (:required-keys binary-index) k)
                           (:seon.db/attributes (form-props forms k))))
               (keys forms))
-      (entity-index (merge contract/forms forms))
-      index)))
+      (index-of schemas)
+      binary-index)))
 
 (defn invalid-entity
   "The first entity a transaction's report (r) left holding attributes an entity schema owns without one that schema
-  requires, as the error :seon.db/invalid-entity, or nil; ix is the `entity-index` the write is held to (`index-of`, the
+  requires, as the error :seon.db/invalid-entity, or nil; ix is the `entity-index` the write is held to (`write-index`, the
   binary's by default). A schema is asked of an entity when the transaction added or retracted an attribute it owns; it
   refuses only what this write broke: on an entity that was that thing before (it held a key the schema itself
   requires), a required key it held before and not after; on one the write makes that thing, every one it lacks. An entity
@@ -212,7 +213,7 @@
   are each datom's own check (`invalid-datom`). The first refusal by entity id, then schema. See
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :map] [:maybe :seon.error/base]] [:=> [:cat :map :map] [:maybe :seon.error/base]]]}
-  ([r] (invalid-entity r index))
+  ([r] (invalid-entity r binary-index))
   ([{:keys [db-before db-after tx-data]} {:keys [entity-schemas identity-schemas required-keys own-required]}]
    (let [has? (fn [db e a] (boolean (first (d/datoms db :eavt e a))))
          ;; {[e schema] {attribute added?}}: what the write did to each touched entity's attributes of each schema; a key
@@ -248,11 +249,11 @@
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
   datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, each entity it touched
-  (`invalid-entity`, by the branch's `index-of`) after; an entity retracted whole takes the entities named by it with it.
+  (`invalid-entity`, by the branch's `write-index`) after; an entity retracted whole takes the entities named by it with it.
   A refusal throws its typed error, and the value is as it was. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
   [db tx-data schemas apply-fn]
-  (let [ix (index-of schemas)
+  (let [ix (write-index schemas)
         ;; ends-with: tx-data with each entity retracted whole followed by the entities whose identity is a ref to it (a
         ;; vector, :seon.vector/of): such an entity is named by its target and has no identity without it, so it ends with
         ;; it, as Datahike ends a component with its parent; derived from the schema (an identity attribute that is a ref),
