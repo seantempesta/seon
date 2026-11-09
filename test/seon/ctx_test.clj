@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.fixtures] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [my.render] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [my.test] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [clojure.string :as str] [clojure.walk :as walk] [clojure.set]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [my.render] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [my.test] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [clojure.string :as str] [clojure.walk :as walk] [clojure.set] [malli.core])) 
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -66,7 +66,7 @@
   {:handle (symbol "result" (str "e" i)) :ms 1.5 :ticks (* 1000 i) :bytes (* 64 i)
    :value {:task "lab/ctx" :proofs (vec (for [j (range 4)] {:test (symbol "app.x-test" (str "t" j)) :status (if (odd? (+ i j)) :pass :fail)}))
            :changes {:vars (vec (for [j (range 3)] (symbol "app.x" (str "f" j))))}}
-   :out "a line of output from the form, as printed\n"})
+   :out {:seon.print/code "a line of output from the form, as printed\n"}})
 
 (defn- eval-tx
   "Eval i of the agent, as the REPL records it."
@@ -222,6 +222,63 @@
     (is (= ["m1"] (names (:messages t) :seon.message/id)) "the messages it holds")
     (is (= [] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on its own record: every turn, eval and message (the owner: deliver all messages and errors)")
     (is (not (contains? t :catch-ups)) "no catch-ups")))
+
+(defn- pulled-schema
+  "The Malli schema of what ctx holds of an entity of schema s0, derived from the schemas alone (docs/data-modeling.md#things-relate-by-refs):
+  each attribute by its own schema; a ref by its targets ({:seon.db/to}), joined (an entity, or for a many ref a map by eid)
+  or not (its {:db/id}); each ref that reaches it, read in reverse, a map by eid of its owner. Every entry optional: what is
+  there is checked."
+  {:malli/schema [:=> [:cat :qualified-keyword] :any]}
+  [s0]
+  (let [nm #(keyword "pulled" (str (namespace %) "." (name %)))
+        stub [:map [:db/id :int]]
+        one (fn [ts] (let [rs (mapv #(vector :ref (nm %)) ts)] (if (= 1 (count rs)) (first rs) (into [:or] rs))))
+        many? #(= :db.cardinality/many (:db/cardinality (get (:schema (ts/test-db)) %)))
+        entity (fn [s] (into [:map]
+                             (concat (for [a (pdb/attributes-of s) :let [ts (pdb/targets a)]]
+                                       [a {:optional true} (cond (nil? ts) a
+                                                                 (many? a) [:or [:set stub] [:map-of :int (one ts)]]
+                                                                 :else [:or stub (one ts)])])
+                                     (for [a (pdb/reaching s) :let [o (pdb/entity-schemas a)] :when o]
+                                       [(keyword (namespace a) (str "_" (name a))) {:optional true} [:map-of :int [:ref (nm o)]]]))))
+        ss (into (set (mapcat val pdb/targets)) (keep pdb/entity-schemas (keys pdb/targets)))]
+    [:schema {:registry (into {} (for [s ss] [(nm s) (entity s)]))} [:ref (nm s0)]]))
+
+;; Refs name their targets (:seon.db/to): every join the agent's and the task's hand-written patterns make is one their
+;; schemas already imply, forward or reverse, so the pattern restates nothing (docs/data-modeling.md#things-relate-by-refs)
+(deftest the-hand-written-joins-are-implied-by-the-refs
+  (doseq [s [:seon.db/agent-fact :seon.task/task-fact]]
+    (let [joins (for [c (:seon.ctx/pattern (seon.contract/properties s)) :when (map? c) [k _] c
+                      :let [[a & opts] (if (vector? k) k [k])] :when (not (:by (apply hash-map opts)))] a)
+          implied (set (concat (filter pdb/targets (pdb/attributes-of s))
+                               (map #(keyword (namespace %) (str "_" (name %))) (pdb/reaching s))))]
+      (is (seq joins) (str s " has joins"))
+      (is (= [] (remove implied joins)) (str s ": a join its refs do not imply")))
+    (is (every? (set (vals pdb/entity-schemas)) (mapcat val pdb/targets)) "every target is an entity schema")))
+
+;; An agent pulled by the joins its schema implies, with no :as and no *, holds its task, evals, model calls and messages
+;; under their attributes, and validates against the schema derived from the refs; a value that breaks its attribute's
+;; schema anywhere in it does not (docs/data-modeling.md#things-relate-by-refs)
+(deftest an-agent-pulled-by-its-implied-joins-validates
+  (let [focus #{:seon.agent/task :seon.eval/_agent :seon.model-call/_agent :seon.message/_to}
+        pattern (vec (filter #(or (keyword? %) (focus (ffirst %))) (pdb/implied-pattern :seon.db/agent-fact)))
+        db (:db-after (d/with (ts/test-db)
+                              (into [{:seon.agent/key k :seon.agent/task {:seon.task/id "lab/ctx"} :seon.ctx/pattern pattern}
+                                     {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
+                                      :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
+                                    (concat (mapcat eval-tx (range 1 4))
+                                            [{:seon.message/id "m1" :seon.message/from "user" :seon.message/body "How is it going?"
+                                              :seon.message/to [[:seon.agent/key k]]}]))))
+        t (dissoc (:tree (ctx/build db (aid db) :b)) :branch :commit :t)
+        s (pulled-schema :seon.db/agent-fact)
+        opts {:registry seon.contract/registry}]
+    (is (= "lab/ctx" (get-in t [:seon.agent/task :seon.task/id])) "the task under its attribute")
+    (is (= 3 (count (:seon.eval/_agent t))) "the evals, by the ref that reaches the agent")
+    (is (= 1 (count (:seon.model-call/_agent t))) "the model call the evals name")
+    (is (= ["m1"] (names (:seon.message/_to t) :seon.message/id)))
+    (is (malli.core/validate s t opts) (pr-str (some-> (malli.core/explain s t opts) :errors first (select-keys [:in :value]))))
+    (let [e (first (keys (:seon.eval/_agent t)))]
+      (is (not (malli.core/validate s (assoc-in t [:seon.eval/_agent e :seon.eval/code] 42) opts)) "a bad value deep in it fails"))))
 
 (deftest an-agents-record-holds-only-its-work
   ;; the owner, 2026-10-29: "The agent's record is facts about its work. Telemetry and derived data live on their
