@@ -380,7 +380,7 @@
                             ;; a call a model output placed answers messages (and what it places), kept as this component's model output
                             wire-call? (= :seon.render/wire (:seon.render/as opts))
                             out (if wire-call? (do (vreset! wired (place env' (apply f (dissoc o :seon.render/as) args))) nil) (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
-                        (when wf (vreset! wired (place env' (wf {:seon.db/db ((:db w))} (first args)))))
+                        (when wf (vreset! wired (place env' (wf {:seon.db/db ((:db w)) :seon.render/index ix} (first args)))))
                         out)
                       ;; a component that throws draws its error in its place: a call of the error's render on the error as data (what
                       ;; threw, and the thrown error's own data: a contract's problems), so the page writes that render and the model
