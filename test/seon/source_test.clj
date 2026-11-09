@@ -721,9 +721,9 @@
         [db {"src/rfc/c.clj" (str/replace (source/file-text db 'rfc.c) "(ns rfc.c)" "(ns rfc.c (:require [clojure.string]))")}]))
 
 (defn read-of
-  "seon.source/read-nss's arguments: refresh-of n's db and its edited file."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map]]}
-  [n] (let [[db ch] (refresh-of n)] [db ch]))
+  "seon.source/read-nss's arguments: refresh-of n's db, its edited file, and the tree read (the same file)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map]]}
+  [n] (let [[db ch] (refresh-of n)] [db ch ch]))
 
 (defn interface-of
   "seon.source/db-interface's arguments: hub-refresh-of n's db and its hub."
@@ -733,7 +733,7 @@
 (defn diff-of
   "seon.source/program-tx's arguments: refresh-of n's db and its edited file, read."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map [:set :any]]]}
-  [n] (let [[db ch] (refresh-of n)] [db (#'source/read-nss db ch) ch #{}]))
+  [n] (let [[db ch] (refresh-of n)] [db (#'source/read-nss db ch ch) ch #{}]))
 
 (defn transact-of
   "datahike.api/db-with's arguments: refresh-of n's db and its refresh's facts."
@@ -1168,6 +1168,19 @@
     (is (vector? (source/tx-of db a true)) "A analyzed after B")
     (is (vector? (source/tx-of db-b {"src/app/privuser.clj" user-b} true)) "B's changed file alone, after A: g is public as B's program holds it")
     (is (= private-before (:private (meta (resolve 'app.privt/g)))) "the image's var is as it was before the four analyses")))
+
+(deftest a-dependent-read-again-takes-the-privacy-of-every-file-the-refresh-read
+  ;; docs/source.md#a-var-is-private-as-the-tree-analyzed-holds-it: refresh-tx reads a dependent again in a later round (its
+  ;; required namespace lost a name it references), and that round's analysis asks the tree's privacy of every file the refresh
+  ;; read, never only that round's: a seed of a store holding seon.db/index as a private def failed "var: #'seon.db/index is not
+  ;; public" when a dependent named the index the same refresh made public (2026-11-09, jolt/remodel-4 after jolt/index-arg)
+  (let [db (empty-db)
+        db (d/db-with db (source/import-tx db {"src/rp/a.clj" "(ns rp.a)\n\n(defn- f [] 1)\n\n(defn g [] 2)\n"
+                                               "src/rp/b.clj" "(ns rp.b (:require [rp.a]))\n\n(defn h [] (rp.a/g))\n"}))
+        tx (source/refresh-tx db {"src/rp/a.clj" "(ns rp.a)\n\n(defn f [] 1)\n"
+                                  "src/rp/b.clj" "(ns rp.b (:require [rp.a]))\n\n(defn h [] (rp.a/f))\n"})]
+    (is (vector? tx) "rp.b, read again because rp.a lost g, names rp.a/f, public in the tree the refresh read")
+    (is (some? (seon.db/eid (d/db-with db tx) :var/name 'rp.b/h)))))
 
 (deftest a-source-the-image-cannot-analyze-is-an-error-not-a-throw
   ;; the standing root's watcher died of "var: #'seon.db/install-missing! is not public": a changed file named a var
