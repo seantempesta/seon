@@ -1143,7 +1143,7 @@
         (cond-> (assoc r :forms (count (d/datoms db :aevt :form/id)))
           (contract/error? tasks) (assoc :tasks tasks))))))
 
-(def ^:private index-roots
+(def index-roots
   "The vars an index of a tree reaches: what makes a program's facts from its files (import-tree!, down through the
   analysis and the account) and what digests them. See docs/source.md#the-binary-records-its-program."
   '[seon.root/import-tree! seon.program/program-digest])
@@ -1154,9 +1154,18 @@
   the runtime pins and config keys they read, never the tree or the program's source (blank in inputs: the files are the
   index's other input). nil when db defines none of roots. What a kept index was made by, so one whose code moved is
   made again. See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs [:vector :qualified-symbol]] [:maybe :string]]}
-  [db inputs roots]
-  (get-in (program/graph-index (program/reach-graph db nil) (assoc inputs :tree "" :code "") {"index" roots}) ["index" :digest]))
+  {:malli/schema [:=> [:cat [:or :seon.host/db :map] :seon.program/inputs [:vector :qualified-symbol]] [:maybe :string]]}
+  [db-or-graph inputs roots]
+  (let [g (if (:rows db-or-graph) db-or-graph (program/reach-graph db-or-graph nil))]
+    (get-in (program/graph-index g (assoc inputs :tree "" :code "") {"index" roots}) ["index" :digest])))
+
+(defn with-index-code
+  "inputs with the code that indexes the process store, the seeded store a process test's root takes (index-code of
+  index-roots over db or its reach graph), as :seon.env/index in its :config: every process test's digest takes it, so a
+  verdict of a run on a store indexed by other code is no verdict of this one. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat [:or :seon.host/db :map] :seon.program/inputs] :seon.program/inputs]}
+  [db-or-graph inputs]
+  (assoc-in inputs [:config :seon.env/index] (or (index-code db-or-graph inputs index-roots) "none")))
 
 (defn- kept-index!
   "The kept store at path (its :db) brought to a tree by index (a function of the connection answering import-tree!'s
@@ -1182,7 +1191,7 @@
                    (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/source (assoc (fact) :indexed-by (or code held))}]}))
                  (let [out (cond (:error r) r
                                  moved? {:moved code}
-                                 :else (assoc r :program (program/program-digest @conn)))]
+                                 :else (assoc r :program (program/program-digest @conn) :indexed-by (or code held)))]
                    (pdb/sync! cfg)
                    (d/release conn)
                    out)))
@@ -1217,7 +1226,7 @@
   ([root base roots]
    (let [inputs (fx/inputs root)
          r (kept-index! (str (pdb/kept-store! base) "/index") #(import-tree! % {:root root :dirs (cfg/value :seon.config.source/dirs)} (profile/now-ns)) inputs roots)]
-     (if (:error r) (:error r) {:program (:program r) :inputs inputs}))))
+     (if (:error r) (:error r) {:program (:program r) :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}))))
 
 (defn binary-program
   "What the running binary was built from, as bin/build recorded it beside the binary (target/seon.program,
