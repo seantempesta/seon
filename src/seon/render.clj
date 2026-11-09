@@ -380,7 +380,8 @@
                             ;; a call a model output placed answers messages (and what it places), kept as this component's model output
                             wire-call? (= :seon.render/wire (:seon.render/as opts))
                             out (if wire-call? (do (vreset! wired (place env' (apply f (dissoc o :seon.render/as) args))) nil) (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
-                        (when wf (vreset! wired (place env' (wf {:seon.db/db ((:db w)) :seon.render/index ix} (first args)))))
+                        ;; a call's answer is its model output; an entity's own model render runs only where no call answers for it
+                        (when (and wf (not wire-call?)) (vreset! wired (place env' (wf {:seon.db/db ((:db w)) :seon.render/index ix} (first args)))))
                         out)
                       ;; a component that throws draws its error in its place: a call of the error's render on the error as data (what
                       ;; threw, and the thrown error's own data: a contract's problems), so the page writes that render and the model
@@ -1072,13 +1073,17 @@
   go: {:hiccup its hiccup, :messages its model output (empty unless outputs holds :seon.render/wire)}. Pure in its arguments:
   no walk or state is kept, so it is how a past point is read (a turn's diff reads its page parts with outputs
   #{:seon.render/hiccup}, so no model render nests). See docs/render.md#one-rendering-system-drawn-from-the-data."
-  {:malli/schema [:=> [:cat :map :seon.host/db :any :map [:set :keyword]] [:map [:hiccup :any] [:messages [:vector :any]]]]}
-  [pull db f ix outputs]
+  {:malli/schema [:function [:=> [:cat :map :seon.host/db :any :map [:set :keyword]] [:map [:hiccup :any] [:messages [:vector :any]]]]
+                  [:=> [:cat :map :seon.host/db :any :map [:set :keyword] :map] [:map [:hiccup :any] [:messages [:vector :any]]]]]}
+  ([pull db f ix outputs] (render-pull pull db f ix outputs {}))
+  ;; opts: the root call's (f opts view); {:seon.render/as :seon.render/wire} makes the root a model output's call, its answer
+  ;; (messages and what it places) the walk's model output, as a call a model output places is
+  ([pull db f ix outputs opts]
   (let [r (ratom/atom pull)
         ;; one pass: nothing swaps this ref, so no change of it is ever diffed
-        w (assoc (walker {:ref r :changes (fn [_ _] nil)} (constantly db) [f {} (ratom/ref-view r (fn [_ _] nil))] ix) :outputs outputs)]
+        w (assoc (walker {:ref r :changes (fn [_ _] nil)} (constantly db) [f opts (ratom/ref-view r (fn [_ _] nil))] ix) :outputs outputs)]
     (try (flush! w nil) {:hiccup (resolved w @(:out w) false) :messages (wire-of w)}
-         (finally (dispose-walk! w)))))
+         (finally (dispose-walk! w))))))
 
 (defn wire-of
   "The model's messages of walk w: its root's model output (kept on its cache entry, :wired, made in the same run as its

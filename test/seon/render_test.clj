@@ -330,7 +330,7 @@
 
 (def ^:private model-renders
   "The model renders (:seon.render/wire of an entity schema, docs/users.md#the-stages-agreed-2026-11-09) and the one helper that writes a turn's page message: each writes messages as the one walk places them, which is the path."
-  '#{seon.ctx.wire/agent-wire seon.ctx.wire/eval-wire seon.ctx.wire/message-wire seon.ctx.wire/model-call-wire seon.ctx.wire/page-message seon.ctx.wire/example-wire})
+  '#{seon.ctx.wire/agent-wire seon.ctx.wire/eval-wire seon.ctx.wire/message-wire seon.ctx.wire/model-call-wire seon.ctx.wire/page-message seon.ctx.wire/example-wire seon.ctx.wire/example-session-wire})
 
 (defn- outside-the-path
   "The vars of db in namespaces nss that make provider messages other than through seon.render/wire: one that references a step of `the-path` and is not named for it, or
@@ -3436,6 +3436,7 @@
     [call (vec (for [[_ e] (:lab.ow/_by c) :when (= (:lab.ow/turn e) (:lab.ow/n call))] e))]))
 (defn lab-agent [_ c] [:article [:h1 (:lab.ow/key c)] (into [:ol] (for [[call evals] (lab-turns c)] (into [:li call] evals)))])
 (defn lab-turn-open [_ n] [{:role "user" :content (str "turn " n)}])
+(defn lab-session-wire [_ c] (vec (concat [{:role "user" :content "open"}] (mapcat (fn [[call evals]] (concat [[#'lab-turn-open {} (:lab.ow/n call)] call] evals)) (lab-turns c)) [{:role "user" :content "close"}])))
 (defn lab-agent-wire [_ c] (vec (mapcat (fn [[call evals]] (concat [[#'lab-turn-open {} (:lab.ow/n call)] call] evals)) (lab-turns c))))
 (defn lab-call [_ x] [:p (str (:lab.ow/reply x))])
 (defn lab-call-wire [_ x] [{:role "assistant" :content (str (:lab.ow/reply x))}])
@@ -3479,7 +3480,10 @@
         (is (= before (pr-str (vec (take 6 after)))) "every earlier message is the same bytes")))
     (let [once (r/render-pull @a db #'lab-agent ix #{:seon.render/hiccup :seon.render/wire})]
       (is (= (r/wire-of w) (:messages once)) "render-pull, one pass let go, answers what the kept walk does")
-      (is (empty? (:messages (r/render-pull @a db #'lab-agent ix #{:seon.render/hiccup}))) "and asked for the page alone, no messages"))
+      (is (empty? (:messages (r/render-pull @a db #'lab-agent ix #{:seon.render/hiccup}))) "and asked for the page alone, no messages")
+      (is (= (into [{:role "user" :content "open"}] (conj (r/wire-of w) {:role "user" :content "close"}))
+             (:messages (r/render-pull @a db #'lab-session-wire ix #{:seon.render/wire} {:seon.render/as :seon.render/wire})))
+          "a root call answers the model output itself, placing the pull's entities each by its own model render"))
     (let [h (walk #{:seon.render/hiccup}) _ (r/flush! h nil)]
       (is (= [] (r/wire-of h)) "a walk asked for the page alone runs no model render")
       (is (not-any? :wired (vals @(:cache h)))))))

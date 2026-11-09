@@ -350,24 +350,29 @@
                          [call] (map evals (filter model? es)) (map evals (remove model? es)))]
            x))))
 
+(defn example-session-wire
+  "An example session's agent (its root view in a render-pull of it) as the model reads it, a model output's call: the message
+  that opens it (seon.ctx.session/example-open), its turns' entities placed (`turn-entities`), each rendered by its own
+  :seon.render/wire in the walk, and the message that closes it. A call's answer stands for the agent's own model render, so an
+  example writes no session opening of its own. See docs/tasks.md#a-task-names-example-sessions."
+  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
+  [{db :seon.db/db} a]
+  (-> [{:role "user" :content (session/example-open (ratom/realize (:seon.agent/key a)) (ratom/realize (:seon.agent/description a)))}]
+      (into (turn-entities db a))
+      (conj {:role "user" :content "</session>"})))
+
 (defn example-wire
-  "Example session ek as the model reads it, placed by the agent's model render as [#'example-wire {} ek] (so the walk keeps it as
-  a component of its own, keyed by ek): the message that opens it (seon.ctx.session/example-open), its turns' entities as of its
-  last t (`turn-entities` on that point's db) each through its schema's model render (seon.render/render-for), composed here
-  because they are a past point's entities, not views of the walk's pull; then the message that closes it. A placed example
-  contributes its turns, never an agent message. See docs/tasks.md#a-task-names-example-sessions."
+  "Example session ek as the model reads it, placed by the agent's model render as [#'example-wire {} ek] (the walk keeps it as
+  a component keyed by the example, a past point that never changes): its agent pulled as of its last t and rendered in one
+  pass for the model (seon.render/render-pull, its root `example-session-wire` as a model output's call), so each of its
+  entities is rendered by its own :seon.render/wire inside a walk. See docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :string] [:vector :seon.model/message]]}
-  [{db :seon.db/db :as o} ek]
+  [{db :seon.db/db} ek]
   (let [dbt (d/as-of db (session/example-t db ek))
         ix (program/index-of-db dbt)
-        o (assoc o :seon.db/db dbt :seon.render/index ix)
-        c (ctx/agent-ctx ix dbt (pdb/eid dbt :seon.agent/key ek))
-        render (fn [x] (cond (:role x) [x]
-                             (and (vector? x) (var? (first x))) (apply (first x) (merge o (second x)) (nnext x))
-                             :else ((requiring-resolve (render/render-for ix (render/schema-of ix x nil) :seon.render/wire)) o x)))]
-    (-> [{:role "user" :content (session/example-open ek (:seon.agent/description c))}]
-        (into (mapcat render) (turn-entities dbt c))
-        (conj {:role "user" :content "</session>"}))))
+        branch (get-in (or (:origin-db dbt) dbt) [:config :branch])
+        pull (:tree (ctx/build ix dbt (pdb/eid dbt :seon.agent/key ek) branch))]
+    (:messages (render/render-pull pull dbt #'example-session-wire ix #{:seon.render/wire} {:seon.render/as :seon.render/wire}))))
 
 (defn agent-wire
   "An agent (:seon.db/agent-fact) as the model reads it: its system message, from the doc sections :seon.agent/system names
