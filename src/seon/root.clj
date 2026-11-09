@@ -1125,14 +1125,14 @@
       (vec (concat code docs tasks)))))
 
 (defn- seed!
-  "Index the source tree {:root :dirs} into conn's branch while this is the store's only process: the program
-  (import-tree!), then the wiki with its baseline (wiki-tx) until it states nothing more (its citations resolve to the
-  program), then the task files (task-files, seon.task/load-tx). A branch whose fact already holds the tree's digest is
-  left as it is. Answers {:imported? :digest :forms}, with :tasks when the task files were refused, or :error. See
-  docs/source.md#indexing-a-tree."
-  {:malli/schema [:=> [:cat :seon.host/conn [:map [:root :string] [:dirs [:sequential :string]]] :int] :map]}
+  "Index the checkout into conn's branch while this is the store's only process: the source tree {:root :dirs}'s program
+  (import-tree!; none when source is nil), then the wiki with its baseline (wiki-tx) until it states nothing more (its
+  citations resolve to the program), then the task files (task-files, seon.task/load-tx). A branch whose fact already
+  holds the tree's digest is left as it is. Answers {:imported? :digest :forms}, with :tasks when the task files were
+  refused, or :error. See docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/conn [:maybe [:map [:root :string] [:dirs [:sequential :string]]]] :int] :map]}
   [conn source t0]
-  (let [r (import-tree! conn source t0)]
+  (let [r (if source (import-tree! conn source t0) {:imported? true})]
     (if-not (:imported? r)
       r
       (let [db (loop [db @conn]
@@ -1206,8 +1206,8 @@
   "Root's boot up to its first thread, on the main carrier (jolt.host/main-carrier-run!: one OS
   thread drives every fiber, so a go block a library starts is a fiber; a future is an OS thread of its
   own, and must have ended before the fork, which seon.lib/fork! refuses beside another thread): main opened on the
-  store at path and resumed as it is, reading no file and no git, or, when no source was ever indexed into it, the source
-  tree indexed into it first (seed!); main's config held, its program digested (seon.program/program-digest), the
+  store at path and resumed as it is, reading no file and no git, or, when nothing was ever indexed into it nor a root
+  booted on it, the checkout indexed into it first (seed!); main's config held, its program digested (seon.program/program-digest), the
   contracts instrumented, the warm paths run and the heap made static, then the fork server forked from it (which preloads
   main's indexes for its agents: seon.fork-server/main), sharing all of that copy-on-write while this is the one thread
   there is (docs/failure-points.md, physics). Its return starts the process's threads (Jolt's carriers, timer and poller;
@@ -1233,8 +1233,8 @@
             _ (.mkdirs (java.io.File. agents-dir))
             open-ms (profile/ms-since t0)
             t1 (profile/now-ns)
-            ;; a main no source was ever indexed into is indexed now, once; every other boot resumes it
-            seeded (when (and source (nil? (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))))
+            ;; a main nothing was ever indexed into or booted on is indexed now, once; every other boot resumes it
+            seeded (when (every? nil? (vals (d/pull @conn [:seon.root/source :seon.root/boot] [:seon.root/id :root])))
                      (seed! conn source t1))
             seed-ms (profile/ms-since t1)
             t2 (profile/now-ns)
