@@ -3473,6 +3473,9 @@
             "a new turn runs the agent and the new turn's components alone")
         (is (= 4 (count ran)))
         (is (= before (pr-str (vec (take 6 after)))) "every earlier message is the same bytes")))
+    (let [once (r/render-pull @a db #'lab-agent ix #{:seon.render/hiccup :seon.render/wire})]
+      (is (= (r/wire-of w) (:messages once)) "render-pull, one pass let go, answers what the kept walk does")
+      (is (empty? (:messages (r/render-pull @a db #'lab-agent ix #{:seon.render/hiccup}))) "and asked for the page alone, no messages"))
     (let [h (walk #{:seon.render/hiccup}) _ (r/flush! h nil)]
       (is (= [] (r/wire-of h)) "a walk asked for the page alone runs no model render")
       (is (not-any? :wired (vals @(:cache h)))))))

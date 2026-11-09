@@ -1065,6 +1065,21 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [w] @(:ledger w))
 
+(declare wire-of dispose-walk!)
+
+(defn render-pull
+  "Pull (a ctx tree, as seon.ctx/build answers it) rendered on db by root render f, in the entity index ix, in one pass and let
+  go: {:hiccup its hiccup, :messages its model output (empty unless outputs holds :seon.render/wire)}. Pure in its arguments:
+  no walk or state is kept, so it is how a past point is read (a turn's diff reads its page parts with outputs
+  #{:seon.render/hiccup}, so no model render nests). See docs/render.md#one-rendering-system-drawn-from-the-data."
+  {:malli/schema [:=> [:cat :map :seon.host/db :any :map [:set :keyword]] [:map [:hiccup :any] [:messages [:vector :any]]]]}
+  [pull db f ix outputs]
+  (let [r (ratom/atom pull)
+        ;; one pass: nothing swaps this ref, so no change of it is ever diffed
+        w (assoc (walker {:ref r :changes (fn [_ _] nil)} (constantly db) [f {} (ratom/ref-view r (fn [_ _] nil))] ix) :outputs outputs)]
+    (try (flush! w nil) {:hiccup (resolved w @(:out w) false) :messages (wire-of w)}
+         (finally (dispose-walk! w)))))
+
 (defn wire-of
   "The model's messages of walk w: its root's model output (kept on its cache entry, :wired, made in the same run as its
   hiccup, when the walk asks for :seon.render/wire), each placed component's marker replaced by that component's own, as
