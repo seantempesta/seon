@@ -151,7 +151,7 @@
       (is (= [:x/a :x/c] (sort (keys (forms gone)))) "an edit that takes a key out retracts its entry"))))
 
 (defn- config-root!
-  "A root on a clone of this checkout, its three tasks its own, and how a test speaks to it: :at-root, :in (an agent's REPL), :ask, :restart!. See docs/config.md#a-process-holds-its-branchs-config."
+  "A root on a clone of this checkout, its three tasks its own (loaded once it listens), and how a test speaks to it: :at-root, :in (an agent's REPL), :ask, :restart!. See docs/config.md#a-process-holds-its-branchs-config."
   []
   (let [dir (scratch-dir "config")
         tree (str dir "/tree")
@@ -162,7 +162,9 @@
         options {:store (ts/clone-process-store! (str runs "/store")) :main "main" :runs runs
                  :args ["--set" (str ":seon.config.source/root=" (pr-str tree))]}
         root (atom (ts/start-root! options))
-        ask (fn [m] (ts/ask @root m))]
+        ask (fn [m] (ts/ask @root m))
+        ;; a boot resumes main and reads no task file: its tasks are a load a person asks for (docs/source.md#indexing-a-tree)
+        _ (ask {:op :eval :agent "root" :code "(my.root/load-tasks! sys)"})]
     {:tree tree :cloned cloned :root root :ask ask
      :restart! (fn [] (ts/stop-root! @root) (reset! root (ts/start-root! options)))
      :at-root (fn [code] (ts/value-of (:response (ask {:op :eval :agent "root" :code code}))))
@@ -180,7 +182,7 @@
 
 (deftest a-branchs-config-is-its-own-and-reaches-the-next-process
   ;; docs/config.md#a-process-holds-its-branchs-config, reproducing 2026-11-07: one agent's unmerged spit of a key with no schema into the config file reached a second agent's live test
-  ;; and stopped a new process. Here it acts on nothing, the boot that meets it says which file and which commit, and a key a branch adds merges, writes back byte-preserved and reads at the next process.
+  ;; and stopped a new process. Here it acts on nothing, a boot reads no file and a re-index that meets it says which file and which commit, and a key a branch adds merges, writes back byte-preserved and reads at the next process.
   (let [{:keys [tree cloned root ask restart! at-root in]} (config-root!)
         k a-branchs-key
         file (str tree "/" config/shipped-file)
@@ -208,11 +210,12 @@
           (is (= 7 (at-root (str "(" k " (datahike.api/pull @(:conn sys) [" k "] [:seon.root/id :root]))"))) "and main's root entity says so")
           (is (= (let [end (str/last-index-of held "}")] (str (subs held 0 end) "\n " k " 7" (subs held end)))
                  (at-root "(get (seon.source/files @(:conn sys) [seon.config/shipped-file]) seon.config/shipped-file)")))))
-      (testing "a boot on a file that doesn't load comes up, says which file and which commit, and keeps main's"
+      (testing "a boot on a file that doesn't load comes up and keeps main's, reading no file; a re-index says which file and which commit"
         (spit file bad)
         (restart!)
         (is (:port @root) (:log @root))
-        (let [err (str (at-root "(:error (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))"))]
+        (is (nil? (at-root "(:error (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))")) "the boot read no file")
+        (let [err (str (at-root "(:seon.error/message (my.root/import! sys))"))]
           (is (str/includes? err config/shipped-file) err)
           (is (str/includes? err "seon.config.nope/key") err)
           ;; the commit it names held a file that loads: a seed may name an earlier commit of the same content, so it's read, not compared with HEAD
