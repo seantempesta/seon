@@ -1392,6 +1392,19 @@
         twice (into (sorted-map) (keep (fn [[a ks]] (when (next ks) [a (mapv second ks)]))) (group-by first named))]
     (is (= {} twice) "each attribute's one entity schema")))
 
+(deftest an-agents-own-entity-schema-is-recognized-on-its-branch
+  ;; docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together: what an entity is is read in the index its reader takes, so a
+  ;; schema an agent registered on its branch is recognized by its branch's index and unknown to the binary's (2026-11-09: the
+  ;; renders saw a branch's schemas through a dynamic binding, recognition through the binary's registry)
+  (let [forms {:lab.idx/name [:and {:seon.db/identity true} :string]
+               :lab.idx/thing [:map {:seon.db/attributes true} [:lab.idx/name {:optional true}]]}
+        e {:lab.idx/name "x"}]
+    (is (nil? (pdb/most-specific (pdb/index) e)) "the binary's index does not know the branch's schema")
+    (is (= :lab.idx/thing (pdb/most-specific (pdb/index-of {:forms forms}) e)) "the branch's index names it")
+    (is (= [:lab.idx/name :db/id] (pdb/attributes-of (pdb/index-of {:forms (assoc forms :lab.idx/sub [:and :lab.idx/thing [:map [:db/id :int]]])}) :lab.idx/sub))
+        "and what a schema extends is read in the same index")
+    (is (identical? (pdb/index) (pdb/index-of nil)) "a branch that changed nothing holds the binary's")))
+
 (deftest a-datom-its-attribute-refuses-is-invalid-and-names-it
   ;; docs/storage.md#the-write-checks-every-datom: the store checks a value's type, and a data attribute's only that it is
   ;; plain, so a declared schema was not enforced; the write holds each value to its attribute's schema

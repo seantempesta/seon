@@ -577,7 +577,8 @@
   then the index carried back, so each call of a measure starts where the last did. nil."
   {:malli/schema [:=> [:cat :seon.host/db :map] :nil]}
   [db acct]
-  (reset! seon.agent/state {:db db :mode :test})
+  ;; an agent's state holds its branch's schema slot (seon.agent/branch-schemas: a fork carries main's), the one copy of its entity index
+  (reset! seon.agent/state {:db db :mode :test :schema-registry {:key {} :registry {} :index (seon.db/index)}})
   (let [tx (program/record-tx db acct)]
     (program/meaning-changes db tx)
     (seon.agent/transact! tx))

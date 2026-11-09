@@ -27,7 +27,7 @@
     ;; verdict reads as its render whatever came before it, and a large one takes no other form's value with it
     (let [proved (with-meta {:reports [] :ran 0 :fns {'a/b {:calls 1}}} {:seon.render/schema :seon.test/proved})
           kept (fn [v] (:value (seon.db/response-of nil (repl/record-details "x" {:handle 'result/e9 :forms 2 :value [1 v]} {}))))]
-      (is (= [1 (:value (render/model proved))] (kept proved)) "a form's model render, as it reads alone")
+      (is (= [1 (:value (render/model (seon.db/index) proved))] (kept proved)) "a form's model render, as it reads alone")
       (is (= 1 (first (kept (vec (range (inc (cfg/value :seon.config.store/max-value-chars))))))) "a form past the largest value kept costs only itself")
       (is (:seon.value/gone (second (kept (vec (range (inc (cfg/value :seon.config.store/max-value-chars))))))) "and says it is gone"))
     (let [e (ev "(+ 1 2) (throw (ex-info \"no\" {})) 4")]
@@ -326,7 +326,7 @@
                                     {:op :eval :agent "root"
                                      :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"
                                                 " a (datahike.api/q '[:find ?a . :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t] [_ :seon.eval/agent ?a]] b " (pr-str task) ")]"
-                                                " (seon.ctx/current-ns (:tree (seon.ctx/build b a :b))))")}]))]
+                                                " (seon.ctx/current-ns (:tree (seon.ctx/build (seon.db/index) b a :b))))")}]))]
     (is (str/ends-with? (str (:value where)) ".here") (pr-str where))))
 
 ;; docs/agent.md#the-repl (owner, 2026-11-03: "fix the commands so they work intuitively everywhere"): one table the
@@ -1045,8 +1045,8 @@
   ;; when located cannot move a position into the form's terms (no :seon.error/at), the
   ;; request's own is printed rather than none; with :seon.error/at it is hidden
   (let [em (contract/error :seon.agent/eval-error 'seon.repl/eval-code "m" {:class "c" :jolt.error/line 4 :jolt.error/column 6})]
-    (is (str/includes? (h/html (render/hiccup {} em)) ":jolt.error/line 4") (h/html (render/hiccup {} em)))
-    (let [r (h/html (render/hiccup {} (assoc em :seon.error/at {:line 3 :column 6})))]
+    (is (str/includes? (h/html (render/hiccup {:seon.render/index (seon.db/index)} em)) ":jolt.error/line 4") (h/html (render/hiccup {:seon.render/index (seon.db/index)} em)))
+    (let [r (h/html (render/hiccup {:seon.render/index (seon.db/index)} (assoc em :seon.error/at {:line 3 :column 6})))]
       (is (not (str/includes? r ":jolt.error/line")) r)
       (is (str/includes? r "at line 3:6") r))))
 
