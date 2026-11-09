@@ -1557,7 +1557,7 @@
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:seon.render/style ":is(.system-message, .example-session, .proof-story) { font-size: 0.75rem; line-height: 1rem; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  [:details {:wire/role "system" :wire/ref [:section (if (seq (:seon.agent/system c)) (vec (sort (keys (:seon.agent/system c)))) wire/system-page)]}
+  [:details {:wire/role "system" :wire/ref [:section (if (seq (:seon.agent/system c)) (vec (sort (keys (:seon.agent/system c)))) doc/system-page)]}
    [:summary {:class "muted" :wire/for "page"} "system message"]
    [#'markdown (wire/agent-system-text db c)]])
 

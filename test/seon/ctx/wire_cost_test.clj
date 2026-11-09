@@ -23,7 +23,7 @@
   and the agent's entity id."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
   [n]
-  (let [db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.ctx.wire/system-page "# You are a Seon agent\n\nThe rules."}))
+  (let [db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.doc/system-page "# You are a Seon agent\n\nThe rules."}))
         db (d/db-with db
                       (into [{:seon.agent/key "b/a1" :seon.agent/turn n}]
                             (for [i (range n) :let [[_ v] (item i)]]

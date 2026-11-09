@@ -35,7 +35,7 @@
 (def instructions
   "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
   when it is done and by what means, short, the standard format's stage descriptions (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
-  (seon.ctx.wire/system-page), and the help page it reads on demand (seon.ctx.wire/help-page). How a task is worked is the system prompt's, and the wiki section docs/agent.md#working-a-task, which an agent reads when it wants it (the instructions no longer cite it into every context): the instructions say only the goal."
+  (seon.doc/system-page), and the help page it reads on demand (seon.ctx.wire/help-page). How a task is worked is the system prompt's, and the wiki section docs/agent.md#working-a-task, which an agent reads when it wants it (the instructions no longer cite it into every context): the instructions say only the goal."
   {:user "Chat with the user: reply to their latest message. Nothing you define here merges: for work that should reach main, start an agent with `(my.task/launch! \"what's wanted\")`. More when you want it: docs/agent.md#working-for-a-person"
    :design (str "Your task: turn the request below into the task the implement step works from: its plan, what the "
                 "plan cites and its red proofs. You are done when an agent with only that page could make the change without "

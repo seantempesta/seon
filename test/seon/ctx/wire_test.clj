@@ -821,7 +821,7 @@
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn (into (task/boot-tx "boot-1" 6 "sean") (seon.config/facts (merge seon.config/config {:seon.config.ai/provider :openai-compat}) {})))
-      (d/transact conn (doc/load-tx @conn "docs" {wire/system-page (slurp (str (seon.config/checkout) "/" wire/system-page))}))
+      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g."
                                                :seon.task/proofs #{'demo-test/g-test}}]))
       (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
@@ -1565,7 +1565,7 @@
   (`source-session!`, `session/session-tx`) named by the task; answers the session-tx."
   ([conn] (example-world! conn "(+ 1 2)"))
   ([conn code]
-  (d/transact conn (doc/load-tx @conn "docs" {wire/system-page (slurp (str (seon.config/checkout) "/" wire/system-page))}))
+  (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
   (source-session! conn code)
   (let [tx (session/session-tx @conn "b/src" "abc")]
     (doseq [t tx] (d/transact conn t))
@@ -1636,7 +1636,7 @@
   ;; the same task with no :seon.task/examples and with an empty one: the same messages
   (ts/test-branch!
     (fn [_ conn]
-      (d/transact conn (doc/load-tx @conn "docs" {wire/system-page (slurp (str (seon.config/checkout) "/" wire/system-page))}))
+      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
       (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
       (let [none (turn! conn 0)
@@ -1684,7 +1684,7 @@
   "Two requests of the fixed fixture of task demo/g, named by no example: its session of one eval, one message and one
   text reply, on conn (a branch with the system prompt loaded); answers {:r0 :r1}."
   [conn]
-  (d/transact conn (doc/load-tx @conn "docs" {wire/system-page (slurp (str (seon.config/checkout) "/" wire/system-page))}))
+  (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
   (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
   (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
   (let [r0 (turn! conn 0)]
@@ -1768,7 +1768,7 @@
   (let [from (fn [id code] (ts/test-branch! (fn [_ c] (source-session! c code) (session/session-tx @c "b/src" id))))
         tx-a (from "abc" "(+ 1 2)")
         tx-b (from "def" "(+ 3 4)")]
-    (d/transact conn (doc/load-tx @conn "docs" {wire/system-page (slurp (str (seon.config/checkout) "/" wire/system-page))}))
+    (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
     (doseq [t (concat tx-b tx-a)] (d/transact conn t))
     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}
                                              :seon.task/examples #{[:seon.agent/key "example/def"] [:seon.agent/key "example/abc"]}}]))
@@ -1838,7 +1838,7 @@
         r1 (turn! 2 {})
         _ (d/transact conn [{:seon.task/id "demo/f" :seon.task/plan "Later."}])
         ;; and the system prompt changes: a turn's system prompt is its section as of the turn's t
-        _ (d/transact conn [{:db/id (seon.ref/page-top @conn wire/system-page) :seon.doc/text "Changed after the turns."}])
+        _ (d/transact conn [{:db/id (seon.ref/page-top @conn doc/system-page) :seon.doc/text "Changed after the turns."}])
         db @conn
         e-of (fn [id] (d/q '[:find ?e . :in $ ?id :where [?e :seon.model-call/id ?id]] db id))]
     [db [r0 r1] [(e-of (seon.lib/call-id "a1" 1)) (e-of (seon.lib/call-id "a1" 2))]]))
@@ -1860,7 +1860,7 @@
 (defn- tree-world
   "A session on the world: the system prompt, its agent b/a1 and turn 1's reply with the evals evs, each {:id :call-id}: [db agent-eid]."
   [& evs]
-  (let [db (d/db-with (ts/test-db) (doc/load-tx (ts/test-db) "docs" {wire/system-page "# You are a Seon agent\n\nThe rules.\n\n## The small one\n\nBe brief."}))
+  (let [db (d/db-with (ts/test-db) (doc/load-tx (ts/test-db) "docs" {doc/system-page "# You are a Seon agent\n\nThe rules.\n\n## The small one\n\nBe brief."}))
         db (d/db-with db (into (ts/turn-tx "a1" 1 {:seon.model-call/reply "I look."})
                                (for [{:keys [id call-id by]} evs]
                                  (cond-> {:seon.eval/id id :seon.eval/by (or by "a1") :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
@@ -2058,3 +2058,54 @@
       (let [d2 (d/db-with d [{:seon.task/id "demo/n" :seon.task/plan "Make demo/f double, by name."}])]
         (is (not (contains? (steps (status-at d2 "demo/n" {})) :fold-message)) "the plan changed since: not that step")))))
 
+
+;; ---- model renders (stage 2b, docs/users.md#the-stages-agreed-2026-11-09) ----
+
+(def ^:private model-renders
+  "Each entity schema's model render, as the one walk will look it up on the schema (its property's name is the owner's)."
+  {:seon.db/agent-fact wire/agent-wire :seon.db/eval-fact wire/eval-wire :seon.message/fact wire/message-wire :seon.model-call/fact wire/model-call-wire})
+
+(defn- placed
+  "What the one walk makes of agent a's model render on db: each entity it places replaced by that entity's own model
+  render's output, in place (the contract the walk keeps, docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09)."
+  [db a]
+  (let [o {:seon.db/db db}]
+    (vec (mapcat (fn [x] (if (:role x) [x] ((model-renders (render/schema-of x nil)) o x)))
+                 (wire/agent-wire o (ctx/agent-ctx db a))))))
+
+(defn- with-system
+  "Db with agent key k's :seon.agent/system written as its run's start writes it (seon.agent/begin-run-tx): the system prompt's top section."
+  [db k]
+  (d/db-with db [{:seon.agent/key k :seon.agent/system [(seon.ref/page-top db doc/system-page)]}]))
+
+(defn- page-message? [m] (str/starts-with? (:content m "") "<page from=\"seon\""))
+
+(defn- without-page
+  "Request r's messages with the page as the stored page evals carry it taken out (seon's evals and the whole-page call): what the
+  model renders put in their place is the model call's page message."
+  [db {:keys [parts]}]
+  (vec (mapcat (fn [[ref ms]] (when-not (or (= [:render] ref) (and (= :eval (first ref)) (= "seon" (:seon.eval/by (d/entity db [:seon.eval/id (second ref)])))))
+                                ms))
+               parts)))
+
+(deftest the-model-renders-read-what-todays-request-reads
+  ;; stage 2b: each entity's model render answers the messages today's request reads of it, byte for byte, in the order the agent's
+  ;; places them; the page reaches the model as each turn's page message, never as an eval of seon's
+  (doseq [[nm world] {"replies with calls, reasoning and a plan that changes" (fn [conn] (let [[db] (sent-turns conn)] [db "a1"]))
+                      "an example session" (fn [conn] (example-world! conn) (turn! conn 0) (turn! conn 1) [@conn "a1"])}]
+    (ts/test-branch!
+      (fn [_ conn]
+        (let [[db0 k] (world conn)
+              db (with-system db0 k)
+              a (pdb/eid db :seon.agent/key k)
+              n (:seon.agent/turn (d/entity db a))
+              today (wire/render db {:commit (d/commit-id @conn) :task (:seon.task/id (:seon.agent/task (d/entity db a))) :turn n :max-turns 9 :origin :model :agent k})
+              ;; the page evals stored as seon's go with this stage: the model renders read a db without them
+              ms (placed (d/db-with db (for [dt (d/datoms db :aevt :seon.eval/by) :when (= "seon" (:v dt))] [:db/retractEntity (:e dt)])) a)]
+          (let [want (without-page db today) got (vec (remove page-message? ms))
+                i (count (take-while true? (map = want got)))
+                cut (fn [m] (some-> m (update :content #(subs % 0 (min 300 (count %))))))]
+            (is (= want got) (str nm ": first differing message " i " of " [(count want) (count got)]
+                                  "\n want " (pr-str (cut (get want i))) "\n got  " (pr-str (cut (get got i))))))
+          (is (every? #(seon.contract/fits? :seon.model/message %) ms) (str nm ": every one a message"))
+          (is (seq (filter page-message? ms)) (str nm ": the page reaches the model as a turn's page message")))))))

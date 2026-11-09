@@ -223,7 +223,7 @@
                     [[{:seon.root/id :root :seon.root/boot "b1"}]
                      (seon.task/agent-tx :a1 {:status :busy :branch :task-x})])
         db0 (reduce d/db-with db0
-                    [(seon.doc/load-tx db0 "docs" {seon.ctx.wire/system-page "# You are a Seon agent\n\nThe help page."})
+                    [(seon.doc/load-tx db0 "docs" {seon.doc/system-page "# You are a Seon agent\n\nThe help page."})
                      (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
                      ;; the agent has no :seon.agent/task: its page draws no task part, as this input has always been (the run it
                      ;; stood for held the task); linked, the draw costs 4,135 calls at 10 against these 3,920
@@ -491,7 +491,7 @@
 (deftest printing-a-result-is-the-models-reading-of-it
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an eval's printed result is computed the first time the model reads that eval and is a lookup after: a person's walk prints no model text at all
   (let [k "b/a1" n 5
-        db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.ctx.wire/system-page "# You are\n\nRules."}))
+        db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.doc/system-page "# You are\n\nRules."}))
         db (reduce (fn [db i] (d/db-with db [{:seon.agent/key k :seon.agent/turn (inc i)}
                                              {:seon.eval/id (str "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k} :seon.eval/call (seon.task/call-ref k (inc i))
                                               :seon.eval/code (str "(f " i ")") :seon.eval/call-id (str "c" i) :seon.eval/response {:handle (symbol "result" (str "e" i)) :value i}}]))
@@ -548,7 +548,7 @@
   [n]
   (let [conn *conn* k (str "b/t" n) tid (str "demo/t" n)
         point (fn [] (let [db @conn] {:branch :b :commit (d/commit-id db) :t (:max-tx db)}))]
-    (d/transact conn (seon.doc/load-tx @conn "docs" {seon.ctx.wire/system-page (str "# You are a Seon agent " n "\n\nRules.")}))
+    (d/transact conn (seon.doc/load-tx @conn "docs" {seon.doc/system-page (str "# You are a Seon agent " n "\n\nRules.")}))
     (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "t" n) :seon.task/plan "Make t." :seon.task/proofs #{'demo-test/t-test}}]))
     (d/transact conn [{:seon.agent/key k :seon.agent/turn 0 :seon.agent/task {:seon.task/id tid}}])
     [@conn (:db/id (d/entity @conn [:seon.agent/key k]))
