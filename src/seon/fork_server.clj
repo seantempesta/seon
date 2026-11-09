@@ -91,7 +91,7 @@
     (when (and task key (d/entity db [:seon.task/id task]))
       (let [db1 (:db-after (pdb/speculate db (agent/begin-run-tx db task key)))
             db2 (:db-after (pdb/speculate db1 (task/agent-cites-tx db1 [:seon.agent/key key] key)))]
-        (ctx/build db2 (pdb/eid db2 :seon.agent/key key) branch)))
+        (ctx/build (or (:index (:schema-registry st)) (program/index-of-db db2)) db2 (pdb/eid db2 :seon.agent/key key) branch)))
     (if (= t (:warm-t st))
       st
       ;; main's search text index (seon.doc/text-index), built here once and carried by each commit
@@ -99,7 +99,7 @@
       (do (doc/text-index db)
       ;; main's schema registry, which each agent forked holds until it writes a schema entry
       (let [k (program/schema-changes db)]
-        (assoc st :warm-t t :schema-registry {:key k :registry (program/schema-registry k)}))))))
+        (assoc st :warm-t t :schema-registry {:key k :registry (program/schema-registry k) :index (pdb/index-of {:forms k})}))))))
 
 (defn index-for-agent
   "What a forked agent is handed of st's index: {:db :index}, the db it is of being main's current

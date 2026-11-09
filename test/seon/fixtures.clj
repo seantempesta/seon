@@ -445,23 +445,23 @@
   [opts e]
   (let [h (@(requiring-resolve 'seon.render.ui/eval-hiccup) {:db (:db opts)} e)
         h (if (and (:seon.eval/call-id e) (pos? (:turn e 0))) [:section {:wire/role "assistant" :wire/reply (:turn e)} h] h)]
-    (vec (mapcat second (seon.render/hiccup-wire h (:db opts))))))
+    (vec (mapcat second (seon.render/hiccup-wire (seon.db/index) h (:db opts))))))
 
 (defn message-messages
   "Message m as the model reads it."
   {:malli/schema [:=> [:cat :any :map] [:vector :map]]}
-  [_ m] (vec (mapcat second (seon.render/hiccup-wire (@(requiring-resolve 'seon.render.ui/message-hiccup) m)))))
+  [_ m] (vec (mapcat second (seon.render/hiccup-wire (seon.db/index) (@(requiring-resolve 'seon.render.ui/message-hiccup) m)))))
 
 (defn turn-messages
   "Model call c's reply as the model reads it."
   {:malli/schema [:=> [:cat :any :map] [:vector :map]]}
-  [_ c] (vec (mapcat second (seon.render/hiccup-wire (@(requiring-resolve 'seon.render.ui/reply-hiccup) (assoc c :seon.model-call/origin :model) true [])))))
+  [_ c] (vec (mapcat second (seon.render/hiccup-wire (seon.db/index) (@(requiring-resolve 'seon.render.ui/reply-hiccup) (assoc c :seon.model-call/origin :model) true [])))))
 
 (defn tree-parts
   "The conversation of agent record c on db as the tree reads it, cold: parts [ref messages turn], its system message and its opening left out."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:vector :any]]}
   [c db]
-  (let [w (seon.render/draw c @(requiring-resolve 'seon.ctx/changes) db (seon.render/declared-var :seon.render/render-ctx) {:model-only true})]
+  (let [w (seon.render/draw c @(requiring-resolve 'seon.ctx/changes) db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {:model-only true})]
     (try (vec (remove (fn [[r]] (or (nil? r) (#{:section :session} (first r)))) (seon.render/wire w)))
          (finally (seon.render/dispose-walk! w)))))
 
@@ -474,5 +474,5 @@
   "The parts of agent record c ({:tree}) on db as the model reads them, drawn cold: {id form}."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
-  (let [w (seon.render/draw (:tree c) @(requiring-resolve 'seon.ctx/changes) db (seon.render/declared-var :seon.render/render-ctx) {:model-only true})]
+  (let [w (seon.render/draw (:tree c) @(requiring-resolve 'seon.ctx/changes) db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {:model-only true})]
     (try (seon.render/placed-hiccup w (seon.render/page-lists w)) (finally (seon.render/dispose-walk! w)))))

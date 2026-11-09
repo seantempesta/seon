@@ -345,12 +345,13 @@
 (defn- def-meta
   "A defined var's own Clojure metadata keys (:var/meta in resources/seon/schemas/seon.facts.edn): from the live var when it is
   bound, merged over the compiler's account of its definition, with :macro when the compiler says the
-  form is a macro. Location keys and :doc are left out (the doc is :var/doc), and so are the keys
+  form is a macro. Privacy (:private) is the definition's own, the compiler's account of it, never the live var's: the image's var holds the
+  privacy of the tree it was built or run from (seon.source/tree-private). Location keys and :doc are left out (the doc is :var/doc), and so are the keys
   instrumentation adds as a process runs (seon.contract/instrument-keys): with them, a definition's facts
   depended on whether the importing process had armed its contracts (491 of 2,431 contracted vars differed)."
   {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:set :keyword]]}
   [v d]
-  (let [m (merge (:meta d) (some-> v meta))]
+  (let [m (merge (:meta d) (dissoc (some-> v meta) :private))]
     (-> (set (keys (cond-> m (:macro? d) (assoc :macro true))))
         (disj :ns :name :file :line :column :end-line :end-column :doc)
         (#(apply disj % contract/instrument-keys)))))
@@ -1084,6 +1085,13 @@
                    :let [v (some->> (text (:e dt)) (differing-form (:v dt)))]
                    :when (some? v)]
                [(:v dt) v]))))
+
+(defn index-of-db
+  "The entity index (seon.db/entity-index) of the registry with db's own schema entries over it (`schema-changes`): what an
+  entity is on that db's branch, built here and never kept: its holder (a walk, an agent's state) keeps it until a schema entry
+  moves. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db] (pdb/index-of {:forms (schema-changes db)}))
 
 (defn schema-registry
   "The registry an evaluation on db binds as malli.registry/*registry*: the binary's forms
