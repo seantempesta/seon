@@ -213,12 +213,12 @@
 
 (def pins
   "Where the wiki states each customized library's pin: the page, and the line that states one
-  (`reference-code/x` pinned at `sha`), compared with the gitlinks root's source import
-  recorded (:seon.root/source :pins, seon.root/import-source!)."
+  (`reference-code/x` pinned at `sha`), compared with the gitlinks root's last index of its source
+  recorded (:seon.root/source :pins, seon.root/import-tree!)."
   {:page "docs/forks.md" :line #"(?m)^`(reference-code/[^`]+)` pinned at `([0-9a-f]+)`"})
 
 (defn stale-pins
-  "Each pin the wiki states (`pins`) that is not the gitlink root's source import recorded, as a
+  "Each pin the wiki states (`pins`) that is not the gitlink root's last index of its source recorded, as a
   :stale-pin row; none while root has recorded no import (unknown, not a mismatch). Cost: the
   page's sections (one AVET range of addresses) and their text."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
@@ -232,6 +232,22 @@
                  :let [s (str "stale-pin " a " " path)]]
              (derived-row ans s 'seon.doc (str a " states " path " pinned at " sha ", its gitlink is " (or g "none"))
                           {:kind :stale-pin :section a :path path :stated sha :recorded g} {:section a :path path :stated sha :recorded g}))))))
+
+(defn stale-binary
+  "A :stale-binary row while root's binary was built from another program than the main it booted on: root's
+  :seon.root/source fact as its boot wrote it (seon.root/booted-source), the binary's program (:binary, none when its
+  build recorded none) beside main's (:program). None on a boot whose binary is main's program, or with no source fact;
+  gone at the next boot on a matching binary. Derived, never stored, no clock, and never an import: the binary is rebuilt
+  (bin/update). Cost: one pull. See docs/health.md#a-stale-binary."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [{:keys [boot binary program]} (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source)]
+    (if (and program (not= binary program))
+      [(derived-row ans (str "stale-binary " boot) 'seon.root
+                    (str "root's binary was built from " (if binary (str "program " binary) "a program its build did not record")
+                         ", and main's program is " program ": agents fork main's code over another image and share no verdicts until bin/update rebuilds it")
+                    {:kind :stale-binary :binary binary :program program} {:binary binary :program program})]
+      [])))
 
 ;; ---- the wiki kept true: code that moved under its text, pages nothing links, issues with no page ----
 
@@ -764,12 +780,12 @@
   "The derived classes `caused-split` does not read, their rows on db."
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
   [db ans]
-  {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :orphan-page (orphan-pages db ans)
+  {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :stale-binary (stale-binary db ans) :orphan-page (orphan-pages db ans)
    :leadless-section (leadless-sections db ans) :uncited-task (uncited-tasks db ans)})
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
-  program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`, `stale-sections`,
+  program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`, `stale-binary`, `stale-sections`,
   `orphan-pages`, `leadless-sections`, `uncited-tasks`, and `problem-unlinked` over all of them). What the page, an agent's context and
   the done and merge gates read: computed when read, never stored, never polled."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]

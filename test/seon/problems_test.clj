@@ -747,6 +747,28 @@
       (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
         (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
 
+(deftest a-root-on-a-stale-binary-is-a-problem
+  ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, as seon.root/a-boot-resumes-from-the-db builds it: a boot
+  ;; writes the program its binary was built from beside main's on root's source fact (seon.root/booted-source), and health
+  ;; derives one :stale-binary row while they differ, gone at the next boot on a matching binary: never stored, no clock,
+  ;; never an import. Red before: no boot wrote the binary's program, and no class read it
+  (let [db0 (world)
+        held {:root "/c" :files 1 :forms 1 :ms 1}
+        in {:env "e" :tree "t" :config {:seon.config.agent/max-turns "40"}}
+        cfg-in {:seon.config.agent/max-turns "41"}
+        boot (fn [db b built main] (d/db-with db [{:seon.root/id :root :seon.root/source (root/booted-source held b built main cfg-in)}]))
+        source #(:seon.root/source (d/pull % [:seon.root/source] [:seon.root/id :root]))
+        rows #(mapv (juxt :binary :program) (get-in (problems/health %) [:classes :stale-binary :rows]))
+        stale (boot db0 "b1" {:program "p0" :inputs in} "p1")]
+    (is (= [] (rows db0)) "no source fact: nothing known, no row")
+    (is (= [["p0" "p1"]] (rows stale)) "a binary of another program than main's: one row naming both")
+    (is (nil? (:inputs (source stale))) "and no inputs to key agents' verdicts by")
+    (is (= [[nil "p1"]] (rows (boot db0 "b1" nil "p1"))) "a binary whose build recorded no program is no match either")
+    (let [fresh (boot stale "b2" {:program "p1" :inputs in} "p1")]
+      (is (= [] (rows fresh)) "the next boot on a binary of main's program: gone, nothing written to close it")
+      (is (= (assoc in :config cfg-in) (:inputs (source fresh))) "its inputs, with the config in force, are what agents key verdicts by")
+      (is (= ["b2" "p1" "p1"] ((juxt :boot :binary :program) (source fresh)))))))
+
 (deftest a-pin-the-wiki-states-is-the-recorded-gitlink
   (let [db0 (world)
         page "# Forks\n\n## Jolt\n\n`reference-code/jolt` pinned at `4342b73c`, the tip of ``jolt/x``.\n\n## Chez\n\n`reference-code/chez` pinned at `80e4b9f`.\n"
@@ -1073,7 +1095,7 @@
   (let [;; the world holds docs/calc.md; the test's first case is a db with no wiki, so its sections go
         db0 (let [db (world)] (d/db-with db (for [{:keys [e]} (d/datoms db :aevt :seon.doc/address)] [:db/retractEntity e])))
         err {:seon.error/signature "eeeeeeeeeeeeeeee" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0
-             :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.watch/died}
+             :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.fx/io-error}
         unlinked #(filterv #{:platform} (mapv :class (get-in (problems/health %) [:classes :problem-unlinked :rows])))
         with-err (d/db-with db0 [err])]
     (is (= [] (unlinked with-err)) "no wiki loaded: unknown")

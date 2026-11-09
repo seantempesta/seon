@@ -598,6 +598,13 @@
   {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe :string]]}
   [cfg] (when-let [p (get-in cfg [:store :path])] (str p "-agents/" (name (main-branch cfg)))))
 
+(defn empty-db
+  "An empty db value with Seon's schema (`schema`), in memory, keeping history when history?: a test's world
+  (my.test/world) and a tree indexed with no store (seon.root/built-program). See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat :boolean] :seon.host/db]}
+  [history?] (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) schema)
+                                     {:keep-history? history? :schema-flexibility :write}))
+
 (defn delete-main!
   "Delete main and every branch held under it (of-main) from the store of conn, a connection
   to :db (datahike.api/delete-branch!; a branch's connections are released first): what a

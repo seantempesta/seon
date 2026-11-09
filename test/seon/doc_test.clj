@@ -393,20 +393,6 @@
     (is (= [] (doc/load-tx db' ["demo" "other"] pages)) "an unchanged wiki writes nothing")
     (is (seq (doc/load-tx db' ["demo" "other"] (dissoc pages "other/b.md"))) "a page gone retracts its sections under the other dir")))
 
-(deftest a-boot-whose-wiki-digest-is-recorded-loads-nothing
-  ;; docs/root.md#boot: the digest of what the load reads (the pages, the program, the task ids) rides on root's
-  ;; fact; a boot that computes the same writes no wiki and reads none, and a change of any input loads again.
-  ;; A checkout of a few pages on the world (2026-10-31, shrink-tests-4)
-  (with-checkout
-    (fn [co]
-      (let [db0 (mt/world)
-            tx (seon.root/wiki-boot-tx db0 co (constantly {}))
-            db (d/db-with db0 tx)]
-        (is (seq tx) "a first boot loads the wiki")
-        (is (= (seon.root/wiki-digest db0 co) (:seon.root/wiki (d/pull db [:seon.root/wiki] [:seon.root/id :root]))) "and records its digest")
-        (is (= [] (seon.root/wiki-boot-tx db co (constantly {}))) "the same inputs load nothing")
-        (is (seq (seon.root/wiki-boot-tx (d/db-with db [{:seon.task/id "demo/new-task"}]) co (constantly {}))) "a new task id loads again")))))
-
 (deftest a-text-index-is-carried-past-a-move-that-writes-no-text
   ;; docs/vector.md#search: seon.doc/carry-index! keeps the index a move left as it was (no build),
   ;; and a move that writes a text has that text's row replaced in it

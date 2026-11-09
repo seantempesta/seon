@@ -168,8 +168,7 @@
         _ (spit (str tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
         ev (fn [code] {:op :eval :agent "root" :code code})
         main (ev "(name (seon.db/conn-main (:conn sys)))")
-        ;; and root's watch fact: a task count off names the batch that loaded the task files (:last-load)
-        held (ev "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys)))) (dissoc (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) :roots :boot)]")
+        held (ev "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys))))]")
         by (ev "(:started-by (seon.task/root @(:conn sys)))")
         first-boot (str/split-lines (root-answers path "main" [main (ev (str "(my.root/load-tasks! sys " (pr-str tasks) ")"))
                                                            {:op :attach :task "demo/t"} held (ev "(:boot sys)") by]
@@ -183,10 +182,10 @@
     (try
       (is (= "main" (printed (first first-boot))) "a boot with no main named works on the config's main")
       (is (= "main" (printed (first second-boot))) "the second boot resumes the same main")
-      (let [[tasks-1 agents-1 watch-1] (printed (nth first-boot 3))
-            [tasks-2 agents-2 watch-2] (printed (second second-boot))]
-        (is (= [1 1] [tasks-1 (count agents-1)]) (str "the first boot holds the one task it loaded (a file task is one whole task) and the agent it started; its watcher: " (pr-str watch-1)))
-        (is (= 1 tasks-2) (str "the second boot still holds the task; its watcher: " (pr-str watch-2)))
+      (let [[tasks-1 agents-1] (printed (nth first-boot 3))
+            [tasks-2 agents-2] (printed (second second-boot))]
+        (is (= [1 1] [tasks-1 (count agents-1)]) "the first boot holds the one task it loaded (a file task is one whole task) and the agent it started")
+        (is (= 1 tasks-2) "the second boot still holds the task")
         (is (every? agents-2 agents-1) "and the first boot's agent (its task is reaped, and started again by the next agent of the session)"))
       (let [b1 (printed (nth first-boot 4))
             [prev killed by2 resume] (map printed (drop 2 second-boot))]
@@ -202,10 +201,10 @@
 
 (deftest a-test-roots-task-files-are-its-own
   ;; the second boot above read 810 tasks (2026-10-25): its root started seconds after a merge
-  ;; rewrote the checkout's task files, FSEvents delivered those writes to its new watcher, and
-  ;; a task file's event loads every file of the task dir. A test root's task dir is its own
-  ;; (seon.test-store/start-root!), so its loads read its own files and never the checkout's.
-  ;; Asserted through the root's own reads, with no watcher event and no write to the checkout.
+  ;; rewrote the checkout's task files, and a load read them. A test root's task dir is its own
+  ;; (seon.test-store/start-root!), so its loads read its own files and never the checkout's; and a boot
+  ;; that resumes a main reads none (task seon.root/a-boot-resumes-from-the-db): only a load a person asks
+  ;; for (my.root/load-tasks!) reads them. Asserted through the root's own reads, with no write to the checkout.
   ;; And the built root reads a line citation (task jolt.ns/whole-program-inference-keeps-nil-checks):
   ;; compiled, `[from to]` destructured from `(if dash [a b] [suffix])` typed `to` a string, so
   ;; `(nil? to)` folded false and `src/a.clj:50` reached parse-long as nil; my.root/load-tasks!
@@ -220,26 +219,12 @@
         ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))]
     (try
       (is (= (str runs "/tasks") (ask "(seon.config/value :seon.config.root/tasks-dir)")) "its task dir is under its runs, not the checkout's")
-      ;; a fresh root's boot loads its task dir (my.root/watch!: a fresh store, or a task file changed
-      ;; while root was down, has nothing else to load it): demo/t, a file task being one whole task
-      ;; (my.root/task-files), none of the checkout's. It held none before: a root loaded task files only on a
-      ;; watcher event, and this assertion was red (0 tasks), so no event for demo.edn's write
-      ;; loaded it; the count is the boot's load
-      (is (= 1 (ask "(count (seon.task/tasks @(:conn sys)))")) "its own task file's one whole task, loaded at boot")
       (is (= "src/a.clj" (ask "((resolve 'seon.ref/line-citation) \"src/a.clj:50\")")) "the built root reads a path:line citation")
-      ;; its watcher's roots are what its watched loaders read, never the checkout, whose builds,
-      ;; stores and (in the main tree) worktrees no loader reads: the whole checkout kept fseventsd
-      ;; saturated (task seon.watch/root-watches-what-its-loaders-read)
-      (let [[roots dirs co] (ask "(let [co (seon.config/checkout)] [(:roots (:seon.root/watch (datahike.api/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root]))) (set (mapcat val (#'my.root/loader-dirs co))) co])")]
-        (is (not-any? #{co} roots) (str "the checkout is no watched root: " roots))
-        (is (= dirs (set roots)) "the watched loaders' dirs alone: no source dir, no refs")
-        ;; its task dir is outside its checkout, and a task file there is the task loader's
-        (is (= [:tasks] (ask (str "(vec (keys (my.root/watch-loads (seon.config/checkout) [[:path \"" runs "/tasks/x.edn\"]])))")))
-            "a task file in a task dir outside the checkout loads the tasks"))
+      (is (false? (ask "(contains? (seon.task/tasks @(:conn sys)) \"demo/t\")")) "the boot resumed the seeded main and read no task file")
       ;; the read's outcome is root's :seon.root/tasks, the subject a refused read names; an unchanged good read writes nothing
-      (is (= [{:files 1} {:ok true :changed 0 :files 1}]
-             (ask "[(:seon.root/tasks (datahike.api/pull @(:conn sys) [:seon.root/tasks] [:seon.root/id :root])) (my.root/load-tasks! sys)]"))
-          "the boot read's outcome, and a read that finds it so writes nothing")
+      (is (= [{:ok true :files 1} true {:files 1} {:ok true :changed 0 :files 1}]
+             (ask "(let [r (my.root/load-tasks! sys)] [(select-keys r [:ok :files]) (contains? (seon.task/tasks @(:conn sys)) \"demo/t\") (:seon.root/tasks (datahike.api/pull @(:conn sys) [:seon.root/tasks] [:seon.root/id :root])) (my.root/load-tasks! sys)])"))
+          "a load a person asks for reads its own dir's one whole task, records the read's outcome, and a read that finds it so writes nothing")
       (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
 
 (deftest a-build-without-whole-program-inference-reads-with-tools-reader
@@ -255,75 +240,12 @@
       (is (= "[1 2]" (str/trim (:out (sh/sh out)))) "and the binary reads")
       (finally (sh/sh "rm" "-rf" out (str out ".build"))))))
 
-(deftest main-follows-its-source-tree-across-restarts
-  ;; task seon.root/main-follows-its-source-tree: a root resuming its main imports its source
-  ;; tree again when the tree reads otherwise than main's last import, replacing main's
-  ;; program (seon.source/replace-tx), and imports nothing when it reads the same. Three
-  ;; boots on one store of its own (removed at the end), the tree a scratch
-  ;; repository under target/: commit A, then commit B with one function changed and one
-  ;; removed, then B again. B's ns form also gains an alias that a new function uses (2026-10-22:
-  ;; an import that ran a form before its namespace's new alias killed the root, `No such namespace`),
-  ;; and the second boot runs that function: the binary, older than main's program, catches up at boot.
-  ;; (seon.source-test/a-restart-catches-up held these two claims on a clone of the whole checkout,
-  ;; with two model turns, about 120 s; folded here 2026-11-08.) A store of its own, empty, with no wiki: on a
-  ;; branch of the seeded process store each boot's import of the one-file tree retracted the checkout's
-  ;; program first (docs/testing.md#a-root-costs-what-it-boots), 74 s for three boots
-  (let [checkout (seon.config/checkout)
-        tree (str checkout "/target/tmp/root-test-follow-" (random-uuid))
-        tasks (str tree "-tasks")
-        git (fn [& args] (apply sh/sh "git" "-C" tree "-c" "user.name=t" "-c" "user.email=t@localhost" args))
-        commit! (fn [text]
-                  (spit (str tree "/src/follow/tree.clj") text)
-                  (git "add" "-A") (git "commit" "-q" "-m" "tree")
-                  (str/trim (:out (git "rev-parse" "HEAD"))))
-        a "(ns follow.tree)\n\n(defn kept [] 1)\n\n(defn changed [] 1)\n\n(defn removed [] 1)\n"
-        b "(ns follow.tree\n  (:require [clojure.set :as follow-set]))\n\n(defn kept [] 1)\n\n(defn changed [] 2)\n\n(defn uses-alias [] (follow-set/union #{1} #{2}))\n"
-        path (str tree "-store")
-        main "main"
-        args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"src\"]" "--set" ":seon.config.root/wiki-dirs=[]"]
-        probe {:op :eval :agent "root"
-               :code (str "(let [db @(:conn sys)] {:fact (:seon.root/source (datahike.api/pull db [:seon.root/source] [:seon.root/id :root]))"
-                          " :text (seon.source/file-text db 'follow.tree)"
-                          " :removed-forms (count (filter #(clojure.string/includes? % \"removed\") (map :v (datahike.api/datoms db :aevt :form/src))))"
-                          " :removed-var (count (datahike.api/datoms db :avet :var/name 'follow.tree/removed))"
-                          " :alias (some-> (resolve 'follow.tree/uses-alias) deref (apply []))"
-                          " :tasks (count (seon.task/tasks db))})")}
-        boot! (fn [requests]
-                (let [out (root-answers path main requests {:args args})]
-                  (sh/sh "rm" "-f" (str path "-in"))
-                  (mapv (fn [l] (or (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))) l))
-                        (take (count requests) (str/split-lines out)))))]
-    (.mkdirs (java.io.File. (str tree "/src/follow")))
-    (.mkdirs (java.io.File. tasks))
-    (.mkdirs (.getParentFile (java.io.File. ^String path)))
-    (spit (str tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
-    (sh/sh "git" "init" "-q" tree)
-    (try
-      (let [sha-a (commit! a)
-            [_ one] (boot! [{:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")} probe])
-            sha-b (commit! b)
-            [two] (boot! [probe])
-            [three] (boot! [probe])]
-        (is (= [sha-a a 1] [(:commit (:fact one)) (:text one) (:tasks one)]) (pr-str one))
-        (is (= sha-b (:commit (:fact two))) "the second boot imported the tree's new commit")
-        (is (= b (:text two)) "main holds B's text, byte for byte")
-        (is (= [0 0] [(:removed-forms two) (:removed-var two)]) "no form or var of the removed function")
-        (is (= 1 (:tasks two)) "the task is intact")
-        (is (= 4 (:retracted (:fact two))) "retracted: the old ns form, the changed function's old form, the removed function's form and its var")
-        (is (= #{1 2} (:alias two)) "the new alias applied before the form using it, and the boot loaded main's program: the function runs")
-        (is (= (dissoc (:fact two) :boot) (dissoc (:fact three) :boot)) "the same commit imports nothing: the fact is the second boot's, but for whose boot it is")
-        (is (not= (:boot (:fact two)) (:boot (:fact three))) "one source fact per boot")
-        (is (and (nil? (:inputs (:fact two))) (re-find #"binary was built from" (str (:unshared (:fact two)))))
-            "the running binary is not built from this tree: no inputs to key agents' results by, and why")
-        (is (= b (:text three))))
-      (finally (sh/sh "rm" "-rf" tree tasks path (str path "-agents") (str path "-in") (str path ".log"))))))
-
 (def ^:private boot-probe
   "What a boot of `boots-on-a-tree` answers: the config key and the schema entry the trees change, as root holds them; the
   t of this boot's fact (:seon.root/boot, written once the graph runs, after the fork server forked), of main's
-  newest program fact (config and schema entries) and of the seed's import (the first :seon.root/source fact in main's
-  history: the seed writes it with the program, in one transaction); the boot's import (seon.root/import-tree!) and
-  the source fact."
+  newest program fact (config and schema entries) and of the seed's index (the first :seon.root/source fact in main's
+  history: the seed writes it with the program, in one transaction); the source fact, and the stale-binary rows health
+  derives from it."
   {:op :eval :agent "root"
    :code (str "(let [db @(:conn sys) root (:db/id (datahike.api/entity db [:seon.root/id :root]))"
               " t-of (fn [a] (reduce max 0 (map :tx (datahike.api/datoms db :aevt a))))]"
@@ -332,25 +254,25 @@
               " :boot-t (:tx (first (datahike.api/datoms db :eavt root :seon.root/boot)))"
               " :program-t (max (t-of :config/form) (t-of :schema/form))"
               " :seed-t (reduce min (map :tx (datahike.api/datoms (datahike.api/history db) :aevt :seon.root/source)))"
-              " :import (get-in sys [:bindings :view :boot :import])"
-              " :fact (dissoc (:seon.root/source (datahike.api/pull db [:seon.root/source] root)) :boot :inputs :unshared :ms)})")})
+              " :fact (dissoc (:seon.root/source (datahike.api/pull db [:seon.root/source] root)) :boot :inputs :ms)"
+              " :stale (mapv (juxt :binary :program) (get-in (my.root/problems sys) [:classes :stale-binary :rows]))})")})
 
 (defn- boots-on-a-tree
   "A store of its own (removed at the end) seeded (./seon seed-program) from a scratch repository under target/ holding
-  the one file path (dirs resources/seon) as its first text; then boot-probe's answer at each boot of a root on it, the
-  file committed with the next of texts before each (the same text commits nothing). Answers [the seed's output answer
-  ...], a boot that never answered its output. opts: :also, more requests (answers in :also); :wiki, a page's text at the
-  tree's docs/zz-broken.md, each boot's (not the seed's) wiki. Each answer's :listening? (its log says ROOT LISTENING) and
-  :tree (the tree's path in the checkout). A few seconds a boot. See docs/source.md#a-boot-imports-main-first."
+  the one file path (dirs resources/seon) as its first text, and with :wiki a page's text at docs/zz-broken.md; then
+  boot-probe's answer at each boot of a root on it, the file committed with the next of texts before each (the same text
+  commits nothing): a main behind its tree, as main is between a landing in git and its bridge's merge (bin/land), on a
+  binary built from another program (this checkout's). Answers [the seed's output answer ...], a boot that never answered
+  its output. opts: :also, more requests (answers in :also). Each answer's :listening? (its log says ROOT LISTENING) and
+  :tree (the tree's path in the checkout). A few seconds a boot. See docs/source.md#a-boot-resumes-from-the-db."
   ([path texts] (boots-on-a-tree path texts {}))
   ([path [seeded & texts] {:keys [also wiki]}]
    (let [rel (str "target/tmp/root-test-boot-" (random-uuid))
          tree (str (config/checkout) "/" rel)
          store (str tree "-store")
          git (fn [& args] (apply sh/sh "git" "-C" tree "-c" "user.name=t" "-c" "user.email=t@localhost" args))
-         args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"resources/seon\"]"]
-         seed-args (into args ["--set" ":seon.config.root/wiki-dirs=[]"])
-         boot-args (into args ["--set" (str ":seon.config.root/wiki-dirs=" (pr-str (if wiki [(str rel "/docs")] [])))])
+         args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"resources/seon\"]"
+               "--set" (str ":seon.config.root/wiki-dirs=" (pr-str (if wiki [(str rel "/docs")] [])))]
          ;; an answer's value, or the line as it is when it holds none (an error)
          read-line (fn [l] (let [v (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil))))] (if (some? v) v l)))]
      (.mkdirs (.getParentFile (java.io.File. (str tree "/" path))))
@@ -359,17 +281,15 @@
        (when wiki
          (.mkdirs (java.io.File. (str tree "/docs")))
          (spit (str tree "/docs/zz-broken.md") wiki))
-       ;; the fork server adds the source root's deps.edn roots at its start (seon.fork-server/main): none here
-       (spit (str tree "/deps.edn") "{:deps {}}")
        (spit (str tree "/" path) seeded)
        (git "add" "-A")
        (git "commit" "-q" "-m" "seeded")
-       (into [(:out (apply ts/binary-sh (concat ["./seon" "seed-program" store] seed-args ["--profile" (name (config/profile)) :dir "target"])))]
+       (into [(:out (apply ts/binary-sh (concat ["./seon" "seed-program" store] args ["--profile" (name (config/profile)) :dir "target"])))]
              (for [text texts]
                (let [_ (spit (str tree "/" path) text)
                      _ (git "add" "-A")
                      _ (git "commit" "-q" "-m" "tree")
-                     out (root-answers store "main" (into [boot-probe] also) {:args boot-args})
+                     out (root-answers store "main" (into [boot-probe] also) {:args args})
                      [probe & more] (str/split-lines out)
                      v (read-line probe)]
                  (sh/sh "rm" "-f" (str store "-in"))
@@ -378,28 +298,29 @@
                    out))))
        (finally (sh/sh "rm" "-rf" tree store (str store "-agents") (str store "-in") (str store ".log")))))))
 
-(deftest a-boot-after-a-merge-reads-the-merged-config
-  ;; task seon.root/a-boot-imports-main-before-it-reads-config: a merge adds a config key root reads at start
-  ;; (:seon.config.web/streams-buf, read for a :bind/ buffer), as 191e4b56ba did. Main holds the tree before it (the
-  ;; shipped config without the key); boot two runs the binary, whose tree has the key, on that main: the boot imports
-  ;; the merged config before it holds main's (2026-11-08 the standing root refused to start, "is set nowhere"); boot
-  ;; three, with nothing merged, imports and writes nothing
+(deftest a-boot-on-a-binary-of-another-program-holds-mains-config
+  ;; task seon.root/a-boot-resumes-from-the-db, THE GAP: a landing moves git first, and its bridge's merge brings main in
+  ;; the db after it (bin/land), so a boot between them finds main behind its tree and its binary built from another
+  ;; program. Here a merge adds a config key root reads at start (:seon.config.web/streams-buf, read for a :bind/ buffer,
+  ;; as 191e4b56ba did): main holds the tree before it (the key at another value: a missing one refuses the seed, as it
+  ;; would a boot, seon.config's closed), and the tree has the binary's. The boot reads neither the tree nor the commit: it
+  ;; holds main's config, writes no program fact, and says its binary is another program than main's, a problem fact
+  ;; (seon.problems/stale-binary), at each boot until bin/update rebuilds it. Red before: the boot imported the commit
   (let [file "resources/seon/config/default.edn"
-        ;; the shipped file as the binary was built (a test reading the checkout's files takes the tree)
+        ;; the shipped file as the binary was built
         merged config/built-text
-        ;; main before the merge: the key at another value (a missing key a config may not lack refuses its import, as it
-        ;; would refuse a boot: seon.config's closed), so the merged value root holds is the boot's import's
         before (str/replace merged #"(:seon\.config\.web/streams-buf )(\d+)" (fn [[_ k v]] (str k (inc (parse-long v)))))
         [seed two three] (boots-on-a-tree file [before merged merged])]
     (is (not= before merged))
     (is (str/includes? (str seed) "SEED OK") (str seed))
-    (is (map? two) (str "the root booted on a main older than its binary: " two))
-    (is (= (config/value :seon.config.web/streams-buf) (:streams-buf two)) "it holds the merged key's value")
-    (is (< (:seed-t two) (:program-t two) (:boot-t two)) "main's config became the merged one before the boot's fact: before root read it, and before the fork")
-    (is (true? (:imported? (:import two))) (pr-str (:import two)))
-    (is (= (:program-t two) (:program-t three)) "nothing merged: no program fact written")
-    (is (false? (:imported? (:import three))) (pr-str (:import three)))
-    (is (= (:fact two) (:fact three)) "and the source fact is the same import's")))
+    (is (map? two) (str "the root booted on a main behind its tree: " two))
+    (is (= (inc (config/value :seon.config.web/streams-buf)) (:streams-buf two)) "it holds main's value, not the tree's or the binary's")
+    (is (= (:seed-t two) (:program-t two)) "the boot wrote no program fact: main's program is the seed's")
+    (is (< (:program-t two) (:boot-t two)))
+    (is (= 1 (count (:stale two))) (str "its binary is another program than main's: one stale-binary row " (pr-str (:stale two))))
+    (is (= (second (first (:stale two))) (:program (:fact two))) "naming main's program as the boot found it")
+    (is (= (:seed-t three) (:program-t three)) "the next boot neither")
+    (is (= (:stale two) (:stale three)) "and the row stands while the binary does")))
 
 (def ^:private registry-of-an-agent
   "A request to root: the schema entry :seon.config.web/streams-buf as an agent forked now holds it (the registry its
@@ -411,29 +332,28 @@
               " (finally (seon.root/kill! sys ag)))]"
               " (or (:value r) r))")})
 
-(deftest a-boot-forks-with-the-merged-schema-registry
-  ;; task seon.root/a-boot-imports-main-before-it-reads-config: main holds a schema entry older than the binary's (here
-  ;; :seon.config.web/streams-buf with another bound, seeded), and the merge brings the binary's. The fork server forks from main
+(deftest a-boot-forks-with-mains-schema-registry
+  ;; task seon.root/a-boot-resumes-from-the-db: main holds a schema entry other than the binary's (here
+  ;; :seon.config.web/streams-buf with another bound, seeded) and its tree has the binary's. The fork server forks from main
   ;; as the boot left it and builds the registry each agent holds from main's schema changes (seon.fork-server/warm), so
-  ;; the boot imports the merged entry before it forks: 2026-11-08 every model call of the first agent after a restart
-  ;; failed on a registry of main's entries from before that boot's import. Asked of an agent forked after the boot
+  ;; an agent forked after the boot holds main's entry: the db's, never the tree's (2026-11-08 every model call of the first
+  ;; agent after a restart failed on a registry that disagreed with main). Red before: the boot imported the tree's entry
   (let [file "resources/seon/schemas/seon.config.web.edn"
-        ;; the entry as the binary was built, the resource's one entry (a test reading the checkout's files takes the tree)
         form (get contract/forms :seon.config.web/streams-buf)
         merged (pr-str {:seon.config.web/streams-buf form})
         before (pr-str {:seon.config.web/streams-buf (update form 1 assoc :min 2)})
         [seed two] (boots-on-a-tree file [before merged] {:also [registry-of-an-agent]})]
     (is (not= before merged))
     (is (str/includes? (str seed) "SEED OK") (str seed))
-    (is (= 1 (:min (second form))) "the merged entry's bound, which the seeded one moves")
-    (is (= [true 1] (first (:also two))) (str "an agent forked after the boot holds the merged entry: " (pr-str two)))
-    (is (false? (:schema-changed? two)) (str two))
-    (is (< (:seed-t two) (:program-t two) (:boot-t two)) "main's entry became the merged one before the boot's fact, which is written after the fork")))
+    (is (= 1 (:min (second form))) "the binary's bound, which main's moves")
+    (is (= [false 2] (first (:also two))) (str "an agent forked after the boot holds main's entry: " (pr-str two)))
+    (is (true? (:schema-changed? two)) "main's entry differs from the binary's")
+    (is (= (:seed-t two) (:program-t two)) "and the boot wrote no program fact")))
 
 (def ^:private broken-boot
-  "boots-on-a-tree on a seeded tree whose next commit breaks its schema resource (it no longer reads) and whose wiki
-  links to no section: the seed's output and the one boot's answer, with the dead citations my.root/problems shows.
-  Two claims read it, so they pay one boot."
+  "boots-on-a-tree on a seeded tree whose wiki links to no section and whose next commit breaks its schema resource (it no
+  longer reads): the seed's output and the one boot's answer, with the dead citations my.root/problems shows. Two claims
+  read it, so they pay one boot."
   (delay
     (let [file "resources/seon/schemas/seon.config.web.edn"
           merged (pr-str {:seon.config.web/streams-buf (get contract/forms :seon.config.web/streams-buf)})]
@@ -441,24 +361,21 @@
                        {:wiki "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n"
                         :also [{:op :eval :agent "root" :code "(mapv (juxt :section :message) (get-in (my.root/problems sys) [:classes :dead-citation :rows]))"}]}))))
 
-(deftest a-boot-whose-import-refuses-a-file-still-starts
-  ;; task seon.root/a-boot-imports-main-before-it-reads-config: the tree's schema resource no longer reads (a merge broke
-  ;; it). The boot imports nothing, says which file (seon.root/unimportable), and starts on main as it was: a dead root is
-  ;; the outcome the boot's import exists to end (docs/source.md#a-file-that-does-not-load)
-  (let [file "resources/seon/schemas/seon.config.web.edn"
-        [seed two] @broken-boot]
+(deftest a-boot-reads-no-file-a-commit-broke
+  ;; task seon.root/a-boot-resumes-from-the-db: the tree's schema resource no longer reads (a commit broke it). The boot
+  ;; reads no file, so nothing of it is refused or written: root starts on main as it was (docs/source.md#a-file-that-does-not-load
+  ;; is a seed's or a re-index's). Red before: the boot read the tree and recorded the refusal on main's source fact
+  (let [[seed two] @broken-boot]
     (is (str/includes? (str seed) "SEED OK") (str seed))
     (is (map? two) (str "the root started: " two))
-    (is (false? (:imported? (:import two))) (pr-str (:import two)))
-    (is (str/includes? (str (:seon.error/message (:error (:import two)))) file) "the refusal names the file")
-    (is (= (:seed-t two) (:program-t two)) "nothing of it was written, at boot or after: main's program is the seed's")
+    (is (nil? (:error (:fact two))) (pr-str (:fact two)))
+    (is (= (:seed-t two) (:program-t two)) "nothing of the tree was written: main's program is the seed's")
     (is (= (config/value :seon.config.web/streams-buf) (:streams-buf two)) "main's entries as they were")))
 
 (deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
-  ;; root's boot loads the wiki through seon.root/wiki-tx in its boot fact's commit (seon.root/wiki-boot-tx); one link to
-  ;; no section in any page used to end the boot, then refused the whole wiki. Now the boot loads every page, the link is
-  ;; a dead citation my.root/problems shows, and the root listens. On broken-boot's boot, whose wiki is one page linking
-  ;; to no section (it was a boot of its own on a checkout of links to this one, 36 s)
+  ;; the wiki is indexed with the program (seon.root/seed!); one link to no section in any page used to end the boot,
+  ;; then refused the whole wiki. Now every page is indexed, the link is a dead citation my.root/problems shows, and the
+  ;; root that resumes it listens. On broken-boot's boot, whose wiki is one page linking to no section
   (let [[_ two] @broken-boot
         page (str (:tree two) "/docs/zz-broken.md")]
     (is (true? (:listening? two)) (str "the root boots: " two))

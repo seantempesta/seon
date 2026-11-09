@@ -1356,8 +1356,8 @@
   the binary: its tests are digested by what they reach), and src's readers of a checkout
   directory (the wiki, read or loaded, and the source dirs: seon.repl-test/the-template-instructions-and-the-help-page-run read
   the help page through seon.doc/pages and was reused over its edits; seon.task-files-test reads the
-  task files through my.root/task-files and was marked flaky over an edit to one). See docs/source.md#tests-run-by-reach."
-  (-> tree-readers (disj 'seon.test-store/binary-sh) (conj 'seon.doc/load-dir-tx 'seon.doc/pages 'my.root/task-files 'seon.fx/read-source)))
+  task files through seon.root/task-files and was marked flaky over an edit to one). See docs/source.md#tests-run-by-reach."
+  (-> tree-readers (disj 'seon.test-store/binary-sh) (conj 'seon.doc/load-dir-tx 'seon.doc/pages 'seon.root/task-files 'seon.fx/read-source)))
 
 (def env-class-readers
   "The vars that read one class of the checkout's files that have no program facts

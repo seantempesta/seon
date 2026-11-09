@@ -168,7 +168,19 @@ Measured 2026-10-29 on this checkout, an idle-ish machine (load 5-7; at load 13 
 
 The import and the wiki are the two phases that grow with the program, and a main made from `:db` repeated both for every root. `seon.root/seed-program!` (`bin/root seed STORE`, which `bin/test` runs once after it builds the binary, on the process store its plan made, `seon.test-store/process-store`) brings `:db` up to the tree: the program and the `:seon.root/source` fact with the tree's digest, imported as a boot imports (`seon.root/import-tree!`: only what the tree changed since the fact's tree), then the wiki, loaded until it states nothing more (its citations resolve to the program, and a root's second boot reached that by itself). A root whose main is a branch of that `:db` finds the digest equal and imports nothing. The seed costs 22 s a tree (the whole tree is analysed; an edit to one file is not yet incremental: 9.6 s) and saves 7.3 s a first boot, so it pays from the fourth root a run boots; a test with a store of its own (`seon.root-test/root-answers` and the restart tests) does not take it. With the wiki baseline on (a standing root's, `SEON_WIKI_BASELINE` unset) a store's second boot also spent 41 s and 8.6 GB in `seon.fx/wiki-history` (`git blame` of every page, `git show` of every old file the sections cite, parsed by `seon.source/defining-ids`), once per store; the seed pays it once in the process store when it is on.
 
-What is left in a seeded boot: the image (2.3 s, fixed), the program loaded from the store (1 s) and the wiki computed to nothing (1.3 s: every page parsed and every section compared, to find that the tree's wiki is the one stored; a digest of the wiki dirs on main would skip it).
+A boot now resumes its main and reads no file ([source](source.md#a-boot-resumes-from-the-db)): no import, no `load-all!`, no wiki, no read of the tree after start. Measured 2026-11-09 on one seeded store of this checkout (5,152 forms), the same machine at load 1.5-2.2, `bin/root start` to `ROOT LISTENING`, warm:
+
+| phase | before | after |
+|---|---|---|
+| store open | 13 ms | 6-9 ms |
+| the tree's import and `load-all!` (`:program`, read 234 ms, `load-all!` 270 ms of it) | 908-934 ms | 0 |
+| seed check (a main with a source fact) | | 1-3 ms |
+| main's config held and its program digested | (in `:program`) | 55-105 ms |
+| contracts armed | 52 ms | 10-11 ms |
+| the tree read again after start (`import-source!`, its inputs 420-480 ms) | ~650 ms | 0 |
+| `bin/root start` to `ROOT LISTENING` | 2,619-3,222 ms (5,331 cold) | 1,047-1,135 ms |
+
+What is left is the image and a digest of main's program (one read of five attributes' datoms, O(program) with a small constant: 5 ms at the REPL, 55-105 ms at boot with the config held). A seed (`bin/root seed`, or the first boot of a fresh store) pays the import, the wiki and the task files once; `bin/build` pays 10.7 s to record the program its binary was built from.
 
 ### The restart tests
 

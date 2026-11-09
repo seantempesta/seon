@@ -520,7 +520,7 @@
   ;; so a kept tree's db may lack an attribute a task or a page holds (the cite entities, :seon.cite/id): the ones it
   ;; lacks are added to this value first, as seon.db/install-missing! adds them to a store a root opens
   (let [db (d/db-with db (vec (remove #(contains? (:schema db) (:db/ident %)) pdb/schema)))
-        tx (task/load-tx db (my.root/task-files (str dir "/" (tasks-dir))))
+        tx (task/load-tx db (seon.root/task-files (str dir "/" (tasks-dir))))
         _ (when (contract/error? tx) (throw (ex-info (:seon.error/message tx) tx)))
         db (d/db-with db tx)]
     (d/db-with db (doc/load-dir-tx db dir "docs" {}))))

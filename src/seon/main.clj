@@ -41,8 +41,8 @@
 (defn root-serve
   "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
   until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
-  what an outside agent's MCP relay (bin/mcp) talks to. It watches what its loaders read
-  (my.root/watch!: every writer's changes loaded as they happen). Its end is a fact on main
+  what an outside agent's MCP relay (bin/mcp) talks to. It runs off its store and reads no
+  file (docs/source.md#a-boot-resumes-from-the-db). Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
   serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
   it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand.
@@ -74,9 +74,6 @@
       ;; the fork server (a thread before it would refuse the fork); the fork server and agents end with root
       (let [p (seon.config/value :seon.config.root/end-with)] (when (pos? p) (lib/end-with! p false)))
       (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))]
-        ;; the watcher ends with this process (target/watch exits on its parent's exit)
-        (let [w (my.root/watch! sys)]
-          (out! "ROOT WATCHING " (if (seon.contract/error? w) (str "nothing: " (:seon.error/message w)) "what its loaders read and its refs")))
         (out! "ROOT LISTENING " bound))
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))
@@ -111,5 +108,9 @@
     "seed-program" (let [r (c/seed-program! (second (seon.config/without-overrides args)))]
              (out! (if (seon.contract/error? r) "SEED FAILED " "SEED OK ") (shown r))
              (lib/c-exit (if (seon.contract/error? r) 1 0)))
+    ;; what bin/build records beside the binary it built (target/seon.program): the program of the tree it was built from
+    "built-program" (let [r (c/built-program (checkout))]
+                      (if (seon.contract/error? r) (out! "BUILT-PROGRAM FAILED " (shown r)) (out! (seon.edn/encode r)))
+                      (lib/c-exit (if (seon.contract/error? r) 1 0)))
     "embed-worker" (seon.vector/serve!)
     (apply (driver! (checkout)) args)))

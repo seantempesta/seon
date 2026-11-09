@@ -344,7 +344,7 @@ Uses of take, subs and the like in display code that choose what to find or read
 - `my.agent/lines`: the lines a to b of a text the agent asked for (`sed -n`'s range, `drop` and `take` over its lines): a selection of data it named, not a cut of output.
 - `seon.repl/do-parts`: a top-level form written `(do ...)` (its text opens with `(` and the token `do`, so a reader macro that expands to do is not one) as its inner forms, each the form the reader already returned, with its exact text and leading comments from the reader's own positions in the do's text (no pattern, no cut by text), each then evaluated as a top-level form as Clojure's compiler takes them: code read, not output.
 - `seon.repl/edit!`, `seon.repl/place`: the offsets of the old text in a place's recorded text (`subs` rebuilds the source around the change, `line-of` counts the lines before an offset): text rearranged, nothing left out; a refused edit names every line that could be meant.
-- `my.root/task-files`: a task file's owning namespace from its file name (`subs` off the `.edn`).
+- `seon.root/tasks-of`: a task file's owning namespace from its file name (`subs` off the `.edn`).
 - `seon.repl/file-name`: a path relative to a root it is under (`subs` off the root).
 - `seon.repl/streaming`: a Writer's `write(str, off, len)` slice (`subs` takes exactly the characters the caller writes; the record and the stream keep every one).
 - `seon.web/handler`, `seon.web/view-of`, `seon.server/mcp-reply`: parsing a request's path and a tool's name.

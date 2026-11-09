@@ -117,7 +117,7 @@
   directory of files (the wiki's pages, the task files). A file listed and gone when it is read
   (a git merge or bin/update rewriting it, a link to nothing) is left out of this read, as a
   deleted file is: the change that removed it, or the one that writes it back, makes the next
-  read (task seon.watch/a-vanished-file-is-a-fact; docs/failure-points.md)."
+  read (docs/failure-points.md)."
   {:malli/schema [:=> [:cat :string :string] [:map-of :string :string]]}
   [dir suffix]
   (into (sorted-map)
