@@ -2,7 +2,7 @@
   "The model's request read from the agent's one render tree (seon.render/wire), its system text, and a past turn's request made again at its basis (docs/render.md#the-models-context-a-cached-prefix-then-the-turn)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]]
-            [clojure.string :as str]
+            [clojure.string :as str] [clojure.walk]
             [datahike.api :as d]
             [seon.render :as render] [seon.program :as program]
             [clojure.data.json :as json]
@@ -254,7 +254,7 @@
   [{db :seon.db/db} {:seon.eval/keys [id by code intent call-id] :as e}]
   (let [mark (result-mark db e) said? (not (str/blank? intent))]
     (if (or call-id said?)
-      [(cond-> {:role "assistant" :content "" :tool-calls [(cond-> {:id id :code (or code "")} said? (assoc :intent intent))]}
+      [(cond-> {:role "assistant" :content "" :tool-calls [(cond-> {:id id :code code} said? (assoc :intent intent))]}
          (and call-id (reply-of db e)) (assoc :reply (reply-of db e)))
        {:role "tool" :tool-call-id id :content (render/result-text db mark)}]
       [{:role "user" :content (render/result-text db (assoc mark :with (array-map :by by :code code)))}])))
@@ -268,11 +268,30 @@
 
 
 (defn- previous-basis
-  "The basis of the turn before turn n of agent a on db: the newest model call of a numbered below n that holds a basis, or nil."
+  "The basis of the turn before turn n of agent a on db: the newest model call of a numbered below n that holds a basis, or nil
+  when none does (turn n is the first the agent took)."
   {:malli/schema [:=> [:cat :seon.host/db :int :int] [:maybe :map]]}
   [db a n]
   (some->> (d/q '[:find ?m ?b :in $ ?a ?n :where [?c :seon.model-call/agent ?a] [?c :seon.model-call/n ?m] [(< ?m ?n)] [?c :seon.model-call/basis ?b]] db a n)
            seq (apply max-key first) second))
+
+(defn- presentation-free
+  "Hiccup h without what is the page's alone: each element's class, style and id (seon.render's part-form leaves them out the same way)."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [h] (clojure.walk/postwalk (fn [x] (if (and (vector? x) (keyword? (first x)) (map? (second x)))
+                                       (let [a (dissoc (second x) :class :style :id)] (if (seq a) (assoc x 1 a) (into [(first x)] (nnext x))))
+                                       x))
+                             h))
+
+(defn- page-parts-at
+  "Agent a's page parts at basis b on db's store, as the model reads them: the agent pulled at b's commit, rendered by its
+  page-parts render in one pass (seon.render.ui/agent-parts through seon.render.ui/render-pull, named here by symbol: they
+  move to the one walk in stage 2a) and stripped of presentation. The branch is the db's own (Datahike's config)."
+  {:malli/schema [:=> [:cat :seon.host/db :int :map] :any]}
+  [db a b]
+  (let [d (db-at db {:commit (:commit b) :t (or (:t b) (:max-tx (d/commit-as-db (pdb/store-of db) (:commit b))))})
+        branch (get-in (or (:origin-db d) d) [:config :branch])]
+    (presentation-free (:hiccup ((requiring-resolve 'seon.render.ui/render-pull) (:tree (ctx/build d a branch)) d (requiring-resolve 'seon.render.ui/agent-parts))))))
 
 (defn page-message
   "The user message Seon writes the model before its turn n: `<page from=\"seon\" turn=\"n\">`, the edits that take the
@@ -280,51 +299,50 @@
   Its bytes are a function of n and the edits: no point, commit or t is in it. See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat :int :any] [:vector :seon.model/message]]}
   [n edits]
-  (cond
-    (contract/error? edits) [{:role "user" :content (str "<page from=\"seon\" turn=\"" n "\">\n" (print/text edits (:context print/budgets)) "\n</page>")}]
-    (empty? edits) []
-    :else [{:role "user" :content (str "<page from=\"seon\" turn=\"" n "\">\n"
-                                      (render/result-text nil {:record {:seon.eval/schema :seon.render/parts
-                                                                        :seon.eval/response {:value (with-meta {:edits edits} {:seon.render/schema :seon.render/parts :seon.print/full true})}}})
-                                      "\n</page>")}]))
+  (if (empty? edits)
+    []
+    [{:role "user" :content (str "<page from=\"seon\" turn=\"" n "\">\n"
+                                 (render/result-text nil {:record {:seon.eval/schema :seon.render/parts
+                                                                   :seon.eval/response {:value (with-meta {:edits edits} {:seon.render/schema :seon.render/parts :seon.print/full true})}}})
+                                 "\n</page>")}]))
 
 (defn model-call-wire
-  "A model call (:seon.model-call/fact) as the model reads it: what moved of the agent's page parts between the previous
-  turn's basis and its own (`diffs-through` over the two points, read from the db, never stored: `page-message`), then what
-  the model said and its reasoning as they were sent. Its evals are their own entities. See
+  "A model call (:seon.model-call/fact) as the model reads it: what moved of the agent's page parts between the previous turn's
+  basis and its own (`page-parts-at` of each, compared by seon.render/page-edits over forms-moved; read from the db, never
+  stored: `page-message`), then what the model said and its reasoning. Whether those are sent is today's rule, reproduced:
+  a model's reply only (origin :model), when it made calls or was not cut at the token limit, and only with words or reasoning
+  to send. A call with no number or no basis is no turn of the agent's: no page message. Its evals are their own entities. See
   docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :seon.model/message]]}
   [{db :seon.db/db} {:seon.model-call/keys [n origin reply reasoning truncated] :as c}]
   (let [e (d/entity db (:db/id c))
         a (:db/id (:seon.model-call/agent e))
         basis (:seon.model-call/basis e)
-        branch (or (some-> a (->> (d/entity db)) :seon.agent/branch) :db)
-        point (fn [b] (when b {:branch branch :commit (:commit b) :t (or (:t b) (:max-tx (d/commit-as-db (pdb/store-of db) (:commit b))))}))
-        edits (when (and a n basis) (first (diffs-through db a [(point (previous-basis db a n)) (point basis)])))
+        edits (when (and a n basis)
+                (let [prev (previous-basis db a n)]
+                  (render/page-edits (render/forms-moved (if prev {"page" (page-parts-at db a prev)} {}) {"page" (page-parts-at db a basis)}))))
         called? (boolean (some #(:seon.eval/call-id (d/entity db %)) (keys (:seon.eval/_call c))))
         spoke? (not (str/blank? reply))
         sent? (and (= :model origin) (or called? (and (not truncated) spoke?)) (or spoke? (some? reasoning)))]
-    (into (page-message (or n 0) edits)
+    (into (if n (page-message n edits) [])
           (when sent?
             [(cond-> {:role "assistant" :content (if spoke? reply "")}
                (some? reasoning) (assoc :reasoning reasoning)
-               (pos? (or n 0)) (assoc :reply n))]))))
+               (and n (pos? n)) (assoc :reply n))]))))
 
 (defn- turn-entities
-  "Agent record c's turns on db as the entities the model reads, in order: each turn's messages as they were taken, its model
-  call, the call's evals, then the evals of other hands. See docs/turn.md#the-turn-is-a-number."
+  "Agent record c's turns as the entities the model reads, ordered from its pull with no seek a turn: its model calls by
+  number, each call's messages as they were taken (seon.ctx/first-delivered), the call, the call's evals of the model's, then
+  those of other hands; a member c no longer holds (unlinked by a swap!) is none. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :map]]}
   [db c]
-  (let [k (:seon.agent/key c)]
-    (vec (for [n (range 0 (+ 2 (or (:seon.agent/turn c) 0)))
-               :let [cid (when k (ctx/call-of db n k)) call (get-in c [:seon.model-call/_agent cid])]
-               :when call
-               :let [{:keys [messages evals]} (ctx/turn-members db c cid)
-                     model? (fn [[ev]] (get-in c [:seon.eval/_agent ev :seon.eval/call-id]))]
-               x (concat (for [[m] messages] (get-in c [:seon.message/_to m]))
-                         [call]
-                         (for [[ev] (filter model? evals)] (get-in c [:seon.eval/_agent ev]))
-                         (for [[ev] (remove model? evals)] (get-in c [:seon.eval/_agent ev])))]
+  (let [evals (:seon.eval/_agent c) msgs (:seon.message/_to c)]
+    (vec (for [[_ call] (sort-by (comp :seon.model-call/n val) (filter (comp :seon.model-call/n val) (:seon.model-call/_agent c)))
+               :let [ms (filter #(contains? msgs %) (keys (:seon.message/_call call)))
+                     ms (if (next ms) (sort-by #(ctx/first-delivered [db (:db/id c) %]) ms) ms)
+                     es (sort (filter #(contains? evals %) (keys (:seon.eval/_call call))))
+                     model? #(:seon.eval/call-id (get evals %))]
+               x (concat (map msgs ms) [call] (map evals (filter model? es)) (map evals (remove model? es)))]
            x))))
 
 (defn agent-wire
