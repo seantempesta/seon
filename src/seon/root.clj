@@ -1212,8 +1212,9 @@
 
 (defn- boot!
   "Root's boot up to its first thread, on the main carrier (jolt.host/main-carrier-run!: one OS
-  thread drives every fiber, so a go block or future a library starts is a fiber and nothing
-  else runs): main opened on the store at path and brought to the source tree (import-tree!, docs/source.md#a-boot-imports-main-first), its program loaded and instrumented, the warm
+  thread drives every fiber, so a go block a library starts is a fiber, and clojure.java.shell/sh,
+  which import-tree! reads git through, copies its pipes on fibers; a future is an OS thread of its
+  own, and must have ended before the fork, which seon.lib/fork! refuses beside another thread): main opened on the store at path and brought to the source tree (import-tree!, docs/source.md#a-boot-imports-main-first), its program loaded and instrumented, the warm
   paths run and the heap made static, then the fork server forked from it (which preloads main's
   indexes for its agents: seon.fork-server/main), sharing all of that copy-on-write while this is the one thread there is
   (docs/failure-points.md, physics). Its return starts the process's threads (Jolt's carriers,
