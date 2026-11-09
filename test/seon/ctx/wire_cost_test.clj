@@ -51,7 +51,7 @@
   (let [[c db] (records-of 6)
         evals (fn [c] (filter #(= :eval (ffirst %)) (seon.fixtures/tree-parts c db)))]
     (clojure.test/is (= 6 (count (evals c))))
-    (clojure.test/is (= 5 (count (evals (update c :evals dissoc (first (keys (:evals c))))))) "what the pattern does not reach is no record")))
+    (clojure.test/is (= 5 (count (evals (update c :seon.eval/_agent dissoc (first (keys (:seon.eval/_agent c))))))) "what the pattern does not reach is no record")))
 
 (defn ring-of
   "seon.ctx.search/pushed's arguments at n forms in a ring, each calling the next: every node two

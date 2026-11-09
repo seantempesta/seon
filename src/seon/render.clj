@@ -634,7 +634,7 @@
     :else [out]))
 
 (defn part-form
-  "Component k of walk w as the form the model reads it, `[seon.render.ui/status {:ctx [:task :proved]} [:h2 ...] ...]`:
+  "Component k of walk w as the form the model reads it, `[seon.render.ui/status {:ctx [:seon.agent/task :proved]} [:h2 ...] ...]`:
   the render's name, the ctx path it read (its opts' :at: (get-in @ctx path) answers the data it drew), then the hiccup
   it returned, each child component a part of its own and no presentation (class, style) in it; its root's id is the name it goes by, so it is said once. What is for the
   page alone is no form. See docs/render.md#a-part-prints-as-its-render."

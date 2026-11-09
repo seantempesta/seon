@@ -115,7 +115,7 @@
   ;; task in @ctx, and its page no task, until a turn or a context read began its work. Forked for
   ;; a task, the agent records it on its branch as it starts (seon.agent/begin-run!): before any turn
   (let [names (volatile! nil)
-        [held] (at/in-agent (fn [n] (vreset! names n) ["(let [t @seon.ctx/ctx] [(contains? t :runs) (get-in t [:task :seon.task/id])])"]))]
+        [held] (at/in-agent (fn [n] (vreset! names n) ["(let [t @seon.ctx/ctx] [(contains? t :runs) (get-in t [:seon.agent/task :seon.task/id])])"]))]
     (is (= [false (:task @names)] (:value held)) "its task, in its record, and no runs")))
 
 (deftest an-agent-reads-its-task-running
@@ -123,7 +123,7 @@
   ;; before main writes the task's release, so (my.task/current) and its page read :held
   ;; its record, which every part of its page is drawn from (the agent's own task part tells it its work, not the execution)
   (let [[current held] (at/in-agent ["(:seon.task/execution (my.task/current))"
-                                     "(:seon.task/execution (:task @seon.ctx/ctx))"])]
+                                     "(:seon.task/execution (:seon.agent/task @seon.ctx/ctx))"])]
     (is (= :running (:value current)) "the agent reads its task running, as main does")
     (is (= :running (:value held)) "and so does its record")))
 
@@ -142,7 +142,7 @@
                                              [(str "(ns " ns ") (def x 41)")
                                               {:op :attach :task task :fresh true}
                                               {:op :eval :agent "root" :code (str "(:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))")}
-                                              {:op :eval :agent "root" :code (in-agent-of task (str "[(some-> (find-ns '" ns ") (ns-resolve 'x)) (count (:evals @seon.ctx/ctx))]"))}
+                                              {:op :eval :agent "root" :code (in-agent-of task (str "[(some-> (find-ns '" ns ") (ns-resolve 'x)) (count (:seon.eval/_agent @seon.ctx/ctx))]"))}
                                               ;; root's requests run in order: its kill, then this eval, which only the agent's death can answer
                                               {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 1)"}]}]))]
     (is (keyword? (:agent reset)) (pr-str reset))
@@ -337,12 +337,12 @@
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :context :agent agent}
                         "(def c0 (datahike.api/commit-id (seon.agent/db)))"
-                        (str "(do (swap! ctx assoc-in [:task :seon.task/plan] " (pr-str plan) ")"
-                             " (get-in @ctx [:task :seon.task/plan]))")
+                        (str "(do (swap! ctx assoc-in [:seon.agent/task :seon.task/plan] " (pr-str plan) ")"
+                             " (get-in @ctx [:seon.agent/task :seon.task/plan]))")
                         "(pr-str (seon.repl/render-ctx-hiccup))"
                         ;; from any namespace, the record by its qualified name (a value the printer
                         ;; would show as an earlier eval's handle is compared here instead)
-                        (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:task :seon.task/plan]))")
+                        (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:seon.agent/task :seon.task/plan]))")
                         {:op :eval :agent "root"
                          :code (str "(:seon.task/plan (datahike.api/entity (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))"
                                     " [:seon.task/id " (pr-str task) "]))")}
@@ -508,7 +508,7 @@
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :attach :task task}
                         {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 1)"}]}
-                        {:op :eval :agent agent :message-md "Changing my plan." :evals [{:intent "change it" :code "(swap! ctx assoc-in [:task :seon.task/plan] \"A plan that moved.\")"}]}
+                        {:op :eval :agent agent :message-md "Changing my plan." :evals [{:intent "change it" :code "(swap! ctx assoc-in [:seon.agent/task :seon.task/plan] \"A plan that moved.\")"}]}
                         {:op :eval :agent agent :message-md "Asking." :evals [{:intent "ask" :code "(my.render/render-changes)"}]}]))
         page (last (:responses moved))]
     (is (some #(contains? (:value %) :components) (:responses first-reply)) "the page whole, the first time")

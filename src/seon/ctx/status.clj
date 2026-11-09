@@ -144,20 +144,20 @@
                               (seq (:seon.test/failures v)) (assoc :failures (:seon.test/failures v)))])))
 
 (defn task-of
-  "The task agent record c holds (its :task, as ctx pulls it, docs/ctx.md#the-pattern), read for what its
+  "The task agent record c holds (its :seon.agent/task, as ctx pulls it, docs/ctx.md#the-pattern), read for what its
   accumulated plan and proofs take (seon.task/pulled-accumulated): its id, kind, plan and proofs and its
   needs', and each proof's var as :proved holds it ({name var}: its verdict, failures and form), the
   task's and its needs'. Each read by its path, so a reader of it reads nothing else of the task."
   {:malli/schema [:=> [:cat :map] [:maybe [:map [:task :map] [:proved [:map-of :qualified-symbol :map]]]]]}
   [c]
-  (when-let [t (:task c)]
+  (when-let [t (:seon.agent/task c)]
     (let [own (fn [x] (into {} (for [k [:seon.task/id :seon.task/kind :seon.task/plan :seon.task/proofs] :let [v (get x k)] :when (some? v)] [k (ratom/realize v)])))
-          needs (vals (:needs t))]
-      {:task (assoc (own t) :needs (into {} (map-indexed (fn [i n] [i (own n)])) needs))
+          needs (vals (:seon.task/needs t))]
+      {:task (assoc (own t) :seon.task/needs (into {} (map-indexed (fn [i n] [i (own n)])) needs))
        :proved (into {} (for [ps (cons (:proved t) (map :proved needs)) v (vals ps) :let [n (:var/name v)] :when n]
                           ;; its verdict and failures, and its source (whether it is defined): its form's text
                           [n (cond-> (into {} (for [k [:var/name :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] :let [x (get v k)] :when (some? x)] [k (ratom/realize x)]))
-                               (get-in v [:form :form/src]) (assoc :form {:form/src (ratom/realize (get-in v [:form :form/src]))}))]))})))
+                               (get-in v [:var/form :form/src]) (assoc :var/form {:form/src (ratom/realize (get-in v [:var/form :form/src]))}))]))})))
 
 (defn form-at
   "The form of src that opens at offset i, as written, up to its closing delimiter (strings and character literals read as such),
@@ -286,14 +286,14 @@
         asked (when plan-tx
                 (some (fn [[e m]] (let [from (:seon.message/from m)]
                                     (when (and (not (or (= "root" from) (= me from))) (> (ctx/first-delivered [db a e]) plan-tx)) from)))
-                      (:messages rec)))
+                      (:seon.message/_to rec)))
         next (cond-> []
                asked (conj {:step :fold-message :from asked}))]
     (cond-> {:reasons reasons
              ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source
              :proofs (vec (for [p (sort-by str proofs)
                                 :let [v (get proved p)
-                                      src (get-in v [:form :form/src])
+                                      src (get-in v [:var/form :form/src])
                                       verdict (when-not test-error (case (:seon.test/status v) nil nil :green :pass :deferred :deferred :fail))
                                       st (cond (and verdict (not= :deferred verdict)) verdict
                                                (or (deferred p) (= :deferred verdict)) :deferred

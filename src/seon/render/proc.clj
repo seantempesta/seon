@@ -328,7 +328,7 @@
   [cell bdb e]
   (let [opened (set (:seon.agent/opened e))
         branch (or (:seon.agent/branch e) :db)
-        mark (fn [t] (cond-> t (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %))))
+        mark (fn [t] (cond-> t (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %))))
         kw @cell]
     (binding [datahike.index.interface/*reads* nil]
       (let [eid (seon.db/eid bdb :seon.agent/key (:seon.agent/key e))]
@@ -416,7 +416,7 @@
         cold-tree #(quiet (fn [] (:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db)))))
         branch-units (fn [] (if-let [kw (or (walked) (user-walk st db e))]
                               (quiet #(render/placed-units (:w kw)))
-                              (let [t (cond-> (cold-tree) (seq opened) (update :evals #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
+                              (let [t (cond-> (cold-tree) (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
                                     w (quiet #(render/draw t ctx/changes bdb (render/layout-of (merge {:seon.agent/key (:seon.agent/key e)} t))))]
                                 (try (render/placed-units w) (finally (render/dispose-walk! w))))))
         ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside

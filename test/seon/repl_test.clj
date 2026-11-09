@@ -722,7 +722,7 @@
         (is (and (re-find #"(?m)^\s*3  " shown) (re-find #"(?m)^6  " shown) (not (re-find #"(?m)^7  " shown)) (not (str/includes? shown ":at")))
             (str "lines: the range shown as numbered lines, numbered as grep numbers them, no map a line: " (subs shown 0 (min 600 (count shown))))))
       (is (str/includes? (printed "(ls 'seon.task)") "seon.task/accumulate") (str "ls: a namespace's definitions: " (subs (printed "(ls 'seon.task)") 0 (min 600 (count (printed "(ls 'seon.task)"))))))
-      (is (not (:ex (by "(swap! ctx assoc-in [:searches \"a1/where-sets-are-logged\"] {:seon.search/id \"a1/where-sets-are-logged\" :seon.search/query \"sets a workout has not logged\" :seon.search/k 5})")))
+      (is (not (:ex (by "(swap! ctx assoc-in [:seon.search/_of \"a1/where-sets-are-logged\"] {:seon.search/id \"a1/where-sets-are-logged\" :seon.search/query \"sets a workout has not logged\" :seon.search/k 5})")))
           "the help page's form runs in a real agent (that it is written, drawn and redrawn: seon.ctx-test/a-search-is-a-member-a-swap-adds-and-changes)")
       (is (str/includes? (printed "(get (my.schema/forms) :seon.task/task)") ":seon.task/own") "a schema's form")
       (is (str/includes? (printed "(my.schema/register! :app.workout/set [:map [:reps :int] [:kg :double]])") ":app.workout/set") "a new schema registers")

@@ -405,7 +405,7 @@
 (defn messages
   "The messages to this agent not yet delivered, delivered (deliver!, as a turn delivers them, at the turn in force: `turn-now`: the entities on
   main to it, another agent's sends included), then the effect outcomes of the inbox. Delivered, a message stays in `@ctx` until the agent
-  removes it (`(swap! ctx update :messages dissoc e)`), and is not delivered again. See docs/users.md#messages."
+  removes it (`(swap! ctx update :seon.message/_to dissoc e)`), and is not delivered again. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (let [es (deliver! (turn-now))]
