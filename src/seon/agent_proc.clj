@@ -11,20 +11,24 @@
 
 (defn unencodable
   "What root's end sends the agent in place of message v, which the codec threw t encoding (the
-  end's :encode-error, jolt.async.remote): the typed :seon.agent/unencodable, as the answer v was
-  (a :reply's :result, an :fx-reply's outcome, under v's :k, so the agent's wait for it gets it),
-  or, for any other message, an answer under v's :id that no wait holds (the agent's transport
-  takes it as an unawaited one; the request it was is root's pending one, owed its answer). The
-  end stays open. See docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data."
-  {:malli/schema [:=> [:cat :map :seon.host/throwable] :seon.wire/seon-msg]}
-  [v t]
+  end's :encode-error, jolt.async.remote, with the end's :in channel in). The typed
+  :seon.agent/unencodable, as the answer v was (a :reply's :result, an :fx-reply's outcome, under
+  v's :k, so the agent's wait for it gets it). For a request of root's (its rid: :id, a clone's :k)
+  the asker is root, not the agent: the error goes to this proc's own :in as a frame
+  ({:op :unsendable :rid}, agent-frame answers the rid with it), and the agent is sent an answer
+  no wait holds (its transport takes it as an unawaited one). The end stays open. See
+  docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data."
+  {:malli/schema [:=> [:cat :seon.host/chan :map :seon.host/throwable] :seon.wire/seon-msg]}
+  [in v t]
   (let [e (contract/error :seon.agent/unencodable #'seon.agent-proc/unencodable
                           (str "a " (some-> (:op v) name) " message holds a value the wire cannot encode: " (ex-message t))
-                          {:message-op (:op v)})]
+                          {:message-op (:op v)})
+        rid (if (= :clone (:op v)) (:k v) (:id v))]
     (case (:op v)
       :fx-reply (merge e (select-keys v [:op :k]))
       (:reply :fd :branched) (assoc (select-keys v [:op :k]) :result e)
-      {:op :reply :id (:id v) :result e})))
+      (do (when (int? rid) (a/put! in {:op :unsendable :rid rid :error e}))
+          {:op :reply :id rid :result e}))))
 
 (defn- to-proc!
   "Send m to the agent's process: onto the end's :out (its writer pump frames it). While a
@@ -180,6 +184,12 @@
         (when (= :clone-failed (:op m)) (step/out! o :to-api {:op :clone-failed :agent new :error (:error m)}))
         (step/out! o :to-api (status st {:status (busy st)}))
         st)
+      ;; a request of root's the end's codec could not encode (unencodable): never sent, so answered here
+      :unsendable (let [{:keys [pass-fd]} (get-in st [:inflight (:rid m)])
+                        _ (some-> pass-fd sock/close!)
+                        st (answer-rid st o (:rid m) (:error m))]
+                    (step/out! o :to-api (status st {:status (busy st)}))
+                    st)
       :synced (do (step/out! o :to-api (status st {:t (:t m) :load-errors (:load-errors m)})) st)
       ;; the back-pressure check's flood: counted, in order
       :noise (let [ok (= (:i m) (:noise st))

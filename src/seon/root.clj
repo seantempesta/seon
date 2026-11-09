@@ -138,7 +138,7 @@
   or an orphan, which are not the server's children)."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword [:maybe :seon.lib/exit-status] :map [:sequential :int]] :seon.root/api-state]}
   [st o aid exit died inflight]
-  (let [e (assoc died :exit exit :seon.error/message (str "agent " (name aid) " died" (exit-text exit)))
+  (let [e (assoc died :exit exit :seon.error/message (str "agent " (name aid) (if (:alive died) " closed its socket and has not exited" " died") (exit-text exit)))
         st (problem st (err/occurrence e :agent {:agent aid :task (get-in st [:view :agents aid :task]) :form (get-in e [:last-op :form])}
                                        (System/currentTimeMillis)))]
     ;; a spawn whose agent died before its hello is answered that death
@@ -337,7 +337,9 @@
         branch (pdb/on-main (pdb/conn-main (:conn st)) (or branch (keyword (str "agent-" (name id)))))
         [r a] (sock/socketpair)
         ;; fiber pumps: an end costs no thread of its own (root may run a thousand agents)
-        end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :encode-error ap/unencodable :buf (cfg/value :seon.config.agent/inbox-size)})]
+        in (a/chan (cfg/value :seon.config.agent/inbox-size))
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :in in :encode-error (partial ap/unencodable in)
+                            :buf (cfg/value :seon.config.agent/inbox-size)})]
     [(-> st (assoc ::update true)
          (assoc-in [:agents id] {:branch branch})
          (assoc-in [:agent-procs id] {:proc agent-launcher
@@ -379,7 +381,7 @@
                (or (:exit v) (:cloned-from v) (:orphan v) (nil? (or pid (:pid v)))) (record-death st o agent (:exit v) died inflight)
                ;; else when the fork server reaps it (:exit): the requests it died in are
                ;; answered then, with the status that names the death
-               :else (assoc-in st [::dying (or pid (:pid v))] [agent died inflight]))
+               :else (assoc-in st [::dying (or pid (:pid v))] [agent died inflight (System/currentTimeMillis)]))
           st (cond-> st rid (deliver-rid o rid {:stopped true :agent agent}))]
       (let [st (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (update ::inserting dissoc agent) (assoc ::update true)
                    (set-agent o agent {:status (or stop :dead) :ended-ms (System/currentTimeMillis) :running nil}))
@@ -776,8 +778,15 @@
                  (cond-> (-> st (set-agent o (:agent m) {:stalled s}) (stall-task o (:agent m) s))
                    (:closing st) (to-agent o (:agent m) {:op :kill})))
       :spoke (set-agent st o (:agent m) {:stalled nil})
-      ;; the stall timer: each agent with an eval in flight checks its own quiet time
-      :stall-check (let [now (System/currentTimeMillis)]
+      ;; the stall timer: each agent with an eval in flight checks its own quiet time; an agent whose end
+      ;; closed and whose exit has not come for the stall bound is a stall too (its pid lives: nothing
+      ;; will ever tell it died): recorded as the agent's problem and every request it held answered
+      :stall-check (let [now (System/currentTimeMillis)
+                         st (reduce (fn [st [pid [aid died inflight since]]]
+                                      (if (and since (pos? (:stall-ms st)) (>= (- now since) (:stall-ms st)))
+                                        (-> st (update ::dying dissoc pid) (record-death o aid nil (assoc died :alive true) inflight))
+                                        st))
+                                    st (::dying st))]
                      (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
       st)))
 
@@ -866,7 +875,7 @@
          st (flush-problems st o)
          st (record-agents st o before)
          ;; while an agent has an eval in flight, the stall check runs every half stall bound
-         st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
+         st (if (and (or (seq (::busy st)) (seq (::dying st))) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
               (let [back (:back st)]
                 (step/put-after! back (quot (:stall-ms st) 2) {:op :stall-check})
                 (assoc st ::stall-due true))
