@@ -14,11 +14,18 @@
   seon.schema.datahike; session D1): one source of truth with the contracts."
   (sd/declarations contract/registry))
 
+(def layout
+  "How a store lays out its records, fixed when it is made: its index nodes addressed by their content (:crypto-hash?, so
+  branches holding the same datoms name one node: docs/sharing.md#what-a-branchs-nodes-are) and its history kept or not
+  (:seon.config.store/keep-history?, v1's ruling 23). A store made otherwise opens as it was made (a connect adopts both:
+  Datahike's store-fixed-record-keys), so a kept store is named by it too (`schema-digest`) and made again with it."
+  {:crypto-hash? true :keep-history? (cfg/value :seon.config.store/keep-history?)})
+
 (def schema-digest
-  "The schema's digest, 8 hex digits of its hasch uuid: a kept store of regenerable output is
-  named by it (seon.test-store/kept-store!), so a changed schema makes a new store rather than
-  one that refuses to open (:seon.db/types-differ) or is migrated."
-  (subs (clojure.string/replace (str (hasch/uuid schema)) "-" "") 0 8))
+  "The digest of the schema and the store's `layout`, 8 hex digits of its hasch uuid: a kept store of regenerable output is
+  named by it (seon.test-store/kept-store!), so a changed schema or layout makes a new store rather than one that refuses
+  to open (:seon.db/types-differ), keeps the old layout, or is migrated."
+  (subs (clojure.string/replace (str (hasch/uuid [schema layout])) "-" "") 0 8))
 
 (defn invalid-datom
   "The first value of tx-data its attribute's declared schema refuses, as the error :seon.db/invalid-datom naming the
@@ -422,7 +429,7 @@
   named by the id it records, never by where it lies: a kept run opens wherever it is copied,
   moved or archived (stored-id); the path names only a store this config is about to make.
   A copy keeps its original's id, as a replica does, so one process opens one of them. It names
-  no :keep-history?: that is fixed when a store is made (Datahike's store-fixed-record-keys;
+  no :keep-history? and no :crypto-hash? (the store's `layout`): they are fixed when a store is made (Datahike's store-fixed-record-keys;
   made-cfg), and a connect adopts what the store records, so a kept store made either way opens."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string] :seon.db/cfg]}
   [backend path]
@@ -441,10 +448,10 @@
     (if-let [id (stored-id cfg)] (assoc-in cfg [:store :id] id) cfg)))
 
 (defn made-cfg
-  "cfg as a store is made with it: keeping history (its temporal indexes, and each
-  transaction's tx-meta) as :seon.config.store/keep-history? says (v1's ruling 23)."
+  "cfg as a store is made with it: its `layout`, history kept as :seon.config.store/keep-history? says (its temporal
+  indexes, and each transaction's tx-meta; v1's ruling 23) and its index nodes addressed by their content."
   {:malli/schema [:=> [:cat :seon.db/cfg] :seon.db/cfg]}
-  [cfg] (assoc cfg :keep-history? (cfg/value :seon.config.store/keep-history?)))
+  [cfg] (merge cfg layout))
 
 (defn sync!
   "Make every commit so far durable: one env sync for LMDB (MDB_NOSYNC); the filestore
