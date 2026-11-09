@@ -332,20 +332,36 @@
         ids (into [] (comp (filter #(#{:seon.task/plan :seon.task/instructions} (:a %))) (keep #(:seon.task/id (d/entity db' (:e %)))) (distinct)) (:tx-data r))]
     (into (vec tx-data) (mapcat #(task/rederive-tx db' (task/task db' %))) ids)))
 
+(defn- with-slot
+  "State st holding its branch's schema slot {:key changes :registry r :index ix}, built from its :db (seon.program/schema-changes,
+  seon.db/index-of), and :index-builds, how many times this agent built one. See docs/machine.md#an-agents-first-write."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st]
+  (let [k (program/schema-changes (:db st))]
+    (-> st
+        (assoc :schema-registry {:key k :registry (program/schema-registry k) :index (pdb/index-of {:forms k})})
+        (update :index-builds (fnil inc 0)))))
+
 (defn schema-moved
-  "State st without the schema registry it holds (seon.repl/branch-registry) when attrs, the attributes a
-  write to :db wrote, hold a schema entry's (:schema/*): the registry is read again at the next eval."
+  "State st with its schema slot built again (`with-slot`) when attrs, the attributes a write to :db wrote, hold a schema entry's
+  (:schema/*), else as it is: the one build of the entity index that write costs, which the slot's readers (the registry, the ctx,
+  the page walk) are handed, never building their own. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :map [:set :any]] :map]}
-  [st attrs] (cond-> st (some #(and (keyword? %) (= "schema" (namespace %))) attrs) (dissoc :schema-registry)))
+  [st attrs] (cond-> st (some #(and (keyword? %) (= "schema" (namespace %))) attrs) with-slot))
 
 (defn branch-schemas
-  "This agent's branch's schema changes and their registry, {:key changes :registry r}: held until a write moves a schema entry (`schema-moved`), a new agent holding main's from its fork (seon.fork-server/warm-start). Reading the changes is two passes over every schema entry, so no eval or write reads them while none moved. See docs/machine.md#an-agents-first-write."
+  "This agent's branch's schema changes, their registry and the entity index they make, {:key changes :registry r :index ix}: the one slot
+  of its state, built by the write that moves a schema entry (`schema-moved`), by a fork carrying main's (seon.fork-server/warm-start) or, when a
+  refused commit dropped it, here at the next use. Reading the changes is two passes over every schema entry, so no eval or write reads them while none moved. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat] :map]}
   []
-  (or (:schema-registry @state)
-      (let [k (program/schema-changes (:db @state)) v {:key k :registry (program/schema-registry k)}]
-        (swap! state assoc :schema-registry v)
-        v)))
+  (or (:schema-registry @state) (:schema-registry (swap! state with-slot))))
+
+(defn branch-index
+  "This agent's branch's entity index (`branch-schemas`): what its renders and its recognition of a value take as ix (seon.db/index-of);
+  the binary's when no branch is held (root, a scratch session: it has no schema entries of its own). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat] :map]}
+  [] (if (:db @state) (:index (branch-schemas)) (pdb/index)))
 
 (defn- config-moved!
   "This process's config held again when a transaction of its own branch wrote attrs naming an entry or a schema entry (a schema its config is read against): one set lookup otherwise. See docs/config.md#a-process-holds-its-branchs-config."

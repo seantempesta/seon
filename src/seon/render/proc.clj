@@ -28,7 +28,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
-            [seon.lib :as lib] [seon.render :as render] [seon.render.ui :as ui] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
+            [seon.lib :as lib] [seon.render :as render] [seon.program :as program] [seon.render.ui :as ui] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.db] [datahike.index.interface]
             [seon.config :as config] [seon.step :as step] [seon.problems :as problems]))
 
@@ -112,11 +112,11 @@
   a function of what its last draw kept, kept, answers [hiccup kept']), else its input by the render its
   schema declares, its unit named (its element's id: :unit). The hiccup and kept are held beside the html.
   step-units calls it only when the unit's input changed."
-  {:malli/schema [:=> [:cat :map :any] [:tuple :any :string :any]]}
-  [{:keys [id input schema html hiccup draw]} kept]
+  {:malli/schema [:=> [:cat :map :map :any] [:tuple :any :string :any]]}
+  [ix {:keys [id input schema html hiccup draw]} kept]
   (cond html [hiccup html nil]
         draw (let [[hc k] (draw kept)] [hc (h/html hc) k])
-        :else (let [hc (render/hiccup {:schema schema :unit id} input)] [hc (h/html hc) nil])))
+        :else (let [hc (render/hiccup {:schema schema :unit id :seon.render/index ix} input)] [hc (h/html hc) nil])))
 
 (defn- step-units
   "Run a layout's units, in the order the layout shows them, against what the view retained: a
@@ -125,8 +125,8 @@
   container when one is held or placed in this patch and a unit after it is held (a part that sorts
   into the middle), before what the container holds when none is before it (a list's newest row
   at its top, a conversation's older parts), else at its end. Answers [view' patch counts]."
-  {:malli/schema [:=> [:cat [:maybe :map] [:sequential :map]] [:tuple :map :map :map]]}
-  [view units]
+  {:malli/schema [:=> [:cat :map [:maybe :map] [:sequential :map]] [:tuple :map :map :map]]}
+  [ix view units]
   ;; a page of no units (the debug page before a model turn) is held with none, never without :units
   (let [view (or view {:units {}})
         held (:units view)
@@ -142,7 +142,7 @@
                      prev (cond-> prev container (assoc container id))]
                  (if (and old (= input (:input old)))
                    [[view patch n] prev placed]
-                   (let [[hiccup html kept] (render-unit u (:kept old))
+                   (let [[hiccup html kept] (render-unit ix u (:kept old))
                          view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container) (some? kept) (assoc :kept kept)))]
                      (cond
                        (= html (:html old)) [[view patch (update n :same inc)] prev placed]
@@ -275,7 +275,7 @@
                                                 calls pulled) :at at :to-come? to-come?} gone (assoc :gone gone))
                 (when (seq calls)
                   {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) opened]
-                   :draw (fn [_] [(ui/debug-turn {:unit "d-turn"} (-> (ui/debug-input bdb at calls raw?) (assoc :view (ui/view-param view) :opened opened))) nil])})
+                   :draw (fn [_] [(ui/debug-turn {:unit "d-turn" :seon.render/index (program/index-of-db bdb)} (-> (ui/debug-input bdb at calls raw?) (assoc :view (ui/view-param view) :opened opened))) nil])})
                 nil))))
 
 (def ^:private gone "The agent statuses of an ended process (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))
@@ -297,8 +297,9 @@
   moves it. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn] :map]}
   [db e branch ident mark]
-  (let [c (ctx/build db e branch) at (volatile! db) a (ratom/atom (mark (:tree c)))
-        w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/layout-of (merge ident (:tree c))) {}])]
+  (let [ix (program/index-of-db db)
+        c (assoc-in (ctx/build ix db e branch) [:ix :own-index?] true) at (volatile! db) a (ratom/atom (mark (:tree c)))
+        w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/layout-of ix (merge ident (:tree c))) {}] ix)]
     (render/flush! w nil)
     {:w w :a a :c c :at at}))
 
@@ -413,11 +414,12 @@
         ;; the branch's kept walk (branch-walk!), one a branch; an agent read from main is drawn once, its reads the page's
         cell (get-in st [:branch-reads (get-in st [:branches view :branch]) :walk])
         walked #(when (and cell (not branchless?)) (branch-walk! cell bdb e))
-        cold-tree #(quiet (fn [] (:tree (ctx/build bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db)))))
+        bix (delay (program/index-of-db bdb))
+        cold-tree #(quiet (fn [] (:tree (ctx/build @bix bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db)))))
         branch-units (fn [] (if-let [kw (or (walked) (user-walk st db e))]
                               (quiet #(render/placed-units (:w kw)))
                               (let [t (cond-> (cold-tree) (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
-                                    w (quiet #(render/draw t ctx/changes bdb (render/layout-of (merge {:seon.agent/key (:seon.agent/key e)} t))))]
+                                    w (quiet #(render/draw t ctx/changes bdb (render/layout-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
                                 (try (render/placed-units w) (finally (render/dispose-walk! w))))))
         ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside
         ;; its unit as the page draws it, from one walk of the page
@@ -435,18 +437,18 @@
                                t (if kw (:tree (:c kw)) (cold-tree))
                                part-unit (if kw
                                            (quiet #(pairs (:w kw)))
-                                           (let [w (quiet #(render/draw t ctx/changes bdb (render/layout-of (merge {:seon.agent/key (:seon.agent/key e)} t))))]
+                                           (let [w (quiet #(render/draw t ctx/changes bdb (render/layout-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
                                              (try (quiet #(pairs w)) (finally (render/dispose-walk! w)))))]
                            [part-unit
                             {:id "d-ctx" :container "#c-rows" :rev (:t t)
-                             :html (h/html [:li {:id "d-ctx"} (quiet #(render/hiccup {:db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
+                             :html (h/html [:li {:id "d-ctx"} (quiet #(render/hiccup {:seon.render/index (if kw @(:index (:w kw)) @bix) :db bdb} (with-meta t {:seon.render/schema :seon.ctx/ctx})))])}]))
         ;; its process's draw and root's each count revisions of their own: a unit says whose it is, so its process's answer replaces root's first draw at the same number
         units (if own?
                 (mapv #(assoc % :own? true) (:units held))
                 (cond (and bdb (not chat?)) (ctx-units)
                       bdb (branch-units)
                       ;; a branch that could not be read: its error, by the error's render
-                      berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/hiccup {} berr)])}]))
+                      berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/hiccup {:seon.render/index (seon.db/index)} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
         sides (when-not (some #(= "#c-side" (:container %)) units) (filterv #(= "#c-side" (:container %)) (some-> (:root-walk st) :w render/placed-units)))
         head (cond-> (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
@@ -675,7 +677,7 @@
   whole later replaces the tab's #app, so a page without it could never become its view's page."
   {:malli/schema [:=> [:cat :map] :any]}
   [e] [:div {:id "app" :class "mx-auto flex max-w-screen-xl flex-col gap-3 p-3 sm:p-4"}
-       (render/hiccup {} e)
+       (render/hiccup {:seon.render/index (seon.db/index)} e)
        ;; the nearest way to look: every session, from the home page
        (when (= :seon.render/no-location (:seon.error/type e)) [:p [:a {:href "/root"} "◆ seon: every session on main"]])])
 
@@ -703,7 +705,7 @@
                                           (hold st (cond-> {:skeleton (h/html hc) :layout hc :units {}} (= :seon.render/no-location (:seon.error/type out)) (assoc :status 404)))) nil]
     :else
     (let [units (:seon.render/units out)
-          [view patch n] (step-units held units)
+          [view patch n] (step-units (seon.db/index) held units)
           [view patch] (finish-patch view patch (set (map :id units)))
           skel (h/html (:seon.render/hiccup out))
           view (assoc view :skeleton skel :layout (:seon.render/hiccup out))]

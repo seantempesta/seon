@@ -461,7 +461,11 @@
  ;; test's, so each change deferred all 116 to the merge (owner, 2026-10-27: "no tests should
  ;; include all of src … the daily full run is the net"); a change to the boot alone is the merge's
  ;; run's and the daily run's to catch.
- :seon.config.source/process-entry #{seon.server/op-answer seon.turn/work!}
+  ;; The owner, 2026-11-09, after two false greens (jolt/hiccup's render points and jolt/sync's answer to an agent stayed green
+ ;; at their digests with the fix removed, their code reached only inside the agent's process): the agent's process entry,
+ ;; seon.repl/serve! (its Flow graph: transport, repl, tests, render), is an entry too, so a change to what an agent's process
+ ;; runs moves the digest of the process tests that reach it.
+:seon.config.source/process-entry #{seon.server/op-answer seon.turn/work! seon.repl/serve!}
  ;; Unit: submodule paths. The runtime every test, and every check step's contract key, runs on:
  ;; Jolt (its host layer, clojure.core and analyzer, which 970 of 977 tests reach) and Chez under it;
  ;; the binary and the test runner are built from them. Their gitlinks (a dirty submodule's files as

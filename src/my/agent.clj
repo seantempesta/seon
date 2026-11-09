@@ -489,8 +489,8 @@
   "Like wc, in tokens: what x costs printed, as the model is sent it (the one printer's text, whole, by its sizer):
   (wc (grep \"plan\")) before reading it whole."
   {:malli/schema [:=> [:cat :any] nat-int?]}
-  [x] (let [v (if-let [r (render/model x)] (:value r) x)]
-        (select/chars-tokens (count (if (string? v) v (:text (print/print-value v {:budget Integer/MAX_VALUE :render render/model})))))))
+  [x] (let [ix (agent/branch-index) v (if-let [r (render/model ix x)] (:value r) x)]
+        (select/chars-tokens (count (if (string? v) v (:text (print/print-value v {:budget Integer/MAX_VALUE :render #(render/model ix %)})))))))
 
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn
@@ -588,7 +588,7 @@
   [db n]
   (let [r (pdb/speculate db [{:db/id "of" :seon.agent/key (str "help " n)} {:seon.cite/id (str "help " n) :seon.cite/of "of" :seon.cite/name n :seon.cite/depth :doc :seon.cite/order 0}])
         db' (:db-after r)]
-    (ui/cite-hiccup db' (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
+    (ui/cite-hiccup db' (:tree (seon.ctx/build (agent/branch-index) db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
 
 (defn- doc-view
   "A section or page view v as `doc` prints it: each edge its address, since (doc address) reads what it says, and no lead when the text below says the same; the

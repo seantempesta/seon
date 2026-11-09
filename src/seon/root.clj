@@ -1024,7 +1024,7 @@
   "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and root, which makes its task list draw root's sessions
   (seon.render.ui/sessions). See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat] [:vector :any]]}
-  [] (conj (render/schema-property :seon.db/agent-fact :seon.ctx/pattern) {[:seon.agent/root :as :root] [:seon.root/id]}))
+  [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern) {[:seon.agent/root :as :root] [:seon.root/id]}))
 
 (defn root-session-tx
   "Root's session, made by the first message to root (the api's :message), an ordinary agent made the ordinary way: an agent entity keyed

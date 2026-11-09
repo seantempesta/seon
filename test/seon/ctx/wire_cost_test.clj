@@ -43,7 +43,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
   [n] (let [[db e] (session-of n)
             db (reduce (fn [db i] (d/db-with db (turn-tx i))) db (range n))]
-        [(:tree (seon.ctx/build db e :b)) db]))
+        [(:tree (seon.ctx/build (seon.db/index) db e :b)) db]))
 
 (deftest a-request-reads-what-the-agents-ctx-holds
   ;; docs/render.md#the-render-is-an-eval; the owner, 2026-10-26: nothing in a request is read from
@@ -134,9 +134,9 @@
   (let [[db0 a] (session-of (inc n))
         db (reduce (fn [db i] (d/db-with db (turn-tx i))) db0 (range n))
         cell (volatile! db)
-        c (seon.ctx/build db a :b)
+        c (seon.ctx/build (seon.db/index) db a :b)
         src (seon.ratom/atom (:tree c))
-        w (assoc (seon.render/walker {:ref src :changes seon.ctx/changes} #(deref cell) [(seon.render/declared-var :seon.render/render-ctx) {}]) :model-only true)]
+        w (assoc (seon.render/walker {:ref src :changes seon.ctx/changes} #(deref cell) [(seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {}]) :model-only true)]
     (seon.render/flush! w nil)
     (seon.ctx.wire/request w)
     (let [r (d/with db (conj (turn-tx n) {:seon.agent/key "b/a1" :seon.agent/turn (inc n)}))]
