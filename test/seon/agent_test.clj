@@ -640,6 +640,9 @@
     (is (re-find #":body \"while proving\"" (:text taken)) (:text taken))))
 
 (deftest a-wide-reach-reuses-unchanged-results
+  ;; its root shares inputs only when the binary is main's program (seon.root/booted-source), so it reads the process store
+  ;; bin/test seeds: red while that store held what older binaries made of unchanged files (seon.root/kept-index! now
+  ;; keys it by the code that indexes), an input its digest misses
   ;; a wide reach reuses what is unchanged:
   ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
   ;; built from that tree: bin/test built it), the agent keys its digests by them and selects
