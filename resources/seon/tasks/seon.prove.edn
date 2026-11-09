@@ -4,4 +4,9 @@
   :seon.task/proofs #{}} {:seon.task/name "the-daily-full-run-builds-its-own-libraries"
   :seon.task/plan "Seen 2026-11-09 (audit of the 2026-11-08 landings): the daily bin/test --all on main (runs/merge-tests/<commit>-<uuid>) has been red three days running on seon.db-test/stored-values-compress-through-the-codecs-the-build-made, its first assertion: konserve.jolt.zstd/lib-path is the main tree's target/lib/libzstd.dylib, not under the run's own checkout. The run's checkout takes the main tree's libraries (bin/env's JOLT_ZSTD_LIB and JOLT_LZ4_LIB, from the environment it was started in) where bin/build would make its own. The test is right (a store's codecs are the ones the build made); the daily run's environment is wrong. Find where the run's checkout is made and started (seon.fx's :tests effect, the main-build slot) and make its bin/env name its own target/lib, as a worktree's does. Proof: the test green in the next daily run; no test changed."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.db-test/stored-values-compress-through-the-codecs-the-build-made}}]
+  :seon.task/proofs #{seon.db-test/stored-values-compress-through-the-codecs-the-build-made}}
+ {:seon.task/name "load-never-turns-a-test-red"
+  :seon.task/plan "Seen 2026-11-09 in jolt/dbboot's proves at load 14-17: STALLED seon.root-test/root-threads-are-what-root-declares 58000 ms (bound 57312 ms) and seon.test-store-test/n-roots-open-the-process-store-at-once 31000 ms (bound 30000 ms). A wall-clock bound that turns a test red under load breaks AGENTS.md section 5 (no assertion the machine's load can turn red; wall time is measured and recorded, never red). Find what applies the bound (the stall check of a test's wall time), and make a stall a fact about a wait that never ends (its producer died, a typed error), never a time; a slow test is shown by its measured time, not failed by it. Proof: the same test under a forced load passes, with its time recorded."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+]
