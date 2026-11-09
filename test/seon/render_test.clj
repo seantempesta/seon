@@ -330,7 +330,7 @@
 
 (def ^:private model-renders
   "The model renders (:seon.render/wire of an entity schema, docs/users.md#the-stages-agreed-2026-11-09) and the one helper that writes a turn's page message: each writes messages as the one walk places them, which is the path."
-  '#{seon.ctx.wire/agent-wire seon.ctx.wire/eval-wire seon.ctx.wire/message-wire seon.ctx.wire/model-call-wire seon.ctx.wire/page-message})
+  '#{seon.ctx.wire/agent-wire seon.ctx.wire/eval-wire seon.ctx.wire/message-wire seon.ctx.wire/model-call-wire seon.ctx.wire/page-message seon.ctx.wire/example-wire})
 
 (defn- outside-the-path
   "The vars of db in namespaces nss that make provider messages other than through seon.render/wire: one that references a step of `the-path` and is not named for it, or

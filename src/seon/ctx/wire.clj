@@ -350,21 +350,34 @@
                          [call] (map evals (filter model? es)) (map evals (remove model? es)))]
            x))))
 
+(defn example-wire
+  "Example session ek as the model reads it, placed by the agent's model render as [#'example-wire {} ek] (so the walk keeps it as
+  a component of its own, keyed by ek): the message that opens it (seon.ctx.session/example-open), its turns' entities as of its
+  last t (`turn-entities` on that point's db) each through its schema's model render (seon.render/render-for), composed here
+  because they are a past point's entities, not views of the walk's pull; then the message that closes it. A placed example
+  contributes its turns, never an agent message. See docs/tasks.md#a-task-names-example-sessions."
+  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :string] [:vector :seon.model/message]]}
+  [{db :seon.db/db :as o} ek]
+  (let [dbt (d/as-of db (session/example-t db ek))
+        ix (program/index-of-db dbt)
+        o (assoc o :seon.db/db dbt :seon.render/index ix)
+        c (ctx/agent-ctx ix dbt (pdb/eid dbt :seon.agent/key ek))
+        render (fn [x] (cond (:role x) [x]
+                             (and (vector? x) (var? (first x))) (apply (first x) (merge o (second x)) (nnext x))
+                             :else ((requiring-resolve (render/render-for ix (render/schema-of ix x nil) :seon.render/wire)) o x)))]
+    (-> [{:role "user" :content (session/example-open ek (:seon.agent/description c))}]
+        (into (mapcat render) (turn-entities dbt c))
+        (conj {:role "user" :content "</session>"}))))
+
 (defn agent-wire
   "An agent (:seon.db/agent-fact) as the model reads it: its system message, from the doc sections :seon.agent/system names
   (only the request's root agent pulls them, so only it has one: a placed example contributes its turns, never an agent
-  message), each example session its task names between the messages that open and close it (`seon.ctx.session/example-open`;
-  the example's turn entities placed here, as of the example's last t), what opens its own session, then its turns'
+  message), each example session its task names as a placed call of `example-wire`, what opens its own session, then its turns'
   entities (`turn-entities`). The task is read in the page parts alone, never here. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
   [{db :seon.db/db} a]
   (let [k (:seon.agent/key a)]
     (-> (if (seq (:seon.agent/system a)) [{:role "system" :content (agent-system-text db a)}] [])
-        (into (mapcat (fn [ek] (let [t (session/example-t db ek) dbt (d/as-of db t)
-                                     c (ctx/agent-ctx (program/index-of-db dbt) dbt (pdb/eid dbt :seon.agent/key ek))]
-                                 (concat [{:role "user" :content (session/example-open ek (:seon.agent/description c))}]
-                                         (turn-entities dbt c)
-                                         [{:role "user" :content "</session>"}]))))
-              (session/session-examples db a))
+        (into (map (fn [ek] [#'example-wire {} ek])) (session/session-examples db a))
         (into (when k [{:role "user" :content (session/session-open k)}]))
         (into (turn-entities db a)))))
