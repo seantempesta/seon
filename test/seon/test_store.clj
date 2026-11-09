@@ -9,13 +9,13 @@
 
 (defn standing-targets-tx
   "The sections and vars every agent is made citing (:seon.config.agent/cites) and the task templates' instructions cite
-  (seon.template/instructions), as this checkout holds them, as tx-data on db: each section as the one parse reads its page
+  (seon.template/instructions), as this checkout holds them, as tx-data: each section as the one parse reads its page
   (seon.doc/page-sections: its heading, level, position, lead and text; its links are not stored, since they reach pages this
   store does not hold and a link to no section refuses the write), each var as this process holds it (its namespace and
   docstring: an import of its file would add a program namespace to the seed every program test counts). So a template's task and an agent are made on the test store as on main, where a cite names what
   exists (docs/references.md#an-entity-cites)."
-  {:malli/schema [:=> [:cat :seon.host/db] :seon.db/tx-data]}
-  [db]
+  {:malli/schema [:=> [:cat] :seon.db/tx-data]}
+  []
   (let [co (config/checkout)
         cs (concat (keep ref/address-citation (config/value :seon.config.agent/cites))
                    (mapcat #(:seon.ref/citations (ref/parse nil %)) (vals template/instructions)))
@@ -40,7 +40,7 @@
            (d/create-database cfg)
            (let [conn (pdb/connect cfg)]
              (pdb/ids! conn) (pdb/seed! conn 2000)
-             (d/transact conn {:tx-data (standing-targets-tx @conn)})
+             (d/transact conn {:tx-data (standing-targets-tx)})
              (d/release conn))
            cfg)))
 

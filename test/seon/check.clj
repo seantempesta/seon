@@ -1980,10 +1980,18 @@
   branch of it, its own main (seon.db/open!)."
   [n]
   (let [path (seon.config/value :seon.config.root/store-path)
-        _ (remove-store-past! path (seon.config/value :seon.config.proofs/check-store-max-bytes))
+        ;; the store follows its seed (AGENTS section 5, a cache keyed by its inputs): path is a link to
+        ;; path-<digest of what the seed writes>, so a changed seed opens a fresh store and the old one is removed
+        ;; (seon.test-store/kept-store!), never read
+        targets (ts/standing-targets-tx)
+        keyed (ts/kept-store! path (subs (lib/digest (pr-str [seon.db/schema-digest (seon.db/seed-tx (parse-long (str n))) targets])) 0 8))
+        _ (remove-store-past! keyed (seon.config/value :seon.config.proofs/check-store-max-bytes))
         t0 (profile/now-ns)
-        {:keys [seeded? conn]} (seon.db/open! :lmdb path n :db)
-        _ (when seeded? (d/transact conn {:tx-data (ts/standing-targets-tx @conn)}))
+        ;; made (whole or not at all) at keyed itself, then path linked to it for every step's root to open
+        {:keys [seeded? conn]} (seon.db/open! :lmdb keyed n :db)
+        _ (java.nio.file.Files/createSymbolicLink (.toPath (java.io.File. ^String path)) (.toPath (.getAbsoluteFile (java.io.File. ^String keyed)))
+                                                  (make-array java.nio.file.attribute.FileAttribute 0))
+        _ (when seeded? (d/transact conn {:tx-data targets}))
         ms (lib/r2 (profile/ms-since t0))
         datoms (count (d/datoms @conn :eavt))
         branches (count (d/branches conn))]
