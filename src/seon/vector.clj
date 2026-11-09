@@ -500,11 +500,10 @@
 
 (defn- round
   "At main's commit (a notice {:t :commit}), the next round: the first :texts due (:seon.config.vector/texts; 0 asks nothing) go
-  to the :embed effect. When the proc is caught up (:clean, the commit at which everything due was asked
-  for), only the texts that commit to this one changed are looked at (`written`: the cost of the commit,
-  not of the store); otherwise, at the first round and after a backlog, a failure or an unwritten
-  answer, all of them (`due`). A round that asks for all that is due leaves the proc caught up at the
-  commit. Both dbs are made from their commits here (seon.db/at-commit) and let go with the round: the
+  to the :embed effect. After a round (:clean, the commit it scanned at, and :owed, the entities it found due and left
+  for later), only the texts that commit to this one changed are looked at (`written`: the cost of the commit, not of the
+  store), then as many owed as the round has room for; at the first round and after a failure or an unwritten answer, all
+  of them (`due`). Catching up on a backlog of n texts is n/texts rounds of seeks, never a scan a round. Both dbs are made from their commits here (seon.db/at-commit) and let go with the round: the
   proc keeps references, never db values (docs/storage.md#a-kept-db-value-is-a-reference).
   A vector ends with the entity it embeds in that entity's own retraction (docs/storage.md#the-write-checks-every-entity-it-touches), so a round has none to sweep.
   Answers [st outputs]; nothing due, nothing asked."
@@ -516,16 +515,24 @@
         from (when (and clean (:seen st)) (pdb/at-commit (:conn st) (:seen st)))
         [_ added] (when from (d/datoms-diff from db :eavt []))
         base (when clean (if (= (:commit clean) (:seen st)) from (pdb/at-commit (:conn st) (:commit clean))))
-        todo (remove (comp (:unembeddable st) first)
-                     (cond (not clean) (due db (:model st))
-                           (identical? base from) (due db (:model st) (filterv (comp texts :a) added))
-                           :else (due db (:model st) (written base db))))
+        fresh (remove (comp (:unembeddable st) first)
+                      (cond (not clean) (due db (:model st))
+                            (identical? base from) (due db (:model st) (filterv (comp texts :a) added))
+                            :else (due db (:model st) (written base db))))
+        ;; what an earlier round found due and left for later (:owed, entity ids): read again only as far as this round has room,
+        ;; so catching up on n texts is n/texts rounds of seeks, never a scan of every text each round
+        owed (remove (into #{} (map first) fresh) (when clean (:owed st)))
+        room (max 0 (- (:texts st) (count fresh)))
+        later (when (pos? room) (remove (comp (:unembeddable st) first)
+                                        (due db (:model st) (for [e (take room owed) a (keys texts) d (d/datoms db :eavt e a)] d))))
+        todo (concat fresh later)
         due (take (:texts st) todo)
-        st (assoc st :seen (:commit m))
-        st (assoc st :clean (when (= (count due) (count todo)) (select-keys m [:t :commit])))]
+        left (into (mapv first (drop (:texts st) todo)) (drop room owed))
+        ;; scanned at this commit: what is still due is owed, so the next round starts from here, not from a full scan
+        st (assoc st :seen (:commit m) :clean (select-keys m [:t :commit]) :owed left)]
     (cond
       (seq due)
-      (let [more? (< (count due) (count todo))
+      (let [more? (boolean (seq left))
             [st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit])]]
                              {:op :fx :kind :embed :req (cond-> {:texts (mapv second due)} more? (assoc :more true))})]
         [(assoc st :running true :more more?) [m]])
@@ -550,7 +557,7 @@
        :outs {:to-api "its requests to the api: the :embed effect, the write to main"}
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:running :embedded :written-t]) (assoc :unembeddable (count (:unembeddable st)))))})
-  ([args] {:rid 0 :pending {} :conn (:conn args) :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :clean nil :seen nil})
+  ([args] {:rid 0 :pending {} :conn (:conn args) :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :owed [] :clean nil :seen nil})
   ([st _] st)
   ([st in m]
    (let [[st outs]
@@ -564,7 +571,7 @@
                                     (if (contract/error? r)
                                       ;; the failure is recorded here (seon.error/asked-tx), closed by the next
                                       ;; vectors written (:seon.vector/model)
-                                      (let [st (cond-> (assoc st :clean nil :seen nil) (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
+                                      (let [st (cond-> (assoc st :clean nil :seen nil :owed []) (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
                                             ;; the newest main it holds, so the row's count reads what is stored
                                             tx (err/asked-tx (pdb/at-commit (:conn st) (:commit (or (:latest st) asked))) r :seon.vector/model [])]
                                         (if (seq tx)
