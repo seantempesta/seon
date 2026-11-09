@@ -46,7 +46,7 @@
   [db c]
   (let [first-turn (some->> (ratom/realize (:seon.agent/key c)) (ctx/call-of db 1))
         id (or (when first-turn (:task (:seon.model-call/basis (d/pull db [:seon.model-call/basis] first-turn))))
-               (get-in c [:task :seon.task/id]))]
+               (get-in c [:seon.agent/task :seon.task/id]))]
     ;; read from the task's datoms, so a task naming none costs no contracted call
     (if-let [te (when id (pdb/eid db :seon.task/id id))]
       (if (seq (d/datoms db :eavt te :seon.task/examples)) (examples-of db id) [])
@@ -91,11 +91,11 @@
   [c db]
   (vec (for [[n cid] (ctx/turns c)
              :let [{:keys [messages evals]} (ctx/turn-members db c cid)
-                   call (get-in c [:calls cid])]
-             r (concat (for [[m] messages] [(assoc (select-keys (get-in c [:messages m]) [:seon.message/id :seon.message/from :seon.message/body]) :turn n) :seon.message/fact])
+                   call (get-in c [:seon.model-call/_agent cid])]
+             r (concat (for [[m] messages] [(assoc (select-keys (get-in c [:seon.message/_to m]) [:seon.message/id :seon.message/from :seon.message/body]) :turn n) :seon.message/fact])
                        (when (= :model (:seon.model-call/origin call))
                          [[(select-keys call [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]) :seon.model-call/fact]])
-                       (for [[e] evals :let [ev (get-in c [:evals e]) whole (pdb/response-of db ev)]]
+                       (for [[e] evals :let [ev (get-in c [:seon.eval/_agent e]) whole (pdb/response-of db ev)]]
                          [(assoc (pdb/with-response (dissoc ev :db/id :seon.eval/agent :seon.eval/call :seon.eval/opened :seon.eval/result) whole) :turn n) :seon.db/eval-fact]))]
          r)))
 

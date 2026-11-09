@@ -25,7 +25,7 @@
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
     (process-test? 'ns/t-test) why test t reaches a process (nil: it does not): it runs at the judge
-    @ctx                      this agent's record as a map: its task, runs, turns, messages and evals,
+    @ctx                      this agent's record as a map: :seon.agent/task, :seon.model-call/_agent, :seon.message/_to and :seon.eval/_agent,
                               kept current as it works; the page shows it as a block (@seon.ctx/ctx
                               from any namespace)
     (swap! ctx assoc-in p v)  a change to it, as to any atom (assoc-in, update-in, dissoc): one checked

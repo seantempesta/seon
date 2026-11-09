@@ -69,11 +69,11 @@ You're done when every proof is green and nothing blocks merging: tell the user 
 
 ## Your context
 
-This conversation is drawn from your record, `@ctx`, by render functions. Each part names the function that drew it and the path it read. `@ctx` is an atom, and changing it changes what you are sent: `(swap! ctx update :evals dissoc <id>)`.
+This conversation is drawn from your record, `@ctx`, by render functions. Each part names the function that drew it and the path it read. `@ctx` is an atom, and changing it changes what you are sent: ``(swap! ctx update :seon.eval/_agent dissoc <id>)``.
 
 Seon runs an eval that shows you your task and your proofs at the start, `(my.render/render-ctx)`, and another when something changes, `(my.render/render-changes)`. Each is in your conversation like your own evals, and `(my.render/render-ctx)` shows you your page whole at any time.
 
-The first answers your page: `{:components [["status" [seon.render.ui/status {:ctx [:task :proved]} ...]] ...]}`, each component under its id. The second answers only what changed since you were last shown it, as edits, each `[path op value]`:
+The first answers your page: `{:components [["status" [seon.render.ui/status {:ctx [:seon.agent/task :proved]} ...]] ...]}`, each component under its id. The second answers only what changed since you were last shown it, as edits, each `[path op value]`:
 
 ```clojure
 {:edits [[["status" :proofs old-test] :-]

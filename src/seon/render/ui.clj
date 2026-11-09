@@ -789,9 +789,9 @@
 :is(.task, .cited, .citations, .references, .searched, .status) > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }
 .task h3 { font-size: 0.75rem; color: var(--color-text-300); }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
-  (when-let [t* (:task c)]
-    (let [own (fn [x] (into {} (for [k (keys x) :when (not= :cites k)] [k (ratom/realize (get x k))])))
-          t (assoc (own t*) :needs (into {} (for [[k n] (:needs t*)] [k (own n)])))
+  (when-let [t* (:seon.agent/task c)]
+    (let [own (fn [x] (into {} (for [k (keys x) :when (not= :seon.cite/_of k)] [k (ratom/realize (get x k))])))
+          t (assoc (own t*) :seon.task/needs (into {} (for [[k n] (:seon.task/needs t*)] [k (own n)])))
           id (:seon.task/id t)
           {:keys [plan]} (task/pulled-accumulated t)
           agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
@@ -810,8 +810,8 @@
   "Where a cite's joins hold an entity, and the identity attribute that marks it held whole there (an entity
   is held once in ctx, {:db/id e} at any other path: docs/ctx.md#the-pattern): each join path below a cite,
   the ones that hold an entity by the cite's own pattern first."
-  [[[:section] :seon.doc/address] [[:var] :var/name] [[:var :form] :form/id] [[:schema] :schema/key] [[:ns] :ns/name]
-   [[:task] :seon.task/id] [[:section :below :*] :seon.doc/address] [[:var :callers :*] :form/id] [[:var :callers :* :defines :*] :var/name]])
+  [[[:section] :seon.doc/address] [[:var] :var/name] [[:var :var/form] :form/id] [[:schema] :schema/key] [[:ns] :ns/name]
+   [[:task] :seon.task/id] [[:section :seon.doc/_parent :*] :seon.doc/address] [[:var :callers :*] :form/id] [[:var :callers :* :form/defines :*] :var/name]])
 
 (defn- fill
   "Node x with each {:db/id e} held whole at another path of ctx c (held: e to that path) replaced by the node
@@ -857,10 +857,10 @@
       (when (and call (not (re-matches #"\([^\s()\"]+(\s+[A-Za-z][\w\-?!*.<>=/]*)*\)" call)) (not (re-find #"[a-z]{3,} [a-z]{3,} [a-z]{3,}" (str/replace call #"\"[^\"]*\"" "")))) call))))
 
 (defn- section-hiccup
-  "A wiki section as pulled (its :below joined) at depth: what it is in a sentence, its heading and address, its text at that
+  "A wiki section as pulled (its :seon.doc/_parent joined) at depth: what it is in a sentence, its heading and address, its text at that
   depth (its stored lead at :summary, its lead and the headings below it at :doc, its text whole at :code), and how to read the rest."
   {:malli/schema [:=> [:cat :map :seon.ref/depth] :any]}
-  [{:seon.doc/keys [address heading lead text] below :below} depth]
+  [{:seon.doc/keys [address heading lead text] below :seon.doc/_parent} depth]
   [:section
    [:h3 (str heading " (" address ")")]
    [:p "A section of the docs your plan names."]
@@ -878,10 +878,10 @@
   process's own metadata. Nothing of who calls it."
   {:malli/schema [:=> [:cat :qualified-symbol [:maybe :map] :boolean] :any]}
   [sym v changing?]
-  (let [src (get-in v [:form :form/src])
+  (let [src (get-in v [:var/form :form/src])
         m (when-not v (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta))
         forms (vals (:callers v))
-        defs-of (fn [f] (for [d (or (vals (:defines f)) (:form/defines f)) :when (and (:var/name d) (not= sym (:var/name d)))] d))
+        defs-of (fn [f] (for [d (let [ds (:form/defines f)] (if (map? ds) (vals ds) ds)) :when (and (:var/name d) (not= sym (:var/name d)))] d))
         test? (fn [f] (some #(contains? (set (:var/meta %)) :test) (defs-of f)))
         tests (sort-by str (distinct (for [f forms :when (test? f) d (defs-of f) :when (contains? (set (:var/meta d)) :test)] (:var/name d))))
         call (some #(call-in (:form/src %) sym) (concat (filter test? forms) (remove test? forms)))
@@ -977,9 +977,9 @@
   {:malli/schema [:=> [:cat :map] [:vector :any]]}
   [c]
   (let [cs (page-cites c)
-        task-ns (some-> (ratom/realize (get-in c [:task :seon.task/ns])) str)
-        reach (into #{} (for [[_ v] (get-in c [:task :proved]) r (ratom/realize (get-in v [:form :form/refs]))] r))
-        lookups (into [[:seon.task/id (ratom/realize (get-in c [:task :seon.task/id]))]]
+        task-ns (some-> (ratom/realize (get-in c [:seon.agent/task :seon.task/ns])) str)
+        reach (into #{} (for [[_ v] (get-in c [:seon.agent/task :proved]) r (ratom/realize (get-in v [:var/form :form/refs]))] r))
+        lookups (into [[:seon.task/id (ratom/realize (get-in c [:seon.agent/task :seon.task/id]))]]
                       (keep #(when (re-matches #"[^\s:/#]+/[^\s:#]+" %) [:var/name (symbol %)])) (map second cs))]
     (vec (for [[p k held] cs
                :let [sym (when (re-matches #"[^\s:/#]+/[^\s:#]+" k) (symbol k))]]
@@ -992,7 +992,7 @@
   stored lead) and the form that reads it. Not shown whole: an agent reads one when it needs it. Nothing when it has none."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
-  (let [cites (for [k (sort-by #(get-in c [:cites % :seon.cite/order]) (keys (:cites c)))] (ratom/realize (get-in c [:cites k])))]
+  (let [cites (for [k (sort-by #(get-in c [:seon.cite/_of % :seon.cite/order]) (keys (:seon.cite/_of c)))] (ratom/realize (get-in c [:seon.cite/_of k])))]
     (when (seq cites)
       [:section
        [:h2 "If you need more"]
@@ -1025,7 +1025,7 @@
               hits (remove #(= :more (:kind %))
                            (search/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) e))]
           ;; the task's own request is on the page already: the heading names it rather than repeating it
-          [:section [:h3 (if (= q (get-in c [:task :seon.task/plan])) "search: this task's request" (str "search: " q))]
+          [:section [:h3 (if (= q (get-in c [:seon.agent/task :seon.task/plan])) "search: this task's request" (str "search: " q))]
            (into [:ol] (for [{:keys [name]} hits] [:li [:code (str name)]]))])))))
 
 (defn- held-whole
@@ -1039,26 +1039,26 @@
         join-paths (fn [p [steps a]]
                      (let [paths (reduce (fn [qs step] (if (= :* step) (for [q qs k (keys (get-in c q))] (conj q k)) (map #(conj % step) qs))) [p] steps)]
                        (for [q paths :let [id (get-in c (conj q :db/id))] :when id] [q (some? (get-in c (conj q a))) id])))
-        found (concat (join-paths [] [[:task] :seon.task/id]) (join-paths [] [[:task :needs :*] :seon.task/id])
-                      (join-paths [] [[:task :proved :*] :var/name]) (join-paths [] [[:task :proved :* :form] :form/id])
-                      (join-paths [] [[:task :needs :* :proved :*] :var/name]) (join-paths [] [[:task :needs :* :proved :* :form] :form/id])
+        found (concat (join-paths [] [[:seon.agent/task] :seon.task/id]) (join-paths [] [[:seon.agent/task :seon.task/needs :*] :seon.task/id])
+                      (join-paths [] [[:seon.agent/task :proved :*] :var/name]) (join-paths [] [[:seon.agent/task :proved :* :var/form] :form/id])
+                      (join-paths [] [[:seon.agent/task :seon.task/needs :* :proved :*] :var/name]) (join-paths [] [[:seon.agent/task :seon.task/needs :* :proved :* :var/form] :form/id])
                       (for [p ps j cite-joins q (join-paths p j)] q))]
     (reduce (fn [m [q whole? id]] (if (and whole? (not (contains? m id))) (assoc m id q) m)) {} found)))
 
 (defn- page-cites
-  "The cites agent record c's page draws, read from ctx alone: its task's (:cites), then each need's (one
+  "The cites agent record c's page draws, read from ctx alone: its task's (:seon.cite/_of), then each need's (one
   level, a merge task's left out), then the agent's own, each target once at the strongest depth any asks,
   the task's proofs left out (the status shows them), in the order the cites were written. Each
   [path target held]: the cite's path, its target as text and where ctx holds each entity it joined whole
   (an entity is held once: docs/ctx.md#the-pattern)."
   {:malli/schema [:=> [:cat :map] [:vector [:tuple [:vector :any] :string [:map-of :int [:vector :any]]]]]}
   [c]
-  (let [task (:task c)
-        proofs (into (set (get task :seon.task/proofs)) (mapcat (fn [n] (get-in task [:needs n :seon.task/proofs]))) (keys (:needs task)))
+  (let [task (:seon.agent/task c)
+        proofs (into (set (get task :seon.task/proofs)) (mapcat (fn [n] (get-in task [:seon.task/needs n :seon.task/proofs]))) (keys (:seon.task/needs task)))
         sorted (fn [p] (sort-by #(get-in c (conj p % :seon.cite/order)) (keys (get-in c p))))
-        groups (concat (when task [[:task :cites]])
-                       (for [n (sort-by #(str (get-in task [:needs % :seon.task/id])) (keys (:needs task)))
-                             :when (not= :merge (get-in task [:needs n :seon.task/kind]))] [:task :needs n :cites])
+        groups (concat (when task [[:seon.agent/task :seon.cite/_of]])
+                       (for [n (sort-by #(str (get-in task [:seon.task/needs % :seon.task/id])) (keys (:seon.task/needs task)))
+                             :when (not= :merge (get-in task [:seon.task/needs n :seon.task/kind]))] [:seon.agent/task :seon.task/needs n :seon.cite/_of])
                        [])
         all (for [g groups k (sorted g) :let [p (conj (vec g) k)]]
               {:path p :target (str (or (get-in c (conj p :seon.cite/address)) (get-in c (conj p :seon.cite/name))))
@@ -1204,12 +1204,12 @@
   (`standing`, from the task's outcome where it holds one), its task, the form it is running and its proofs green."
   {:seon.render/style ".agent-state { border-radius: 0.375rem; background: var(--color-base-900); padding: 0.5rem; min-width: 0; overflow-x: auto; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  (let [task (:task c)
+  (let [task (:seon.agent/task c)
         t (into {} (for [k [:seon.task/id :seon.task/outcome :seon.task/reason] :let [v (ratom/realize (get task k))] :when (some? v)] [k v]))
         agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
                              :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
         stands (standing agent t)
-        verdicts (for [[_ ps] (concat [[nil (:proved task)]] (map (fn [[_ nd]] [nil (:proved nd)]) (:needs task))) [_ v] ps] (ratom/realize (:seon.test/status v)))
+        verdicts (for [[_ ps] (concat [[nil (:proved task)]] (map (fn [[_ nd]] [nil (:proved nd)]) (:seon.task/needs task))) [_ v] ps] (ratom/realize (:seon.test/status v)))
         running (d/q '[:find ?r . :in $ ?a :where [?p :seon.process/agent ?a] [?p :seon.process/running ?r]] db (:db/id c))]
     [:div {:wire/for "page"}
      [:p (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))) (when (:reason stands) (str " · " (:reason stands))))]
@@ -1243,9 +1243,10 @@
 
 (defn- added-keys
   "The keys the agent added to ctx c: any qualified key outside its own :seon.agent/* attributes,
-  its pattern and the environment, in order. It reads ctx's own key set only."
+  its pattern, the reverse joins its pattern holds (:seon.eval/_agent: an attribute read from the entity it points at) and
+  the environment, in order. It reads ctx's own key set only."
   {:malli/schema [:=> [:cat :map] [:sequential :qualified-keyword]]}
-  [c] (filter #(and (qualified-keyword? %) (not (#{"seon.agent" "db" "seon.ctx"} (namespace %)))) (sort-by str (keys c))))
+  [c] (filter #(and (qualified-keyword? %) (not (#{"seon.agent" "db" "seon.ctx"} (namespace %))) (not (str/starts-with? (name %) "_"))) (sort-by str (keys c))))
 
 (defn ctx-keys
   "The keys the agent added to its ctx (a component over ctx, placed when there is one), each a
@@ -1465,7 +1466,7 @@
   conversation to read. The model reads the plan in the task's part. See docs/render.md#the-page."
   {:seon.render/style ".chat-ask { max-width: 85%; align-self: flex-end; border-radius: 1rem; border-top-right-radius: 0.125rem; background: var(--color-base-800); padding: 0.625rem 1rem; color: var(--color-text-100); }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
-  (when-let [plan (some-> (:task c) ratom/realize :seon.task/plan)]
+  (when-let [plan (some-> (:seon.agent/task c) ratom/realize :seon.task/plan)]
     (let [{:keys [shown truncated? omitted lines]} (print/plain plan (config/value :seon.config.render/line-budget))]
       [:section
        (if truncated?
@@ -1526,7 +1527,7 @@
   "How each proof of an agent's task went across its turns (a component over ctx and the db), once its work has ended: read from the commit each turn's basis names, where the test's status and failures stood, so it is what the agent read then and nothing is recorded for it. A row for each change. The person's: the model read each as it came. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  (let [proofs (ratom/realize (get (:task c) :seon.task/proofs))
+  (let [proofs (ratom/realize (get (:seon.agent/task c) :seon.task/proofs))
         outcome (ratom/realize (:seon.agent/outcome c))
         turn (or (ratom/realize (:seon.agent/turn c)) 0)]
     (when (and (seq proofs) outcome (= (ratom/realize (:seon.agent/ended-turn c)) turn))
@@ -1556,7 +1557,7 @@
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:seon.render/style ":is(.system-message, .example-session, .proof-story) { font-size: 0.75rem; line-height: 1rem; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  [:details {:wire/role "system" :wire/ref [:section (if (seq (:system c)) (vec (sort (keys (:system c)))) wire/system-page)]}
+  [:details {:wire/role "system" :wire/ref [:section (if (seq (:seon.agent/system c)) (vec (sort (keys (:seon.agent/system c)))) wire/system-page)]}
    [:summary {:class "muted" :wire/for "page"} "system message"]
    [#'markdown (wire/agent-system-text db c)]])
 
@@ -1575,11 +1576,11 @@
             (for [[_ cid] (ctx/turns c)
                   :let [{:keys [messages evals]} (ctx/turn-members db c cid)
                         evals (map first evals)
-                        model? #(get-in c [:evals % :seon.eval/call-id])
-                        step #(eval-hiccup {:db db} (get-in c [:evals %]))]]
-              (into [:div {:wire/turn (get-in c [:calls cid :seon.model-call/n])}]
-                    (concat (for [[m] messages] (message-hiccup (get-in c [:messages m])))
-                            [(reply-hiccup (get-in c [:calls cid]) (boolean (seq (filter model? evals))) (map step (filter model? evals)))]
+                        model? #(get-in c [:seon.eval/_agent % :seon.eval/call-id])
+                        step #(eval-hiccup {:db db} (get-in c [:seon.eval/_agent %]))]]
+              (into [:div {:wire/turn (get-in c [:seon.model-call/_agent cid :seon.model-call/n])}]
+                    (concat (for [[m] messages] (message-hiccup (get-in c [:seon.message/_to m])))
+                            [(reply-hiccup (get-in c [:seon.model-call/_agent cid]) (boolean (seq (filter model? evals))) (map step (filter model? evals)))]
                             (map step (remove model? evals)))))
             [[:p {:wire/role "user" :wire/for "model"} "</session>"]]))))
 
@@ -1615,16 +1616,16 @@
   [:div {:id "p-task"}
    ;; root's sessions, when this record's pull holds root (root's session's pattern does: docs/users.md#roots-session)
    (when (:root c) [#'sessions {:at [:root]}])
-   (when (:task c)
-     (list [#'task {:at [:task]}] [#'status {:at [:task :proved]}] [#'citations {:at [:task :cites]}]
+   (when (:seon.agent/task c)
+     (list [#'task {:at [:seon.agent/task]}] [#'status {:at [:seon.agent/task :proved]}] [#'citations {:at [:seon.agent/task :seon.cite/_of]}]
            (seq (cite-parts c))
            ;; each search its task and the agent hold, a part each, drawn on the branch's db
-           (for [p (concat (for [e (keys (get-in c [:task :searches]))] [:task :searches e])
-                           (for [e (keys (get c :searches))] [:searches e]))]
+           (for [p (concat (for [e (keys (get-in c [:seon.agent/task :seon.search/_of]))] [:seon.agent/task :seon.search/_of e])
+                           (for [e (keys (get c :seon.search/_of))] [:seon.search/_of e]))]
              [#'searched {:key (get-in c (conj p :seon.search/id)) :at p}])))
-   (when (seq (:cites c)) [#'references {:at [:cites]}])
+   (when (seq (:seon.cite/_of c)) [#'references {:at [:seon.cite/_of]}])
    (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])
-   (when (:task c) [#'own-problems {:at [:task]}])
+   (when (:seon.agent/task c) [#'own-problems {:at [:seon.agent/task]}])
    [#'turn {:at [:seon.agent/ns]}]
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])
 
@@ -1635,15 +1636,15 @@
   [{c :seon.ctx/ctx db :seon.db/db n :key}]
   (when-let [cid (some->> (ratom/realize (:seon.agent/key c)) (ctx/call-of db n))]
     (let [{:keys [messages evals]} (ctx/turn-members db c cid)
-          model? (let [plain (ratom/untracked c)] (fn [e] (get-in plain [:evals e :seon.eval/call-id])))
+          model? (let [plain (ratom/untracked c)] (fn [e] (get-in plain [:seon.eval/_agent e :seon.eval/call-id])))
           ;; who posts that it was opened, read here once and not by each eval
           agent-key (ratom/realize (:seon.agent/key c)) agent-id (some-> agent-key keyword)
-          item (fn [[e id]] [#'eval-item {:key id :at [:evals e] :agent-key agent-key :agent-id agent-id}])
-          call (get-in c [:calls cid])
+          item (fn [[e id]] [#'eval-item {:key id :at [:seon.eval/_agent e] :agent-key agent-key :agent-id agent-id}])
+          call (get-in c [:seon.model-call/_agent cid])
           ours (filter (comp model? first) evals)]
       (when call
         ;; a turn nothing has come of yet (a call its messages or evals have not reached) is no element
-        (when-let [kids (seq (remove nil? (concat (for [[m id] messages] [#'chat-message {:key id :at [:messages m]}])
+        (when-let [kids (seq (remove nil? (concat (for [[m id] messages] [#'chat-message {:key id :at [:seon.message/_to m]}])
                                                   [(reply-hiccup (cond-> (into {} (for [k [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]
                                                                                         :let [v (ratom/realize (get call k))] :when (some? v)] [k v]))
                                                                    ;; in flight: the model's call until its evals have all run (:seon.model-call/forms, written by seon.turn after
@@ -1669,7 +1670,7 @@
      [#'system-message {}]
      [#'session-examples {}]
      (when k [:li {:wire/role "user" :wire/for "model" :wire/ref [:session k]} (session/session-open k)])
-     (when (:task c) [#'chat-ask {:wire/for "page"}])
+     (when (:seon.agent/task c) [#'chat-ask {:wire/for "page"}])
      ;; one past the turn in force: what was taken for the turn that reads it comes before that turn begins (seon.turn/take!, tell-error!); a turn no record names draws nothing
      (for [n (range 0 (+ 2 (or (ratom/realize (:seon.agent/turn c)) 0)))] [#'conversation-turn {:key n}])
      [#'chat-end {:wire/for "page"}]
@@ -1735,7 +1736,7 @@
   ;; what it evaluates now (its process's :seon.process/running) is its conversation's newest part
   (let [{:seon.agent/keys [status branch description]} v
         id (:seon.agent/key v)
-        ;; how its work stands: the task's outcome (a ctx's pull names the task :task), the agent's own end, else its status
+        ;; how its work stands: the task's outcome (root's pull names the task :task, an agent's its attribute), the agent's own end, else its status
         stands (standing v (ratom/realize (or (:task v) (:seon.agent/task v))))
         ;; its current process's pid while it runs: an ended process's pid names nothing live
         ;; a ctx join holds its members by id (a map); root's own pull, a vector
@@ -2054,9 +2055,9 @@
     (into [:ul {:class "flex gap-2 lg:flex-col lg:gap-0.5"}] (for [boot boots] [#'boot-side {} boot]))]])
 
 (defn- newest-started
-  "The agents this user started (ctx c's :started join), newest first by when each started. See docs/users.md#whats-on-screen."
+  "The agents this user started (ctx c's :seon.agent/agents join), newest first by when each started. See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:sequential :int]]}
-  [db c] (sort-by (fn [e] [(- (or (:seon.agent/started-ms (d/entity db e)) 0)) e]) (keys (:started c))))
+  [db c] (sort-by (fn [e] [(- (or (:seon.agent/started-ms (d/entity db e)) 0)) e]) (keys (:seon.agent/agents c))))
 
 (defn sign-in
   "The page / is when no one is signed in (a render over the db): who could be, each a link to their page, and root's. Until there is a login, root signs in the OS account running it. See docs/users.md#whats-on-screen."
@@ -2085,7 +2086,7 @@
                (for [k (earlier n)] [#'agent-side {} (:db/id (d/entity db [:seon.agent/key k]))])))]])))
 
 (defn started-side
-  "The agents this user started in its agents list (a component over ctx, by the pull's :started join): each `agent-side`. See docs/users.md#whats-on-screen."
+  "The agents this user started in its agents list (a component over ctx, by the pull's :seon.agent/agents join): each `agent-side`. See docs/users.md#whats-on-screen."
   {:seon.render/style ".started-side { display: contents; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   [:li {:class "contents"} [:ul {:class "contents"} (for [eid (newest-started db c)] [#'agent-side {} eid])]])

@@ -1,8 +1,8 @@
 (ns seon.ctx
   "The agent's record as one map, `@ctx` (docs/ctx.md): its agent entity pulled by a pattern,
   Datahike's pull syntax held as data (:seon.ctx/pattern: the agent's own edit, else its entity
-  schema's), each join's members under the join's key (its :as: :evals, :runs, a run's :task,
-  :calls and :messages), a collection a map of its members by their ids, newest first; a window newest
+  schema's), each join's members under the join's key (its :as, else its attribute: :seon.agent/task, :seon.eval/_agent,
+  :seon.model-call/_agent and :seon.message/_to), a collection a map of its members by their ids, newest first; a window newest
   first (:limit with :reverse); a symbol joined by lookup (:by); every entity held once. Beside
   them its environment, :t :branch :commit.
 
@@ -30,24 +30,24 @@
 ;; ---- db -> map ---------------------------------------------------------------------------
 
 (defn- own
-  "Entity e on db, every attribute it holds (or, under pattern spec s that names its attributes,
-  those and the ones its joins read: a forward join's attribute, a reverse lookup's name): a
-  cardinality-many one as a set (pull answers a vector), a ref as {:db/id}; {:db/id e} alone when
-  db holds none of it."
+  "Entity e on db, the attributes the pattern spec s names (nil, or a `*`: every one), and the ones its joins read (a forward
+  join's attribute, a reverse lookup's name): a cardinality-many one as a set (pull answers a vector), a ref as {:db/id};
+  {:db/id e} alone when db holds none of it. One seek of e's datoms, a quarter of what the pull engine costs for the same answer."
   {:malli/schema [:function [:=> [:cat :seon.host/db pos-int?] :map] [:=> [:cat :seon.host/db pos-int? [:maybe :map]] :map]]}
   ([db e] (own db e nil))
   ([db e s]
-  (let [rs (dbi/-rschema db)
-        many (get rs :db.cardinality/many #{})]
-    (if (or (nil? s) (:star? s))
-      ;; every attribute: its datoms, one seek, a quarter of what the pull engine costs for the same answer
-      (let [ref (get rs :db.type/ref #{})]
-        (reduce (fn [m {:keys [a v]}]
-                  (let [x (if (contains? ref a) {:db/id v} v)]
-                    (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x))))
-                {:db/id e} (d/datoms db :eavt e)))
-      (let [m (or (d/pull db (vec (into #{:db/id} (concat (:attrs s) (for [j (:joins s) :when (not (:rev? j))] (:attr j))))) e) {:db/id e})]
-        (reduce-kv (fn [m a v] (if (and (contains? many a) (sequential? v)) (assoc m a (set v)) m)) m m))))))
+   (let [rs (dbi/-rschema db)
+         many (get rs :db.cardinality/many #{})
+         ref (get rs :db.type/ref #{})
+         named? (if (or (nil? s) (:star? s))
+                  any?
+                  (into (set (:attrs s)) (for [j (:joins s) :when (not (:rev? j))] (:attr j))))]
+     (reduce (fn [m {:keys [a v]}]
+               (if (named? a)
+                 (let [x (if (contains? ref a) {:db/id v} v)]
+                   (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x)))
+                 m))
+             {:db/id e} (d/datoms db :eavt e)))))
 
 (defn- many?
   "Does join j hold a collection (a reverse ref, or a cardinality-many attribute)?"
@@ -252,7 +252,7 @@
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :seon.ctx/spec [:vector :any] :seon.ctx/ix [:maybe :map] [:map-of :any [:vector :any]]] [:tuple :map :seon.ctx/ix]]}
   [db e s p r old touched]
   (if (and (not (:star? s)) (= #{:db/id} (:attrs s)))
-    ;; a join of `[:db/id]` names its members and holds none of them (agent -> call -> its evals, which the agent's :evals join holds):
+    ;; a join of `[:db/id]` names its members and holds none of them (agent -> call -> its evals, which the agent's :seon.eval/_agent join holds):
     ;; nothing to place, so no new path moves anything (no contracted call: this runs for every member built)
     [(if (stub? old) old {:db/id e}) r]
   (let [r (update-in r [:at e] (fnil conj #{}) p)
@@ -765,7 +765,7 @@
   its task's :seon.task/ns (seon.agent/start-ns); nil for a task that names none. Where its next eval runs
   (docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
-  [c] (or (:seon.agent/ns c) (:seon.task/ns (:task c))))
+  [c] (or (:seon.agent/ns c) (:seon.task/ns (:seon.agent/task c))))
 
 (defn cited
   "Var v as the task's page shows it: its source and its callers (doc/callers), or that it
@@ -788,10 +788,10 @@
   [db c cid]
   ;; the turn's reads: its member set, and a member its ctx does not hold yet. A member's id is written once, so an outside agent's one growing turn reads no more for each it holds
   (let [plain (ratom/untracked c)
-        at (fn [k attr] (keep (fn [e] (when-let [id (or (get-in plain [k e attr]) (get-in c [k e attr]))] [e id]))
-                              (when (seq (get-in c [:calls cid k])) (keys (get-in plain [:calls cid k])))))]
-    {:messages (let [ms (at :messages :seon.message/id)] (if (next ms) (sort-by (fn [[e]] (first-delivered [db (:db/id c) e])) ms) ms))
-     :evals (sort-by first (at :evals :seon.eval/id))}))
+        at (fn [k ck attr] (keep (fn [e] (when-let [id (or (get-in plain [k e attr]) (get-in c [k e attr]))] [e id]))
+                                 (when (seq (get-in c [:seon.model-call/_agent cid ck])) (keys (get-in plain [:seon.model-call/_agent cid ck])))))]
+    {:messages (let [ms (at :seon.message/_to :seon.message/_call :seon.message/id)] (if (next ms) (sort-by (fn [[e]] (first-delivered [db (:db/id c) e])) ms) ms))
+     :evals (sort-by first (at :seon.eval/_agent :seon.eval/_call :seon.eval/id))}))
 
 (defn call-of
   "The model call of turn n of the agent with key k on db, or nil: one seek by its id. See docs/turn.md#the-turn-is-a-number."
@@ -802,8 +802,8 @@
   "The model calls of agent record c that are its turns, in order: [n eid]; a context read (origin :outside) is no turn. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :map] [:sequential [:tuple :int :int]]]}
   [c]
-  (sort (for [e (keys (:calls c)) :when (not= :outside (get-in c [:calls e :seon.model-call/origin]))]
-          [(or (get-in c [:calls e :seon.model-call/n]) 0) e])))
+  (sort (for [e (keys (:seon.model-call/_agent c)) :when (not= :outside (get-in c [:seon.model-call/_agent e :seon.model-call/origin]))]
+          [(or (get-in c [:seon.model-call/_agent e :seon.model-call/n]) 0) e])))
 
 (defn agent-ctx
   "Agent a's ctx value as db holds it, drawn cold (seon.ctx/build): a read of a session with no live @ctx. See

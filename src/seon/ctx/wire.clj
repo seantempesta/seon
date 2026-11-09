@@ -42,11 +42,11 @@
   [db] (doc/page-text db system-page))
 
 (defn agent-system-text
-  "The system message of agent record c on db: the doc sections its :system join names, each its heading at its level and its text, in the order the wiki was written; with none, the
+  "The system message of agent record c on db: the doc sections its :seon.agent/system join names, each its heading at its level and its text, in the order the wiki was written; with none, the
   system prompt (`system-text`). See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat :seon.host/db :map] :string]}
   [db c]
-  (if-let [es (seq (keys (:system c)))]
+  (if-let [es (seq (keys (:seon.agent/system c)))]
     (->> (map #(d/pull db [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/text :seon.doc/position] %) es)
          ;; page by page, each as the wiki wrote it: a position is its page's
          (sort-by (juxt #(first (str/split (:seon.doc/address %) #"#")) :seon.doc/position))
