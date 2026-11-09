@@ -57,5 +57,4 @@
  {:seon.task/name "a-forked-test-child-died-stuck"
   :seon.task/plan "Seen once, 2026-11-07, on jolt/delivered at 3578ff8fe1, under load, in `bin/check agent-tests`, a sample of 100 forked from an agent: `seon.render-cost-test/a-transaction-costs-its-datoms-to-match` answered `test process died: {:exit 1}`, and the log began `jolt-main-carrier: stuck: the program waits, and nothing is queued, no timer is set and no descriptor is awaited`, with a trace in `seon.root/start!` under `seon.check/run-check`. Alone it's green, and the step's rerun was green. Not reproduced, and whether the branch caused it is unknown: it added a Flow port to the reconciler. Next time: keep the child's fiber dump (`kill -INFO`). Correct: a child waits on something that answers, or its wait says what it was. See docs/processes.md#what-a-fork-inherits."
   :seon.task/kind :work}
-
 ]
