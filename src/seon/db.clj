@@ -382,14 +382,11 @@
   "Transactions of an example program sized by n (the test store's and the check store's
   seed, never a root's own): n/110 namespaces (none below 110), each one tx of the
   namespace and its 20 contracted functions (each a form and its var: 12 datoms, so about
-  2n datoms in all), then one tx of a task referring to two of its vars; and, as production's main holds them, the wiki
-  sections and the var the task templates' instructions cite (seon.template/instructions) and the sections every agent is
-  made citing (:seon.config.agent/cites): a cite names what exists (docs/references.md#an-entity-cites), so a template's task
-  and an agent are made here as on main."
+  2n datoms in all), then one tx of a task referring to two of its vars."
   {:malli/schema [:=> [:cat :int] [:sequential :seon.db/tx-data]]}
   [n]
   (let [nns (quot n 110)]
-    (cond-> (vec (mapcat (fn [k]
+    (mapcat (fn [k]
               (let [nsym (symbol (str "app.m" k))]
                 [(into [{:db/id "ns" :ns/name nsym :ns/doc (str "Module " k " of the example program.")}]
                        (for [i (range 20)
@@ -401,22 +398,7 @@
                          e))
                  [{:task/name (keyword (str "app.m" k) "tidy") :task/plan (str "Tidy module " k ": name every value by its schema.")
                    :task/status :held :task/refs [[:var/name (symbol (str nsym) "f0")] [:var/name (symbol (str nsym) "f1")]]}]]))
-            (range nns)))
-      (pos? nns) (conj (let [held [{:db/id "agent" :seon.doc/address "docs/agent.md#the-agent" :seon.doc/heading "The agent" :seon.doc/level 1 :seon.doc/position 0
-                               :seon.doc/lead "An agent works one task on its own branch."}
-                              {:seon.doc/address "docs/agent.md#merging" :seon.doc/heading "Merging" :seon.doc/level 2 :seon.doc/position 0 :seon.doc/parent "agent"
-                               :seon.doc/lead "A merge task brings main's work into its branch and keeps the proofs green."}
-                              {:seon.doc/address "docs/agent.md#designing-a-task" :seon.doc/heading "Designing a task" :seon.doc/level 2 :seon.doc/position 1 :seon.doc/parent "agent"
-                               :seon.doc/lead "A design step turns a request into the task the implement step works from."}
-                              {:db/id "branch" :ns/name 'my.branch :ns/doc "The branch an agent works on."}
-                              {:var/name 'my.branch/merge-main! :var/ns "branch" :var/doc "Merge main into this branch." :var/meta #{:arglists}}]
-                             addresses (set (keep :seon.doc/address held))]
-                         ;; and the sections every agent is made citing (:seon.config.agent/cites, a path#anchor each) it lacks
-                         (into held (for [a (cfg/value :seon.config.agent/cites)
-                                          :let [address (str/replace a #"\?[a-z]+#" "#")]
-                                          :when (not (addresses address))]
-                                      {:seon.doc/address address :seon.doc/heading (subs address (inc (str/index-of address "#")))
-                                       :seon.doc/lead "A section every agent is made citing."})))))))
+            (range nns))))
 
 ;; :writer :sync (vendor datahike.writer, session F1): root's Flow :writer proc is the only
 ;; caller of transact, so it is THE serial writer; Datahike runs no queue, commit loop or

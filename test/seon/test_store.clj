@@ -4,14 +4,40 @@
   many branches, as in production; owner, 2026-10-21). Test-only, so it lives in test/, not
   in src (session DUP-HELPERS); it seeds and opens through seon.db's own seed! and open-main!."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [seon.task :as task] [seon.config :as config] [hasch.core :as hasch]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.db :as pdb] [clojure.java.shell :as sh] [clojure.string] [clojure.edn] [clojure.test] [seon.lib] [seon.program :as program] [seon.fx :as fx] [seon.task :as task] [seon.config :as config] [hasch.core :as hasch]
+            [seon.ref :as ref] [seon.doc :as doc] [seon.source :as source] [seon.template :as template]))
+
+(defn standing-targets-tx
+  "The sections and vars every agent is made citing (:seon.config.agent/cites) and the task templates' instructions cite
+  (seon.template/instructions), as this checkout holds them, as tx-data on db: each section as the one parse reads its page
+  (seon.doc/page-sections: its heading, level, position, lead and text; its links are not stored, since they reach pages this
+  store does not hold and a link to no section refuses the write), each var's namespace by the one import of its file
+  (seon.source/text-tx). So a template's task and an agent are made on the test store as on main, where a cite names what
+  exists (docs/references.md#an-entity-cites)."
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.db/tx-data]}
+  [db]
+  (let [co (config/checkout)
+        cs (concat (keep ref/address-citation (config/value :seon.config.agent/cites))
+                   (mapcat #(:seon.ref/citations (ref/parse nil %)) (vals template/instructions)))
+        wanted (into #{} (for [{:seon.ref/keys [path anchor]} cs :when (and path anchor)] [path anchor]))
+        addresses (into #{} (map (fn [[p a]] (str p "#" a))) wanted)
+        nss (into (sorted-set) (for [{n :seon.ref/name} cs :when (qualified-symbol? n)] (symbol (namespace n))))]
+    (vec (concat (for [p (sort (into #{} (map first) wanted))
+                       sec (doc/page-sections p (slurp (str co "/" p)))
+                       :when (addresses (:seon.doc/address sec))]
+                   (select-keys sec [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text]))
+                 (mapcat (fn [n] (let [f (source/namespace-path n)] (source/text-tx db n (slurp (str co "/" f)) f))) nss)))))
 
 (def ^:private store
-  "The test store's config, made and seeded with about 2,000 datoms on first use."
+  "The test store's config, made and seeded with about 2,000 datoms on first use, and what every agent and template cites
+  (standing-targets-tx)."
   (delay (let [cfg (pdb/made-cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
                                    :writer pdb/writer-cfg})]
            (d/create-database cfg)
-           (let [conn (pdb/connect cfg)] (pdb/ids! conn) (pdb/seed! conn 2000) (d/release conn))
+           (let [conn (pdb/connect cfg)]
+             (pdb/ids! conn) (pdb/seed! conn 2000)
+             (d/transact conn {:tx-data (standing-targets-tx @conn)})
+             (d/release conn))
            cfg)))
 
 (defn program-schema-digest

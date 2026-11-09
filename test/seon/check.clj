@@ -578,8 +578,7 @@
                 "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
                 (and (= (str "hello from " x "\n") (:seon.print/code (:out r10))) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
                 "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
-                ;; the seed's vars (seon.db/seed-tx): 20 a namespace, and the var the templates cite
-                (and (= "7" (printed r7)) (= "361" (printed (first r8)))
+                (and (= "7" (printed r7)) (= "360" (printed (first r8)))
                      (= :seon.repl/ticks-spent (get-in (second r8) [:ex :seon.error/type])) (= ":after" (printed (nth r8 2))))}}))))
 
 ;; ---- root's threads: a declared number (session THREADS) --------------------------------
