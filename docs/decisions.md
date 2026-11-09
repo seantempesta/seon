@@ -66,6 +66,10 @@ The owner's rulings of 2026-11-09, on one system of agents, rendering from data,
 
 "just deliver the message and the message being in the agents branch is the proof of delivery?" No delivery entity and no mark of the turn that took it; that turn is derived from when the message first appeared on the branch. Stated in: docs/users.md#the-stages-agreed-2026-11-09 (settled).
 
+### A cite is a ref to what exists; an opened eval reaches the model (owner, 2026-11-09)
+
+"I think logically it doesn't make sense to cite something that isn't there?"; "You can transact with temp ids and it'll resolve in the transaction. Referring to a doc can create the doc at the same time if it doesn't exist." Files are a cite target; library vars are literals for now; dead citations are refused at the write. On opening an eval: "Model reads it too"; "I always want to see the current state including a waiting state". Stated in: docs/users.md#the-stages-agreed-2026-11-09 (settled).
+
 ### A private session takes only what main held when it branched (owner, 2026-11-09)
 
 "The private session only takes from main what is on main at the time it is branched." Stated in: task seon.merge/a-session-syncs-with-main-unless-private.
