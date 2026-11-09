@@ -30,6 +30,14 @@ The owner's rulings of 2026-11-09, on one system of agents, rendering from data,
 
 "Boot's job is to resume the existing system or if it's fresh to index it and get it to the point that everything is running off the db. From that point on we are syncing data TO files not reading from them"; "Of course we can re-index if we want. But I mean as a functioning system concept." A running system runs off the db and writes files from it; a boot resumes from the db and reads no file; indexing from files is an explicit act a person chooses (seeding a fresh store, or re-indexing one on purpose), never something a boot or a running root does by itself. Stated in: docs/source.md#a-boot-imports-main-first (Optimization rewrites it), task seon.root/a-boot-resumes-from-the-db.
 
+### Claude sessions' landings enter the db as data, for now (owner, 2026-11-09)
+
+"We have to accommodate you and your agents who primarily write the updates in files, but this is a temporary system -- I want seon agents writing updates inside the system and pushing them to disk." `bin/land` submits the landed change to root as data, which merges it into main and writes the files back; the bridge goes when Seon agents write the system's updates themselves. Stated in: docs/users.md#the-stages-agreed-2026-11-09 (stage 1d).
+
+### Docs link to code, never copy it (owner, 2026-11-09)
+
+"Don't put code into docs if we can link to the code. I want all the docs readable and renderable from the doc parse and indexing"; "I want clear specs and links to the schemas". A doc names a var, a schema key or a task (docs/references.md) where it would show code. Stated in: AGENTS.md section 7.
+
 ### A private session takes only what main held when it branched (owner, 2026-11-09)
 
 "The private session only takes from main what is on main at the time it is branched." Stated in: task seon.merge/a-session-syncs-with-main-unless-private.
