@@ -106,10 +106,10 @@
   ({:seon.db/attributes true}) names itself (`own-keys`), to that schema; :identity-schemas, those of them that are upsert
   keys; :required-keys {schema [attribute ...]}, the keys each requires, its own and those of the schemas it extends, and
   :own-required, only its own; :schema-identities, :identity-schemas turned around; :targets, each ref attribute's target
-  entity schemas ({:seon.db/to}); and :forms, the forms it was built from}. It is the one value every reader of what an entity
+  entity schemas ({:seon.db/to}); :drawn-schemas, the identity schemas that declare a render (:seon.render/hiccup), theirs or a parent's; and :forms, the forms it was built from}. It is the one value every reader of what an entity
   is takes first (ix): a branch's own entity schema is recognized by its own index, never the binary's.
   See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :map] [:map [:forms :map] [:entity-schemas :map] [:identity-schemas :map] [:schema-identities :map] [:required-keys :map] [:own-required :map] [:targets :map]]]}
+  {:malli/schema [:=> [:cat :map] [:map [:forms :map] [:entity-schemas :map] [:identity-schemas :map] [:schema-identities :map] [:drawn-schemas [:set :any]] [:required-keys :map] [:own-required :map] [:targets :map]]]}
   [forms]
   (let [entity? #(:seon.db/attributes (form-props forms %))
         required (fn [form] (for [e (own-entries form) :let [p (second e)] :when (not (and (map? p) (:optional p)))] (first e)))
@@ -119,6 +119,8 @@
      :entity-schemas es
      :identity-schemas ids
      :schema-identities (into {} (map (fn [[a k]] [k a])) ids)
+     ;; the identity schemas that declare a render, theirs or a parent's: what seon.render/schema-of names a pulled map by, one lookup
+     :drawn-schemas (into #{} (filter (fn [k] (some #(:seon.render/hiccup (form-props forms %)) (tree-seq (constantly true) #(parents-in forms %) k)))) (vals ids))
      :required-keys (into {} (for [k (distinct (vals es))]
                                [k (vec (distinct (mapcat #(required (get forms %)) (filter entity? (tree-seq (constantly true) #(parents-in forms %) k)))))]))
      :own-required (into {} (for [k (distinct (vals es))] [k (vec (required (get forms k)))]))

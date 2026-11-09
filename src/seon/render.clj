@@ -86,7 +86,7 @@
           ;; case, is a lookup and no call
           (let [ss (into #{} (keep (:identity-schemas ix)) (keys v))
                 s (if (next ss) (most-specific ix v) (first ss))]
-            (when (and (keyword? s) (declared ix s)) s))))))
+            (when (contains? (:drawn-schemas ix) s) s))))))
 
 (declare render-of own-key)
 
