@@ -1709,7 +1709,7 @@
 (defn- read-at
   "The ids of the messages the running agent's turn n reads, as its record holds them (seon.ctx/turn-members) on its branch's db."
   [n]
-  (let [db (agent/db) k (:key @agent/state) c (seon.ctx/agent-ctx db (pdb/eid db :seon.agent/key k))]
+  (let [db (agent/db) k (:key @agent/state) c (seon.ctx/agent-ctx (seon.db/index) db (pdb/eid db :seon.agent/key k))]
     (mapv second (:messages (seon.ctx/turn-members db c (seon.ctx/call-of db n k))))))
 
 (deftest a-message-taken-by-one-agent-is-still-owed-to-the-other
