@@ -15,7 +15,8 @@
   section one sentence citing a var and linking its page's first section), and those pages."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string [:map-of :string :string]]]}
   [n]
-  (let [db (base)
+  ;; the section of another dir each section cites by its address: stored (a link to no section refuses the load)
+  (let [db (d/db-with (base) [{:seon.doc/address "docs/references.md#cost" :seon.doc/heading "Cost"}])
         pages (into {} (for [p (range (max 1 (quot n 10)))]
                          [(str "demo/p" p ".md")
                           (apply str (str "# Page " p "\n\nPage " p " holds ten sections.\n")
@@ -181,7 +182,8 @@
   "citing-sections' arguments at size n: a wiki of n sections all citing app.m0/f1 (pages of ten), and that var."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :symbol]]}
   [n]
-  (let [db (base)
+  ;; the section of another dir each section cites by its address: stored (a link to no section refuses the load)
+  (let [db (d/db-with (base) [{:seon.doc/address "docs/references.md#cost" :seon.doc/heading "Cost"}])
         pages (into {} (for [p (range (max 1 (quot n 10)))]
                          [(str "demo/p" p ".md")
                           (apply str (str "# Page " p "\n\nPage " p " holds ten sections.\n")
