@@ -270,7 +270,7 @@
     (is (nil? (root/index-code db in '[app.none/x])) "roots the program does not define: no key, made again")))
 
 (deftest a-builds-kept-index-holds-the-program-a-fresh-index-holds
-  ;; and it is made again, in a store of its own, when a change reaches the code that indexes (seon.root/index-code; here
+  ;; and it is made again from nothing when a change reaches the code that indexes (seon.root/index-code; here
   ;; the roots app.bp/make, which calls app.bp/rule), and only then
   (let [dir (scratch-dir "built")
         tree (str dir "/tree")
@@ -279,8 +279,13 @@
         commit! #(do (git "add" "-A") (git "commit" "-q" "-m" "t"))
         roots '[app.bp/make]
         kept (str dir "/kept") fresh (str dir "/fresh")
-        stores #(vec (sort (mapcat (fn [d] (.list d)) (filter (fn [d] (.startsWith (.getName d) "kept-")) (.listFiles (java.io.File. ^String dir))))))
-        index #(:program (root/built-program tree % roots))]
+        index #(:program (root/built-program tree % roots))
+        ;; a datom of the test's own in the kept index: a store indexed again from nothing holds none
+        at-kept (fn [f] (let [p (str (first (filter (fn [d] (.startsWith (.getName d) "kept-")) (.listFiles (java.io.File. ^String dir)))) "/index")
+                              {:keys [cfg conn]} (pdb/open! :lmdb p 0 :db)]
+                          (try (f conn) (finally (pdb/sync! cfg) (d/release conn)))))
+        mark! #(at-kept (fn [c] (d/transact c {:tx-data [{:note/text "kept" :note/agent :kept-index}]})))
+        marked? #(at-kept (fn [c] (boolean (some #(= "kept" (:v %)) (d/datoms @c :aevt :note/text)))))]
     (try
       (sh/sh "git" "init" "-q" tree)
       ;; an index another schema or layout made (seon.db/schema-digest names it) is dropped, never opened
@@ -289,21 +294,21 @@
       (put! "src/app/other.clj" "(ns app.other)\n\n(defn other [] 1)\n")
       (commit!)
       (let [a (index kept)
-            s0 (stores)
+            _ (mark!)
+            _ (is (marked?) "the mark is there")
             _ (is (not (.exists (java.io.File. (str dir "/kept-00000000")))) "the index of another schema or layout was dropped")]
         (put! "src/app/other.clj" "(ns app.other)\n\n(defn other [] 2)\n")
         (put! "src/app/bq.clj" "(ns app.bq)\n\n(defn two [] 2)\n")
         (commit!)
         (let [b (index kept)]
           (is (and (string? a) (not= a b)) "the kept index moved with the tree")
-          (is (= s0 (stores)) "in the same store: the change reaches none of the code that indexes")
+          (is (marked?) "in the same store: the change reaches none of the code that indexes")
           (is (= b (index fresh)) "and holds the program a fresh index of the same tree holds"))
         (put! "src/app/bp.clj" "(ns app.bp)\n\n(defn rule [x] (str x :v2))\n\n(defn make [x] (rule x))\n")
         (commit!)
         (let [c (index kept)]
-          (is (not= s0 (stores)) "a change to a form the indexing code reaches makes the index again, in a store of its own")
-          (is (= 1 (count (stores))) "the old one removed")
-          (is (= c (index (str dir "/fresh2"))) "holding what a fresh index holds")))
+          (is (not (marked?)) "a change to a form the indexing code reaches makes the index again from nothing")
+          (is (= c (index (str dir "/fresh2"))) "and it holds what a fresh index holds")))
       (finally (sh/sh "rm" "-rf" dir)))))
 
 (deftest a-landing-through-the-bridge-is-a-zero-diff
