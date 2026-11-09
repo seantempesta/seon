@@ -1096,8 +1096,9 @@
 
 (defn changed-tx
   "The facts that bring db's index of the tree up to date with the files that changed (changed: {relative path text}, a
-  removed file's text nil; modes: {path git mode}), as a seed indexes them and in its order (seed!): the source dirs'
-  files (seon.fx/source-file?: seon.source/refresh-tx, seon.source/modes-tx), then on the db those make the wiki's pages
+  removed file's text nil; modes: {path git mode}, a mode kept only for a file the allow-list names, as a read keeps it),
+  as a seed indexes them and in its order (seed!): the source dirs' files (seon.fx/source-file?: seon.source/refresh-tx,
+  seon.source/modes-tx), then on the db those make the wiki's pages
   (seon.doc/load-tx; a removed page loads empty, so its sections go) and the task files (seon.task/load-tx of tasks-of; a
   removed file declares none, so its tasks are cancelled). A path of none of these (native code, deps.edn, system.edn, a
   gitlink) is a build input, which the binary's build takes. What a Claude session's landing evaluates on its branch
@@ -1110,7 +1111,8 @@
         wiki (cfg/value :seon.config.root/wiki-dirs)
         tasks-dir (cfg/value :seon.config.root/tasks-dir)
         pick (fn [f] (into {} (filter (comp f key)) changed))
-        code (into (source/refresh-tx db (pick program?)) (source/modes-tx db (into {} (filter (comp program? key)) modes)))
+        ;; a mode is a fact of a file the allow-list names (seon.source/modes-tx), as a read records it (seon.fx/read-source)
+        code (into (source/refresh-tx db (pick program?)) (source/modes-tx db (into {} (filter #(and (program? (key %)) (cfg/file-kind (key %)))) modes)))
         db1 (pdb/speculate-db db code)
         pages (update-vals (pick (fn [p] (and (str/ends-with? p ".md") (some #(under? p %) wiki)))) #(or % ""))
         docs (if (seq pages) (doc/load-tx db1 wiki pages) [])

@@ -263,12 +263,14 @@
                      "docs/zz-land.md" "# Land\n\nA page, changed.\n\n## Kept\n\nIt stays.\n"
                      "resources/seon/tasks/zz-land.edn" (pr-str [{:seon.task/name "t" :seon.task/plan "Landed." :seon.task/kind :work}]))
               (dissoc "docs/zz-gone.md"))
-        modes {"bin/zz-land" "100755"}
+        ;; as bin/land's bridge passes them: every changed text file's mode, a namespace's and a page's too
+        modes (assoc (zipmap (keys b) (repeat "100644")) "bin/zz-land" "100755")
         changed (into {} (for [p (into (set (keys a)) (keys b)) :when (not= (a p) (b p))] [p (b p)]))
         _ (doseq [[path text] a :when (.exists (java.io.File. (str here "/" path)))] (require (source/file-ns text)))
         db0 (pdb/empty-db false)
-        main-a (d/db-with db0 (root/changed-tx db0 a modes))
-        main-b (d/db-with main-a (root/changed-tx main-a changed modes))
+        ;; through the write check every write takes (seon.db/with), as the agent's transact! does
+        main-a (:db-after (pdb/with db0 (root/changed-tx db0 a modes)))
+        main-b (:db-after (pdb/with main-a (root/changed-tx main-a changed modes)))
         program-paths (filter #(or (str/starts-with? % "src/") (str/starts-with? % "bin/")) (keys b))
         seeded-b (let [db (pdb/empty-db false)] (d/db-with db (source/tx-of db (select-keys b program-paths) false)))]
     (is (= (set (keys changed)) #{"src/app/imp.clj" "src/app/land.clj" "bin/zz-land" "docs/zz-land.md" "docs/zz-gone.md" "resources/seon/tasks/zz-land.edn"}))
