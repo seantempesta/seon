@@ -475,6 +475,8 @@
                     ;; program, the binary's inputs with no program facts (seon.fx/inputs), what its agents key their test
                     ;; results by; two programs are seon.problems/stale-binary's row
                     [:boot {:optional true} :string] [:binary {:optional true} :string] [:program {:optional true} :string]
+                    ;; the build's index only: the code that made it (seon.root/index-code)
+                    [:indexed-by {:optional true} :string]
                     [:inputs {:optional true} :seon.program/inputs]]
  ;; the next generation (docs/source.md#the-next-generation): the merges commit the :build effect
  ;; built (seon.fx/build), its worktree and binary and how long the build took, or why it was

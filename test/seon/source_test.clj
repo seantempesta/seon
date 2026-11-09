@@ -252,24 +252,58 @@
 ;; build (1.23 G ticks and 5.4 GB of analysis, 2.34 G and 4.9 GB of checked transaction, 10.7 s at load 2); it is now the
 ;; seed's own incremental index on a store the build keeps, so a build pays for what its tree changed. Its digest is the
 ;; one a fresh index of the same tree holds. A scratch repository of two files, two stores of the test's own, removed
+(deftest the-code-that-indexes-is-keyed-by-its-reach
+  ;; docs/source.md#the-binary-records-its-program: a kept index is a cache of what the indexing code made of the files,
+  ;; so its key holds that code (seon.root/index-code: the reach digest of its roots), and a change the code does not reach
+  ;; keeps it. On the world: roots app.ix/make, which calls app.ix/rule; app.other is reached by nothing
+  (let [db (my.test/with (my.test/world)
+                         (my.test/code 'app.ix "(ns app.ix)\n\n(defn rule [x] (str x))\n\n(defn make [x] (rule x))\n")
+                         (my.test/code 'app.other "(ns app.other)\n\n(defn other [] 1)\n"))
+        in {:env "e" :tree "t" :code "c" :config {}}
+        code #(root/index-code % in '[app.ix/make])
+        k (code db)]
+    (is (string? k))
+    (is (= k (code (my.test/with db (my.test/code 'app.other "(ns app.other)\n\n(defn other [] 2)\n")))) "a change it does not reach keeps it")
+    (is (= k (root/index-code db (assoc in :tree "t2" :code "c2") '[app.ix/make])) "the tree and the source it reads are the files', not its key")
+    (is (not= k (code (my.test/with db (my.test/code 'app.ix "(ns app.ix)\n\n(defn rule [x] (str x :v2))\n\n(defn make [x] (rule x))\n")))) "a change to a form it reaches moves it")
+    (is (not= k (root/index-code db (assoc in :env "e2") '[app.ix/make])) "and so does the runtime it runs on")
+    (is (nil? (root/index-code db in '[app.none/x])) "roots the program does not define: no key, made again")))
+
 (deftest a-builds-kept-index-holds-the-program-a-fresh-index-holds
+  ;; and it is made again, in a store of its own, when a change reaches the code that indexes (seon.root/index-code; here
+  ;; the roots app.bp/make, which calls app.bp/rule), and only then
   (let [dir (scratch-dir "built")
         tree (str dir "/tree")
         git (fn [& args] (apply sh/sh "git" "-C" tree "-c" "user.name=t" "-c" "user.email=t@t" args))
         put! (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str tree "/" p)))) (spit (str tree "/" p) t))
         commit! #(do (git "add" "-A") (git "commit" "-q" "-m" "t"))
-        kept (str dir "/kept") fresh (str dir "/fresh")]
+        roots '[app.bp/make]
+        kept (str dir "/kept") fresh (str dir "/fresh")
+        stores #(vec (sort (mapcat (fn [d] (.list d)) (filter (fn [d] (.startsWith (.getName d) "kept-")) (.listFiles (java.io.File. ^String dir))))))
+        index #(:program (root/built-program tree % roots))]
     (try
       (sh/sh "git" "init" "-q" tree)
-      (put! "src/app/bp.clj" "(ns app.bp)\n\n(defn one [] 1)\n")
+      ;; an index another schema or layout made (seon.db/schema-digest names it) is dropped, never opened
+      (.mkdirs (java.io.File. (str dir "/kept-00000000/index")))
+      (put! "src/app/bp.clj" "(ns app.bp)\n\n(defn rule [x] (str x))\n\n(defn make [x] (rule x))\n")
+      (put! "src/app/other.clj" "(ns app.other)\n\n(defn other [] 1)\n")
       (commit!)
-      (let [a (:program (root/built-program tree kept))]
-        (put! "src/app/bp.clj" "(ns app.bp)\n\n(defn one [] 2)\n")
+      (let [a (index kept)
+            s0 (stores)
+            _ (is (not (.exists (java.io.File. (str dir "/kept-00000000")))) "the index of another schema or layout was dropped")]
+        (put! "src/app/other.clj" "(ns app.other)\n\n(defn other [] 2)\n")
         (put! "src/app/bq.clj" "(ns app.bq)\n\n(defn two [] 2)\n")
         (commit!)
-        (let [b (:program (root/built-program tree kept))]
+        (let [b (index kept)]
           (is (and (string? a) (not= a b)) "the kept index moved with the tree")
-          (is (= b (:program (root/built-program tree fresh))) "and holds the program a fresh index of the same tree holds")))
+          (is (= s0 (stores)) "in the same store: the change reaches none of the code that indexes")
+          (is (= b (index fresh)) "and holds the program a fresh index of the same tree holds"))
+        (put! "src/app/bp.clj" "(ns app.bp)\n\n(defn rule [x] (str x :v2))\n\n(defn make [x] (rule x))\n")
+        (commit!)
+        (let [c (index kept)]
+          (is (not= s0 (stores)) "a change to a form the indexing code reaches makes the index again, in a store of its own")
+          (is (= 1 (count (stores))) "the old one removed")
+          (is (= c (index (str dir "/fresh2"))) "holding what a fresh index holds")))
       (finally (sh/sh "rm" "-rf" dir)))))
 
 (deftest a-landing-through-the-bridge-is-a-zero-diff

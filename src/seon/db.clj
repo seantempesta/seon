@@ -23,7 +23,7 @@
 
 (def schema-digest
   "The digest of the schema and the store's `layout`, 8 hex digits of its hasch uuid: a kept store of regenerable output is
-  named by it (seon.test-store/kept-store!), so a changed schema or layout makes a new store rather than one that refuses
+  named by it (`kept-store!`), so a changed schema or layout makes a new store rather than one that refuses
   to open (:seon.db/types-differ), keeps the old layout, or is migrated."
   (subs (clojure.string/replace (str (hasch/uuid [schema layout])) "-" "") 0 8))
 
@@ -725,6 +725,25 @@
   "Remove directory dir and what it holds, when it is there. nil."
   {:malli/schema [:=> [:cat :string] :nil]}
   [dir] (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. ^String dir)))) nil)
+
+(defn kept-store!
+  "The path of the kept store of regenerable output at base for a schema's digest (the whole schema's, `schema-digest`,
+  unless given), base-<digest>; a store at base made with another digest (base itself, or base-<8 hex digits> but this
+  one) is removed: it is output, made again from its inputs, never a record, so a changed schema or layout makes a new
+  store, nothing migrated or refused (task seon.test-store/a-kept-store-is-keyed-by-its-schema). Nothing is made here;
+  the caller opens it. The test runner's program store, the process tests' store and the build's index take it. See
+  docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:function [:=> [:cat :string] :string] [:=> [:cat :string :string] :string]]}
+  ([base] (kept-store! base schema-digest))
+  ([base digest]
+   (let [f (java.io.File. ^String base)
+         dir (.getParentFile f)
+         stem (.getName f)
+         keyed (str stem "-" digest)
+         old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
+     (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
+       (remove-dir! (str dir "/" n)))
+     (str dir "/" keyed))))
 
 (defn- compact-marker
   "The file in the store at path that says a sweep freed pages since its last compaction (compact-if-due!)."

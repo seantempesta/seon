@@ -1158,21 +1158,63 @@
     (d/release conn)
     (assoc out :ms (lib/r2 (profile/ms-since t0)))))
 
+(def ^:private index-roots
+  "The vars an index of a tree reaches: what makes a program's facts from its files (import-tree!, down through the
+  analysis and the account) and what digests them. See docs/source.md#the-binary-records-its-program."
+  '[seon.root/import-tree! seon.program/program-digest])
+
+(defn index-code
+  "The code that indexes a tree, as db's program states it, under inputs: the reach digest of roots
+  (seon.program/graph-index over db's seon.program/reach-graph, as a check step's root is digested), its components and
+  the runtime pins and config keys they read, never the tree or the program's source (blank in inputs: the files are the
+  index's other input). nil when db defines none of roots. What a kept index was made by, so one whose code moved is
+  made again. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.program/inputs [:vector :qualified-symbol]] [:maybe :string]]}
+  [db inputs roots]
+  (get-in (program/graph-index (program/reach-graph db nil) (assoc inputs :tree "" :code "") {"index" roots}) ["index" :digest]))
+
 (defn built-program
   "The program of the tree at root as a seed indexes it, and the inputs bin/test keys verdicts by: {:program
   (seon.program/program-digest of the tree's index) :inputs (seon.fx/inputs)}, or the error of a read or an analysis.
-  The index is kept between builds in the store at path, the build's own (bin/build's target/seon.index), and brought
-  to the tree as a seed brings a store (import-tree!: only the files the tree changed since that store's last index),
-  so a build pays for what changed. What bin/build records beside the binary it built (target/seon.program,
-  `binary-program`). See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat :string :string] :map]}
-  [root path]
-  (let [{:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
-        r (import-tree! conn {:root root :dirs (cfg/value :seon.config.source/dirs)} (profile/now-ns))
-        out (if (:error r) (:error r) {:program (program/program-digest @conn) :inputs (fx/inputs root)})]
-    (pdb/sync! cfg)
-    (d/release conn)
-    out))
+  The index is the build's cache, a store other than the one store because it is regenerable from the tree at any time
+  and root never reads it: kept between builds at base (bin/build's target/seon.index, keyed by the schema and layout:
+  seon.db/kept-store!, so one of another layout is dropped and made again), brought to the tree as a seed brings a store
+  (import-tree!: only the files the tree changed), and keyed by the code that made it (index-code of roots, index-roots
+  by default, on its :seon.root/source fact as :indexed-by): when what the tree changed moves that code, the tree is
+  indexed into a new store, since an index brought up to date keeps what the old code made of its unchanged forms. So a build pays for what
+  changed. What bin/build records beside the binary it built (target/seon.program, `binary-program`). See
+  docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:vector :qualified-symbol]] :map]]}
+  ([root base] (built-program root base index-roots))
+  ([root base roots]
+   (let [;; a dir keyed by the schema and layout (one of another is removed: seon.db/kept-store!), holding one index,
+         ;; index-<its code's key>: a code that moved is a new store, since an index brought up to date keeps each form
+         ;; whose text did not change as the old code made it (seon.program/account-diff-tx), its id included
+         dir (doto (java.io.File. ^String (pdb/kept-store! base)) .mkdirs)
+         source {:root root :dirs (cfg/value :seon.config.source/dirs)}
+         inputs (fx/inputs root)
+         index! (fn [path]
+                  (let [{:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
+                        fact #(:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
+                        ;; read before the import, whose fact replaces the one held
+                        held (:indexed-by (fact))
+                        r (import-tree! conn source (profile/now-ns))
+                        code (when (and (not (:error r)) (or (:imported? r) (nil? held))) (index-code @conn inputs roots))
+                        moved? (and held code (not= held code))]
+                    ;; the import's fact replaced the one held: the key is written again whenever the fact lacks it
+                    (when (and (not moved?) (or code held) (not= (or code held) (:indexed-by (fact))))
+                      (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/source (assoc (fact) :indexed-by (or code held))}]}))
+                    (let [out (cond (:error r) (:error r)
+                                    moved? {:moved code}
+                                    :else {:program (program/program-digest @conn) :inputs inputs})]
+                      (pdb/sync! cfg)
+                      (d/release conn)
+                      out)))
+         found (first (sort (filter #(re-matches #"index(-[0-9a-f]{8})?" %) (.list dir))))
+         r (index! (str dir "/" (or found "index")))]
+     (if-let [code (:moved r)]
+       (index! (pdb/kept-store! (str dir "/index") (subs code 0 8)))
+       r))))
 
 (defn binary-program
   "What the running binary was built from, as bin/build recorded it beside the binary (target/seon.program,
