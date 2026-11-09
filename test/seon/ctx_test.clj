@@ -215,12 +215,12 @@
                                             [{:seon.message/id "m1" :seon.message/from "user" :seon.message/body "How is it going?"
                                               :seon.message/to [[:seon.agent/key k]]}]))))
         t (:tree (ctx/build db (aid db) :b))]
-    (is (= "lab/ctx" (get-in t [:task :seon.task/id])) "the task, pulled whole by the agent's own ref")
-    (is (= "Make app.x/f0 pass." (get-in t [:task :seon.task/plan])))
-    (is (= 4 (count (:calls t))) "every model call, those its records name among them")
-    (is (= 5 (count (:evals t))) "every eval")
-    (is (= ["m1"] (names (:messages t) :seon.message/id)) "the messages it holds")
-    (is (= [] (for [[j _] joins :when (some #{:limit} j)] (first j))) "no window on its own record: every turn, eval and message (the owner: deliver all messages and errors)")
+    (is (= "lab/ctx" (get-in t [:seon.agent/task :seon.task/id])) "the task, pulled whole by the agent's own ref")
+    (is (= "Make app.x/f0 pass." (get-in t [:seon.agent/task :seon.task/plan])))
+    (is (= 4 (count (:seon.model-call/_agent t))) "every model call, those its records name among them")
+    (is (= 5 (count (:seon.eval/_agent t))) "every eval")
+    (is (= ["m1"] (names (:seon.message/_to t) :seon.message/id)) "the messages it holds")
+    (is (= [] (for [[j _] joins :when (and (vector? j) (some #{:limit} j))] (first j))) "no window on its own record: every turn, eval and message (the owner: deliver all messages and errors)")
     (is (not (contains? t :catch-ups)) "no catch-ups")))
 
 (defn- pulled-schema
@@ -255,6 +255,36 @@
       (is (seq joins) (str s " has joins"))
       (is (= [] (remove implied joins)) (str s ": a join its refs do not imply")))
     (is (every? (set (vals pdb/entity-schemas)) (mapcat val pdb/targets)) "every target is an entity schema")))
+
+;; A context is keyed by attributes (docs/data-modeling.md#things-relate-by-refs): a pattern names the attributes its readers read
+;; and joins each ref by its own attribute, so a path into @ctx names an attribute and a schema can say what a key is
+(defn- pattern-faults
+  "The faults in pattern p of entity schema s, at any depth, as [schema thing what]: a `*`, an :as on a join whose attribute (or
+  forward attribute, for a reverse one) names its target (:seon.db/to), a ref join its schema's implied pattern does not hold
+  (:seon.agent/agents is the one the implied pattern skips, as it targets its own schema). A join's own pattern is read as its
+  target schema's: the owner of a reverse attribute, the one a :by names, else the first its attribute targets."
+  {:malli/schema [:=> [:cat [:maybe :qualified-keyword] [:vector :any]] [:sequential :any]]}
+  [s p]
+  (let [reverse? #(clojure.string/starts-with? (name %) "_")
+        forward #(keyword (namespace %) (subs (name %) 1))
+        implied (when s (set (concat (filter pdb/targets (pdb/attributes-of s))
+                                     (map #(keyword (namespace %) (str "_" (name %))) (pdb/reaching s)))))]
+    (concat (when (some #{'*} p) [[s '* :star]])
+            (for [clause p :when (map? clause) [k sub] clause
+                  :let [[a & opts] (if (vector? k) k [k]) o (apply hash-map opts) fwd (if (reverse? a) (forward a) a)
+                        target (cond (reverse? a) (pdb/entity-schemas fwd) (:by o) (pdb/entity-schemas (:by o)) :else (first (pdb/targets fwd)))]
+                  fault (concat (when (and (pdb/targets fwd) (:as o)) [[s a :as]])
+                                (when (and (pdb/targets fwd) (not (:by o)) implied (not (implied a)) (not= :seon.agent/agents a)) [[s a :not-implied]])
+                                (when (vector? sub) (pattern-faults target sub)))]
+              fault))))
+
+(deftest a-pattern-joins-refs-by-their-attribute
+  (let [ps (for [s (distinct (vals pdb/entity-schemas)) :when (not= :seon.root/root-fact s)
+                 :let [p (:seon.ctx/pattern (seon.contract/properties s))] :when p] [s p])]
+    (is (seq ps) "entity schemas with a pattern")
+    (is (some #(= :seon.db/agent-fact (first %)) ps) "the agent's is one")
+    (doseq [[s p] ps]
+      (is (= [] (vec (pattern-faults s p))) (str s ": every join keyed by its attribute, no *, each ref join one its refs imply")))))
 
 ;; An agent pulled by the joins its schema implies, with no :as and no *, holds its task, evals, model calls and messages
 ;; under their attributes, and validates against the schema derived from the refs; a value that breaks its attribute's
@@ -300,8 +330,8 @@
                                {:seon.vector/of [:seon.eval/id "e1"] :seon.vector/model "m"}]))
         t (:tree (ctx/build db (aid db) :b))
         keys-in (fn keys-in [x] (cond (map? x) (concat (keys x) (mapcat keys-in (vals x))) (coll? x) (mapcat keys-in x)))]
-    (is (= ["I will check f0."] (map :seon.model-call/reply (vals (:calls t)))) "the model call is in the record, with its reply")
-    (is (empty? (remove #{:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning
+    (is (= ["I will check f0."] (map :seon.model-call/reply (vals (:seon.model-call/_agent t)))) "the model call is in the record, with its reply")
+    (is (empty? (remove #{:seon.model-call/_agent :seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning
                           :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error
                           ;; how many forms its reply ran, written when the last has run: the call's end as a fact, which the turn's
                           ;; in-flight element waits on (docs/render.md#in-flight-output-streams), as :finish is how it stopped
@@ -312,7 +342,7 @@
         "no :seon.process/* key, no pid or memory on the agent, anywhere in the record")
     (is (= #{[77 5.0]} (d/q '[:find ?p ?m :where [?x :seon.process/agent ?a] [?a :seon.agent/key] [?x :seon.process/pid ?p] [?x :seon.process/forked-ms ?m]] db))
         "the process is reached by a query on its agent")
-    (is (contains? (set (map :seon.eval/id (vals (:evals t)))) "e1") "the eval is in the record")
+    (is (contains? (set (map :seon.eval/id (vals (:seon.eval/_agent t)))) "e1") "the eval is in the record")
     (is (empty? (filter #(and (keyword? %) (= "seon.vector" (namespace %))) (keys-in t))) "no :seon.vector/* in the record")
     (is (= [1200] (d/q '[:find [?n ...] :where [?m :seon.model-call/id "lab/ctx#1/0"] [?m :seon.model-call/tokens ?n]] db))
         "the model call's telemetry is reached by a query on it")))
@@ -464,8 +494,8 @@
   ;; never the newest :seon.config.ctx/window of them (100), which only root's own record keeps for its copies
   (let [n 2400 db (seeded n nil) c (ctx/build db (aid db) :b)]
     (is (< (seon.config/value :seon.config.ctx/window) (quot n 20)) "more of each than the window")
-    (is (= (quot n 20) (count (:messages (:tree c)))) "every message to the agent")
-    (is (= (quot n 3) (count (:calls (:tree c)))) "every model call it has")))
+    (is (= (quot n 20) (count (:seon.message/_to (:tree c)))) "every message to the agent")
+    (is (= (quot n 3) (count (:seon.model-call/_agent (:tree c)))) "every model call it has")))
 
 (deftest the-patch-costs-the-change-not-the-session
   ;; a new eval's transaction patches the record in the work of its datoms, whatever the session's
@@ -622,8 +652,8 @@
   ;; 113 KB, a plan edit 10 and 86 KB), and each names the one path it changed
   (let [changed (fn [[c db tx b]] [db (set (map second (ctx/changes c (ctx/patch c db tx b))))])
         task (fn [_] [:task])
-        f0 #(into (task %) [:cites (id % [:seon.cite/id "lab/ctx app.x/f0"]) :var])]
-    (let [[db ps] (changed (cited-redefined 10))] (is (= #{(conj (f0 db) :form)} ps) "a redefinition: the cited var's form"))
+        f0 #(into (task %) [:seon.cite/_of (id % [:seon.cite/id "lab/ctx app.x/f0"]) :var])]
+    (let [[db ps] (changed (cited-redefined 10))] (is (= #{(conj (f0 db) :var/form)} ps) "a redefinition: the cited var's form"))
     (let [[db ps] (changed (new-caller 10))] (is (= #{(conj (f0 db) :callers (id db [:form/id "app.x/c-2"]))} ps) "a new caller: that caller"))
     (let [[db ps] (changed (plan-edited 10))] (is (= #{(conj (task db) :seon.task/plan)} ps) "a plan edit: the plan")))
   (cost/proof
@@ -676,16 +706,16 @@
      :sizes [100 300 1000 3000]}))
 
 (deftest a-redefined-vars-record-holds-its-new-form
-  ;; a var's form is part of the var's record (:seon.db/var-fact's pattern, [:var/form :as :form]): a record over a
+  ;; a var's form is part of the var's record (:seon.db/var-fact's pattern, the :var/form join): a record over a
   ;; var, patched by its redefinition (a new form, the var pointed to it), holds the new form whole
   (let [db (d/db-with (ts/test-db) [{:db/id "f" :form/id "demo/f-1" :form/src "(defn f [] 1)"} {:var/name 'demo/f :var/form "f"}])
         e (:db/id (d/entity db [:var/name 'demo/f]))
         c (ctx/build db e :b)
         rep (d/with db [{:db/id "g" :form/id "demo/f-2" :form/src "(defn f [] 2)"} [:db/add e :var/form "g"]])
         c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
-    (is (= "(defn f [] 1)" (get-in (:tree c) [:form :form/src])) "built: the var with its form")
-    (is (= "(defn f [] 2)" (get-in (:tree c') [:form :form/src])) "patched: the new form, whole")
-    (is (= [[:replace [:form] (:form (:tree c'))]] (ctx/changes c c')) "what changed: the form")
+    (is (= "(defn f [] 1)" (get-in (:tree c) [:var/form :form/src])) "built: the var with its form")
+    (is (= "(defn f [] 2)" (get-in (:tree c') [:var/form :form/src])) "patched: the new form, whole")
+    (is (= [[:replace [:var/form] (:var/form (:tree c'))]] (ctx/changes c c')) "what changed: the form")
     (is (= c' (ctx/build (:db-after rep) e :b)) "as a build holds it")))
 
 (declare steps)
@@ -855,7 +885,7 @@
                                          :seon.doc/lead "What z does." :seon.doc/text "What z does."}])
         page #(pr-str (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w))))
         [[before after] db'] (as-agent! db #(let [before (page)]
-                                               (swap! ctx/ctx assoc-in [:task :seon.task/plan] "Make `app.x/f0` pass; see [the z](docs/x.md#the-z).")
+                                               (swap! ctx/ctx assoc-in [:seon.agent/task :seon.task/plan] "Make `app.x/f0` pass; see [the z](docs/x.md#the-z).")
                                                (seon.agent/transact! [{:seon.agent/key k :seon.agent/description "another write after it"}])
                                                [before (page)]))
         cold (pr-str (seon.fixtures/drawn-parts db' (ctx/build db' (pdb/eid db' :seon.agent/key k) :b)))]
@@ -876,7 +906,7 @@
                                                          "(defn render-tile\n  \"A tile of the dashboard.\"\n  [x] x)\n")) db)))
         draw (fn [db] (seon.fixtures/drawn-parts db (ctx/build db (aid db) :b)))
         part-of (fn [parts e] (some (fn [[pid v]] (when (str/starts-with? (str pid) "searched-") v)) parts))
-        [_ db1] (as-agent! db #(swap! ctx/ctx assoc-in [:searches "a1/messages"]
+        [_ db1] (as-agent! db #(swap! ctx/ctx assoc-in [:seon.search/_of "a1/messages"]
                                      {:seon.search/id "a1/messages" :seon.search/query "the messages addressed to this session" :seon.search/k 5}))
         e (id db1 [:seon.search/id "a1/messages"])
         ;; its query's vector, as the vectors proc writes it: a search is drawn once its query has one
@@ -884,9 +914,9 @@
         p1 (draw db1)]
     (is (some? e) "the swap! wrote the search, the agent's")
     (is (= (aid db1) (:db/id (:seon.search/of (d/entity db1 e)))) "of the agent, joined by its pattern")
-    (is (contains? (:searches (:tree (ctx/build db1 (aid db1) :b))) e) "its key in ctx is its entity's id, the string key given way")
+    (is (contains? (:seon.search/_of (:tree (ctx/build db1 (aid db1) :b))) e) "its key in ctx is its entity's id, the string key given way")
     (is (str/includes? (pr-str (part-of p1 e)) "app.srch/untaken-entries") (str "its part draws the query's hits: " (pr-str (part-of p1 e))))
-    (let [[_ db2] (as-agent! db1 #(swap! ctx/ctx assoc-in [:searches e :seon.search/query] "a tile of the dashboard"))
+    (let [[_ db2] (as-agent! db1 #(swap! ctx/ctx assoc-in [:seon.search/_of e :seon.search/query] "a tile of the dashboard"))
           p2 (draw db2)
           moved (set (for [[pid v] p2 :when (not= v (get p1 pid))] pid))]
       (is (str/includes? (pr-str (part-of p2 e)) "app.srch/render-tile") "a new query: its part draws the new hits")
@@ -899,11 +929,11 @@
   ;; what each proof calls, by name (D5: its form's :form/refs)
   (let [db (seeded 10)
         t (get-in (:tree (ctx/build db (aid db) :b)) [:task])
-        f0 (get-in t [:cites (id db [:seon.cite/id "lab/ctx app.x/f0"]) :var])]
-    (is (= "What x does." (get-in t [:cites (id db [:seon.cite/id "lab/ctx docs/x.md#the-x"]) :section :seon.doc/text])) "D3: the cited section's text, by its address")
-    (is (= "(defn f0 [x] x)" (get-in f0 [:form :form/src])) "D2: the cited var's source")
+        f0 (get-in t [:seon.cite/_of (id db [:seon.cite/id "lab/ctx app.x/f0"]) :var])]
+    (is (= "What x does." (get-in t [:seon.cite/_of (id db [:seon.cite/id "lab/ctx docs/x.md#the-x"]) :section :seon.doc/text])) "D3: the cited section's text, by its address")
+    (is (= "(defn f0 [x] x)" (get-in f0 [:var/form :form/src])) "D2: the cited var's source")
     (is (= #{(id db [:form/id "app.x/c-1"]) (id db [:form/id "app.x-test/t0-1"])} (set (keys (:callers f0)))) "D1: its callers, the test among them")
-    (let [t0 (get-in t [:proved (id db [:var/name 'app.x-test/t0]) :form])]
+    (let [t0 (get-in t [:proved (id db [:var/name 'app.x-test/t0]) :var/form])]
       (is (= "(deftest t0 (is (= 1 (f0 1))))" (:form/src t0)) "D1: the test's source, held whole at its first path (the task's proofs)")
       (is (= {:db/id (:db/id t0)} (get-in f0 [:callers (id db [:form/id "app.x-test/t0-1"])]))
           "and {:db/id} among the var's callers, which reach it later (the page fills it from its first path)")
@@ -912,14 +942,13 @@
 (deftest an-agents-record-holds-its-proofs-status
   ;; task seon.proofs/test-results-are-a-few-facts (R2a): the status an agent's test run recorded on a proof's
   ;; var entity (seon.proofs/result-tx) is in the agent's record under the task's :proved, where the
-  ;; one layout renders it from: the pattern's wildcard reaches it
+  ;; one layout renders it from: the pattern names the attributes the status reads (not the digest: nothing reads it)
   (let [db (seeded 3 nil)
         db (:db-after (d/with db [{:var/name 'app.x-test/t0 :seon.test/digest "d1" :seon.test/status :red :seon.test/failures [{:type :fail :message "no"}]
                                    :seon.test/ticks 40 :seon.test/bytes 800}]))
-        t (get-in (ctx/build db (aid db) :b) [:tree :task])
+        t (get-in (ctx/build db (aid db) :b) [:tree :seon.agent/task])
         v (get-in t [:proved (id db [:var/name 'app.x-test/t0])])]
     (is (= :red (:seon.test/status v)))
-    (is (= "d1" (:seon.test/digest v)))
     (is (= [{:type :fail :message "no"}] (:seon.test/failures v)))
     (is (= 40 (:seon.test/ticks v)))))
 
@@ -931,11 +960,11 @@
   (let [db (seeded 10)
         t #(get-in (:tree %) [:task])
         c (ctx/build db (aid db) :b)]
-    (let [cite #(get-in (t %1) [:cites (id db [:seon.cite/id (str "lab/ctx " %2)])])]
-      (is (= ['app.x/f0 'app.x/f1] (sort-by str (keep :seon.cite/name (vals (:cites (t c)))))) "the cites' names, the author's symbols")
+    (let [cite #(get-in (t %1) [:seon.cite/_of (id db [:seon.cite/id (str "lab/ctx " %2)])])]
+      (is (= ['app.x/f0 'app.x/f1] (sort-by str (keep :seon.cite/name (vals (:seon.cite/_of (t c)))))) "the cites' names, the author's symbols")
       (is (= 'app.x/f0 (get-in (cite c 'app.x/f0) [:var :var/name])) "app.x/f0 joined by name")
       (is (nil? (:var (cite c 'app.x/f1))) "app.x/f1, written by nobody yet, not")
-      (is (= "(defn f0 [x] x)" (get-in (cite c 'app.x/f0) [:var :form :form/src])) "the var whole, its form joined")
+      (is (= "(defn f0 [x] x)" (get-in (cite c 'app.x/f0) [:var :var/form :form/src])) "the var whole, its form joined")
       (is (some #{"app.x/c-1"} (names (get-in (cite c 'app.x/f0) [:var :callers]) :form/id)) "its caller: the form naming it, by the same name reversed")
       (let [rep (d/with db [{:db/id "f" :form/id "app.x/f1-1" :form/src "(defn f1 [])"} {:var/name 'app.x/f1 :var/form "f"}])
             c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
@@ -1028,13 +1057,13 @@
           (is (= (:max-tx db) (:max-tx db')) "the branch is unchanged"))))
     (testing "a cited var's source is refused, naming its definition as the way to change it"
       (let [f0 (id db [:seon.cite/id "lab/ctx app.x/f0"])
-            [[r same] db'] (step db #(swap! ctx/ctx assoc-in [:task :cites f0 :var :form :form/src] "(defn f0 [x] (inc x))"))]
+            [[r same] db'] (step db #(swap! ctx/ctx assoc-in [:task :seon.cite/_of f0 :var :var/form :form/src] "(defn f0 [x] (inc x))"))]
         (is (= :seon.ctx/invalid (:seon.error/type r)))
         (is (str/includes? (:why (first (:invalid r))) "(in-ns 'app.x) (defn f0 ...)") (pr-str r))
         (is same)
         (is (= (:max-tx db) (:max-tx db'))))
       (let [f0 (id db [:seon.cite/id "lab/ctx app.x/f0"])
-            [[r] _] (step db #(swap! ctx/ctx update-in [:task :cites f0] dissoc :var))]
+            [[r] _] (step db #(swap! ctx/ctx update-in [:task :seon.cite/_of f0] dissoc :var))]
         (is (= "a lookup's members follow :seon.cite/name: change it" (:why (first (:invalid r))))
             "no var changed in it (one gone): what the members follow, no definition named")))
     (testing "a swap! that changes nothing writes nothing, and the record stays the db's"
@@ -1335,7 +1364,7 @@
       (let [all (my.render/render-ctx)
             after-all (my.render/render-changes)
             again (my.render/render-changes)
-            tid (get-in @ctx/ctx [:task :seon.task/id])
+            tid (get-in @ctx/ctx [:seon.agent/task :seon.task/id])
             _ (swap! seon.agent/state assoc :db (d/db-with db [{:seon.task/id tid :seon.task/plan "A plan that moved."}]))
             moved (my.render/render-changes)
             _ (seon.repl/page-walk)

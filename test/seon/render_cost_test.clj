@@ -328,7 +328,7 @@
   asked whether one of its read paths moved), then the walk's frame: what it redrew."
   {:malli/schema [:=> [:cat :map :seon.host/deref] [:map-of [:vector :any] [:enum :miss :same]]]}
   [w a]
-  (swap! a (fn [c] (update-in c [:evals (first (keys (:evals c))) :seon.eval/opened] not)))
+  (swap! a (fn [c] (update-in c [:seon.eval/_agent (first (keys (:seon.eval/_agent c))) :seon.eval/opened] not)))
   (seon.render/flush! w nil))
 
 (deftest a-change-costs-its-components
@@ -351,7 +351,7 @@
   "The input of size n: a component as status draws it, n named children, then the same with one of them changed: page-edits' one argument, [[id was now]]."
   {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
   [n]
-  (let [was (into ['seon.render.ui/status {:ctx [:task :proved]} [:h2 "Your proofs"]]
+  (let [was (into ['seon.render.ui/status {:ctx [:seon.agent/task :proved]} [:h2 "Your proofs"]]
                   [(into [:ul {:key :proofs}] (for [i (range n)] (let [t (symbol "demo-test" (str "t-" i))] [:li {:key t} [:code (str t)] ": passes"])))])
         now (assoc-in was [3 3] '[:li {:key demo-test/t-1} [:code "demo-test/t-1"] ": fails"])]
     [[["status" was now]]]))

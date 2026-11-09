@@ -1238,7 +1238,7 @@
         rs (in-agent ["(#'seon.turn/show-page!)"
                       "(#'seon.turn/show-page!)"
                       evals
-                      "(swap! ctx assoc-in [:task :seon.task/plan] \"A plan that moved.\")"
+                      "(swap! ctx assoc-in [:seon.agent/task :seon.task/plan] \"A plan that moved.\")"
                       "(#'seon.turn/show-page!)"
                       evals
                       "(binding [*ns* (the-ns 'my.render)] (eval '(defn render-ctx [] (throw (ex-info \"broken render\" {})))))"
@@ -1655,11 +1655,11 @@
 
 (defn- messages-held
   "The bodies of the messages this agent's @ctx holds, in the order they reached the branch."
-  [] (mapv :seon.message/body (sort-by :db/id (vals (:messages @seon.ctx/ctx)))))
+  [] (mapv :seon.message/body (sort-by :db/id (vals (:seon.message/_to @seon.ctx/ctx)))))
 
 (defn- remove-held!
-  "The agent removes the one message its @ctx holds, as `(swap! ctx update :messages dissoc e)` does, and its branch commits."
-  [] (swap! seon.ctx/ctx update :messages dissoc (first (keys (:messages @seon.ctx/ctx)))) (agent/commit!))
+  "The agent removes the one message its @ctx holds, as `(swap! ctx update :seon.message/_to dissoc e)` does, and its branch commits."
+  [] (swap! seon.ctx/ctx update :seon.message/_to dissoc (first (keys (:seon.message/_to @seon.ctx/ctx)))) (agent/commit!))
 
 (deftest one-message-reaches-two-agents
   ;; docs/users.md#messages: one entity to two agents; each holds it; a removal retracts that agent's own ref only
@@ -1776,12 +1776,12 @@
            member (fn [coll attr id] (some #(when (= id (attr %)) %) (vals (get @seon.ctx/ctx coll))))]
        (try
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key k :db @store-conn})
-         (is (nil? (:seon.eval/opened (member :evals :seon.eval/id "e1"))) "before the take, nothing of main's")
+         (is (nil? (:seon.eval/opened (member :seon.eval/_agent :seon.eval/id "e1"))) "before the take, nothing of main's")
          (is (= [{:seon.eval/id "e1" :seon.eval/opened true}]
                 (agent/untaken-facts))
              "what main holds of its evals that the branch does not; e9 is no eval of its branch")
          (is (= [] (agent/deliver! 1)) "the delivery a turn makes (seon.turn/deliver!): no messages here, the facts written")
-         (is (true? (:seon.eval/opened (member :evals :seon.eval/id "e1"))) "the opened eval")
+         (is (true? (:seon.eval/opened (member :seon.eval/_agent :seon.eval/id "e1"))) "the opened eval")
          (is (= [] (agent/untaken-facts)) "delivered: nothing more to copy")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
@@ -1945,7 +1945,7 @@
                    "(swap! order conj :a)"
                    "(throw (ex-info \"stop\" {}))"
                    "(swap! order conj :never)"
-                   (str "(do (def id-of (fn [code] (:seon.eval/id (first (filter #(= code (:seon.eval/code %)) (vals (:evals @seon.ctx/ctx))))))) (def probe " probe ") (def before (probe (id-of \"(swap! order conj :a)\"))) :ok)")
+                   (str "(do (def id-of (fn [code] (:seon.eval/id (first (filter #(= code (:seon.eval/code %)) (vals (:seon.eval/_agent @seon.ctx/ctx))))))) (def probe " probe ") (def before (probe (id-of \"(swap! order conj :a)\"))) :ok)")
                    "(seon.repl/again (id-of \"(swap! order conj :a)\"))"
                    "(seon.repl/again (id-of \"(swap! order conj :a)\") \"(swap! order conj :edited)\")"
                    "(seon.repl/again \"no-such-eval\")"
@@ -2713,13 +2713,13 @@
 (deftest a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once
   ;; the agent draws its own page (one derivation, slice 2): the render proc's {:op :render} ask is
   ;; answered by an agent parked between requests with its parts' HTML, a key its branch renders
-  ;; drawn by that render, recording nothing; a request to an agent that is gone is answered at
+  ;; drawn by that render, recording nothing (the key is named by the agent's pattern, which pulls only what it names); a request to an agent that is gone is answered at
   ;; once, so its page is drawn by root from its branch and never waits
   (let [n "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.eval/id))"
         [_ _ swapped before drawn after gone]
         (in-agent #(vector "(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/hiccup lab.ui/steps} :string])"
                    "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat :map [:vector :string]] :any]} [_ v] [:ol (for [s v] [:li s])])"
-                   "(swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"])"
+                   "(do (swap! seon.ctx/ctx assoc :seon.ctx/pattern (conj (seon.render/schema-property :seon.db/agent-fact :seon.ctx/pattern) :lab.ctx/steps)) (swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"]))"
                    n
                    {:op :eval :agent "root"
                     :code (str "(let [id :" (:agent %) "]"
@@ -2953,7 +2953,7 @@
   ;; queue before anything else, each recorded as any eval is, by whoever asked, at turn 0 and with no call id. One that
   ;; throws is recorded with its error and the rest run, as a reply's calls do (owner, 2026-11-08). A reader of the
   ;; conversation then sees them in order and, in the request, as calls of their own.
-  (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:evals (first %)]) (:evals (seon.ctx/turn-members db c (second (first (seon.ctx/turns c))))))] "
+  (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:seon.eval/_agent (first %)]) (:evals (seon.ctx/turn-members db c (second (first (seon.ctx/turns c))))))] "
                   "{:turn (seon.agent/turn-now) "
                   " :records (mapv (fn [v] [(:seon.eval/by v) (:seon.eval/intent v) (:seon.eval/call-id v) (some? (:ex (seon.db/response-of db v))) (:value (seon.db/response-of db v))]) es) "
                   " :roles (mapv :role (drop 2 (:messages (seon.ctx.wire/render db {:agent (:key @seon.agent/state) :commit (datahike.api/commit-id db) :task \"x\" :turn 1 :max-turns 1 :origin :outside} {:walk (seon.repl/page-walk)}))))})")

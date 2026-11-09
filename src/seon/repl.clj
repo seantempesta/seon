@@ -1152,7 +1152,7 @@
   {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string [:maybe :string]] :map]]}
   ([id] (again id nil))
   ([id code]
-   (let [evals (map val (sort-by key (:evals @ctx/ctx)))
+   (let [evals (map val (sort-by key (:seon.eval/_agent @ctx/ctx)))
          e (first (filter #(= id (:seon.eval/id %)) evals))]
      (if-not e
        (contract/error :seon.repl/no-eval #'again (str "no eval " id " in this agent's record") {:seon.eval/id id})
@@ -1165,7 +1165,7 @@
   "Run again this agent's conversation's evals down to eval id, in order, each in its place (`again`), stopping at the first that fails: what a person does evaluating a file down to a line. Seon's evals are not its work, and an eval that names no call (a context read, the agent's loop) is in no conversation. Answers each one run, {:id :failed?}. See docs/turn.md#an-eval-can-be-run-again."
   {:malli/schema [:=> [:cat :string] [:vector [:map [:id :string] [:failed? :boolean]]]]}
   [id]
-  (let [evals (map val (sort-by key (:evals @ctx/ctx)))
+  (let [evals (map val (sort-by key (:seon.eval/_agent @ctx/ctx)))
         work? #(and (:seon.eval/call %) (not= "seon" (:seon.eval/by %)))]
     (if (some #(= id (:seon.eval/id %)) evals)
       (reduce (fn [acc ev]

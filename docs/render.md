@@ -89,7 +89,7 @@ Each view renders on its own (```seon.render.proc/view-pass```, a [failure point
 
 ### A part prints as its render
 
-The model reads each part as the hiccup its render returned, headed by the function that drew it and the ctx path it read: ``[seon.render.ui/status {:ctx [:task :proved]} [:h2 "Where your work stands"] ...]`` (```seon.render/part-form``` from the walk's own cache entry, printed by ```seon.render/part-text```). The head is the cache entry's `:f`, so it names the function that drew the part; `:ctx` is the `:at` its layout gave the component, a real path of the agent's `@ctx` (`(get-in @ctx path)` answers the data it read; an entity id in the path is fine). A child component is a part of its own, nested; presentation (class, style) is the page's and is not printed, and an id names an element, so it is, and so is a `:key`, Reagent's, which names a child ([a change is edits by name](#a-change-is-edits-by-name)) and which the page's writer leaves out; an element or a component call for the page alone carries `:wire/for "page"` and is left out (a walk only the model reads does not draw it: ```seon.render/draw```'s `:model-only`, until ```seon.render/draw-all```), and an element for the model alone carries `:wire/for "model"`, which the page's writer leaves out. A walk read once and let go (`:once`, a request drawn cold) makes no reaction and reads ctx as plain data. Source is a verbatim block, `[:pre [:code src]]` in the hiccup, printed in a Markdown fence longer than any run of backticks inside it (```seon.render/fence```), never escaped; a string with a line break or a quote is text, printed as written. The page writes a symbol head by resolving it (```seon.web.html/html```): one expansion, not a second render path. A test reads that a real page's heads name functions and its paths answer data (`seon.render-test/a-parts-head-is-the-function-that-drew-it-and-its-path-is-real`); nothing refuses a part.
+The model reads each part as the hiccup its render returned, headed by the function that drew it and the ctx path it read: ``[seon.render.ui/status {:ctx [:seon.agent/task :proved]} [:h2 "Where your work stands"] ...]`` (```seon.render/part-form``` from the walk's own cache entry, printed by ```seon.render/part-text```). The head is the cache entry's `:f`, so it names the function that drew the part; `:ctx` is the `:at` its layout gave the component, a real path of the agent's `@ctx` (`(get-in @ctx path)` answers the data it read; an entity id in the path is fine). A child component is a part of its own, nested; presentation (class, style) is the page's and is not printed, and an id names an element, so it is, and so is a `:key`, Reagent's, which names a child ([a change is edits by name](#a-change-is-edits-by-name)) and which the page's writer leaves out; an element or a component call for the page alone carries `:wire/for "page"` and is left out (a walk only the model reads does not draw it: ```seon.render/draw```'s `:model-only`, until ```seon.render/draw-all```), and an element for the model alone carries `:wire/for "model"`, which the page's writer leaves out. A walk read once and let go (`:once`, a request drawn cold) makes no reaction and reads ctx as plain data. Source is a verbatim block, `[:pre [:code src]]` in the hiccup, printed in a Markdown fence longer than any run of backticks inside it (```seon.render/fence```), never escaped; a string with a line break or a quote is text, printed as written. The page writes a symbol head by resolving it (```seon.web.html/html```): one expansion, not a second render path. A test reads that a real page's heads name functions and its paths answer data (`seon.render-test/a-parts-head-is-the-function-that-drew-it-and-its-path-is-real`); nothing refuses a part.
 
 ### The agent's turn
 
@@ -119,9 +119,9 @@ Your page and your model's context are renders of `@ctx`, and a render runs agai
 
 ```clojure
 (defn eval-code "An eval's code." {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]] :int] :any]}
-  [{c :seon.ctx/ctx} id] [:li (get-in c [:evals id :seon.eval/code])])
+  [{c :seon.ctx/ctx} id] [:li (get-in c [:seon.eval/_agent id :seon.eval/code])])
 (defn page "The plan, then the code of each eval." {:malli/schema [:=> [:cat [:map [:seon.ctx/ctx :map]]] :any]}
-  [{c :seon.ctx/ctx}] [:div [:p (get-in c [:task :seon.task/plan])] (into [:ol] (for [id (keys (:evals c))] [#'eval-code {} id]))])
+  [{c :seon.ctx/ctx}] [:div [:p (get-in c [:seon.agent/task :seon.task/plan])] (into [:ol] (for [id (keys (:seon.eval/_agent c))] [#'eval-code {} id]))])
 ```
 
 A flush (`seon.render/flush!`) answers each component it ran, `:miss` when its output is new and `:same` when it ran and answered what it did before (which passes nothing on: its parent and the page are untouched); a component it skipped is not named. A path that names nothing reads `nil` and draws it, with no error: check a render's output once. A render that throws draws its error in its place, a `:seon.render/component-defect` naming the render and the message, and every other component draws. To change your own page, register your render as the layout or one of its parts ([ctx](ctx.md#the-record-is-the-agents-work), [adding a datum and its render](ctx.md#adding-a-datum-and-its-render)). `seon.render-test/a-flush-answers-what-it-redrew`.
@@ -137,13 +137,13 @@ A flush (`seon.render/flush!`) answers each component it ran, `:miss` when its o
 (in-ns 'agent.a1)
 ;; what your plan cites, changed through ctx: the write derives what the new text cites (seon.agent/transact!),
 ;; so the cited part appears in the same turn
-(swap! ctx update-in [:task :seon.task/plan] str " See `seon.print/text`.")
+(swap! ctx update-in [:seon.agent/task :seon.task/plan] str " See `seon.print/text`.")
 ```
 
 Each part is headed by the name of the render that drew it (``seon.render.ui/cited``, ``seon.render.ui/status``), so a line you see leads to the function you redefine. `seon.render-test/a-redefined-render-redraws`, `seon.ctx-test/the-page-reads-every-write-since-it-was-drawn`.
 
 **What a read costs**, measured in that test and in `seon.ratom-test/inferred-paths`: a render runs again when a change reaches what it read.
-- `(get-in c [:task :seon.task/plan])`, `(:k m)`: that value changed, or something above it was replaced.
+- `(get-in c [:seon.agent/task :seon.task/plan])`, `(:k m)`: that value changed, or something above it was replaced.
 - `(contains? m :k)`, `(get m :k nf)`: the same as reading the value; a key's presence is not cheaper.
 - `(count m)`, `(keys m)`, `(seq m)` of a collection: a member added, removed or replaced, never a change inside a member.
 - `(for [[id e] evals] (:seon.eval/code e))`: any member's attribute; the same list with `[#'eval-code {} id]` runs only the `eval-code` whose eval changed.

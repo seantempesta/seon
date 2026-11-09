@@ -285,7 +285,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
                                                :seon.task/plan "Read `demo.calc`, `:x.s/block` and `bin/env`."}]))
         t (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/n") :b))
-        m (into {} (for [c (vals (:cites t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c)])]))]
+        m (into {} (for [c (vals (:seon.cite/_of t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c)])]))]
     (is (str/includes? (m 'demo.calc) "Adds.") "a namespace: the first sentence of its doc")
     (is (str/includes? (m 'demo.calc) "(doc 'demo.calc)") "and the form that reads it")
     (is (str/includes? (m :x.s/block) ":int") "a schema key: what it holds")
@@ -593,7 +593,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Make ```ctx-big/big``` fast."}]))
         r (seon.doc/resolve-ref db 'ctx-big/big :code)
         ;; the task's cite as ctx holds it: the var it names, with its form
-        part {:seon.cite/name 'ctx-big/big :seon.cite/depth :code :var {:var/name 'ctx-big/big :form {:form/src src}}}
+        part {:seon.cite/name 'ctx-big/big :seon.cite/depth :code :var {:var/name 'ctx-big/big :var/form {:form/src src}}}
         model (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db part {:changing? true})])]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} (select-keys r [:symbol :source])) "the source whole as code, never swapped for its doc by size")
     (is (str/includes? model src) "the part holds it whole, in a fence: a function cited to be changed is read whole")
@@ -677,7 +677,7 @@
   "The wire messages of the conversation of `reply-world` with the evals ids of its ctx unlinked (what swap! on @ctx does)."
   [ids]
   (let [[db c] (reply-world)
-        ms (seon.fixtures/tree-messages (update c :evals #(apply dissoc % (map (partial pdb/eid db :seon.eval/id) ids))) db)]
+        ms (seon.fixtures/tree-messages (update c :seon.eval/_agent #(apply dissoc % (map (partial pdb/eid db :seon.eval/id) ids))) db)]
     (seon.model/wire-messages true ms)))
 
 (defn- reply-shape
@@ -707,7 +707,7 @@
     (is (= [["I look." "think" ["(f 1)" "(f 2)" "(f 3)"]] ["Then." "more" ["(f 4)" "(f 5)"]]] (reply-shape (wire-without ["e6"])))))
   (testing "the reasoning survives a cut of call 0 and goes only when replay is off"
     (let [[db c] (reply-world)
-          ms (seon.fixtures/tree-messages (update c :evals dissoc (pdb/eid db :seon.eval/id "e1")) db)]
+          ms (seon.fixtures/tree-messages (update c :seon.eval/_agent dissoc (pdb/eid db :seon.eval/id "e1")) db)]
       (is (= "think" (:reasoning_content (first (seon.model/wire-messages true ms)))))
       (is (not (contains? (first (seon.model/wire-messages false ms)) :reasoning_content))))))
 
@@ -742,7 +742,7 @@
         block (data-of db "demo/f")
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))
         ;; the page's part: the cite joins the task by its id (:seon.cite/task), drawn by its plan
-        cite (some #(when (= 'demo.other/g (:seon.cite/name %)) %) (vals (:cites (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/f") :b)))))
+        cite (some #(when (= 'demo.other/g (:seon.cite/name %)) %) (vals (:seon.cite/_of (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/f") :b)))))
         part (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db cite)])]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")
@@ -1518,7 +1518,7 @@
   (let [db (db-with-program)
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/plan "Change `demo/f`."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        names #(set (keep :seon.cite/name (vals (:cites (:tree (ctx/build % (pdb/eid % :seon.task/id "demo/c") :b))))))]
+        names #(set (keep :seon.cite/name (vals (:seon.cite/_of (:tree (ctx/build % (pdb/eid % :seon.task/id "demo/c") :b))))))]
     (is (= '#{demo/f} (names db)) "the cites its write made")
     (let [db (d/db-with db [{:seon.task/id "demo/c" :seon.task/plan "Change `demo/g`."}])]
       (is (= '#{demo/f} (names db)) "a draw reads the entities, never the text again")
@@ -1877,9 +1877,9 @@
   ;; message the doc section it links
   (let [[db a] (tree-world {:id "e1" :call-id "c"})
         section (pdb/eid db :seon.doc/address (first (filter #(str/includes? % "the-small-one") (map :v (d/datoms db :aevt :seon.doc/address)))))
-        pattern '[:seon.agent/key :seon.agent/turn {[:seon.agent/system :as :system] [:db/id]}
-                  {[:seon.eval/_agent :as :evals] [:seon.eval/id :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/response]}
-                  {[:seon.model-call/_agent :as :calls] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin {[:seon.eval/_call :as :evals] [:db/id]}]}]
+        pattern '[:seon.agent/key :seon.agent/turn {:seon.agent/system [:db/id]}
+                  {:seon.eval/_agent [:seon.eval/id :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/response]}
+                  {:seon.model-call/_agent [:seon.model-call/id :seon.model-call/n :seon.model-call/origin {:seon.eval/_call [:db/id]}]}]
         task (d/db-with db (into (seon.task/create-tx db [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f." :seon.task/proofs #{'demo-test/f-test}}])
                                  [{:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/f"}}]))
         small (d/db-with task [{:db/id a :seon.ctx/pattern pattern :seon.agent/system [section]}])
@@ -1929,7 +1929,7 @@
 
 (deftest a-page-eval-reads-as-the-value-it-stored
   ;; docs/render.md#the-render-is-an-eval: a model's bytes for a page diff are what (my.render/render-changes) stored
-  (let [v (render/parts-value {"status" '[seon.render.ui/status {:ctx [:task :proved]} [:p "moved"]]})
+  (let [v (render/parts-value {"status" '[seon.render.ui/status {:ctx [:seon.agent/task :proved]} [:p "moved"]]})
         rec {:seon.eval/id "p1" :seon.eval/by "seon" :seon.eval/code "(my.render/render-changes)" :seon.eval/schema :seon.render/parts
              :seon.eval/response {:handle 'result/p1 :value v}}
         [db] (tree-world)

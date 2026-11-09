@@ -30,7 +30,7 @@ An entity schema says which keys go together, and an entity holding any key it r
 
 ## Things relate by refs
 
-A relationship is one ref, written on the many side, and read from either end. An eval names its agent (`:seon.eval/agent`), and the agent's evals are that ref read in reverse, `{[:seon.eval/_agent :as :evals] [*]}` in a pull, so nothing on the agent needs updating when an eval is added. A many-to-many relationship is a set of refs on one side.
+A relationship is one ref, written on the many side, and read from either end. An eval names its agent (`:seon.eval/agent`), and the agent's evals are that ref read in reverse, ``{:seon.eval/_agent [...]}`` in a pull, the join's key the attribute itself (a pull's `:as` renames it, which Seon's patterns never do on a ref, so a path into `@ctx` names an attribute), so nothing on the agent needs updating when an eval is added. A many-to-many relationship is a set of refs on one side.
 
 **A ref names what it points at, once, on its own schema** (owner, 2026-11-09: separate definitions, linked): `:seon.eval/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]`, a set ref on its `:set` (`[:set {:seon.db/to [:seon.task/task-fact]} :seon.db/ref]`), several targets when it may point at several things (`:seon.cite/of`, a task or an agent). From that one fact every reader knows the links both ways: ```seon.db/targets``` (what each ref points at), ```seon.db/reaching``` (the refs that point at a schema: an agent's evals, model calls, messages, cites and searches), and ```seon.db/implied-pattern```, the pull a schema implies, a schema already walked not followed again (Malli's `::walked-refs`), so no join loops. So "an agent" is its attributes and the refs that reach it, and no schema restates another's links. The hand-written joins of the agent's and the task's patterns are all implied (`seon.ctx-test/the-hand-written-joins-are-implied-by-the-refs`), and an agent pulled by them, with no `:as` and no `*`, validates against a Malli schema derived from the refs, every entry optional (`seon.ctx-test/an-agent-pulled-by-its-implied-joins-validates`). A target is a link, never what the ref's value is checked against, so a test's reach does not follow it (```seon.program/less-targets```).
 
@@ -70,7 +70,7 @@ AVET holds an attribute only if it is an identity, a ref or declared `{:seon.db/
 
 A render runs again when a datom touches what it read, so a narrow read costs less now and is drawn less often later ([what a read scanned](storage.md#what-a-read-scanned)). A seek by value is keyed by exactly that attribute and value, and only a datom with that value touches it. A pull is keyed by that entity's attributes. A scan of an attribute is touched by every write to that attribute anywhere.
 
-The same holds for `@ctx`: read the path you need, since walking `(:evals c)` to find a few depends on every eval ([reactive renders](render.md#reactive-renders)). So look up the records of turn 7 by their number, and do not filter every eval to find them.
+The same holds for `@ctx`: read the path you need, since walking ``(:seon.eval/_agent c)`` to find a few depends on every eval ([reactive renders](render.md#reactive-renders)). So look up the records of turn 7 by their number, and do not filter every eval to find them.
 
 ## Work is progressive
 
