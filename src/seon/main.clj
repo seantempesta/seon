@@ -109,7 +109,7 @@
              (out! (if (seon.contract/error? r) "SEED FAILED " "SEED OK ") (shown r))
              (lib/c-exit (if (seon.contract/error? r) 1 0)))
     ;; what bin/build records beside the binary it built (target/seon.program): the program of the tree it was built from
-    "built-program" (let [r (c/built-program (checkout))]
+    "built-program" (let [r (c/built-program (checkout) (second (seon.config/without-overrides args)))]
                       (if (seon.contract/error? r) (out! "BUILT-PROGRAM FAILED " (shown r)) (out! (seon.edn/encode r)))
                       (lib/c-exit (if (seon.contract/error? r) 1 0)))
     "embed-worker" (seon.vector/serve!)

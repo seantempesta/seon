@@ -1159,18 +1159,20 @@
     (assoc out :ms (lib/r2 (profile/ms-since t0)))))
 
 (defn built-program
-  "The program of the tree at root as a seed indexes it, and the inputs bin/test keys verdicts by: {:program (its source
-  dirs imported into an empty db, seon.source/tx-of, then seon.program/program-digest) :inputs (seon.fx/inputs)}, or the
-  error of a read or an analysis. What bin/build records beside the binary it built (target/seon.program, `binary-program`). See
-  docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat :string] :map]}
-  [root]
-  (let [r (fx/read-source {:req {:root root :dirs (cfg/value :seon.config.source/dirs)}})
-        db (pdb/empty-db false)
-        tx (if (contract/error? r) r (source/tx-of db (:value r) false))]
-    (if (contract/error? tx)
-      tx
-      {:program (program/program-digest (:db-after (pdb/with db tx))) :inputs (fx/inputs root)})))
+  "The program of the tree at root as a seed indexes it, and the inputs bin/test keys verdicts by: {:program
+  (seon.program/program-digest of the tree's index) :inputs (seon.fx/inputs)}, or the error of a read or an analysis.
+  The index is kept between builds in the store at path, the build's own (bin/build's target/seon.index), and brought
+  to the tree as a seed brings a store (import-tree!: only the files the tree changed since that store's last index),
+  so a build pays for what changed. What bin/build records beside the binary it built (target/seon.program,
+  `binary-program`). See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string :string] :map]}
+  [root path]
+  (let [{:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
+        r (import-tree! conn {:root root :dirs (cfg/value :seon.config.source/dirs)} (profile/now-ns))
+        out (if (:error r) (:error r) {:program (program/program-digest @conn) :inputs (fx/inputs root)})]
+    (pdb/sync! cfg)
+    (d/release conn)
+    out))
 
 (defn binary-program
   "What the running binary was built from, as bin/build recorded it beside the binary (target/seon.program,

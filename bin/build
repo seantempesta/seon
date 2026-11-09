@@ -261,11 +261,12 @@ build_embed() {
   echo "$pin" > "$T/embed.stamp"
 }
 
-# record_program: the program of the tree target/seon was built from, as a seed indexes it, and the tree's inputs
-# (seon.root/built-program), into target/seon.program: a root resumes its main reading no source, and compares main's
+# record_program: the program of the tree target/seon was built from, as a seed indexes it into target/seon.index (kept
+# between builds, so a build indexes what the tree changed), and the tree's inputs (seon.root/built-program), into
+# target/seon.program: a root resumes its main reading no source, and compares main's
 # program with this one (docs/source.md#the-binary-records-its-program)
 record_program() {
-  ( cd "$T" && SEON_CHECKOUT=$ROOT HOME=$T/home nice -n 15 ./seon built-program --profile scripted ) > "$T/built-program.log" 2>&1 &&
+  ( cd "$T" && SEON_CHECKOUT=$ROOT HOME=$T/home nice -n 15 ./seon built-program "$T/seon.index" --profile scripted ) > "$T/built-program.log" 2>&1 &&
     tail -1 "$T/built-program.log" > "$T/seon.program" ||
     { rm -f "$T/seon.program" "$T/seon.stamp"; tail -5 "$T/built-program.log" >&2; die "recording the program target/seon was built from failed; see target/built-program.log"; }
   say "seon: recorded the program it was built from (target/seon.program)"

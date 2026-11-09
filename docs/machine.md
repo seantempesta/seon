@@ -180,7 +180,7 @@ A boot now resumes its main and reads no file ([source](source.md#a-boot-resumes
 | the tree read again after start (`import-source!`, its inputs 420-480 ms) | ~650 ms | 0 |
 | `bin/root start` to `ROOT LISTENING` | 2,619-3,222 ms (5,331 cold) | 1,047-1,135 ms |
 
-What is left is the image and a digest of main's program (one read of five attributes' datoms, O(program) with a small constant: 5 ms at the REPL, 55-105 ms at boot with the config held). A seed (`bin/root seed`, or the first boot of a fresh store) pays the import, the wiki and the task files once; `bin/build` pays 10.7 s to record the program its binary was built from.
+What is left is the image and a digest of main's program (one read of five attributes' datoms, O(program) with a small constant: 5 ms at the REPL, 55-105 ms at boot with the config held). A seed (`bin/root seed`, or the first boot of a fresh store) pays the import, the wiki and the task files once; `bin/build` records the program its binary was built from by an incremental index it keeps (1.8-2.0 s a build of a changed tree, [source](source.md#the-binary-records-its-program)).
 
 ### The restart tests
 

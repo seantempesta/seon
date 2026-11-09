@@ -248,6 +248,30 @@
       (let [r (sh/sh "diff" "-r" (str orig "/src") (str copy "/src"))]
         (is (= [0 ""] [(:exit r) (:out r)]))))))
 
+;; docs/source.md#the-binary-records-its-program: the build's record was the whole tree indexed into an empty db at every
+;; build (1.23 G ticks and 5.4 GB of analysis, 2.34 G and 4.9 GB of checked transaction, 10.7 s at load 2); it is now the
+;; seed's own incremental index on a store the build keeps, so a build pays for what its tree changed. Its digest is the
+;; one a fresh index of the same tree holds. A scratch repository of two files, two stores of the test's own, removed
+(deftest a-builds-kept-index-holds-the-program-a-fresh-index-holds
+  (let [dir (scratch-dir "built")
+        tree (str dir "/tree")
+        git (fn [& args] (apply sh/sh "git" "-C" tree "-c" "user.name=t" "-c" "user.email=t@t" args))
+        put! (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str tree "/" p)))) (spit (str tree "/" p) t))
+        commit! #(do (git "add" "-A") (git "commit" "-q" "-m" "t"))
+        kept (str dir "/kept") fresh (str dir "/fresh")]
+    (try
+      (sh/sh "git" "init" "-q" tree)
+      (put! "src/app/bp.clj" "(ns app.bp)\n\n(defn one [] 1)\n")
+      (commit!)
+      (let [a (:program (root/built-program tree kept))]
+        (put! "src/app/bp.clj" "(ns app.bp)\n\n(defn one [] 2)\n")
+        (put! "src/app/bq.clj" "(ns app.bq)\n\n(defn two [] 2)\n")
+        (commit!)
+        (let [b (:program (root/built-program tree kept))]
+          (is (and (string? a) (not= a b)) "the kept index moved with the tree")
+          (is (= b (:program (root/built-program tree fresh))) "and holds the program a fresh index of the same tree holds")))
+      (finally (sh/sh "rm" "-rf" dir)))))
+
 (deftest a-landing-through-the-bridge-is-a-zero-diff
   ;; task seon.root/a-boot-resumes-from-the-db: a Claude session's landing enters main as data, the changed files' facts
   ;; (seon.root/changed-tx, what bin/land's bridge evaluates on an outside agent's branch before the ordinary merge).
