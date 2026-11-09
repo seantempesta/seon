@@ -2405,3 +2405,11 @@
      [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" unit "-raw&open=' + el.open)")} raw? (assoc :open true))
       [:summary {:class "cursor-pointer text-text-400"} "the body's JSON, whole, as sent"]
       (when raw? [:pre {:class "whitespace-pre-wrap break-all font-mono text-text-100" :data-wire "body"} (json/write-str body)])]]))
+
+;; Web's to replace when 2a's page renders exist: the agent's page parts that are not its conversation, which a turn's diff compares.
+(defn agent-parts
+  "An agent's page parts that are not its conversation (its task), the hiccup a turn's diff compares; :seon.ctx/pattern, what it
+  reads of the agent, so a point's parts pull that and no more. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  {:seon.ctx/pattern [:seon.agent/key {:seon.agent/task :seon.task/task-fact}]
+   :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_ c] [:section {:id "agent-parts"} (:seon.agent/task c)])

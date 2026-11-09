@@ -300,15 +300,19 @@
   (pattern-of: the agent's own edit, else its entity schema's), and its environment on branch,
   the db's data only (nothing derived from it is held here: a render derives what it needs);
   :ix the walk's state (node: where each entity is held, its pattern, what each join watches).
-  Any entity an entity schema names: an agent's (its @ctx), root's, the user's, a task's. With no
+  Any entity an entity schema names: an agent's (its @ctx), root's, the user's, a task's; with pattern p, e pulled by p (a
+  render's own :seon.ctx/pattern, for one that reads less than the entity's pattern holds). With no
   e (an agent whose entity its branch does not hold yet), its environment alone. ix is the entity index schemas are read in
   (seon.db/index-of), kept in :ix (:index): handed by a patch's caller (an agent's slot), or, when :ix holds :own-index? (a caller that built it for its own use), built again by a patch that moved a schema entry. O(the entities
   the pattern reaches)."
-  {:malli/schema [:=> [:cat :map :seon.host/db [:maybe pos-int?] :any] [:map [:tree :map] [:ix :seon.ctx/ix]]]}
-  [ix db e branch]
-  (let [m (when e (own db e))
-        [tree r] (if (and m (< 1 (count m))) (node db e (render/pattern ix (pattern-of ix m)) [] {:index ix} nil {}) [{} {:index ix}])]
-    {:tree (with-environment tree db branch) :ix r}))
+  {:malli/schema [:function [:=> [:cat :map :seon.host/db [:maybe pos-int?] :any] [:map [:tree :map] [:ix :seon.ctx/ix]]]
+                  [:=> [:cat :map :seon.host/db [:maybe pos-int?] :any [:maybe [:vector :any]]] [:map [:tree :map] [:ix :seon.ctx/ix]]]]}
+  ([ix db e branch] (build ix db e branch nil))
+  ;; pattern p, given, in place of the entity's own: what a render that reads less of it pulls (a render's :seon.ctx/pattern)
+  ([ix db e branch p]
+   (let [m (when e (own db e))
+         [tree r] (if (and m (< 1 (count m))) (node db e (render/pattern ix (or p (pattern-of ix m))) [] {:index ix} nil {}) [{} {:index ix}])]
+     {:tree (with-environment tree db branch) :ix r})))
 
 (defn made-by
   "Who made attribute a of entity e as db holds it: the tx-meta of the transaction of its newest

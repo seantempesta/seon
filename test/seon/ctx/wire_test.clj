@@ -2070,7 +2070,10 @@
   render's output, in place (the contract the walk keeps, docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09)."
   [db a]
   (let [o {:seon.db/db db}]
-    (vec (mapcat (fn [x] (if (:role x) [x] ((model-renders (render/schema-of x nil)) o x)))
+    (vec (mapcat (fn [x] (cond (:role x) [x]
+                                       ;; a placed call, [#'f opts & args]: the walk renders it as a component of its own
+                                       (and (vector? x) (var? (first x))) (apply (first x) (merge o (second x)) (nnext x))
+                                       :else ((model-renders (render/schema-of x nil)) o x)))
                  (wire/agent-wire o (ctx/agent-ctx db a))))))
 
 (defn- with-system
