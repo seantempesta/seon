@@ -500,9 +500,9 @@
 (deftest an-end-closed-on-a-live-pid-ends-the-agent-and-answers-its-waiter
   ;; an agent whose end closed can never answer root again: root ends it at once (the kill its :kill
   ;; makes), and its exit, which comes, answers the requests it held through ::dying. No bound is
-  ;; reached and no stall timer is armed. The pid is a real child, alive for 20 s unless killed.
-  (let [pid (seon.lib/fork! {:refused (fn [n] {:refused n}) :parent identity
-                        :child (fn [] (Thread/sleep 20000) (seon.lib/c-exit 0))})
+  ;; reached and no stall timer is armed. The pid is a real child (sleep 20), alive unless killed.
+  (let [proc (.start (ProcessBuilder. ^java.util.List ["sleep" "20"]))
+        pid (.pid proc)
         p (promise)
         st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                              :view {:agents {:a1 {:status :busy :pid pid :branch :b1}}} :graph (promise)
@@ -510,7 +510,7 @@
         st (-> st (assoc-in [:agents :a1] {:branch :b1}) (assoc :writer-closed true))
         [st rid] (#'root/pend st p :eval :a1)
         st (#'root/end-agent st (volatile! {}) {:agent :a1 :pid pid :inflight [rid]})
-        status (seon.lib/wait-status pid)]
+        status {:exit (.waitFor proc)}]
     (is (not= {:exit 0} status) (str "ended by root, not left to run out: " (pr-str status)))
     (is (not (realized? p)) "its waiter is answered at its exit, not before")
     (let [st' (#'root/back-op st (volatile! {}) {:ev :exit :pid pid :status status})]
