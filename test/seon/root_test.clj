@@ -370,7 +370,9 @@
   (let [file "resources/seon/config/default.edn"
         ;; the shipped file as the binary was built (a test reading the checkout's files takes the tree)
         merged config/built-text
-        before (str/join "\n" (remove #(str/includes? % ":seon.config.web/streams-buf ") (str/split-lines merged)))
+        ;; main before the merge: the key at another value (a missing key a config may not lack refuses its import, as it
+        ;; would refuse a boot: seon.config's closed), so the merged value root holds is the boot's import's
+        before (str/replace merged #"(:seon\.config\.web/streams-buf )(\d+)" (fn [[_ k v]] (str k (inc (parse-long v)))))
         [seed two three] (boots-on-a-tree file [before merged merged])]
     (is (not= before merged))
     (is (str/includes? (str seed) "SEED OK") (str seed))
