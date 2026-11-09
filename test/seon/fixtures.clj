@@ -77,7 +77,7 @@
     (vec (for [{:keys [name needs] :as s} specs :when name]
            (cond-> {:seon.task/ns tns :seon.task/name name
                     :seon.task/plan (or (:plan s)
-                                        (str "Make " (str/join ", " (map #(str "`" % "`") (proof-vars s))) " pass its proof `app.proofs/" name "-test`."
+                                        (str "Make " (str/join ", " (map #(str "`" % "`") (proof-vars s))) " pass its proof ``app.proofs/" name "-test``."
                                              (when (seq needs) (str " It may use " (str/join ", " (map #(str "`app.calc/" % "`") needs)) "."))))
                     :seon.task/proofs (or (:proofs s) #{(symbol "app.proofs" (str name "-test"))})}
              (seq needs) (assoc :seon.task/needs (set (map #(str tns "/" %) needs)))
