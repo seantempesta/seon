@@ -274,15 +274,14 @@
       (is (= :root (first (task/entity-value booted e))))
       (is (= "b1" (:boot (second (task/entity-value booted e))))))))
 
-(deftest a-message-a-fork-inherited-is-still-delivered
-  ;; docs/users.md#messages: a message sent before its agent's branch forked is on the branch with no turn holding it: it still arrives; one a turn holds, removed or not, doesn't again
+(deftest a-message-on-the-branch-is-delivered
+  ;; docs/users.md#messages (owner, 2026-11-09): the entity on the agent's branch is the proof of delivery: one a fork inherited is delivered at the fork, one removed (its ref retracted, the entity kept) stays so
   (let [main (d/db-with (ts/test-db) (into [{:seon.agent/key "a"}] (task/message-tx "m1" "sean" ["a"] "first" 1)))
-        forked main
-        placed (d/db-with forked [{:seon.message/id "m1" :seon.message/call {:seon.model-call/id (seon.lib/call-id "a" 1)}}])
-        removed (d/db-with placed [[:db/retract (:db/id (d/entity placed [:seon.message/id "m1"])) :seon.message/to (:db/id (d/entity placed [:seon.agent/key "a"]))]])]
-    (is (= ["m1"] (map :id (task/undelivered main forked "a"))) "inherited, and no turn has it")
-    (is (= [] (task/undelivered main placed "a")) "a turn has it")
-    (is (= [] (task/undelivered main removed "a")) "removed after, it stays gone")))
+        away (d/db-with (ts/test-db) [{:seon.agent/key "a"}])
+        removed (d/db-with main [[:db/retract (:db/id (d/entity main [:seon.message/id "m1"])) :seon.message/to (:db/id (d/entity main [:seon.agent/key "a"]))]])]
+    (is (= ["m1"] (map :id (task/undelivered main away "a"))) "a branch that does not hold it is owed it")
+    (is (= [] (task/undelivered main main "a")) "inherited at the fork: delivered")
+    (is (= [] (task/undelivered main removed "a")) "removed after, it stays delivered")))
 
 (deftest a-started-agent-is-linked-to-who-started-it
   ;; docs/users.md#what-each-thing-is: a task names who started it; its agent, when it starts, is in that one's :seon.agent/agents, a user or an agent alike

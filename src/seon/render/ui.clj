@@ -1568,14 +1568,15 @@
   [{db0 :seon.db/db k :key}]
   (let [t (session/example-t db0 k)
         db (d/as-of db0 t)
-        c (ctx/agent-ctx db (seon.db/eid db :seon.agent/key k))]
+        c (ctx/agent-ctx db (seon.db/eid db :seon.agent/key k))
+        placed (ctx/placed-messages db c)]
     (into [:details {:wire/ref [:example k t]}
            [:summary {:class "muted" :wire/for "page"} (str "example session " k)]
            [:p {:wire/role "user" :wire/for "model"} (session/example-open k (:seon.agent/description c))]]
           (concat
-            (for [[_ cid] (ctx/turns c)
-                  :let [{:keys [messages evals]} (ctx/turn-members db c cid)
-                        evals (map first evals)
+            (for [[n cid] (ctx/turns c)
+                  :let [messages (get placed n)
+                        evals (map first (ctx/turn-evals c cid))
                         model? #(get-in c [:seon.eval/_agent % :seon.eval/call-id])
                         step #(eval-hiccup {:db db} (get-in c [:seon.eval/_agent %]))]]
               (into [:div {:wire/turn (get-in c [:seon.model-call/_agent cid :seon.model-call/n])}]
@@ -1631,11 +1632,12 @@
 
 (defn conversation-turn
   "Turn :key as the chat shows it and the model reads it, found by its model call's id, one seek (agent -> call -> its records, so a record of another turn touches nothing this read and an earlier
-  turn never runs again): the messages it took, its reply holding the evals it ran, and the evals of other hands after it, each eval and message a component of its own. See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:key :int]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db n :key}]
-  (when-let [cid (some->> (ratom/realize (:seon.agent/key c)) (ctx/call-of db n))]
-    (let [{:keys [messages evals]} (ctx/turn-members db c cid)
+  turn never runs again): the messages it took (:messages, [[m id]] as the list placed them: `seon.ctx/placed-messages`), its reply holding the evals it ran, and the evals of other hands after it, each eval and message a component of its own. A turn whose call is not made yet (the one now opening)
+  holds the messages delivered for it alone. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:key :int] [:messages {:optional true} [:sequential [:tuple :int :string]]]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db n :key messages :messages}]
+  (if-let [cid (some->> (ratom/realize (:seon.agent/key c)) (ctx/call-of db n))]
+    (let [evals (ctx/turn-evals c cid)
           model? (let [plain (ratom/untracked c)] (fn [e] (get-in plain [:seon.eval/_agent e :seon.eval/call-id])))
           ;; who posts that it was opened, read here once and not by each eval
           agent-key (ratom/realize (:seon.agent/key c)) agent-id (some-> agent-key keyword)
@@ -1657,22 +1659,28 @@
                                                                    (assoc ::in-flight true))
                                                                  (boolean (seq ours)) (map item ours))]
                                                   (map item (remove (comp model? first) evals)))))]
-          (into [:div {:class "seon-stack" :wire/turn n}] kids))))))
+          (into [:div {:class "seon-stack" :wire/turn n}] kids))))
+    ;; the turn now opening has no call yet: what was delivered since the last turn's edge reads here, before the turn begins
+    (when-let [ms (seq messages)]
+      (into [:div {:class "seon-stack" :wire/turn n}] (for [[m id] ms] [#'chat-message {:key id :at [:seon.message/_to m]}])))))
 
 (defn conversation-list
   "The conversation of an agent's page (c-rows), what the model reads as messages (:seon.render/messages) and the person as the chat: its system message, the example sessions it reads, what opens its own session (every conversation opens on a user
-  message), what was asked (the person's: the model reads the plan in the task's part), a component for each of its turns (`conversation-turn`), then how it stands (the person's). It reads the agent's turn number and nothing of its records: a new eval runs its turn alone, and a new turn this list and a lookup of each earlier turn's marker.
+  message), what was asked (the person's: the model reads the plan in the task's part), a component for each of its turns (`conversation-turn`), then how it stands (the person's). It reads the agent's turn number, the turns' bases and the index of the messages to the agent (`seon.ctx/placed-messages`: where each was read, derived from when it was delivered, handed to each turn as its :messages) and nothing else of its records: a new eval runs its turn alone, and a new turn or message this list and a lookup of each earlier turn's marker; a turn runs again for its own messages alone.
   See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:seon.render/list "c-rows" :seon.render/messages true :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  (let [k (ratom/realize (:seon.agent/key c))]
+  {:seon.render/list "c-rows" :seon.render/messages true :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db}]
+  (let [k (ratom/realize (:seon.agent/key c))
+        turn (or (ratom/realize (:seon.agent/turn c)) 0)
+        ;; where each message was read, once for every turn (a turn is given its own, so a message delivered runs this list and the turn it reached)
+        placed (when k (ctx/placed-messages db c))]
     [:ol {:id "c-rows"}
      [#'system-message {}]
      [#'session-examples {}]
      (when k [:li {:wire/role "user" :wire/for "model" :wire/ref [:session k]} (session/session-open k)])
      (when (:seon.agent/task c) [#'chat-ask {:wire/for "page"}])
      ;; one past the turn in force: what was taken for the turn that reads it comes before that turn begins (seon.turn/take!, tell-error!); a turn no record names draws nothing
-     (for [n (range 0 (+ 2 (or (ratom/realize (:seon.agent/turn c)) 0)))] [#'conversation-turn {:key n}])
+     (for [n (range 0 (+ 2 turn))] [#'conversation-turn (let [ms (get placed n (when (= n (inc turn)) (:pending placed)))] (cond-> {:key n} ms (assoc :messages ms)))])
      [#'chat-end {:wire/for "page"}]
      [#'proof-story {:wire/for "page"}]]))
 

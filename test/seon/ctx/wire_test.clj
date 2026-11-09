@@ -764,7 +764,7 @@
                                                             :seon.eval/code code :seon.eval/response {:handle (symbol "result" id) :value 1} :seon.eval/call (seon.task/call-ref "a1" turn)}]))
             _ (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "a1" :seon.agent/turn 2 :seon.agent/task {:seon.task/id "demo/f"}}}])
             _ (ev! "e1" "a1" "(f 1)" 1)
-            _ (d/transact conn (update (task/message-tx "m1" "user" ["a1"] "use g" 1000) 0 assoc :seon.message/call (seon.task/call-ref "a1" 2)))
+            _ (d/transact conn (task/message-tx "m1" "user" ["a1"] "use g" 1000))
             _ (ev! "e2" "a1" "(f 2)" 2)
             _ (ev! "x1" "b/a9" "(other)" 1)
             db @conn
@@ -802,7 +802,7 @@
             first-stage (turn! b0)
             boundary "demo/d is done. Your task now is demo/i, in this same session: what you did so far stays above.\n\nIts plan: Implement d."
             _ (work! "demo/i")
-            _ (d/transact conn (update (task/message-tx "m1" "root" ["a1"] boundary 1000) 0 assoc :seon.message/call (seon.task/call-ref "a1" 2)))
+            _ (d/transact conn (task/message-tx "m1" "root" ["a1"] boundary 1000))
             second-stage (turn! (basis "demo/i" 2))
             ms0 (:messages first-stage) ms1 (:messages second-stage)
             refs (mapv first (:parts second-stage))
@@ -1166,12 +1166,13 @@
   (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
         [w :as walk] (walked db)
         says #(pr-str (into [] (mapcat second) (render/wire w)))
-        take! (fn [id n body] (update (seon.task/message-tx id "owner" ["demo/a1"] body 1000) 0 assoc :seon.message/call (seon.task/call-ref "demo/a1" n)))]
+        take! (fn [id body] (seon.task/message-tx id "owner" ["demo/a1"] body 1000))]
     (is (not (str/includes? (says) "Before the turn.")))
-    (step! walk (take! "m1" 1 "Before the turn."))
-    (is (str/includes? (says) "Before the turn.") "taken under turn 1, the turn in force 0")
-    (step! walk [{:seon.agent/key "demo/a1" :seon.agent/turn 1}])
-    (step! walk (take! "m2" 2 "One past it again."))
+    (step! walk (take! "m1" "Before the turn."))
+    (is (str/includes? (says) "Before the turn.") "delivered for the turn after the one in force, 0")
+    (step! walk (ts/turn-tx "demo/a1" 1 {}))
+    (is (str/includes? (says) "Before the turn.") "and read by turn 1 when it opens")
+    (step! walk (take! "m2" "One past it again."))
     (is (str/includes? (says) "One past it again.") "and past each turn after")))
 
 (deftest opening-a-page-does-not-change-what-the-model-reads
@@ -1443,17 +1444,17 @@
   ;; message taken by the second turn, an outside eval made during it and its message reply (a record, after what else the turn holds)
   (let [ev (fn [id by turn & [more]] (merge {:seon.eval/id id :seon.eval/by by :seon.eval/agent [:seon.agent/key "a1"] :seon.eval/call (seon.task/call-ref "a1" turn)
                                               :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value 1}} more))
-        msg (fn [id turn] {:seon.message/id id :seon.message/to [[:seon.agent/key "a1"]] :seon.message/call (seon.task/call-ref "a1" turn) :seon.message/from "owner" :seon.message/body id})
+        msg (fn [id] {:seon.message/id id :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body id})
         db (t/with (t/world)
                    [{:seon.agent/key "a1" :seon.agent/turn 2}]
-                   ;; written in time order, though not the transcript's: a message after its turn's evals' ids, a reply before an eval of its turn
-                   [(msg "m1" 1)
-                    (model-call-fact 1 {:seon.model-call/forms 2 :seon.model-call/reply "I look."})
+                   ;; written in time order, though not the transcript's: a message before the turn that reads it, a reply before an eval of its turn
+                   [(msg "m1")]
+                   [(model-call-fact 1 {:seon.model-call/forms 2 :seon.model-call/reply "I look."})
                     (ev "e10" "outside" 1)
                     (ev "e9" "a1" 1 {:seon.eval/call-id "c9"})
-                    (ev "e8" "a1" 1 {:seon.eval/call-id "c8"})
-                    (msg "m2" 2)
-                    (model-call-fact 2 {:seon.model-call/forms 0 :seon.model-call/reply "Done." :seon.model-call/reasoning "easy"})
+                    (ev "e8" "a1" 1 {:seon.eval/call-id "c8"})]
+                   [(msg "m2")]
+                   [(model-call-fact 2 {:seon.model-call/forms 0 :seon.model-call/reply "Done." :seon.model-call/reasoning "easy"})
                     (ev "e11" "outside" 2)])
         a (pdb/eid db :seon.agent/key "a1")
         ps (seon.fixtures/tree-parts (:tree (ctx/build db a :b)) db)]
@@ -1462,21 +1463,21 @@
     (is (= [1 1 1 1 1 2 2 2] (mapv #(nth % 2) ps)) "each record's turn")
     (is (= {:role "assistant" :content "Done." :reasoning "easy" :reply 2} (first (second (nth ps 6)))) "the reply is an assistant message")))
 
-(deftest a-mid-turn-message-takes-the-number-in-force-and-the-prefix-holds
-  ;; docs/turn.md#the-turn-is-a-number: a message the agent's code takes in the middle of turn 1 takes 1, a message the loop takes for
-  ;; turn 2 takes 2, and request 2 holds request 1 whole (its page first) and then turn 1's evals and messages, in order, the page's change after them
+(deftest a-mid-turn-message-reads-at-the-next-turn-and-the-prefix-holds
+  ;; docs/turn.md#the-turn-is-a-number: a message delivered in the middle of turn 1 (after its basis) is read by turn 2, so request 2 holds
+  ;; request 1 whole (its page first), then turn 1's evals as they were, then the message, the page's change after it
   (ts/test-branch!
     (fn [_ conn]
       (let [[ask! ev!] (parts-session conn)
             r0 (ask! 0)
             _ (ev! "e1")
-            _ (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/call (seon.task/call-ref "a1" 1) :seon.message/from "owner" :seon.message/body "note taken in turn 1"}])
+            _ (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body "note taken in turn 1"}])
             r1 (ask! 1)]
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "request 2 starts with request 1 whole, its page the first request's")
-        (is (= ["system" "user" "assistant" "tool" "user" "assistant" "tool" "assistant" "tool"] (mapv :role (:messages r1)))
-            "then the message of turn 1 (before turn 1's eval, though written after it), the eval and its result, then the page's change: the status says a message came after the plan")
-        (is (str/includes? (:content (nth (:messages r1) 4)) "note taken in turn 1"))
-        (is (str/includes? (:content (last (:messages r1))) "came after your plan last changed") "the change is that one step")))))
+        (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "assistant" "tool" "user"] (mapv :role (:messages r1)))
+            "then turn 1's eval and its result as they were, the page's change (an eval of turn 1: the status says a message came after the plan), then the message delivered after turn 1's basis, which turn 2 reads at its start")
+        (is (str/includes? (:content (last (:messages r1))) "note taken in turn 1"))
+        (is (str/includes? (:content (nth (:messages r1) 7)) "came after your plan last changed") "the change is that one step")))))
 
 (deftest a-record-takes-the-agents-turn-in-force
   ;; docs/turn.md#the-turn-is-a-number: agent/turn-now is the agent's :seon.agent/turn on its branch (0 before its first turn),
@@ -1488,8 +1489,8 @@
          (is (= 0 (agent/turn-now)) "before its first turn")
          (reset! agent/state {:key "a1" :db db3})
          (is (= 3 (agent/turn-now)))
-         (is (= [3 ["a1"]] ((juxt (comp :seon.model-call/n :seon.message/call) (comp #(mapv second %) :seon.message/to)) (first (agent/entries-tx [{:id "m" :from "owner" :body "x" :sent-ms 1000}] (agent/turn-now)))))
-             "a message delivered in turn 3 carries 3 and its agent")
+         (is (= [["a1"] false] ((juxt (comp #(mapv second %) :seon.message/to) #(contains? % :seon.message/call)) (first (agent/entries-tx [{:id "m" :from "owner" :body "x" :sent-ms 1000}]))))
+             "a message delivered to the agent carries its agent, and no turn: the turn that reads it is derived from when it was delivered")
          (finally (reset! agent/state old)))))
 
 (deftest failures-that-got-the-same-value-are-one-entry
@@ -1557,7 +1558,7 @@
    (d/transact conn [{:seon.agent/key "b/src" :seon.agent/turn 2 :seon.agent/task [:seon.task/id "demo/h"]}])
    (d/transact conn [{:seon.eval/id "s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "b/src"] :seon.eval/call (seon.task/call-ref "b/src" 1)
                       :seon.eval/code code :seon.eval/response {:handle 'result/s1 :value 3} :seon.eval/call-id "call_1" :seon.eval/intent "Add."}])
-   (d/transact conn [{:seon.message/id "m1" :seon.message/to [[:seon.agent/key "b/src"]] :seon.message/call (seon.task/call-ref "b/src" 2) :seon.message/from "owner" :seon.message/body "Looks right."}])
+   (d/transact conn [{:seon.message/id "m1" :seon.message/to [[:seon.agent/key "b/src"]] :seon.message/from "owner" :seon.message/body "Looks right."}])
    (d/transact conn [{:seon.model-call/id (seon.lib/call-id "b/src" 2) :seon.model-call/agent [:seon.agent/key "b/src"] :seon.model-call/n 2 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "Done."}])))
 
 (defn- example-world!
@@ -1690,7 +1691,7 @@
   (let [r0 (turn! conn 0)]
     (d/transact conn [{:seon.eval/id "e0" :seon.eval/by "a1" :seon.eval/agent [:seon.agent/key "a1"] :seon.eval/call (seon.task/call-ref "a1" 1)
                        :seon.eval/code "(+ 5 1)" :seon.eval/response {:handle 'result/e0 :value 6} :seon.eval/call-id "c0" :seon.eval/intent "Add."}])
-    (d/transact conn [{:seon.message/id "m0" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/call (seon.task/call-ref "a1" 2) :seon.message/from "owner" :seon.message/body "Go on."}])
+    (d/transact conn [{:seon.message/id "m0" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body "Go on."}])
     (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" 2) :seon.model-call/agent [:seon.agent/key "a1"] :seon.model-call/n 2 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "Thinking."}])
     {:r0 r0 :r1 (turn! conn 2)}))
 

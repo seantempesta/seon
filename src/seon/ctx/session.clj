@@ -56,7 +56,7 @@
   "The kinds of record `session-records` answers, each with the attributes that name it, its agent and its model call. See
   docs/tasks.md#a-task-names-example-sessions."
   {:seon.db/eval-fact [:seon.eval/id :seon.eval/agent :seon.eval/call]
-   :seon.message/fact [:seon.message/id :seon.message/to :seon.message/call]
+   :seon.message/fact [:seon.message/id :seon.message/to nil]
    :seon.model-call/fact [:seon.model-call/id :seon.model-call/agent nil]})
 
 (defn- in-example
@@ -89,15 +89,16 @@
   "The conversation of agent record c on db, [record kind] in its order (turn by turn: its messages, its reply, its evals). A record keeps the turn it names as :turn. See docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:vector [:tuple :map :qualified-keyword]]]}
   [c db]
-  (vec (for [[n cid] (ctx/turns c)
-             :let [{:keys [messages evals]} (ctx/turn-members db c cid)
+  (let [placed (ctx/placed-messages db c)]
+   (vec (for [[n cid] (ctx/turns c)
+             :let [messages (get placed n) evals (ctx/turn-evals c cid)
                    call (get-in c [:seon.model-call/_agent cid])]
              r (concat (for [[m] messages] [(assoc (select-keys (get-in c [:seon.message/_to m]) [:seon.message/id :seon.message/from :seon.message/body]) :turn n) :seon.message/fact])
                        (when (= :model (:seon.model-call/origin call))
                          [[(select-keys call [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]) :seon.model-call/fact]])
                        (for [[e] evals :let [ev (get-in c [:seon.eval/_agent e]) whole (pdb/response-of db ev)]]
                          [(assoc (pdb/with-response (dissoc ev :db/id :seon.eval/agent :seon.eval/call :seon.eval/opened :seon.eval/result) whole) :turn n) :seon.db/eval-fact]))]
-         r)))
+         r))))
 
 (defn- session-request
   "The request agent a answered, for an example: its task's plan, else its own description; nil when it has neither

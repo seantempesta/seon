@@ -351,15 +351,16 @@
 (defn undelivered
   "The messages main holds to the agent with key k that branch-db, its branch, does not hold: each {:id :from :body :sent-ms}, in main's
   order (by transaction, then id). The agent's ref on main is the fact (a seek of :seon.message/to on its entity, never a scan of the
-  messages), and a turn on the branch placing the message (:seon.message/call) is its delivery, so a message the agent removed (its ref retracted, the
-  entity kept) is not brought again, and one its branch inherited at a fork, which no turn placed, still arrives. The one reading of it: the agent's next act (seon.agent/undelivered) and root's check that a
-  parked agent is owed one. O(the messages to the agent). See docs/users.md#messages."
+  messages), and the message entity on the branch (one lookup of its id) is its delivery (owner, 2026-11-09), written there by seon.agent/deliver! or brought down
+  by a merge or sync of main: a message the agent removed (its ref retracted, the entity kept) stays delivered, and one already on main when the branch forked is
+  delivered at the fork. The one reading of it: the agent's next act (seon.agent/undelivered) and root's check that a
+  parked agent is owed one. O(m) seeks on main and O(m) id lookups on the branch, m the messages to the agent. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :string] [:vector [:map [:id :string] [:from :string] [:body :string] [:sent-ms :int]]]]}
   [main branch-db k]
   (if-let [me (pdb/eid main :seon.agent/key k)]
     (->> (d/datoms main :avet :seon.message/to me)
          (map (fn [dt] [(:tx dt) (d/entity main (:e dt))]))
-         (remove (fn [[_ m]] (:seon.message/call (d/entity branch-db [:seon.message/id (:seon.message/id m)]))))
+         (remove (fn [[_ m]] (pdb/eid branch-db :seon.message/id (:seon.message/id m))))
          (sort-by (fn [[tx m]] [tx (:seon.message/id m)]))
          (mapv (fn [[_ m]] {:id (:seon.message/id m) :from (:seon.message/from m) :body (:seon.message/body m) :sent-ms (:seon.message/sent-ms m)})))
     []))

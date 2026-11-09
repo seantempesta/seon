@@ -742,7 +742,7 @@
            (is (= ["demo/a"] (mapv :task (r/actions (:idx st)))))))
        (testing "parked with the message on its branch (kept there, or removed): not woken, nothing starts"
          (let [bc (pdb/connect (assoc cfg :branch sb))]
-           (try (d/transact bc (update (task/message-tx "m1" "owner" [k] "carry on" 1000) 0 assoc :seon.message/call {:seon.model-call/id (str k "/1")}))
+           (try (d/transact bc (task/message-tx "m1" "owner" [k] "carry on" 1000))
                 (let [st (#'r/settle-late (at #{k}))]
                   (is (= [#{} #{}] [(get-in st [:idx :woken]) (get-in st [:idx :late])]))
                   (is (= [] (r/actions (:idx st)))))

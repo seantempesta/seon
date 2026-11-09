@@ -111,7 +111,7 @@
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
                                                             (zero? (mod i 3)) (conj (seon.task/call-ref k i))
                                                             (zero? (mod i 20)) (conj {:seon.message/id (str "m" i) :seon.message/from "user"
-                                                                                      :seon.message/to [[:seon.agent/key k]] :seon.message/call (seon.task/call-ref k (max 3 (* 3 (quot i 3)))) :seon.message/body "How is it going?"})))
+                                                                                      :seon.message/to [[:seon.agent/key k]] :seon.message/body "How is it going?"})))
                                                  part)))))
             db (partition-all 100 (range 1 (inc n)))))))
 

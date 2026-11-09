@@ -31,12 +31,12 @@
     [db (:db/id (d/entity db [:seon.agent/key "b/a1"]))]))
 
 (defn- turn-tx
-  "Turn t of session-of's agent as production writes it: its eval i's model call with the reply that holds it, and a message taken at every other turn, naming that call."
+  "Turn t of session-of's agent as production writes it: its eval i's model call with the reply that holds it, and a message taken at every other turn, delivered in the same transaction as the call (so it reads at that turn)."
   {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
   [i]
   (let [t (inc i) call #(seon.task/call-ref "b/a1" t)]
     (cond-> [{:seon.eval/id (str "e" i) :seon.eval/call (assoc (call) :seon.model-call/origin :model :seon.model-call/reply (str "Reading the rows of part " i "."))}]
-      (even? i) (conj {:seon.message/id (str "m" i) :seon.message/to [{:seon.agent/key "b/a1"}] :seon.message/call (call) :seon.message/from "owner" :seon.message/body (str "How is part " i "?")}))))
+      (even? i) (conj {:seon.message/id (str "m" i) :seon.message/to [{:seon.agent/key "b/a1"}] :seon.message/from "owner" :seon.message/body (str "How is part " i "?")}))))
 
 (defn records-of
   "The input at n of seon.ctx.wire/request: the agent's ctx value over session-of's db, as a request reads it, each turn production-shaped (`turn-tx`)."
