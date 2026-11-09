@@ -50,11 +50,14 @@
     (let [v (ns-resolve nsx (first form))] (when (var? v) v))))
 
 (defn- analyze
-  "form's analyzed node in namespace nsym, without running it."
-  {:malli/schema [:=> [:cat :symbol :any] :map]}
-  [nsym form]
-  (let [nsx (program/ensure-ns! nsym)]
-    (binding [*ns* nsx] (jolt.analyzer/analyze (jolt.host/ctx-for-ns (str nsym)) form))))
+  "form's analyzed node in namespace nsym, without running it. private?, when given, is the analysis env's :private? function
+  (jolt.host/ctx-for-ns): asked a var's namespace and name (strings) before the var's own :private meta, it answers :private, :public or nil
+  (the meta answers). See docs/source.md#a-var-is-private-as-the-tree-analyzed-holds-it."
+  {:malli/schema [:function [:=> [:cat :symbol :any] :map] [:=> [:cat :symbol :any [:maybe :seon.host/fn]] :map]]}
+  ([nsym form] (analyze nsym form nil))
+  ([nsym form private?]
+   (let [nsx (program/ensure-ns! nsym)]
+     (binding [*ns* nsx] (jolt.analyzer/analyze (jolt.host/ctx-for-ns (str nsym) (if private? {:private? private?} {})) form)))))
 
 (def ^:private defining-heads
   "The heads of the top-level forms that define a var by their second element."
@@ -68,12 +71,14 @@
   are the file's, whatever the namespace held before (a binary's own namespace, one of
   test/'s that main's program loaded with its old ns form, or one another namespace's
   require marked loaded), and running it again on the namespace it set up changes nothing.
-  A var the image already holds takes the privacy this definition gives it (defn-, ^:private), so a
-  file analyzed after it in load order may name a var the same import makes public: root's main
-  held test-runner/tree-branch private while the tree made it public, and every import of main
-  failed (docs/failure-points.md). Answers {:units [...] :ns-form? b}."
-  {:malli/schema [:=> [:cat :symbol :any] :map]}
-  [nsym form]
+  Analysis never changes a var of the image: whether a var another namespace defines is public, when a file names it, is asked
+  of private? (the :private? of the analysis env, see `tree-private`), the privacy of the tree being analyzed, never read off
+  the image's var, which holds whichever tree was imported or run last (root's main held test-runner/tree-branch private while the
+  tree made it public, and every import of main failed; 2026-11-09: head and base analyzed in one process left each other's
+  privacy). Answers {:units [...] :ns-form? b}."
+  {:malli/schema [:function [:=> [:cat :symbol :any] :map] [:=> [:cat :symbol :any [:maybe :seon.host/fn]] :map]]}
+  ([nsym form] (analyze-form nsym form nil))
+  ([nsym form private?]
   (let [nsx (program/ensure-ns! nsym)
         hv (head-var form nsx)
         ns-form? (= #'clojure.core/ns hv)
@@ -89,15 +94,7 @@
     (when (or ns-form?
               (and macro? (not (some-> (ns-resolve nsx (second form)) bound?))))
       (binding [*ns* nsx] (eval form)))
-    ;; a var the image holds takes the privacy its new definition gives it, so a file analyzed
-    ;; after this one (in load order) may name a var made public by the same import
-    (when-let [v (and (seq? form) (symbol? (second form))
-                      (contains? defining-heads (symbol (name (first form))))
-                      (get (ns-interns nsx) (second form)))]
-      (let [private? (boolean (or (= "defn-" (name (first form))) (:private (meta (second form)))))]
-        (when (not= private? (boolean (:private (meta v))))
-          (alter-meta! v assoc :private private?))))
-    {:units [(program/unit-account (analyze nsym form))] :ns-form? ns-form?}))
+    {:units [(program/unit-account (analyze nsym form private?))] :ns-form? ns-form?})))
 
 (defn- alias-held-not-declared
   "An alias form names that namespace nsx holds and its file's ns form, ns-form, doesn't declare, or nil: what only this process would resolve. A full name, a class's static and quoted data are no alias. See docs/source.md#main-s-program-follows-the-tree."
@@ -115,10 +112,12 @@
 (defn accounts
   "The program accounts of text's forms in namespace nsym, in file order: each form's
   account with its exact text, lead and order (its index), and a form that is none of the
-  program's (a comment block, a top-level call) as a text form, so the file is whole.
-  Answers {:accounts [...] :tail}."
-  {:malli/schema [:=> [:cat :symbol :string] [:map [:accounts [:vector :map]] [:tail :string]]]}
-  [nsym text]
+  program's (a comment block, a top-level call) as a text form, so the file is whole. private?, the tree's
+  (`tree-private`), answers a named var's privacy to the analysis. Answers {:accounts [...] :tail}."
+  {:malli/schema [:function [:=> [:cat :symbol :string] [:map [:accounts [:vector :map]] [:tail :string]]]
+                  [:=> [:cat :symbol :string [:maybe :seon.host/fn]] [:map [:accounts [:vector :map]] [:tail :string]]]]}
+  ([nsym text] (accounts nsym text nil))
+  ([nsym text private?]
   (let [ns-form (volatile! nil)
         {:keys [forms tail]} (read-forms nsym text
                                          (fn [{:keys [form ns] :as f}]
@@ -126,7 +125,7 @@
                                              (when (and (seq? form) (= 'ns (first form))) (vreset! ns-form form))
                                              (when-let [a (and @ns-form (find-ns n) (alias-held-not-declared (find-ns n) @ns-form form))]
                                                (throw (ex-info (str "the form names alias " a " and this file's ns form doesn't require it: it resolves only in a process that already holds it") {:ns n :alias a})))
-                                             (merge f (analyze-form n form)))))
+                                             (merge f (analyze-form n form private?)))))
         seen (volatile! {})]
     {:tail tail
      :accounts (vec (map-indexed
@@ -135,7 +134,7 @@
                               base {:units units :src src :form form :ns ns :ns-after ns :ns-form? ns-form? :ns-meta (when ns-form? (meta (second form))) :before nil :lead lead :order i :k k}]
                           (or (program/account base)
                               {:id (str ns "/text-" i) :src src :ns ns :lead lead :order i})))
-                      forms))}))
+                      forms))})))
 
 (defn defining-ids
   "The form id of the form defining each var in text, the file of namespace nsym: {qualified var
@@ -356,6 +355,33 @@
   [nsym p]
   (boolean (and p (.exists (java.io.File. (str (config/checkout) "/" p))))))
 
+(defn- text-privacy
+  "{var-symbol private?} of the vars namespace nsym's text defines at its top level (def, defn, defn-, defonce, defmacro, defmulti, defprotocol,
+  deftest): private when the form is a defn- or its name carries ^:private. Read, not analyzed."
+  {:malli/schema [:=> [:cat :symbol :string] [:map-of :symbol :boolean]]}
+  [nsym text]
+  (into {} (for [{:keys [form]} (:forms (read-forms nsym text))
+                 :when (and (seq? form) (symbol? (first form)) (symbol? (second form)) (contains? defining-heads (symbol (name (first form)))))]
+             [(second form) (boolean (or (= "defn-" (name (first form))) (:private (meta (second form)))))])))
+
+(defn tree-private
+  "The :private? function (the analysis env's, jolt.host/ctx-for-ns) for analyzing files ({relative path text}), the changed files of a tree,
+  over db, the tree's program as far as it holds it: asked a var's namespace and name (strings) it answers :private or :public by how the
+  tree defines it (a namespace the files define: its forms' own defn- / ^:private; another namespace the db holds the var of: its :var/meta),
+  and nil for a namespace the tree does not define (clojure.core, a library), which the image's var answers, since the tree cannot change it.
+  Never reads or changes the image's var. See docs/source.md#a-var-is-private-as-the-tree-analyzed-holds-it."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.host/fn]}
+  [db files]
+  (let [texts (into {} (for [[p t] files :when (str/ends-with? p ".clj") :let [f (ns-form t)] :when f] [(second f) t]))
+        read (volatile! {})]
+    (fn [vns vname]
+      (let [nsym (symbol vns)]
+        (if-let [t (get texts nsym)]
+          (let [m (or (get @read nsym) (get (vswap! read assoc nsym (text-privacy nsym t)) nsym))]
+            (when-some [p (get m (symbol vname))] (if p :private :public)))
+          (when-let [e (d/entity db [:var/name (symbol vns vname)])]
+            (if (contains? (set (:var/meta e)) :private) :private :public)))))))
+
 (defn- read-nss
   "Each namespace of files ({relative path text}) read and analyzed in load order: {nsym
   {:accounts :tail :file}} (accounts, with its file's relative path). A namespace the files define
@@ -363,13 +389,14 @@
   once analyzed, so a later file's require of it answers from the analysis, never a load from disk that
   cannot find it; one whose file the checkout has is never marked (a real require must still load it). See
   docs/source.md#main-s-program-follows-the-tree."
-  {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :symbol :map]]}
-  [files]
-  (reduce (fn [m [nsym path text]]
-            (let [a (assoc (accounts nsym text) :file path)]
-              (when-not (in-checkout? nsym path) (@mark-loaded! (str nsym)))
-              (assoc m nsym a)))
-          {} (load-order files)))
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] [:map-of :symbol :map]]}
+  [db files]
+  (let [private? (tree-private db files)]
+    (reduce (fn [m [nsym path text]]
+              (let [a (assoc (accounts nsym text private?) :file path)]
+                (when-not (in-checkout? nsym path) (@mark-loaded! (str nsym)))
+                (assoc m nsym a)))
+            {} (load-order files))))
 
 (defn- ns-tx
   "The facts that make namespace nsym's program on db its file's (read, as read-nss answers
@@ -458,7 +485,7 @@
   this is import-tx's program."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
   [db files]
-  (let [read (read-nss files)
+  (let [read (read-nss db files)
         gone (for [dt (d/datoms db :aevt :ns/file) :let [n (:ns/name (d/entity db (:e dt)))] :when (not (contains? read n))] [n nil])]
     (program-tx db (into read gone) files
                 (into (set (filter config/file-kind (keys files)))
@@ -569,7 +596,7 @@
         read (loop [round texts check (keys gone) read gone]
                (if (and (empty? round) (empty? check))
                  read
-                 (let [now (read-nss (required-files db round #(contains? (loaded-libs) %)))
+                 (let [now (read-nss db (required-files db round #(contains? (loaded-libs) %)))
                        read (into read now)
                        ;; what the namespace had that it no longer has: a name removed or of another kind, a
                        ;; macro, protocol, type or inline function changed (what was added breaks no form)
