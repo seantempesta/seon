@@ -807,8 +807,7 @@
                       (if (and n (pos? n) (not= :outside (:seon.model-call/origin call)))
                         (let [mx (max mx (or (:t (:seon.model-call/basis call))
                                              (get-in c [:seon.model-call/_agent cid :seon.model-call/basis :t])
-                                             (:tx (first (d/datoms db :eavt cid :seon.model-call/id)))
-                                             0))
+                                             (:tx (first (d/datoms db :eavt cid :seon.model-call/id)))))
                               j (loop [j i] (if (and (< j (count ms)) (<= (nth (nth ms j) 0) mx)) (recur (inc j)) j))]
                           (if (> n prev)
                             (recur (rest es) j mx n (if (= i j) out (reduce (fn [out k] (if-let [id (get-in held [(nth (nth ms k) 1) :seon.message/id])] (assoc! out n (conj (get out n []) [(nth (nth ms k) 1) id])) out)) out (range i j))))
