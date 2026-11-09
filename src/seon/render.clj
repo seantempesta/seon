@@ -29,7 +29,7 @@
 (defn props
   "The properties of named schema k's form in the entity index ix (its :forms, the binary's with a branch's over them), or nil:
   the one place a render lookup reads a schema's properties, so recognition and the render it names read one index. See
-  docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  docs/render.md#one-rendering-system-drawn-from-the-data."
   {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] [:maybe :map]]}
   [ix k] (let [f (get (:forms ix) k)] (when (and (vector? f) (map? (second f))) (second f))))
 
@@ -166,14 +166,14 @@
 (defn render-for
   "The render symbol schema k (or its nearest parent, in the entity index ix) names for output o, a property of the schema
   (:seon.render/hiccup, data to hiccup; :seon.render/wire, an entity to the model's messages), or nil. See
-  docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  docs/render.md#one-rendering-system-drawn-from-the-data."
   {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword] :qualified-keyword] [:maybe :symbol]]}
   [ix k o]
   (when k (or (get (props ix k) o) (some #(render-for ix % o) (parents ix k)))))
 
 (defn entity-render
   "The hiccup render var of x, a view of a pulled entity, by its schema as the entity index ix reads it (`schema-of`), or nil
-  for any other value: what the walk runs x as a component of. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  for any other value: what the walk runs x as a component of. See docs/render.md#one-rendering-system-drawn-from-the-data."
   {:malli/schema [:=> [:cat :map :any] :any]}
   [ix x]
   (when (ratom/view? x)
@@ -1068,7 +1068,7 @@
 (defn wire-of
   "The model's messages of walk w: its root's model output (kept on its cache entry, :wired, made in the same run as its
   hiccup, when the walk asks for :seon.render/wire), each placed component's marker replaced by that component's own, as
-  `resolved` places hiccup: the order is each render's. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  `resolved` places hiccup: the order is each render's. See docs/render.md#one-rendering-system-drawn-from-the-data."
   {:malli/schema [:=> [:cat :map] [:vector :seon.model/message]]}
   [w]
   (let [cache @(:cache w)]

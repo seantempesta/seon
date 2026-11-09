@@ -175,7 +175,7 @@
   "What map e is, as the write check reads it (the entity index ix's :entity-schemas, the schema that owns each attribute): of
   the schemas owning the attributes e holds, the best match, the one with the most of its attributes present, those it
   inherits (`parents`) counted, so a schema beats the one it extends; nil for none, {:ambiguous [s ...]} for a tie. One lookup a key, then a sum a candidate
-  over its parents. The order of e's keys never decides. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  over its parents. The order of e's keys never decides. See docs/data-modeling.md#a-thing-is-its-attributes."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [ix e]
   (let [own (frequencies (keep (:entity-schemas ix) (keys e)))]
