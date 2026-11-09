@@ -239,13 +239,14 @@
   (calls, hits, misses and allocation by render var), what the model was last shown of it (:shown, `page-value`), the edits between pairs of points it answered (:diffs, `changes-of`), and the render vars it watches: each it drew, once,
   whose redefinition (a defn at the REPL: Clojure's watch on a var's root) queues that var's components
   for the next flush!, found in the cache when it fires. It holds the entity index its renders read schemas in (:index,
-  seon.db/index-of): the caller's ix when given (a one-shot render of an agent passes its held branch index), else built from
-  its db here, and built again by a flush that moved a :schema/* datom (`flush!`), never otherwise. A cold walk (root drawing a branch) is a
+  seon.db/index-of): the caller's ix when given (an agent passes its slot's: one copy, handed again by each flush! that is given
+  one, never built again here), else built from its db here (:own-index?) and built again by a flush that moved a :schema/* datom
+  (`flush!`), never otherwise. A cold walk (root drawing a branch) is a
   walker drawn once."
   {:malli/schema [:function [:=> [:cat :map :seon.host/fn [:vector :any]] :map] [:=> [:cat :map :seon.host/fn [:vector :any] :map] :map]]}
-  ([src db-fn root] (walker src db-fn root (program/index-of-db (db-fn))))
+  ([src db-fn root] (assoc (walker src db-fn root (program/index-of-db (db-fn))) :own-index? true))
   ([src db-fn root ix]
-  {:src src :db db-fn :root root :index (volatile! ix) :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
+  {:src src :db db-fn :root root :index (volatile! ix) :own-index? false :cache (volatile! {}) :queue (volatile! #{}) :mounts (volatile! 0)
    :ledger (volatile! {}) :out (volatile! nil) :db-keys (volatile! #{}) :readers (volatile! {}) :forms (volatile! {}) :drawn (ratom/atom {}) :watched (volatile! #{}) :inputs (volatile! {}) :gone (volatile! #{}) :skipped (volatile! #{}) :defects (volatile! []) :shown (volatile! nil)
    :diffs (volatile! {})}))
 
@@ -524,14 +525,17 @@
   again); then those it let go that no parent drew go (a child moved between parents stays, whichever ran first). Answers what it ran, {key :miss} for an output new
   and {key :same} for one = to the last, the components it skipped left out ({} when nothing a
   render read changed). See docs/render.md#reactive-renders."
-  {:malli/schema [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]]] [:map-of [:vector :any] [:enum :miss :same]]]}
-  [w datoms]
+  {:malli/schema [:function [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]]] [:map-of [:vector :any] [:enum :miss :same]]]
+                  [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]] [:maybe :map]] [:map-of [:vector :any] [:enum :miss :same]]]]}
+  ([w datoms] (flush! w datoms nil))
+  ([w datoms ix]
   (let [env {:children (volatile! []) :ran (volatile! {})}]
+    (when ix (vreset! (:index w) ix))
     (if-let [root @(:out w)]
       (let [held? (fn held? [k] (or (= root k) (some held? (:parents (get @(:cache w) k)))))]
           (ratom/flush!)
           ;; a schema entry moved: what an entity is may have, so the index is built again from the db; no other write does
-          (when (or (= :all datoms) (some #(= "schema" (namespace (:a %))) datoms))
+          (when (and (nil? ix) (:own-index? w) (or (= :all datoms) (some #(= "schema" (namespace (:a %))) datoms)))
             (vreset! (:index w) (program/index-of-db ((:db w)))))
           (if (= :all datoms)
             (vswap! (:queue w) into @(:db-keys w))
@@ -553,7 +557,7 @@
           @(:ran env))
       (let [[f opts & children] (:root w) [_ k] (render! w f (or opts {}) (vec children) env)]
         (vreset! (:out w) k)
-        @(:ran env)))))
+        @(:ran env))))))
 
 (defn- tree-rev
   "Component k's revision with its children's, below it: what moves when anything it shows changed
@@ -863,7 +867,9 @@
                   [:=> [:cat :map :seon.host/fn :seon.host/db :any [:map [:model-only {:optional true} :boolean] [:once {:optional true} :boolean] [:index {:optional true} :map]]] :map]]}
   ([t changes db root-var] (draw t changes db root-var {}))
   ([t changes db root-var opts]
-   (let [w (merge (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}] (or (:index opts) (program/index-of-db db))) (select-keys opts [:model-only :once]))]
+   (let [w (merge (if-let [ix (:index opts)]
+                       (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}] ix)
+                       (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}])) (select-keys opts [:model-only :once]))]
      (flush! w nil)
      w)))
 

@@ -2970,9 +2970,14 @@
         "three ordinary evals at turn 0 in order, by whoever asked, none a model's call; the throw recorded, and the next still runs")
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (take 6 (:roles v))) "each reaches the request as a call and its result")))
 
-(deftest a-schema-write-drops-the-branch-index-with-its-registry
-  ;; docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together: the agent holds its branch's entity index in the slot of its
-  ;; registry (seon.agent/branch-schemas), so the write that moves a schema entry drops both and no other write does
-  (let [st {:schema-registry {:key {} :registry {} :index (seon.db/index)}}]
-    (is (some? (:index (:schema-registry (seon.agent/schema-moved st #{:seon.eval/id})))) "a write of another attribute keeps it")
-    (is (nil? (:schema-registry (seon.agent/schema-moved st #{:schema/form}))) "a schema entry's drops it")))
+(deftest one-schema-write-builds-the-branch-index-once
+  ;; docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together: the agent's state slot is its one copy of the entity index
+  ;; (seon.agent/branch-schemas): the write that moves a schema entry builds it, and its readers (the registry, the ctx's patch, the
+  ;; page walk's flush) are handed that one. :index-builds counts the builds in the state
+  (let [db (ts/test-db)
+        st {:db db :schema-registry {:key {} :registry {} :index (seon.db/index)}}
+        moved (seon.agent/schema-moved st #{:schema/form})]
+    (is (nil? (:index-builds (seon.agent/schema-moved st #{:seon.eval/id}))) "a write of another attribute builds none")
+    (is (= 1 (:index-builds moved)) "a schema entry's write builds one")
+    (is (some? (:index (:schema-registry moved))) "into the slot")
+    (is (= 1 (:index-builds (seon.agent/schema-moved moved #{:seon.eval/id}))) "and a later write of another attribute builds no other")))

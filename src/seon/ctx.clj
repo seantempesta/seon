@@ -302,7 +302,7 @@
   :ix the walk's state (node: where each entity is held, its pattern, what each join watches).
   Any entity an entity schema names: an agent's (its @ctx), root's, the user's, a task's. With no
   e (an agent whose entity its branch does not hold yet), its environment alone. ix is the entity index schemas are read in
-  (seon.db/index-of), kept in :ix (:index) and built again by a patch that moved a schema entry. O(the entities
+  (seon.db/index-of), kept in :ix (:index): handed by a patch's caller (an agent's slot), or, when :ix holds :own-index? (a caller that built it for its own use), built again by a patch that moved a schema entry. O(the entities
   the pattern reaches)."
   {:malli/schema [:=> [:cat :map :seon.host/db [:maybe pos-int?] :any] [:map [:tree :map] [:ix :seon.ctx/ix]]]}
   [ix db e branch]
@@ -364,13 +364,17 @@
   builds the record anew, as a fresh build places it, sharing every subtree it did not change
   (share). The environment (:t :branch :commit) is the
   root map's, new each transaction."
-  {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]] :seon.host/db [:sequential :any] :any] [:map [:tree :map] [:ix :seon.ctx/ix]]]}
-  [c db datoms branch]
-  (let [r (cond-> (:ix c) (some #(= "schema" (namespace (:a %))) datoms) (assoc :index (program/index-of-db db)))
+  {:malli/schema [:function [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]] :seon.host/db [:sequential :any] :any] [:map [:tree :map] [:ix :seon.ctx/ix]]]
+                  [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]] :seon.host/db [:sequential :any] :any [:maybe :map]] [:map [:tree :map] [:ix :seon.ctx/ix]]]]}
+  ([c db datoms branch] (patch c db datoms branch nil))
+  ([c db datoms branch ix]
+  (let [r (cond-> (:ix c)
+            ix (assoc :index ix)
+            (and (nil? ix) (:own-index? (:ix c)) (some #(= "schema" (namespace (:a %))) datoms)) (assoc :index (program/index-of-db db)))
         root (get-in c [:tree :db/id])
         touched (touched-by r datoms)
         ;; a fresh build shares every subtree it did not change with the record before (share)
-        fresh #(update (build (:index r) db root branch) :tree (fn [t] (merge (share (apply dissoc (:tree c) environment-keys) (apply dissoc t environment-keys)) (select-keys t environment-keys))))]
+        fresh #(cond-> (update (build (:index r) db root branch) :tree (fn [t] (merge (share (apply dissoc (:tree c) environment-keys) (apply dissoc t environment-keys)) (select-keys t environment-keys)))) (:own-index? r) (assoc-in [:ix :own-index?] true))]
     (cond
       (nil? root) (fresh)
       (some #(and (= root (:e %)) (= :seon.ctx/pattern (:a %))) datoms) (fresh)
@@ -389,7 +393,7 @@
         (if (or (:relocate r) (not (seq (dissoc tree :db/id))) (empty? (d/datoms db :eavt root)))
           (fresh)
           {:tree (with-environment tree db branch)
-           :ix (dissoc r :patching :relocate)})))))
+           :ix (dissoc r :patching :relocate)}))))))
 
 ;; the record and its index, beside the atom: the agent is one thread, and its state's watch runs
 ;; on it, so each patch follows the one before
@@ -735,7 +739,7 @@
       (= (:max-tx a) (:max-tx b)) (in (update @held :tree with-environment b (:branch n)))
       :else (let [ds (moved a b (:tx n))
                   _ (vswap! moved-since #(if (= :all %) % (into % ds)))
-                  c (patch @held b ds (:branch n))]
+                  c (patch @held b ds (:branch n) (:index (:schema-registry n)))]
               ;; a swap!'s own transaction: installed when the swap! ends (the atom is mid-swap)
               (if *writing* (do (vreset! held c) (vreset! pending c)) (install! c))))))
 

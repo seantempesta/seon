@@ -125,7 +125,7 @@
         start (first pts) branch (:branch start)
         db0 (db-at db start)
         ix (program/index-of-db db0)
-        c0 (ctx/build ix db0 a branch)
+        c0 (assoc-in (ctx/build ix db0 a branch) [:ix :own-index?] true)
         layout (render/layout-of ix (assoc (:tree c0) :seon.agent/key (:seon.agent/key (d/entity db0 a))))
         at (volatile! db0) r (ratom/atom (:tree c0))
         w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [layout {}] ix) :model-only true)]

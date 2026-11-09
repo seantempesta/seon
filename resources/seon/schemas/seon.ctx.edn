@@ -36,4 +36,4 @@
  :seon.ctx/ix [:map [:held {:optional true} :map] [:at {:optional true} :map] [:spec {:optional true} :map]
                [:watch {:optional true} :map] [:watching {:optional true} :map] [:patching {:optional true} :boolean] [:relocate {:optional true} :boolean]
                ;; the entity index (seon.db/index-of) the record's pattern and joins read schemas in; built again by a patch that moved a schema entry
-               [:index {:optional true} :map]]}
+               [:index {:optional true} :map] [:own-index? {:optional true} :boolean]]}

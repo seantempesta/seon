@@ -298,7 +298,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn] :map]}
   [db e branch ident mark]
   (let [ix (program/index-of-db db)
-        c (ctx/build ix db e branch) at (volatile! db) a (ratom/atom (mark (:tree c)))
+        c (assoc-in (ctx/build ix db e branch) [:ix :own-index?] true) at (volatile! db) a (ratom/atom (mark (:tree c)))
         w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/layout-of ix (merge ident (:tree c))) {}] ix)]
     (render/flush! w nil)
     {:w w :a a :c c :at at}))

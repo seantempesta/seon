@@ -2181,22 +2181,31 @@
   (is (= :seon.agent/key (some #{:seon.agent/key} (keys (:entity-schemas (seon.db/index))))) "an attribute an extended schema names")
   (is (= :seon.db/agent-fact ((:entity-schemas (seon.db/index)) :seon.agent/key)) "is named by that schema alone"))
 
-(deftest a-walk-builds-its-index-again-when-a-schema-entry-moves-and-only-then
-  ;; docs/render.md#reactive-renders: the walk holds the entity index its renders read schemas in, given by its caller or built from its
-  ;; db; a flush that moved a :schema/* datom builds it again from the db, any other keeps it (O(moved), keyed by the write)
+(deftest a-walk-builds-its-index-again-only-when-it-built-it-and-a-schema-entry-moves
+  ;; docs/render.md#reactive-renders: the walk holds the entity index its renders read schemas in. One a caller gave it (an agent's slot,
+  ;; the one copy) it never builds again, and takes the one each flush is handed; one it built from its db it builds again when a flush
+  ;; moved a :schema/* datom, any other flush keeps it (O(moved), keyed by the write)
   (let [form [:map {:seon.db/attributes true} [:lab.walk/name {:optional true}]]
         db (seon.db/db-with (ts/test-db) [{:schema/key :lab.walk/thing :schema/form (binding [*print-namespace-maps* false] (seon.edn/encode form))}])
-        w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly db) [#'identity {}] (seon.db/index))
-        known? #(contains? (:forms @(:index w)) :lab.walk/thing)]
-    (r/flush! w nil)
-    (is (identical? (seon.db/index) @(:index w)) "the caller's index is held, not built")
-    (r/flush! w [{:e 1 :a :seon.eval/id :v "x" :tx 1 :added true}])
-    (is (identical? (seon.db/index) @(:index w)) "a datom that is no schema entry's keeps it")
-    (r/flush! w (vec (d/datoms db :aevt :schema/form)))
-    (is (known?) "a schema datom moved: built again from the walk's db, which holds the entry")
-    (let [ix @(:index w)]
-      (r/flush! w [{:e 1 :a :seon.eval/id :v "x" :tx 1 :added true}])
-      (is (identical? ix @(:index w)) "and kept by the next flush that moves none"))))
+        schema-datoms (vec (d/datoms db :aevt :schema/form))
+        other [{:e 1 :a :seon.eval/id :v "x" :tx 1 :added true}]
+        walk (fn [& ix] (apply r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly db) [#'identity {}] ix))
+        known? #(contains? (:forms @(:index %)) :lab.walk/thing)
+        given (walk (seon.db/index))
+        own (walk)]
+    (r/flush! given nil) (r/flush! own nil)
+    (is (known? own) "built from its db at its creation")
+    (is (not (known? given)) "the caller's is held as given")
+    (r/flush! given schema-datoms)
+    (is (identical? (seon.db/index) @(:index given)) "a given index is never built again, whatever moved")
+    (let [ix @(:index own)]
+      (r/flush! own other)
+      (is (identical? ix @(:index own)) "a flush that moves no schema datom keeps it")
+      (r/flush! own schema-datoms)
+      (is (not (identical? ix @(:index own))) "one that moved a schema datom builds the walk's own again"))
+    (let [handed (seon.db/index-of {:forms {:lab.walk/thing form}})]
+      (r/flush! given other handed)
+      (is (identical? handed @(:index given)) "a flush handed an index holds it"))))
 
 (deftest two-unrelated-identity-schemas-are-an-error
   ;; docs/ctx.md#the-pattern: a record whose identities name schemas neither extends is no one thing: an error naming them, never the

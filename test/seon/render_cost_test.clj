@@ -56,7 +56,7 @@
   "The input of size n: a vector of n messages (each a value whose schema declares a render),
   printed by the default render under a budget that shows them all."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
-  [n] [{:budget 200000}
+  [n] [{:budget 200000 :seon.render/index (seon.db/index)}
        (vec (for [i (range n)] {:seon.message/id (str "m" i) :seon.message/from "user" :seon.message/body "hello"}))])
 
 (deftest the-printer-renders-nested-values-in-one-pass
@@ -348,13 +348,13 @@
 
 ;; See docs/render.md#a-change-is-edits-by-name
 (defn keyed-part
-  "The input of size n: a component as status draws it, n named children, then the same with one of them changed: page-edits' one argument, [[id was now]]."
+  "The input of size n: a component as status draws it, n named children, then the same with one of them changed: page-edits' arguments, the entity index and [[id was now]]."
   {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
   [n]
   (let [was (into ['seon.render.ui/status {:ctx [:seon.agent/task :proved]} [:h2 "Your proofs"]]
                   [(into [:ul {:key :proofs}] (for [i (range n)] (let [t (symbol "demo-test" (str "t-" i))] [:li {:key t} [:code (str t)] ": passes"])))])
         now (assoc-in was [3 3] '[:li {:key demo-test/t-1} [:code "demo-test/t-1"] ": fails"])]
-    [[["status" was now]]]))
+    [(seon.db/index) [["status" was now]]]))
 
 (deftest edits-cost-the-component
   ;; a diff reads the one component that moved: its children, once, never the page's
@@ -600,7 +600,7 @@
         through (fn [chain] (swap! passes conj chain)
                   (mapv (fn [[a b]] (seon.render/page-edits (seon.db/index) (seon.render/forms-moved (pages a) (pages b)))) (partition 2 1 chain)))
         w (seon.render/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes :points (fn [] [p0 p1 p2]) :diffs-through through} (constantly nil)
-                              [#'two-askers {:from p1 :to p2}])]
+                              [#'two-askers {:from p1 :to p2}] (seon.db/index))]
     (seon.render/flush! w nil)
     (clojure.test/is (= [[nil p0 p1 p2]] @passes) "two components, one pair, cold: one pass from nothing through p2, filling the pairs before it")
     (let [again ((seon.render/changes-of w) p0 p1)]

@@ -1211,7 +1211,7 @@
   {:malli/schema [:=> [:cat] :map]}
   []
   (with-branch-schemas #(let [w (the-walk)]
-                          (render/flush! w (ctx/take-moved!))
+                          (render/flush! w (ctx/take-moved!) (agent/branch-index))
                           ;; a component that threw is a problem of the agent's, in its fold (docs/health.md), as well as what it draws in its place
                           (doseq [d (render/take-defects! w)] (swap! agent/state update :errors err/note d :eval nil (System/currentTimeMillis)))
                           w)))
