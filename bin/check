@@ -97,7 +97,10 @@ export SEON_STARTER_FIFO=$STARTER
 trap 'rm -f "$STARTER"; rm -rf "$CHECK_RESULTS"' EXIT
 trap 'exit 143' TERM INT HUP
 # (fd 7, the fifo's write end, stays bin/check's own: a child holding it would keep the fifo open)
-run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" --profile scripted 2>&1 7>&- 3>&-) }
+# a check's roots index task files of their own (none), as a test root's are (seon.test-store/start-root!): a fresh main is
+# seeded with its tasks dir's (docs/source.md#indexing-a-tree), and the checkout's are no check's subject
+CHECK_TASKS=$ROOT/target/check/tasks; mkdir -p "$CHECK_TASKS"
+run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" --profile scripted --set ":seon.config.root/tasks-dir=\"$CHECK_TASKS\"" 2>&1 7>&- 3>&-) }
 run-embedding() { SEON_EMBED_TEXTS=64 run "$@" }
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then

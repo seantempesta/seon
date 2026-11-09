@@ -951,6 +951,8 @@
     (is (< (* 10 held) whole) (str "a held read allocated " held " bytes; a whole read " whole))))
 
 (deftest an-agents-first-search-reads-the-index-it-inherited
+  ;; root's REPL writes main through my.test/code, a namespace the binary holds (seon.root requires it): a boot loads
+  ;; nothing of main's program (docs/source.md#a-boot-resumes-from-the-db), and this test was red on a binary without it
   ;; docs/vector.md#search: an agent's first grep built the search's text index from nothing (seon.doc/text-index).
   ;; The fork server builds main's once and each move carries it (seon.doc/carry-index!): the
   ;; first search finds the index held for its db and builds none, and its FTS5 table, an in-memory SQLite database,
