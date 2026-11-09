@@ -155,7 +155,7 @@
         codec' {:encode codec/encode :decode codec/decode}
         root-end (remote/open r {:codec codec' :pump :fiber :encode-error ap/unencodable})
         agent-end (remote/open a' {:codec codec' :pump :fiber})
-        take! #(first (a/alts!! [(:in agent-end) (a/timeout 5000)]))]
+        take! #(a/<!! (:in agent-end))]   ; a closed end answers nil, so no wait outlives it
     (a/>!! (:out root-end) {:op :reply :k 7 :result (sorted-map :a 1)})
     (a/>!! (:out root-end) {:op :reply :k 8 :result {:ok true}})
     (let [x (take!) y (take!)]
