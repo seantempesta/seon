@@ -38,6 +38,10 @@ The owner's rulings of 2026-11-09, on one system of agents, rendering from data,
 
 "Don't put code into docs if we can link to the code. I want all the docs readable and renderable from the doc parse and indexing"; "I want clear specs and links to the schemas". A doc names a var, a schema key or a task (docs/references.md) where it would show code. Stated in: AGENTS.md section 7.
 
+### Audit before merging; the code gets smaller; no heroics (owner, 2026-11-09)
+
+"I want regular audits on all worktrees before merging confirming that we are not building hand wired custom code everywhere"; "The code base should actually get smaller after we remove all the custom parts and focus on reusing and refining"; "Do not force the square peg through the round hole. If you find yourself needing heroics and writing a shitload of code we are doing the wrong thing and we need to fix the design. I want algorithmic estimates for all work we are doing and not to accept anything that's outside of a reasonable version of that". Stated in: AGENTS.md section 3 (audit every branch before it lands).
+
 ### A private session takes only what main held when it branched (owner, 2026-11-09)
 
 "The private session only takes from main what is on main at the time it is branched." Stated in: task seon.merge/a-session-syncs-with-main-unless-private.

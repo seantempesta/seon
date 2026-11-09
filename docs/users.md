@@ -24,6 +24,15 @@ Nothing here is a new concept: every part of Seon is the same few pieces, and wh
 - **The system entity** (`:seon.root/root-fact` today, the `seon.system` namespace at stage 3): boot, config, quiescence; data root's procs read, not an agent.
 - **Root's process** is the go-between (owner: "root I think is mostly the go between for flow communication and isn't doing anything that can allow an agent or the user to take down the system"): the writer, the reconciler, the fork server, the web transport (html and Datastar patches from the user agent's hiccup, a malformed answer an error on that user's page) and the merge gate. It runs no render of an agent or a user.
 
+**How data flows, each hop by the one mechanism that carries it** (owner, 2026-11-09: "refine the existing concepts of what an agent is, how data flows through the system both literally with flow but also between processes, the database, the browser"):
+- **Inside a process:** Flow procs and their bounded channels ([flow](flow.md)): root's procs (```seon.writer```, the reconciler, the fork server, the web proc), an agent's (transport, REPL, tests, and the render proc of stage 1b). A step never blocks; a request is answered once; back-pressure is a full channel.
+- **Between root and an agent:** one socket per agent (```seon.sock/send!```), framed messages: root's requests (an eval, a render) and the agent's answers and streamed output; root's side of it is its agent proc (```seon.agent-proc/agent-frame```).
+- **Into the db:** an agent writes its own branch through its own connection (group commit); root's writer is the one writer of main. A message is one fact on main (```seon.root/message-write```), delivered onto the recipient's branch by its next act (```seon.agent/deliver!```).
+- **Between branches:** the one merge: main into an agent's branch at its turn's open (```seon.agent/merge-main!```), an agent's work into main through the gate; syncing or private (stage 5).
+- **Between agents:** a message, or a request routed through root (a render, an eval of origin `:context`); never a write to another agent's branch.
+- **To the browser:** root's web proc writes the user agent's hiccup as html and sends Datastar patches on one deflate-compressed event stream per tab ([render](render.md#in-flight-output-streams)); what is still being produced streams on `[:web :streams]`.
+- **From the browser:** a person's click or typing posts to the web proc, which sends it to the user agent (stage 4) as a request; the user agent sends requests to root or an agent.
+
 **Gone, because each was a special case:** root's render walks of pages (`root-walk`, `user-walk`, `branch-walk!`, the cold draw); every layout, ```seon.render/layout-of``` and `:seon.render/layout`; an entity's second render; root's session as a thing apart (```seon.root/root-session-pattern```, its refresh, the special message path); `:seon.agent/root`; an opened eval written on main (opening is an eval with origin `:context` the user agent sends the agent); `:as` and `*` in patterns.
 
 ## The data model: schemas, refs and pulls
