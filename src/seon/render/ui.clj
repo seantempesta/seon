@@ -190,7 +190,7 @@
   "The config in force (the declared HTML render of :seon.config/config), as root wrote it
   on main: every key grouped by its area, its value whole, its unit, the schema's description
   on hover, and the layer it came from (:seon.config/sources, docs/config.md#layers) as text
-  beside it, when opts names it (:seon.config/sources, root's fact on main). It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  beside it, when opts names it (:seon.config/sources, root's fact on main). It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.config/config] :any]}
   [opts c]
   (let [prop (fn [k p] (get (contract/properties k) p))
@@ -359,7 +359,7 @@
 
 (defn task-box
   "A task: its kind and execution, its plan (accumulated along its needs), instructions, what
-  is wrong (its failure, held for root), its needs and proofs, and its evidence. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  is wrong (its failure, held for root), its needs and proofs, and its evidence. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.task/task] :any]}
   [opts t]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)]
@@ -390,7 +390,7 @@
     [:div {:class (str "verdict " (if (:ok? v) "ok" "red"))} [:b head] (for [[c w] more] [:span {:class c} (str " " w)])]))
 
 (defn cost-report
-  "A cost proof's measurements against its estimate, row by size, then its verdict. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  "A cost proof's measurements against its estimate, row by size, then its verdict. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.render/cost-report] :any]}
   [opts {:keys [rows verdict]}]
   (let [dims (filter (set (mapcat (comp keys :expected) rows)) [:ns :bytes :calls])]
@@ -463,7 +463,7 @@
   (seon.print/record-text of the eval, through the model render of the schema it kept; a value in a row by that schema's
   html render; a live response's own :text; an error's by its error
   map's render; a value recorded as its basis, @ctx's, rendered from the branch at it, seon.ctx.wire/basis-value), and its cost and who evaluated it as recorded; :as :inline, its code and
-  response in one line, the value's line printed now (seon.print/line: the one printer). Rendered from the eval, which never changes. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  response in one line, the value's line printed now (seon.print/line: the one printer). Rendered from the eval, which never changes. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts e]
   (let [recorded? (contains? e :seon.eval/response)
@@ -615,7 +615,7 @@
   "Main's problems (the declared html render of :seon.problems/report): each class with rows,
   its count, and its rows a line each (`problem-row`), open ones first, rendered only when the
   tab opened the class (its id in :open, the /open toggle's; a report shown with no :open shows
-  every class's rows). It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  every class's rows). It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.problems/report] :any]}
   [opts {:keys [classes open]}]
   (let [cs (for [[c {:keys [n rows]}] (sort-by (comp str key) classes) :when (seq rows)] [c n rows])]
@@ -667,7 +667,7 @@
   are: in the agent, under its branch's schemas, so a render the branch defines draws its key
   (seon.repl/render-ctx); anywhere else, by main's. Beside each attribute, who made it as of t
   (seon.ctx/made-by): the eval whose code wrote it, else the branch it came from when not this one,
-  and a catch-up's merge from main. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  and a catch-up's merge from main. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.ctx/ctx] :any]}
   [opts {:keys [t branch commit] :as c}]
   (let [ks (sort-by str (keys (dissoc c :t :branch :commit :db/id)))
@@ -1234,7 +1234,7 @@
 
 (defn ctx-key
   "A key the agent added to its ctx (a component over ctx), named by that key, which is its schema:
-  its value by the key's render. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  its value by the key's render. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :qualified-keyword] :any]}
   [{c :seon.ctx/ctx ix :seon.render/index} k]
   [:section
@@ -1315,7 +1315,7 @@
       (-> e (assoc :seon.eval/response (pdb/response-of db e)) (dissoc :seon.eval/result)))))
 
 (defn eval-glance
-  "What came of an eval, in the chat with no click (a component over ctx and the db, for the page alone): its value through the one render (render/hiccup: the render it has, else the value printer), whole once its step is opened; or, closed, what went wrong on a line, the opened step having the rest. See docs/render.md#a-value-draws-itself. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  "What came of an eval, in the chat with no click (a component over ctx and the db, for the page alone): its value through the one render (render/hiccup: the render it has, else the value printer), whole once its step is opened; or, closed, what went wrong on a line, the opened step having the rest. See docs/render.md#a-value-draws-itself. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:seon.render/style ".eval-glance { margin: 0.25rem 0 0.25rem 1rem; min-width: 0; overflow-x: auto; font-size: 0.75rem; }\n.eval-item:has(> details[open]) .eval-glance-line { display: none; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db at :at ix :seon.render/index}]
   (when-let [e (eval-shown c db at)]
@@ -1359,7 +1359,7 @@
 
 (defn eval-output
   "What came of an eval as the person reads it when it is opened (a component over ctx and the db; the model reads the same response as the one printer prints it, `seon.ctx.wire/tool-text`): how long it ran, what it costs the context in tokens and its handle, what its forms printed, then its error, or its
-  value by the render its record names. See docs/render.md#cost-is-shown-one-way. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  value by the render its record names. See docs/render.md#cost-is-shown-one-way. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db at :at agent :agent ix :seon.render/index}]
   (when-let [e (eval-shown c db at)]
@@ -1393,7 +1393,7 @@
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
   the eval's value): its one line (the schema's model render, my.agent/prove-summary), then each proof's
-  status, each red test's first failing assertion by the one printer, and each test whose child died. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  status, each red test's first failing assertion by the one printer, and each test whose child died. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts r]
   (let [;; its reports only when it still holds them: an agent's select-keys of a prove keeps the schema
@@ -1524,7 +1524,7 @@
           [] turns))
 
 (defn proof-story
-  "How each proof of an agent's task went across its turns (a component over ctx and the db), once its work has ended: read from the commit each turn's basis names, where the test's status and failures stood, so it is what the agent read then and nothing is recorded for it. A row for each change. The person's: the model read each as it came. See docs/render.md#the-page. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  "How each proof of an agent's task went across its turns (a component over ctx and the db), once its work has ended: read from the commit each turn's basis names, where the test's status and failures stood, so it is what the agent read then and nothing is recorded for it. A row for each change. The person's: the model read each as it came. See docs/render.md#the-page. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db ix :seon.render/index}]
   (let [proofs (ratom/realize (get (:seon.agent/task c) :seon.task/proofs))
@@ -1899,7 +1899,7 @@
 
 (defn root-head
   "Root's head (a component over its ctx and the db): what is going on in a sentence, by the tasks' states, and, when it last went quiet,
-  its root causes, by root's own render (`root`). See docs/render.md#the-page. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  its root causes, by root's own render (`root`). See docs/render.md#the-page. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:seon.render/style ".root-head { border-radius: 0.375rem; background: var(--color-base-900); padding: 0.75rem; font-size: 0.875rem; line-height: 1.25rem; color: var(--color-text-100); }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db ix :seon.render/index}]
   ;; what an agent is doing is its task's outcome; :seon.task/execution stays :running once it has finished
@@ -1918,7 +1918,7 @@
 (defn problems-tile
   "Main's open problems (a component over root's ctx, its :health: the report the render proc keeps
   with root's process, seon.problems/health changed by each move of main, seon.render.proc/health!): what needs fixing by the report's render, and
-  below it, folded, what is upkeep (:seon.problems/attention). It runs again only when :health changes. See docs/render.md#the-page. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  below it, folded, what is upkeep (:seon.problems/attention). It runs again only when :health changes. See docs/render.md#the-page. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:seon.render/style ":is(.problems-tile, .process-tile, .session-card) { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
 :is(.problems-tile, .process-tile, .session-card) > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx ix :seon.render/index}]
@@ -2301,7 +2301,7 @@
   its records' refs, content as Markdown or a tool's highlighted, each tool call's function, id and arguments, whole. The line where the provider's cached
   prefix ends (placed by its cache-hit count over the sizes, an estimate, said so), or, with none recorded, where
   the messages the request before sent the same way end; the envelope (every field but the messages) and,
-  while opened, the whole body's JSON as sent. input as `debug-input` answers it. See docs/render.md#the-debug-page-is-the-wire-request. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  while opened, the whole body's JSON as sent. input as `debug-input` answers it. See docs/render.md#the-debug-page-is-the-wire-request. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:keys [view to-come? turn agent origin body sources new raw? error differs? opened swept?]
          {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]} :usage}]

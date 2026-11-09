@@ -160,7 +160,7 @@
   "v rendered: (render-fn opts v), the function its override or schema names, else the printer's
   (print-hiccup); a value's own key holding hiccup answers that hiccup. opts' :seon.render/index is the entity index its
   schemas are read in (seon.db/index-of), required: a walk's own, filled by `render!` and `emit`, passed on to the render it
-  calls. Inside a walk, one render calling another is the interim docs/users.md#the-stages-agreed-2026-11-09 removes."
+  calls. Inside a walk, one render calling another is the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.render/index :map]]] :any] :any]}
   [opts v]
   (let [own (own-key v :seon.render/hiccup) ix (:seon.render/index opts)]

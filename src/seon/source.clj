@@ -53,11 +53,10 @@
   "form's analyzed node in namespace nsym, without running it. private?, when given, is the analysis env's :private? function
   (jolt.host/ctx-for-ns): asked a var's namespace and name (strings) before the var's own :private meta, it answers :private, :public or nil
   (the meta answers). See docs/source.md#a-var-is-private-as-the-tree-analyzed-holds-it."
-  {:malli/schema [:function [:=> [:cat :symbol :any] :map] [:=> [:cat :symbol :any [:maybe :seon.host/fn]] :map]]}
-  ([nsym form] (analyze nsym form nil))
-  ([nsym form private?]
-   (let [nsx (program/ensure-ns! nsym)]
-     (binding [*ns* nsx] (jolt.analyzer/analyze (jolt.host/ctx-for-ns (str nsym) (if private? {:private? private?} {})) form)))))
+  {:malli/schema [:=> [:cat :symbol :any [:maybe :seon.host/fn]] :map]}
+  [nsym form private?]
+  (let [nsx (program/ensure-ns! nsym)]
+    (binding [*ns* nsx] (jolt.analyzer/analyze (jolt.host/ctx-for-ns (str nsym) (if private? {:private? private?} {})) form))))
 
 (def ^:private defining-heads
   "The heads of the top-level forms that define a var by their second element."
@@ -74,7 +73,7 @@
   Analysis never changes a var of the image: whether a var another namespace defines is public, when a file names it, is asked
   of private? (the :private? of the analysis env, see `tree-private`), the privacy of the tree being analyzed, never read off
   the image's var, which holds whichever tree was imported or run last (root's main held test-runner/tree-branch private while the
-  tree made it public, and every import of main failed; 2026-11-09: head and base analyzed in one process left each other's
+  tree made it public, and every import of main failed; head and base analyzed in one process left each other's
   privacy). Answers {:units [...] :ns-form? b}. See docs/source.md#a-var-is-private-as-the-tree-analyzed-holds-it."
   {:malli/schema [:function [:=> [:cat :symbol :any] :map] [:=> [:cat :symbol :any [:maybe :seon.host/fn]] :map]]}
   ([nsym form] (analyze-form nsym form nil))
@@ -202,7 +201,7 @@
   its last form. A seed, an import and a test fixture are this."
   {:malli/schema [:=> [:cat :seon.host/db :symbol :string [:maybe :string]] :seon.db/tx-data]}
   [db nsym text file]
-  (let [{:keys [accounts tail]} (accounts nsym text)
+  (let [{:keys [accounts tail]} (accounts nsym text nil)
         tx (vec (concat (mapcat #(program/account-tx db (assoc %1 :order %2) %2) accounts (program/stable-places (vec (repeat (count accounts) nil))))
                         (when file (for [a accounts] {:db/id (str "form " (:id a)) :form/source true}))))]
     (cond-> tx
@@ -310,7 +309,7 @@
   (let [forms (into {} (for [[path text] files :when (str/ends-with? path ".clj") :let [f (ns-form text)] :when f] [(second f) [path text f]]))
         by-ns (update-vals forms pop)
         ;; the namespaces each ns form requires, from the compiler's analysis of it (not run)
-        reqs (update-vals forms (fn [[_ _ f]] (:requires (program/unit-account (analyze (second f) f)))))]
+        reqs (update-vals forms (fn [[_ _ f]] (:requires (program/unit-account (analyze (second f) f nil)))))]
     (vec (for [nsym (program/topo (vec (keys by-ns)) #(reqs %) #(first (by-ns %)))
                :let [[path text] (by-ns nsym)]]
            [nsym path text]))))
