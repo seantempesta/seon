@@ -26,12 +26,19 @@
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.db :as pdb :refer [parents own-keys extends? most-specific]] [seon.program :as program] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
             [clojure.string :as str] [clojure.walk] [datahike.api :as d] [datahike.reads :as reads] [datahike.db.utils :as dbu] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile] [editscript.core :as ed]))
 
+(defn props
+  "The properties of named schema k's form in the entity index ix (its :forms, the binary's with a branch's over them), or nil:
+  the one place a render lookup reads a schema's properties, so recognition and the render it names read one index. See
+  docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] [:maybe :map]]}
+  [ix k] (let [f (get (:forms ix) k)] (when (and (vector? f) (map? (second f))) (second f))))
+
 (defn declared
   "The render symbol schema k (or its nearest parent, in the entity index ix: seon.db/index-of) declares, or nil."
   {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] [:maybe :symbol]]}
   [ix k]
   (when k
-    (or (:seon.render/hiccup (contract/properties k))
+    (or (:seon.render/hiccup (props ix k))
         (some #(declared ix %) (parents ix k)))))
 
 (defn model-declared
@@ -40,7 +47,7 @@
   {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] [:maybe :symbol]]}
   [ix k]
   (when k
-    (or (:seon.render/model (contract/properties k))
+    (or (:seon.render/model (props ix k))
         (some #(model-declared ix %) (parents ix k)))))
 
 (defn full-declared?
@@ -82,11 +89,10 @@
       (when (map? v)
         (if-let [t (when (every? #(contains? v %) error-keys) (:seon.error/type v))]
           (if (contains? contract/forms t) t :seon.error/base)
-          ;; a map whose identity attributes name no one schema is drawn as the data it is; one identity, the common
-          ;; case, is a lookup and no call
-          (let [ss (into #{} (keep (:identity-schemas ix)) (keys v))
-                s (if (next ss) (most-specific ix v) (first ss))]
-            (when (contains? (:drawn-schemas ix) s) s))))))
+          ;; what the map is, as the write check reads it (the best match of the attributes it holds); one that names no one
+          ;; schema with a render is drawn as the data it is
+          (let [s (most-specific ix v)]
+            (when (and (keyword? s) (declared ix s)) s))))))
 
 (declare render-of own-key)
 
@@ -155,6 +161,22 @@
   is a component, and its var's contract says what it reads."
   {:malli/schema [:=> [:cat :map :qualified-keyword] :any]}
   [ix k] (some-> (declared ix k) requiring-resolve))
+
+(defn render-for
+  "The render symbol schema k (or its nearest parent, in the entity index ix) names for output o, a property of the schema
+  (:seon.render/hiccup, data to hiccup; :seon.render/wire, an entity to the model's messages), or nil. See
+  docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword] :qualified-keyword] [:maybe :symbol]]}
+  [ix k o]
+  (when k (or (get (props ix k) o) (some #(render-for ix % o) (parents ix k)))))
+
+(defn entity-render
+  "The hiccup render var of x, a view of a pulled entity, by its schema as the entity index ix reads it (`schema-of`), or nil
+  for any other value: what the walk runs x as a component of. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  {:malli/schema [:=> [:cat :map :any] :any]}
+  [ix x]
+  (when (ratom/view? x)
+    (let [v (ratom/untracked x)] (when (and (map? v) (:db/id v)) (some->> (schema-of ix v nil) (declared-var ix))))))
 
 (defn hiccup
   "v rendered: (render-fn opts v), the function its override or schema names, else the printer's
@@ -309,14 +331,28 @@
   render in its place (docs/failure-points.md: a component's render); every other component draws."
   {:malli/schema [:=> [:cat :map :any :map [:sequential :any] :map] [:tuple [:= ::child] [:vector :any]]]}
   [w f opts children env]
-  (let [k (comp-key f opts children) prev (get @(:cache w) k) ks (inputs-in w f)]
+  (let [k (comp-key f opts children) prev (get @(:cache w) k) ks (inputs-in w f)
+        ;; an entity rendered by its schema's render: its model render runs in the same run when the walk asks for that output
+        ;; (:outputs, data on the walk), its reads tracked with the hiccup's
+        ix @(:index w)
+        e0 (some-> (first children) ratom/untracked)
+        wf (when (and (contains? (:outputs w) :seon.render/wire) (map? e0) (:db/id e0))
+             (some-> (schema-of ix e0 nil) (#(render-for ix % :seon.render/wire)) requiring-resolve))
+        ;; the model output: its messages, and each entity or call it places run as a component (the one the hiccup placed is a
+        ;; hit), kept as its marker, so the parent orders and each child's output stays its own
+        place (fn [env' xs] (mapv (fn [x] (cond (entity-render ix x) (render! w (entity-render ix x) {} [x] env')
+                                                (and (vector? x) (or (var? (first x)) (fn? (first x))) (not (keyword? (first x))))
+                                                (render! w (first x) (assoc (or (second x) {}) :seon.render/as :seon.render/wire) (vec (nnext x)) env')
+                                                :else x))
+                                  xs))]
     (vswap! (:children env) conj k)
     (if (and prev (= opts (:opts prev)) (= (count children) (count (:args prev)))
              (every? true? (map ratom/view= children (:args prev)))
              (not (contains? @(:queue w) k)))
       (do (led! w f :hit nil nil) [::child k])
       (let [args (mapv ratom/fresh children)
-            db? (contains? ks :seon.db/db)
+            db? (or (contains? ks :seon.db/db) (some? wf))
+            wired (volatile! nil)
             o (cond-> opts
                 (contains? ks :seon.ctx/ctx) (assoc :seon.ctx/ctx (if (:once w) @(:ref (:src w)) (ratom/fresh (ratom/ref-view (:ref (:src w)) (:changes (:src w))))))
                 db? (assoc :seon.db/db ((:db w)))
@@ -337,7 +373,12 @@
             kept (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
-            one #(try (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) (assoc env :children kids :self k)) {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))})
+            one #(try (let [env' (assoc env :children kids :self k)
+                            ;; a call a model output placed answers messages (and what it places), kept as this component's model output
+                            wire-call? (= :seon.render/wire (:seon.render/as opts))
+                            out (if wire-call? (do (vreset! wired (place env' (apply f (dissoc o :seon.render/as) args))) nil) (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
+                        (when wf (vreset! wired (place env' (wf {:seon.db/db ((:db w))} (first args)))))
+                        out)
                       ;; a component that throws draws its error in its place: a call of the error's render on the error as data (what
                       ;; threw, and the thrown error's own data: a contract's problems), so the page writes that render and the model
                       ;; reads the call, the error in it, in the conversation a user message at its place; every other component draws
@@ -363,7 +404,7 @@
             ;; run: its closure holds the db and the ctx view of this run, which a kept walk has no use for (AGENTS.md section 4, a kept db value is a reference); render! sets it anew
             _ (when rx (ratom/-set! rx :f (constantly nil)))
             bytes (- (profile/alloc-bytes) a0)
-            children @kids
+            children (vec (distinct @kids))
             same? (and prev (= out (:out prev)))
             read-keys (some-> @reads seq d/reads-index)]
         (vswap! (:queue w) disj k)
@@ -383,7 +424,7 @@
         (some-> (:ran env) (vswap! assoc k (if same? :same :miss)))
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
-                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :kept @kept
+                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :kept @kept :wired @wired
                                     :reads read-keys})
         ;; the components that read the db: the ones a transaction's datoms are matched against
         (vswap! (:db-keys w) (if (seq @reads) conj disj) k)
@@ -439,7 +480,7 @@
          (cond
            (and (:model-only w) (map? o) (= "page" (:wire/for o))) (do (vswap! (:skipped w) conj (:self env)) nil)
            (keyword? head)
-           (let [attrs (when (map? o) o) kids (if attrs (nnext x) (next x))]
+           (let [attrs (when (and (map? o) (not (ratom/view? o))) o) kids (if attrs (nnext x) (next x))]
              (into (if attrs [head attrs] [head]) (map #(go % env)) kids))
            ;; a form drawn before whose component nothing queued: its marker, with nothing asked of it (a list's earlier
            ;; members cost the list a lookup each). Only plain arguments: a view's equality reads the source
@@ -457,7 +498,8 @@
            :else (ratom/realize x)))
        (seq? x) (doall (map #(go % env) x))
        (h/raw? x) x
-       (ratom/view? x) (hiccup {:seon.render/index @(:index w)} (ratom/unwrap x))
+       ;; a pulled entity placed in hiccup is rendered by its schema's render as a component of its own, the view its argument
+       (ratom/view? x) (if-let [f (entity-render @(:index w) x)] (render! w f {} [x] env) (hiccup {:seon.render/index @(:index w)} (ratom/unwrap x)))
        :else (ratom/realize x)))
    x0 env0))
 
@@ -1016,6 +1058,15 @@
   (skipped) counts and the bytes its runs allocated."
   {:malli/schema [:=> [:cat :map] :map]}
   [w] @(:ledger w))
+
+(defn wire-of
+  "The model's messages of walk w: its root's model output (kept on its cache entry, :wired, made in the same run as its
+  hiccup, when the walk asks for :seon.render/wire), each placed component's marker replaced by that component's own, as
+  `resolved` places hiccup: the order is each render's. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  {:malli/schema [:=> [:cat :map] [:vector :seon.model/message]]}
+  [w]
+  (let [cache @(:cache w)]
+    (vec ((fn go [k] (mapcat #(if (and (vector? %) (= ::child (first %))) (go (second %)) [%]) (:wired (get cache k)))) @(:out w)))))
 
 (defn tree
   "What draws what in walk w, from its root, as data that chains and prints nothing: each component its cache holds as

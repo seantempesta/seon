@@ -3422,3 +3422,57 @@
       (is (str/includes? tile "class=\"said\"") "in the tile's own text"))
     (is (not-any? #(= "user-messages" %) (map #(when (var? %) (name (symbol %))) (tree-seq coll? seq (ui/user-ctx {:seon.ctx/ctx {}}))))
         "and the page has no feed of every message")))
+
+;; Stage 2a's walk (docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09): one pass over a pull renders the page and
+;; the model's messages. A lab schema in a branch's index names each entity's two renders; recognition is the best match of the
+;; attributes an entity holds; a parent's render orders and places its children; a call placed in a model output is a
+;; component of its own; the walk renders the model output only when asked (:outputs)
+(defn lab-turns [c]
+  (for [[_ call] (sort-by (comp :lab.ow/n val) (:lab.ow/_agent c))]
+    [call (vec (for [[_ e] (:lab.ow/_by c) :when (= (:lab.ow/turn e) (:lab.ow/n call))] e))]))
+(defn lab-agent [_ c] [:article [:h1 (:lab.ow/key c)] (into [:ol] (for [[call evals] (lab-turns c)] (into [:li call] evals)))])
+(defn lab-turn-open [_ n] [{:role "user" :content (str "turn " n)}])
+(defn lab-agent-wire [_ c] (vec (mapcat (fn [[call evals]] (concat [[#'lab-turn-open {} (:lab.ow/n call)] call] evals)) (lab-turns c))))
+(defn lab-call [_ x] [:p (str (:lab.ow/reply x))])
+(defn lab-call-wire [_ x] [{:role "assistant" :content (str (:lab.ow/reply x))}])
+(defn lab-eval [_ x] [:code (str (:lab.ow/code x))])
+(defn lab-eval-wire [_ x] [{:role "tool" :content (str (:lab.ow/code x))}])
+
+(deftest one-pass-renders-the-page-and-the-models-messages
+  (let [forms {:lab.ow/key [:and {:seon.db/identity true} :string] :lab.ow/n :int :lab.ow/reply :string :lab.ow/code :string :lab.ow/turn :int
+               :lab.ow/agent [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/lab-agent :seon.render/wire 'seon.render-test/lab-agent-wire} [:lab.ow/key :lab.ow/key]]
+               :lab.ow/call [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/lab-call :seon.render/wire 'seon.render-test/lab-call-wire} [:lab.ow/n :lab.ow/n] [:lab.ow/reply {:optional true} :lab.ow/reply]]
+               :lab.ow/eval [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/lab-eval :seon.render/wire 'seon.render-test/lab-eval-wire} [:lab.ow/code :lab.ow/code] [:lab.ow/turn :lab.ow/turn]]}
+        ix (seon.db/index-of {:forms forms})
+        call (fn [id n r] {:db/id id :lab.ow/n n :lab.ow/reply r})
+        ev (fn [id n code] {:db/id id :lab.ow/code code :lab.ow/turn n})
+        ;; a collection as seon.ctx holds one: members by id, sorted as ctx sorts them
+        coll (fn [& kvs] (into (sorted-map-by (fn [a b] (cond (and (int? a) (int? b)) (compare b a) (int? a) -1 (int? b) 1 :else (compare (str a) (str b))))) (apply hash-map kvs)))
+        t2 {:db/id 1 :lab.ow/key "a" :lab.ow/_agent (coll 10 (call 10 1 "Reading.") 11 (call 11 2 "Fixing."))
+            :lab.ow/_by (coll 20 (ev 20 1 "(+ 1 1)") 21 (ev 21 2 "(+ 2 2)"))}
+        a (seon.ratom/atom t2)
+        db (ts/test-db)
+        walk (fn [outputs] (assoc (r/walker {:ref a :changes seon.ctx/changes} (constantly db) [#'lab-agent {} (seon.ratom/ref-view a seon.ctx/changes)] ix) :outputs outputs))
+        w (walk #{:seon.render/hiccup :seon.render/wire})
+        ran (r/flush! w nil)]
+    (is (= :lab.ow/agent (seon.db/most-specific ix t2)) "the pull's root is recognized by the attributes it holds")
+    (is (= {:ambiguous [:lab.ow/call :lab.ow/eval]} (seon.db/most-specific ix {:lab.ow/n 1 :lab.ow/code "x"})) "a tie is an error value naming both")
+    (is (= #{'seon.render-test/lab-agent 'seon.render-test/lab-call 'seon.render-test/lab-eval 'seon.render-test/lab-turn-open}
+           (set (map (comp symbol first) (keys ran)))) "each entity rendered by its own schema's render, the placed call a component of its own")
+    (is (str/includes? (h/html (r/resolved w @(:out w) true)) "Fixing."))
+    (is (= [{:role "user" :content "turn 1"} {:role "assistant" :content "Reading."} {:role "tool" :content "(+ 1 1)"}
+            {:role "user" :content "turn 2"} {:role "assistant" :content "Fixing."} {:role "tool" :content "(+ 2 2)"}]
+           (r/wire-of w)) "the messages, in the order the agent's model render places them")
+    (swap! a assoc-in [:lab.ow/_by 21 :lab.ow/code] "(+ 2 3)")
+    (is (= ['seon.render-test/lab-eval] (mapv (comp symbol first) (keys (r/flush! w nil)))) "one eval changed reruns its component alone, page and model")
+    (is (= {:role "tool" :content "(+ 2 3)"} (peek (r/wire-of w))))
+    (let [before (pr-str (r/wire-of w))]
+      (swap! a (fn [t] (-> t (assoc-in [:lab.ow/_agent 12] (call 12 3 "Done.")) (assoc-in [:lab.ow/_by 22] (ev 22 3 "(+ 3 3)")))))
+      (let [ran (r/flush! w nil) after (r/wire-of w)]
+        (is (= #{'seon.render-test/lab-agent 'seon.render-test/lab-call 'seon.render-test/lab-eval 'seon.render-test/lab-turn-open} (set (map (comp symbol first) (keys ran))))
+            "a new turn runs the agent and the new turn's components alone")
+        (is (= 4 (count ran)))
+        (is (= before (pr-str (vec (take 6 after)))) "every earlier message is the same bytes")))
+    (let [h (walk #{:seon.render/hiccup}) _ (r/flush! h nil)]
+      (is (= [] (r/wire-of h)) "a walk asked for the page alone runs no model render")
+      (is (not-any? :wired (vals @(:cache h)))))))

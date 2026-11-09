@@ -172,13 +172,19 @@
   [ix a b] (boolean (or (= a b) (some #(extends? ix % b) (parents ix a)))))
 
 (defn most-specific
-  "The entity schemas the identity attributes of map e name, as one: the one that extends all the others, nil for none,
-  or {:ambiguous [s ...]} when none does, as the entity index ix says. The order of e's keys never decides. See docs/ctx.md#the-pattern."
+  "What map e is, as the write check reads it (the entity index ix's :entity-schemas, the schema that owns each attribute): of
+  the schemas owning the attributes e holds, the best match, the one with the most of its attributes present, those it
+  inherits (`parents`) counted, so a schema beats the one it extends; nil for none, {:ambiguous [s ...]} for a tie (owner,
+  2026-11-09: \"if an entity is several things the best matching one should win\"). One lookup a key, then a sum a candidate
+  over its parents. The order of e's keys never decides. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [ix e]
-  (let [ss (distinct (keep (:identity-schemas ix) (keys e)))]
-    (when (seq ss)
-      (or (some (fn [s] (when (every? #(extends? ix s %) ss) s)) ss) {:ambiguous (vec ss)}))))
+  (let [own (frequencies (keep (:entity-schemas ix) (keys e)))]
+    (when (seq own)
+      (let [score (fn score [s] (+ (get own s 0) (reduce + 0 (map score (parents ix s)))))
+            ranked (sort-by (comp - second) (map (juxt identity score) (keys own)))
+            [[s0 n0] [s1 n1]] ranked]
+        (if (and s1 (= n0 n1)) {:ambiguous (vec (sort (map first (filter #(= n0 (second %)) ranked))))} s0)))))
 
 (defn index-of
   "The `entity-index` of a branch's own schema changes (schemas, {:forms :registry}, or nil): the binary's (`index`) when it
