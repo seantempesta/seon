@@ -75,7 +75,7 @@
   of private? (the :private? of the analysis env, see `tree-private`), the privacy of the tree being analyzed, never read off
   the image's var, which holds whichever tree was imported or run last (root's main held test-runner/tree-branch private while the
   tree made it public, and every import of main failed; 2026-11-09: head and base analyzed in one process left each other's
-  privacy). Answers {:units [...] :ns-form? b}."
+  privacy). Answers {:units [...] :ns-form? b}. See docs/source.md#a-var-is-private-as-the-tree-analyzed-holds-it."
   {:malli/schema [:function [:=> [:cat :symbol :any] :map] [:=> [:cat :symbol :any [:maybe :seon.host/fn]] :map]]}
   ([nsym form] (analyze-form nsym form nil))
   ([nsym form private?]
