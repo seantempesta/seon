@@ -180,6 +180,16 @@
     (try (f (assoc @store :branch b) conn)
          (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
 
+(defn root-tx
+  "Root's entity as a test states it: m's root attributes on root's entity and its seon.config.* keys as the config in force, an entity of its own
+  (seon.config/facts), as root's boot writes them. See docs/config.md#facts-on-main."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [m]
+  (let [config-key? #(some-> (namespace %) (clojure.string/starts-with? "seon.config."))
+        cs (into {} (filter (comp config-key? key)) m)]
+    (cond-> [(into {:seon.root/id :root} (remove (comp config-key? key)) m)]
+      (seq cs) (into (config/facts cs {})))))
+
 (defn turn-tx
   "Model turn n of agent k (a key) as seon.turn/act! writes it first: the agent's number n and its model call
   <k>/<n> (origin :model), with more, the call's other attributes. A record the test writes

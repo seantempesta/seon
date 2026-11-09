@@ -4,13 +4,12 @@
 ;; the keys' schemas are in seon.config.<area>.edn, v1's shape (~/src/seon resources/seon/schemas/
 ;; seon.config.*.edn): a schema with a :description and its :seon.config/unit.
 ;;
-;; :seon.config/config is the whole resolved config: open, as every entity schema is (root's entity holds it beside
-;; root's own facts), and every key optional, since a task holds single keys as its overrides; a write is held to the
+;; :seon.config/config is the whole resolved config: open, as every entity schema is, and every key optional, since a task holds single keys as its overrides; a write is held to the
 ;; keys it holds. The loader closes it at its top (seon.config's `closed`), so an unknown key refuses boot; that the
 ;; shipped file states every key is seon.config-test/the-shipped-file-validates-under-every-profile's,
 ;; and its entries declare the attributes root writes on main's root entity (seon.config/facts).
 {:seon.config/config
- [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/config-panel
+ [:map {:seon.db/attributes true
         :description "The resolved config: every limit, bound and default of the platform, one key each."}
   ;; root and its procs
   [:seon.config.root/profile {:optional true} :seon.config.root/profile]
@@ -198,8 +197,15 @@
   [:seon.config.native/probe-lib {:optional true} :seon.config.native/probe-lib]
   [:seon.config.native/sqlite-lib {:optional true} :seon.config.native/sqlite-lib]]
 
+ ;; the config in force as an entity of its own (docs/config.md#facts-on-main): named by the content id of its map
+ ;; (seon.config/facts), so the same config is one entity on every branch, and root's entity refs it (:seon.root/config)
+ :seon.config/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
+ :seon.config/config-fact [:and {:seon.db/attributes true :seon.render/hiccup seon.render.ui/config-panel
+                                 :description "The config in force: its keys (:seon.config/config) and its content id."}
+                           :seon.config/config [:map [:seon.config/id :seon.config/id]]]
+
  ;; which layer each key came from (seon.config/sources): the shipped file, a --config file
- ;; (the standing root's config/local.edn among them) or --set; written beside the config on main's root entity, as EDN text
+ ;; (the standing root's config/local.edn among them) or --set; written on main's root entity, as EDN text
  :seon.config/sources [:map-of :qualified-keyword :string]
  :seon.config/sources-fact [:map {:seon.db/attributes true} [:seon.config/sources :seon.config/sources]]
 

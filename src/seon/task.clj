@@ -311,14 +311,13 @@
                         [:db.fn/retractAttribute [:seon.process/id pk] a])))))))
 
 (defn boot-tx
-  "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
-  :seon.config.merge/max-running, is written with the config in force, seon.config/facts), and
-  the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
+  "Root's boot: its id for this process lifetime (the config in force, max-running among its keys, is written with it,
+  seon.config/facts), and the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
   makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.root/signed-in). See docs/users.md#what-each-thing-is."
-  {:malli/schema [:=> [:cat :string pos-int? :string] [:vector :any]]}
-  [boot max-running name]
+  {:malli/schema [:=> [:cat :string :string] [:vector :any]]}
+  [boot name]
   (into [{:db/id "user" :seon.agent/key name :seon.user/name name}
-         {:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running :seon.root/signed-in "user"}]
+         {:seon.root/id :root :seon.root/boot boot :seon.root/signed-in "user"}]
         (agent-tx (keyword name) {})))
 
 (defn call-ref
@@ -619,16 +618,19 @@
            a (assoc :agent (keyword (:seon.agent/key a)) :key (:seon.agent/key a) :env (:seon.agent/env a))))))
 
 (defn root
-  "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout :started-by}, nil
-  before the first boot."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]
+  "Root's boot and the config keys it reads on db: {:boot :max-running :max-merging :gate-checkout :started-by}, the config's
+  from the entity :seon.root/config refs (a key it lacks is absent), nil before the first boot."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running {:optional true} :int] [:max-merging {:optional true} :int]
                                                      [:gate-checkout {:optional true} :string] [:started-by {:optional true} :string]]]]}
   [db]
-  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout :seon.root/started-by] [:seon.root/id :root])]
-    (cond-> {:boot (:seon.root/boot r) :max-running (:seon.config.agent/max-running r)}
-      (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r))
-      (:seon.config.source/gate-checkout r) (assoc :gate-checkout (:seon.config.source/gate-checkout r))
-      (:seon.root/started-by r) (assoc :started-by (:seon.root/started-by r)))))
+  (when-let [r (d/pull db [:seon.root/boot :seon.root/started-by {:seon.root/config [:seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout]}]
+                       [:seon.root/id :root])]
+    (let [c (:seon.root/config r)]
+      (cond-> {:boot (:seon.root/boot r)}
+        (:seon.config.agent/max-running c) (assoc :max-running (:seon.config.agent/max-running c))
+        (:seon.config.merge/max-running c) (assoc :max-merging (:seon.config.merge/max-running c))
+        (:seon.config.source/gate-checkout c) (assoc :gate-checkout (:seon.config.source/gate-checkout c))
+        (:seon.root/started-by r) (assoc :started-by (:seon.root/started-by r))))))
 
 (defn proof?
   "Does task t (as `task` answers it) owe test var v green: its accumulated proofs, each a test var, never excused as main's red. See docs/merging.md#a-merge-runs-what-the-change-reaches."

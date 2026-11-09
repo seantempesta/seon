@@ -1383,7 +1383,7 @@
     ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
-          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running (person)) (into (task/earlier-agents-tx db)) (into (cfg/facts config in-force-sources))
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (person)) (into (task/earlier-agents-tx db)) (into (cfg/facts config in-force-sources))
                                                                                   (into (root-session-refresh-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)

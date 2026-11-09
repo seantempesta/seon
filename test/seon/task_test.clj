@@ -240,7 +240,7 @@
    (fn [cfg conn]
      (let [main (:branch cfg) b (keyword (str (name main) "-a3"))
            k "a3"]
-       (d/transact conn [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])
+       (d/transact conn [{:seon.root/id :root :seon.root/boot "b1"}])
        (d/transact conn [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :task-demo-f :seon.task/kind :work}])
        (d/transact conn (task/agent-tx :a3 {:status :idle :pid 77 :running {:form "(f 2)"}}))
        (d/branch! conn main b)
@@ -276,7 +276,7 @@
 (deftest an-agents-live-state-is-facts-on-its-entity
   ;; what root observes of an agent is recorded on the agent's entity: a member no longer true
   ;; is retracted, and an agent is named by its key, whatever boot
-  (let [db0 (d/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])
+  (let [db0 (d/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot "b1"}])
         db1 (d/db-with db0 (task/agent-tx :a3 {:status :running :pid 77 :running {:form "(f 2)" :since-ms 5} :mem-mb 120.5}))
         db2 (d/db-with db1 (task/agent-tx :a3 {:status :idle :pid 77 :running nil}))
         db3 (d/db-with db2 (task/agent-tx :a3 {:status :spawning}))
@@ -291,14 +291,14 @@
 
 (deftest a-new-boot-leaves-the-earlier-boots-agents
   ;; root's agents are this boot's: a boot retracts the earlier boots' agents' link to root
-  (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}] (task/agent-tx :a1 {:status :idle})))
-        db2 (d/db-with db (into (task/boot-tx "b2" 4 "sean") (task/earlier-agents-tx db)))
+  (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1"}] (task/agent-tx :a1 {:status :idle})))
+        db2 (d/db-with db (into (task/boot-tx "b2" "sean") (task/earlier-agents-tx db)))
         db3 (d/db-with db2 (task/agent-tx :a1 {:status :spawning}))
         agents (fn [db] (set (map :seon.agent/key (:seon.agent/_root (d/pull db '[{:seon.agent/_root [:seon.agent/key]}] [:seon.root/id :root]))))) ]
     (is (= #{"a1"} (agents db)))
     (is (= #{"sean"} (agents db2)) "the new boot holds none of the earlier boot's: only its user, an agent with no process")
     (is (= #{"sean" "a1"} (agents db3)) "and its own as they start")
-    (is (= #{"sean"} (agents (d/db-with db3 (into (task/boot-tx "b3" 4 "sean") (task/earlier-agents-tx db3))))) "a later boot keeps the one user, and unlinks the rest")
+    (is (= #{"sean"} (agents (d/db-with db3 (into (task/boot-tx "b3" "sean") (task/earlier-agents-tx db3))))) "a later boot keeps the one user, and unlinks the rest")
     (is (some? (d/entity db3 [:seon.agent/key "a1"])) "the earlier agent is kept, not deleted")))
 
 (deftest a-design-adds-a-proof-with-update
@@ -331,7 +331,7 @@
         e (:db/id (d/entity db [:seon.root/id :root]))]
     (is (nil? (task/root db)))
     (is (nil? (task/entity-value db e)))
-    (let [booted (d/db-with db [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 2}])]
+    (let [booted (d/db-with db [{:seon.root/id :root :seon.root/boot "b1"}])]
       (is (= :root (first (task/entity-value booted e))))
       (is (= "b1" (:boot (second (task/entity-value booted e))))))))
 

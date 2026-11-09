@@ -18,7 +18,7 @@
 (def req {:seon.task/ns 'demo :seon.task/name "workouts" :seon.task/plan "store my workouts"
           :seon.task/proofs #{'demo-test/workouts-test}})
 
-(defn- main [] (d/db-with (ts/test-db) (task/boot-tx "boot-1" 4 "sean")))
+(defn- main [] (d/db-with (ts/test-db) (task/boot-tx "boot-1" "sean")))
 
 (defn- spawns [db] (filter #(= :spawn (:op %)) (r/actions (r/index db))))
 

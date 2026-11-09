@@ -231,7 +231,7 @@
   (ts/test-branch! (fn [cfg conn] (let [child (keyword (str (name (:branch cfg)) "-a1"))
         c (assoc config/config :seon.config.agent/max-running 6)]
     (is (nil? (config/from-db @conn)))
-    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6 "sean") (config/facts c {:seon.config.web/port "--set"}))})
+    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (config/facts c {:seon.config.web/port "--set"}))})
     (is (= c (config/from-db @conn)))
     (is (= {:seon.config.web/port "--set"} (d/q '[:find ?s . :where [?e :seon.root/id :root] [?e :seon.config/sources ?s]] @conn)))
     ;; the reconciler's root read sees the same config keys
@@ -240,13 +240,41 @@
     (d/branch! conn (:branch cfg) child)
     (is (= c (config/from-db @(pdb/connect (assoc cfg :branch child)))))))))
 
+;; owner, 2026-11-09 (stage 3, docs/users.md#the-stages-agreed-2026-11-09): the config in force is an entity of its own, so root's
+;; entity is root, not the config by the best match of its attributes (the entity index's :entity-schemas)
+(deftest the-config-in-force-is-its-own-entity
+  (ts/test-branch! (fn [cfg conn]
+    (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (config/facts config/config {}))})
+    (let [ix (pdb/index)
+          best (fn [m] (key (apply max-key val (frequencies (keep (:entity-schemas ix) (keys m))))))
+          root (d/entity @conn [:seon.root/id :root])]
+      (is (= :seon.root/root-fact (best (d/pull @conn '[*] [:seon.root/id :root]))) "root's entity reads as root")
+      (let [c (:seon.root/config root)]
+        (is (some? c) "root refs the config in force")
+        (is (= :seon.config/config-fact (get (:identity-schemas ix) :seon.config/id)) "named by the config's own identity")
+        (is (pdb/extends? ix :seon.config/config-fact :seon.config/config) "an entity schema holding the config's attributes")
+        (is (= (:seon.config.web/port config/config) (:seon.config.web/port c)) "holding its keys")
+        (is (nil? (:seon.config.web/port root)) "which root's entity does not")
+        (is (= config/config (config/from-db @conn)) "read back whole through the ref"))))))
+
+(deftest the-same-config-on-two-branches-is-one-entity
+  (ts/test-branch! (fn [cfg conn]
+    (let [a (keyword (str (name (:branch cfg)) "-a")) b (keyword (str (name (:branch cfg)) "-b"))
+          _ (do (d/branch! conn (:branch cfg) a) (d/branch! conn (:branch cfg) b))
+          on (fn [br] (let [c (pdb/connect (assoc cfg :branch br))]
+                        (d/transact c {:tx-data (config/facts config/config {})})
+                        (:db/id (:seon.root/config (d/entity @c [:seon.root/id :root])))))
+          [ea eb] [(on a) (on b)]]
+      (is (some? ea))
+      (is (= ea eb) "one entity on every branch")))))
+
 ;; owner, 2026-10-28: "Fix the model provider not reading the config. A config can override at any point even
 ;; between turns." The provider was copied once at boot (seon.root/start!); it is resolved at the call now
 (deftest the-provider-is-the-config-as-it-stands-at-the-call
   (ts/test-branch! (fn [cfg conn]
     (let [c (merge config/config {:seon.config.ai/provider :none})
-          tick! (fn [m] (d/transact conn {:tx-data [(assoc m :seon.root/id :root)]}))]
-      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6 "sean") (config/facts c {}))})
+          tick! (fn [m] (d/transact conn {:tx-data (config/facts (merge c m) {})}))]
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (config/facts c {}))})
       (is (= {:kind :none} (config/provider-at @conn @conn nil)) "main's config at the first turn")
       (testing "a change to main's config applies at the next call, with no restart"
         (tick! {:seon.config.ai/provider :scripted :seon.config.ai/script 'seon.fixtures/reply})
@@ -263,7 +291,7 @@
   (ts/test-branch! (fn [_ conn]
     (let [vs '#{app.a/one app.b/two app.c/three}
           c (assoc config/config :seon.config.source/process-vars vs)]
-      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" 6 "sean") (config/facts c {}))})
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (config/facts c {}))})
       (is (= vs (:seon.config.source/process-vars (config/from-db @conn))))
       (is (set? (:seon.config.source/process-vars (config/from-db @conn))))
       (is (= c (config/from-db @conn)) "and the whole config is its db copy")))))
@@ -331,7 +359,7 @@
     (is (= :scripted (get-in scripted [:config :seon.config.root/profile])))
     (is (= "--profile scripted" (get-in scripted [:sources :seon.config.root/profile])))
     (is (= "no --profile" (get-in none [:sources :seon.config.root/profile])))
-    (is (= :deepseek (:seon.config.root/profile (first (config/facts (:config deepseek) (:sources deepseek))))))
+    (is (= :deepseek (:seon.config.root/profile (some #(when (:seon.config/id %) %) (config/facts (:config deepseek) (:sources deepseek))))))
     ;; a later layer still wins over the profile's value
     (is (= :none (get-in (under ["--profile" "scripted" "--set" ":seon.config.ai/provider=:none"]) [:config :seon.config.ai/provider])))))
 
