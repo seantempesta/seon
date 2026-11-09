@@ -689,9 +689,12 @@
         section (fn [anchor] (some (fn [[_ h body]] (when (= anchor (-> h str/lower-case (str/replace #"[^a-z0-9 -]" "") (str/replace " " "-"))) body))
                                    (re-seq #"(?m)^## (.+)\n([\s\S]*?)(?=^## |\z)" page)))
         sent (fn [text] (apply str text (for [[_ a] (re-seq #"```docs/agent\.md#([a-z0-9-]+)```" text)] (str "\n" (section a)))))
-        help-forms (runnable (doc/page-text (my.test/with (my.test/world)
-                                                          ;; the help page alone: the forms it tells an agent to run (the agent under test reads the rest)
-                                                          (my.test/page wire/help-page page))
+        ;; the help page alone, its sections as the one parse reads them (its links reach pages this world does not hold, which a
+        ;; load refuses): the forms it tells an agent to run (the agent under test reads the rest)
+        help-forms (runnable (doc/page-text (seon.db/db-with (my.test/world)
+                                                              (vec (for [sec (doc/page-sections wire/help-page page)]
+                                                                     (cond-> (select-keys sec [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text])
+                                                                       (:seon.ref/parent sec) (assoc :seon.doc/parent [:seon.doc/address (:seon.ref/parent sec)])))))
                                              wire/help-page))
         template-forms (into [] (comp (mapcat (comp runnable sent val)) (distinct)) (sort-by key template/instructions))
         ends #{"(my.turn/wait)"}
