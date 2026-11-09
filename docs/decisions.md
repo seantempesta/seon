@@ -26,6 +26,10 @@ The owner's rulings of 2026-11-09, on one system of agents, rendering from data,
 
 "I want the user to have a process regardless. Anything that's user focused should be handled by this agent too so separate users don't take down the system"; "User should have a branch just like the other agents"; "it's a read only ctx tree. The user isn't modifying anything it's sending the requests to agents"; "root I think is mostly the go between for flow communication and isn't doing anything that can allow an agent or the user to take down the system"; "The user doesn't need to be an agent under root"; the system's entity is `:seon.system/*` ("sure"). The user agent's model and routing are later ("I don't want to tackle the live aspects of the user agent right now"). Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09.
 
+### A running system runs off the db; boot resumes from it and reads no file (owner, 2026-11-09)
+
+"Boot's job is to resume the existing system or if it's fresh to index it and get it to the point that everything is running off the db. From that point on we are syncing data TO files not reading from them"; "Of course we can re-index if we want. But I mean as a functioning system concept." A running system runs off the db and writes files from it; a boot resumes from the db and reads no file; indexing from files is an explicit act a person chooses (seeding a fresh store, or re-indexing one on purpose), never something a boot or a running root does by itself. Stated in: docs/source.md#a-boot-imports-main-first (Optimization rewrites it), task seon.root/a-boot-resumes-from-the-db.
+
 ### A private session takes only what main held when it branched (owner, 2026-11-09)
 
 "The private session only takes from main what is on main at the time it is branched." Stated in: task seon.merge/a-session-syncs-with-main-unless-private.
