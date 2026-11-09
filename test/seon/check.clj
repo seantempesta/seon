@@ -578,7 +578,7 @@
                 "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
                 (and (= (str "hello from " x "\n") (:seon.print/code (:out r10))) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
                 "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
-                (and (= "7" (printed r7)) (= "360" (printed (first r8)))
+                (and (= "7" (printed r7)) (= "361" (printed (first r8)))
                      (= :seon.repl/ticks-spent (get-in (second r8) [:ex :seon.error/type])) (= ":after" (printed (nth r8 2))))}}))))
 
 ;; ---- root's threads: a declared number (session THREADS) --------------------------------
@@ -1974,12 +1974,16 @@
 (defn seed
   "The one store bin/check is given (:seon.config.root/store-path; SEON_STORE names another),
   opened before any step boots: created and seeded with about n datoms on :db when missing or past
-  :seon.config.proofs/check-store-max-bytes, else as it is. Each step's root then works on a branch of it, its own main (seon.db/open!)."
+  :seon.config.proofs/check-store-max-bytes, else as it is, and, when seeded, what every agent and template cites
+  (seon.test-store/standing-targets-tx, the test store's same targets: a cite names what exists, docs/references.md#an-entity-cites,
+  so a step's merge task, whose instructions cite my.branch/merge-main!, is written as on main). Each step's root then works on a
+  branch of it, its own main (seon.db/open!)."
   [n]
   (let [path (seon.config/value :seon.config.root/store-path)
         _ (remove-store-past! path (seon.config/value :seon.config.proofs/check-store-max-bytes))
         t0 (profile/now-ns)
         {:keys [seeded? conn]} (seon.db/open! :lmdb path n :db)
+        _ (when seeded? (d/transact conn {:tx-data (ts/standing-targets-tx @conn)}))
         ms (lib/r2 (profile/ms-since t0))
         datoms (count (d/datoms @conn :eavt))
         branches (count (d/branches conn))]
