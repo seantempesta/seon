@@ -5,7 +5,7 @@
             [clojure.java.shell] [clojure.java.io] [clojure.walk] [datahike.api :as d] [datahike.writer :as dw] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
-            [datahike.datom :as dd] [datahike.index.persistent-set :as psi]
+            [datahike.datom :as dd] [datahike.index.persistent-set :as psi] [seon.merge] [org.replikativ.persistent-sorted-set]
             [jolt.scheme :as scm] [superv.async :as sv]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
@@ -1323,6 +1323,37 @@
      ;; made a creating write seek nothing (2026-11-09)
      :per-n {:ticks 3500 :bytes 14000}
      :sizes [30 100 300]}))
+
+(deftest a-branchs-own-nodes-follow-its-own-datoms
+  ;; docs/sharing.md#what-a-branchs-nodes-are: an index node's address is
+  ;; its content's hash, so a branch that takes main's changes by merge names main's nodes for them, and holds as its own
+  ;; only the nodes its own datoms are in. With random addresses every node a merge rewrote stayed the branch's own: 66 to
+  ;; 81 percent of a long-lived branch's nodes after 100 merges in the lab, against 6 to 9 with content addresses. A store
+  ;; on disk of its own, the last resort: a node has an address only once a durable store holds it; removed at the end
+  (let [path (str (seon.config/checkout) "/target/db-test-nodes-" (random-uuid))
+        {cfg :cfg main :conn} (pdb/open! :lmdb path 2000 :db)]
+      (let [b (keyword (str "test-" (random-uuid)))
+            _ (d/branch! main :db b)
+            br (pdb/connect (assoc cfg :branch b))
+            addrs (fn [db] (let [v (volatile! #{})] (org.replikativ.persistent-sorted-set/walk-addresses (:eavt db) (fn [a] (when a (vswap! v conj a)) true)) @v))
+            merge! (fn []
+                     (let [base (d/commit-as-db br (d/merge-base br b :db))
+                           r (seon.merge/delta-three-way base @br @main #{})]
+                       (d/merge-db br #{:db} (vec (seon.merge/merge-tx @br base @main (:apply r) #{})))))
+            private (fn [] (let [m (addrs @main) o (addrs @br)] [(count (remove m o)) (count o)]))]
+        (try
+          ;; main grows by a namespace a round, and the branch takes each by merge; then the branch writes one note
+          (doseq [i (range 20)]
+            (let [nsym (symbol (str "app.c" i))]
+              (d/transact main (vec ((mt/code nsym (str "(ns " nsym ")\n(defn f [] " i ")\n")) @main)))
+              (merge!)))
+          (d/transact br [{:note/agent :t :note/text "the branch's own"}])
+          (let [[own total] (private)]
+            (is (:crypto-hash? (:config @br)) "the store's nodes are addressed by their content")
+            ;; its own: the one write's path, a leaf and the branches over it to the root (4 of 157 measured, 2026-11-09);
+            ;; with random addresses 76 of 157, what the 20 merges rewrote
+            (is (<= own 8) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
+          (finally (d/release br) (d/release main) (clojure.java.shell/sh "rm" "-rf" path))))))
 
 (deftest a-branchs-own-entity-schema-is-the-one-its-writes-are-held-to
   ;; docs/storage.md#the-write-checks-every-entity-it-touches: the per-datom check read a branch's own schemas and the

@@ -31,10 +31,10 @@ Options a person can ask of a merge (a choice of keys, `-X theirs`) are task ``s
 
 ## What a branch's nodes are
 
-Node keys are random ids today (Seon does not set Datahike's `:crypto-hash?`), so a node a branch rewrites is its own even when another branch holds the same datoms. What keeps a branch small is writing little:
+An index node's address is the hash of its content (Datahike's `:crypto-hash?`, made so with every store: ```seon.db/layout```; a leaf's address is the SHA-256 of the bytes the store writes for its datoms, [datahike](forks.md#datahike)), so two branches that hold the same datoms name one node, and a branch's own nodes are the ones its own datoms are in, never what the merges it took rewrote. Measured on a seeded store, a branch that took 20 of main's changes by merge and wrote one note held 4 of its 157 EAVT nodes as its own (the note's path, leaf to root); with random addresses 76 of 157 (`seon.db-test/a-branchs-own-nodes-follow-its-own-datoms`); in the lab, 6 to 9 percent of a long-lived branch's nodes after 100 merges against 66 to 81. A commit of 3 forms costs 3.77 M ticks against 2.35 M with random addresses (24.0 M when a leaf was hashed by hasch's walk of its values). A store made before keeps its random addresses and opens as it was (a connect adopts how a store was made); a kept store of regenerable output is named by its layout too, so it is made again with it. Collection with shared nodes is mark and sweep only ([storage](storage.md#collection)).
 
-- A test's facts are kept on a branch only where something reads them (```seon.proofs/facts-worth-keeping```), and a form's place no longer renumbers its file. On a real store of 3 agent branches, EAVT is 3 to 10 percent private by address, where an earlier real store's was as much as 27, and `seon.test` datoms 30 to 484 where they were 5,416.
-- For a long-lived branch, a user's taking hundreds of merges, random keys drift: 66 to 81 percent private after 100 merges in a lab, against 6 to 9 with content-hashed keys and a SHA-256 of each leaf's stored bytes, with all tests green on such stores. That needs a Datahike fork change and a new store, approved by the owner on 2026-11-08 and next to build (task ``seon.db/a-branch-is-main-plus-its-own-changes``).
+What also keeps a branch small is writing little:
+- A test's facts are kept on a branch only where something reads them (```seon.proofs/facts-worth-keeping```), and a form's place no longer renumbers its file. On a real store of 3 agent branches, EAVT was 3 to 10 percent private by address with random keys, where an earlier real store's was as much as 27, and `seon.test` datoms 30 to 484 where they were 5,416.
 
 ## What each operation should cost
 

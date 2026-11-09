@@ -1,7 +1,7 @@
 ;; The durable store (new in next; :seon.config.store/flush-ms is the owner's 2026-10-20 name).
 {:seon.config.store/backend [:enum {:seon.config/at-load true :seon.config/unit "backend" :description "The durable store's konserve backend."} :lmdb :file]
  :seon.config.store/lmdb-map-bytes [:int {:min 1048576 :seon.config/unit "bytes" :description "LMDB's map size: the store's largest size; a write past it is refused."}]
- :seon.config.store/keep-history? [:boolean {:seon.config/unit "boolean" :description "Whether a store is made keeping history (temporal indexes, tx-meta); fixed when the store is made."}]
+ :seon.config.store/keep-history? [:boolean {:seon.config/at-load true :seon.config/unit "boolean" :description "Whether a store is made keeping history (temporal indexes, tx-meta); fixed when the store is made."}]
  :seon.config.store/keep-commits [:int {:seon.config/at-load true :min 1 :seon.config/unit "commits" :description "How many of main's newest commit snapshots a store keeps readable by id, and how many land between its sweeps."}]
  :seon.config.store/value-out-of-line-bytes [:or {:seon.config/unit "bytes" :description "A datom value at least this large is stored once under its own key, the index holding a reference; :never keeps values inline."} [:= :never] [:int {:min 1}]]
  :seon.config.store/max-value-chars [:int {:min 1 :seon.config/unit "characters" :description "The largest value an eval's record keeps, counted by a walk (a scalar 1, a string or keyword its length); past it the value's type and this bound are kept and the transcript says it is gone."}]

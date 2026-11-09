@@ -104,7 +104,7 @@
                            (for [[src] forms
                                  :when (re-find #"^\(def(once)?\s" src)
                                  :when (re-find #"(config|cfg)/(value|resolve) " src)
-                                 [_ k] (re-seq #"\(\S*/(?:value|resolve) (:seon\.config\.[\w./-]+)" src)]
+                                 [_ k] (re-seq #"\(\S*/(?:value|resolve) (:seon\.config\.[\w./?!*+-]+)" src)]
                              (keyword (subs k 1))))]
     (is (seq read-at-load))
     (is (= [] (vec (remove #(get-in seon.config/schema-forms [% 1 :seon.config/at-load]) read-at-load))))))
