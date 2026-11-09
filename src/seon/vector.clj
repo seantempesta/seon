@@ -523,7 +523,7 @@
         ;; so catching up on n texts is n/texts rounds of seeks, never a scan of every text each round
         owed (remove (into #{} (map first) fresh) (when clean (:owed st)))
         room (max 0 (- (:texts st) (count fresh)))
-        later (when (pos? room) (remove (comp (:unembeddable st) first)
+        later (when (and (pos? room) (seq owed)) (remove (comp (:unembeddable st) first)
                                         (due db (:model st) (for [e (take room owed) a (keys texts) d (d/datoms db :eavt e a)] d))))
         todo (concat fresh later)
         due (take (:texts st) todo)
