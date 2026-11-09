@@ -526,7 +526,8 @@
   their own (seon.judge/first-move: analysis runs a reply's ns form, so never in root) and
   written on main with its usage and cost. No loop: a call answers one reply, and nothing of
   it runs. A paid call is made only while the pass has spent under
-  :seon.config.ai/judge-pass-usd; at the bound the pass stops and writes :seon.judge/stopped
+  :seon.config.ai/judge-pass-usd as the task resolves it (its own setting first: seon.config/resolve-in, so a
+  test bounds its pass on its task, never on root's config); at the bound the pass stops and writes :seon.judge/stopped
   on the pass's own fact. A reply whose usage cannot be priced, a model error or a scoring
   error ends the pass with :error. A fact held for the request but scored by other scoring
   (seon.judge/scorer) is scored again from its calls, with no model call (:reused?
@@ -534,7 +535,7 @@
   :usd :reused? :rescored?}] :usd :stopped :error}."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
-  (let [bound (config/value :seon.config.ai/judge-pass-usd)
+  (let [bound (fn [db id] (config/value :seon.config.ai/judge-pass-usd {:task (d/pull db [:seon.config.ai/judge-pass-usd] [:seon.task/id id])}))
         src (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
         version (select-keys src [:root :commit])
         ;; the score of calls against task t's subject, made in an agent of its own (a reply's
@@ -568,8 +569,8 @@
                   (let [f {:seon.judge/digest dg :seon.judge/score (cond-> (assoc sc :version version :calls calls) usage (assoc :usage usage) usd (assoc :usd usd))}]
                     @(root/transact-main! sys [f])
                     (recur more (conj rows (row (assoc f :seon.judge/task id) :rescored)) spent))))
-              (>= spent bound)
-              (let [stopped {:usd spent :bound bound :left (vec (cons id more))}]
+              (>= spent (bound db id))
+              (let [stopped {:usd spent :bound (bound db id) :left (vec (cons id more))}]
                 @(root/transact-main! sys [{:seon.judge/digest (judge/digest {:pass ids :version version}) :seon.judge/stopped stopped}])
                 {:rows rows :usd spent :stopped stopped})
               :else
