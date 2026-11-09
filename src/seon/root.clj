@@ -1171,7 +1171,7 @@
         tx (if (contract/error? r) r (source/tx-of db (:value r) false))]
     (if (contract/error? tx)
       tx
-      {:program (program/program-digest (d/db-with db tx)) :inputs (fx/inputs root)})))
+      {:program (program/program-digest (:db-after (pdb/with db tx))) :inputs (fx/inputs root)})))
 
 (defn binary-program
   "What the running binary was built from, as bin/build recorded it beside the binary (target/seon.program,
