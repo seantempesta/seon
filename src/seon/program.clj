@@ -1433,6 +1433,14 @@
   [f]
   (if (and (vector? f) (= :map (first f))) (into [] (remove #(and (vector? %) (config-key? (first %)))) f) f))
 
+(defn- less-targets
+  "Schema form f less the targets its properties name (:seon.db/to, a ref attribute's): a ref's value is checked as
+  a ref whatever it points at, so the schemas it names are links for the readers that follow them (seon.db/targets),
+  never what a value of the entry is checked against, and no edge of the entry (docs/source.md#tests-run-by-reach)."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [f]
+  (if (and (vector? f) (map? (second f)) (contains? (second f) :seon.db/to)) (update f 1 dissoc :seon.db/to) f))
+
 (defn- config-facts
   "What the schema entries (schemas: {key text}) say of the config keys, from one read of each entry that is
   not itself a config key's: {:keys the keys their forms name as data, a map's fields (less-config-fields)
@@ -1752,7 +1760,7 @@
         own (lib/digest (str k "\n" (if (config-key? k) (str (boolean listed?) "\n" text) (if (= raw form) text (sedn/encode form)))))]
     {:id (str "schema " k) :own own :ns k :defines #{}
      :refs (into #{} (filter qualified-symbol?) (tree-seq coll? seq form))
-     :schema (mapv #(str "schema " %) (names form))}))
+     :schema (mapv #(str "schema " %) (names (less-targets form)))}))
 
 (defn reach-graph
   "db's reach graph, a value: its live forms and schema entries (a schema entry's :schema, the
