@@ -1148,9 +1148,8 @@
                "src/app/pubuser.clj" "(ns app.pubuser (:require [app.pubsrc]))\n\n(defn h [] (app.pubsrc/g))\n"}]
     (is (:private (meta (resolve 'app.pubsrc/g))) "the image holds g as private")
     (is (vector? (source/tx-of db files true)) "the user of g analyzes after the file that makes it public")
-    (is (not (:private (meta (resolve 'app.pubsrc/g)))) "and the image's var is public, as the import defines it")
-    (is (vector? (source/tx-of db {"src/app/pubsrc.clj" "(ns app.pubsrc)\n\n(defn- g [] 1)\n"} true)))
-    (is (:private (meta (resolve 'app.pubsrc/g))) "a definition made private again makes the var private")))
+    (is (:private (meta (resolve 'app.pubsrc/g))) "and the image's var is as it was: analysis changes none (the tree's privacy answers, seon.source/tree-private)")
+    (is (vector? (source/tx-of db {"src/app/pubsrc.clj" "(ns app.pubsrc)\n\n(defn- g [] 1)\n"} true)))))
 
 (deftest a-var-is-as-private-as-the-tree-analyzed-holds-it
   ;; docs/source.md#a-var-is-private-as-the-tree-analyzed-holds-it: whether a file may name a var is the privacy of the tree analyzed, never
