@@ -1,7 +1,7 @@
 (ns seon.ctx.session
   "Example sessions: a finished session of another task, kept as EDN and loaded under example keys, that a task names for its agent to read (docs/render.md#the-models-context-a-cached-prefix-then-the-turn)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.program :as program]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.task :as task] [seon.lib :as lib]
@@ -134,7 +134,7 @@
                                   (as-> v' (ctx/revalued nil v' {:seon.value/gone {:type "the agent's record at a basis a copy cannot rebuild"}})))
                               k]
                              [v k]))
-        rs (when a (map cannot (remove (fn [[v k]] (and (= :seon.db/eval-fact k) (not (:seon.eval/call-id v)))) (session-records (ctx/agent-ctx db a) db))))
+        rs (when a (map cannot (remove (fn [[v k]] (and (= :seon.db/eval-fact k) (not (:seon.eval/call-id v)))) (session-records (ctx/agent-ctx (program/index-of-db db) db a) db))))
         unknown (first (remove #(session-kinds (second %)) rs))]
     (cond (nil? a) (refuse (str "no agent is keyed \"" key "\""))
           (nil? request) (refuse (str "agent \"" key "\" has no request to show: its task has no plan and it has no description"))

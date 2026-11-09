@@ -42,7 +42,7 @@
                                 (for [[t [st fs]] vs]
                                   (cond-> {:var/name t :seon.test/status st} (seq fs) (assoc :seon.test/failures (vec fs))))))]
      ;; read from the agent's record as the page's status part reads it (its task's proofs)
-     (status/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "a1") :b)) opts))))
+     (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) opts))))
 
 (defn- index-of
   "main's claims as the reconciler's index holds them (seon.reconcile/index), with only what the done rule
@@ -148,7 +148,7 @@
     (testing "a test run that failed as a whole is said, not read as tests not run"
       (let [err {:seon.error/type :seon.proofs/test-run-died :seon.error/operation 'seon.agent/test-run :seon.error/message "namespace app-test did not load: Unable to resolve symbol: g"}
             db (d/db-with db [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"] :seon.agent/test-error err}])
-            st (status/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "a1") :b)) {})]
+            st (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) {})]
         (is (= {:failed ["namespace app-test did not load: Unable to resolve symbol: g"]} (:test-run st)))
         (is (= [{:test 'demo-test/f-test :status :not-run :source (print/code "(deftest f-test (is (= 4 (f 2))))")}] (:proofs st)) "a written proof did not run")
         (is (re-find #"did not load" (pr-str (seon.render.ui/status-hiccup {} st))) "drawn, it is there"))
@@ -249,7 +249,7 @@
     (is (= :unknown (:status (by 'ctx-calc-test/empty-test))) "a proof no report named never ran: the judge's :proof-unknown")
     (let [db (d/db-with db [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "ctx/sq"]
                              :seon.agent/test-error {:seon.error/type :seon.proofs/test-run-died :seon.error/operation 'seon.agent/test-run :seon.error/message "namespace app-test did not load"}}])
-          b (status/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "a1") :b)) {})]
+          b (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) {})]
       (is (= {'ctx-calc-test/square-test :not-run 'ctx-calc-test/empty-test :not-run 'ctx-calc-test/cube-test :undefined}
              (into {} (map (juxt :test :status)) (:proofs b)))
           "when the test run failed as a whole, a written proof did not run"))))
@@ -284,7 +284,7 @@
   (let [db (d/db-with (db-with-program) [{:ns/name 'demo.calc :ns/doc "Adds. More."} {:schema/key :x.s/block :schema/form "[:map [:x.s/from :int]]"}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
                                                :seon.task/plan "Read `demo.calc`, `:x.s/block` and `bin/env`."}]))
-        t (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/n") :b))
+        t (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.task/id "demo/n") :b))
         m (into {} (for [c (vals (:seon.cite/_of t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c)])]))]
     (is (str/includes? (m 'demo.calc) "Adds.") "a namespace: the first sentence of its doc")
     (is (str/includes? (m 'demo.calc) "(doc 'demo.calc)") "and the form that reads it")
@@ -367,7 +367,7 @@
                         {:var/name 'demo-test/f-test :seon.test/status :green}])
       (d/transact conn (program-facts '[[demo/helper "(defn helper [x] x)" []]]))
       (d/transact conn [{:var/name 'demo/helper :var/meta #{:arglists}}])
-      (let [db @conn st (status/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "a1") :b)) {})]
+      (let [db @conn st (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) {})]
         (is (= ['demo/helper] (:without-a-contract st)))
         (is (= [{:reason :contract-gap :vars ['demo/helper]}] (:refused st)))))))
 
@@ -386,7 +386,7 @@
       (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :green} {:var/name 'demo-test/own-test :seon.test/status :red}
                         {:var/name 'demo-test/kept-test :seon.test/status :red}])
       (let [db @conn
-            st (status/status db (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "a1") :b))
+            st (status/status db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b))
                                {:index (fn [] (index-of {"demo/f" #{'demo-test/f-test}} {} {}))})
             by (into {} (map (juxt :test identity)) (:refused st))]
         (is (= #{'demo-test/own-test 'demo-test/kept-test 'demo-test/env-test} (set (keys by))) (str "main's own red is a reason too: " (pr-str (:refused st))))
@@ -409,14 +409,14 @@
   [conn seen id t]
   (let [db @conn
         a (pdb/eid db :seon.agent/key "a1")
-        now (seon.fixtures/drawn-parts db (ctx/build db a (:seon.agent/branch (d/entity db a))))
+        now (seon.fixtures/drawn-parts db (ctx/build (seon.db/index) db a (:seon.agent/branch (d/entity db a))))
         first? (nil? @seen)
         moved (into (array-map) (remove (fn [[k f]] (= f (get @seen k)))) now)
         [intent code] ((if first? :whole :changes) wire/render-calls)]
     (when (or first? (seq moved))
       (d/transact conn [{:seon.eval/id id :seon.eval/by "seon" :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" t)
                          :seon.eval/code code :seon.eval/intent intent :seon.eval/schema :seon.render/parts
-                         :seon.eval/response {:handle (symbol "result" id) :value (if first? (render/parts-value moved) {:edits (render/page-edits (render/forms-moved @seen now))})}}]))
+                         :seon.eval/response {:handle (symbol "result" id) :value (if first? (render/parts-value moved) {:edits (render/page-edits (seon.db/index) (render/forms-moved @seen now))})}}]))
     (reset! seen now)
     moved))
 
@@ -499,7 +499,7 @@
             p3 (turn! 3)
             _ (d/transact conn [{:seon.root/id :root :seon.root/boot "b1"}])
             p4 (turn! 4)
-            w (render/walker (src [p1 p2 p3 p4]) (constantly nil) [#'identity {}])
+            w (render/walker (src [p1 p2 p3 p4]) (constantly nil) [#'identity {}] (seon.db/index))
             diff (render/changes-of w)]
         ;; a restart: nothing kept, the last turn's pair asked first. It fills every pair before it in one pass, one chain
         ;; [nil p1 p2 p3 p4]: one walk drawn once at p1 and advanced through p2, p3 and p4 (a count of the source's calls, not time)
@@ -512,7 +512,7 @@
         (is (nil? (stored "p4")) "turn 4 stored no eval")
         ;; a request asks in turn order, turn 1's pair first: still one pass, to the last turn, and every later ask is held
         (let [_ (reset! chains [])
-              w2 (render/walker (src [p1 p2 p3 p4]) (constantly nil) [#'identity {}])
+              w2 (render/walker (src [p1 p2 p3 p4]) (constantly nil) [#'identity {}] (seon.db/index))
               diff2 (render/changes-of w2)]
           (doseq [[p0 p] [[nil p1] [p1 p2] [p2 p3] [p3 p4]]] (diff2 p0 p))
           (is (= [[nil p1 p2 p3 p4]] @chains) "asked in turn order, one pass answered every pair"))
@@ -520,11 +520,11 @@
         (is (and (seq (:components (stored "p1"))) (seq (:edits (stored "p2"))) (seq (:edits (stored "p3")))) "and each is a change worth comparing")
         ;; the pass equals the pairs computed one by one, each a walk drawn cold at its first point and advanced to its second
         (doseq [[p0 p1'] [[nil p1] [p1 p2] [p2 p3] [p3 p4]]]
-          (let [w3 (render/walker (src []) (constantly nil) [#'identity {}])]
+          (let [w3 (render/walker (src []) (constantly nil) [#'identity {}] (seon.db/index))]
             (is (= ((render/changes-of w3) p0 p1') (diff p0 p1')) "the pair alone equals the pair filled in the pass")
             (render/dispose-walk! w3)))
         (is (= 5 (count @chains)) "the four alone were four chains of their own, the pass one")
-        (let [w4 (render/walker {:ref (seon.ratom/atom {}) :changes ctx/changes} (constantly nil) [#'identity {}])
+        (let [w4 (render/walker {:ref (seon.ratom/atom {}) :changes ctx/changes} (constantly nil) [#'identity {}] (seon.db/index))
               e ((render/changes-of w4) p1 p2)]
           (is (= :seon.render/no-diffs-through (:seon.error/type e)) "a source that cannot draw a point answers a typed error, not nothing")
           (render/dispose-walk! w4))
@@ -547,7 +547,7 @@
                          :seon.model-call/basis {:commit (d/commit-id @conn) :task "demo/f" :turn 1 :max-turns 4 :origin :model}}])
       (let [db @conn
             a (pdb/eid db :seon.agent/key "a1")
-            page (seon.fixtures/drawn-parts db (ctx/build db a :b))
+            page (seon.fixtures/drawn-parts db (ctx/build (seon.db/index) db a :b))
             text (str/join "\n\n" (map render/part-text (vals page)))
             times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
         (is (some #(= % "status") (keys page)) "how the work stands is on the page")
@@ -671,7 +671,7 @@
                     (model-call-fact 2 {:seon.model-call/forms 2 :seon.model-call/reply "Then." :seon.model-call/reasoning "more"})
                     (model-call-fact 3 {:seon.model-call/forms 1 :seon.model-call/reply "" :seon.model-call/reasoning "quiet"})
                     (ev 1 1) (ev 2 1) (ev 3 1) (ev 4 2) (ev 5 2) (ev 6 3)])]
-    [db (:tree (ctx/build db (pdb/eid db :seon.agent/key "a1") :b))]))
+    [db (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b))]))
 
 (defn- wire-without
   "The wire messages of the conversation of `reply-world` with the evals ids of its ctx unlinked (what swap! on @ctx does)."
@@ -742,7 +742,7 @@
         block (data-of db "demo/f")
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))
         ;; the page's part: the cite joins the task by its id (:seon.cite/task), drawn by its plan
-        cite (some #(when (= 'demo.other/g (:seon.cite/name %)) %) (vals (:seon.cite/_of (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/f") :b)))))
+        cite (some #(when (= 'demo.other/g (:seon.cite/name %)) %) (vals (:seon.cite/_of (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.task/id "demo/f") :b)))))
         part (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db cite)])]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")
@@ -769,7 +769,7 @@
             _ (ev! "x1" "b/a9" "(other)" 1)
             db @conn
             a (:db/id (d/entity db [:seon.agent/key "a1"]))
-            ids (mapv (comp second first) (seon.fixtures/tree-parts (:tree (seon.ctx/build db a :b)) db))]
+            ids (mapv (comp second first) (seon.fixtures/tree-parts (:tree (seon.ctx/build (seon.db/index) db a :b)) db))]
         (is (= ["e1" "m1" "e2"] ids) "the first wake's eval and message, then the second's, and no other agent's: by their turn numbers")))))
 
 (deftest a-sessions-next-stage-keeps-the-last-request-as-its-prefix
@@ -943,7 +943,7 @@
   ;; value's schema is metadata, which the store does not keep, and record-text never read the record's :schema
   (let [v (with-meta {:reports [] :ran 3 :reused 2 :fail 0 :error 0 :pass 3 :heap (vec (range 400))} {:seon.render/schema :seon.test/proved})
         r {:handle 'result/e7 :value v}
-        live (seon.print/response-text r seon.render/model)
+        live (seon.print/response-text r #(seon.render/model (seon.db/index) %))
         rec (repl/record-details "(my.agent/prove)" r {})
         db (d/db-with (db-with-program) [(into {:seon.eval/id "e7" :seon.eval/by "a1"} rec)])
         stored (d/pull db '[:seon.eval/code :seon.eval/response :seon.eval/result :seon.eval/schema] [:seon.eval/id "e7"])
@@ -1008,7 +1008,7 @@
         rec (repl/record-details "(f 1)" {:text "2"} {:intent text})]
     (is (= text (:seon.eval/intent rec)) "the text, kept as written")
     (is (not (contains? rec :cites)) "and nothing parsed from it")
-    (let [row #(seon.web.html/html (seon.render.ui/evaluation {:as :inline} (assoc (repl/record-details "(x)" {:text "x" :value %} {}) :seon.eval/by "a1")))]
+    (let [row #(seon.web.html/html (seon.render.ui/evaluation {:seon.render/index (seon.db/index) :as :inline} (assoc (repl/record-details "(x)" {:text "x" :value %} {}) :seon.eval/by "a1")))]
       (is (str/includes? (row {:a 1}) "{:a 1}") "its value in one line, printed now, for the collapsed eval")
       (is (str/includes? (row nil) ">nil</code>") "a value of nil is nil, not nothing (such evals' collapsed rows showed nothing)"))))
 
@@ -1111,9 +1111,9 @@
   [db]
   (let [db (d/db-with db [{:seon.agent/key "demo/a1" :seon.agent/task {:seon.task/id "demo/r"}}]) 
         cell (volatile! db)
-        c (volatile! (ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b))
+        c (volatile! (ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "demo/a1") :b))
         a (seon.ratom/atom (:tree @c))
-        w (render/walker {:ref a :changes ctx/changes} #(deref cell) [(requiring-resolve (render/declared :seon.render/render-ctx)) {}])]
+        w (render/walker {:ref a :changes ctx/changes} #(deref cell) [(requiring-resolve (render/declared (seon.db/index) :seon.render/render-ctx)) {}])]
     (render/flush! w nil)
     [w a cell c (pdb/eid db :seon.agent/key "demo/a1")]))
 
@@ -1153,10 +1153,10 @@
   (let [[db te] (sections-near "Make ```demo/g``` say one thing.")
         [w :as walk] (walked db)
         kept #(render/kept-of w '[seon.render.ui/status])
-        c (:tree (ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b))
+        c (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "demo/a1") :b))
         before (kept)]
     (is (map? before))
-    (is (= (select-keys before [:phase :next]) (select-keys (status/status db (ctx/build (d/db-with db [{:seon.agent/key "demo/a1" :seon.agent/task {:seon.task/id "demo/r"}}]) (pdb/eid db :seon.agent/key "demo/a1") :b) {}) [:phase :next])))
+    (is (= (select-keys before [:phase :next]) (select-keys (status/status db (ctx/build (seon.db/index) (d/db-with db [{:seon.agent/key "demo/a1" :seon.agent/task {:seon.task/id "demo/r"}}]) (pdb/eid db :seon.agent/key "demo/a1") :b) {}) [:phase :next])))
     (step! walk [{:seon.model-call/id (seon.lib/call-id "demo/a1" 1) :seon.model-call/agent [:seon.agent/key "demo/a1"] :seon.model-call/n 1 :seon.model-call/origin :model}])
     (is (identical? before (kept)) "nothing of how the work stands moved: the same value, nothing ran")))
 
@@ -1180,8 +1180,8 @@
   (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
         db (d/db-with db (conj (ts/turn-tx "demo/a1" 1 {:seon.model-call/reply "Reading."})
                                {:seon.agent/key "demo/a1" :seon.agent/task {:seon.task/id "demo/r"}}))
-        c (:tree (ctx/build db (pdb/eid db :seon.agent/key "demo/a1") :b))
-        root (render/declared-var :seon.render/render-ctx)
+        c (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "demo/a1") :b))
+        root (render/declared-var (seon.db/index) :seon.render/render-ctx)
         wire #(try (render/wire %) (finally (render/dispose-walk! %)))]
     (is (= (wire (render/draw c ctx/changes db root {:model-only true :once true}))
            (wire (render/draw c ctx/changes db root {}))))))
@@ -1212,8 +1212,8 @@
     (is (some? ((html w) part)) "the cited section, a part of its own")
     (let [changed (step! walk [[:db/add [:seon.doc/address "docs/vector.md#the-model"] :seon.doc/lead "The model, as main now says it."]])
           live (html w)
-          cold (let [d @cell w2 (render/draw (:tree (ctx/build d (pdb/eid d :seon.agent/key "demo/a1") :b)) ctx/changes d
-                                             (requiring-resolve (render/declared :seon.render/render-ctx)))]
+          cold (let [d @cell w2 (render/draw (:tree (ctx/build (seon.db/index) d (pdb/eid d :seon.agent/key "demo/a1") :b)) ctx/changes d
+                                             (requiring-resolve (render/declared (seon.db/index) :seon.render/render-ctx)))]
                  (try (html w2) (finally (render/dispose-walk! w2))))]
       (is (= [part] changed) "the cited section's part, and nothing else, drawn again")
       (is (str/includes? (live part) "The model, as main now says it.") "with the section as it is now")
@@ -1386,7 +1386,7 @@
             {:keys [messages parts]} (ask! 0)
             db @conn
             a (pdb/eid db :seon.agent/key "a1")
-            all (keys (seon.fixtures/drawn-parts db (ctx/build db a (:seon.agent/branch (d/entity db a)))))]
+            all (keys (seon.fixtures/drawn-parts db (ctx/build (seon.db/index) db a (:seon.agent/branch (d/entity db a)))))]
         (is (= ["system" "user" "assistant" "tool"] (mapv :role messages)) "the system prompt, what opens the session (a conversation never opens on a blank assistant message), then the page as an eval's call and its answer")
         (is (= [:section :session :eval] (mapv (comp first first) parts)) "the records it was made of")
         (is (= (count all) (count (re-seq #"(?m)^\s*\[seon\.render\.ui/" (:content (peek messages))))) "each part of the page, headed by its function")
@@ -1435,7 +1435,7 @@
                                     {:seon.model-call/id (seon.lib/call-id "a1" 2) :seon.model-call/agent [:seon.agent/key "a1"] :seon.model-call/n 2 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "(defn f0 [x] (let [y"
                                      :seon.model-call/truncated true}])
         a (:db/id (d/entity db [:seon.agent/key "a1"]))]
-    (is (= [{:role "assistant" :content "Done: f0 is green." :reply 1}] (seon.fixtures/tree-messages (:tree (seon.ctx/build db a :b)) db)) "the whole reply is a record, the cut one is not")))
+    (is (= [{:role "assistant" :content "Done: f0 is green." :reply 1}] (seon.fixtures/tree-messages (:tree (seon.ctx/build (seon.db/index) db a :b)) db)) "the whole reply is a record, the cut one is not")))
 
 (deftest a-reply-with-no-call-is-a-record-at-its-turn
   ;; docs/turn.md#the-turn-is-a-number (owner, 2026-11-04): the conversation is ordered by the numbers its records carry, not by
@@ -1457,7 +1457,7 @@
                    [(model-call-fact 2 {:seon.model-call/forms 0 :seon.model-call/reply "Done." :seon.model-call/reasoning "easy"})
                     (ev "e11" "outside" 2)])
         a (pdb/eid db :seon.agent/key "a1")
-        ps (seon.fixtures/tree-parts (:tree (ctx/build db a :b)) db)]
+        ps (seon.fixtures/tree-parts (:tree (ctx/build (seon.db/index) db a :b)) db)]
     (is (= ["m1" (seon.lib/call-id "a1" 1) "e9" "e8" "e10" "m2" (seon.lib/call-id "a1" 2) "e11"] (mapv (comp second first) ps))
         "per turn: its messages, its reply holding its evals as they ran, then the evals of other hands; a reply that called is a record while it has evals")
     (is (= [1 1 1 1 1 2 2 2] (mapv #(nth % 2) ps)) "each record's turn")
@@ -1508,7 +1508,7 @@
   ;; docs/agent.md#the-repl: before any eval the REPL is where it starts, the task's namespace; the turn line says where it is
   (let [db (d/db-with (ts/test-db) (task/create-tx (ts/test-db) [{:seon.task/ns 'x :seon.task/name "nsd" :seon.task/plan "Make it."}]))
         db (d/db-with db [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "x/nsd"]}])
-        tree (:tree (ctx/build db (pdb/eid db :seon.agent/key "a1") :b))]
+        tree (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b))]
     (is (= 'x (ctx/current-ns tree)))
     (is (= 'y (ctx/current-ns (assoc tree :seon.agent/ns 'y))))))
 
@@ -1519,7 +1519,7 @@
   (let [db (db-with-program)
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/plan "Change `demo/f`."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        names #(set (keep :seon.cite/name (vals (:seon.cite/_of (:tree (ctx/build % (pdb/eid % :seon.task/id "demo/c") :b))))))]
+        names #(set (keep :seon.cite/name (vals (:seon.cite/_of (:tree (ctx/build (seon.db/index) % (pdb/eid % :seon.task/id "demo/c") :b))))))]
     (is (= '#{demo/f} (names db)) "the cites its write made")
     (let [db (d/db-with db [{:seon.task/id "demo/c" :seon.task/plan "Change `demo/g`."}])]
       (is (= '#{demo/f} (names db)) "a draw reads the entities, never the text again")
@@ -1603,7 +1603,7 @@
             close-at (first (keep-indexed #(when (= "</session>" (:content %2)) %1) more))
             example (subvec (vec more) 0 close-at)
             db @conn
-            original (mapcat second (seon.fixtures/tree-parts (:tree (seon.ctx/build db (pdb/eid db :seon.agent/key "b/src") :b)) db))
+            original (mapcat second (seon.fixtures/tree-parts (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "b/src") :b)) db))
             prefix #(un-example db "example/abc" (pr-str %))]
         (is (= "system" (:role sys)))
         (is (= {:role "user" :content "<session id=\"example/abc\" kind=\"example\" from=\"seon\">\nA finished session of another task, shown for how its work was done; not yours. Its request:\nMake h."} open) "the example's opening and its request")
@@ -1657,7 +1657,7 @@
       (source-session! conn)
       (let [tx (session/session-tx @conn "b/src" "abc")
             names (fn [db k] (let [a (pdb/eid db :seon.agent/key k)]
-                               (seon.fixtures/tree-messages (:tree (seon.ctx/build db a :b)) db)))]
+                               (seon.fixtures/tree-messages (:tree (seon.ctx/build (seon.db/index) db a :b)) db)))]
         (is (= tx (clojure.edn/read-string (pr-str tx))) "plain data: written with pr-str, read back")
         (is (= {:seon.agent/key "example/abc" :seon.agent/status :ended :seon.agent/description "Make h." :seon.agent/turn 2} (ffirst tx)) "its turn the last its records carry: its page draws a component for each")
         (is (= 4 (count tx)) "the agent, then a transaction for each of three records")
@@ -1666,7 +1666,7 @@
             (doseq [t (clojure.edn/read-string (pr-str tx))] (d/transact fresh t))
             (is (= (pr-str (names @conn "b/src")) (un-example @conn "example/abc" (pr-str (names @fresh "example/abc"))))
                 "the example draws the same messages as the original's records")
-            (is (= [(seon.lib/id (seon.lib/digest "example/abc/s1")) (seon.lib/id (seon.lib/digest "example/abc/m1")) (seon.lib/call-id "example/abc" 2)] (mapv (comp second first) (seon.fixtures/tree-parts (:tree (seon.ctx/build @fresh (pdb/eid @fresh :seon.agent/key "example/abc") :b)) @fresh)))
+            (is (= [(seon.lib/id (seon.lib/digest "example/abc/s1")) (seon.lib/id (seon.lib/digest "example/abc/m1")) (seon.lib/call-id "example/abc" 2)] (mapv (comp second first) (seon.fixtures/tree-parts (:tree (seon.ctx/build (seon.db/index) @fresh (pdb/eid @fresh :seon.agent/key "example/abc") :b)) @fresh)))
                 "ids re-keyed under the example, in the order they ran, a model call's `<key>/<n>` as any agent's")))))))
 
 (deftest the-page-draws-its-tasks-examples-in-the-conversation
@@ -1675,7 +1675,7 @@
       (example-world! conn)
       (let [db @conn
             a (pdb/eid db :seon.agent/key "a1")
-            w (render/draw (:tree (ctx/build db a :b)) ctx/changes db (render/declared-var :seon.render/render-ctx))
+            w (render/draw (:tree (ctx/build (seon.db/index) db a :b)) ctx/changes db (render/declared-var (seon.db/index) :seon.render/render-ctx))
             html (try (pr-str (render/placed-hiccup w ["#c-rows"])) (finally (render/dispose-walk! w)))]
         (is (str/includes? html "example/abc"))
         (is (str/includes? html "(+ 1 2)") "its eval, by the one hiccup an eval has")))))
@@ -1935,7 +1935,7 @@
              :seon.eval/response {:handle 'result/p1 :value v}}
         [db] (tree-world)
         tool (:content (peek (seon.fixtures/eval-messages {:db db} (assoc rec :seon.eval/call-id "x"))))]
-    (is (= (print/record-text rec render/model) tool))
+    (is (= (print/record-text rec #(render/model (seon.db/index) %)) tool))
     (is (str/includes? tool "moved"))))
 
 (deftest the-recorded-requests-come-out-the-same
@@ -2033,7 +2033,7 @@
         (let [db @conn]
           (doseq [[id r] answers
                   :let [e (d/pull db '[*] [:seon.eval/id id])
-                        sent (wire/tool-text db e)]]
+                        sent (wire/tool-text (seon.db/index) db e)]]
             (is (some? (:seon.eval/result e)) (str id " holds a result entity"))
             (is (= (when (contains? r :value) (:value r)) (:seon.result/value (d/pull db '[*] (get-in e [:seon.eval/result :db/id])))) (str id " its value is the result's"))
             (is (not-any? #(contains? (:seon.eval/response e) %) [:value :ex :out :err :forms]) "and not the response's")

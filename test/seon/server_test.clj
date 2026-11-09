@@ -406,7 +406,7 @@
                              "            :pages (some (fn [f] (when (= 'seon.render/draw (:var f)) (:calls f))) (seon.profile/touched))}))]"
                              "  {:reads (vec (repeatedly 9 m))"
                              "   :live=cold (let [pw (seon.repl/page-walk) db (seon.agent/db) page (seon.render/placed-hiccup pw (seon.render/page-lists pw)) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
-                             "                    w (seon.render/draw (:tree (seon.ctx/build db a (:seon.agent/branch (datahike.api/entity db a)))) seon.ctx/changes db (seon.render/declared-var :seon.render/render-ctx) {:model-only true})"
+                             "                    w (seon.render/draw (:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (datahike.api/entity db a)))) seon.ctx/changes db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {:model-only true})"
                              "                    cold (seon.render/placed-hiccup w (seon.render/page-lists w))]"
                              "                (or (= page cold) (vec (for [k (distinct (concat (keys page) (keys cold))) :when (not= (get page k) (get cold k))] k))))})")]))
         later (rest (:reads (:value reads)))]
@@ -436,7 +436,7 @@
                         ;; the prove's eval as recorded: its value, data, under the schema the page draws it by
                         "(let [e (datahike.api/q '[:find [?e ?k] :in $ ?c :where [?e :seon.eval/code ?c] [?e :seon.eval/response _] [?e :seon.eval/schema ?k]] (seon.agent/db) \"(my.agent/prove #{'app.okt/ok-test})\")
                                v (seon.ratom/realize (:value (seon.db/response-of (seon.agent/db) (datahike.api/pull (seon.agent/db) '[:seon.eval/response :seon.eval/result] (first e)))))]
-                           [(second e) (:proofs v) (seon.web.html/html (seon.render.ui/proved {} v))])"
+                           [(second e) (:proofs v) (seon.web.html/html (seon.render.ui/proved {:seon.render/index (seon.db/index)} v))])"
                         {:op :done :agent agent}]))]
     ;; the owner, 2026-10-27: an eval's answer stays small, its handle and one line; what the run
     ;; found is drawn on its eval, from its value (seon.render.ui/proved)
