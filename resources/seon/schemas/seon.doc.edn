@@ -15,18 +15,14 @@
  :seon.doc/text :string
  ;; the enclosing section
  :seon.doc/parent [:and {:seon.db/to [:seon.doc/fact]} :seon.db/ref]
- ;; what its own text cites and resolves to: a section (a link) or a var (a name)
+ ;; what its own text cites and resolves to: a section (a link) or a var (a name); a link to no section is refused at
+ ;; the load (:seon.cite/no-target, docs/references.md#the-wiki-in-the-store)
  :seon.doc/references [:set :seon.db/ref]
  ;; the names its own text cites as references (seon.ref/kept: a text word only when it named
- ;; something at load), kept as names: a var deleted later leaves its name here, and a name that
- ;; no longer names something is a dead citation (seon.problems, class :dead-citation)
+ ;; something at load), kept as names: a var deleted later leaves its name here
  ;; indexed (AVET): the sections that cite a name are sought by it, when a var or task of that name appears or
  ;; vanishes (seon.problems/caused-split, docs/cost.md#a-diff-per-attribute-costs-a-descent-each)
  :seon.doc/names [:set {:seon.db/index true} :qualified-symbol]
- ;; the addresses its own text links to (a link or a cited path#anchor) that reached no section
- ;; at load: the load goes on without them, and a target that is still no stored section is a
- ;; dead citation (seon.problems, class :dead-citation)
- :seon.doc/dead-links [:set :string]
  ;; the form id of each var the section cites, as it stood when the section's text was last written
  ;; (seon.doc/load-tx keeps it while the text is unchanged): a var whose form id now differs leaves the
  ;; section stale (seon.problems, class :stale-section). From git's baseline (seon.doc/baseline-reads)
@@ -49,7 +45,6 @@
                      [:seon.doc/parent {:optional true} :seon.doc/parent]
                      [:seon.doc/references {:optional true} :seon.doc/references]
                      [:seon.doc/names {:optional true} :seon.doc/names]
-                     [:seon.doc/dead-links {:optional true} :seon.doc/dead-links]
                      [:seon.doc/read {:optional true} :seon.doc/read]
                      [:seon.doc/baseline-unread {:optional true} :seon.doc/baseline-unread]
                      [:seon.doc/reviewed {:optional true} :seon.doc/reviewed]]

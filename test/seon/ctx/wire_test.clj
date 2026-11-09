@@ -23,6 +23,8 @@
                                    :form/defines [(str v)]}
                                   (ns-fact v)])
                                '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))"]
+                                 ;; a var the tests' plans cite (a cite names what exists: docs/references.md#an-entity-cites)
+                                 [demo/g "(defn g \"Halves.\" [x] (/ x 2))"]
                                  [demo-test/f-test "(deftest f-test (is (= 4 (f 2))))"]
                                  [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]
                                  ;; a test the agent wrote in its scratch namespace, no proof of its task
@@ -278,19 +280,20 @@
            (:seon.ref/lead (shown "docs/flow.md#step"))) "doc depth: the section's lead")
     (is (clojure.string/includes? (str (shown "docs/flow.md#stop")) "Then the graph is gone.") "code depth: the section whole")))
 
-;; docs/references.md#an-entity-cites: a cite of a schema key joins its entry, of a namespace its entity, each drawn
-;; from what the cite holds; a path no section of the db names joins nothing, and its part says so
+;; docs/references.md#an-entity-cites: a cite of a schema key joins its entry, of a namespace its entity, of a file its
+;; entity, each drawn from what the cite holds
 (deftest a-cited-schema-key-and-namespace-show-what-they-are
-  (let [db (d/db-with (db-with-program) [{:ns/name 'demo.calc :ns/doc "Adds. More."} {:schema/key :x.s/block :schema/form "[:map [:x.s/from :int]]"}])
+  (let [db (d/db-with (db-with-program) [{:ns/name 'demo.calc :ns/doc "Adds. More."} {:schema/key :x.s/block :schema/form "[:map [:x.s/from :int]]"}
+                                         {:file/path "bin/env" :file/text "#!/bin/sh"}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
                                                :seon.task/plan "Read `demo.calc`, `:x.s/block` and `bin/env`."}]))
         t (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/n") :b))
-        m (into {} (for [c (vals (:seon.cite/_of t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c)])]))]
+        m (into {} (for [c (vals (:seon.cite/_of t))] [(task/cited-name c) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c)])]))]
     (is (str/includes? (m 'demo.calc) "Adds.") "a namespace: the first sentence of its doc")
     (is (str/includes? (m 'demo.calc) "(doc 'demo.calc)") "and the form that reads it")
     (is (str/includes? (m :x.s/block) ":int") "a schema key: what it holds")
     (is (not (str/includes? (m :x.s/block) "my.schema/register!")) "its change is taught once, not on every cite")
-    (is (str/includes? (m "bin/env") (:unresolved seon.ref/problem-messages)) "a file: it joins nothing, and its part says so")))
+    (is (str/includes? (m "bin/env") "(slurp \"bin/env\")") "a file: the form that reads it")))
 
 (deftest an-agent-reads-its-conversation-so-far
   ;; a live DeepSeek agent re-read the same Datahike source every other turn because each
@@ -593,7 +596,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Make ```ctx-big/big``` fast."}]))
         r (seon.doc/resolve-ref db 'ctx-big/big :code)
         ;; the task's cite as ctx holds it: the var it names, with its form
-        part {:seon.cite/name 'ctx-big/big :seon.cite/depth :code :var {:var/name 'ctx-big/big :var/form {:form/src src}}}
+        part {:seon.cite/depth :code :seon.cite/target {:var/name 'ctx-big/big :var/form {:form/src src}}}
         model (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db part {:changing? true})])]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} (select-keys r [:symbol :source])) "the source whole as code, never swapped for its doc by size")
     (is (str/includes? model src) "the part holds it whole, in a fence: a function cited to be changed is read whole")
@@ -604,16 +607,6 @@
   (let [v (mapv (fn [i] (* (Math/exp (/ (- i) 96.0)) (Math/sin (* (inc seed) (inc i) 0.37)))) (range 768))
         n (Math/sqrt (reduce + (map #(* % %) v)))]
     (mapv #(/ % n) v)))
-
-(deftest unresolved-names-share-one-problem
-  ;; a measured context (2026-10-22) repeated the same 280-character problem under each name
-  ;; that resolves to nothing; it is said once, beside every such name
-  (let [db (db-with-program)
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "u" :seon.task/plan "Use `demo/f`, `demo/x` and `demo/y`."
-                                               :seon.task/proofs #{'demo-test/f-test}}]))
-        refs (:write-set (data-of db "demo/u"))]
-    (is (= ['demo/f] (keep :symbol refs)) "the resolved name as itself")
-    (is (= {:unresolved ['demo/x 'demo/y] :problem (:unresolved seon.ref/problem-messages)} (last refs)) "the others, one problem")))
 
 (deftest an-owners-message-reaches-the-next-turn
   ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
@@ -741,12 +734,12 @@
                                                :seon.task/proofs #{'demo-test/f-test}}]))
         block (data-of db "demo/f")
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))
-        ;; the page's part: the cite joins the task by its id (:seon.cite/task), drawn by its plan
-        cite (some #(when (= 'demo.other/g (:seon.cite/name %)) %) (vals (:seon.cite/_of (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/f") :b)))))
+        ;; the page's part: the cite's target is the task, drawn by its plan
+        cite (some #(when (= "demo.other/g" (get-in % [:seon.cite/target :seon.task/id])) %) (vals (:seon.cite/_of (:tree (ctx/build db (pdb/eid db :seon.task/id "demo/f") :b)))))
         part (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db cite)])]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")
-    (is (= "demo.other/g" (get-in cite [:task :seon.task/id])) "the cite joins the task by its id")
+    (is (= "demo.other/g" (get-in cite [:seon.cite/target :seon.task/id])) "the cite's target is the task")
     (is (str/includes? part "G is defined first. Then f calls it.") "and its part shows the plan")
     (is (not (str/includes? part (:unresolved seon.ref/problem-messages))) "not an unresolved name")))
 
@@ -1054,15 +1047,16 @@
         ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss),
         ;; held before the task cites them: a name in a namespace the program does not hold is not cited
         db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
+        ;; a function beside the plan by meaning, and a schema key its plan names
+        db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
+                          {:schema/key :demo/thing :schema/form "[:map]"}])
+        ;; (written before the task: its plan cites them, and a cite names what exists)
         ;; every item scored is shown (its cut 0), so these tests read relevance's whole order
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan
                                               :seon.task/config {:seon.config.render/relevance-summary 0.0}}]))
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.doc/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) "m"))
-        ;; a function beside the plan by meaning, and a schema key its plan names
-        db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
-                          {:schema/key :demo/thing :schema/form "[:map]"}])
         f (pdb/eid db :form/id "demo/g")]
     [(d/db-with db (vector/tx-data [f] [1] [(dir 1.0 0.05)] "m")) te dir]))
 
@@ -1518,9 +1512,9 @@
   (let [db (db-with-program)
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/plan "Change `demo/f`."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        names #(set (keep :seon.cite/name (vals (:seon.cite/_of (:tree (ctx/build % (pdb/eid % :seon.task/id "demo/c") :b))))))]
+        names #(set (keep (fn [c] (get-in c [:seon.cite/target :var/name])) (vals (:seon.cite/_of (:tree (ctx/build % (pdb/eid % :seon.task/id "demo/c") :b))))))]
     (is (= '#{demo/f} (names db)) "the cites its write made")
-    (let [db (d/db-with db [{:seon.task/id "demo/c" :seon.task/plan "Change `demo/g`."}])]
+    (let [db (d/db-with db [{:var/name 'demo/g} {:seon.task/id "demo/c" :seon.task/plan "Change `demo/g`."}])]
       (is (= '#{demo/f} (names db)) "a draw reads the entities, never the text again")
       (is (= '#{demo/g} (names (d/db-with db (task/rederive-tx db (task/task db "demo/c")))))
           "and a write of the plan makes them again"))))
@@ -1991,7 +1985,7 @@
   ;; (vars-history spent turns 4-8 finding it out)
   (let [db (d/db-with (db-with-program) [{:schema/key :var/form :schema/form ":seon.db/ref"}
                                          {:schema/key :var/name :schema/form ":symbol"}])
-        text (fn [k] (seon.render/part-text ['seon.render.ui/cited {} (seon.render.ui/cite-hiccup db {:seon.cite/name k :seon.cite/depth :doc :schema (d/pull db '[*] [:schema/key k])})]))
+        text (fn [k] (seon.render/part-text ['seon.render.ui/cited {} (seon.render.ui/cite-hiccup db {:seon.cite/depth :doc :seon.cite/target (d/pull db '[*] [:schema/key k])})]))
         t (text :var/form)]
     (is (str/includes? t "An attribute your plan names.") t)
     (is (str/includes? t ":form/src") "a ref followed: what the form entity holds")

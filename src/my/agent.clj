@@ -55,7 +55,7 @@
   {:malli/schema [:=> [:cat] [:vector [:map [:cites :any] [:depth :seon.ref/depth]]]]}
   []
   (let [db (agent/db)]
-    (mapv (fn [c] {:cites (or (:seon.cite/address c) (:seon.cite/name c)) :depth (:seon.cite/depth c)})
+    (mapv (fn [c] {:cites (task/cited-name c) :depth (:seon.cite/depth c)})
           (task/cites-of db (pdb/eid db :seon.agent/key (:key @agent/state))))))
 
 (defn cite!
@@ -130,7 +130,7 @@
     {:cited? false :threw nil}
     (try {:cited? (contains? (set (some->> (task/task db id) :seon.task/plan ref/names)) sym) :threw nil}
          (catch Throwable e
-           {:cited? (boolean (some #(= sym (:seon.cite/name %)) (task/task-cites db id))) :threw (or (ex-message e) (str (class e)))}))))
+           {:cited? (boolean (some #(= sym (get-in % [:seon.cite/target :var/name])) (task/task-cites db id))) :threw (or (ex-message e) (str (class e)))}))))
 
 (defn no-var
   "The one answer for a name sym that is no var on db nor in this process (a library's var is
@@ -581,14 +581,18 @@
                            ranked)))))
 
 (defn- cited
-  "Name n as a cite of it on the agent's page shows it, on demand: a cite of n at doc depth made on db (one
-  d/with), pulled by the cite's own pattern (seon.ctx/build) and drawn by seon.render.ui/cite-hiccup, so on demand and on the page are one render. See
+  "Name n as a cite of it on the agent's page shows it, on demand: a cite of n's target (seon.ref/target) at doc depth made on
+  db (one d/with), pulled by the cite's own pattern (seon.ctx/build) and drawn by seon.render.ui/cite-hiccup, so on demand and on
+  the page are one render. A name db holds nothing by is `no-var`'s answer, else said to resolve to nothing. See
   docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db [:or :symbol :qualified-keyword]] :any]}
   [db n]
-  (let [r (pdb/speculate db [{:db/id "of" :seon.agent/key (str "help " n)} {:seon.cite/id (str "help " n) :seon.cite/of "of" :seon.cite/name n :seon.cite/depth :doc :seon.cite/order 0}])
-        db' (:db-after r)]
-    (ui/cite-hiccup db' (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil)))))
+  (let [[a v :as t] (ref/target db {:seon.ref/name n :seon.ref/depth :doc :seon.ref/line 1})]
+    (if (pdb/eid db a v)
+      (let [r (pdb/speculate db [{:db/id "of" :seon.agent/key (str "help " n)} {:seon.cite/id (str "help " n) :seon.cite/of "of" :seon.cite/target t :seon.cite/depth :doc :seon.cite/order 0}])
+            db' (:db-after r)]
+        (ui/cite-hiccup db' (:tree (seon.ctx/build db' (pdb/eid db' :seon.cite/id (str "help " n)) nil))))
+      (or (when (symbol? n) (no-var db n)) [:section [:h3 (str n)] [:p (:unresolved ref/problem-messages)]]))))
 
 (defn- doc-view
   "A section or page view v as `doc` prints it: each edge its address, since (doc address) reads what it says, and no lead when the text below says the same; the

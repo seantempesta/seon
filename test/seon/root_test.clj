@@ -431,15 +431,12 @@
     (is (< (:seed-t two) (:program-t two) (:boot-t two)) "main's entry became the merged one before the boot's fact, which is written after the fork")))
 
 (def ^:private broken-boot
-  "boots-on-a-tree on a seeded tree whose next commit breaks its schema resource (it no longer reads) and whose wiki
-  links to no section: the seed's output and the one boot's answer, with the dead citations my.root/problems shows.
-  Two claims read it, so they pay one boot."
+  "boots-on-a-tree on a seeded tree whose next commit breaks its schema resource (it no longer reads): the seed's output and
+  the one boot's answer."
   (delay
     (let [file "resources/seon/schemas/seon.config.web.edn"
           merged (pr-str {:seon.config.web/streams-buf (get contract/forms :seon.config.web/streams-buf)})]
-      (boots-on-a-tree file [merged (str merged "\n{:unclosed")]
-                       {:wiki "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n"
-                        :also [{:op :eval :agent "root" :code "(mapv (juxt :section :message) (get-in (my.root/problems sys) [:classes :dead-citation :rows]))"}]}))))
+      (boots-on-a-tree file [merged (str merged "\n{:unclosed")]))))
 
 (deftest a-boot-whose-import-refuses-a-file-still-starts
   ;; task seon.root/a-boot-imports-main-before-it-reads-config: the tree's schema resource no longer reads (a merge broke
@@ -453,18 +450,6 @@
     (is (str/includes? (str (:seon.error/message (:error (:import two)))) file) "the refusal names the file")
     (is (= (:seed-t two) (:program-t two)) "nothing of it was written, at boot or after: main's program is the seed's")
     (is (= (config/value :seon.config.web/streams-buf) (:streams-buf two)) "main's entries as they were")))
-
-(deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
-  ;; root's boot loads the wiki through seon.root/wiki-tx in its boot fact's commit (seon.root/wiki-boot-tx); one link to
-  ;; no section in any page used to end the boot, then refused the whole wiki. Now the boot loads every page, the link is
-  ;; a dead citation my.root/problems shows, and the root listens. On broken-boot's boot, whose wiki is one page linking
-  ;; to no section (it was a boot of its own on a checkout of links to this one, 36 s)
-  (let [[_ two] @broken-boot
-        page (str (:tree two) "/docs/zz-broken.md")]
-    (is (true? (:listening? two)) (str "the root boots: " two))
-    (is (= [[(str page "#broken") (str page "#broken links to " (str/replace page "zz-broken" "agent") "#nowhere, which is no section")]]
-           (first (:also two)))
-        (str "and the link is one dead citation, naming page, section and target: " (pr-str two)))))
 
 (deftest a-root-restart-names-the-same-agent-by-the-same-name
   ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent's id is the keyword of its

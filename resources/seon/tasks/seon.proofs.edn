@@ -31,22 +31,22 @@
   :seon.task/kind :work}
  {:seon.task/name "test-results-are-a-few-facts"
   :seon.task/plan "Test results go back into the database as a few facts per test and per function, through root's one writer, with no
-history, replacing slice 1's file cache (8564dea1d5, `target/results`). Owner rulings: \"one writer for sure\"; \"never
+history, replacing slice 1's file cache (8564dea1d5, ``target/results``). Owner rulings: \"one writer for sure\"; \"never
 300k new records per test run … just the essentials\" (2026-10-27); \"We want to be able to query things in the db,
 functions, tests, schemas and understand what tests are failing and timings\" (2026-10-28); derived data may be
 cached, always regenerable (AGENTS §5).
 
-What is stored (all `:db/noHistory` via `:seon.db/no-history?`, overwritten in place):
+What is stored (all ``:db/noHistory`` via ``:seon.db/no-history?``, overwritten in place):
 - On the test's var entity (`:var/name`, kind `:test`, resources/seon/schemas/seon.facts.edn ~57-66):
   `:seon.test/digest` (the reach digest it was last judged at), `:seon.test/status` (`:green` `:red` `:flaky`: green
-  and red at one digest), `:seon.test/failure` (the first failing assertion, bounded by the printer; present only while
+  and red at one digest), `:seon.test/failures` (the first failing assertion, bounded by the printer; present only while
   red, retracted on green), and running sums `:seon.test/ticks` `:seon.test/bytes`.
   A run at a new digest resets the sums to that run; at the same digest it adds. Mean = sum / runs, computed on read.
-- On each contracted function's var entity: running sums `:seon.fn/calls` `:seon.fn/ticks` `:seon.fn/bytes` (from the
-  test's `seon.profile` epoch, seon.fx/details' 5-number entries), plus `:seon.fn/form-digest`; a changed form resets them.
+- On each contracted function's var entity: running sums ``:seon.fn/calls`` ``:seon.fn/ticks`` ``:seon.fn/bytes`` (from the
+  test's `seon.profile` epoch, seon.fx/details' 5-number entries), plus ``:seon.fn/form-digest``; a changed form resets them.
 - A red test's full output, when kept, is a value on the test (stored out of line by Datahike's large-value store when
   ≥ 1 KB), retracted on green.
-- Nothing per run. A run's logs stay in `target/prove/<run-id>` while it is red or killed (a green run's directory is removed with it).
+- Nothing per run. A run's logs stay in ``target/prove/<run-id>`` while it is red or killed (a green run's directory is removed with it).
 
 Who writes:
 - `bin/test` / `bin/prove` shards: through root's server (restore the `:record` op path from before 8564dea1d5:
@@ -65,7 +65,7 @@ Readers, each moved from the file cache to these facts (file:line from the 2026-
 
 Deleted: seon.fx key-dir, verdict-path, read-verdict, stored-results, verdict-files, evict, write-verdicts!, last-ms
 (file cache, ~150 lines); config keys :seon.config.proofs/results-dir and results-per-test; bin/env's
-SEON_RESULTS_DIR; the per-check `target/tmp/check-results.*` dirs (3c6db9e711) become unneeded; seon.test-store's
+SEON_RESULTS_DIR; the per-check ``target/tmp/check-results.*`` dirs (3c6db9e711) become unneeded; seon.test-store's
 results-dir. The old per-digest and per-run entities stay deleted.
 
 Size: ~1,100 tests × 7 + contracted functions × 4 ≈ 14k datoms, constant; a full run rewrites only the tests that ran.

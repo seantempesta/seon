@@ -1081,8 +1081,8 @@
 (defn wiki-tx
   "The wiki (the checkout's :seon.config.root/wiki-dirs: docs/ and the top-level pages) onto main db, written in the boot fact's own commit so main
   holds it before any agent forks: the system prompt every agent reads first is one of its pages
-  (seon.ctx.wire/system-text), and the help page another (seon.ctx.wire/help-text). An unchanged wiki writes nothing. A link to no section is kept on
-  its section and shows as a dead citation (seon.problems/health), never refuses the load.
+  (seon.ctx.wire/system-text), and the help page another (seon.ctx.wire/help-text). An unchanged wiki writes nothing. A link to no section refuses
+  the write, :seon.cite/no-target naming it (docs/references.md#the-wiki-in-the-store).
   baseline: what the sections with no record were last written against (wiki-baseline)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector :any]]
                   [:=> [:cat :seon.host/db :string :map] [:vector :any]]]}

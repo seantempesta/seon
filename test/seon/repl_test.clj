@@ -700,8 +700,10 @@
         forms (concat (remove end? all)
                       (filter #(str/starts-with? % "(my.task/fail!") all)
                       (filter ends all))
-        cited "(seon.task/citation-problems (my.db/db) (vec (for [[k v] seon.template/instructions] {:seon.task/ns 'demo :seon.task/name (name k) :seon.task/plan \"\" :seon.task/instructions v})))"
-        cited-help (str "(seon.task/citation-problems (my.db/db) [{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.ctx.wire/help-text (my.db/db))}])")
+        ;; each cite a ref to what it names: a name that names nothing is the write's refusal, naming it (docs/references.md#an-entity-cites)
+        refused (fn [decls] (str "(try (seon.db/with (my.db/db) (seon.task/create-tx (my.db/db) " decls ")) [] (catch clojure.lang.ExceptionInfo e [(:target (ex-data e))]))"))
+        cited (refused "(vec (for [[k v] seon.template/instructions] {:seon.task/ns 'demo :seon.task/name (name k) :seon.task/plan \"\" :seon.task/instructions v}))")
+        cited-help (refused "[{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.ctx.wire/help-text (my.db/db))}]")
         [problems help-problems & items] (rest (at/in-agent (fn [{:keys [agent]}] (into [{:op :context :agent agent} cited cited-help] forms))))]
     (is (= [] (:value problems)) (str "every name the instructions cite resolves in the program: " (pr-str problems)))
     (is (= [] (:value help-problems)) (str "every name the help page cites resolves in the program: " (pr-str help-problems)))

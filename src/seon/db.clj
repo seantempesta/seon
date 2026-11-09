@@ -245,6 +245,21 @@
   {:malli/schema [:=> [:cat :map] :nil]}
   [e] (throw (ex-info (:seon.error/message e) e)))
 
+(defn- applied
+  "apply-fn of tx-data (Datahike's transaction), its refusal of a lookup ref that names no entity (a cite's target, a wiki
+  link: Datahike's :entity-id/missing) made the typed :seon.cite/no-target naming the lookup; any other throw is Datahike's
+  own. See docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat ifn? :any] :map]}
+  [apply-fn tx-data]
+  (try (apply-fn tx-data)
+       (catch clojure.lang.ExceptionInfo e
+         (let [{:keys [error entity-id]} (ex-data e)]
+           (if (and (= :entity-id/missing error) (vector? entity-id) (= 2 (count entity-id)) (qualified-keyword? (first entity-id)))
+             (refuse! (contract/error :seon.cite/no-target #'applied (str "nothing on this branch is the lookup in :target: a cite or a link names what exists, or "
+                                                                        "what the same write made before it; a name that does not exist yet is written in two backticks, ``ns/name``")
+                                      {:target entity-id}))
+             (throw e))))))
+
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
   datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, each entity it touched
@@ -274,7 +289,7 @@
                               out))))))
         tx-data (ends-with tx-data)]
     (when-let [e (invalid-datom db tx-data schemas)] (refuse! e))
-    (let [r (apply-fn tx-data)]
+    (let [r (applied apply-fn tx-data)]
       (when-let [e (invalid-entity r ix)] (refuse! e))
       r)))
 

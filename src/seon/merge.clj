@@ -42,7 +42,7 @@
 (def ^:private stated-keys
   "The program keys one entity's stated attributes hold, by key kind, as data: :id the identity naming the entity, :stated each attribute its content
   reads and the content key it takes, :needs a content key without which the entity is no program (a scratch schema entry has no file), :carries the attribute
-  namespace outside the program's that rides with it. A section's stated attributes are what a page's text states; the rest (lead, references, names, dead links,
+  namespace outside the program's that rides with it. A section's stated attributes are what a page's text states; the rest (lead, references, names,
   what it read) the load derives from these, so a change shows in these and a merge reads only them (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
   {:section {:id :seon.doc/address :carries "seon.doc"
              :stated {:seon.doc/address :seon.doc/address :seon.doc/heading :seon.doc/heading :seon.doc/text :seon.doc/text :seon.doc/parent :seon.doc/parent}}
