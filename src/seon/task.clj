@@ -67,29 +67,21 @@
   [db decl]
   (into [] (remove :seon.ref/problem-kind) (ref/kept db (ref/cited (texts-citations (cited-texts decl))))))
 
-(defn- cite-target
-  "Citation c's target on db as its cite entity writes it (seon.ref/target: the lookup of what it names). A name of a task is the task unless it is the citing entity's own
-  identity self: a text naming its own task's id names what the task makes (a function of that name), never the task
-  itself, which its page already shows. See docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat :seon.host/db :map :string] :seon.ref/target]}
-  [db c self]
-  (let [t (ref/target db c)]
-    (if (= t [:seon.task/id self]) [:var/name (:seon.ref/name c)] t)))
-
 (defn cite-tx
   "The cite entity of entity of (a lookup ref, or the tempid of the write that makes it; of-id its identity
-  value) for citation c at place order: its target (cite-target, a lookup, which resolves against what the write made
-  before it: a task the same write makes is one), its depth, its content id \"<of-id> <target>\", upserted by it. See
-  docs/references.md#an-entity-cites."
+  value) for citation c at place order: its target (seon.ref/target on db, the db the write holds: a lookup that resolves
+  against what the write made before it, so a task's own name is the task it makes), its depth, its content id
+  \"<of-id> <target>\", upserted by it. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :any :string [:map [:seon.ref/depth :seon.ref/depth]] :int] :map]}
   [db of of-id c order]
-  (let [t (cite-target db c of-id)]
+  (let [t (ref/target db c)]
     {:seon.cite/id (str of-id " " (second t)) :seon.cite/of of :seon.cite/target t
      :seon.cite/depth (:seon.ref/depth c) :seon.cite/order order}))
 
 (def ^:private cite-pull
-  "What a reader that is no draw reads of a cite: its own attributes and its target's identity (seon.ref/target-attrs)."
-  (conj '[*] {:seon.cite/target (into [:db/id] ref/target-attrs)}))
+  "What a reader that is no draw reads of a cite: its entity id (what a rewrite retracts), its own attributes and its target's
+  identity (seon.ref/target-attrs). See docs/references.md#an-entity-cites."
+  [:db/id :seon.cite/id :seon.cite/of :seon.cite/depth :seon.cite/order {:seon.cite/target (into [:db/id] ref/target-attrs)}])
 
 (defn cites-of
   "The cite entities entity e holds on db (:seon.cite/of), pulled with their targets' identities (cite-pull), in their

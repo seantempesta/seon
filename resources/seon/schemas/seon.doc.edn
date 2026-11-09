@@ -16,7 +16,7 @@
  ;; the enclosing section
  :seon.doc/parent [:and {:seon.db/to [:seon.doc/fact]} :seon.db/ref]
  ;; what its own text cites and resolves to: a section (a link) or a var (a name); a link to no section is refused at
- ;; the load (:seon.cite/no-target, docs/references.md#the-wiki-in-the-store)
+ ;; the load (:seon.db/no-target, docs/references.md#the-wiki-in-the-store)
  :seon.doc/references [:set :seon.db/ref]
  ;; the names its own text cites as references (seon.ref/kept: a text word only when it named
  ;; something at load), kept as names: a var deleted later leaves its name here

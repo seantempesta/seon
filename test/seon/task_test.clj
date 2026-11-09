@@ -34,15 +34,19 @@
   "The typed error the checked write of tx on db answers (seon.db/with), or nil when it is written."
   [db tx] (try (pdb/with db tx) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))
 
-;; docs/references.md#task-references: a plan naming its own task's id names what the task makes (a function of that name), never
-;; the task, whose page already shows it (a lab, 2026-11-08: app.greet/greet's page showed its own plan again as "Another task your plan names")
-(deftest a-task-never-cites-itself-as-a-task
-  (let [db (d/db-with (db-with-program) (task/create-tx (db-with-program) [(decl "Make `demo/f`.")]))
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "other" :seon.task/plan "p"}]))
-        tx (task/rederive-tx db {:seon.task/id "demo/t" :seon.task/plan "Make `demo/t` work, after `demo/other`."})
+;; docs/references.md#task-references: a plan naming its own task's id, the function it will make, cites what the db holds after
+;; the write: the task the same write makes until the function is written, never nothing (a new task app.greet/greet whose plan names
+;; app.greet/greet was refused, so no task could be filed for a function not yet written)
+(deftest a-task-naming-its-own-function-cites-what-the-write-holds
+  (let [db (db-with-program)
+        tx (task/create-tx db [(decl "Make `demo/t` work, after `demo/f`.")])
+        db' (pdb/db-with db tx)
         targets (into {} (for [m tx :when (and (map? m) (:seon.cite/id m))] [(target-of m) (:seon.cite/target m)]))]
-    (is (= [:var/name 'demo/t] (targets 'demo/t)) "its own id is cited as the name of what it makes, never joined as a task: it is this one")
-    (is (= [:seon.task/id "demo/other"] (targets "demo/other")) "another task it names is its target")))
+    (is (= [:seon.task/id "demo/t"] (targets "demo/t")) "its own name: the task the write makes")
+    (is (= ["demo/t" 'demo/f] (mapv task/cited-name (task/cites-of db' (pdb/eid db' :seon.task/id "demo/t")))) "and the write is not refused")
+    (let [db2 (pdb/db-with db' [{:var/name 'demo/t}])]
+      (is (= [:var/name 'demo/t] (:seon.cite/target (first (filter :seon.cite/id (task/rederive-tx db2 (task/task db2 "demo/t"))))))
+          "once the function is written, a rewrite of the text cites it"))))
 
 ;; docs/references.md#task-references: a task's text is parsed once at its write, and each target it cites is a cite entity
 (deftest the-writer-writes-a-tasks-cites
@@ -70,7 +74,7 @@
 ;; docs/references.md#an-entity-cites: a cite names what exists; a name that does not is the write's refusal, naming it
 (deftest a-cite-of-nothing-is-refused-naming-its-target
   (let [db (db-with-program)]
-    (is (= {:seon.error/type :seon.cite/no-target :target [:var/name 'demo/nope]}
+    (is (= {:seon.error/type :seon.db/no-target :target [:var/name 'demo/nope]}
            (select-keys (refusal db (task/create-tx db [(decl "Make `demo/f` and `demo/nope` pass.")])) [:seon.error/type :target])))
     (is (= [:seon.doc/address "docs/vector.md#nowhere"] (:target (refusal db (task/create-tx db [(decl "Read [n](docs/vector.md#nowhere).")])))))
     (is (= [:file/path "docs/nowhere.md"] (:target (refusal db (task/create-tx db [(decl "Read [n](docs/nowhere.md).")]))))
@@ -91,6 +95,21 @@
         tx (task/create-tx db [(decl "Add ``demo/later`` and ``:demo/later-key`` beside `demo/f`.")])]
     (is (= {'demo/f :doc} (cited-in tx)))
     (is (nil? (refusal db tx)) "and the write is not refused")))
+
+(deftest deleting-a-cited-var-is-refused-naming-its-cites
+  ;; docs/references.md#an-entity-cites: a cite is a ref to what exists, so the write that deletes what a task's text cites is
+  ;; refused, naming each cite (the task and the name its text cites); the agent rewrites those texts in the same write
+  (let [db0 (db-with-program)
+        db (pdb/db-with db0 (task/create-tx db0 [(decl "Make `demo/f` exact.")]))
+        gone [[:db/retractEntity (pdb/eid db :var/name 'demo/f)]]
+        r (refusal db gone)]
+    (is (= :seon.db/invalid-entity (:seon.error/type r)) (pr-str r))
+    (is (some #(str/includes? % "demo/t demo/f") (:entities r)) (str "it names the cite, its task and the name: " (pr-str (:entities r))))
+    (let [plan "Make ``demo/f`` exact again, once it is written."
+          fixed (pdb/db-with db (-> gone (conj [:db/add [:seon.task/id "demo/t"] :seon.task/plan plan])
+                                    (into (task/rederive-tx db {:seon.task/id "demo/t" :seon.task/plan plan}))))]
+      (is (nil? (pdb/eid fixed :var/name 'demo/f)) "the text rewritten in the same write: the var is deleted")
+      (is (= [] (task/cites-of fixed (pdb/eid fixed :seon.task/id "demo/t"))) "and its cite with it"))))
 
 (deftest a-page-cited-whole-is-its-top-section
   ;; docs/references.md#an-entity-cites: a path with no anchor cites the page's top section, whose sections join below it

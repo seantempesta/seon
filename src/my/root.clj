@@ -9,7 +9,7 @@
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
   writes nothing ({:ok true :changed 0}); else the writer's answer, with counts and the datoms
-  written. A cite whose target is no entity is the writer's refusal, :seon.cite/no-target (docs/references.md#an-entity-cites)."
+  written. A cite whose target is no entity is the writer's refusal, :seon.db/no-target (docs/references.md#an-entity-cites)."
   {:malli/schema [:=> [:cat :seon.root/sys :any :map] :map]}
   [sys tx counts]
   (cond (contract/error? tx) tx
@@ -303,7 +303,7 @@
   "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
   entities (seon.doc/load-tx): a changed section rewritten, a removed one retracted, an
   unchanged wiki writing nothing. Answers the writer's answer with the counts; a link to no section is its refusal,
-  :seon.cite/no-target naming it (docs/references.md#the-wiki-in-the-store)."
+  :seon.db/no-target naming it (docs/references.md#the-wiki-in-the-store)."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
   ([sys dir]

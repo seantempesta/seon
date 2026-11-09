@@ -303,10 +303,8 @@
  :seon.cite/of [:and {:seon.db/to [:seon.task/task-fact :seon.db/agent-fact]} :seon.db/ref]
  ;; what it cites: a section, a var, a task, a schema entry, a namespace or a file, written as the lookup of its
  ;; identity (seon.ref/target), which resolves against what the same write made before it; a lookup to nothing is refused,
- ;; :seon.cite/no-target (docs/references.md#an-entity-cites)
+ ;; :seon.db/no-target (docs/references.md#an-entity-cites)
  :seon.cite/target [:and {:seon.db/to [:seon.doc/fact :seon.db/var-fact :seon.task/task-fact :seon.db/schema-fact :seon.db/ns-fact :seon.db/file-fact]} :seon.db/ref]
- ;; the refusal of a write whose lookup ref names no entity (a cite's target, a link of a wiki page): the lookup it names
- :seon.cite/no-target [:and :seon.error/base [:map [:seon.error/type [:= :seon.cite/no-target]] [:target :seon.ref/target]]]
  :seon.cite/depth :seon.ref/depth
  ;; its first mention's place in the citing text (an agent's: the order its cites were written)
  :seon.cite/order :int

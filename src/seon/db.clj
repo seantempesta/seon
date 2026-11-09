@@ -209,7 +209,8 @@
   incomplete before stays as it was (a whole-store scan's to report), and one left holding none of them has stopped
   being that thing. Presence is one seek
   per (entity, key), so a write costs its touched entities' required keys, never an entity's size or the store's; values
-  are each datom's own check (`invalid-datom`). The first refusal by entity id, then schema. See
+  are each datom's own check (`invalid-datom`). The first refusal by entity id, then schema, and every entity it broke in
+  :entities (a deleted var's cites, each a task and the name its text cites). See
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :map] [:maybe :seon.error/base]] [:=> [:cat :map :map] [:maybe :seon.error/base]]]}
   ([r] (invalid-entity r index))
@@ -232,13 +233,18 @@
                                     broke (if was? (filter #(has? db-before e %) gone) gone)]
                                 (when (seq broke) {:at [e (str k)] :e e :k k :req req :broke (vec broke)}))))))
                       touched)]
-     (when-let [{:keys [e k req broke]} (first (sort-by :at broken))]
-       (let [ident (if-let [a (some #(when (contains? identity-schemas %) %) req)]
-                     (if-let [v (:v (first (d/datoms db-after :eavt e a)))] [a v] e) e)]
+     (when (seq broken)
+       (let [ident (fn [{:keys [e req]}] (if-let [a (some #(when (contains? identity-schemas %) %) req)]
+                                           (if-let [v (:v (first (d/datoms db-after :eavt e a)))] [a v] e) e))
+             text #(print/text (ident %) (:part print/budgets))
+             all (sort-by :at broken)
+             {:keys [k broke] :as b} (first all)]
+         ;; every entity the write broke is named (a var deleted under its cites: each cite, "<task> <name>", one turn's fix)
          (contract/error :seon.db/invalid-entity #'invalid-entity
-                         (str (print/text ident (:part print/budgets)) " holds attributes of " k ", which requires "
-                              (str/join ", " broke) ": a write that leaves them out breaks it")
-                         {:entity (print/text ident (:part print/budgets)) :schema k :missing broke}))))))
+                         (str (text b) " holds attributes of " k ", which requires "
+                              (str/join ", " broke) ": a write that leaves them out breaks it"
+                              (when (next all) (str " (and " (dec (count all)) " more, each in :entities)")))
+                         {:entity (text b) :schema k :missing broke :entities (mapv text all)}))))))
 
 (defn- refuse!
   "Throw error e (a typed refusal) as the transaction's answer. See docs/storage.md#the-write-checks-every-entity-it-touches."
@@ -248,7 +254,7 @@
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
   datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, a lookup ref to nothing
-  (:seon.cite/no-target), each entity it touched (`invalid-entity`, by the branch's `index-of`) after; an entity retracted whole takes the entities named by it with it.
+  (:seon.db/no-target), each entity it touched (`invalid-entity`, by the branch's `index-of`) after; an entity retracted whole takes the entities named by it with it.
   A refusal throws its typed error, and the value is as it was. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
   [db tx-data schemas apply-fn]
@@ -275,12 +281,12 @@
         tx-data (ends-with tx-data)]
     (when-let [e (invalid-datom db tx-data schemas)] (refuse! e))
     ;; Datahike refuses a lookup ref that names no entity (a cite's target, a wiki link: its :entity-id/missing): made the
-    ;; typed :seon.cite/no-target naming the lookup; any other throw is Datahike's own (docs/references.md#an-entity-cites)
+    ;; typed :seon.db/no-target naming the lookup; any other throw is Datahike's own (docs/references.md#an-entity-cites)
     (let [r (try (apply-fn tx-data)
                  (catch clojure.lang.ExceptionInfo x
                    (let [{:keys [error entity-id]} (ex-data x)]
                      (if (and (= :entity-id/missing error) (vector? entity-id) (= 2 (count entity-id)) (qualified-keyword? (first entity-id)))
-                       (refuse! (contract/error :seon.cite/no-target #'checked (str "nothing on this branch is the lookup in :target: a cite or a link names what exists, or "
+                       (refuse! (contract/error :seon.db/no-target #'checked (str "nothing on this branch is the lookup in :target: a cite or a link names what exists, or "
                                                                                   "what the same write made before it; a name that does not exist yet is written in two backticks, ``ns/name``")
                                                 {:target entity-id}))
                        (throw x)))))]
@@ -376,11 +382,13 @@
   "Transactions of an example program sized by n (the test store's and the check store's
   seed, never a root's own): n/110 namespaces (none below 110), each one tx of the
   namespace and its 20 contracted functions (each a form and its var: 12 datoms, so about
-  2n datoms in all), then one tx of a task referring to two of its vars."
+  2n datoms in all), then one tx of a task referring to two of its vars; and, as production's main holds them, the wiki
+  sections and the var the task templates' instructions cite (seon.template/instructions: a cite names what exists,
+  docs/references.md#an-entity-cites), so a template's task is written here as on main."
   {:malli/schema [:=> [:cat :int] [:sequential :seon.db/tx-data]]}
   [n]
   (let [nns (quot n 110)]
-    (mapcat (fn [k]
+    (cond-> (vec (mapcat (fn [k]
               (let [nsym (symbol (str "app.m" k))]
                 [(into [{:db/id "ns" :ns/name nsym :ns/doc (str "Module " k " of the example program.")}]
                        (for [i (range 20)
@@ -392,7 +400,14 @@
                          e))
                  [{:task/name (keyword (str "app.m" k) "tidy") :task/plan (str "Tidy module " k ": name every value by its schema.")
                    :task/status :held :task/refs [[:var/name (symbol (str nsym) "f0")] [:var/name (symbol (str nsym) "f1")]]}]]))
-            (range nns))))
+            (range nns)))
+      (pos? nns) (conj [{:db/id "agent" :seon.doc/address "docs/agent.md#agent" :seon.doc/heading "Agent" :seon.doc/level 1 :seon.doc/position 0 :seon.doc/lead "An agent works one task on its own branch."}
+                        {:seon.doc/address "docs/agent.md#merging" :seon.doc/heading "Merging" :seon.doc/level 2 :seon.doc/position 0 :seon.doc/parent "agent"
+                         :seon.doc/lead "A merge task brings main's work into its branch and keeps the proofs green."}
+                        {:seon.doc/address "docs/agent.md#designing-a-task" :seon.doc/heading "Designing a task" :seon.doc/level 2 :seon.doc/position 1 :seon.doc/parent "agent"
+                         :seon.doc/lead "A design step turns a request into the task the implement step works from."}
+                        {:db/id "branch" :ns/name 'my.branch :ns/doc "The branch an agent works on."}
+                        {:var/name 'my.branch/merge-main! :var/ns "branch" :var/doc "Merge main into this branch." :var/meta #{:arglists}}]))))
 
 ;; :writer :sync (vendor datahike.writer, session F1): root's Flow :writer proc is the only
 ;; caller of transact, so it is THE serial writer; Datahike runs no queue, commit loop or

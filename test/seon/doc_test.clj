@@ -57,11 +57,11 @@
 
 (deftest a-link-to-no-section-refuses-the-load-naming-it
   ;; docs/references.md#the-wiki-in-the-store: a link is a ref to its section, so one to no section is the write's
-  ;; refusal (:seon.cite/no-target, the lookup of its address), and the page that adds the section loads
+  ;; refusal (:seon.db/no-target, the lookup of its address), and the page that adds the section loads
   (let [broken (assoc pages "demo/async.md" (str/replace async "flow.md#idioms" "flow.md#nowhere"))
         db (empty-db)
         refusal (try (pdb/with db (doc/load-tx db "demo" broken)) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-    (is (= {:seon.error/type :seon.cite/no-target :target [:seon.doc/address "demo/flow.md#nowhere"]}
+    (is (= {:seon.error/type :seon.db/no-target :target [:seon.doc/address "demo/flow.md#nowhere"]}
            (select-keys refusal [:seon.error/type :target])) "refused, naming the link")
     (let [fixed (pdb/db-with db (doc/load-tx db "demo" (assoc broken "demo/flow.md" (str flow "\n## Nowhere\n\nNow it exists.\n"))))]
       (is (= ["demo/flow.md#nowhere"] (mapv :seon.doc/address (:seon.doc/references (d/pull fixed [{:seon.doc/references [:seon.doc/address]}] [:seon.doc/address "demo/async.md#waiting"]))))
