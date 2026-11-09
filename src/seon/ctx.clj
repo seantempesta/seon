@@ -61,7 +61,7 @@
   join's own datoms are e's."
   {:malli/schema [:=> [:cat pos-int? :map :map] [:sequential :any]]}
   [e m j]
-  (cond (and (:rev? j) (:by j)) (when-some [v (get m (:by j))] [[(:attr j) v]])
+  (cond (and (:rev? j) (:by j)) (if-some [v (get m (:by j))] [[(:attr j) v]] [])
         (:rev? j) [[(:attr j) e]]
         (:by j) (let [v (get m (:attr j))] (for [x (if (coll? v) v [v]) :when (some? x)] [(:by j) x]))
         :else []))
@@ -84,10 +84,11 @@
   (let [{:keys [attr by limit reverse?]} j
         cap (fn [xs] (if limit (take limit xs) xs))]
     (if (:rev? j)
-      (when-some [v (if by (get m by) e)]
+      (if-some [v (if by (get m by) e)]
         (cap (cond (not reverse?) (map :e (d/datoms db :avet attr v))
                    (in-time-order? ix j) (map :e (take-while #(and (= attr (:a %)) (= v (:v %))) (d/rseek-datoms db :avet attr v)))
-                   :else (map :e (sort-by (juxt :tx :e) #(compare %2 %1) (d/datoms db :avet attr v))))))
+                   :else (map :e (sort-by (juxt :tx :e) #(compare %2 %1) (d/datoms db :avet attr v)))))
+        [])
       (let [v (get m attr) vs (if (set? v) (sort-by #(if (map? %) (:db/id %) %) v) (if (some? v) [v] []))]
         (cap (keep (fn [x] (if by (pdb/eid db by x) (:db/id x))) vs))))))
 
@@ -507,6 +508,10 @@
                                          (and (map? o) (map? m) (not (stub? o)) (= (:db/id o) (:db/id m))) (edits ix db sub o m (:db/id o) (conj path k) acc)
                                          :else (refuse acc (conj path k) "a ref's entity: set it by the ref"))))
                      acc (distinct (concat (keys om) (keys nm))))
+             ;; a var a ref joins (a cite's target) changes by its definition, as a lookup's does
+             (and (map? om) (map? nm) (not (stub? om)) (= (:db/id om) (:db/id nm)) (:var/name nm))
+             (refuse acc path (str "a var changes by its definition, not by swap!: evaluate (in-ns '" (namespace (:var/name nm)) ") (defn "
+                                   (name (:var/name nm)) " ...), and the next @seon.ctx/ctx holds its new source"))
              (and (map? om) (map? nm) (not (stub? om)) (= (:db/id om) (:db/id nm))) (edits ix db sub om nm (:db/id om) path acc)
              (and (nil? nm) (map? om)) (-> acc (update :tx conj [:db/retract e attr (:db/id om)]) (update :paths conj path))
              :else (refuse acc path "a ref's entity: set it by the ref"))))

@@ -412,8 +412,9 @@
                       [[{:seon.root/id :root :seon.root/boot "b1"}]
                        (into [{:db/id "demo/f" :seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan walked-plan :seon.task/execution :running
                                :seon.task/branch :task-demo-f :seon.task/kind :work :seon.task/proofs #{'demo/f-test}}]
-                             ;; what its plan cites, as the task writer writes it (seon.task/cites-tx)
-                             (seon.task/cites-tx (ts/test-db) "demo/f" "demo/f" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil walked-plan)))))
+                             ;; what its plan cites, as the task writer writes it (seon.task/cites-tx): its targets made before them in this write
+                             (into [{:var/name 'seon.render/hiccup} {:seon.doc/address "docs/render.md#no-clipping" :seon.doc/heading "No clipping"}]
+                                   (seon.task/cites-tx (ts/test-db) "demo/f" "demo/f" (seon.ref/kept (ts/test-db) (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil walked-plan)))))))
                        (seon.task/agent-tx :a3 {:status :idle :pid 77 :branch :task-demo-f})
                        (seon.test-store/work-tx "demo/f" :running {:boot "b1" :agent :a3 :branch :task-demo-f :model "m" :max-turns 8 :start-ms 0})
                        (seon.task/message-tx "m-1" "owner" [k] "check g" 1000)
@@ -2828,6 +2829,9 @@
                        {:db/id "top" :seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing" :seon.doc/lead "How a test is written."}
                        {:seon.doc/address "docs/testing.md#testing-in-the-world" :seon.doc/heading "Testing in the world" :seon.doc/parent "top"}
                        {:seon.doc/address "docs/references.md#an-entity-cites" :seon.doc/heading "An entity cites" :seon.doc/lead "A citation is an entity."}
+                       {:seon.doc/address "docs/agent.md#working-a-task" :seon.doc/heading "Working a task"}
+                       {:seon.doc/address "docs/agent.md#merging" :seon.doc/heading "Merging"}
+                       {:seon.doc/address "docs/data-modeling.md#data-modeling" :seon.doc/heading "Data modeling"}
                        {:db/id "g" :form/id "demo/g-1" :form/src "(defn g \"Gets it.\" [x] x)"} {:db/id "gv" :var/name 'demo/g :var/doc "Gets it." :var/form "g"}
                        {:db/id "t" :form/id "demo-test/g-test-1" :form/src "(deftest g-test (is (g 1)))" :form/refs #{'demo/g} :form/defines ["tv"]}
                        {:db/id "tv" :var/name 'demo-test/g-test :var/meta #{:test} :var/form "t"}
@@ -2851,7 +2855,10 @@
 (deftest a-work-task-is-sent-how-a-task-is-worked
   (let [k "b1/a1"
         db (ts/test-db)
-        db (d/db-with db (seon.doc/load-tx db "docs" {"docs/agent.md" (slurp (str (seon.config/checkout) "/docs/agent.md"))}))
+        ;; the section as the one parse reads it (seon.doc/page-sections), stored alone: its page's links reach pages this db does not hold
+        sec (some #(when (= "docs/agent.md#working-a-task" (:seon.doc/address %)) %)
+                  (seon.doc/page-sections "docs/agent.md" (slurp (str (seon.config/checkout) "/docs/agent.md"))))
+        db (d/db-with db [(select-keys sec [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text])])
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true. How: ```docs/agent.md#working-a-task```."})))
         db (d/db-with db [{:db/id k :seon.agent/key k :seon.agent/task [:seon.task/id "demo/w"]}])
         aid (seon.db/eid db :seon.agent/key k)
@@ -2871,8 +2878,8 @@
     (is (every? #(re-find #"\[:h3 \"" %) (vals drawn)) "every cite is headed")
     (is (str/includes? (drawn "docs/x.md#the-x") "What x does. And more.") "a section at doc depth: its lead")
     (is (str/includes? (drawn "docs/x.md#the-x") "(doc \"docs/x.md#the-x\")") "and how to read the rest")
-    (let [sec (r/part-text ['seon.render.ui/cited {} (ui/cite-hiccup (ts/test-db) {:seon.cite/address "docs/testing.md#testing" :seon.cite/depth :doc
-                                                                          :section {:seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing" :seon.doc/lead "How a test is written."
+    (let [sec (r/part-text ['seon.render.ui/cited {} (ui/cite-hiccup (ts/test-db) {:seon.cite/depth :doc
+                                                                          :seon.cite/target {:seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing" :seon.doc/lead "How a test is written."
                                                                                     :seon.doc/_parent {1 {:seon.doc/address "docs/testing.md#testing-in-the-world" :seon.doc/heading "Testing in the world"}}}})])]
       (is (str/includes? sec "Testing in the world (docs/testing.md#testing-in-the-world)") "a page cited whole: its top section, the headings below it joined"))
     (is (str/includes? (drawn "demo/g") "(defn g \"Gets it.\" [x] x)") "a function at doc depth: its whole source, in a fence")

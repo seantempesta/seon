@@ -58,7 +58,7 @@ Each is its own definition, linked to the others by refs. "Refs out" are its att
 - **A result**, `:seon.result/result-fact`: identity `:seon.result/hash` (a content id: the same value is one entity on every branch). The eval tile is its render (stage 2a).
 - **A model call** (a turn), `:seon.model-call/fact`: identity `:seon.model-call/id`. Refs out: `:seon.model-call/agent`. Reached by: `:seon.eval/call`. Each turn's diff is its model render (stage 2b).
 - **A message**, `:seon.message/fact`: identity `:seon.message/id`. Refs out: `:seon.message/to` (agents). No ref names the turn that took it: that is derived (see Delivered).
-- **A cite**, `:seon.cite/cite-fact`: identity `:seon.cite/id` (a content id). Ref out: `:seon.cite/of` (a task or an agent). What it cites is a value (`:seon.cite/address`, `:seon.cite/name`, `:seon.cite/task`) joined by value; whether it becomes a ref is open with the owner.
+- **A cite**, `:seon.cite/cite-fact`: identity `:seon.cite/id` (a content id). Refs out: `:seon.cite/of` (a task or an agent) and `:seon.cite/target` (a section, a var, a task, a schema entry, a namespace or a file: a cite names what exists, [an entity cites](references.md#an-entity-cites)).
 - **A search**, `:seon.search/search-fact`: identity `:seon.search/id`. Ref out: `:seon.search/of` (a task or an agent).
 - **A doc section**, `:seon.doc/fact`: identity `:seon.doc/address`. Ref out: `:seon.doc/parent`.
 - **A var**, `:seon.db/var-fact`: identity `:var/name`; refs out `:var/ns`, `:var/form`; its test facts (`:seon.test/*`) are a proof's verdict.

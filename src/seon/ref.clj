@@ -682,39 +682,50 @@
                plan (assoc :seon.ref/lead plan))
              depth))))
 
-(defn- loaded-var?
-  "Is sym a var of a namespace this process holds that db's program does not (a
-  dependency's, Jolt's)? A namespace of the program names its vars by db alone: this
-  process may still hold a var db's program deleted."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] :boolean]}
-  [db sym]
-  (let [nsym (symbol (namespace sym))]
-    (and (empty? (d/datoms db :avet :ns/name nsym))
-         (some? (some-> (find-ns nsym) ns-interns (get (symbol (name sym))))))))
+(def target-attrs
+  "The identity attribute of each thing a cite may name, in its :seon.cite/target's order (:seon.db/to): a section's
+  address, a var's name, a task's id, a schema key, a namespace's name and a file's path. See docs/references.md#an-entity-cites."
+  (let [ix (pdb/index)] (mapv (:schema-identities ix) ((:targets ix) :seon.cite/target))))
 
-(defn names-on-db?
-  "Does a name (a qualified symbol, a symbol or a keyword) name something on db: a var by its
-  :var/name or as loaded, a task by its :seon.task/id, a namespace by its :ns/name or as loaded, a
-  schema key the contract registry holds (a declared form or a host predicate, :seon.host/db)?
-  Reads no file of the checkout, so what only cites names (seon.problems/dead-citations) has
-  no tree as an input."
-  {:malli/schema [:=> [:cat :seon.host/db [:or :symbol :keyword]] :boolean]}
-  [db sym]
-  (boolean (cond (qualified-symbol? sym) (or (seq (d/datoms db :avet :var/name sym)) (task? db sym) (loaded-var? db sym))
-                 (symbol? sym) (or (seq (d/datoms db :avet :ns/name sym)) (find-ns sym))
-                 (keyword? sym) (some? (mr/schema contract/registry sym)))))
+(defn target-value
+  "The identity value of a cite's target m as pulled (`target-attrs`: an address, a name, an id, a key or a path), or nil. See
+  docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat [:maybe :map]] :any]}
+  [m] (when (map? m) (some #(get m %) target-attrs)))
+
+(defn- path-namespace
+  "The namespace whose file db holds as path (its :ns/file), named by Clojure's load-path rule from path (src/a/b_c.clj
+  is a.b-c, below its first directory), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :symbol]]}
+  [db path]
+  (when-let [[_ rel] (re-matches #"[^/]+/(.+)\.clj[cs]?" path)]
+    (let [n (symbol (-> rel (str/replace "/" ".") (str/replace "_" "-")))]
+      (when (= path (some->> (pdb/eid db :ns/name n) (d/entity db) :ns/file)) n))))
+
+(defn target
+  "What citation c names, as the lookup of its identity on db ([attribute value], `target-attrs`), whether db holds it or
+  not: a qualified symbol a var by :var/name, else a task by its :seon.task/id when db holds one, else the var it would
+  be; a qualified keyword a schema key; a simple symbol a namespace; a path#anchor a section; a path a page by its top
+  section (`page-top`), else a file by :file/path, else the namespace whose file it is (:ns/file), else the file it
+  would be. See docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:seon.ref/name {:optional true} :seon.ref/name] [:seon.ref/path {:optional true} :seon.ref/path]
+                                             [:seon.ref/anchor {:optional true} :seon.ref/anchor]]] :seon.ref/target]}
+  [db {n :seon.ref/name :seon.ref/keys [path anchor]}]
+  (cond (qualified-symbol? n) (if (and (nil? (pdb/eid db :var/name n)) (pdb/eid db :seon.task/id (str n))) [:seon.task/id (str n)] [:var/name n])
+        (keyword? n) [:schema/key n]
+        (symbol? n) [:ns/name n]
+        anchor [:seon.doc/address (str path "#" anchor)]
+        :else (if-let [top (page-top db path)]
+                [:seon.doc/address (:seon.doc/address (d/pull db [:seon.doc/address] top))]
+                (if-let [ns (when-not (pdb/eid db :file/path path) (path-namespace db path))] [:ns/name ns] [:file/path path]))))
 
 (defn names-something?
-  "Does citation c name something on db: a name (`names-on-db?`), an entry (file or directory)
-  of the checkout, a section of a Markdown page by its anchor? An anchor with no page of its
-  own (:anchor-missing) names nothing."
+  "Does citation c name something db holds: is its `target` an entity of db? An anchor with no page of its own
+  (:anchor-missing) names nothing. Reads no file of the checkout. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :seon.ref/citation] :boolean]}
-  [db {sym :seon.ref/name :seon.ref/keys [path anchor]}]
-  (boolean (cond sym (names-on-db? db sym)
-                 (nil? path) false
-                 anchor (let [f (io/file (cfg/checkout) path)]
-                          (and (.isFile f) (some #(= anchor (:seon.ref/anchor %)) (:seon.ref/sections (parse path (slurp f))))))
-                 :else (.exists (io/file (cfg/checkout) path)))))
+  [db c]
+  (boolean (when (or (:seon.ref/name c) (:seon.ref/path c))
+             (let [[a v] (target db c)] (pdb/eid db a v)))))
 
 (defn- alias-form?
   "Is citation c a qualified symbol whose namespace part names no namespace on db or in this
@@ -727,7 +738,8 @@
 
 (defn kept
   "Of citations (each once, at its strongest depth: `cited`), the references on db: a
-  resolve-only one (a text word) kept only when it names something, an alias form left out."
+  resolve-only one (a text word) kept only when it names an entity of db (`names-something?`), an alias form left out.
+  See docs/references.md#resolving-and-showing."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.ref/citation]] [:vector :seon.ref/citation]]}
   [db citations]
   (into [] (remove #(or (alias-form? db %) (and (:seon.ref/resolve-only %) (not (names-something? db %))))) citations))
@@ -741,8 +753,11 @@
   ([db path text] (kept db (cited (:seon.ref/citations (parse path text))))))
 
 (defn names
-  "The qualified symbols text cites, at any depth, once each in first-mention order."
+  "The qualified symbols text names, once each in first-mention order: what it cites, at any depth, and what it mentions as
+  a two-backtick literal (a name a plan will create, which cites nothing: docs/references.md#task-references)."
   {:malli/schema [:=> [:cat :string] [:vector :qualified-symbol]]}
   [text]
-  (into [] (comp (map :seon.ref/name) (filter qualified-symbol?) (distinct))
-        (:seon.ref/citations (parse nil text))))
+  (into [] (comp (keep (fn [{:seon.ref/keys [code width] :as span}]
+                         (if (= 2 width) (qualified-name code) (:seon.ref/name (candidate nil span)))))
+                 (filter qualified-symbol?) (distinct))
+        (:seon.ref/spans (scan text))))

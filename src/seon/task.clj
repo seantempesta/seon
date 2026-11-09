@@ -67,38 +67,37 @@
   [db decl]
   (into [] (remove :seon.ref/problem-kind) (ref/kept db (ref/cited (texts-citations (cited-texts decl))))))
 
-(defn- cite-target
-  "Citation c's target as its cite entity holds it on db, {:seon.cite/address a} or {:seon.cite/name n}: a
-  section's path#anchor; a page cited whole its top section's address (seon.ref/page-top: its sections
-  are joined below it), a page or file db holds no section of, its path as written; a name as itself, and a
-  name of a task (seon.ref/task?) its id beside it (:seon.cite/task, which the pattern joins the task by), unless it is the
-  citing entity's own identity self: a text naming its own task's id names what the task makes (a function of that name),
-  never the task itself, which its page already shows."
-  {:malli/schema [:=> [:cat :seon.host/db :map :string] :map]}
-  [db {:seon.ref/keys [name path anchor]} self]
-  (cond (and (qualified-symbol? name) (not= self (str name)) (ref/task? db name)) {:seon.cite/name name :seon.cite/task (str name)}
-        name {:seon.cite/name name}
-        anchor {:seon.cite/address (str path "#" anchor)}
-        :else {:seon.cite/address (or (some->> (ref/page-top db path) (d/pull db [:seon.doc/address]) :seon.doc/address) path)}))
-
 (defn cite-tx
   "The cite entity of entity of (a lookup ref, or the tempid of the write that makes it; of-id its identity
-  value) for citation c at place order: its target (cite-target), its depth, its content id
+  value) for citation c at place order: its target (seon.ref/target on db, the db the write holds: a lookup that resolves
+  against what the write made before it, so a task's own name is the task it makes), its depth, its content id
   \"<of-id> <target>\", upserted by it. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :any :string [:map [:seon.ref/depth :seon.ref/depth]] :int] :map]}
   [db of of-id c order]
-  (let [t (cite-target db c of-id)]
-    (merge t {:seon.cite/id (str of-id " " (or (:seon.cite/address t) (:seon.cite/name t)))
-              :seon.cite/of of :seon.cite/depth (:seon.ref/depth c) :seon.cite/order order})))
+  (let [t (ref/target db c)]
+    {:seon.cite/id (str of-id " " (second t)) :seon.cite/of of :seon.cite/target t
+     :seon.cite/depth (:seon.ref/depth c) :seon.cite/order order}))
+
+(def ^:private cite-pull
+  "What a reader that is no draw reads of a cite: its entity id (what a rewrite retracts), its own attributes and its target's
+  identity (seon.ref/target-attrs). See docs/references.md#an-entity-cites."
+  [:db/id :seon.cite/id :seon.cite/of :seon.cite/depth :seon.cite/order {:seon.cite/target (into [:db/id] ref/target-attrs)}])
 
 (defn cites-of
-  "The cite entities entity e holds on db (:seon.cite/of), pulled, in their order: what a reader that is no
-  draw reads of what e cites (the judge, a problem, my.agent/cite!). See docs/references.md#an-entity-cites."
+  "The cite entities entity e holds on db (:seon.cite/of), pulled with their targets' identities (cite-pull), in their
+  order: what a reader that is no draw reads of what e cites (the judge, a problem, my.agent/cite!). See
+  docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] [:vector :map]]}
   [db e]
   (if e
-    (vec (sort-by :seon.cite/order (for [dt (d/datoms db :avet :seon.cite/of e)] (d/pull db '[*] (:e dt)))))
+    (vec (sort-by :seon.cite/order (for [dt (d/datoms db :avet :seon.cite/of e)] (d/pull db cite-pull (:e dt)))))
     []))
+
+(defn cited-name
+  "What cite c (as cites-of reads it) names, its target's identity value (seon.ref/target-value): a section's address, a
+  var's name, a task's id, a schema key, a namespace's name or a file's path. See docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [c] (ref/target-value (:seon.cite/target c)))
 
 (defn task-cites
   "What task id's page draws of what it cites, read on db: its own cites, then each need's (one level, a
@@ -110,15 +109,15 @@
   (let [e (pdb/eid db :seon.task/id id)
         needs (when e (sort-by :seon.task/id (remove #(= :merge (:seon.task/kind %)) (map #(d/pull db [:db/id :seon.task/id :seon.task/kind] (:v %)) (d/datoms db :eavt e :seon.task/needs)))))
         cs (concat (cites-of db e) (mapcat #(cites-of db (:db/id %)) needs))
-        target #(or (:seon.cite/address %) (:seon.cite/name %))
+        target #(get-in % [:seon.cite/target :db/id])
         by (group-by target cs)]
     (mapv (fn [t] (apply max-key #(ref/strength (:seon.cite/depth %)) (rseq (vec (by t))))) (distinct (map target cs)))))
 
 (defn cites-tx
   "The facts that make entity of (as cite-tx takes it) cite exactly citations cs on db: one cite entity per
-  target (cite-tx), at the strongest depth any of cs asks for it and its first's place, and each cite of
-  of on db no longer among them retracted whole. The one writer of a text's cites, called where the text
-  is written (create-tx, load-tx, rederive-tx). See docs/references.md#an-entity-cites."
+  target (cite-tx), at the strongest depth any of cs asks for it and its first's place, and each cite of of on db no
+  longer among them retracted whole. The one writer of a text's cites, called where the text is written (create-tx,
+  load-tx, rederive-tx), after what the same write makes. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :any :string [:sequential [:map [:seon.ref/depth :seon.ref/depth]]]] [:vector :any]]}
   [db of of-id cs]
   (let [{:keys [by order]} (reduce (fn [{:keys [by order] :as acc} c]
@@ -148,17 +147,6 @@
   {:malli/schema [:=> [:cat :seon.host/db :any :string] [:vector :any]]}
   [db of k]
   (vec (map-indexed (fn [i c] (cite-tx db of k c i)) (keep ref/address-citation (cfg/value :seon.config.agent/cites)))))
-
-(defn citation-problems
-  "Each citation of decls' text that resolves to nothing on db, as {:task :name :problem
-  :unresolved}: answered beside the write, never an error (docs/references.md)."
-  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]] [:vector :map]]}
-  [db decls]
-  (vec (for [decl decls
-             c (ref/kept db (ref/cited (texts-citations (cited-texts decl))))
-             :when (not (ref/names-something? db c))]
-         {:task (task-id (:seon.task/ns decl) (:seon.task/name decl))
-          :name (or (:seon.ref/name c) (:seon.ref/path c)) :problem :unresolved})))
 
 (defn- cycle-in
   "A task id on a needs cycle among decls (plus the needs already on main, which cannot
@@ -763,8 +751,12 @@
           declared (fn [id d] {:seon.task/id id :seon.task/declared (sedn/encode d)})]
       (if-let [p (needs-problem graph graph)]
         (file-refused (first owners) p)
+        (let [created (when (seq new) (create-tx db new))
+              ;; a changed task's text may cite a task this write makes: its cites are read on the db the new tasks make,
+              ;; written after them, so the lookup resolves in the write
+              db' (if (seq new) (:db-after (pdb/speculate db (filterv #(and (map? %) (:seon.task/id %)) created))) db)]
         (vec (concat
-               (when (seq new) (create-tx db new))
+               created
                (for [d new] (declared (task-id (:seon.task/ns d) (:seon.task/name d)) d))
                (mapcat (fn [[id d]]
                          ;; what it states now: members, config flattened, references derived, branch
@@ -775,11 +767,11 @@
                            (cond-> (-> (entity-tx db (pdb/eid db :seon.task/id id) (conj stated-attributes :seon.task/needs) want)
                                        (conj [:db/add [:seon.task/id id] :seon.task/declared (sedn/encode d)])
                                        ;; what its text cites now
-                                       (into (cites-tx db [:seon.task/id id] id (text-citations db d))))
+                                       (into (cites-tx db' [:seon.task/id id] id (text-citations db' d))))
                              ;; declared again after its removal: revived
                              (and (nil? (stored id)) (= :cancelled (:seon.task/execution (all id))))
                              (conj [:db/add [:seon.task/id id] :seon.task/execution :held]))))
                        changed)
                (mapcat (fn [id] [[:db/add [:seon.task/id id] :seon.task/execution :cancelled]
                                  [:db/retract [:seon.task/id id] :seon.task/declared (stored id)]])
-                       removed)))))))
+                       removed))))))))

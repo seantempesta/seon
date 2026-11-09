@@ -100,9 +100,11 @@
  :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :seon.db/plain]]]
  ;; a value its attribute's declared schema refuses, at the write (seon.db/invalid-datom)
  :seon.db/invalid-datom [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/invalid-datom]] [:attribute :qualified-keyword]]]
+ ;; a lookup ref a write names that names no entity (a cite's target, a wiki link to no section), at the write (seon.db/checked): the lookup
+ :seon.db/no-target [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/no-target]] [:target :seon.ref/target]]]
  ;; an entity a write touched that an entity schema its keys select refuses, at the write (seon.db/invalid-entity)
  :seon.db/invalid-entity [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/invalid-entity]] [:entity :string] [:schema :qualified-keyword]
-                          [:missing [:vector :qualified-keyword]]]]
+                          [:missing [:vector :qualified-keyword]] [:entities {:optional true} [:vector :string]]]]
  :seon.writer/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.writer/refused]]]]
  :seon.merge/uncontracted [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/uncontracted]]
                                                   [:uncontracted [:vector :qualified-symbol]]]]
@@ -227,10 +229,10 @@
  ;; ---- the one read: seon.problems/report ----
  ;; each class's area, the group root's page and context show it under (docs/health.md),
  ;; declared once here and read through seon.contract/properties (as a status set is)
- :seon.problems/class [:enum {:seon.problems/derived #{:stalled :dead-citation :unnamed-site :stale-pin :stale-section :orphan-page :leadless-section :uncited-task :uncited-var :problem-unlinked :long-form}
+ :seon.problems/class [:enum {:seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-section :orphan-page :leadless-section :uncited-task :uncited-var :problem-unlinked :long-form}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it)
                              :seon.problems/attention #{:stale-section :uncited-var :long-form}
-                             :seon.problems/areas [[:docs #{:dead-citation :stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost}]
+                             :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost}]
                                                     [:laws #{:unnamed-site :long-form}] [:merges #{:merge :task-conflict :unrun}] [:tasks #{:failed :uncited-task}]
                                                     [:agents #{:stalled :dead :error :waste}] [:errors #{:platform :eval :agent :effect}] [:health #{:problem-unlinked}]]
                              ;; each class's section of the wiki: what it is and how it is fixed. A class with open rows whose
@@ -241,10 +243,10 @@
                                                   :merge "docs/merging.md#conflicts-and-pins" :task-conflict "docs/merging.md#conflicts-and-pins"
                                                   :unrun "docs/merging.md#a-merge-runs-what-the-change-reaches"
                                                   :dead "docs/root.md#runs-and-judging" :failed "docs/tasks.md#a-refused-run-is-held-for-root"
-                                                  :dead-citation "docs/health.md#a-dead-citation" :unnamed-site "docs/health.md#a-laws-unnamed-site"
+                                                  :unnamed-site "docs/health.md#a-laws-unnamed-site"
                                                   :stale-pin "docs/forks.md#branch-scheme" :stale-section "docs/health.md#a-stale-section"
                                                   :orphan-page "docs/health.md#an-orphan-page" :leadless-section "docs/health.md#a-section-with-no-lead" :uncited-task "docs/health.md#a-task-that-cites-nothing" :uncited-var "docs/health.md#a-function-that-cites-no-section" :long-form "docs/health.md#a-form-too-long" :problem-unlinked "docs/health.md#a-problem-with-no-page"}}
-                       :stalled :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :dead-citation :unnamed-site :stale-pin :unrun
+                       :stalled :platform :eval :agent :effect :red :cost :merge :dead :error :waste :failed :task-conflict :unnamed-site :stale-pin :unrun
                        :stale-section :orphan-page :leadless-section :uncited-task :uncited-var :problem-unlinked :long-form]
  :seon.problems/row [:map {:seon.render/hiccup seon.render.ui/problem-row}
                      [:producer [:maybe :qualified-symbol]] [:owner-ns [:maybe :symbol]]

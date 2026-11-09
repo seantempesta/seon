@@ -232,14 +232,17 @@
         (is (= "CONFIG FAILED (stale binary)" (last (str/split-lines out))) out))
       (finally (clojure.java.shell/sh "rm" "-rf" tmp)))))
 
-(defn- cited-db
-  "The test store's seed with a wiki page citing two vars of its program and one name that names
-  nothing (a dead citation the base already has), as seon.problems-test's caused fixture; and the two vars."
-  []
-  (let [db0 (ts/test-db)
-        [v w] (map :v (take 2 (d/datoms db0 :aevt :var/name)))
-        page (str "# P\n\nIt reads `" v "`, `" w "` and `" (symbol (namespace v) "no-such-var") "`.\n")]
-    [(d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page})) v]))
+(defn- catch-db
+  "The test store's seed with n live forms in a src namespace, each defining one var and carrying a catch the law page
+  does not name (each an :unnamed-site), as seon.problems-test's catch-forms; and the n-th var's name."
+  [db0 n]
+  (let [ns-e (:db/id (:var/ns (d/entity db0 (:e (first (d/datoms db0 :aevt :var/name))))))]
+    [(d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/m.clj"]]
+                          (mapcat (fn [i] [{:db/id (- (inc (* 2 i))) :form/id (str "check-form-" i) :form/ns ns-e :form/order i :form/src "(defn f [])"
+                                            :form/catches #{"{:class Exception, :answers :expr}"} :form/defines [(- (* 2 i))]}
+                                           {:db/id (- (* 2 i)) :var/name (symbol "app.check" (str "v" i)) :var/ns ns-e :var/form (- (inc (* 2 i)))}]))
+                          (range 1 (inc n))))
+     (symbol "app.check" (str "v" n))]))
 
 (deftest the-health-step-reads-the-task-files-relative-to-the-checkout
   ;; test-runner/health!: the config holds :seon.config.root/tasks-dir resolved against the
@@ -252,35 +255,36 @@
         "it names the configured directory under the checkout")))
 
 (deftest a-problem-the-base-had-is-not-the-branchs
-  (let [[base] (cited-db)
+  (let [[base] (catch-db (ts/test-db) 1)
         h (test-runner/branch-health base base nil)]
-    (is (pos? (get-in (seon.problems/health base) [:classes :dead-citation :n])) "the base has an open problem")
+    (is (pos? (get-in (seon.problems/health base) [:classes :unnamed-site :n])) "the base has an open problem")
     (is (= [] (:caused h)) "the branch changed nothing, so it caused none")
     (is (every? true? (vals (:checks h))) "and its health is green")))
 
 (deftest a-problem-the-branch-made-fails-it
-  (let [[base v] (cited-db)
-        head (d/db-with base [[:db/retractEntity (pdb/eid base :var/name v)]])
+  (let [[base] (catch-db (ts/test-db) 1)
+        [head v] (catch-db base 2)
         h (test-runner/branch-health base head nil)]
-    (is (= [{:class :dead-citation :message (str "demo/p.md#p cites " v ", which names nothing")}] (:caused h)))
-    (is (false? (get-in h [:checks :no-dead-citation])) "its health is red on the class it made")
-    (testing "the classes asked for are the ones judged (bin/laws catch asks for :unnamed-site)"
-      (is (= {:no-unnamed-site true} (:checks (test-runner/branch-health base head [:unnamed-site])))))
+    (is (= [:unnamed-site] (mapv :class (:caused h))))
+    (is (str/includes? (:message (first (:caused h))) (str v)) "naming what the branch made")
+    (is (false? (get-in h [:checks :no-unnamed-site])) "its health is red on the class it made")
+    (testing "the classes asked for are the ones judged (bin/laws catch asks for :unnamed-site): one the branch did not make is green"
+      (is (= {:no-unnamed-site true} (:checks (test-runner/branch-health base base [:unnamed-site])))))
     (testing "a class no verdict judges (an attention class never fails a branch) is refused, never a green"
       (is (thrown? Exception (test-runner/branch-health base head [:stale-section]))))))
 
 (deftest a-class-the-health-step-does-not-read-is-refused
-  (let [[base v] (cited-db)
-        head (d/db-with base [[:db/retractEntity (pdb/eid base :var/name v)]])]
+  (let [[base] (catch-db (ts/test-db) 1)
+        [head] (catch-db base 2)]
     (doseq [c [:orphan-page :stalled :stale-pin :leadless-section :uncited-task :problem-unlinked]]
       (is (thrown? Exception (test-runner/branch-health base head [c])) (str (name c) " is no verdict of caused-split")))))
 
 (deftest the-health-steps-checks-are-the-classes-caused-reads
-  (let [[base v] (cited-db)
+  (let [[base] (catch-db (ts/test-db) 1)
         attention? (:seon.problems/attention (contract/properties :seon.problems/class))]
     (is (= (into #{} (comp (remove attention?) (map #(keyword (str "no-" (name %))))) seon.problems/caused-classes)
            (set (keys (:checks (test-runner/branch-health base base nil))))))
-    (let [head (d/db-with base [[:db/retractEntity (pdb/eid base :var/name v)]])]
+    (let [[head] (catch-db base 2)]
       (is (every? seon.problems/caused-classes (map :class (:rows (seon.problems/caused-split base head))))
           "every class caused-split answers is one the health step judges"))))
 
