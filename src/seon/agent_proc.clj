@@ -19,7 +19,7 @@
   {:malli/schema [:=> [:cat :map :seon.host/throwable] :seon.wire/seon-msg]}
   [v t]
   (let [e (contract/error :seon.agent/unencodable #'seon.agent-proc/unencodable
-                          (str "a " (pr-str (:op v)) " message holds a value the wire cannot encode: " (ex-message t))
+                          (str "a " (some-> (:op v) name) " message holds a value the wire cannot encode: " (ex-message t))
                           {:message-op (:op v)})]
     (case (:op v)
       :fx-reply (merge e (select-keys v [:op :k]))
