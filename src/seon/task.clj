@@ -339,7 +339,7 @@
 (defn undelivered
   "The messages main holds to the agent with key k that branch-db, its branch, does not hold: each {:id :from :body :sent-ms}, in main's
   order (by transaction, then id). The agent's ref on main is the fact (a seek of :seon.message/to on its entity, never a scan of the
-  messages), and the message entity on the branch (one lookup of its id) is its delivery (owner, 2026-11-09), written there by seon.agent/deliver! or brought down
+  messages), and the message entity on the branch (one lookup of its id) is its delivery (docs/users.md#messages), written there by seon.agent/deliver! or brought down
   by a merge or sync of main: a message the agent removed (its ref retracted, the entity kept) stays delivered, and one already on main when the branch forked is
   delivered at the fork. The one reading of it: the agent's next act (seon.agent/undelivered) and root's check that a
   parked agent is owed one. O(m) seeks on main and O(m) id lookups on the branch, m the messages to the agent. See docs/users.md#messages."

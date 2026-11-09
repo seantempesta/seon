@@ -811,22 +811,22 @@
         ;; the messages as [transaction entity], in the order they were delivered
         ms (->> (d/datoms db :avet :seon.message/to (:db/id c)) (mapv (fn [dt] [(nth dt 3) (nth dt 0)])) sort vec)
         ;; the turns in order, one pass with the messages: each turn takes those delivered at or before its edge, no edge before an earlier one's. The record holds its calls newest first, so its reverse is turn order; one that is not is sorted and passed again
-        place (fn [entries]
+        ;; strict? false: entries sorted by number, where two calls of one number are one turn's (an answer's call beside its turn's)
+        place (fn [entries strict?]
                 (loop [es (seq entries) i 0 mx 0 prev 0 out (transient {})]
                   (if-let [entry (first es)]
                     (let [cid (key entry) call (val entry) n (:seon.model-call/n call)]
                       (if (and n (pos? n) (not= :outside (:seon.model-call/origin call)))
                         (let [mx (max mx (or (:t (:seon.model-call/basis call))
-                                             (get-in c [:seon.model-call/_agent cid :seon.model-call/basis :t])
                                              (:tx (first (d/datoms db :eavt cid :seon.model-call/id)))))
                               j (loop [j i] (if (and (< j (count ms)) (<= (nth (nth ms j) 0) mx)) (recur (inc j)) j))]
-                          (if (> n prev)
+                          (if (or (> n prev) (and (not strict?) (= n prev)))
                             (recur (rest es) j mx n (if (= i j) out (reduce (fn [out k] (if-let [id (get-in held [(nth (nth ms k) 1) :seon.message/id])] (assoc! out n (conj (get out n []) [(nth (nth ms k) 1) id])) out)) out (range i j))))
                             ::unordered))
                         (recur (rest es) i mx prev out)))
                     (persistent! (reduce (fn [out k] (if-let [id (get-in held [(nth (nth ms k) 1) :seon.message/id])] (assoc! out :pending (conj (get out :pending []) [(nth (nth ms k) 1) id])) out)) out (range i (count ms)))))))
-        placed (if (and (sorted? calls) (not (:seon.ctx/by-position (meta calls)))) (place (rseq calls)) ::unordered)]
-    (if (= ::unordered placed) (place (sort-by #(:seon.model-call/n (val %)) calls)) placed)))
+        placed (if (and (sorted? calls) (not (:seon.ctx/by-position (meta calls)))) (place (rseq calls) true) ::unordered)]
+    (if (= ::unordered placed) (place (sort-by #(:seon.model-call/n (val %)) calls) false) placed)))
 
 (defn turn-evals
   "What model call cid of agent record c holds that c holds too: the evals it ran, [[e id]] in the order they ran, each with its own id; one unlinked from c (a swap! on @ctx) is none. Reads each member's id alone: a member's id is written once, so an outside agent's one
