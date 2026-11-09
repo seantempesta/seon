@@ -328,6 +328,10 @@
   {:malli/schema [:=> [:cat :map] [:sequential :any]]}
   [r] (for [[k sym] (:defines r) :when (#{:var :method} k)] sym))
 
+(def ^:private model-renders
+  "The model renders (:seon.render/wire of an entity schema, docs/users.md#the-stages-agreed-2026-11-09) and the one helper that writes a turn's page message: each writes messages as the one walk places them, which is the path."
+  '#{seon.ctx.wire/agent-wire seon.ctx.wire/eval-wire seon.ctx.wire/message-wire seon.ctx.wire/model-call-wire seon.ctx.wire/page-message})
+
 (defn- outside-the-path
   "The vars of db in namespaces nss that make provider messages other than through seon.render/wire: one that references a step of `the-path` and is not named for it, or
   whose code holds a message ({:role :content}) or a request ({:messages} of a turn or a model) and is not a step."
@@ -336,7 +340,7 @@
   (let [refs (->> (d/datoms db :aevt :form/refs) (keep #(when (contains? the-path (:v %)) [(:v %) (:e %)])) distinct)
         by-ref (for [[step e] refs :let [r (seon.program/form-row db e)] :when (nss (:ns r)) v (named-by r) :when (not (or (= step v) (contains? (get the-path step) v)))] v)
         role (for [r (rows-with db nss [":role"]) :when (some #(and (map? %) (contains? % :role) (contains? % :content)) (tree-seq coll? seq (:read r))) v (named-by r)
-                   :when (not (#{'seon.render/wire-parts 'seon.model/wire-message} v))] v)
+                   :when (not (or (#{'seon.render/wire-parts 'seon.model/wire-message} v) (model-renders v)))] v)
         asks (for [r (rows-with db nss [":messages"])
                    :when (some #(and (map? %) (contains? % :messages) (or (contains? % :turn) (contains? % :model))) (tree-seq coll? seq (:read r)))
                    v (named-by r)

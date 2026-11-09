@@ -2061,20 +2061,16 @@
 
 ;; ---- model renders (stage 2b, docs/users.md#the-stages-agreed-2026-11-09) ----
 
-(def ^:private model-renders
-  "Each entity schema's model render, as the one walk will look it up on the schema (its property's name is the owner's)."
-  {:seon.db/agent-fact wire/agent-wire :seon.db/eval-fact wire/eval-wire :seon.message/fact wire/message-wire :seon.model-call/fact wire/model-call-wire})
-
-(defn- placed
-  "What the one walk makes of agent a's model render on db: each entity it places replaced by that entity's own model
-  render's output, in place (the contract the walk keeps, docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09)."
+(defn- model-walk
+  "What Web's walk makes of agent a's model render on db: a walker on the agent's pull asked for both outputs, rooted on the
+  agent's entity (its schema's renders), flushed once, the root's model output with each placed entity or call resolved
+  (seon.render/wire-of)."
   [db a]
-  (let [o {:seon.db/db db}]
-    (vec (mapcat (fn [x] (cond (:role x) [x]
-                                       ;; a placed call, [#'f opts & args]: the walk renders it as a component of its own
-                                       (and (vector? x) (var? (first x))) (apply (first x) (merge o (second x)) (nnext x))
-                                       :else ((model-renders (render/schema-of x nil)) o x)))
-                 (wire/agent-wire o (ctx/agent-ctx db a))))))
+  (let [ix (seon.program/index-of-db db)
+        r (seon.ratom/atom (ctx/agent-ctx ix db a))
+        w (assoc (render/walker {:ref r :changes ctx/changes} (constantly db) [#'seon.render.ui/agent {} (seon.ratom/ref-view r ctx/changes)] ix)
+                 :outputs #{:seon.render/hiccup :seon.render/wire})]
+    (try (render/flush! w nil) (render/wire-of w) (finally (render/dispose-walk! w)))))
 
 (defn- with-system
   "Db with agent key k's :seon.agent/system written as its run's start writes it (seon.agent/begin-run-tx): the system prompt's top section."
@@ -2104,7 +2100,7 @@
               n (:seon.agent/turn (d/entity db a))
               today (wire/render db {:commit (d/commit-id @conn) :task (:seon.task/id (:seon.agent/task (d/entity db a))) :turn n :max-turns 9 :origin :model :agent k})
               ;; the page evals stored as seon's go with this stage: the model renders read a db without them
-              ms (placed (d/db-with db (for [dt (d/datoms db :aevt :seon.eval/by) :when (= "seon" (:v dt))] [:db/retractEntity (:e dt)])) a)]
+              ms (model-walk (d/db-with db (for [dt (d/datoms db :aevt :seon.eval/by) :when (= "seon" (:v dt))] [:db/retractEntity (:e dt)])) a)]
           (let [want (without-page db today) got (vec (remove page-message? ms))
                 i (count (take-while true? (map = want got)))
                 cut (fn [m] (some-> m (update :content #(subs % 0 (min 300 (count %))))))]
@@ -2119,7 +2115,7 @@
         big (vec (range 40000))
         e {:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/code "(range 40000)" :seon.eval/call-id "c9" :seon.eval/intent "Count."
            :seon.eval/response {:handle 'result/e9 :value big}}
-        tool (fn [e] (:content (peek (wire/eval-wire {:seon.db/db db} e))))
+        tool (fn [e] (:content (peek (wire/eval-wire {:seon.db/db db :seon.render/index (seon.program/index-of-db db)} e))))
         closed (tool e) opened (tool (assoc e :seon.eval/opened true))]
     (is (str/includes? opened "39999") "opened: the whole value")
     (is (not (str/includes? closed "39999")) "closed: within its budget")
