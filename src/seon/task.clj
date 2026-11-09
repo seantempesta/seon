@@ -588,7 +588,9 @@
   {:malli/schema [:=> [:cat :seon.db/agent-fact] :seon.reconcile/agent]}
   [a]
   (let [{:seon.agent/keys [branch model max-turns holder]} a]
-    ;; an environment only with a branch: a task's start always writes one, an agent root starts with no task has none
+    ;; an environment only with a branch and max-turns: a task's start always writes both (seon.task/start-tx), an agent
+    ;; root starts with no task has neither. A branch alone is a valid agent-fact its contract must answer for (the
+    ;; generated check), so it has no environment (the audit of 2026-11-09 asked for a loud refusal: the contract is no place for it)
     (cond-> (select-keys a [:seon.agent/key :seon.agent/boot])
       (and branch max-turns) (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
 

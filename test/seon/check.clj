@@ -152,8 +152,11 @@
     feed))
 
 (defn- await-feed
-  "true once (pred @feed) holds, false when the feed ended first (:ended, set by watch-feed!): the
-  wait ends with its producer, and the caller's check is red naming what it awaited. No deadline."
+  "true once (pred @feed) holds, false when the feed ended first (:ended, set by watch-feed!): a wait
+  whose producer died (root stopped, the peer closed) ends, and the caller's check is red naming what it
+  awaited. No deadline: a live producer that owes the mark and never sends it is its own defect, fixed
+  there (the render proc's keyframe to a stale tab: seon.web/a-tabs-first-keyframe-settles-on-its-own),
+  never by a timeout here (AGENTS.md §4, nothing hangs)."
   [feed pred]
   (await-ref feed #(or (pred %) (:ended %)))
   (boolean (pred @feed)))
@@ -1342,17 +1345,20 @@
   (lib/c-exit 0))
 
 (defn boot-twice
-  "A start! in a process whose carrier threads already run: its answer, the last line as EDN,
-  {:second message}. A process boots root once (seon.root/boot!: on the main carrier, before any
-  thread), and a first boot's threads (Jolt's carriers, timer, poller) outlive stop!, so a second
-  start! is refused by Jolt by name (main-carrier-run!: fibers already run on carrier threads) and
-  forks nothing beside them. A go block starts the same carriers a first boot leaves, so the refusal
-  is shown without paying for that first boot (about 20 s: docs/testing.md#a-root-costs-what-it-boots)."
+  "One real cycle in this process (cycle-row: start!, three agents evaluate, stop!), then a second start!: the last
+  line as EDN, {:running [diff] :stopped [diff] :second message}, as threads-declared prints its cycles with the second
+  boot's answer; exit 0 when the cycle's threads were exact. A process boots root once (seon.root/boot!: on the main
+  carrier, before any thread), and the first boot's threads (Jolt's carriers, timer, poller) outlive stop!, so the
+  second start! is refused by Jolt by name (main-carrier-run!: fibers already run on carrier threads) and forks nothing
+  beside them. The cycle is the one seon.root-test/root-threads-are-what-root-declares reads, so the refusal follows a
+  real boot and stop! at no boot of its own (docs/testing.md#a-root-costs-what-it-boots)."
   []
-  (a/<!! (a/go 1))
-  (out! (sedn/encode {:second (try (c/stop! (c/start! {:datoms 2000})) :booted
-                                   (catch Throwable e (ex-message e)))}))
-  (lib/c-exit 0))
+  (let [row (cycle-row 0)
+        again (try (c/stop! (c/start! {:datoms 2000})) :booted
+                   (catch Throwable e (ex-message e)))]
+    (out! (sedn/encode {:running [(:running row)] :stopped [(:stopped row)] :second again}))
+    ;; exact, as exact? reads a row (defined below)
+    (lib/c-exit (if (and (:ok row) (empty? (:running row)) (empty? (:stopped row))) 0 1))))
 
 (defn- exact? [row] (and (:ok row) (empty? (:running row)) (empty? (:stopped row))))
 

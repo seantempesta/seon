@@ -598,7 +598,9 @@
          :growth :constant
          ;; measured 2026-11-06 at 100, 300, 1,000 forms: 331k, 335k, 364k ticks; 940 KB, 960 KB, 1.04 MB; 83 calls. Replacing
          ;; each form's row on every text write: 762k, 923k, 1.60M ticks; 3.10, 4.06, 7.43 MB; 65 calls (red: over and steeper)
-         :fixed {:calls 101 :bytes 1000000 :ticks 340000} ; 83 until the write checked every datom (the owner, 2026-11-06)
+         :fixed {:calls 102 :bytes 1000000 :ticks 340000} ; 83 until the write checked every datom (the owner, 2026-11-06); 102
+         ;; since the check is a function, seon.db/checked, not a macro shaped to the count (the audit of 2026-11-09; the owner's
+         ;; validation at transaction time, 2026-11-08). 380k ticks and 1.12 MB measured then, under the shared load of a full prove
          :sizes [100 300 1000]})
       (finally (reset! seon.agent/state was)
                (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)))))

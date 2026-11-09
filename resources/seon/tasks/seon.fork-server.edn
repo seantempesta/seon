@@ -16,4 +16,7 @@
   :seon.task/plan "Measured 2026-11-08 (an agent's first search, seon.agent-test/an-agents-first-search-reads-the-index-it-inherited): its first grep allocated 8-15 MB more than its second, all cold decoding of the EAVT leaves holding the sections' :seon.doc/text, which every forked agent decodes for itself; the text index itself is inherited current. Candidate: read those leaves in seon.fork-server/warm-start, so each agent inherits them decoded (copy-on-write). Measure first: the fork server's resident memory with and without it (docs/machine.md's budget), against the bytes saved per agent times agents per hour; propose to the owner with the numbers. Not started."
   :seon.task/kind :work
   :seon.task/proofs #{}}
-]
+ {:seon.task/name "a-source-root-with-no-deps-edn-starts-the-fork-server"
+  :seon.task/plan "Found 2026-11-09 (the audit fixes' helper): seon.fork-server/dev-classpath! slurps the source root's deps.edn with nothing named for its absence, so a source root with none (a scratch tree a test boots, a user's repository that is not a Clojure project) throws at the fork server's start and root reports the fork server lost; seon.root-test's boots-on-a-tree writes {:deps {}} to get past it. Correct: a root with no deps.edn has no dependency roots to add (absent is no deps, a fact of the tree, not a fake default), and a deps.edn that does not read is a typed error named in docs/failure-points.md, answered to whoever asked for the fork. Delete the {:deps {}} line from boots-on-a-tree. Proof, red first: a boot on a tree with no deps.edn spawns an agent."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]

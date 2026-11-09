@@ -60,14 +60,24 @@
   {:malli/schema [:=> [:cat :any] :boolean]}
   [a] (boolean (:seon.db/identity (contract/properties a))))
 
+(defn- form-props
+  "The properties of named schema k's form in forms ([:type {props} ...]), or nil. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :map :any] [:maybe :map]]}
+  [forms k] (let [f (get forms k)] (when (and (vector? f) (map? (second f))) (second f))))
+
+(defn- parents-in
+  "The named schemas k's form in forms extends ([:and p ...] or [:merge p ...]). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] [:vector :qualified-keyword]]}
+  [forms k]
+  (let [form (get forms k)]
+    (if (and (vector? form) (#{:and :merge} (first form)))
+      (filterv #(and (qualified-keyword? %) (contains? forms %)) (rest form))
+      [])))
+
 (defn parents
   "The named schemas k's form extends ([:and p ...] or [:merge p ...]). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] [:vector :qualified-keyword]]}
-  [k]
-  (let [form (get contract/forms k)]
-    (if (and (vector? form) (#{:and :merge} (first form)))
-      (filterv #(and (qualified-keyword? %) (contains? contract/forms %)) (rest form))
-      [])))
+  [k] (parents-in contract/forms k))
 
 (defn- own-entries
   "The [key props? schema] entries a schema's form names itself: its [:map ...] members, inline or in an [:and ...] arm,
@@ -83,15 +93,37 @@
   {:malli/schema [:=> [:cat :any] [:vector :any]]}
   [form] (mapv first (own-entries form)))
 
+(defn- entity-index
+  "What schema forms say an entity is: {:entity-schemas {attribute schema}, each attribute an entity schema
+  ({:seon.db/attributes true}) names itself (`own-keys`), to that schema; :identity-schemas, those of them that are upsert
+  keys; :required-keys {schema [attribute ...]}, the keys each requires, its own and those of the schemas it extends, and
+  :own-required, only its own}.
+  See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :map] [:map [:entity-schemas :map] [:identity-schemas :map] [:required-keys :map] [:own-required :map]]]}
+  [forms]
+  (let [entity? #(:seon.db/attributes (form-props forms %))
+        required (fn [form] (for [e (own-entries form) :let [p (second e)] :when (not (and (map? p) (:optional p)))] (first e)))
+        es (into {} (for [[k form] forms :when (entity? k) a (own-keys form)] [a k]))]
+    {:entity-schemas es
+     :identity-schemas (into {} (filter #(:seon.db/identity (form-props forms (key %)))) es)
+     :required-keys (into {} (for [k (distinct (vals es))]
+                               [k (vec (distinct (mapcat #(required (get forms %)) (filter entity? (tree-seq (constantly true) #(parents-in forms %) k)))))]))
+     :own-required (into {} (for [k (distinct (vals es))] [k (vec (required (get forms k)))]))}))
+
+(def ^:private index
+  "The binary's `entity-index`, derived once from its registry: what every write is held to, unless its branch changed an
+  entity schema (`index-of`). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  (entity-index contract/forms))
+
 (def entity-schemas
-  "{attribute schema}: each attribute an entity schema ({:seon.db/attributes true}) names itself (`own-keys`), to that
-  schema: what an entity is, from the attributes it holds. Derived once from the registry; the one map the write
-  (`invalid-entity`) and the renders (seon.render's most-specific) read (seon.render-test/a-walk-is-its-entity-and-its-units). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  (into {} (for [[k form] contract/forms :when (:seon.db/attributes (contract/properties k)) a (own-keys form)] [a k])))
+  "{attribute schema}: each attribute an entity schema names itself, to that schema (`entity-index`): what an entity is,
+  from the attributes it holds; the map the renders read (seon.render's most-specific;
+  seon.render-test/a-walk-is-its-entity-and-its-units). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  (:entity-schemas index))
 
 (def identity-schemas
   "{identity-attribute schema}: the entity schemas by the upsert keys they name. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  (into {} (filter (comp identity-attr? key)) entity-schemas))
+  (:identity-schemas index))
 
 (def schema-identities
   "{schema identity-attribute}: each entity schema's own upsert key, `identity-schemas` turned around. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
@@ -111,72 +143,84 @@
     (when (seq ss)
       (or (some (fn [s] (when (every? #(extends? s %) ss) s)) ss) {:ambiguous (vec ss)}))))
 
-(def ^:private required-keys
-  "{schema [attribute ...]}: the keys an entity schema requires, its own and those of the schemas it extends: what an
-  entity holding any attribute it owns holds whole. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  (into {} (for [k (distinct (vals entity-schemas))]
-             [k (vec (distinct (mapcat (fn [s] (for [[a p] (map (fn [e] [(first e) (second e)]) (own-entries (get contract/forms s)))
-                                                     :when (not (and (map? p) (:optional p)))]
-                                                 a))
-                                       (cons k (filter #(:seon.db/attributes (contract/properties %)) (tree-seq (constantly true) parents k))))))])))
+(defn- index-of
+  "The `entity-index` a write is held to, given its branch's own schema changes ({:forms :registry}, or nil): the binary's
+  (`index`), unless the branch changed an entity schema or an attribute one names, when it is derived again from the
+  registry with the branch's forms over it: a cost of the registry's size, paid only by the writes of a branch that changed
+  what an entity is. See docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:=> [:cat [:maybe :map]] :map]}
+  [schemas]
+  (let [forms (:forms schemas)]
+    (if (some (fn [k] (or (contains? (:entity-schemas index) k) (contains? (:required-keys index) k)
+                          (:seon.db/attributes (form-props forms k))))
+              (keys forms))
+      (entity-index (merge contract/forms forms))
+      index)))
 
 (defn invalid-entity
   "The first entity a transaction's report (r) left holding attributes an entity schema owns without one that schema
-  requires, as the error :seon.db/invalid-entity, or nil. A schema is asked of an entity when the transaction added or
-  retracted an attribute it owns (`entity-schemas`); it refuses only what this write broke: a required key the entity
-  held before and not after, or one missing on an entity the write gave an attribute of that schema. An entity left
-  holding none of the schema's required keys has stopped being that thing. Presence is one seek per (entity, key), so a
-  write costs its touched entities' required keys, never an entity's size or the store's; values are each datom's own
-  check (`invalid-datom`). See docs/storage.md#the-write-checks-every-entity-it-touches."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.error/base]]}
-  [{:keys [db-before db-after tx-data]}]
-  (let [has? (fn [db e a] (boolean (first (d/datoms db :eavt e a))))
-        touched (reduce (fn [m {:keys [e a tx added]}]
-                          (if-let [k (when (not= e tx) (entity-schemas a))]
-                            (update-in m [[e k]] #(or % added))
-                            m))
-                        {} tx-data)]
-    (some (fn [[[e k] added?]]
-            (let [req (required-keys k)
-                  after (filterv #(has? db-after e %) req)]
-              (when (or added? (seq after))
-                (when-let [gone (seq (remove (set after) req))]
-                  (let [broke (if added? gone (filter #(has? db-before e %) gone))]
-                    (when (seq broke)
-                      (let [ident (if-let [a (some #(when (identity-attr? %) %) req)]
-                                    (if-let [v (:v (first (d/datoms db-after :eavt e a)))] [a v] e) e)]
-                        (contract/error :seon.db/invalid-entity #'invalid-entity
-                                        (str (print/text ident (:part print/budgets)) " holds attributes of " k ", which requires "
-                                             (str/join ", " broke) ": a write that leaves them out breaks it")
-                                        {:entity (print/text ident (:part print/budgets)) :schema k :missing (vec broke)}))))))))
-          (sort-by (comp str key) touched))))
+  requires, as the error :seon.db/invalid-entity, or nil; ix is the `entity-index` the write is held to (`index-of`, the
+  binary's by default). A schema is asked of an entity when the transaction added or retracted an attribute it owns; it
+  refuses only what this write broke: on an entity that was that thing before (it held a key the schema itself
+  requires), a required key it held before and not after; on one the write makes that thing, every one it lacks. An entity
+  incomplete before stays as it was (a whole-store scan's to report), and one left holding none of them has stopped
+  being that thing. Presence is one seek
+  per (entity, key), so a write costs its touched entities' required keys, never an entity's size or the store's; values
+  are each datom's own check (`invalid-datom`). The first refusal by entity id, then schema. See
+  docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:function [:=> [:cat :map] [:maybe :seon.error/base]] [:=> [:cat :map :map] [:maybe :seon.error/base]]]}
+  ([r] (invalid-entity r index))
+  ([{:keys [db-before db-after tx-data]} {:keys [entity-schemas identity-schemas required-keys own-required]}]
+   (let [has? (fn [db e a] (boolean (first (d/datoms db :eavt e a))))
+         ;; {[e schema] {attribute added?}}: what the write did to each touched entity's attributes of each schema; a key
+         ;; it only added is held after with no seek (a write that creates an entity seeks nothing after)
+         touched (reduce (fn [m {:keys [e a tx added]}]
+                           (if-let [k (when (not= e tx) (entity-schemas a))]
+                             (update-in m [[e k] a] #(if (nil? %) (boolean added) (and % added)))
+                             m))
+                         {} tx-data)
+         broken (keep (fn [[[e k] did]]
+                        (let [added? (boolean (some true? (vals did)))
+                              req (required-keys k)
+                              after (filterv #(or (true? (get did %)) (has? db-after e %)) req)]
+                          (when (or added? (seq after))
+                            (when-let [gone (seq (remove (set after) req))]
+                              (let [was? (some #(has? db-before e %) (own-required k))
+                                    broke (if was? (filter #(has? db-before e %) gone) gone)]
+                                (when (seq broke) {:at [e (str k)] :e e :k k :req req :broke (vec broke)}))))))
+                      touched)]
+     (when-let [{:keys [e k req broke]} (first (sort-by :at broken))]
+       (let [ident (if-let [a (some #(when (contains? identity-schemas %) %) req)]
+                     (if-let [v (:v (first (d/datoms db-after :eavt e a)))] [a v] e) e)]
+         (contract/error :seon.db/invalid-entity #'invalid-entity
+                         (str (print/text ident (:part print/budgets)) " holds attributes of " k ", which requires "
+                              (str/join ", " broke) ": a write that leaves them out breaks it")
+                         {:entity (print/text ident (:part print/budgets)) :schema k :missing broke}))))))
 
 (defn- refuse!
-  "Throw error e (a typed refusal) as the transaction's answer."
+  "Throw error e (a typed refusal) as the transaction's answer. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :map] :nil]}
   [e] (throw (ex-info (:seon.error/message e) e)))
 
-(defmacro ^:private checked
+(defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
   datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, each entity it touched
-  (`invalid-entity`) after; an entity retracted whole takes the entities named by it with it. A refusal
-  throws its typed error, and the value is as it was. A macro, its body inlined at each transaction entry (each
-  contracted): a transaction pays the two checks and no call of scaffolding (contracted calls are a cost dimension:
-  seon.ctx-test/a-swap-costs-what-it-changed). See docs/storage.md#the-write-checks-every-entity-it-touches."
+  (`invalid-entity`, by the branch's `index-of`) after; an entity retracted whole takes the entities named by it with it.
+  A refusal throws its typed error, and the value is as it was. See docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
   [db tx-data schemas apply-fn]
-  ;; built with list and a quoted body: it expands only here, in seon.db, where the body's names resolve
-  (list 'let ['db db 'tx-data tx-data 'schemas schemas 'apply-fn apply-fn]
-        (quote
-  ;; ends-with: tx-data with each entity retracted whole followed by the entities whose identity is a ref to it (a vector,
-  ;; :seon.vector/of): such an entity is named by its target and has no identity without it, so it ends with it, as
-  ;; Datahike ends a component with its parent; derived from the schema (an identity attribute that is a ref), so no
-  ;; writer retracts it by hand. One AVET seek per identity ref a retraction names; local, so a transaction that
-  ;; retracts nothing whole pays one scan of its ops and no call
-  (let [ends-with (fn [tx-data]
+  (let [ix (index-of schemas)
+        ;; ends-with: tx-data with each entity retracted whole followed by the entities whose identity is a ref to it (a
+        ;; vector, :seon.vector/of): such an entity is named by its target and has no identity without it, so it ends with
+        ;; it, as Datahike ends a component with its parent; derived from the schema (an identity attribute that is a ref),
+        ;; so no writer retracts it by hand. One AVET seek per identity ref a retraction names (no attribute is a component, so
+        ;; none of Datahike's own cascade is followed)
+        ends-with (fn [tx-data]
                     (let [whole? (fn [op] (and (vector? op) (#{:db.fn/retractEntity :db/retractEntity} (first op))))]
                       (if-not (some whole? tx-data)
                         tx-data
-                        (let [refs (filterv #(= :db.type/ref (get-in (:schema db) [% :db/valueType])) (keys identity-schemas))]
+                        (let [schema (:schema db)
+                              refs (filterv #(= :db.type/ref (get-in schema [% :db/valueType])) (keys (:identity-schemas ix)))]
                           (loop [todo (keep #(when (whole? %) (:db/id (d/entity db (second %)))) tx-data) seen #{} out (vec tx-data)]
                             (if-let [e (first todo)]
                               (if (seen e)
@@ -188,8 +232,8 @@
         tx-data (ends-with tx-data)]
     (when-let [e (invalid-datom db tx-data schemas)] (refuse! e))
     (let [r (apply-fn tx-data)]
-      (when-let [e (invalid-entity r)] (refuse! e))
-      r)))))
+      (when-let [e (invalid-entity r ix)] (refuse! e))
+      r)))
 
 (defn transact-checked
   "The writer's transact (`datahike.writing/transact!`) through both checks (`checked`): the connection's 'transact!
@@ -203,8 +247,8 @@
 (defn with
   "The one transaction on a database value (Datahike's `d/with`) through both checks (`checked`): every speculation, an
   agent's test fork and a test's world write through it, as the writer's transact does. Answers the report; schemas
-  are a branch's own ({:forms :registry}) or nil. A direct d/with, d/db-with or d/transact outside seon.db is red
-  (bin/laws transactions). See docs/storage.md#the-write-checks-every-entity-it-touches."
+  are a branch's own ({:forms :registry}) or nil. A Datahike transaction call at a site docs/storage.md does not
+  name is red (bin/laws transactions). See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :any :any] :map] [:=> [:cat :any :any [:maybe :map]] :map]]}
   ([db tx-data] (with db tx-data nil))
   ([db tx-data schemas] (checked db tx-data schemas #(d/with db %))))
@@ -220,7 +264,7 @@
 (defn speculate-db
   "The db after the hypothetical tx-data (`speculate`'s :db-after). See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :any] :any]}
-  [db tx-data] (:db-after (d/with db tx-data)))
+  [db tx-data] (:db-after (speculate db tx-data)))
 
 (defn db-with
   "The db after tx-data (`with`'s :db-after). See docs/storage.md#the-write-checks-every-entity-it-touches."

@@ -954,6 +954,41 @@
                       (str (str/join "; " bad) "; main stays as imported at commit " (or commit "none yet"))
                       {:files (vec (sort (keys files)))}))))
 
+(defn import-of
+  "What main's program on db becomes for r, what seon.fx/read-source answered of {:root :dirs}, held being root's
+  :seon.root/source fact: {:digest} alone when main holds r's digest (nothing to import); {:digest :tx :fact} when it
+  imports, tx the program facts (seon.source/tx-of, only the changes when r was read by its :paths) with the files'
+  modes, and fact the source fact with the digest, its counts as main holds them after tx; {:fact :error} when it can't
+  (a read with no files, or files that don't import: unimportable), fact saying what was read and why, with no digest,
+  so the next import reads again. t0: the import's start, the fact's :ms. The one computation of an import:
+  import-tree! and import-source! differ only in how they write it. See docs/source.md#a-boot-imports-main-first."
+  {:malli/schema [:=> [:cat :seon.host/db [:maybe :map] :map [:map [:root :string] [:dirs [:sequential :string]]] :int] :map]}
+  [db held r {:keys [root dirs]} t0]
+  (let [files (:value r)
+        digest (when files (source-digest r dirs))
+        changed? (boolean (:paths r))
+        fact-on (fn [db n] (cond-> {:root root :dirs (vec dirs) :ms (lib/r2 (profile/ms-since t0))
+                                    :files (if changed? (+ (count (d/datoms db :aevt :ns/file)) (count (d/datoms db :aevt :schema/file))) n)
+                                    :forms (count (d/datoms db :aevt :form/id))}
+                             (:commit r) (assoc :commit (:commit r))
+                             ;; the tree it read: the next import reads only what differs from it
+                             (:tree r) (assoc :tree (:tree r))
+                             (seq (:pins r)) (assoc :pins (:pins r))
+                             ;; a read that carries its files with an error (a gap with main) imports, and says so
+                             (contract/error? r) (assoc :error (:seon.error/message r))))]
+    (cond
+      (nil? files) {:fact (fact-on db 0) :error r}
+      (= digest (:digest held)) {:digest digest}
+      :else
+      (let [tx (source/tx-of db files changed?)
+            bad (if (contract/error? tx) tx (unimportable db files tx (:commit held)))]
+        (if bad
+          {:digest digest :fact (assoc (fact-on db (count files)) :error (:seon.error/message bad)) :error bad}
+          (let [tx (into (vec tx) (source/modes-tx db (:modes r)))]
+            {:digest digest :tx tx
+             :fact (assoc (fact-on (pdb/speculate-db db tx) (count files))
+                          :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))}))))))
+
 (defn import-source!
   "Main's program follows Seon's own source (seon.source): root's dirs read through the
   :source effect (first brought to the main checkout's branch, seon.fx/read-source: fast-forwarded
@@ -969,7 +1004,7 @@
   the fact, its :effect row naming :seon.root/source (seon.error/asked-tx); a fact the store
   refuses is a :platform cause with the writer's reason, and the fact in force is then this
   boot's without its inputs, saying why (:error). Answers the fact in force, or the error a
-  write of it answered.
+  write of it answered. What it imports is import-of's, as import-tree!'s is: only the write differs (root's writer here).
   With changed (the relative paths a watcher saw change, or none), only those files are read and
   main's program is brought up to date with them (seon.source/refresh-tx, the cost of what
   changed in the program), and the fact's digest is still the tree's: the git tree id
@@ -990,31 +1025,20 @@
                                                                   (and (nil? paths) (:digest held) (:tree held)) (assoc :since (:tree held) :since-dirs (:dirs held [])))}))
         changed (when (:digest held) changed)
         r (let [r (ask changed)] (if (and changed (not (:tree r))) (ask nil) r))
-        changed (when (:paths r) (or changed (set (:paths r))))
-        files (:value r)
-        digest (when files (source-digest r dirs))
         built? (and (:inputs r) (= (:binary r) (:tree (:inputs r))))
         this-boot (fn [fact] (cond-> (assoc (dissoc fact :inputs :unshared) :boot (:boot sys))
                                built? (assoc :inputs (:inputs r))
                                (and (:inputs r) (not built?)) (assoc :unshared (str "the binary was built from tree " (or (:binary r) "unknown")
                                                                                        ", the source is tree " (:tree (:inputs r))))))
-        tx (when (and files (not= digest (:digest held))) (source/tx-of @(:conn sys) files (boolean changed)))
-        tx (or (when (and files (not= digest (:digest held))) (unimportable @(:conn sys) files tx (:commit held))) tx)
-        fact (if (and digest (= digest (:digest held)))
-               (this-boot held)
-               (let [w (when (and tx (not (contract/error? tx))) @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (into tx (source/modes-tx @(:conn sys) (:modes r)))}}))]
-                 (this-boot (cond-> {:root root :files (if changed (+ (count (d/datoms @(:conn sys) :aevt :ns/file)) (count (d/datoms @(:conn sys) :aevt :schema/file))) (count files)) :forms (count (d/datoms @(:conn sys) :aevt :form/id)) :ms (profile/ms-since t0)}
-                              (:commit r) (assoc :commit (:commit r))
-                              (:tree r) (assoc :tree (:tree r) :dirs (vec dirs))
-                              (seq (:pins r)) (assoc :pins (:pins r))
-                              (and w (not (contract/error? w))) (assoc :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))
-                              (contract/error? r) (assoc :error (:seon.error/message r))
-                              (contract/error? tx) (assoc :error (:seon.error/message tx))
-                              (contract/error? w) (assoc :error (:seon.error/message w))))))]
+        {:keys [tx fact error]} (import-of @(:conn sys) held r {:root root :dirs dirs} t0)
+        w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))
+        fact (this-boot (cond (nil? fact) held
+                              (contract/error? w) (-> fact (dissoc :digest :retracted) (assoc :error (:seon.error/message w)))
+                              :else fact))]
     ;; a source the running image cannot analyze is root's defect to show, a :platform cause; the import
-    ;; changed nothing, so no digest is recorded and the next batch tries again
-    (when (contract/error? tx)
-      @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (platform-tx @(:conn sys) (assoc tx :seon.error/subject :seon.root/source) (System/currentTimeMillis))}}))
+    ;; changed nothing, so no digest is recorded and the next batch tries again (a failed read is the asked-tx's below)
+    (when (and error (:value r))
+      @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (platform-tx @(:conn sys) (assoc error :seon.error/subject :seon.root/source) (System/currentTimeMillis))}}))
     ;; a failed read is recorded here, with the fact, in one transaction (seon.error/asked-tx)
     (let [w @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (err/asked-tx @(:conn sys) r :seon.root/source [{:seon.root/id :root :seon.root/source fact}])}})]
       (if-not (contract/error? w)
@@ -1127,42 +1151,27 @@
       (conj (vec (wiki-tx db checkout (baseline))) {:seon.root/id :root :seon.root/wiki digest}))))
 
 (defn import-tree!
-  "Main's program on conn brought to the source tree {:root :dirs :follow}, only what it changed since root's
-  :seon.root/source fact, written with the fact in one transaction while this is the store's only process (a boot, a
-  seed); nothing when main holds its digest, and :error saying why when it can't import. t0: the caller's phase start,
-  the fact's :ms. Answers {:imported? :digest :error}. See docs/source.md#a-boot-imports-main-first."
-  {:malli/schema [:=> [:cat :seon.host/conn [:map [:root :string] [:dirs [:sequential :string]] [:follow {:optional true} :string]] :int] :map]}
-  [conn {:keys [root dirs follow]} t0]
+  "Main's program on conn brought to the source tree {:root :dirs :follow :branch} (branch, root's merges branch, brought
+  to what it read as import-source! brings it), only what it changed since root's :seon.root/source fact (import-of),
+  written with the fact in one transaction while this is the store's only process (a boot, a seed); nothing when main
+  holds its digest, and :error saying why when it can't import. t0: the caller's phase start, the fact's :ms. Answers
+  {:imported? :digest :error}. See docs/source.md#a-boot-imports-main-first."
+  {:malli/schema [:=> [:cat :seon.host/conn [:map [:root :string] [:dirs [:sequential :string]] [:follow {:optional true} :string] [:branch {:optional true} :any]] :int] :map]}
+  [conn {:keys [root dirs follow branch] :as source} t0]
   (let [held (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
-        r (fx/read-source {:req (cond-> {:root root :dirs dirs}
+        r (fx/read-source {:req (cond-> {:root root :dirs dirs :own-branch branch}
                                   follow (assoc :follow follow)
                                   ;; only what the tree changed since its last import: what main merged and the tree never held stays main's
                                   (and (:digest held) (:tree held)) (assoc :since (:tree held) :since-dirs (:dirs held [])))})
-        files (:value r)
-        digest (when files (source-digest r dirs))]
+        {:keys [digest tx fact error]} (import-of @conn held r source t0)]
     (cond
       ;; a failed read, or a tree that main is not behind (a gap of commits main holds, or a refused fast-forward)
       ;; the error without the read it may carry: a boot keeps this answer in its view
-      (and (contract/error? r) (not (and files (= 0 (:behind r))))) {:imported? false :error (select-keys r [:seon.error/type :seon.error/operation :seon.error/message])}
-      (= digest (:digest held)) {:imported? false :digest digest}
-      :else
-      (let [changed? (boolean (:paths r))
-            tx (source/tx-of @conn files changed?)
-            bad (if (contract/error? tx) tx (unimportable @conn files tx (:commit held)))]
-        (if bad
-          {:imported? false :error bad}
-          (let [tx (into (vec tx) (source/modes-tx @conn (:modes r)))
-                after (pdb/speculate-db @conn tx)
-                fact (cond-> {:root root :digest digest :dirs (vec dirs) :ms (lib/r2 (profile/ms-since t0))
-                              :files (if changed? (+ (count (d/datoms after :aevt :ns/file)) (count (d/datoms after :aevt :schema/file))) (count files))
-                              :forms (count (d/datoms after :aevt :form/id))
-                              :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx))}
-                       (:commit r) (assoc :commit (:commit r))
-                       ;; the tree it read: the next import reads only what differs from it
-                       (:tree r) (assoc :tree (:tree r))
-                       (seq (:pins r)) (assoc :pins (:pins r)))]
-            (d/transact conn {:tx-data (conj tx {:seon.root/id :root :seon.root/source fact})})
-            {:imported? true :digest digest}))))))
+      (and (contract/error? r) (not (and (:value r) (= 0 (:behind r))))) {:imported? false :error (select-keys r [:seon.error/type :seon.error/operation :seon.error/message])}
+      error {:imported? false :error error}
+      (nil? tx) {:imported? false :digest digest}
+      :else (do (d/transact conn {:tx-data (conj tx {:seon.root/id :root :seon.root/source fact})})
+                {:imported? true :digest digest}))))
 
 (defn seed-program!
   "Bring the program and the wiki on :db of the store at path (made when missing) up to the tree

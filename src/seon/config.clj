@@ -21,9 +21,8 @@
   loads with moves only at a rebuild and no file on disk can stop it starting. A process then holds
   the config of its own branch's db (`hold!`, docs/config.md#a-process-holds-its-branchs-config):
   every read takes that map, and a fork inherits it. A value resolving to nil (an unset `#env`) is
-  absent; the result must satisfy `:seon.config/config` closed at its top (`closed`: an unknown key or an
-  invalid value refuses with `:seon.config/refused`; every key is optional, the shipped file states each one,
-  and reading a key the config lacks is refused, never nil). Root
+  absent; the result must satisfy `:seon.config/config` as a config is read (`closed`: an unknown key, an
+  invalid value or a missing key a config may not lack refuses with `:seon.config/refused`). Root
   writes the resolved config as facts on main's root entity (`facts`), platform records a
   merge never carries, where agents, the dashboard and the context read it.
 
@@ -94,12 +93,20 @@
 (def ^:private registry
   (mr/composite-registry (m/default-schemas) (mr/simple-registry schema-forms)))
 
+(def ^:private may-be-absent
+  "The config keys a config may lack, absent meaning the provider's default or none (each one's description says which);
+  every other key the shipped file states is required as a config is read (`closed`). Each key's own schema carries this
+  once the config map is dissolved (seon.db/one-definition-of-each-entity, step 2). See docs/config.md#a-process-holds-its-branchs-config."
+  #{:seon.config.agent/wake-turns :seon.config.ai/reasoning-effort :seon.config.ai/script :seon.config.ai/temperature
+    :seon.config.ai/thinking :seon.config.root/profile :seon.config.source/gate-checkout :seon.config.source/root})
+
 (defn- closed
-  "The compiled config map s closed at its top, as a config is read: an unknown key refuses it. The schema itself is open,
-  as every entity schema is (root's entity holds the config and root's own facts); nested values keep their own shape.
-  See docs/config.md#a-process-holds-its-branchs-config."
+  "The compiled config map s as a config is read: closed at its top (an unknown key refuses it) and every key but those it
+  `may-be-absent` required (a missing one refuses it, at boot, never at its first read). The schema itself is open and its
+  keys optional, as every entity schema's are (root's entity holds the config beside its own facts, and a task holds single
+  keys as its overrides); nested values keep their own shape. See docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat :any] :any]}
-  [s] (mu/update-properties s assoc :closed true))
+  [s] (mu/required-keys (mu/update-properties s assoc :closed true) (remove may-be-absent (map first (m/entries s)))))
 
 (def config-schema "The compiled `:seon.config/config`, closed at its top (`closed`)." (closed (m/deref (m/schema :seon.config/config {:registry registry}))))
 

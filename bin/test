@@ -42,16 +42,18 @@ case ${1:-} in
   *) WHAT=tests OWN=1 OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; echo "test: run ${OUT:t}, logs in $OUT" ;;
 esac
 mkdir -p "$OUT"; rm -f $OUT/shard-*(N)
-# this run's shards (:seon.config.proofs/jobs): one, two only when 12 cores are free. A measure read once at the plan, deciding how many shards, never when
-if [[ -z ${SEON_PROOF_JOBS:-} ]]; then
+# this run's shards (:seon.config.proofs/jobs): one, two only when 12 cores are free. A measure read once at the plan, deciding how many shards, never when.
+# Given to the plan (its shards) and the check steps (as many at once): the roots a shard's tests boot and an agent's test children read
+# jobs as configured (the audit of 2026-11-09: exported to all, it also capped every agent's test children in the run at one)
+jobs=${SEON_PROOF_JOBS:-}
+if [[ -z $jobs ]]; then
   ncpu=$(sysctl -n hw.ncpu); load=$(sysctl -n vm.loadavg | awk '{print int($2)}')
   # one shard: a shard is a process of its own that loads every test namespace and boots a shared root per test
   # group, so a second one doubles the roots and memory for the same tests; it pays only on an idle machine, never
   # beside other sessions' runs (owner, 2026-11-08: "Why are we doing so much sharding?")
   free=$(( ncpu - load )); jobs=1; (( free >= 12 )) && jobs=2
-  export SEON_PROOF_JOBS=$jobs
 fi
-runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
+SEON_PROOF_JOBS=$jobs runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
 # a test or step that reaches a process of its own (a root, an agent, the binary) runs target/seon,
 # which its digest does not cover: that binary is built from this tree first (a no-op build costs
 # ~30-45 s). The plan names what it selected that reaches one (out/binary); nothing, no build
@@ -76,8 +78,8 @@ if [[ -s $OUT/process-store ]]; then
 fi
 st=0 P=()
 [[ -e $OUT/stopped ]] && { F=(); : > "$OUT/steps" }
-# told to stop (a timeout's TERM), its shards end with it, unheard: a shard left running reads a root the stop ended, and stores those reds, which
-# turn flaky beside the next run's greens at the same digests. A shard that dies stores nothing
+# told to stop (a timeout's TERM), its shards get TERM: each stores the greens of the tests that ended (its shutdown hook) and never a red, since a
+# test cut short reads a root the stop ended, and its red would turn flaky beside the next run's greens. A shard that dies with no hook stores nothing
 trap 'kill $P 2>/dev/null; exit 143' TERM INT HUP
 # each shard a process of its own; its tests' ms are in their cached verdicts (:ms, seon.fx/typical-ms)
 # (exec: the pid is the shard's, so a kill reaches it, not a shell that leaves it running)
@@ -88,7 +90,7 @@ print -r -- "$P" > "$OUT/shards.pid"; [[ -e $OUT/stopped && -n $P ]] && kill $P 
 # bin/check), so the run takes as long as the longer of the two, not their sum (docs/merging.md). Their
 # output is kept in out/check.log and printed after the shards'.
 C=
-if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then "$ROOT/bin/check" --steps "$OUT" > "$OUT/check.log" 2>&1 & C=$!; fi
+if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then SEON_PROOF_JOBS=$jobs "$ROOT/bin/check" --steps "$OUT" > "$OUT/check.log" 2>&1 & C=$!; fi
 print -r -- "$C" > "$OUT/check.pid"; [[ -n $C && -e $OUT/stopped ]] && kill $C 2>/dev/null
 # a stalled test is named, never ended: a running shard quiet since its last "started" line past
 # that test's bound (k times its own last run, the plan's out/stall-bounds; the floor and a test

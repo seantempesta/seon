@@ -660,7 +660,11 @@
  ;; source tree and its commit), the reply's eval calls and their cost in USD when priced
  :seon.judge/score [:map [:acted :boolean] [:right-var :boolean] [:right-test :boolean]
                     [:waste :int] [:uncompiled :int] [:green :boolean] [:version [:map [:root {:optional true} :string] [:commit {:optional true} :string]]]
-                    [:calls [:vector :string]] [:usd {:optional true} number?]
+                    [:calls [:vector :string]]
+                    ;; the provider's token counts, by the model call's own names (seon.turn/usage): a value of the score
+                    [:usage {:optional true} [:map [:seon.model-call/tokens {:optional true} :int] [:seon.model-call/cache-hit-tokens {:optional true} :int]
+                                              [:seon.model-call/cache-miss-tokens {:optional true} :int]]]
+                    [:usd {:optional true} number?]
                     ;; the scoring that made it (seon.judge/scorer): other scoring scores the calls again
                     [:scorer :string]]
  ;; a pass that stopped at its budget: what it spent, the bound, the tasks it left
@@ -668,8 +672,6 @@
  :seon.judge/judge-fact [:map {:seon.db/attributes true}
                          [:seon.judge/digest :seon.judge/digest] [:seon.judge/task {:optional true} :seon.judge/task]
                          [:seon.judge/score {:optional true} :seon.judge/score] [:seon.judge/stopped {:optional true} :seon.judge/stopped]]
- ;; a judge's record may hold a model call's token counts by their own names (:seon.model-call/tokens ...): defined once, by
- ;; :seon.model-call/fact, never listed here (an attribute is named by one entity schema)
  ;; ---- the program merge's facts (session D1's proto.merge.facts.edn) ----
  :seon.merge/key [:and {:seon.db/index true} :seon.db/plain]
  :seon.merge/base :seon.db/plain
