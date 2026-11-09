@@ -875,7 +875,7 @@
          st (flush-problems st o)
          st (record-agents st o before)
          ;; while an agent has an eval in flight, the stall check runs every half stall bound
-         st (if (and (or (seq (::busy st)) (seq (::dying st))) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
+         st (if (and (or (seq (::busy st)) (seq (::dying st))) (not (::stall-due st)) (some-> (:stall-ms st) pos?) (:back st))
               (let [back (:back st)]
                 (step/put-after! back (quot (:stall-ms st) 2) {:op :stall-check})
                 (assoc st ::stall-due true))
