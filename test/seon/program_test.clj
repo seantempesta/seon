@@ -1257,7 +1257,7 @@
         in {:env "e" :tree "t" :config {} :data-refs '{app.pt-sys/read-decl #{app.pt-procs/writer-proc}}}
         k 'app.pt-sys-test/boot-test]
     (is (not= ((ts/reach-digests db in) k) ((ts/reach-digests db' in) k)) "the proc changed: the test booting through the declaration moves")
-    (is (contains? (get (fx/declared-refs (str (seon.config/checkout) "/resources/seon/system.edn")) 'seon.system/read-decl) 'seon.writer/writer-proc)
+    (is (contains? (get (fx/declared-refs (slurp (str (seon.config/checkout) "/resources/seon/system.edn"))) 'seon.system/read-decl) 'seon.writer/writer-proc)
         "the shipped declaration's procs are the reader's data refs")))
 
 (deftest the-config-in-force-is-an-input

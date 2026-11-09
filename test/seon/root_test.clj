@@ -220,6 +220,10 @@
     (try
       (is (= (str runs "/tasks") (ask "(seon.config/value :seon.config.root/tasks-dir)")) "its task dir is under its runs, not the checkout's")
       (is (= "src/a.clj" (ask "((resolve 'seon.ref/line-citation) \"src/a.clj:50\")")) "the built root reads a path:line citation")
+      ;; a boot loads nothing of main's program (docs/source.md#a-boot-resumes-from-the-db), so the binary holds every
+      ;; namespace of src: my.test, which no namespace of the binary required, was loaded by the boot's load-all! before
+      (is (= [] (ask "(vec (for [f (file-seq (java.io.File. (str (seon.config/checkout) \"/src\"))) :let [p (.getPath f)] :when (.endsWith p \".clj\") :let [n (symbol (-> p (subs (count (str (seon.config/checkout) \"/src/\"))) (clojure.string/replace #\"\\.clj$\" \"\") (clojure.string/replace \"/\" \".\") (clojure.string/replace \"_\" \"-\")))] :when (not (find-ns n))] n))"))
+          "the binary holds every namespace of src")
       (is (false? (ask "(contains? (seon.task/tasks @(:conn sys)) \"demo/t\")")) "the boot resumed the seeded main and read no task file")
       ;; the read's outcome is root's :seon.root/tasks, the subject a refused read names; an unchanged good read writes nothing
       (is (= [{:ok true :files 1} true {:files 1} {:ok true :changed 0 :files 1}]

@@ -27,7 +27,7 @@
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
-            [seon.turn] [my.fx] [my.task] [my.turn] [my.render] [my.branch] [my.doc] [clojure.core.async.flow :as flow] [clojure.test]
+            [seon.turn] [my.fx] [my.task] [my.turn] [my.render] [my.branch] [my.doc] [my.test] [clojure.core.async.flow :as flow] [clojure.test]
             [taoensso.trove :as trove]))
 
 
@@ -1102,8 +1102,7 @@
   (seon.doc/load-tx; a removed page loads empty, so its sections go) and the task files (seon.task/load-tx of tasks-of; a
   removed file declares none, so its tasks are cancelled). A path of none of these (native code, deps.edn, system.edn, a
   gitlink) is a build input, which the binary's build takes. What a Claude session's landing evaluates on its branch
-  (bin/land; owner, 2026-11-09: \"We have to accommodate you and your agents who primarily write the updates in files, but
-  this is a temporary system\"). See docs/source.md#a-landing-enters-main-as-data."
+  (bin/land's bridge, a temporary one). See docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string]] :seon.db/tx-data]}
   [db changed modes]
   (let [under? (fn [p d] (if (= "." d) (not (str/includes? p "/")) (and (str/starts-with? p (str d "/")) (not (str/includes? (subs p (inc (count d))) "/")))))
