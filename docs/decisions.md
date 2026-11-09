@@ -42,6 +42,18 @@ The owner's rulings of 2026-11-09, on one system of agents, rendering from data,
 
 "I want regular audits on all worktrees before merging confirming that we are not building hand wired custom code everywhere"; "The code base should actually get smaller after we remove all the custom parts and focus on reusing and refining"; "Do not force the square peg through the round hole. If you find yourself needing heroics and writing a shitload of code we are doing the wrong thing and we need to fix the design. I want algorithmic estimates for all work we are doing and not to accept anything that's outside of a reasonable version of that". Stated in: AGENTS.md section 3 (audit every branch before it lands).
 
+### One pass over the pull renders the page and the model's context (owner, 2026-11-09)
+
+"maybe we render both the hiccup and the agents context as the processing of the pull? By the end of the hiccup render on the agent we have all the data identified and the hiccup formed. Rather than walking the hiccup we can just treat it as the hiccup on the page"; "Then we have the model context deterministic from the pull and we can send back the hiccup as a composable part that the user pull can integrate"; "The pull doesn't need to be in order the render functions for the data being processed can order them. We still have separate render functions for everything"; "Once we know what something is it's just a db query to find what its render function is". Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09, item 4.
+
+### What an entity is: recognized as the write check does, the best match winning (owner, 2026-11-09)
+
+"Redo this so we are looking up what something is the same way our tx processor looks up and validates data. That is hand rolled shit"; "I think if an entity is several things the best matching one should win. So a single attribute vs two matching vs more is more specific right?" Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09, item 4.
+
+### Render functions take what they read; the cache is never relied on (owner, 2026-11-09)
+
+"I want less magic though so update the my.render/render-ctx function needs to pass in args that likely pass in the pull and whatever else it needs? No magic functions"; "I think this works even without the cache? It's pretty fast right?"; "don't write data until you understand it". Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09, item 4.
+
 ### A private session takes only what main held when it branched (owner, 2026-11-09)
 
 "The private session only takes from main what is on main at the time it is branched." Stated in: task seon.merge/a-session-syncs-with-main-unless-private.
