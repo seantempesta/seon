@@ -1017,7 +1017,7 @@
   Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
   the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged also-red-on-main main-moved] steps :next}]
+  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged also-red-on-main main-moved]}]
   (let [state #(:status %)
         unwritten (filter #(= :undefined (state %)) proofs)
         red (filter #(#{:fail :error} (state %)) proofs)
@@ -1074,10 +1074,6 @@
         (for [{:keys [key ours theirs]} unmerged]
           [:div {:key key} [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
            [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
-     ;; the next step, from the task's data (seon.ctx.status/status :next): none blocks merging
-     (for [{:keys [step from]} steps]
-       (case step
-         :fold-message [:p {:key :fold-message} "A message from " from " came after your plan last changed. If it changes what's wanted, write that into the plan and its proofs; if it's a question or a remark, answer it."]))
      (cond
        (and green? (empty? blocks) (empty? unmerged))
        [:p {:key :merging} "Every proof passes and nothing blocks merging."]
