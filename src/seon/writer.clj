@@ -454,6 +454,9 @@
            ;; a :flush? write's batch is stored on main's committed value: what ran ahead after it in this step is stored first
            ;; (transact-batch! on a shown value would store the run-ahead beside it and leave the writer and Datahike apart)
            st (commit-batch (if (seq (:pend st)) (commit-ahead st o) st) o)
+           ;; what runs ahead is bounded: at the batch bound (:seon.config.root/writer-batch) it is stored in this step, never left
+           ;; to grow while the flusher's answer is late (a starved flusher would otherwise hold every write shown and unstored)
+           st (if (>= (count (:ahead st)) (cfg/value :seon.config.root/writer-batch)) (commit-ahead st o) st)
            ;; writes ran ahead: their store commit is this writer's next step, after this step's answers leave, asked through
            ;; the flusher, which answers {:op :commit} on the writer's in-port as it answers :flushed (the loop the two already
            ;; have: a proc's out-port on its own in-channel took that channel's name in Flow, and a closed :in then spun a stop)
