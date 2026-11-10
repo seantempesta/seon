@@ -61,13 +61,20 @@
   {:malli/schema [:=> [:cat :any [:maybe :map] :any :any] :nil]}
   [this watches old new] (doseq [[k f] watches] (f k this old new)) nil)
 
+(defmacro ^:private captured!
+  "derefed recorded as a source of the reaction in progress, inline: what a view's every read does, so a read costs no
+  contracted call of its own (a placed component reads ~30 fields, each read once two or three contracted calls). See
+  docs/render.md#reactive-renders."
+  [derefed]
+  `(when-some [r# *ratom-context*]
+     (-set! r# :captured (conj (or (-get r# :captured) []) ~derefed))))
+
 (defn- notify-deref-watcher!
   "Record derefed as a source of the reaction in progress: a reactive object, or [ref path kind]
   for a read through a view."
   {:malli/schema [:=> [:cat :any] :nil]}
   [derefed]
-  (when-some [r *ratom-context*]
-    (-set! r :captured (conj (or (-get r :captured) []) derefed)))
+  (captured! derefed)
   nil)
 
 (defn- deref-capture
@@ -127,10 +134,14 @@
 
 (declare view sorted-view)
 
+(defmacro ^:private view?*
+  "`view?`, inline where the ratom asks it of every value it walks (unwrap, untracked, realize). See docs/render.md#reactive-renders."
+  [x] `(let [x# ~x] (or (instance? seon.ratom.View x#) (instance? seon.ratom.SortedView x#))))
+
 (defn view?
   "Is x a tracking view?"
   {:malli/schema [:=> [:cat :any] :boolean]}
-  [x] (or (instance? seon.ratom.View x) (instance? seon.ratom.SortedView x)))
+  [x] (view?* x))
 
 (defn- wrap
   "Value v found at path p of source src: a view of it when it is a map (a :shallow read: its
@@ -159,22 +170,31 @@
   the page writer take."
   {:malli/schema [:=> [:cat :any] :any]}
   [x]
-  (if (view? x) (let [src (.-src x)] (notify-deref-watcher! [src (.-path x) :deep]) (.-m x)) x))
+  (if (view?* x) (let [src (.-src x)] (notify-deref-watcher! [src (.-path x) :deep]) (.-m x)) x))
 
 (defn untracked
   "View x's value with no read recorded (any other x as it is): for a reader of what is written once, an entity's id, which a read per member would make a list's reading cost a read per member. See docs/render.md#reactive-renders."
   {:malli/schema [:=> [:cat :any] :any]}
-  [x] (if (view? x) (.-m x) x))
+  [x] (if (view?* x) (.-m x) x))
 
 (defn realize
   "x with every view in it (its own, its map values', its vector's members) its real value,
   each read whole."
   {:malli/schema [:=> [:cat :any] :any]}
   [x]
-  (cond (view? x) (unwrap x)
-        (map? x) (if (some view? (vals x)) (reduce-kv (fn [m k v] (assoc m k (realize v))) x x) x)
-        (vector? x) (if (some view? x) (mapv realize x) x)
+  (cond (view?* x) (unwrap x)
+        (map? x) (if (some #(view?* %) (vals x)) (reduce-kv (fn [m k v] (assoc m k (realize v))) x x) x)
+        (vector? x) (if (some #(view?* %) x) (mapv realize x) x)
         :else x))
+
+(defmacro ^:private wrapped
+  "`wrap`, inline in a view's lookups: value v at path p of src, a view of it when it is a map, else v, read as kind. See
+  docs/render.md#reactive-renders."
+  [src v p kind]
+  `(let [v# ~v p# ~p]
+     (if (map? v#)
+       (do (captured! [~src p# :shallow]) (if (sorted? v#) (sorted-view ~src v# p#) (view ~src v# p#)))
+       (do (captured! [~src p# ~kind]) v#))))
 
 (defmacro ^:private defview
   "A tracking view type T: a map over m, the value at path of source src, recording each read.
@@ -182,34 +202,34 @@
   [T extra]
   `(deftype ~T [~'src ~'m ~'path]
      clojure.lang.ILookup
-     (~'valAt [~'_ ~'k] (wrap ~'src (get ~'m ~'k) (conj ~'path ~'k) :deep))
+     (~'valAt [~'_ ~'k] (wrapped ~'src (get ~'m ~'k) (conj ~'path ~'k) :deep))
      (~'valAt [~'_ ~'k ~'nf] (if (contains? ~'m ~'k)
-                               (wrap ~'src (get ~'m ~'k) (conj ~'path ~'k) :deep)
-                               (do (notify-deref-watcher! [~'src (conj ~'path ~'k) :shallow]) ~'nf)))
+                               (wrapped ~'src (get ~'m ~'k) (conj ~'path ~'k) :deep)
+                               (do (captured! [~'src (conj ~'path ~'k) :shallow]) ~'nf)))
      clojure.lang.IPersistentMap
      (~'assoc [~'this ~'k ~'v] (assoc (unwrap ~'this) ~'k ~'v))
      (~'assocEx [~'this ~'k ~'v] (assoc (unwrap ~'this) ~'k ~'v))
      (~'without [~'this ~'k] (dissoc (unwrap ~'this) ~'k))
      clojure.lang.Associative
-     (~'containsKey [~'_ ~'k] (notify-deref-watcher! [~'src (conj ~'path ~'k) :shallow]) (contains? ~'m ~'k))
+     (~'containsKey [~'_ ~'k] (captured! [~'src (conj ~'path ~'k) :shallow]) (contains? ~'m ~'k))
      (~'entryAt [~'this ~'k] (when (contains? ~'m ~'k) (clojure.lang.MapEntry. ~'k (.valAt ~'this ~'k))))
      clojure.lang.IPersistentCollection
-     (~'count [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (count ~'m))
+     (~'count [~'_] (captured! [~'src ~'path :keys]) (count ~'m))
      (~'cons [~'this ~'x] (conj (unwrap ~'this) ~'x))
      (~'empty [~'_] (empty ~'m))
      (~'equiv [~'this ~'o] (= (unwrap ~'this) (if (view? ~'o) (unwrap ~'o) ~'o)))
      clojure.lang.Seqable
-     (~'seq [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (seq (entries ~'src ~'m ~'path (seq ~'m))))
+     (~'seq [~'_] (captured! [~'src ~'path :keys]) (seq (entries ~'src ~'m ~'path (seq ~'m))))
      clojure.lang.Counted
      clojure.lang.MapEquivalence
      ;; what a persistent map's = asks of the other side (APersistentMap.equiv), so (= m view)
      ;; holds as (= view m) does
      java.util.Map
-     (~'size [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (count ~'m))
-     (~'isEmpty [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (empty? ~'m))
+     (~'size [~'_] (captured! [~'src ~'path :keys]) (count ~'m))
+     (~'isEmpty [~'_] (captured! [~'src ~'path :keys]) (empty? ~'m))
      (~'get [~'this ~'k] (.valAt ~'this ~'k))
      (~'entrySet [~'this] (set (seq ~'this)))
-     (~'keySet [~'_] (notify-deref-watcher! [~'src ~'path :keys]) (set (keys ~'m)))
+     (~'keySet [~'_] (captured! [~'src ~'path :keys]) (set (keys ~'m)))
      (~'values [~'this] (vals ~'this))
      clojure.lang.IFn
      (~'invoke [~'this ~'k] (.valAt ~'this ~'k))
@@ -225,12 +245,12 @@
 (defview View [])
 (defview SortedView
   [clojure.lang.Reversible
-   (rseq [_] (notify-deref-watcher! [src path :keys]) (seq (entries src m path (rseq m))))
+   (rseq [_] (captured! [src path :keys]) (seq (entries src m path (rseq m))))
    clojure.lang.Sorted
    (comparator [_] (.comparator ^clojure.lang.Sorted m))
    (entryKey [_ e] (key e))
-   (seq [_ asc] (notify-deref-watcher! [src path :keys]) (seq (entries src m path (.seq ^clojure.lang.Sorted m asc))))
-   (seqFrom [_ k asc] (notify-deref-watcher! [src path :keys]) (seq (entries src m path (.seqFrom ^clojure.lang.Sorted m k asc))))])
+   (seq [_ asc] (captured! [src path :keys]) (seq (entries src m path (.seq ^clojure.lang.Sorted m asc))))
+   (seqFrom [_ k asc] (captured! [src path :keys]) (seq (entries src m path (.seqFrom ^clojure.lang.Sorted m k asc))))])
 
 (defn view
   "Map m, the value at path of source src ({:ref r :changes f}: the reference read, and the

@@ -384,6 +384,16 @@
          (and n (pos? n)) (assoc :reply n))]
       [])))
 
+(defn- opening-page
+  "The page of the turn now opening, whose call is not written yet (a read made as a model's request would be:
+  seon.turn/context-block): the call that shows agent a's page from last-b, the last call's basis, to here, the request's own
+  point, after what that turn took; none when here is that basis, or when the pull holds calls but no basis (a smaller pattern
+  shows no page). newest: the last call's number. See docs/render.md#the-render-is-an-eval."
+  {:malli/schema [:=> [:cat :int [:maybe :map] [:maybe :map] :boolean [:maybe :int]] [:maybe [:vector :any]]]}
+  [a here last-b no-calls? newest]
+  (when (and here (not= (:t here) (:t last-b)) (or no-calls? last-b))
+    [[#'page-diff-msgs {} a last-b here (inc (or newest 0))]]))
+
 (defn- turn-entities
   "Agent record c's turns as the entities the model reads, ordered from its pull: its model calls by number, each turn's
   messages as it read them (seon.ctx/placed-messages: those delivered by its basis, so one delivered mid-turn reads at the next
@@ -424,12 +434,7 @@
            x))
           ;; those delivered after the last turn's edge, which the turn now opening takes (:pending): never lost before that turn's call exists
           (concat (keep (fn [[m _]] (get msgs m)) (get placed :pending))
-                  ;; the turn now opening, whose call is not written yet (a read made as a model's request would be: seon.turn/context-block):
-                  ;; its page, from the last call's basis to the request's own point, after what it took, as the model's turn reads it
-                  (let [last-b (last (keep basis-of cs))]
-                    ;; a pull that leaves the bases out (a smaller pattern) shows no page: only one with no call yet, or one holding bases
-                    (when (and here (not= (:t here) (:t last-b)) (or (empty? cs) last-b))
-                      [[#'page-diff-msgs {} (:db/id c) last-b here (inc (or newest 0))]]))))))
+                  (opening-page (:db/id c) here (last (keep basis-of cs)) (empty? cs) newest)))))
 
 (defn example-session-msgs
   "An example session's agent (its root view in a render-pull of it) as the model reads it, a model output's call: the message
