@@ -172,6 +172,16 @@
     (str "needs name no task: " (str/join ", " missing))
     (some->> (cycle-in graph) (str "needs form a cycle through "))))
 
+(defn plan-search-tx
+  "The search a task holds of its plan's words, of task t (its tempid or a lookup ref) with plan text plan, or nil for a blank
+  plan: the ranked matches over code and wiki its page draws on the branch's db (seon.render.ui/searched), the place to start
+  before any citation. Every task gets it the one way, whether it was declared in a file or asked for (`create-tx`). The query
+  is the plan as written, copied once: the agent owns it after. See docs/tasks.md#a-request-is-one-transaction."
+  {:malli/schema [:=> [:cat :any [:maybe :string]] [:maybe :map]]}
+  [t plan]
+  (when-not (str/blank? plan)
+    {:seon.search/id (str (if (vector? t) (second t) t) "/request") :seon.search/of t :seon.search/query plan}))
+
 (defn create-tx
   "The transaction writing decls (task declarations) as held tasks: each gets its id and
   its branch; needs refer by id, to a task of this write or one already on db. A cycle
@@ -196,7 +206,9 @@
             ;; what each text cites, read on the db the tasks make (a task this write declares is a task it may
             ;; cite), its cite entities naming the task by its tempid
             db' (:db-after (pdb/speculate db tasks))]
-        (into tasks (mapcat (fn [id decl] (cites-tx db' id id (text-citations db' decl))) ids decls))))))
+        (-> tasks
+            (into (mapcat (fn [id decl] (cites-tx db' id id (text-citations db' decl))) ids decls))
+            (into (keep (fn [[id decl]] (plan-search-tx id (:seon.task/plan decl)))) (map vector ids decls)))))))
 
 (defn execution-tx
   "Set the desired execution of tasks ids (:running is root's release, run!)."
@@ -782,6 +794,11 @@
         (vec (concat
                created
                (for [d new] (declared (task-id (:seon.task/ns d) (:seon.task/name d)) d))
+               ;; a task already held whose plan has no search (made before every task got one: plan-search-tx), one seek each
+               (for [[id d] decls :let [e (pdb/eid db :seon.task/id id)]
+                     :when (and e (empty? (d/datoms db :avet :seon.search/of e)))
+                     :let [s (plan-search-tx [:seon.task/id id] (:seon.task/plan d))] :when s]
+                 s)
                (mapcat (fn [[id d]]
                          ;; what it states now: members, config flattened, references derived, branch
                          ;; defaulted, needs as entity ids (a task new in this write by its tempid, its id)
