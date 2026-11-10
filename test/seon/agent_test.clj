@@ -2208,6 +2208,7 @@
                            (str "(reset! user/gate-reply (fn [tests] {:value {:results (zipmap tests (repeat :error)) :digests (zipmap tests (repeat \"gate\")) :log " (pr-str log) "}}))")
                            prove])
                   {:proofs #{t}})]
+    (.delete (java.io.File. ^String log))
     (is (= [:error :seon.fx/io-error] (:value refused)) (pr-str refused))
     (is (= [:verdict {t :error}] (:value unreached)) (pr-str unreached))))
 
