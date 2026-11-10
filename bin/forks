@@ -52,11 +52,15 @@ for unit in ${(f)"$(for u in $units; do print "${ms[$u]:-999999999} $u"; done | 
   where[$unit]=$best
 done
 run-units() { local d=$1; shift; mkdir -p "$d"; (cd "$ROOT" && TMPDIR=$d/ nice -n 15 target/jolt/jolt -A:dhtest run test/forks/run.jolt "$@" < /dev/null > "$d.log" 2>&1) }
-P=()
+P=() typeset -A PJ GST
 for (( j = 1; j <= J; j++ )); do
-  [[ -n ${group[$j]} ]] && { run-units "$TMP/g$j" ${=group[$j]} & P+=($!) }
+  [[ -n ${group[$j]} ]] && { run-units "$TMP/g$j" ${=group[$j]} & P+=($!); PJ[$!]=$j }
 done
-for p in $P; do wait $p; done
+for p in $P; do wait $p; GST[${PJ[$p]}]=$?; done
+# a process that ended before all its units answered: its log is the only evidence of a crash or a kill, so it is kept
+# outside the run's temp directory (target/forks-died/), with its exit status, and its path printed
+kept() { local j=$1 d=$ROOT/target/forks-died; mkdir -p "$d"; local f="$d/${TMP:t}-g$j.log"
+  [[ -e $f ]] || { { echo "exit ${GST[$j]}"; cat "$TMP/g$j.log" } > "$f"; echo "forks: process $j ended early (exit ${GST[$j]}); its log: $f" }; }
 got-of() { grep -F -- "FORK $1 " $2 | tail -1 | sed 's/^FORK [^ ]* //' }
 bad=0
 for (( i = 1; i <= n; i++ )); do
@@ -67,8 +71,8 @@ for (( i = 1; i <= n; i++ )); do
     run-units "$TMP/alone-$i" $unit; alone=$(got-of $unit "$TMP/alone-$i.log")
     if [[ -n $got && $alone == "${want[$unit]}" ]]; then
       bad=$((bad + 1)); echo "FORK $unit FAILED: $got beside others, $alone alone (baseline ${want[$unit]}): a leak between units"
-    elif [[ $alone == "${want[$unit]}" ]]; then echo "FORK $unit $alone (alone: its process ended before it answered)"
-    else bad=$((bad + 1)); echo "FORK $unit FAILED: ${alone:-no counts} (baseline ${want[$unit]})"; tail -20 "$TMP/alone-$i.log"; fi
+    elif [[ $alone == "${want[$unit]}" ]]; then [[ -z $got ]] && kept $j; echo "FORK $unit $alone (alone: its process ended before it answered)"
+    else [[ -z $got ]] && kept $j; bad=$((bad + 1)); echo "FORK $unit FAILED: ${alone:-no counts} (baseline ${want[$unit]})"; tail -20 "$TMP/alone-$i.log"; fi
   else echo "FORK $unit $got"; fi
 done
 # the units' own walls kept for the next run's deal (only a full run's: a named run's are a few), and the slowest shown
