@@ -2646,12 +2646,16 @@
                              [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                               (str "(let [db (seon.agent/db)"
                                    "      n (fn [db] (count (datahike.api/q '[:find ?e :where [?e :seon.eval/id]] db)))"
-                                   "      back (fn [db] (when-let [p (first (datahike.api/parent-commit-ids db))] (datahike.api/commit-as-db db p)))]"
-                                   "  (vec (distinct (map n (take 30 (take-while some? (iterate back db)))))))")])
+                                   "      evs (fn [db] (set (datahike.api/q '[:find ?i ?o ?c :where [?e :seon.eval/id ?i] [(get-else $ ?e :seon.eval/origin :none) ?o] [(get-else $ ?e :seon.eval/code \"\") ?c]] db)))"
+                                   "      back (fn [db] (when-let [p (first (datahike.api/parent-commit-ids db))] (datahike.api/commit-as-db db p)))"
+                                   "      dbs (vec (take 30 (take-while some? (iterate back db))))]"
+                                   "  {:counts (vec (distinct (map n dbs)))"
+                                   "   :over (vec (for [[a b] (map vector dbs (rest dbs)) :let [added (clojure.set/difference (evs a) (evs b))] :when (< 1 (count added))]"
+                                   "                {:t (:max-tx a) :parent-t (:max-tx b) :added (mapv (fn [[i o c]] [i o (subs c 0 (min 60 (count c)))]) added)}))})")])
                              {:config {:seon.config.ai/script 'seon.fixtures/same-call}})
-        ns (:value counts)]
-    (is (< 3 (count ns)) (pr-str ns))
-    (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns)))))
+        ns (:counts (:value counts))]
+    (is (< 3 (count ns)) (pr-str counts))
+    (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns) " commits that added more: " (pr-str (:over (:value counts)))))))
 
 (deftest a-model-turn-records-its-text-and-the-message-it-took
   ;; the owner's message is a fact root writes on

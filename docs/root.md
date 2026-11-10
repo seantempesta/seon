@@ -9,7 +9,7 @@ Root's procs are declared as data in `resources/seon/system.edn` and started all
 | Proc | Step-fn | What it owns |
 |---|---|---|
 | `:api` | ```seon.root/api-proc``` | where requests come in: callers' reply promises, the agents' procs, root's view; it routes every request and answer as data |
-| `:writer` | `seon.writer/writer-proc` | the only transact, branch and merge caller, with group commit; root's write answered at its apply and stored in its next step ([storage](storage.md#durability-is-continuous-group-commit)) |
+| `:writer` | `seon.writer/writer-proc` | the only transact, branch and merge caller, with group commit ([storage](storage.md)) |
 | `:flusher` | `seon.writer/flusher-proc` | the store's sync ([storage](storage.md)) |
 | `:fork-server` | `seon.fork-server/fork-server-proc` | the fork server's command pipe, its events, its standby ([processes](processes.md#the-fork-server)) |
 | `:reconciler` | `seon.reconcile/reconciler-proc` | main's commits, turned into actions ([judging](#runs-and-judging)) |

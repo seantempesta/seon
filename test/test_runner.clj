@@ -137,17 +137,23 @@
   seon.proofs/a-failed-import-leaves-no-branch: one selected 0 tests and said OK). Every text is
   read from the tree's git objects (tree-files). Two runs on one new tree both import it and the first to
   finish keeps the branch (keep-tree!). A store past
-  :seon.config.proofs/program-store-max-bytes on disk (an LMDB file never shrinks) is removed
-  before it is opened, and starts again from this tree. The branch's connection stays open for
+  :seon.config.proofs/program-store-max-bytes on disk (an LMDB file never shrinks; max-bytes, else that key) is removed
+  when a tree must be imported into it, and starts again from that tree; a tree it keeps is read whatever its size. The branch's connection stays open for
   the process (the db value reads the store); the store's main connection is released. tree: the
   checkout's tree-id when the caller holds it (the plan computes it once)."
   ([root store] (program-db root store (fx/tree-id root)))
-  ([root store tree]
-  (when (> (.length (io/file store "data.mdb")) (config/value :seon.config.proofs/program-store-max-bytes))
-    (fx/remove-tree! store))
+  ([root store tree] (program-db root store tree (config/value :seon.config.proofs/program-store-max-bytes)))
+  ([root store tree max-bytes]
   (let [b (tree-branch tree)
-        {:keys [conn cfg]} (pdb/open! :lmdb store 0 :db)
-        branches (d/branches conn)]
+        open #(pdb/open! :lmdb store 0 :db)
+        ;; the bound is the write's: a tree the store keeps is read whatever the store's size (a shard read the plan's tree
+        ;; from a store the plan's import had taken past it, removed it, and its first program reader imported the tree
+        ;; again inside its own tick budget); only a tree to import starts a store past it again
+        [{:keys [conn cfg]} branches] (let [o (open) bs (d/branches (:conn o))]
+                                        (if (or (contains? (set bs) b) (<= (.length (io/file store "data.mdb")) max-bytes))
+                                          [o bs]
+                                          (do (d/release (:conn o)) (fx/remove-tree! store)
+                                              (let [o (open)] [o (d/branches (:conn o))]))))]
     (when-not (contains? (set branches) b)
       (keep-tree! conn cfg root tree b branches))
     (d/release conn)

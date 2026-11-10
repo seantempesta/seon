@@ -119,17 +119,16 @@
 
 (defn write-back!
   "Sync main's changed files to disk: the files the merged tasks ids (none: every merged task whose files no commit holds) wait on, read from main as
-  it is now and committed on the merges branch in one :git effect, its answer recorded by seon.reconcile/commit-tx (each task's sha, clearing
-  the wait, or the error again). A task with no such files is answered :seon.root/nothing-lost under
+  it is now and committed on the merges branch in one :git effect. What the git effect answers is recorded by seon.reconcile/commit-tx: the sha on each task, which
+  clears the wait (and holds a new one for any file main has no text for), or the error again. A task with no such files is answered :seon.root/nothing-lost under
   :not-lost and left out; no source root, or no text on main for any of the files, is answered at once and recorded nowhere (the tasks keep their
-  error). Main is synced first. Answers {:written ids :paths paths :sha}, the git effect's error, or the precondition's, with :not-lost when any. See docs/source.md#commit-the-merges-branch."
+  error). Answers {:written ids :paths paths :sha}, the git effect's error, or the precondition's, with :not-lost when any. See docs/source.md#commit-the-merges-branch."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]]}
   ([sys] (write-back! sys (vec (for [e (d/q '[:find [?e ...] :where [?e :seon.task/error]] @(:conn sys))
                                      :let [t (d/pull @(:conn sys) [:seon.task/id :seon.task/outcome :seon.task/error] e)]
                                      :when (reconcile/lost-write-back t)]
                                  (:seon.task/id t)))))
   ([sys ids]
-  @(root/store-clean! sys) ; git follows: main stored and synced first
   (let [db @(:conn sys)
         tasks (into {} (for [id ids] [id (d/pull db [:seon.task/outcome :seon.task/error] [:seon.task/id id])]))
         lost (filterv #(some? (reconcile/lost-write-back (tasks %))) ids)
@@ -183,8 +182,6 @@
   effect's error, or :seon.root/no-source-root. See docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
-  ;; git is an outside effect: what ran ahead on main is stored and synced first (docs/storage.md#durability-is-continuous-group-commit)
-  @(root/store-clean! sys)
   (let [{:keys [tasks paths req not-unsynced]} (sync-req @(:conn sys) ids (config/value :seon.config.root/tasks-dir))
         root (config/value :seon.config.source/root)
         r (cond (empty? tasks) {:value {:sha nil}}
@@ -460,10 +457,7 @@
     (loop [[id & more] ids rows [] spent 0.0]
         (if (nil? id)
           {:rows rows :usd spent}
-          ;; each request is built on a stored commit of main (judge/request names it): what ran ahead, this loop's own writes
-          ;; included, is stored first
-          (let [_ @(root/store-clean! sys)
-                db @(:conn sys)
+          (let [db @(:conn sys)
                 t (task/task db id)
                 req (judge/request db t)
                 dg (judge/digest req)

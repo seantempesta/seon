@@ -201,6 +201,7 @@
   [:seon.config.web/feed-encoding {:optional true} :seon.config.web/feed-encoding]
   [:seon.config.web/feed-deflate-level {:optional true} :seon.config.web/feed-deflate-level]
   [:seon.config.contract/instrument {:optional true} :seon.config.contract/instrument]
+  [:seon.config.contract/private-checked? {:optional true} :seon.config.contract/private-checked?]
   [:seon.config.native/probe-lib {:optional true} :seon.config.native/probe-lib]
   [:seon.config.native/sqlite-lib {:optional true} :seon.config.native/sqlite-lib]]
 
