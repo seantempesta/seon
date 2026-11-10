@@ -540,5 +540,8 @@
    ;; measured on the same input right after (seon.cost-test/measure-unit), so the row is the extra
    ;; attribute alone: 10,377 B and 2,847 ticks at 1k and 10k in two processes, the same each run
    ;; (the two-db difference read 9,946 B and 2,577 ticks)
-   :db/pull {:ticks 5475.52 :ns 15483.7 :bytes 23833.98 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
-   :db/pull-attr {:ticks 2596.5 :ns 8873.6 :bytes 7488.0 :what "each attribute of a d/pull beyond its first (per attribute)"}})
+   ;; each row now measured in a process that ran nothing before it, a warm call (seon.check/units, seon.cost-test/fresh-rows):
+   ;; in a shard the pull rows moved with what the shard ran before (pull-attr 1870 to 2774 ticks, 7488 and 8560 B), and the
+   ;; old rows held the cold first call; re-measured that way the two pulls read 24% fewer ticks, every other row within 1.25x
+   :db/pull {:ticks 4150.87 :ns 12041.7 :bytes 19575.47 :what "d/pull of one attribute of an entity, by entity id (per pull)"}
+   :db/pull-attr {:ticks 1975.93 :ns 5387.5 :bytes 6768.0 :what "each attribute of a d/pull beyond its first (per attribute)"}})

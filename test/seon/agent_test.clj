@@ -2654,8 +2654,8 @@
         ;; the shared root's main holds every earlier test's messages: this agent's are the ones to its id
         [[mid from to body] :as facts] (filterv #(= (name (:agent @names)) (nth % 2)) (:value on-main))]
     (is (= 1 (:model-calls end)) (pr-str end))
-    (is (= [[(System/getProperty "user.name") (name (:agent @names)) "use demo/g"]] (mapv #(subvec % 1) facts)) "one entity on main: from the user, to the agent")
-    (is (= [[mid (System/getProperty "user.name") "use demo/g" agent-key]] on-branch) "the turn wrote the entity root wrote, by its id, with the agent's ref")
+    (is (= [[(seon.config/value :seon.config.root/user-name) (name (:agent @names)) "use demo/g"]] (mapv #(subvec % 1) facts)) "one entity on main: from the user, to the agent")
+    (is (= [[mid (seon.config/value :seon.config.root/user-name) "use demo/g" agent-key]] on-branch) "the turn wrote the entity root wrote, by its id, with the agent's ref")
     (is (= on-branch committed) "and it is in the commit the turn read")
     (is (not-any? #{:observed :taken} basis-keys) "the basis names no message: the fact is the record")
     (is (contains? basis-keys :t) "it holds its t: a commit a sweep took is drawn as of it (docs/storage.md#collection)")

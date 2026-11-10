@@ -1631,7 +1631,7 @@
   [_ c]
   [:div {:id "p-task"}
    ;; root's sessions, when this record's pull holds root (root's session's pattern does: docs/users.md#roots-session)
-   (when (:root c) [#'sessions {:at [:root]}])
+   (when (:seon.agent/root c) [#'sessions {:at [:seon.agent/root]}])
    (when (:seon.agent/task c)
      (list [#'task {:at [:seon.agent/task]}] [#'status {:at [:seon.agent/task :proved]}] [#'citations {:at [:seon.agent/task :seon.cite/_of]}]
            (seq (cite-parts c))
@@ -1743,11 +1743,17 @@
                        :else [status-stands status])
         [text tone] (get from k [(kname k) :quiet])
         turns (when (= "stopped at its cap" text) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a)))
+        ;; what the task waits on, as a fact about it beside its word (Point's ruling within the owner's 2026-11-08 plain words,
+        ;; 2026-11-10): no instruction to the person
+        waits (cond (= k :parked) "waits for a message"
+                    (= k :told) "ended, said how"
+                    (and (= from task-stands) (= k :running) (= :idle status)) "between turns")
         waiting? (or (= :waiting end) (#{:parked :told} o))
         reason (when-not waiting? (some #(when-not (str/blank? %) %) [(:seon.task/reason t) (:reason (:seon.task/failure t)) (when end (:seon.agent/reason a))]))]
     (cond-> {:state (keyword (cond (= from task-stands) "task" (= from end-stands) "end" :else "status") (name (or k :none)))
              :text text :tone tone :lit? (= :live tone)}
       turns (assoc :detail (str turns (if (= 1 turns) " turn" " turns")))
+      waits (assoc :detail waits)
       reason (assoc :reason reason))))
 
 (defn agent
@@ -1837,7 +1843,9 @@
 (def ^:private session-attrs
   "What an entry of the agents list reads of an agent on main: its identity, its process's status, its branch and turns, and its task."
   [:seon.agent/key :seon.agent/started-ms :seon.agent/status :seon.agent/branch :seon.agent/max-turns
-   {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure :seon.task/plan {:seon.task/started-by [:seon.user/name]}]}])
+   {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure :seon.task/plan {:seon.task/started-by [:seon.user/name]}]}
+   ;; the agents doing the tasks it started (a request's work agents), shown under its tile
+   {:seon.task/_started-by [{:seon.task/agent [:seon.agent/key]}]}])
 
 (defn session-address
   "The name of an agent's page: its key (:seon.agent/key, its id's name), the one name of a session that survives a root's restart,
@@ -1846,7 +1854,7 @@
   [a] (:seon.agent/key a))
 
 (defn sessions
-  "Root's sessions as its session reads them (a component over the db, drawn when its record holds root, :root, as root's
+  "Root's sessions as its session reads them (a component over the db, drawn when its record holds root, :seon.agent/root, as root's
   session's pattern does): every session on main with a task, as of the main its last turn heard (:seon.agent/main-commit), newest first, as root's own work list reads them (`work-list`), each
   by its address, what it works on and how it stands, so root's session knows what is already being done before it starts more;
   itself left out. The newest :seon.config.ctx/window of them; the heading says once how to read the rest, with no count, which
@@ -1870,8 +1878,8 @@
 
 (defn agent-side
   "A session of main in the agents list (a component over the db, its agent's entity id: every agent on main, of any boot, a
-  process or none): lit while it works, its id, how its work stands (standing) and what it works on (its task in words, else its
-  branch, cut to the pill's width), the whole pill one link to its page by its stable address (session-address), the whole name in its title. See docs/render.md#a-sessions-address-and-the-agents-list."
+  process or none): lit while it works, what it works on (its task in words, else its branch; else its id), how its work stands
+  (standing), the whole pill one link to its page by its stable address (session-address), the whole name in its title. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
   [{db :seon.db/db} eid]
   (let [a (d/pull db session-attrs eid)
@@ -1883,9 +1891,9 @@
               :title (str/join " · " (remove nil? [id (:text stands) (:detail stands) what (:seon.task/id t)]))}
           [:span {:class "flex items-baseline gap-2"}
            [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
-           [:span {:class "font-semibold text-text-100"} (kname id)]
-           (when (:seon.agent/status a) [:span {:class (str "truncate text-2xs " (tone-class (:tone stands)))} (:text stands)])]
-          (when what [:span {:class "truncate text-2xs text-text-400"} what])]]))
+           ;; named by what it works on (its task in words), its key in the title: a person tells agents apart by their work
+           [:span {:class "min-w-0 truncate font-semibold text-text-100"} (or what (kname id))]
+           (when (:seon.agent/status a) [:span {:class (str "shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)])]]]))
 
 (defn- session-order
   "How a boot's sessions sort in the list: by when they started (oldest first)."
@@ -2018,7 +2026,7 @@
   what it works on in words and how it stands (standing), then what it last told whoever started it, a few lines of it (the
   task's reason, which root's message to them carries: seon.reconcile/tell-tx), so a person can tell which to open. See
   docs/users.md#whats-on-screen."
-  {:seon.render/style ".session-card > a { display: flex; flex-direction: column; gap: 0.5rem; height: 100%; min-height: 12rem; border: 1px solid var(--color-base-800); border-radius: 0.5rem; background: var(--color-base-900); padding: 0.75rem 0.875rem; color: inherit; text-decoration: none; } .session-card > a:hover { border-color: var(--color-base-600); } .session-card .said { max-height: 16rem; overflow: hidden; font-size: 0.875rem; line-height: 1.375rem; color: var(--color-text-300); -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); } .session-card .said p { margin: 0 0 0.375rem; } .session-card .said .asked { color: var(--color-text-400); border-left: 2px solid var(--color-base-700); padding-left: 0.5rem; }"
+  {:seon.render/style ".session-card .started { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.5rem 0 0 1rem; } .session-card .started .session-card > a { min-height: 0; } .session-card > a { display: flex; flex-direction: column; gap: 0.5rem; height: 100%; min-height: 12rem; border: 1px solid var(--color-base-800); border-radius: 0.5rem; background: var(--color-base-900); padding: 0.75rem 0.875rem; color: inherit; text-decoration: none; } .session-card > a:hover { border-color: var(--color-base-600); } .session-card .said { max-height: 16rem; overflow: hidden; font-size: 0.875rem; line-height: 1.375rem; color: var(--color-text-300); -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); } .session-card .said p { margin: 0 0 0.375rem; } .session-card .said .asked { color: var(--color-text-400); border-left: 2px solid var(--color-base-700); padding-left: 0.5rem; }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
   [{db :seon.db/db} k]
   (let [a (d/pull db session-attrs [:seon.agent/key k])
@@ -2038,7 +2046,10 @@
       ;; the person's newest message, then the agent's answer to it: what was asked and what came of it is the point
       [:div {:class "said"}
        (when asked [:p {:class "asked"} [#'markdown asked {:inline? true}]])
-       (when reply [#'markdown reply {:inline? true}])]]]))
+       (when reply [#'markdown reply {:inline? true}])]]
+     ;; the agents doing what it started, each its own tile under it, so a request and its work read as one tree
+     (when-let [ks (seq (distinct (keep #(get-in % [:seon.task/agent :seon.agent/key]) (:seon.task/_started-by a))))]
+       (into [:div {:class "started"}] (for [k ks] [#'session-card {} k])))]))
 
 (defn- sessions-by-standing
   "Sessions ks (agent keys, newest first) as tiles grouped by how each stands, in its state's plain word: parked (a message wakes it),

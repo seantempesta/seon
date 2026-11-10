@@ -433,14 +433,14 @@
 (defn git-commit
   "Commit files ({relative path text}) on branch of the repository at dir, with message,
   through git's plumbing: blobs, a tree from the branch's own with the files replaced, a
-  commit whose parent is the branch head (a branch not there yet starts at dir's HEAD, the
+  commit whose parent is the branch head (a branch not there yet starts at :base, else at dir's HEAD, the
   commit the running generation's tree checks out), and the ref moved only from that head. No
   working tree or checkout is touched, so main and every worktree's files stay as they are.
   With :allow-empty? and no files it commits the branch's own tree again (an empty commit: a review,
   seon.doc/review-message). Each file is first read as its reader reads it (unreadable), and one that doesn't refuses the commit. :modes ({path git mode}) gives a file's mode, 100644 otherwise. Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
   to write), or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [dir branch files message allow-empty? modes]} :req}]
+  [{{:keys [dir branch files message allow-empty? modes base]} :req}]
   (if (and (empty? files) (not allow-empty?))
     {:value {:sha nil :files 0}}
     (try
@@ -448,7 +448,7 @@
        (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: " (str/join "; " bad)) {:path dir})
        (let [ref (str "refs/heads/" branch)
             have? (some? (git-try dir ["rev-parse" "--verify" "--quiet" ref]))
-            parent (git! {} dir ["rev-parse" "--verify" (if have? ref "HEAD")] nil)
+            parent (git! {} dir ["rev-parse" "--verify" (if have? ref (or base "HEAD"))] nil)
             gp (git! {} dir ["rev-parse" "--git-path" (str "seon-index-" (lib/c-getpid))] nil)
             index (if (str/starts-with? gp "/") gp (str dir "/" gp))]
         (try

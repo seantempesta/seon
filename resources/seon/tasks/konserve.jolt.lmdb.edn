@@ -1,5 +1,5 @@
 [{:seon.task/name "a-failed-write-saves-nothing-at-its-close"
   :seon.task/plan "Filed 2026-11-10 (Deep fixes), found fixing the LMDB compliance unit on the konserve fork re-created on upstream's history. When a binary write throws before its value is given, the write's cleanup closes the blob, and the Jolt LMDB backing's close saves the header it holds with no value; only the NullPointerException that concat-bytes then throws on the missing value stops it (it also hid the first error, an input shape the store did not take, fixed in konserve 4d0b72d). Wrong either way: a failed write must save nothing and must answer its own error. Fix in the konserve fork (konserve/jolt/lmdb.jolt): close saves only a blob whose header and value were both given; the first error is the one answered. Proof: a write whose input the store refuses leaves no key behind and answers that refusal, not a NullPointerException."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{konserve.jolt.lmdb-test/binary-write-input-store-refuses-leaves-key-behind}}
 ]

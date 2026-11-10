@@ -1046,7 +1046,7 @@
         _ @(c/transact-main! sys [] {:flush? true})
         st (c/state sys {:datoms true})
         md (main-data-datoms sys)
-        expect {:main-datoms (count md) :by-attr (by-attr md) :main-t (get-in st [:main :t]) :user (System/getProperty "user.name")}]
+        expect {:main-datoms (count md) :by-attr (by-attr md) :main-t (get-in st [:main :t]) :user (seon.config/value :seon.config.root/user-name)}]
       (spit (str path ".expect.edn") (sedn/encode expect))
       {:report {:store (:store st) :a ra :merge (dissoc m :ops) :b rb :clone [(:id cl) rc] :expect expect :store-bytes (dir-bytes (:store-path sys))}
        :checks {:merged (:merged? m)} :then :kill}))))
@@ -1093,7 +1093,7 @@
                 :merge-b [(select-keys mmb [:ok :applied]) (dissoc mb :ops)] :after-merging-b r-n2}
        :checks {:main-recovered (and (= (:main-datoms expect) md) (:recovered? (:store st)))
                 ;; what main-data-datoms leaves out, asserted: the boot retracted phase 1's links
-                :earlier-agents-are-not-this-roots (= [(System/getProperty "user.name")] linked)
+                :earlier-agents-are-not-this-roots (= [(seon.config/value :seon.config.root/user-name)] linked)
                 ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
                 ;; main-data-datoms leaves the user out: it is still main's
                 :phase-1s-user-recovered (some? (seon.db/eid @(:conn sys) :seon.agent/key (:user expect)))
@@ -1359,6 +1359,23 @@
       (try (let [st (lib/fork! {:child (fn [] (System/exit 3)) :refused (fn [n] {:refused n}) :parent lib/wait-status})]
              {:status st :parents-hook-ran-in (when (.exists f) (slurp f))})
            (finally (.removeShutdownHook (Runtime/getRuntime) hook) (.delete f))))})
+
+(defn units
+  "The unit table's rows measured (seon.cost-test/measure-unit at its unit-n), each in a process that ran nothing before
+  it: a child forked from this process's main carrier per measurement, this process having only loaded the benches, so
+  what another measurement or a shard's earlier tests left in the process (a pull path's caches) moves no row. k one
+  unit (its keyword's text) or every row of seon.cost/units when nil or \"all\"; reps measurements of each. One line a
+  measurement, UNIT [k row]. See docs/cost.md#what-is-measured."
+  [k reps]
+  (let [measure @(requiring-resolve 'seon.cost-test/measure-unit)
+        unit-n @(requiring-resolve 'seon.cost-test/unit-n)
+        ks (if (and k (not= "all" k)) [(keyword (subs k (if (= \: (first k)) 1 0)))] (sort (keys seon.cost/units)))]
+    (jolt.host/main-carrier-run!
+      (fn []
+        (doseq [k ks _ (range (or (some-> reps parse-long) 1))]
+          (lib/fork! {:child #(out! "UNIT " (pr-str [k (measure k (unit-n k))]))
+                      :refused (fn [n] (out! "UNIT " (pr-str [k {:refused n}]))) :parent lib/wait-status}))))
+    (lib/c-exit 0)))
 
 (defn forks
   "Fork case k (fork-cases) on this process's main carrier: its answer, the last line as EDN."
@@ -2084,6 +2101,7 @@
      "lifecycle-pause" (fn [n more] (lifecycle-pause))
      "boot-twice" (fn [n more] (boot-twice))
      "forks" (fn [n more] (forks n))
+     "units" (fn [n more] (units n (first more)))
      "sweepers-held" (fn [n more] (sweepers-held))
      "drain" (fn [n more] (drain (n-or n "8")))
      "backpressure" (fn [n more] (backpressure (n-or n "8")))

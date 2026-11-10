@@ -6,5 +6,5 @@ The change left: (1) relevance's lexical feature reads each pool item's whole te
 
 Proofs: seon.doc-cost-test/a-search-costs-nothing-for-sections-it-does-not-answer-from (sections no hit names cost nothing); to write, red first: a search's cost flat in the length of its pool items' texts."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.ctx.search-test/search-s-cost-flat-length-pool-items-texts}}
 ]
