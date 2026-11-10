@@ -796,11 +796,6 @@
       (when-not (and exists? existed? (empty? added)) (sync! cfg))
       {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
 
-(defn- remove-dir!
-  "Remove directory dir and what it holds, when it is there. nil."
-  {:malli/schema [:=> [:cat :string] :nil]}
-  [dir] (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. ^String dir)))) nil)
-
 (defn kept-store!
   "The path of the kept store of regenerable output at base for a schema's digest (the whole schema's, `schema-digest`,
   unless given), base-<digest>; a store at base made with another digest (base itself, or base-<8 hex digits> but this
@@ -817,7 +812,7 @@
          keyed (str stem "-" digest)
          old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
      (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
-       (remove-dir! (str dir "/" n)))
+       (lib/remove-tree! (str dir "/" n)))
      (str dir "/" keyed))))
 
 (defn- compact-marker
@@ -846,16 +841,16 @@
           dir (str path ".compact")
           size #(.length (java.io.File. ^String %))
           before (size data)]
-      (remove-dir! dir)
+      (lib/remove-tree! dir)
       (.mkdirs (java.io.File. ^String dir))
       (let [e (try (lmdb-ffi/compact-copy! (klmdb/open-env! path nil) dir) nil
                    (catch Throwable e e))]
         (klmdb/close-env! path)
         (if e
-          (do (remove-dir! dir)
+          (do (lib/remove-tree! dir)
               (contract/error :seon.db/compact-failed #'seon.db/compact-if-due! (str "compacting the store at " path ": " (ex-message e)) {:path path}))
           (do (posix/c-rename (str dir "/data.mdb") data)
-              (remove-dir! dir)
+              (lib/remove-tree! dir)
               (.delete (java.io.File. ^String (compact-marker path)))
               {:bytes-before before :bytes-after (size data) :ms (profile/ms-since t0)}))))))
 

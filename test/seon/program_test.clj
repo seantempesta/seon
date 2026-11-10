@@ -8,7 +8,7 @@
   order of their real references; a test reaches what it calls; banned calls and inline
   definitions are recorded for the merge to judge; a file analyzed without running gives
   the REPL's facts."
-  (:require [seon.test-store :as ts] [my.test :as mt] [clojure.test :refer [deftest is testing]]
+  (:require [seon.lib] [seon.test-store :as ts] [my.test :as mt] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d] [clojure.java.shell]
             [seon.db :as pdb]
             [seon.program :as program] [seon.doc] [seon.server]
@@ -656,7 +656,7 @@
 (defn- with-dir
   "f called with a fresh verdict cache directory under this checkout's target/tmp, removed after."
   [f] (let [dir (str (seon.config/checkout) "/target/tmp/verdicts-" (random-uuid))]
-        (try (f dir) (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+        (try (f dir) (finally (seon.lib/remove-tree! dir)))))
 
 (defn- run-plan "bin/test's plan of digests against the verdicts the cache at dir holds." [digests dir]
   (proofs/plan nil digests (seon.fx/stored-results dir digests) #{}))

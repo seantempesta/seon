@@ -2,7 +2,7 @@
   "Every proc's step-fn, called as a plain function (no graph, no Flow), checked against
   its `:malli/schema` (seon.step/step-schema) and against what each arity must do.
   Run: bin/test seon.procs-test (proto/flow f2-final test/proto/procs_test.clj)"
-  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing run-tests]]
+  (:require [seon.lib] [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing run-tests]]
             [malli.core :as m] [seon.contract]
             [clojure.core.async :as a] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec]
             [clojure.core.async.flow :as flow]
@@ -234,7 +234,7 @@
           (is (true? (:ok (:r (first (:to-api outs))))))
           (is (seq pins))
           (is (= pins (get-in (d/pull @conn [:seon.root/source] [:seon.root/id :root]) [:seon.root/source :pins])))))))
-     (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+     (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 (deftest the-flush-is-continuous-group-commit
   ;; owner 2026-10-21 (git history, "Durability is batched everywhere", superseded

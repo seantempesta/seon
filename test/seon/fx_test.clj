@@ -1,7 +1,7 @@
 (ns seon.fx-test
   "The effect owner and worker step-fns as plain functions (no graph): admission by workers,
   priority order, budget refused, the queue bound, and a worker answering a defect."
-  (:require [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg] [seon.contract :as contract] [seon.proofs :as proofs]
+  (:require [seon.lib] [clojure.test :refer [deftest is testing]] [jolt.deps] [seon.fx :as fx] [seon.config :as cfg] [seon.contract :as contract] [seon.proofs :as proofs]
             [clojure.core.async.flow :as flow] [clojure.core.async :as a] [seon.model :as model]))
 
 (defn- owner [workers] (fx/owner-proc {:kind :t :workers workers :work nil :back nil}))
@@ -256,7 +256,7 @@
     (spit (str dir "/ports") "x")
     (is (= ["?? ports"] (fx/uncommitted dir)))
     (is (contract/error? (fx/uncommitted (str dir "/none"))) "git can't read it: said, never no files")
-    (clojure.java.shell/sh "rm" "-rf" dir)))
+    (seon.lib/remove-tree! dir)))
 
 (deftest a-gate-that-cant-analyze-says-so
   ;; deepseek-run6: every one of 209 tests read :error, the cause only in the log
@@ -297,7 +297,7 @@
       (let [empty-dir (.getCanonicalPath (doto (java.io.File. (str dir "-empty")) (.mkdirs)))]
         (clojure.java.shell/sh "git" "-C" empty-dir "init" "-q")
         (is (nil? (fx/branch-head empty-dir "x")) "a repository with no commit: nil"))
-      (finally (clojure.java.shell/sh "rm" "-rf" dir (str dir "-empty"))))))
+      (finally (seon.lib/remove-tree! dir (str dir "-empty"))))))
 
 (deftest the-model-call-uses-the-provider-its-request-names
   ;; owner, 2026-10-28: the provider is resolved at each turn (seon.config/provider-at) and travels with the
@@ -332,7 +332,7 @@
           ;; a bound of 1 byte evicts every verdict not just written: the walk ended and removed the three old .edn files
           (is (not (.exists (java.io.File. d "a/one.edn"))))
           (is (not (.exists (java.io.File. d "b/c/two.edn"))))))
-      (finally (fx/remove-tree! d)))))
+      (finally (seon.lib/remove-tree! d)))))
 
 ;; docs/merging.md#a-merge-runs-what-the-change-reaches: 17 gates in a row built one candidate to the one refusal, about 40 s each, holding the worker
 (deftest a-candidate-that-makes-no-plan-is-not-built-again

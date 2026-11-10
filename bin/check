@@ -180,13 +180,13 @@ u-laws() { echo "== laws (every law's sites: catch, clocks, measures, resolution
 u-lmdb-kill() {
   echo "== lmdb-kill (a writer SIGKILLed inside a txn while this process holds the env; the next writes commit: robust locks)"
   step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill.mdb"
-  is-green lmdb-kill && rm -f "$OUT/lmdb-kill.mdb" "$OUT/lmdb-kill.mdb-lock"
+  is-green lmdb-kill && "$ROOT/bin/remove-tree" "$OUT/lmdb-kill.mdb" "$OUT/lmdb-kill.mdb-lock"
 }
 # lmdb-sem, below Datahike too, on envs of its own under one directory, deleted when green
 u-lmdb-sem() {
   echo "== lmdb-sem (another env's set at an env's key, a set gone under a holder, 16 processes opening one env, 50 envs in one process, a killed opener's set: each env's semaphore set is its own, and costs no undo entry for its life)"
   step lmdb-sem "" "$ROOT/target/lmdb-sem" "$OUT/lmdb-sem"
-  is-green lmdb-sem && rm -rf "$OUT/lmdb-sem"
+  is-green lmdb-sem && "$ROOT/bin/remove-tree" "$OUT/lmdb-sem"
 }
 # forks: the forks' own suites on Jolt, a process a unit (bin/forks), against test/forks/baseline.edn
 u-forks() { echo "== forks (Datahike's and konserve's own tests on Jolt, each unit's counts against its baseline)"; step forks "FAILED|^FORKS " "$ROOT/bin/forks" }
@@ -299,7 +299,7 @@ unit() {
   # a unit that cannot take its copy of the seeded store fails here, loudly: it never runs on a store its own root seeded
   (( NEEDS )) && { mkdir -p "$SEON_STORE" && cp -c "$STORE/data.mdb" "$SEON_STORE/data.mdb" || { failed "$1 (no copy of the seeded store $STORE)"; print "FAILED $1: no copy of the seeded store $STORE"; return 1 } }
   { u-$1 } > "$OUT/$1.shown" 2>&1
-  grep -q "^$1[ -]" "$OUT/failed" || rm -rf "$SEON_STORE"
+  grep -q "^$1[ -]" "$OUT/failed" || "$ROOT/bin/remove-tree" "$SEON_STORE"
   cat "$OUT/$1.shown"
 }
 mkfifo "$OUT/pool"; exec 3<>"$OUT/pool"; rm "$OUT/pool"

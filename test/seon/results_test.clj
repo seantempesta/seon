@@ -3,7 +3,7 @@
   key, digest and status, flaky kept across writers, the least recently used evicted past a capacity, the cost a test spent per
   function kept with its verdict, and nothing written to the store; each test on a cache directory of
   its own under target/tmp."
-  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [seon.config :as cfg]
+  (:require [seon.lib] [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [seon.config :as cfg]
             [seon.fx :as fx] [seon.proofs :as proofs] [seon.cost :as cost]))
 
 (defn- fc [v calls ticks self bytes] {:var v :calls calls :ticks ticks :self-ticks self :bytes bytes :self-bytes bytes})
@@ -12,7 +12,7 @@
   "f called with a fresh cache directory under this checkout's target/tmp, removed after."
   [f]
   (let [dir (str (cfg/checkout) "/target/tmp/verdicts-" (random-uuid))]
-    (try (f dir) (finally (sh/sh "rm" "-rf" dir)))))
+    (try (f dir) (finally (seon.lib/remove-tree! dir)))))
 
 (defn- rec!
   ([dir ran] (rec! dir ran {}))
