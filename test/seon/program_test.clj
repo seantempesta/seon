@@ -1431,3 +1431,25 @@
     (is (= (in {}) (in {:seon.config.ai/provider :openai-compat :seon.config.ai/script 'a/b :seon.config.root/profile :deepseek :seon.config.store/sole-writer? true})))
     (is (not= (in {}) (in {:seon.config.proofs/jobs 5})) "a key that is no one's place still does")))
 
+
+(deftest a-var-a-string-names-moves-the-test-holding-it
+  ;; Context, 2026-11-10: (in-agent ["(my.agent/tests-reaching 'x)"]) names a var only inside a
+  ;; string in a vector, and a change to it left the test's digest and a stored green. In a test
+  ;; namespace every string constant that reads as forms names the vars of those forms
+  ;; (docs/source.md#tests-run-by-reach), by one read; a string that is no code names nothing
+  (let [in {:env "e" :tree "t" :config {}}
+        tests ['user "(ns app.pt-sn-test (:require [clojure.test :refer [deftest is]]))"
+               'app.pt-sn-test "(deftest in-vector-test (is (= 1 (seon.lib/fork! [\"(app.pt-sn/f 1)\"]))))"
+               'app.pt-sn-test "(deftest quoted-in-string-test (is (= 1 (seon.lib/fork! [\"  (def x 'app.pt-sn/f)\"]))))"
+               'app.pt-sn-test "(deftest in-map-test (is (= 1 (seon.lib/fork! {:code \"(app.pt-sn/f 1)\"}))))"
+               'app.pt-sn-test "(deftest not-code-test (is (= 1 (seon.lib/fork! [\"hello, world (unbalanced\" \"app.pt-sn/f is not code\"]))))"
+               'app.pt-sn-test "(deftest pure-test (is (= 1 1)))"]
+        with-f (fn [body] (apply record (record (empty-db) 'user "(ns app.pt-sn)" 'app.pt-sn (str "(defn f [x] " body ")")) tests))
+        dg (fn [db] (update-vals (program/graph-index (program/reach-graph db nil) in nil) :digest))
+        d1 (dg (with-f "1")) d2 (dg (with-f "2"))
+        moved? (fn [t] (not= (d1 (symbol "app.pt-sn-test" t)) (d2 (symbol "app.pt-sn-test" t))))]
+    (is (moved? "in-vector-test") "a var named in a string in a vector")
+    (is (moved? "quoted-in-string-test") "a var quoted in a string that does not start with a paren")
+    (is (moved? "in-map-test") "a var named in a string in a map")
+    (is (not (moved? "not-code-test")) "a string that is no code names nothing, and does not throw")
+    (is (not (moved? "pure-test")) "a test naming nothing keeps its digest")))
