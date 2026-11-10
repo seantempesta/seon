@@ -681,6 +681,15 @@
   (let [p (cfg/value :seon.config.proofs/unmeasured-process-ms) i (cfg/value :seon.config.proofs/unmeasured-ms)]
     (into {} (map (fn [t] [t (or (get measured t) (if (process t) p i))])) tests)))
 
+(defn memory-jobs
+  "How many shards a run may take: jobs (the configured ceiling) or fewer, as many as available-mb holds above floor-mb at
+  shard-mb a shard (the machine's free plus inactive memory, seon.lib/sysmem), at least one: a heavy run is judged by cores
+  and free memory, never by the load average, which counts other sessions' niced work (AGENTS.md §8). See
+  docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat pos-int? :int pos-int? :int] pos-int?]}
+  [jobs available-mb shard-mb floor-mb]
+  (-> (quot (- available-mb floor-mb) shard-mb) (max 1) (min jobs)))
+
 (defn worth-shards
   "How many shards tests' work is worth, at most jobs: one for each min-ms of it ({test ms}; a test never measured counts as the mean of those measured,
   as `shards` deals it), so a run of a few seconds stays one process and a long one splits (docs/merging.md#a-merge-runs-what-the-change-reaches)."

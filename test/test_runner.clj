@@ -432,10 +432,16 @@
         ;; one; the full run and a merge's verification shard
         ;; each test's ms, measured or its class's configured estimate (never 1 ms: an unmeasured run dealt itself one shard)
         ms (proofs/estimated-ms run-tests (measured-ms run-tests) (set process))
+        ;; as many shards as free memory holds, at most the configured jobs (never fewer for the load average: bin/test)
+        avail (long (:available-mb (seon.lib/sysmem)))
+        jobs (proofs/memory-jobs (config/value :seon.config.proofs/jobs) avail
+                                 (config/value :seon.config.proofs/shard-mb) (config/value :seon.config.proofs/free-floor-mb))
+        _ (write! (str out "/jobs") (str jobs))
+        _ (when (< jobs (config/value :seon.config.proofs/jobs))
+            (println (str "prove: " avail " MB free: " jobs " of " (config/value :seon.config.proofs/jobs) " shards at most ("
+                          (config/value :seon.config.proofs/shard-mb) " MB a shard above " (config/value :seon.config.proofs/free-floor-mb) " MB kept free)")))
         n (write-shards! out (if no-test [] run-tests) digests (:tree inputs) (select-keys steps mg-run)
-                         (if all?
-                           (config/value :seon.config.proofs/jobs)
-                           (proofs/worth-shards run-tests (config/value :seon.config.proofs/jobs) ms (config/value :seon.config.proofs/shard-min-ms)))
+                         (if all? jobs (proofs/worth-shards run-tests jobs ms (config/value :seon.config.proofs/shard-min-ms)))
                          ms)
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
