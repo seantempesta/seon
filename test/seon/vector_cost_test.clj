@@ -32,7 +32,7 @@
   the proofs, share their forms, and packing a 768-dim vector is the dearest part of making one."
   (memoize
     (fn [i] [{:db/id (str "f" i) :form/id (str "vf" i) :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src (str "(defn vf" i " [])")}
-             (vector/fact (str "f" i) 0 (unit-vector i) "m")])))
+             (vector/fact (str "f" i) "0" (unit-vector i) "m")])))
 
 (def ^:private grown
   "{n db}: the stores store-of made, so the next, a larger one, adds only the forms past the largest
@@ -100,7 +100,10 @@
      ;; 2026-10-31 (shrink-tests-4): on the world (seon.vector-cost-test/store-of), which holds no seed texts and no
      ;; titles to scan: 65k ticks / 259 KB at 30, 143k / 622 KB at 100, 355k / 1.68 MB at 300: ~1,060 ticks and
      ;; 5.3 KB a text, the fixed part ~40k / 100 KB (the 1.5 MB of titles was the seed's)
-     :per-n {:ticks 1100.0 :bytes 5500.0}
+     ;; 2026-11-09, bound moved with the owner's yes ("Move bound, cut scans"): a vector is due by its text's digest
+     ;; (:seon.vector/text), so a full scan builds and digests each text's bytes: 107.8k ticks / 485 KB at 30, about 2.3k ticks and
+     ;; 12.8 KB a text. A full scan is a fresh start's only (a-backlog-is-caught-up-by-seeks-not-scans)
+     :per-n {:ticks 2500.0 :bytes 14000.0}
      :fixed {:ticks 40000.0 :bytes 100000.0}
      :sizes [30 100 300]}))
 
@@ -132,6 +135,34 @@
         r [(assoc (vector/vectors-proc {:model "m" :texts 64 :conn c}) :clean {:t 0 :commit (d/commit-id (pdb/head conn b))} :seen (d/commit-id (pdb/head conn b))) :main {:t 1 :commit (d/commit-id (pdb/head conn s))}]]
     (d/release bc)
     r))
+
+(defn owed-of
+  "seon.vector/vectors-proc's arguments for main's notice of a commit that wrote one form, with n forms in the store every one
+  due, after a round from a fresh start at the db before the commit asked for :texts of them (10) and left the rest."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :keyword :map]]}
+  [n]
+  (let [[proc k notice] (round-of n)
+        ;; the round before, at the db before the commit, from a fresh start: it scans every text, asks for 10 and owes the rest
+        [st _] (vector/vectors-proc (assoc proc :texts 10 :clean nil :seen nil) k {:t 0 :commit (:commit (:clean proc))})]
+    [(assoc st :running false) k notice]))
+
+(deftest a-backlog-is-caught-up-by-seeks-not-scans
+  ;; docs/vector.md#what-is-embedded: a proc behind (more due than :texts) kept no commit it had scanned at, so every round after
+  ;; scanned every text again, and catching up on n texts took n/texts full scans (red, measured: about 2.3k ticks a text a
+  ;; round). A round keeps the commit it scanned at and the entities it still owes, and reads only as many as it asks for
+  (try
+    (cost/proof
+      {:of 'seon.vector/vectors-proc :input 'seon.vector-cost-test/owed-of
+       :n "texts owed from a round before, 10 asked a round"
+       :work (str "the commit's text datoms (log n), :texts owed entities read by seek (constant), and the rest of what is owed "
+                  "carried as ids: never a scan of every text")
+       ;; measured 2026-11-09 (load 11-15): 535k ticks / 1.76 MB / 116 calls at 30, 583k / 1.82 MB at 100, 585k / 1.90 MB at 300:
+       ;; flat but for the commit's diff, log n deep; before, every round behind scanned all n texts (about 2.3k ticks each)
+       :growth :log
+       :per-n {:ticks 15000.0 :bytes 50000.0}
+       :fixed {:ticks 560000.0 :bytes 1800000.0 :calls 130}
+       :sizes [30 100 300]})
+    (finally nil)))
 
 (deftest a-commit-is-embedded-for-what-it-changed
   (try

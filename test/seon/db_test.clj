@@ -131,16 +131,16 @@
         _ (d/create-database cfg)
         c0 (pdb/connect cfg)
         ;; and one attribute installed before it was indexed
-        _ (d/transact c0 {:tx-data (mapv #(if (= :seon.vector/text-t (:db/ident %)) (dissoc % :db/index) %) (butlast pdb/schema))})
+        _ (d/transact c0 {:tx-data (mapv #(if (= :seon.message/from (:db/ident %)) (dissoc % :db/index) %) (butlast pdb/schema))})
         ;; a datom written before the index: an AVET read of an unindexed attribute answers empty, with no error
-        _ (d/transact c0 {:tx-data [{:db/id "f" :form/id "v/1" :form/src "(def v 1)" :form/ns {:ns/name (quote v)} :form/order 0} (seon.vector/fact "f" 42 [0.5 0.25] "m")]})
-        _ (is (empty? (d/datoms @c0 :avet :seon.vector/text-t)) "unindexed, an AVET read finds nothing")
+        _ (d/transact c0 {:tx-data [{:db/id "f" :form/id "v/1" :form/src "(def v 1)" :form/ns {:ns/name (quote v)} :form/order 0} {:seon.message/id "m-42" :seon.message/from "x42" :seon.message/body "b"}]})
+        _ (is (empty? (d/datoms @c0 :avet :seon.message/from)) "unindexed, an AVET read finds nothing")
         _ (d/release c0)
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (is (= lacking (:db/ident (get (d/schema @conn) lacking))) "the attribute the store lacked is installed")
-      (is (true? (get-in (d/schema @conn) [:seon.vector/text-t :db/index])) "and the index an attribute lacked")
-      (is (= [42] (mapv :v (d/datoms @conn :avet :seon.vector/text-t))) "and the datoms it already held read through that index")
+      (is (true? (get-in (d/schema @conn) [:seon.message/from :db/index])) "and the index an attribute lacked")
+      (is (= ["x42"] (mapv :v (d/datoms @conn :avet :seon.message/from))) "and the datoms it already held read through that index")
       (let [t (:max-tx @conn)
             _ (d/release conn)
             {c2 :conn} (pdb/open! :lmdb path 0 :db)]
@@ -1380,7 +1380,7 @@
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn [{:form/id "f/1" :form/src "(defn f [])" :form/ns [:ns/name 'app.m0] :form/order 0}])
-      (d/transact conn [(seon.vector/fact [:form/id "f/1"] 1 [0.5 0.25 0.125] "m")])
+      (d/transact conn [(seon.vector/fact [:form/id "f/1"] "1" [0.5 0.25 0.125] "m")])
       (let [ve (pdb/eid @conn :seon.vector/of (pdb/eid @conn :form/id "f/1"))]
         (is (some? ve) "the form has its vector")
         (is (map? (d/transact conn [[:db.fn/retractEntity [:form/id "f/1"]]])) "retracting the form is not refused")

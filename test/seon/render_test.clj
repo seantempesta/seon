@@ -2995,7 +2995,7 @@
             s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))
             unembedded (search-part (draw))
             ;; its query's vector, as main's vectors proc writes it (seon.vector/tx-data)
-            _ (d/transact conn (seon.vector/tx-data [s] [(:tx (first (d/datoms @conn :eavt s :seon.search/query)))] [(vec (repeat 768 0.036))] "m"))
+            _ (d/transact conn (seon.vector/tx-data [s] ["query"] [(vec (repeat 768 0.036))] "m"))
             before (search-part (draw))]
         (is (nil? unembedded) "a query with no vector yet draws nothing: words alone are no search the page shows")
         (is (some? before) "the request's search is a part of the page once its query has a vector")

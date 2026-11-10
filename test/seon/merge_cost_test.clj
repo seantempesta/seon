@@ -117,7 +117,7 @@
         s (keyword (str (name b) "-theirs"))
         _ (d/branch! conn b s)
         c (pdb/connect (assoc cfg :branch s))
-        _ (d/transact c {:tx-data (vector/tx-data es (vec (repeat n 1)) (vec (repeat n [0.5 0.5])) "m")})
+        _ (d/transact c {:tx-data (vector/tx-data es (vec (repeat n "1")) (vec (repeat n [0.5 0.5])) "m")})
         r [(pdb/head conn b) (pdb/head conn b) (pdb/head conn s) #{}]]
     (d/release c) (d/release bc)
     r))
