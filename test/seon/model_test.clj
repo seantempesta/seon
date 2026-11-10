@@ -129,16 +129,16 @@
                      {:role "tool" :tool-call-id "ca" :content "{:handle result/e1, :value 1}"}
                      {:role "assistant" :content "" :reply 1 :tool-calls [{:id "cb" :code "(g)" :intent "g"}]}
                      {:role "tool" :tool-call-id "cb" :content "{:handle result/e2, :value 2}"}
-                     {:role "assistant" :content "" :tool-calls [{:id "eval-p3" :code "(my.render/render-changes)"}]}
+                     {:role "assistant" :content "" :tool-calls [{:id "eval-p3" :code "(+ 1 2)"}]}
                      {:role "tool" :tool-call-id "eval-p3" :content "{:handle result/p3, :value {:edits []}}"}]
             sent (:messages (model/request-body provider {:messages neutral :task "t/x" :turn 1}))]
-        (is (= ["assistant" "tool" "tool" "assistant" "tool"] (mapv :role sent)) "a reply, its two results, Seon's insert and its result")
+        (is (= ["assistant" "tool" "tool" "assistant" "tool"] (mapv :role sent)) "a reply, its two results, an insert's call and its result")
         (is (= "Doing f, then g." (get-in sent [0 :content])) "the text beside the calls")
         (is (= [{:id "ca" :type "function" :function {:name "eval" :arguments (json/write-str {:intent "f" :code "(f)"})}}
                 {:id "cb" :type "function" :function {:name "eval" :arguments (json/write-str {:intent "g" :code "(g)"})}}]
                (get-in sent [0 :tool_calls])))
         (is (= [{:role "tool" :tool_call_id "ca" :content "{:handle result/e1, :value 1}"} {:role "tool" :tool_call_id "cb" :content "{:handle result/e2, :value 2}"}] (subvec sent 1 3)) "each with its handle")
-        (is (= "{\"code\":\"(my.render\\/render-changes)\"}" (get-in sent [3 :tool_calls 0 :function :arguments])) "Seon's own: code and no intent")
+        (is (= "{\"code\":\"(+ 1 2)\"}" (get-in sent [3 :tool_calls 0 :function :arguments])) "an insert's own: code and no intent")
         (is (= (mapv #(dissoc % :seon.model/at) (:tool-calls c)) (mapv (fn [tc] (#'model/eval-of "eval" (get-in tc [:function :arguments]) (:id tc))) (get-in sent [0 :tool_calls])))
             "what went out reads back as the reply it was")))
     (testing "a reply with text and no call is a message alone"

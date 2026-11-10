@@ -226,6 +226,26 @@
         (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (gone-statuses (:status a))) (not (gone-statuses (:status a')))) conj disj) #{}) id)))
     st))
 
+(defn stall-state
+  "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
+  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-due, ::busy and ::lost, and
+  each agent proc's :inflight (each request's kind), :fx-out, :stall-seen and :last-frame-ms, read by one Flow ping of
+  the graph, with :answered, every proc that answered it. The ping's bound is :seon.config.check/ping-ms: a proc
+  mid-step that long answers nothing and is missing from :answered (an agent in ::busy and not there is mid-step), never
+  read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
+  {:malli/schema [:=> [:cat :seon.root/sys] :map]}
+  [sys]
+  (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
+        state #(::flow/state (get states %))]
+    {:root (let [api (state :api)]
+             ;; the stall check's armed flag: ::stall-due, or once seon.step/timer holds it, ::stall-timer's value (a volatile)
+             (cond-> (select-keys api [::stall-due ::busy ::lost])
+               (contains? api ::stall-timer) (assoc ::stall-armed (some-> (::stall-timer api) deref))))
+     :agents (into (sorted-map)
+                   (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
+                     [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms]) :inflight (update-vals (:inflight s) :kind))]))
+     :answered (vec (sort (keys states)))}))
+
 (defn- stall-task
   "Root's task to deal with agent id's stall s, when it works a task (seon.template/stall: one per
   agent and task, so a later stall of the same task writes none): written to main, held, worked by
@@ -843,7 +863,8 @@
       :spoke (set-agent st o (:agent m) {:stalled nil})
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]
-                     (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
+                     (step/fired! (::stall-timer st))
+                     (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) st (::busy st)))
       st)))
 
 (defn- answer-taken
@@ -905,6 +926,8 @@
                  ;; what this step took, kept across Flow's catch (which keeps the state from
                  ;; before the step): a host object of this proc's own
                  ::taken (volatile! [])
+                 ;; the stall check's timer: armed while an agent has an eval in flight (seon.step/timer)
+                 ::stall-timer (step/timer)
                  ::errors {}
                  ::flow/in-ports {:ext (:ext args) :back (:back args)}
                  ::flow/out-ports {:to-writer (:to-writer args) :events (:events args)}))
@@ -931,11 +954,9 @@
          st (flush-problems st o)
          st (record-agents st o before)
          ;; while an agent has an eval in flight, the stall check runs every half stall bound
-         st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
-              (let [back (:back st)]
-                (step/put-after! back (quot (:stall-ms st) 2) {:op :stall-check})
-                (assoc st ::stall-due true))
-              st)
+         ;; its armed flag is a host object (seon.step/timer): a step that took :stall-check and then threw cannot leave it armed for good
+         _ (when (and (seq (::busy st)) (pos? (:stall-ms st)) (:back st))
+             (step/arm! (::stall-timer st) (:back st) (quot (:stall-ms st) 2) {:op :stall-check}))
          st (if (::update st)
               (do (flow/update! @(:graph st) {:procs (merge (get-in st [:system :procs]) (:agent-procs st)) :conns (get-in st [:system :conns])})
                   (dissoc st ::update))
@@ -1320,7 +1341,7 @@
                    (d/release conn)
                    out)))
         r (once)]
-    (if (:moved r) (do (fx/remove-tree! path) (once)) r)))
+    (if (:moved r) (do (seon.lib/remove-tree! path) (once)) r)))
 
 (defn seed-program!
   "Index the tree (source root and dirs from the config) into :db of the store at path (made when missing): seed!, so a

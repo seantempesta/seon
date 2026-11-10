@@ -9,6 +9,8 @@
 #
 #   bin/build            every step; chez, jolt, native, lmdb, lz4, zstd, embed and css are skipped when their stamp matches their pin; hello and seon when it matches the tree and the toolchain's pins
 #   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|embed|css|seon   one step, and each step it needs whose stamp is stale
+#   bin/build libs       the four native libraries the runtime loads (native, lmdb, lz4, zstd), each skipped when its stamp
+#                        matches: what bin/test asks before its plan, a stamp compare each when nothing moved
 #   BUILD_FORCE=1 bin/build     every stamp removed first: each step rebuilds, once
 #
 # Everything is written under target/; nothing is installed outside it. Dependency
@@ -151,9 +153,10 @@ build_native() {
 # target/lmdb-lock (native/lmdb_lock.c), and target/lmdb-crash (native/lmdb_crash.c, LMDB compiled into it with its writes
 # and flushes renamed to its recorder's).
 LMDB_SRC=$RC/lmdb/libraries/liblmdb
+LMDB_NATIVE="native/lmdb_kill.c native/lmdb_lock.c native/lmdb_crash.c"
 build_lmdb() {
   [ -f "$LMDB_SRC/mdb.c" ] || die "missing LMDB source at $LMDB_SRC (the reference-code/lmdb submodule)"
-  pin="$(pin "$LMDB_SRC") robust $(git -C "$ROOT" hash-object native/lmdb_kill.c native/lmdb_lock.c native/lmdb_crash.c | tr '\n' ' ')"
+  pin="$(pin "$LMDB_SRC") robust $(cd "$ROOT" && git hash-object $LMDB_NATIVE | tr '\n' ' ')"
   if fresh lmdb "$pin" && [ -f "$T/lib/liblmdb.dylib" ]; then say "lmdb up to date ($pin)"; return; fi
   mkdir -p "$T/lib"
   say "lmdb: $LMDB_SRC at $pin -> target/lib/liblmdb.dylib (MDB_USE_ROBUST)"
@@ -169,7 +172,7 @@ build_lmdb() {
     cc -c -O2 -g -pthread -o "$T/lmdb-crash-midl.o" "$LMDB_SRC/midl.c" >> "$T/lmdb-build.log" 2>&1 &&
     cc -O2 -g -pthread -I"$LMDB_SRC" -o "$T/lmdb-crash" "$ROOT/native/lmdb_crash.c" "$T/lmdb-crash-mdb.o" "$T/lmdb-crash-midl.o" \
     >> "$T/lmdb-build.log" 2>&1 || die "lmdb-crash (native/lmdb_crash.c) build failed; see target/lmdb-build.log"
-  rm -f "$T/lmdb-crash-mdb.o" "$T/lmdb-crash-midl.o" "$T/lmdb-sem"
+  rm -f "$T/lmdb-crash-mdb.o" "$T/lmdb-crash-midl.o"
   echo "$pin" > "$T/lmdb.stamp"
 }
 
@@ -337,7 +340,8 @@ case $STEP in
   zstd) build_zstd ;;
   embed) build_embed ;;
   css) build_css ;;
+  libs) build_native; build_lmdb; build_lz4; build_zstd ;;
   seon) build_seon ;;
   all) build_chez; build_jolt; build_native; build_lmdb; build_lz4; build_zstd; build_embed; build_css; build_hello; build_seon ;;
-  *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | lz4 | zstd | embed | css | seon | all)" ;;
+  *) die "unknown step $STEP (chez | jolt | hello | native | lmdb | lz4 | zstd | libs | embed | css | seon | all)" ;;
 esac

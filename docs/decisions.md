@@ -6,6 +6,14 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
 
+### A run far past its measured time is ended, after its evidence (owner, 2026-11-10)
+
+The fourth clock exception, relayed by the managing session at 20:35: a script may end a run that goes far past its measured time, after capturing the evidence (sample, logs, process list and the Seon state: root's stall check, each agent proc's), reported red with a typed reason, never retried; the cause still gets its task. Before it, a stuck step ran until someone noticed. Stated in [clocks](clocks.md#time-decides-the-owners-exceptions): `bin/check` ends a step past `:seon.config.check/step-end-factor` times its median measured run (STEP-OVERRAN), after `bin/evidence`.
+
+### A write to main is answered after the store holds it (owner, 2026-11-10)
+
+Asked with the question tool (relayed by Point, 2026-11-10 ~19:40) between answering root's write at its apply, with root's api storing what ran ahead before any request reaches an agent, and answering after the store commit; the owner chose the second (in Point's relay: "answered means every process can read it"), one rule, no gate at root, no class of missed reads. Stated in [storage](storage.md#durability-is-continuous-group-commit).
+
 ### The best known way, improved (owner, 2026-11-10)
 
 "You do things the best known way until someone comes up with a better way and that becomes the standard 'best known way' of doing things." "Pain points can become well polished and intentional features." "We can iterate and on each run the system gets a little better." The wiki and AGENTS.md are the way, written down; a pain is a finding whose fix changes the way itself (a script, a check, a wiki section) and deletes the old one. Stated in AGENTS.md §1 and docs/sessions.md#the-way-improves.
@@ -25,6 +33,10 @@ The owner's rulings of 2026-11-10, on how the work improves and lands, on what r
 ### Pages are built from data by one walk (owner, 2026-11-10)
 
 "No more hand drawn lists and custom shit. If I come up with a new agent type and I attach a bunch of data to it's entity and there are render functions it should just work everywhere. ... Root, the user, and normal agents should be different based on their data and their connections, not separate special code." "Why can't we write render functions that recognize 'this is a top level render it's not a leaf so it's not going to be rendered as a tile'"; "don't flatten, the location in the pull pattern has meaning"; on the chat's order, "Sort them by time?". One walk over the pull, nested like the pull; each entity drawn by its own schema's render, which knows only whether it is on top or nested; the chat is its entities in the order they were made; no declared places, no kinds, no read mark. With it, the same day: root's agent is made at boot (reversing 2026-11-08's "made by the first message"); an example session is sent to the model as real user, assistant and tool messages and drawn by the same renders ("not learn a text exampled but see exactly how to structure the tool calls"); a mechanical message's sender is the system entity, not an agent ("Why do we need a full agent for this?"). In flight on branch jolt/pages; the task is seon.render/a-model-render-draws-each-turns-diff until its own are landed.
+
+### The forks follow upstream: theirs when almost as good, ours written to be offered (owner, 2026-11-10)
+
+Owner, 2026-11-10: "Make sure deep fixes is merging all the fixes from all upstream dependencies"; "If there are two solutions and theirs is almost as good as ours choose theirs"; for Datahike, "start with the latest datahike and just overlay only the ones we need over it"; "I don't want to open upstream patches until we are sure what we did was correct and the solutions are proper high quality implementations"; "make sure all the code is well written and matches their style and coding guidelines for both datahike and jolt. I highly respect all the developers working on these projects and I don't want to waste their time or have them complain that I submitted a low effort pull request that is a nightmare to review and understand." Stated in: docs/forks.md#following-upstream.
 
 ### Every session proves its branch before handing it over (owner, 2026-11-10)
 
@@ -57,6 +69,10 @@ Asked with the question tool by the managing session, the Tests session's eviden
 ### The model's history is the pull's data; what is computed is computed in the hiccup render (owner, 2026-11-10)
 
 "All rendering that is pulling new data and processing it should happen at the hiccup render function step. I don't want what's shown on screen to dramatically differ from what the model sees." Then, asked where the history comes from: "Every render function gets the current db, the @ctx full pull data, and I think the current render tree? This allows any function to get whatever data it needs to do the proper render. So where are the messages and other parts that are data? In the @ctx pull data". So a history entity's native messages are made from its own pulled fields by its `:seon.render/openai-compat` render, never converted from hiccup; whatever looks data up or computes does it once, in the hiccup render, which the page shows styled and the model reads stripped. Stated in: docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup.
+
+### Three request cost proofs land waived (owner, 2026-11-10)
+
+Asked whether pages from data (step 1) waits for stage 2b's request cost proofs, red since 2b at its base: "Land now, three waivers". `seon.render-cost-test/a-cold-request-draws-what-the-model-reads`, `seon.render-cost-test/drawing-latest-costs-one-request` and `seon.ctx.wire-cost-test/a-requests-cost-is-its-records` each carry an `:overrun` naming task `seon.render/a-model-render-draws-each-turns-diff`, with what each measured at its largest size; no bound moved, and each waiver comes off with that task. Stated in: docs/cost.md#an-accepted-overrun-and-its-ratchet (the rule), the three proofs' comments (the numbers).
 
 ### An entity is held at every path the pull reaches it (owner, 2026-11-10)
 
@@ -476,7 +492,7 @@ The owner's rulings of 2026-11-01, after the audit of what agents read; they sta
 
 ### An agent's evals on a task are a session; past ones are shown as curated sessions (owner, 2026-11-01)
 
-"Yeah sessions is fine"; "In the instructions I don't think we say the dead ends part. Curated sessions." A session is an agent's evals on a task in order (nREPL's word; still stored as `:seon.run/*`, renamed only by a store erase). A past session shown to an agent as a worked example is a curated session: the session as stored, with the evals that led nowhere marked out, reaching the model as the same tool-call turns its own evals do (`seon.render.ui/eval-hiccup`), never as a text blob and never repeating the system message. No parallel store or renderer; it is evaluated as a measured arm before it is built in (plan.md, where it stands).
+"Yeah sessions is fine"; "In the instructions I don't think we say the dead ends part. Curated sessions." A session is an agent's evals on a task in order (nREPL's word; still stored as `:seon.run/*`, renamed only by a store erase). A past session shown to an agent as a worked example is a curated session: the session as stored, with the evals that led nowhere marked out, reaching the model as the same tool-call turns its own evals do (`seon.ctx.wire/eval-msgs`), never as a text blob and never repeating the system message. No parallel store or renderer; it is evaluated as a measured arm before it is built in (plan.md, where it stands).
 
 ### Context is data a render draws from the db (owner, 2026-11-01)
 

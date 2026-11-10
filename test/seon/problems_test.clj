@@ -146,7 +146,7 @@
     (is (= [] (writes o3)) "the answered write is followed by nothing: 500 repeats of a written signature are counted in the fold")))
 
 (deftest an-agent-death-is-recorded-with-its-cause
-  (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (profile/now-ns))
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (random-uuid))
         _ (.mkdirs (java.io.File. (str dir "-agents")))
         _ (spit (str dir "-agents/a1.err") (str (apply str (repeat 3000 "x")) "\nChez: out of memory\n"))
         p (promise)
@@ -626,8 +626,8 @@
 
 (deftest thinking-on-every-assistant-message-says-its-reasoning
   ;; docs/model.md#thinking-is-off-by-default: DeepSeek answers 400 at the first request otherwise, whose first
-  ;; message after the system's is the page eval Seon ran, which no reasoning made
-  (let [inserted {:role "assistant" :content "Seon ran this." :tool-calls [{:id "eval-e1" :code "(my.render/render-ctx)"}]}
+  ;; message after the system's is an eval Seon inserted, which no reasoning made
+  (let [inserted {:role "assistant" :content "Seon ran this." :tool-calls [{:id "eval-e1" :code "(+ 1 2)"}]}
         answered {:role "tool" :tool-call-id "eval-e1" :content "{}"}
         own {:role "assistant" :content "" :reasoning "Square it." :reply 1 :tool-calls [{:id "c1" :code "(+ 1 2)"}]}
         r (assoc req :messages [{:role "system" :content "s"} inserted answered own])

@@ -20,7 +20,7 @@
       (is (not (pdb/store? path)) "refused, it made nothing")
       (d/release (:conn (pdb/open! :lmdb path 0 :db)))
       (is (= path (ts/process-store co)) "made, it is the store")
-      (finally (sh/sh "rm" "-rf" co)))))
+      (finally (seon.lib/remove-tree! co)))))
 
 (deftest a-test-root-is-its-own
   ;; task seon.test-store/a-test-root-is-its-own: root_test's root-answers gave every root on the
@@ -39,7 +39,7 @@
       (spit (str runs "/root.pids") (str pid " " pid "\n"))
       (let [e (is (thrown? ExceptionInfo (ts/start-root! {:store store :main (str "own-b-" (random-uuid)) :runs runs})))]
         (is (= :seon.test-store/runs-in-use (:seon.error/type (ex-data e)))))
-      (finally (sh/sh "rm" "-rf" runs)))))
+      (finally (seon.lib/remove-tree! runs)))))
 
 (deftest a-test-root-runs-scripted-unless-its-test-names-another
   ;; seon.test-store/root-profile: start-root! gave a root the starting process's own profile, so a
@@ -77,7 +77,7 @@
         (let [{:keys [conn seeded?]} (pdb/open! :lmdb path 0 :db)]
           (is seeded? "the new path is made fresh")
           (d/release conn)))
-      (finally (sh/sh "rm" "-rf" dir)))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest n-roots-open-the-process-store-at-once
   ;; task seon.test-store/a-process-root-opens-the-shared-store-under-load: under load one shard's
@@ -96,7 +96,7 @@
                (ts/ask {:port nil :log "lmdb env_open: Invalid argument"} {:op :agents}))))
       (finally
         (doseq [r started :when (:port r)] (ts/stop-root! r))
-        (doseq [r started] (sh/sh "rm" "-rf" (:runs r)) (ts/drop-main! store (:main r)))))))
+        (doseq [r started] (seon.lib/remove-tree! (:runs r)) (ts/drop-main! store (:main r)))))))
 
 (deftest agent-tests-in-one-process-share-its-root
   ;; task seon.test-store/an-agent-test-shares-its-shards-root: a root booted per in-agent test

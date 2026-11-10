@@ -73,7 +73,7 @@ An eval's record is plain data, so the store keeps it: whatever made the respons
 | boundary | (`ns/fn`) | what it records |
 |---|---|---|
 | the agent's REPL: reading and evaluating an agent's form | `seon.repl/eval-code` | a form's read error or evaluation error as an `:err` reply item (the one error map itself, under `:err`; the evaluation of a form past its tick budget is the typed interrupt); the next form's reading goes on after an error, the request ends after an interrupt |
-| a component's render, on any page the walk draws (an agent's own render, unmerged: a key of `@ctx` whose render its branch defines, [ctx](ctx.md)), and a render called inside its hiccup (`[#'seon.render/hiccup opts v]`), which runs when the hiccup is written | `seon.render/render!`; the call written, `seon.web.html/write!` (its place on the page says what threw; the model reads the part as data) | `:seon.render/component-defect` (the render, what it threw, and the thrown error's own data under `:seon.render/threw`: a contract's problems) as the component's part: the page draws it by the error's render, the model reads the error map as data, every other component drawn; the agent goes on |
+| a component's render, on any page the walk draws (an agent's own render, unmerged: a key of `@ctx` whose render its branch defines, [ctx](ctx.md)), and a render called inside its hiccup (`[#'seon.render/hiccup opts v]`), which runs when the hiccup is written | `seon.render/render!`; the call written, `seon.web.html/write!` (its place on the page says what threw; the model reads the part as data) | `:seon.render/component-defect` (the render, what it threw, and the thrown error's own data under `:seon.render/threw`: a contract's problems) as the component's part: the page draws it by the error's render, the model reads the error map as data, every other component drawn; the agent goes on. An entity's model render runs in the same component run in a try of its own at the same edge, so a model render that throws never blanks the person's page: its error is a problem (health) and, in its place in the model's output, what :seon.render/component-defect's own model render answers |
 | a reaction's run, queued by a change (a render is code, and agents write renders: reagent.ratom's _try-capture) | `seon.ratom/Reaction` (its `-run`, checked; `seon.ratom/->Reaction` makes it) | the throw kept as the reaction's state and thrown again at its next deref, so the component or reaction that reads it meets it; flush! goes on with every other queued reaction (`seon.ratom-test/catching`, `exception-recover`) |
 | an agent's definition that breaks Seon's recording of it (`:def` of a var the recording itself calls): the form's vars put back as they were, and that said | `seon.repl/wrap-record`, by `seon.repl/undo-definition!` | `:seon.repl/definition-undone`, the eval's error, the run going on |
 | a turn of the agent's loop: Seon's code meeting the program on the agent's branch as it stands (its status, `seon.turn/status-now`, its draw, its request and its evals: the agent redefined a function or registered a schema they call, Seon's own included), the message saying the cause may be Seon's code or the agent's change; the work's end (`seon.turn/end!`) is outside it, run once on what the turn answered, and root's interrupt passes it as a stop | `seon.turn/work!` and `seon.turn/status-now` (their catches, `seon.turn/turn-error!`) | the one error map as a message from seon on the agent's branch, which its next turn reads as any message; the turn counted; a turn whose status threw (`seon.turn/status-now`, its catch) makes its model call that turn with the message; the second consecutive throw, with no model turn between, ends the agent's work `:error` with that error (its request cannot be drawn). So a turn's own decisions before its model call read facts, never re-run what the agent may have broken: the merge check (```seon.reconcile/hairy```) takes the names the task references from its plan's cites, which the plan's write derived, not from its text re-parsed by the parser (```seon.ref/scan```), which the agent may have changed so that every parse throws: a re-parse would end the agent `:error` before the model read its error; a broken parser then costs only the parts that draw Markdown, each its component's defect, and the model is sent the error (`seon.agent-test/a-broken-parser-reaches-the-model`); its evals, which record their intent unparsed, still answer (a request's evaluation, below) |
@@ -288,7 +288,7 @@ and the verdict cache's count (`evict!`) use it; a new walk of a tree that may h
 The leftover came from tests writing relative to the working directory, which in an agent is the one
 directory every agent shares (`:seon.config.agent/cwd`). A test child now works in a directory of its own
 (`seon.fx/run-dir`, named by its pid), removed by its agent when the child has ended
-(`seon.fx/remove-tree!`; `seon.agent-test/a-test-run-leaves-nothing-in-its-agents-working-directory`), and
+(`seon.lib/remove-tree!`; `seon.agent-test/a-test-run-leaves-nothing-in-its-agents-working-directory`), and
 the wiki fixture of `seon.root-test` links the checkout's `target/` entries but `runs/`, not `target/`.
 
 ## LMDB locks
@@ -314,6 +314,13 @@ neither fill the table nor keep freed pages from reuse. The lock region's format
 (lock type 6, version 3): a process of another build refuses the store with `MDB_VERSION_MISMATCH`,
 so every process on a store runs this build. `bin/check`'s `lmdb-kill` (`native/lmdb_kill.c`) and
 `lmdb-lock` (`native/lmdb_lock.c`) steps prove each claim, case by case.
+
+A directory that may hold a store is deleted through ```seon.lib/remove-tree!``` (the program's one way;
+`bin/remove-tree` the shell's, a plain `rm -rf`). It first closes the stores this process has open under
+it (``konserve.jolt.lmdb/close-envs-under!``), so the process keeps no mapping of deleted files and a
+store made again at the path opens its own; a store another process holds is deleted under it, and that
+process works on its files until it closes them. Nothing of a deleted store is left outside its tree
+(`lmdb-lock` case 7, `seon.db-test/a-deleted-store-leaves-nothing`).
 
 ## LMDB crash safety
 

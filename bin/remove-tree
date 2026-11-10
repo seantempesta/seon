@@ -1,0 +1,6 @@
+#!/bin/zsh
+# bin/remove-tree PATH ...   remove each path and all it holds, as `rm -rf` (a symbolic link removed, never entered):
+# the shell's way to delete a directory that may hold a store; seon.lib/remove-tree! is the program's, which first
+# closes the stores its own process has open there. Nothing of an LMDB store outlives its files: its locks are
+# record locks on its lock file (docs/failure-points.md#lmdb-locks).
+exec rm -rf -- "$@"

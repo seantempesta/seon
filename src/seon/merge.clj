@@ -291,12 +291,33 @@
      (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)]
        (into [] (filter (comp (content-attr das-b das-d) :a)) diff)))))
 
+(defn moves-content?
+  "Whether a commit's resolved ops move main's content: a datom of an attribute a program key's content reads with no
+  declared data (`content-attr`), or of task content a branch carries (carried-platform-attrs). What the writer marks
+  main's commits by (docs/storage.md#mains-content-mark). Cost: the ops, one predicate each."
+  {:malli/schema [:=> [:cat :seon.db/resolved-tx] :boolean]}
+  [ops]
+  (let [content? (content-attr #{} #{})]
+    (boolean (some (fn [[_ _ a]] (or (content? a) (contains? carried-platform-attrs a))) ops))))
+
+(defn same-content?
+  "Whether a and b, two dbs of main, hold the same content, read from main's content mark (:seon.root/content-t on its root
+  entity), which the writer moves in the commit that moves the content and at its start: both carry it and it is equal. A db
+  no writer marked answers false, so it is diffed. Only main's own points are asked: a branch's writes move no mark. Cost:
+  two entity reads, no diff. See docs/storage.md#mains-content-mark."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:maybe :seon.host/db]] :boolean]}
+  [a b]
+  (let [mark (fn [db] (some->> (pdb/eid db :seon.root/id :root) (d/entity db) :seon.root/content-t))]
+    (boolean (and a b (some? (mark a)) (= (mark a) (mark b))))))
+
 (defn content-commit
-  "The commit that stands for main's content at db main: held's, a db of an earlier commit, when no content differs (`content-datoms`), else main's. A commit that moved
-  only records then changes no answer a reader of the content gives, nor its key (docs/render.md#how-the-work-stands). Cost: one descent per content attribute, shared subtrees skipped."
+  "The commit that stands for main's content at db main: held's, a db of an earlier commit, when no content differs (main's
+  content mark is held's, `same-content?`, else `content-datoms`), else main's. A commit that moved
+  only records then changes no answer a reader of the content gives, nor its key (docs/render.md#how-the-work-stands). Cost:
+  two entity reads when the mark answers; else one descent per content attribute, shared subtrees skipped."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db] :uuid]}
   [held main]
-  (d/commit-id (if (and held (empty? (content-datoms held main #{}))) held main)))
+  (d/commit-id (if (and held (or (same-content? held main) (empty? (content-datoms held main #{})))) held main)))
 
 (defn touched-keys
   "Every program key whose content may differ between base and any of dbs (`touched-by`, over

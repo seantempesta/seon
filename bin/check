@@ -149,13 +149,42 @@ step() {
   local name=$1 filter=$2; shift 2
   local log=$OUT/$name.log expect=${EXPECT:-0}
   [[ $name == seed ]] || want ${${name%-write}%-read} || return 0
+  # its bound (bin/prove's plan, SEL/step-bounds: the step-end factor times its median measured ms; a step never measured has
+  # none): past it, its evidence is captured (bin/evidence, with its root's stall state from the port its root wrote beside its
+  # store), then it is ended and red, STEP-OVERRAN, never retried (the owner's fourth clock exception, 2026-11-10:
+  # docs/clocks.md#time-decides-the-owners-exceptions)
+  local bound= W=
+  [[ -n $SEL && -s $SEL/step-bounds ]] && bound=$(awk -v k="${${name%-write}%-read}" '$1 == k { print $2 }' "$SEL/step-bounds")
+  rm -f "$OUT/$name.overran"
   # its wall and CPU seconds kept beside its log (NAME.time: zsh's time, which keeps the exit
   # status); fd 7 (the starter fifo) and fd 3 (the run's token pool) stay bin/check's own
-  { time (SEON_MAIN=check-$name "$@" > "$log" 2>&1 7>&- 3>&-) } 2> "$OUT/$name.time"
-  local st=$?
+  { time (SEON_MAIN=check-$name "$@" > "$log" 2>&1 7>&- 3>&-) } 2> "$OUT/$name.time" 7>&- 3>&- & local sp=$!
+  if [[ -n $bound ]]; then
+    ( trap 'kill $S 2>/dev/null; exit 0' TERM; sleep $(( bound / 1000.0 )) 7>&- 3>&- & S=$!; wait $S || exit 0
+      "$ROOT/bin/evidence" "$OUT/$name-overran" $sp "$(cat "${SEON_STORE:-/nonexistent}/root.port" 2>/dev/null)" > /dev/null 2>&1
+      print -r -- "$bound" > "$OUT/$name.overran"
+      end-tree $sp ) 7>&- 3>&- & W=$!
+  fi
+  wait $sp; local st=$?
+  [[ -n $W ]] && { kill $W 2>/dev/null; wait $W 2>/dev/null }
+  local r=$(sed -n 's/^real \([0-9.]*\).*/\1/p' "$OUT/$name.time" | head -1)
+  [[ -n $SEL && -n $r ]] && printf "%s %.0f\n" "$name" $(( r * 1000 )) >> "$SEL/step-ms"
   if [[ -n $filter ]]; then grep -E "$filter" "$log"; else tail -1 "$log"; fi
-  if (( st != expect )); then failed "$name (exit $st, expected $expect, $log)"; echo "FAILED $name (exit $st, expected $expect)"
+  if [[ -e $OUT/$name.overran ]]; then
+    failed "$name (STEP-OVERRAN: ran past its bound, $(<$OUT/$name.overran) ms; its evidence in $OUT/$name-overran, $log)"
+    echo "FAILED $name: STEP-OVERRAN, ran past its bound of $(<$OUT/$name.overran) ms (:seon.config.check/step-end-factor times its median); evidence in $OUT/$name-overran"
+  elif (( st != expect )); then failed "$name (exit $st, expected $expect, $log)"; echo "FAILED $name (exit $st, expected $expect)"
   else green $name; fi
+  return 0
+}
+# end-tree PID: every process under PID (PID itself, the shell that times the step, reports its end), by their process groups (a held command's is its own), ended at once; bin/check's
+# own group is never one of them. Only what this run started: the tree is read from ps by parent, from PID down.
+end-tree() {
+  local me=$(ps -o pgid= -p $$ | tr -d ' ')
+  local t=($(ps -axo pid=,ppid= | awk -v r="$1" '{ p[$1] = $2 } END { for (x in p) { y = p[x]; while (y != "") { if (y == r) { print x; break } y = p[y] } } }'))
+  local g=($(for k in $t; do ps -o pgid= -p $k; done | tr -d ' ' | sort -u))
+  for x in $g; do [[ $x != $me ]] && kill -KILL -$x 2>/dev/null; done
+  kill -KILL $t 2>/dev/null
   return 0
 }
 
@@ -180,17 +209,17 @@ u-laws() { echo "== laws (every law's sites: catch, clocks, measures, resolution
 u-lmdb-kill() {
   echo "== lmdb-kill (a writer SIGKILLed inside a txn, a dead reader table lock, fork with the writer lock held, killed readers past the table's size, a killed reader's pages, a kill after a sync: the next writes commit and nothing is held or lost)"
   step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill"
-  is-green lmdb-kill && rm -rf "$OUT/lmdb-kill"
+  is-green lmdb-kill && "$ROOT/bin/remove-tree" "$OUT/lmdb-kill"
 }
 u-lmdb-lock() {
   echo "== lmdb-lock (no semaphore, 16 processes on one store, 8 threads over 2 envs of one store, 50 stores in one process, no lock left after a killed writer, a second env's close keeps the first's locks, a deleted store leaves nothing, another lock format refused)"
   step lmdb-lock "" "$ROOT/target/lmdb-lock" "$OUT/lmdb-lock"
-  is-green lmdb-lock && rm -rf "$OUT/lmdb-lock"
+  is-green lmdb-lock && "$ROOT/bin/remove-tree" "$OUT/lmdb-lock"
 }
 u-lmdb-crash() {
   echo "== lmdb-crash (an OS crash at every write point of 40 commits, any subset of the unflushed writes landing torn at 4 KB: the store opens at its last synced commit, key for key, and commits after)"
   step lmdb-crash "" "$ROOT/target/lmdb-crash" "$OUT/lmdb-crash"
-  is-green lmdb-crash && rm -rf "$OUT/lmdb-crash"
+  is-green lmdb-crash && "$ROOT/bin/remove-tree" "$OUT/lmdb-crash"
 }
 # forks: the forks' own suites on Jolt, a process a unit (bin/forks), against test/forks/baseline.edn
 u-forks() { echo "== forks (Datahike's and konserve's own tests on Jolt, each unit's counts against its baseline)"; step forks "FAILED|^FORKS " "$ROOT/bin/forks" }
@@ -303,7 +332,7 @@ unit() {
   # a unit that cannot take its copy of the seeded store fails here, loudly: it never runs on a store its own root seeded
   (( NEEDS )) && { mkdir -p "$SEON_STORE" && cp -c "$STORE/data.mdb" "$SEON_STORE/data.mdb" || { failed "$1 (no copy of the seeded store $STORE)"; print "FAILED $1: no copy of the seeded store $STORE"; return 1 } }
   { u-$1 } > "$OUT/$1.shown" 2>&1
-  grep -q "^$1[ -]" "$OUT/failed" || rm -rf "$SEON_STORE"
+  grep -q "^$1[ -]" "$OUT/failed" || "$ROOT/bin/remove-tree" "$SEON_STORE"
   cat "$OUT/$1.shown"
 }
 mkfifo "$OUT/pool"; exec 3<>"$OUT/pool"; rm "$OUT/pool"
