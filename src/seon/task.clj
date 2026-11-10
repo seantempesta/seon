@@ -67,6 +67,15 @@
   [db decl]
   (into [] (remove :seon.ref/problem-kind) (ref/kept db (ref/cited (texts-citations (cited-texts decl))))))
 
+(defn gone
+  "What declaration decl's text cites (its delimited citations, `text-citations`, a resolve-only word left out: it may name
+  what a plan will make) that db no longer holds, each as its target's identity value: a cite ends with its target
+  (docs/storage.md#the-write-checks-every-entity-it-touches), so the text is what still names it. See
+  docs/health.md#a-task-that-cites-nothing."
+  {:malli/schema [:=> [:cat :seon.host/db [:map [:seon.task/plan {:optional true} [:maybe :string]] [:seon.task/instructions {:optional true} [:maybe :string]]]] [:vector :any]]}
+  [db decl]
+  (into [] (keep #(when-not (:seon.ref/resolve-only %) (let [[a v] (ref/target db %)] (when-not (pdb/eid db a v) v)))) (text-citations db decl)))
+
 (defn cite-tx
   "The cite entity of entity of (a lookup ref, or the tempid of the write that makes it; of-id its identity
   value) for citation c at place order: its target (seon.ref/target on db, the db the write holds: a lookup that resolves

@@ -459,7 +459,10 @@
     ;; was), and its placeholder check reads each ready task's proofs (seon.db/eid per proof): 12 calls that never ran before
     ;; 2026-11-10, ruled by Point in Sean's absence, reported to him: 86 -> 88: dbboot's stale-binary class reads root's source fact (one
     ;; seon.db/eid and one pull per health read), its floor
-    (is (<= (:calls m) 88) "the contracted calls of one health read (88 on the world, 2 of them stale-binary's read of root's source fact, 12 of them the ready tasks' proofs read by uncited-tasks; before that 74: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the fold of the counted classes is one, fold-counted)")))
+    ;; 2026-11-10, citecascade (the owner's yes pending, named in the landing message): 88 -> 160: uncited-tasks reads each
+    ;; ready task's own text for what it cites that is gone (seon.task/gone: its parse, the one reader of a text's citations,
+    ;; and a seek per citation), about 6 calls a ready task; a cite now ends with its target, so the text is where it shows
+    (is (<= (:calls m) 160) "the contracted calls of one health read (88 on the world, 2 of them stale-binary's read of root's source fact, 12 of them the ready tasks' proofs read by uncited-tasks; before that 74: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the fold of the counted classes is one, fold-counted)")))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -563,7 +566,9 @@
                :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched task and its agent's task, the derived classes are carried and read where the two dbs differ; the program's changes come from the moved datoms (seon.merge/delta-changes given them), and the per-task part is the cold index nodes the task scans touch"
                :growth :linear
                :per-n {:ticks 1700 :bytes 10500 :calls 0}
-               :fixed {:ticks 650000 :bytes 3000000 :calls 54}
+               ;; 2026-11-10, citecascade (the owner's yes pending): calls 54 -> 71, uncited-tasks reads each ready task's own
+               ;; text for what it cites that is gone (seon.task/gone), about 6 calls a ready task of the input's
+               :fixed {:ticks 650000 :bytes 3000000 :calls 71}
                :sizes [10 30 100]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
@@ -801,7 +806,9 @@
                ;; fixed bytes re-derived 2026-10-23 (jolt/similar-finds-helpers-by-embedding): 3.01 MB at 10,
                ;; 10.0 MB at 100, 80.2 MB at 1,000 sites; a fixed part near the smallest size's whole cost read
                ;; as steeper growth (task seon.cost/a-speedup-never-reads-as-steeper)
-               :fixed {:ns 19500000 :bytes 17500000 :calls 62}
+               ;; 2026-11-10, citecascade (the owner's yes pending): calls 62 -> 64, uncited-tasks's read of what a ready
+               ;; task's text cites that is gone (seon.task/gone)
+               :fixed {:ns 19500000 :bytes 17500000 :calls 64}
                :sizes [10 30 100]}))
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
@@ -1136,7 +1143,9 @@
                :n "tasks examined: finished design steps and the ready implement steps that need them, each citing"
                :work "the kind and task datoms once, then each implement step's needs walked once; the program's vars among the cites asked of the program once (seon.program/program-names, read from the cites at read time where :seon.task/references stored it at write: 43 calls before, 45 since)"
                :growth :linear
-               :per-n {:ns 50000 :bytes 65000 :calls 4}
+               ;; 2026-11-10, citecascade (the owner's yes pending): calls 4 -> 6 a task, each ready task's own text read for
+               ;; what it cites that is gone (seon.task/gone); measured 124 calls at 20 tasks against 85
+               :per-n {:ns 50000 :bytes 65000 :calls 6}
                :fixed {:ns 500000 :bytes 500000 :calls 5}
                :sizes [20 60 200]}))
 
@@ -1168,6 +1177,26 @@
                                                    :seon.task/plan "The root tile shows what boot loaded."}]))
         rows (into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health db) [:classes :uncited-task :rows]))]
     (is (contains? rows ["app/tile" :no-references]) "a ready :whole task whose plan names nothing the context can pull")))
+
+(deftest a-cite-ends-with-its-target-and-its-task-shows-what-is-gone
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches, docs/health.md#a-task-that-cites-nothing: an import that retracts a var
+  ;; a task cites left the cite without its required target, so the write check refused the whole import (2026-11-10: generated
+  ;; slow-test tasks citing tests, and root on main's older code could not boot). The cite ends with its target on the one path,
+  ;; and the task's plan, which still names the var, is the problem
+  (let [db (t/with (world) (t/task 'app.calc "gone" "Make `app.calc/inc2` add two exactly." #{'app.calc-test/total-sums}))
+        cites #(set (map seon.task/cited-name (seon.task/cites-of % (pdb/eid % :seon.task/id "app.calc/gone"))))
+        files (into {} (for [n ['app.report 'app.calc-test]] [(:ns/file (d/entity db [:ns/name n])) (seon.source/file-text db n)]))
+        calc (str/replace (seon.source/file-text db 'app.calc) #"\n\n\(defn inc2[^\n]*\n" "\n")
+        _ (is (contains? (cites db) 'app.calc/inc2) "the task cites the var")
+        _ (is (not (str/includes? calc "inc2")) "the file the import reads no longer defines it")
+        after (t/with db (seon.source/replace-tx db (assoc files "src/app/calc.clj" calc)))
+        rows (filter #(= "app.calc/gone" (:task %)) (get-in (problems/health after) [:classes :uncited-task :rows]))]
+    (is (nil? (pdb/eid after :var/name 'app.calc/inc2)) "the import is accepted and the var is gone")
+    (is (not (contains? (cites after) 'app.calc/inc2)) "its cite ended with it")
+    (is (empty? (d/datoms after :avet :seon.cite/id "app.calc/gone app.calc/inc2")) "nothing of the cite is left")
+    (is (= #{[:gone ['app.calc/inc2]] [:no-references nil]} (set (map (juxt :reason :gone) rows)))
+        "the task shows that its plan names what no longer exists (and, its one cite gone, that it cites nothing the context pulls)")
+    (is (empty? (filter #(= "app.calc/gone" (:task %)) (get-in (problems/health db) [:classes :uncited-task :rows]))) "before the import it was no problem")))
 
 (defn- var-forms
   "db0 with the vars app.cite/v0..: each in a src namespace, its form src, docstring and kind as given
