@@ -1298,7 +1298,9 @@
     []))
 
 (defn config-refused
-  "The refusal, when tx-data touches a config entry on db and the entries it leaves don't make a config db's schema after it allows; nil otherwise, at the cost of one scan of tx-data. Asked before a branch's write or an import commits. See docs/config.md#a-process-holds-its-branchs-config."
+  "The refusal, when tx-data touches a config entry on db and the entries it leaves don't make a config db's schema after it allows; nil otherwise. It reads
+  only config and schema entries after tx-data, so it applies only their part of it (seon.db/project-tx): one scan of tx-data and a
+  speculation of what it touches, never of the whole import. Asked before a branch's write or an import commits. See docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat :seon.host/db :seon.db/tx-data] [:maybe :map]]}
   [db tx-data]
   (when (some #(if (map? %)
@@ -1307,7 +1309,7 @@
                      (and (= :db/retractEntity (first %)) (:config/key (d/entity db (second %))))))
               tx-data)
     ;; no entries left is nothing stated, as a tree with no config file states nothing (hold!)
-    (let [after (pdb/speculate-db db tx-data)]
+    (let [after (pdb/speculate-db db (pdb/project-tx tx-data #(#{"config" "schema"} (namespace %))))]
       (when-let [es (cfg/entries after)]
         (let [r (cfg/of-entries es (schema-changes after))]
           (when (:seon.error/type r) r))))))

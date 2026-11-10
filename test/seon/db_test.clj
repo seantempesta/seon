@@ -865,7 +865,9 @@
      :per-n {:ticks 7000 :bytes 10500}
      ;; the overrun's :measured is the proof's at 300, its largest size, taken 2026-11-10: 1.63x the ticks and 1.35x the bytes
      ;; of its bound (before, a record at 1,000 of 12.97 M ticks and 17.0 MB, 3.8x what 300 measures, so no regression showed)
-     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :n 300 :measured {:ticks 3416299.0 :bytes 4259728.0}}
+     ;; re-taken 2026-11-10 on the sorted set's upstream fixes and geometric leaf growth: 3,373,602 ticks and 3,527,280 B at
+     ;; 300 (was 3,416,299 and 4,259,728): 1.61x the bound's ticks, 1.12x its bytes
+     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :n 300 :measured {:ticks 3373602.0 :bytes 3527280.0}}
      :sizes [30 100 300]}))
 
 (deftest an-identity-costs-its-seek
@@ -1450,3 +1452,32 @@
     (is (= :seon.db/invalid-datom (:seon.error/type (pdb/invalid-datom db tx (own :int)))) "an int refuses the string")
     (is (nil? (pdb/invalid-datom db tx (own :string))) "and the same name, now a string, accepts it")
     (is (= :seon.db/invalid-datom (:seon.error/type (pdb/invalid-datom db tx (own :int)))) "and is refused again when it is an int again")))
+
+(defn preloaded
+  "preload!'s argument: the world with n plain datoms added."
+  [n]
+  (let [[db tx] (plain-datoms n)] [(d/db-with db tx)]))
+
+(deftest preload-counts-each-index-leaf-by-leaf
+  ;; docs/machine.md#roots-heap: the fork server reads every node of main's indexes once so its agents inherit them
+  ;; decoded. The read is each index's own reduce (a leaf's datoms stepped over, nothing made), and it answers what the
+  ;; three indexes hold. Counting (d/datoms db index) made a lazy cell a datom: 1.2 s of a root's first fork
+  (let [[db tx] (plain-datoms 300)
+        db (d/db-with db tx)]
+    (is (= (+ (count (d/datoms db :aevt)) (count (d/datoms db :avet)) (count (d/datoms db :eavt))) (pdb/preload! db))
+        "the datoms of the three indexes"))
+  (cost/proof
+    {:of 'seon.db/preload! :input 'seon.db-test/preloaded
+     :n "datoms added to the world, each in two or three indexes"
+     :work "per datom per index: one step of the sorted set's reduce"
+     :growth :linear
+     ;; measured 2026-11-10 (seon.cost/measure, the world + n datoms, nodes in memory): 7,579 ticks and 4.5 KB at 100,
+     ;; 23,683 and 14.0 KB at 1,000: 18 ticks and 10 B a datom added. Counting (d/datoms db index) three times on the same
+     ;; dbs: 65,399 ticks and 387 KB at 100, 205,556 ticks and 1.23 MB at 1,000 (78 ticks and 470 B a datom in an index)
+     ;; On Seon's own program db, read from its store in a fresh process (609,913 datoms in the three indexes, measured the
+     ;; same day, one run each): 504 M ticks and 1,836 ms counting d/datoms, 462 M ticks and 1,774 ms by this reduce: 8 percent.
+     ;; The rest is not the walk: it is decoding the leaves, about 750 ticks a datom, paid again on a second pass in that
+     ;; process (495 M ticks), so its node cache did not hold them. This proof bounds the walk; the decode is another row
+     :per-n {:ticks 22 :bytes 13}
+     :fixed {:ticks 7000 :bytes 4500 :calls 1}
+     :sizes [100 300 1000]}))

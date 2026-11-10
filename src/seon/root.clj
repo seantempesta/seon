@@ -1004,7 +1004,8 @@
           {:digest digest :fact (assoc (fact-on db (count files)) :error (:seon.error/message bad)) :error bad}
           (let [tx (into (vec tx) (source/modes-tx db (:modes r)))]
             {:digest digest :tx tx
-             :fact (assoc (fact-on (pdb/speculate-db db tx) (count files))
+             ;; the counts read three attributes after tx: only their part of it is applied (seon.db/project-tx), never the whole import
+             :fact (assoc (fact-on (pdb/speculate-db db (pdb/project-tx tx #{:form/id :ns/name :ns/file :schema/key :schema/file})) (count files))
                           :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))}))))))
 
 (defn baseline-of
@@ -1356,8 +1357,8 @@
   that changed (its text on db, main holding tree's program, is not in the file as the binary's tree has it) is in
   root-reach of db's reach graph, or when db holds no namespace of it (added or gone: what it held is unknown); a path
   of none of these that does not run from the checkout or main (tests, the wiki, task files, bin/'s scripts) is not current. Anything else (tests, the wiki, task files, agent-side code) is current: a process
-  loads it from main's db. The one rule a spawn refusal, the stale-binary row and the gate's build all ask (Point,
-  2026-11-10). Cost: one git diff, one reach graph of db (or g, when the caller holds one), O(changed files' forms).
+  loads it from main's db. The one rule a spawn refusal, the stale-binary row and the gate's build all ask.
+  Cost: one git diff, one reach graph of db (or g, when the caller holds one), O(changed files' forms).
   See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string]] [:maybe :map]]
                   [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string] [:maybe :map]] [:maybe :map]]]}
