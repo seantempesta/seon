@@ -305,15 +305,19 @@
                                             [{:seon.message/id "m1" :seon.message/from "user" :seon.message/body "How is it going?"
                                               :seon.message/to [[:seon.agent/key k]]}]))))
         t (dissoc (:tree (ctx/build (seon.db/index) db (aid db) :b)) :branch :commit :t)
-        s (pulled-schema :seon.db/agent-fact)
-        opts {:registry seon.contract/registry}]
+        ;; the schema made once and its validator compiled once, for both checks: compiling it is seconds (malli's ref
+        ;; validators compile each ref again on every path to it), and each malli.core/validate of the form, with the
+        ;; explain the message evaluated on a pass too, compiled it again: three times, 9.6 s
+        opts {:registry seon.contract/registry}
+        s (malli.core/schema (pulled-schema :seon.db/agent-fact) opts)
+        valid? (malli.core/validate s t)]
     (is (= "lab/ctx" (get-in t [:seon.agent/task :seon.task/id])) "the task under its attribute")
     (is (= 3 (count (:seon.eval/_agent t))) "the evals, by the ref that reaches the agent")
     (is (= 1 (count (:seon.model-call/_agent t))) "the model call the evals name")
     (is (= ["m1"] (names (:seon.message/_to t) :seon.message/id)))
-    (is (malli.core/validate s t opts) (pr-str (some-> (malli.core/explain s t opts) :errors first (select-keys [:in :value]))))
+    (is valid? (when-not valid? (pr-str (some-> (malli.core/explain s t) :errors first (select-keys [:in :value])))))
     (let [e (first (keys (:seon.eval/_agent t)))]
-      (is (not (malli.core/validate s (assoc-in t [:seon.eval/_agent e :seon.eval/code] 42) opts)) "a bad value deep in it fails"))))
+      (is (not (malli.core/validate s (assoc-in t [:seon.eval/_agent e :seon.eval/code] 42))) "a bad value deep in it fails"))))
 
 (deftest an-agents-record-holds-only-its-work
   ;; the owner, 2026-10-29: "The agent's record is facts about its work. Telemetry and derived data live on their
