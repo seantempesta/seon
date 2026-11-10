@@ -745,6 +745,7 @@
         db (mt/with (mt/world)
              (form 'app.fc-test "pure" :test #{})
              (form 'app.fc-test "reads-program" :test '#{seon.test-store/kept-program-store})
+             (form 'app.fc-test "reads-a-doc" :test '#{clojure.repl/doc})
              (form 'app.fc-test "starts-a-process" :test '#{seon.lib/fork!})
              (form 'app.fc-test "reads-schemas" :test '#{seon.reconcile/index})
              (form 'app.fc-test "runs-a-script" :test '#{clojure.java.shell/sh})
@@ -770,6 +771,7 @@
         bin (moved :seon.env/bin) web (moved :seon.env/web) system (moved :seon.env/system) deps (moved :seon.env/deps)
         schemas (moved :seon.env/schemas) src (moved :seon.env/src)]
     (is (src 'reads-program) "a test reading the checkout's whole program takes the src class")
+    (is (src 'reads-a-doc) "and so does a test reading a docstring, which no form's code holds")
     (is (not (src 'pure)) "a pure test takes no src class")
     (is (not (src 'starts-a-process)) "nor does a test that only starts processes")
     ;; bin/check contracts judges every var of src (seon.contract/uncontracted): batch 18 added one uncontracted with
@@ -1351,25 +1353,40 @@
 (deftest a-comment-or-whitespace-edit-moves-no-test
   ;; owner, 2026-11-06: "make sure test reuse is working": a form's own digest was its text's, so a reflowed body or a
   ;; comment reran every test reaching the form. It is the read text less comments and whitespace runs
-  ;; (seon.program/form-ids); a docstring is not left out (it is data some code reads: docs/source.md#what-a-test-takes-of-a-forms-text)
+  ;; (seon.program/form-ids). A docstring is left out too (owner, 2026-11-10: a test's digest takes code, not docstrings):
+  ;; a test whose namespace reads a docstring (clojure.repl/doc, :var/doc, :ns/doc) takes the src class, the program's
+  ;; text, found from its forms, never declared (docs/source.md#what-a-test-takes-of-a-forms-text)
   (let [src "(defn add \"Adds.\" [a b] (+ a b))"
         db (apply record (empty-db) (concat (take 2 calc-srcs)
                                             ['app.pt-calc src
+                                             'app.pt-calc "(defn neg \"Negates.\" [x] (- x))"
                                              'user "(ns app.pt-calc-test (:require [clojure.test :refer [deftest is]] [app.pt-calc :refer [add]]))"
-                                             'app.pt-calc-test "(deftest add-test (is (= 3 (add 1 2))))"]))]
+                                             'app.pt-calc-test "(deftest add-test (is (= 3 (add 1 2))))"
+                                             'app.pt-calc-test "(deftest docs-test (is (= {:var/doc 3} {:var/doc (add 1 2)})))"]))]
     (is (= '#{} (selected db (record db 'app.pt-calc "(defn add \"Adds.\"\n  [a b]\n  ;; commutative\n  (+ a   b))"))) "a comment and whitespace")
     (is (= '#{} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b]\n  (+ a b)) ; tail"))) "a trailing comment")
-    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Sums.\" [a b] (+ a b))"))) "a docstring is data some code reads")
-    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ b a))"))) "a change of code")
-    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ a \"x;y\"))"))) "a string literal holding a ; and spaces is code")
-    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn ^:private add \"Adds.\" [a b] (+ a b))"))) "a visibility")
-    (let [code #(second (program/form-ids 'app.x % 0 (read-string %)))]
+    (is (= '#{} (selected db (record db 'app.pt-calc "(defn add \"Sums.\" [a b] (+ a b))"))) "a docstring")
+    (let [dg (fn [src] (ts/reach-digests db {:env "e" :tree "t" :config {:seon.env/src src}}))
+          a (dg "a") b (dg "b")]
+      (is (= #{'app.pt-calc-test/docs-test} (set (for [[t d] a :when (not= d (b t))] t)))
+          "the test reading a docstring takes the src class, the program's text, and no other test does"))
+    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ b a))"))) "a change of code")
+    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ a \"x;y\"))"))) "a string literal holding a ; and spaces is code")
+    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn ^:private add \"Adds.\" [a b] (+ a b))"))) "a visibility")))
+
+(deftest a-forms-code-is-what-the-reader-read-less-its-docstring
+  ;; seon.program/form-ids case by case: what a form's code digest holds (docs/source.md#what-a-test-takes-of-a-forms-text)
+  (let [code #(second (program/form-ids 'app.x % 0 (read-string %)))]
+      (is (= (code "(def x \"Doc.\" 5)") (code "(def x \"Other.\" 5)")) "a def's docstring")
+      (is (= (code "(ns app.x \"Doc.\" (:require [a.b]))") (code "(ns app.x \"Other.\" (:require [a.b]))")) "a namespace's")
+      (is (not= (code "(def x \"Doc.\")") (code "(def x \"Other.\")")) "a def's only string is its value")
+      (is (not= (code "(defmethod m \"a\" [x] x)") (code "(defmethod m \"b\" [x] x)")) "a method's dispatch value is code")
       (is (= (code "(def x \"a;b  c\")") (code "(def x   \"a;b  c\"   ; why\n)")) "a string keeps its own ; and spaces, the rest is squeezed")
       (is (not= (code "(def x \"a;b  c\")") (code "(def x \"a;b c\")")) "and its spaces are its own")
       (is (= (code "(map #(inc %) [1])") (code "(map\n  #(inc %)\n  [1])")) "a #() prints as the reader made it, however it is laid out")
       (is (= (code "`(let [x# 1] x#)") (code "`(let [x# 1] x#)")) "a syntax quote's gensyms are the reader's counter, not the form's")
       (is (not= (code "(defn ^:private f [] 1)") (code "(defn f [] 1)")) "the name's metadata is part of the code")
-      (is (not= (code "(def x 5)") (second (program/form-ids 'app.y "(def x 5)" 0 '(def x 5)))) "a namespace is part of the digest"))))
+      (is (not= (code "(def x 5)") (second (program/form-ids 'app.y "(def x 5)" 0 '(def x 5)))) "a namespace is part of the digest")))
 
 (deftest a-config-key-added-moves-no-test-that-does-not-name-it
   ;; owner, 2026-11-06: a branch adding one config key reran 1,118 of 1,154 keys, the config map's entry (which lists
