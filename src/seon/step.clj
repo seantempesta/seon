@@ -29,6 +29,28 @@
   (a/go (a/<! (a/timeout (max 1 ms))) (a/>! ch m))
   nil)
 
+(defn timer
+  "A self-timer's armed flag: a host object the proc's state holds, as a step's taken messages
+  are kept, so it is the same whatever state Flow keeps. A flag in the state itself was undone
+  with the state when a step that took the timer's message then threw (Flow keeps the state from
+  before the step), so the timer read as armed for good and was never armed again (root's stall
+  check, docs/failure-points.md). `arm!` puts its message, `fired!` marks it taken."
+  {:malli/schema [:=> [:cat] :seon.host/volatile]}
+  [] (volatile! false))
+
+(defn arm!
+  "Puts m on ch after ms (`put-after!`) unless timer t is armed already; t is armed until `fired!`.
+  Answers nil."
+  {:malli/schema [:=> [:cat :seon.host/volatile :seon.host/chan :int :any] :nil]}
+  [t ch ms m]
+  (when-not @t (vreset! t true) (put-after! ch ms m))
+  nil)
+
+(defn fired!
+  "Timer t's message was taken: the next `arm!` puts another, whatever the step that took it does after. Answers nil."
+  {:malli/schema [:=> [:cat :seon.host/volatile] :nil]}
+  [t] (vreset! t false) nil)
+
 (defn control-op
   "The lifecycle op of a transport message, or nil for ordinary data."
   {:malli/schema [:=> [:cat :any] :seon.step/control]}

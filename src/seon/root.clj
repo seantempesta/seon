@@ -843,7 +843,8 @@
       :spoke (set-agent st o (:agent m) {:stalled nil})
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]
-                     (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
+                     (step/fired! (::stall-timer st))
+                     (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) st (::busy st)))
       st)))
 
 (defn- answer-taken
@@ -905,6 +906,8 @@
                  ;; what this step took, kept across Flow's catch (which keeps the state from
                  ;; before the step): a host object of this proc's own
                  ::taken (volatile! [])
+                 ;; the stall check's timer: armed while an agent has an eval in flight (seon.step/timer)
+                 ::stall-timer (step/timer)
                  ::errors {}
                  ::flow/in-ports {:ext (:ext args) :back (:back args)}
                  ::flow/out-ports {:to-writer (:to-writer args) :events (:events args)}))
@@ -931,11 +934,9 @@
          st (flush-problems st o)
          st (record-agents st o before)
          ;; while an agent has an eval in flight, the stall check runs every half stall bound
-         st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
-              (let [back (:back st)]
-                (step/put-after! back (quot (:stall-ms st) 2) {:op :stall-check})
-                (assoc st ::stall-due true))
-              st)
+         ;; its armed flag is a host object (seon.step/timer): a step that took :stall-check and then threw cannot leave it armed for good
+         _ (when (and (seq (::busy st)) (pos? (:stall-ms st)) (:back st))
+             (step/arm! (::stall-timer st) (:back st) (quot (:stall-ms st) 2) {:op :stall-check}))
          st (if (::update st)
               (do (flow/update! @(:graph st) {:procs (merge (get-in st [:system :procs]) (:agent-procs st)) :conns (get-in st [:system :conns])})
                   (dissoc st ::update))

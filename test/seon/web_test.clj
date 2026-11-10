@@ -178,7 +178,7 @@
   (into {} (for [[id a] index] [id (assoc a :key (str "b1/" (name id)))])))
 
 (def ^:private call-el
-  "The in-flight element a1's call b1/a1/3 has on a page (seon.render.ui/reply-hiccup draws it)."
+  "The in-flight element a1's call b1/a1/3 has on a page (seon.render.ui/model-call-view draws it)."
   "<div id=\"app\"><div id=\"b1_2Fa1_2F3\" class=\"seon-stream\" data-ignore-morph=\"\" data-stream-in=\"b1/a1/3\"></div></div>")
 
 (defn- stream-tabs

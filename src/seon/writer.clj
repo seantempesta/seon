@@ -322,19 +322,20 @@
 
 (defn- writer-one
   "One request into the batch: root's :tx on main joins the batch; any other op first
-  commits the batch (it reads committed heads), then runs."
+  commits the batch (it reads committed heads), then runs. Only the op itself is caught (an
+  interop edge, Datahike, refused: its answer is the error, as data): the batch's commit is
+  outside the catch, so a refused op never hands back a state from before a commit Datahike made."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
   [st o {:keys [op] :as m}]
-  (try
-    (if (= op :tx)
-      ;; the batch's transact checks it (seon.db/transact-checked): a refusal is answered to its requester alone
-      (update st :pend (fnil conj []) m)
-      (other-op (commit-batch st o) o m))
-    (catch Throwable e
-      ;; an interop edge (Datahike) refused: the request's answer is the error, as data
-      ;; with the store's map use: a full map (MDB_MAP_FULL) shows itself against its size
-      (answer o (:dest m) (refused (step/error-msg e) (cond-> {} (pdb/map-use (:cfg st)) (assoc :store (pdb/map-use (:cfg st))))))
-      (dissoc st :pend))))
+  (if (= op :tx)
+    ;; the batch's transact checks it (seon.db/transact-checked): a refusal is answered to its requester alone
+    (update st :pend (fnil conj []) m)
+    (let [st (commit-batch st o)]
+      (try (other-op st o m)
+           (catch Throwable e
+             ;; with the store's map use: a full map (MDB_MAP_FULL) shows itself against its size
+             (answer o (:dest m) (refused (step/error-msg e) (cond-> {} (pdb/map-use (:cfg st)) (assoc :store (pdb/map-use (:cfg st))))))
+             (dissoc st :pend))))))
 
 (defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}
   [ch m]
