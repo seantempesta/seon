@@ -44,7 +44,7 @@ n=${#units}
 J=${SEON_PROOF_JOBS:-2}; (( J > n )) && J=$n
 typeset -A load group where
 # an unmeasured unit weighs the mean of the measured ones (1 when none is), so a first run still spreads its units
-mean=1; (( ${#ms} )) && mean=$(( ${(j:+:)${(v)ms}} / ${#ms} ))
+mean=1; if (( ${#ms} )); then sum=0; for m in ${(v)ms}; do sum=$(( sum + m )); done; mean=$(( sum / ${#ms} )); fi
 for (( j = 1; j <= J; j++ )); do load[$j]=0; group[$j]=""; done
 for unit in ${(f)"$(for u in $units; do print "${ms[$u]:-999999999} $u"; done | sort -k1,1 -n -r -s | awk '{print $2}')"}; do
   best=1; for (( j = 2; j <= J; j++ )); do (( load[$j] < load[$best] )) && best=$j; done
