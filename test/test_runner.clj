@@ -522,9 +522,10 @@
                         [(keyword (str "no-" (name c))) (not-any? #(= c (:class %)) made)]))}))
 
 (defn- tasks-dir
-  "The task files' directory relative to the checkout (:seon.config.root/tasks-dir, which the
-  config holds resolved against it), so it names the same files in a tree extracted elsewhere."
-  [] (str (.relativize (.toPath (io/file (str (config/checkout)))) (.toPath (io/file (config/value :seon.config.root/tasks-dir))))))
+  "Where the tree keeps its task files, relative to it (:seon.config.source/tasks-dir: the tree's layout, never this process's
+  own task dir, :seon.config.root/tasks-dir, which a check run points at its own), so it names the same files in a tree
+  extracted elsewhere."
+  [] (config/value :seon.config.source/tasks-dir))
 
 (defn- with-wiki
   "Program db db with the wiki and the tasks of the checkout at dir, by root's own loaders
