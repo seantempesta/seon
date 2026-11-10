@@ -151,7 +151,7 @@
                  (if (and old (= input (:input old)))
                    [[view patch n] prev placed]
                    (let [[hiccup html kept] (render-unit ix u (:kept old))
-                         view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container) (some? kept) (assoc :kept kept)))]
+                         view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container) (:parent u) (assoc :parent (:parent u)) (some? kept) (assoc :kept kept)))]
                      (cond
                        (= html (:html old)) [[view patch (update n :same inc)] prev placed]
                        (and container (nil? old))
@@ -173,14 +173,22 @@
   (str/replace html #"<!--s:([^>]*?)-->" (fn [[_ id]] (compose (get-in units [id :html] "") units))))
 
 (defn- finish-patch
-  "A patch's appends and prepends as HTML (a container's new rows before what it holds as one
-  prepend, in the layout's order), and the removes of the contained units the layout no longer has."
+  "A patch's units as HTML, each composed with its children's (a unit's slots), a unit inside an ancestor the patch also sends left
+  to it, its appends and prepends (a container's new rows before what it holds as one prepend, in the layout's order), and the removes
+  of the contained units the layout no longer has. See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :map :map [:set :string]] [:tuple :map :map]]}
   [view patch live-ids]
   (let [gone (for [[id u] (:units view) :when (and (:container u) (not (live-ids id)))] id)
         view (update view :units #(apply dissoc % gone))
-        html #(compose (get-in view [:units % :html]) (:units view))]
+        html #(compose (get-in view [:units % :html]) (:units view))
+        ;; a unit sent inside an ancestor this patch also sends (a parent re-drawn carries its children, composed) is not sent again
+        sent (into #{} (concat (map first (:frags patch)) (map second (:appends patch)) (map second (:prepends patch)) (map second (:afters patch))))
+        inside? (fn inside? [id] (when-let [p (get-in view [:units id :parent])] (or (contains? sent p) (inside? p))))
+        own (fn [k xs] (vec (remove #(inside? (nth % k)) xs)))
+        patch (-> patch (update :frags #(own 0 %)) (update :appends #(own 1 %)) (update :prepends #(own 1 %)) (update :afters #(own 1 %)))]
     [view (-> patch
+              ;; each sent unit's html with its children's composed into its slots
+              (update :frags (fn [fs] (vec (for [[id _] fs] [id (html id)]))))
               (update :appends (fn [as] (vec (for [[c el] as] [c (html el)]))))
               (update :prepends (fn [ps] (vec (for [[c group] (group-by first ps)] [c (apply str (map (comp html second) group))]))))
               ;; a unit placed after its sibling: by the sibling's element id
