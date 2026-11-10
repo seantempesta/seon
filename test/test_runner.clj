@@ -287,19 +287,20 @@
             base (sort-by (juxt #(- (cost %)) identity) (keys mg)))))
 
 (defn- write-shards!
-  "tests (var symbols) dealt into at most jobs shards (shards: :seon.config.proofs/jobs for a full run or a merge's
+  "tests (var symbols) dealt into at most jobs shards, named prefix-<i> (shard: the ones bin/test starts once target/seon is
+  built and the process store seeded; early: the ones reaching neither, started as soon as the plan is written) (shards: :seon.config.proofs/jobs for a full run or a merge's
   verification, what their work is worth for what a change reaches: seon.proofs/worth-shards), the generative check's keys mg
   ({key digest}) dealt among them (deal-mg), each written as out/shard-<i>.edn ({:tests [...] :mg {key digest}
   :digests {test digest} :tree t}, t the planned tree's id) for bin/test to run, one process each (bin/test
   removes the last run's first), and each measured test's stall bound as out/stall-bounds (\"<test> <ms>\"
   lines, for bin/stalls). Answers the shard count."
-  [out tests digests tree mg jobs ms]
+  [out prefix tests digests tree mg jobs ms]
   (let [sh (proofs/shards tests jobs ms)
         mg-ms (measured-ms (keys mg))
         floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
         dealt (deal-mg sh mg ms mg-ms)]
     (doseq [[i [ts m]] (map-indexed vector dealt)]
-      (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :mg m :digests (select-keys digests ts) :tree tree})))
+      (write! (str out "/" prefix "-" i ".edn") (sedn/encode {:tests ts :mg m :digests (select-keys digests ts) :tree tree})))
     ;; each measured test's stall bound, k times its own last run, for bin/stalls (a test with no
     ;; record takes the floor, out/stall-ms)
     (write! (str out "/stall-bounds") (apply str (for [[t m] (sort-by key ms)] (str t " " (max floor (* k m)) "\n"))))
@@ -455,9 +456,14 @@
         _ (when (< jobs (config/value :seon.config.proofs/jobs))
             (println (str "prove: " avail " MB free: " jobs " of " (config/value :seon.config.proofs/jobs) " shards at most ("
                           (config/value :seon.config.proofs/shard-mb) " MB a shard above " (config/value :seon.config.proofs/free-floor-mb) " MB kept free)")))
-        n (write-shards! out (if no-test [] run-tests) digests (:tree inputs) (select-keys steps mg-run)
-                         (if all? jobs (proofs/worth-shards run-tests jobs ms (config/value :seon.config.proofs/shard-min-ms)))
-                         ms)
+        ;; the tests that reach no binary run in early shards, started as soon as the plan is written, beside the build and the
+        ;; seed they do not need (972 of 1,168 tests in a batch's prove, 2026-11-10); the rest once both are done. Together at
+        ;; most jobs: early takes what its work is worth, the rest what is left (at least one)
+        {late true early false} (group-by #(contains? binary %) (if no-test [] run-tests))
+        worth #(if all? %2 (proofs/worth-shards %1 %2 ms (config/value :seon.config.proofs/shard-min-ms)))
+        n-early (if (or (seq early) (seq mg-run)) (worth (vec early) jobs) 0)
+        n (+ (if (pos? n-early) (write-shards! out "early" (vec early) digests (:tree inputs) (select-keys steps mg-run) n-early ms) 0)
+             (if (seq late) (write-shards! out "shard" (vec late) digests (:tree inputs) {} (worth (vec late) (max 1 (- jobs n-early))) ms) 0))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
         step-bin (filterv proofs/step-needs-binary? run-steps)
