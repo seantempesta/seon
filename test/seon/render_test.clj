@@ -2132,6 +2132,20 @@
     (is (str/includes? card "working") "how its work stands")
     (is (str/includes? card "href=\"/agent/b2/a3\"") "its page")))
 
+;; docs/users.md#whats-on-screen: a request and its work read as one tree: an agent's tile holds, under it, the tile of each agent doing a
+;; task it started (the task's :seon.task/started-by, reversed in the tile's pull). Cost: n = the agents under one tile (what that agent
+;; started); the reverse join is one VAET seek on the tile's own entity and a pull of each child, so a tile costs its own children, never
+;; the store's agents, and each child tile is its own component, reused by its key
+(deftest a-tile-holds-the-agents-its-agent-started
+  (let [db (sessions-db "b2" [["b2/a2" :a2 :running "seon.print/a-long-string" :parked :task-a]
+                              ["b2/a3" :a3 :running "seon.print/b-short-string" :running :task-b]])
+        work-task (:db/id (:seon.agent/task (d/entity db [:seon.agent/key "b2/a3"])))
+        ;; as production writes a started task: who started it, and the agent working it
+        db (d/db-with db [[:db/add work-task :seon.task/started-by [:seon.agent/key "b2/a2"]] [:db/add work-task :seon.task/agent [:seon.agent/key "b2/a3"]]])
+        kids (fn [hc] (keep #(when (and (vector? %) (= #'ui/session-card (first %))) (nth % 2)) (tree-seq coll? seq hc)))]
+    (is (= ["b2/a3"] (kids (ui/session-card {:seon.db/db db} "b2/a2"))) "the request's tile holds its work agent's")
+    (is (empty? (kids (ui/session-card {:seon.db/db db} "b2/a3"))) "the work agent's holds none")))
+
 (deftest a-users-page-draws-the-agents-it-started
   ;; docs/users.md#whats-on-screen: a user is an agent found by its name; its pull joins the agents it started, and the one list's and card's renders draw them
   (let [db (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a] ["b2/a2" :a2 :idle "x/asks" :parked :task-b] ["b2/a3" :a3 :idle "x/other" :parked :task-c]])
@@ -2392,14 +2406,14 @@
         text (fn [x] (str (:text x) (when (:detail x) (str " · " (:detail x)))))]
     (testing "a task its agent works"
       (is (= "working" (text (st :busy :running))))
-      (is (= "working" (text (st :idle :running))) "between two forms it still works")
+      (is (= "working · between turns" (text (st :idle :running))) "between two forms it still works, and says so")
       (is (= "starting" (text (st :spawning :running))))
       (is (= :live (:tone (st :busy :running)))))
     (testing "parked, or told, only where a message would be taken"
-      (is (= "parked" (text (st :idle :parked))))
-      (is (= "told" (text (st :idle :told))))
-      (is (= "parked" (text (st :ended :parked))) "its process is gone, and a message starts it again")
-      (is (= "parked" (text (st :dead :parked)))))
+      (is (= "parked · waits for a message" (text (st :idle :parked))))
+      (is (= "told · ended, said how" (text (st :idle :told))))
+      (is (= "parked · waits for a message" (text (st :ended :parked))) "its process is gone, and a message starts it again")
+      (is (= "parked · waits for a message" (text (st :dead :parked)))))
     (testing "a capped task is stopped, however idle its process looks"
       (is (= "stopped at its cap · 40 turns" (text (st :idle :cap :seon.agent/max-turns 40))))
       (is (= "stopped at its cap · 38 turns" (text (st :idle :cap :seon.agent/max-turns 40 :seon.agent/ended-turn 38))) "the turns it took when it recorded them")
@@ -2455,6 +2469,8 @@
     (is (str/includes? head "proof-red seon.ref-test/an-alias") "its reason, in the header line")
     (is (not (str/includes? head "waiting")))
     (is (str/includes? side "stopped at its cap") side)
+    (is (str/includes? side ">An alias</span>") "the pill names the agent by its task")
+    (is (not (str/includes? side ">b2/a6<")) "its key only in the title")
     (is (not-any? #(str/includes? side %) ["idle" "waiting"]))
     (is (str/includes? card "stopped at its cap") card)
     (is (not (str/includes? card "idle")))
@@ -2475,7 +2491,7 @@
     (is (str/starts-with? a6 "<li") a6)
     (is (str/includes? a6 "href=\"/agent/b2/a6\"") "by its key")
     (let [[_ inside] (re-find #"<a [^>]*>(.*)</a>" a6)]
-      (is (and (str/includes? inside "○") (str/includes? inside "a6") (str/includes? inside "stopped at its cap")) "its dot, name and status are inside the link")
+      (is (and (str/includes? inside "○") (str/includes? inside "An alias") (str/includes? inside "stopped at its cap")) "its dot, name (its task in words) and status are inside the link")
       (is (str/includes? inside "An alias") "and its task in words"))
     (is (str/includes? a6 "title=\"") "the whole name in a title")
     (is (str/includes? a6 "seon.ref/an-alias") "the title names the task whole")
@@ -3469,6 +3485,37 @@
         to-root (filter #(and (#{:patch :keyframe} (:op %)) (= :root (:view %))) (:to-web @o))]
     (is (seq to-root) (str "the spawn reaches root's tab: " (pr-str (map :op (:to-web @o)))))
     (is (some? st2))))
+;; focus is a ref on the user entity (docs/users.md#whats-on-screen): a tab opening an agent's page writes it, home reads it
+(defn- signed-in-main
+  "Main with the user sean signed in, and focus on agent key focus when given."
+  [main focus]
+  (d/db-with main (cond-> [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"} {:seon.root/id :root :seon.root/signed-in "u"}]
+                    focus (conj [:db/add "u" :seon.user/focus [:seon.agent/key focus]]))))
+
+(deftest the-user-entity-has-a-focus-ref-to-an-agent
+  (let [a (get (d/schema (ts/test-db)) :seon.user/focus)]
+    (is (= :db.type/ref (:db/valueType a)) "an optional ref on the user")))
+
+(deftest opening-an-agents-page-writes-the-signed-in-users-focus
+  (let [[main branch _] (paged-dbs)
+        st (assoc (proc-state (signed-in-main main nil) branch) :watch #{:root})
+        txs (fn [outs] (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= [:focus] (:tag %)) (:to-api outs)))))
+        [st1 o1] (#'p/render-proc st :from-web {:op :views :views #{:root :a3} :tabs 1})]
+    (is (= [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.agent/key "a3"]]] (txs o1)) "the agent's page is the focus")
+    (let [st2 (assoc st :main-db (signed-in-main main "a3") :watch #{:root :a3})
+          [_ o2] (#'p/render-proc st2 :from-web {:op :views :views #{:root :a3} :tabs 2})]
+      (is (empty? (txs o2)) "written only when it changes")
+      (let [[_ o3] (#'p/render-proc st2 :from-web {:op :views :views #{:root :a3 :home} :tabs 2})]
+        (is (= [[:db.fn/retractAttribute [:seon.user/name "sean"] :seon.user/focus]] (txs o3)) "opening home retracts it")))
+    (is (some? st1))))
+
+(deftest home-is-the-users-focus-else-the-user
+  (let [[main _ _] (paged-dbs)
+        user-of (fn [db] (:db/id (d/entity db [:seon.user/name "sean"])))
+        a3 (fn [db] (:db/id (d/entity db [:seon.agent/key "a3"])))]
+    (is (= (user-of (signed-in-main main nil)) (#'p/location (signed-in-main main nil) :home)) "no focus: the user")
+    (is (= (a3 (signed-in-main main "a3")) (#'p/location (signed-in-main main "a3") :home)) "a focus: its agent")))
+
 ;; Stage 2a's walk (docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09): one pass over a pull renders the page and
 ;; the model's messages. A lab schema in a branch's index names each entity's two renders; recognition is the best match of the
 ;; attributes an entity holds; a parent's render orders and places its children; a call placed in a model output is a
@@ -3564,3 +3611,20 @@
     (is (not (str/includes? person "spawn 10")) "no spawn on a person's page")
     (is (not (str/includes? person "all=&gt;")) "no eval-every-agent form")
     (is (str/includes? debug "spawn 10") "root's debug page holds them")))
+
+;; docs/render.md#a-sessions-address-and-the-agents-list: a status keeps its plain word (owner, 2026-11-08) and says beside it what the task
+;; waits on, as a fact about the task (Point, 2026-11-10), so "working" beside an idle process or "parked" beside a dead one reads right
+(deftest a-status-says-what-its-task-waits-on
+  (let [s (fn [status o] (ui/standing {:seon.agent/status status} {:seon.task/outcome o}))]
+    (is (= ["parked" "waits for a message"] ((juxt :text :detail) (s :dead :parked))))
+    (is (= "ended, said how" (:detail (s :idle :told))))
+    (is (= ["working" "between turns"] ((juxt :text :detail) (s :idle :running))))
+    (is (nil? (:detail (s :busy :running))) "a running process is just working")
+    (is (not-any? #(re-find #"(?i)\byou\b" (str (:detail %))) [(s :dead :parked) (s :idle :told) (s :idle :running)]) "no second person")))
+
+;; docs/render.md#one-rendering-system-drawn-from-the-data: a view's units are rendered in main's entity index as root's walk holds it,
+;; never the binary's once main is read, so a render main declares or changes is the one a unit runs
+(deftest a-views-units-render-in-mains-index
+  (let [ix {:forms {} :entity-schemas {} :marker ::mains}]
+    (is (= ix (#'p/units-index {:root-walk {:w {:index (volatile! ix)}}})) "main's, as root's walk holds it")
+    (is (= (seon.db/index) (#'p/units-index {})) "the binary's before main is read")))

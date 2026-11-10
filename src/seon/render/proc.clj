@@ -118,6 +118,13 @@
         draw (let [[hc k] (draw kept)] [hc (h/html hc) k])
         :else (let [hc (render/hiccup {:schema schema :unit id :seon.render/index ix} input)] [hc (h/html hc) nil])))
 
+(defn- units-index
+  "The entity index a view's units are rendered in: main's as root's walk holds it (built from main, again when a schema entry
+  moves), so a render main declares or changes is the one a unit runs; the binary's only before main is read. See
+  docs/render.md#one-rendering-system-drawn-from-the-data."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st] (or (some-> (:root-walk st) :w :index deref) (seon.db/index)))
+
 (defn- step-units
   "Run a layout's units, in the order the layout shows them, against what the view retained: a
   unit whose input is unchanged is skipped; one whose bytes are unchanged sends nothing; a new one
@@ -219,9 +226,25 @@
   (cond (vector? view) (location db (second view))
         (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
         ;; home: whoever is signed in (docs/users.md#whats-on-screen)
-        (= :home view) (:db/id (:seon.root/signed-in (d/entity db [:seon.root/id :root])))
+        (= :home view) (let [u (:seon.root/signed-in (d/entity db [:seon.root/id :root]))] (:db/id (or (:seon.user/focus u) u)))
         (keyword? view) (session-of db (address-of view))
         :else view))
+
+(defn- focus-tx
+  "The transaction that moves the signed-in user's focus to the newest of opened (the views a tab just opened): the agent its page is, or
+  root's (:root or :home) retracting it; nil when none of them names a page, the user is not signed in, or the focus already is that. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:sequential :any]] [:maybe [:vector :any]]]}
+  [db opened]
+  (when-let [u (some-> db (d/entity [:seon.root/id :root]) :seon.root/signed-in)]
+    (let [named (fn [v] (let [x (if (vector? v) (second v) v)]
+                          (cond (#{:root :home} x) ::root
+                                (keyword? x) (let [e (some->> (location db x) (d/entity db))] (when (:seon.agent/key e) (:seon.agent/key e))))))
+          to (last (keep named opened))
+          held (:seon.agent/key (:seon.user/focus u))
+          who [:seon.user/name (:seon.user/name u)]]
+      (cond (nil? to) nil
+            (= ::root to) (when held [[:db.fn/retractAttribute who :seon.user/focus]])
+            (not= to held) [[:db/add who :seon.user/focus [:seon.agent/key to]]]))))
 
 (defn- focus
   "The focus of view's page for its bar and its head (seon.render.ui/focus-of): :root, else the agent its address names on main db:
@@ -705,7 +728,7 @@
                                           (hold st (cond-> {:skeleton (h/html hc) :layout hc :units {}} (= :seon.render/no-location (:seon.error/type out)) (assoc :status 404)))) nil]
     :else
     (let [units (:seon.render/units out)
-          [view patch n] (step-units (seon.db/index) held units)
+          [view patch n] (step-units (units-index st) held units)
           [view patch] (finish-patch view patch (set (map :id units)))
           skel (h/html (:seon.render/hiccup out))
           view (assoc view :skeleton skel :layout (:seon.render/hiccup out))]
@@ -1015,6 +1038,8 @@
                            :else st))
               :from-web (case (:op m)
                           :views (let [w (:views m)
+                                       _ (when-let [tx (focus-tx (:main-db st) (remove #(contains? (:watch st) %) w))]
+                                           (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data tx}} :route [:render :answers] :tag [:focus]}))
                                        ;; a view no tab watches keeps nothing: its retained page, its branch read, its rows
                                        drop #(into {} (filter (fn [[v]] (contains? w v))) %)]
                                    (ask-state (-> (reduce drop-view st (remove #(contains? w %) (keys (:views st))))

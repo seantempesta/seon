@@ -456,6 +456,25 @@
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
 
+(deftest a-persons-ask-and-message-name-the-signed-in-user-and-are-refused-with-none
+  ;; docs/users.md#whats-on-screen: who asks is the user signed in on main, never the OS account
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [api #(#'root/api-proc {:boot "b1" :conn conn :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                                  :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+           ask (fn [m] (let [p (promise) [_ outs] (step #'root/api-proc (api) :ext (assoc m :p p))] [p outs]))
+           txs (fn [outs] (vec (mapcat :tx-data (:to-writer outs))))]
+       (d/transact conn {:tx-data [{:seon.agent/key "a1"}]})
+       (let [[p _] (ask {:op :ask :text "do a thing"})]
+         (is (re-find #"no user is signed in" (str (:seon.error/message @p))) "no user: the ask is refused"))
+       (let [[p _] (ask {:op :message :id :a1 :body "hi"})]
+         (is (re-find #"no user is signed in" (str (:seon.error/message @p))) "no user: the message is refused"))
+       (d/transact conn {:tx-data [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"} {:seon.root/id :root :seon.root/signed-in "u"}]})
+       (let [[_ outs] (ask {:op :ask :text "do a thing"})]
+         (is (some #{[:db/add [:seon.task/id "request/do-a-thing"] :seon.task/started-by [:seon.agent/key "sean"]]} (txs outs)) "the signed-in user started it"))
+       (let [[_ outs] (ask {:op :message :id :a1 :body "hi"})]
+         (is (some #(and (map? %) (= "sean" (:seon.message/from %))) (txs outs)) "from the signed-in user"))))))
+
 (deftest an-end-closed-on-a-live-pid-ends-the-agent-and-answers-its-waiter
   ;; an agent whose end closed can never answer root again: root ends it at once (the kill its :kill
   ;; makes), and its exit, which comes, answers the requests it held through ::dying. No bound is
