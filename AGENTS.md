@@ -45,7 +45,7 @@ Asking the owner, helpers by the shape of the work, briefs and reviews: [session
 ### A session's working rules
 
 - **On start:** read §0's list and the newest entries of `docs/decisions.md`; run `git log --oneline --first-parent -10`, `uptime` and `bin/root status`; tell the owner in a few lines what you will do.
-- **Root follows main through `bin/update`**, which `bin/land` runs; never `bin/root stop/start` on the standing root.
+- **Root follows main through `bin/update`**, never `bin/root stop/start` ([merging](docs/merging.md#a-branch-lands-with-binland)).
 - **A hang is evidence:** capture it before killing the process ([machine](docs/machine.md#reading-a-hang)).
 - **Step back** when about three rounds of tool calls have not answered a question, the work is a detail no step of THE PLAN names, or a fix keeps growing or needs edge cases in several places: write down what is known and tell the owner.
 
@@ -95,7 +95,7 @@ Every need is met by one of these. If one doesn't fit, stop and say so; never ro
 - **A task:** desired state on attributes, observed state as facts, `:needs` between them; one reconciler closes the gap at the cost of what changed. An OS child is an effect, and its exit is a fact.
 - **A process:** an agent is a forked OS process with a real REPL, on its own branch.
 - **A render:** every view, the model's context included, is a render declared on the entity's schema (`:seon.render/hiccup` for html, `:seon.render/model` for the model's messages); one pass over the pull renders both.
-- **An error is data**, flowing to whoever can fix it. It keeps data, never a Throwable whose frames pin the system.
+- **An error is data**, flowing to whoever can fix it. It keeps data, never a Throwable whose frames pin the system (root's `*e` reached 1.08 GB).
 
 **Nothing crashes and nothing hangs** (owner, 2026-10-28: "I want our system to be robust and to have it not crash or hang ever."). Every wait ends, with its value or a typed error saying why it never will. A hang is a defect at the producer that owed the answer, never fixed by a timeout or a watchdog. A failure comes back to the requester as an error value.
 
