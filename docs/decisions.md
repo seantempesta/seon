@@ -304,7 +304,7 @@ Owner, 2026-11-06: "I want edits to go into the database (which is the source of
 
 ### No regex or text parsing; function composition
 
-Owner, 2026-11-06: "I don't want anything hacky here. No regex or parsing text. I want function composition." Stated in AGENTS.md §9 (regex over code) and docs/turn.md#an-eval-can-be-run-again.
+Owner, 2026-11-06: "I don't want anything hacky here. No regex or parsing text. I want function composition." Stated in docs/source.md#a-forms-account-is-the-programs-facts, AGENTS.md §9 (regex over code) and docs/turn.md#an-eval-can-be-run-again.
 
 ### An eval run again replaces itself
 
@@ -616,7 +616,7 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 ### Nothing crashes and nothing hangs; failures are data to the agent (owner, 2026-10-28)
 
-"I want our system to be robust and to have it not crash or hang ever. We can generate errors as data and return them to the agent and they should be able to fix most things or send to root if they need another process to fix it." Every wait ends with its value or a typed error; a failure returns to the requester as an error value; the agent fixes it or messages root. Stated: AGENTS §4.
+"I want our system to be robust and to have it not crash or hang ever. We can generate errors as data and return them to the agent and they should be able to fix most things or send to root if they need another process to fix it." Every wait ends with its value or a typed error; a failure returns to the requester as an error value; the agent fixes it or messages root. Stated: docs/errors.md#nothing-crashes-and-nothing-hangs, AGENTS §4.
 
 ### Every eval's answer says how main differs from the branch (owner, 2026-10-28)
 
@@ -624,7 +624,7 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 ### Derived data may be cached; it is always regenerable from the db at t (owner, 2026-10-28)
 
-"Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T." A derived value (a score, a selection, a render, a diff) may be kept, in memory or in the store, as a cache keyed by its inputs, never by a clock; it may be evicted at any time, and its reader regenerates it from the db as of t. What a turn showed is derived this way: the scores recorded per turn are a cache of the scorer over the db at that turn, never the record. Refines "No derived data in the db or in ctx" (2026-10-26): ctx still holds the db's data only. Stated: AGENTS §5, docs/ctx.md.
+"Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T." A derived value (a score, a selection, a render, a diff) may be kept, in memory or in the store, as a cache keyed by its inputs, never by a clock; it may be evicted at any time, and its reader regenerates it from the db as of t. What a turn showed is derived this way: the scores recorded per turn are a cache of the scorer over the db at that turn, never the record. Refines "No derived data in the db or in ctx" (2026-10-26): ctx still holds the db's data only. Stated: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on, AGENTS §5, docs/ctx.md.
 
 ### Focused sessions; no fan-out (owner, 2026-10-28)
 
@@ -640,7 +640,7 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 ### A kept db value is a reference, {:branch :commit :t} (owner, 2026-10-28)
 
-"I don't want us carrying around large values for no reason. At those points we need to change db's into whatever facts we need to re-create that point in time." A db value is used, then let go; whatever keeps it past its moment keeps `{:branch :commit :t}` and re-creates it. Errors keep data, not a Throwable that pins the system. Stated: AGENTS §4.
+"I don't want us carrying around large values for no reason. At those points we need to change db's into whatever facts we need to re-create that point in time." A db value is used, then let go; whatever keeps it past its moment keeps `{:branch :commit :t}` and re-creates it. Errors keep data, not a Throwable that pins the system. Stated: docs/storage.md#a-kept-db-value-is-a-reference, AGENTS §4.
 
 ### No surprises from main (owner, 2026-10-28)
 
@@ -1351,7 +1351,7 @@ Root, 2026-10-21 (reversible): no owner quote. Stated in: docs/tasks.md#task-con
 
 ### Durability is continuous group commit
 
-Owner, 2026-10-21: "Why have an arbitrary 10ms collection point?" Stated in: AGENTS §5.
+Owner, 2026-10-21: "Why have an arbitrary 10ms collection point?" Stated in: docs/storage.md#durability-is-continuous-group-commit, AGENTS §5.
 
 ## 2026-10-20
 

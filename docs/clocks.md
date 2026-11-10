@@ -4,7 +4,7 @@ Time is measured and recorded, and decides only at the owner's three exceptions;
 
 Work runs because it arrived and parks when there is none; a missing answer is a recorded
 fact (blocked, stalled, dead), never a timer's guess. The exceptions are the cron proc, a
-message's delayed insert, and the kernel's TCP keepalive ([AGENTS.md §4](../AGENTS.md)).
+message's delayed insert, and the kernel's TCP keepalive ([below](#time-decides-the-owners-exceptions)).
 
 `bin/laws clocks` lists every function in `src/` whose code (strings and comments left
 out) sleeps, takes a timeout, holds a deadline or names a `*-MS` constant, and fails on one
@@ -18,6 +18,10 @@ an exemption. A list item names its site before its first colon, and the site's 
 site whose mark is gone must leave the page in the same commit (no check catches it yet: the
 health problem classes, ``jolt/health``). Catches are judged the same
 way in [failure points](failure-points.md).
+
+## If nothing has changed, we do nothing
+
+An idle system does no work: no proc steps, renders, pings, flushes or polls happen unless a message arrived. Work runs because it arrived, is admitted by its measured workload ([below](#time-orders-a-queue-measured-workload)) and parks when there is none. A proc reports its own problems as facts and its changes as events, so health is the absence of open problem facts ([errors](errors.md#problems)) and nothing is polled to learn it; the `idle` check step holds it, an idle root with a tab open stepping nothing ([checks](checks.md#modes)). A clock, timer, sleep, poll, deadline, ping or fixed slot standing in for a dependency or a workload is the mistake this rules out (owner, 2026-10-30: "timeouts just mean we have the wrong design (most of the time)"): a wait ends on its value or on its producer's typed error ([errors](errors.md#nothing-crashes-and-nothing-hangs)).
 
 ## Time decides (the owner's exceptions)
 
