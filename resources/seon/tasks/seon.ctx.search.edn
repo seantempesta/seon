@@ -1,10 +1,10 @@
 [
  {:seon.task/name "a-search-costs-what-it-ranks"
-  :seon.task/plan "Measured 2026-11-08 (Context, on 7888's root, seon.cost/measure, warm): one seon.ctx.search/search of a request's words, :kinds #{:var :section :schema}, k 10, no query vector, costs 10.5M to 16.8M ticks, 37 to 57 MB and 762 to 1,036 contracted calls. On a lab agent it was 35.1 MB of the 50.5 MB of a page drawn cold (seon.render.ui/searched), the largest part of every restart and outside read. Find where it spends (the text ranking seon.doc/tokens, the reference ranking, seon.ctx.search/relevance over its pool, the :more count that scores every candidate) and make it cost what it answers: k hits ranked, not the candidate set. The page now draws a search only once its query has a vector (owner, 2026-11-08), so measure with a vector too.
+  :seon.task/plan "What exists, measured 2026-11-10 on main's program (a lab root, seon.cost/measure, warm; query \"a turn's diff is rendered from the page parts at two bases, never stored\", :kinds #{:var :section :schema}, k 10, no vector): one seon.ctx.search/search costs 8.7M ticks and 25 MB, of which seon.ctx.search/relevance 4.8M (seon.doc/terms tokenizing the 40 pool items' texts, 134k characters, 2.5M; item-text 0.4M; its own scoring 1.7M) and seon.doc/tokens 2.8M (seon.doc/named-hits for the 351 hits above the z cut, 2.0M; the FTS5 query 0.34M). A search answers k hits from a pool of k x related-near.
 
-Done 2026-11-08: the line search (each ranked hit's text read and lower-cased, 7.5M ticks and 29 MB of the text ranking's 8.0M and 32 MB) is now read for a shown hit alone (seon.doc/line-of). Left: relevance over the pool and the rest, about 7.8M ticks a search.
+The change left: (1) relevance's lexical feature reads each pool item's whole text and tokenizes it per search: the term counts of an indexed text are what the text index already holds, so they come from it (an FTS5 vocabulary of each row's terms, or a count per row kept when the row is written), not from re-reading the text; expected about 0.3M for 40 items. (2) tokens names every hit above the z cut (351) when a search shows k and fuses the first k x related-near: name the hits the fusion can reach and count the rest by kind from their attribute, or say why every one must be named.
 
-Proofs, red first: a cost proof of seon.ctx.search/search over a program of n vars at 10, 100 and 1,000, growing no faster than the hits it answers plus the matches it ranks (seon.cost/proof)."
+Proofs: seon.doc-cost-test/a-search-costs-nothing-for-sections-it-does-not-answer-from (sections no hit names cost nothing); to write, red first: a search's cost flat in the length of its pool items' texts."
   :seon.task/kind :work
   :seon.task/proofs #{}}
 ]
