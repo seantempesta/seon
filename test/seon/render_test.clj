@@ -3491,6 +3491,16 @@
       (r/flush! lw nil)
       (is (= (r/openai-compat w) (r/openai-compat lw)) "a root called with no entity (a layout) answers its walk's source entity's model render")
       (r/dispose-walk! lw))
+    ;; the bridge's root before its entity exists: a walk flushed on an empty pull, then the entity, answers the entity's model render
+    (let [e (seon.ratom/atom {})
+          ew (assoc (r/walker {:ref e :changes seon.ctx/changes} (constantly db) [#'lab-layout {}] ix) :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
+      (r/flush! ew nil)
+      (is (= [] (r/openai-compat ew)) "no entity yet: no model output")
+      (reset! e @a)
+      (seon.ratom/flush!)
+      (r/flush! ew nil)
+      (is (= (r/openai-compat w) (r/openai-compat ew)) "the entity appears: the root runs again and answers its model render")
+      (r/dispose-walk! ew))
     (let [h (walk #{:seon.render/hiccup}) _ (r/flush! h nil)]
       (is (= [] (r/openai-compat h)) "a walk asked for the page alone runs no model render")
       (is (not-any? :outs (vals @(:cache h)))))))

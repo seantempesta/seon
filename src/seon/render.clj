@@ -386,6 +386,9 @@
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
             one #(try (let [env' (assoc env :children kids :self k)
+                            ;; the bridge's root (no entity of its own): its source's identity read tracked, so the root runs again
+                            ;; when the entity first appears (a walk made before its agent's entity is on the branch)
+                            _ (when (and ev (empty? children)) (get ev :db/id))
                             ;; a call an output placed answers that output (and what it places), kept as this component's answer to it
                             as (:seon.render/as opts)
                             out (if as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil) (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
