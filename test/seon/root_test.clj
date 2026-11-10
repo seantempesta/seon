@@ -337,33 +337,31 @@
     (is (= (:seed-t three) (:program-t three)) "the next boot neither")
     (is (= (:stale two) (:stale three)) "and the row stands while the binary does")))
 
-(def ^:private spawn-on-it
-  "A request to root: spawn an agent and answer its id, or the refusal's [type message stale-binary] when the spawn is
-  refused; the agent, if one was made, is ended after."
+(def ^:private registry-of-an-agent
+  "A request to root: the schema entry :seon.config.web/streams-buf as an agent forked now holds it (the registry its
+  eval binds, seon.fork-server/warm-start's, under seon.contract/options): [whether 1 is valid, its :min]; the agent is
+  ended after."
   {:op :eval :agent "root"
-   :code (str "(try (let [ag (seon.root/spawn! sys {})] (seon.root/kill! sys ag) [:spawned ag])"
-              " (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (ex-message e) (some? (:binary d))])))")})
+   :code (str "(let [ag (seon.root/spawn! sys {})"
+              " r (try @(seon.root/submit! sys ag \"(let [s (malli.core/deref (malli.core/schema :seon.config.web/streams-buf seon.contract/options))] [(malli.core/validate s 1) (:min (malli.core/properties s))])\")"
+              " (finally (seon.root/kill! sys ag)))]"
+              " (or (:value r) r))")})
 
-(deftest a-root-on-a-binary-of-another-program-forks-no-agent
-  ;; task seon.root/a-boot-resumes-from-the-db, the owner's rule (2026-11-10: "dbboot is supposed to resume if the store is
-  ;; already there ... make sure this rule holds"): a store made by tree A (here a schema entry, :seon.config.web/streams-buf
-  ;; with another bound, seeded) under the binary of tree B. Root resumes it and stays up, but forks no agent: an agent
-  ;; would load main's forms over the binary's code and run the two mixed (2026-11-10, Web's and Context's roots: old
-  ;; contracts against new callers, a fork server lost on its first fork). The refusal names the acts that bring them
-  ;; into agreement: erase the store, reindex from disk, or bin/root next. Red before: the agent forked, holding main's entry
+(deftest a-boot-forks-with-mains-schema-registry
+  ;; task seon.root/a-boot-resumes-from-the-db: main holds a schema entry other than the binary's (here
+  ;; :seon.config.web/streams-buf with another bound, seeded) and its tree has the binary's. The fork server forks from main
+  ;; as the boot left it and builds the registry each agent holds from main's schema changes (seon.fork-server/warm), so
+  ;; an agent forked after the boot holds main's entry: the db's, never the tree's (2026-11-08 every model call of the first
+  ;; agent after a restart failed on a registry that disagreed with main). Red before: the boot imported the tree's entry
   (let [file "resources/seon/schemas/seon.config.web.edn"
         form (get contract/forms :seon.config.web/streams-buf)
         merged (pr-str {:seon.config.web/streams-buf form})
         before (pr-str {:seon.config.web/streams-buf (update form 1 assoc :min 2)})
-        [seed two] (boots-on-a-tree file [before merged] {:also [spawn-on-it]})
-        [type message stale?] (first (:also two))]
+        [seed two] (boots-on-a-tree file [before merged] {:also [registry-of-an-agent]})]
     (is (not= before merged))
     (is (str/includes? (str seed) "SEED OK") (str seed))
-    (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
-    (is (= :seon.root/refused type) (str "the spawn is refused: " (pr-str (first (:also two)))))
-    (is stale? "naming the two programs")
-    (doseq [act ["rm -rf runs/store" "my.root/import!" "bin/root next"]]
-      (is (str/includes? (str message) act) (str "its message names " act)))
+    (is (= 1 (:min (second form))) "the binary's bound, which main's moves")
+    (is (= [false 2] (first (:also two))) (str "an agent forked after the boot holds main's entry: " (pr-str two)))
     (is (true? (:schema-changed? two)) "main's entry differs from the binary's")
     (is (= (:seed-t two) (:program-t two)) "and the boot wrote no program fact")))
 
