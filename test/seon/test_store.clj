@@ -33,14 +33,17 @@
                        (:doc (meta v)) (assoc :var/doc (:doc (meta v))))))))))
 
 (def ^:private store
-  "The test store's config, made and seeded with about 2,000 datoms on first use, and what every agent and template cites
-  (standing-targets-tx)."
+  "The test store's config, made and seeded with about 2,000 datoms on first use, what every agent and template cites
+  (standing-targets-tx) and a stub of the system prompt."
   (delay (let [cfg (pdb/made-cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
                                    :writer pdb/writer-cfg})]
            (d/create-database cfg)
            (let [conn (pdb/connect cfg)]
              (pdb/ids! conn) (pdb/seed! conn 2000)
              (d/transact conn {:tx-data (standing-targets-tx)})
+             ;; a stub of the system prompt, as a root's store holds the real one: every agent's request needs one (seon.ctx.wire/system-text),
+             ;; and a world without it renders an error where the agent's page goes. A test of the prompt itself loads the wiki's
+             (d/transact conn {:tx-data (doc/load-tx @conn "docs" {doc/system-page "# A stub of the system prompt\n\nBe brief."})})
              (d/release conn))
            cfg)))
 

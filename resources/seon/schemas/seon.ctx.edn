@@ -21,19 +21,19 @@
  ;; a record whose identity attributes name entity schemas none of which extends the others (seon.render/entity-schema):
  ;; no one schema names it, so no pattern, render or layout does; the schemas it named
  :seon.render/no-one-schema [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-one-schema]] [:schemas [:vector :qualified-keyword]]]]
- ;; a record no layout draws (seon.render/layout-of): its schema, nil when none names it, names no :seon.render/layout and extends none
- ;; that does; its schema and its identity attributes
- :seon.render/no-layout [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-layout]] [:schema [:maybe :qualified-keyword]] [:identity [:vector :qualified-keyword]]]]
+ ;; an entity no render renders (seon.render/render-var-of): its schema, nil when none names it, names no :seon.render/hiccup and extends none that does
+ ;; its schema and its identity attributes
+ :seon.render/no-render [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-render]] [:schema [:maybe :qualified-keyword]] [:identity [:vector :qualified-keyword]]]]
  ;; a pattern as the walk takes it (seon.render/pattern): '* or the attributes it names, and its joins,
  ;; each with its own pattern under :sub
  :seon.ctx/spec [:map [:star? :boolean] [:attrs [:set :keyword]]
                  [:joins [:vector [:map [:attr :qualified-keyword] [:key :keyword] [:rev? :boolean] [:by [:maybe :qualified-keyword]]
                                    [:reverse? :boolean] [:limit [:maybe nat-int?]] [:sub :map]]]]]
- ;; the walk's state beside a record's map (seon.ctx/node): where each entity is held (its one path),
- ;; every path it sits at ({:db/id e} at all but one), its pattern, what each join [e key] watches
- ;; ([attribute value] keys, :watch) and its reverse (:watching); each a map checked shallowly: a contract
- ;; checked on every call of the walk must not cost what the walk is proven not to (the record's size)
- :seon.ctx/ix [:map [:held {:optional true} :map] [:at {:optional true} :map] [:spec {:optional true} :map]
-               [:watch {:optional true} :map] [:watching {:optional true} :map] [:patching {:optional true} :boolean] [:relocate {:optional true} :boolean]
+ ;; the walk's state beside a record's map (seon.ctx/node): every path each entity sits at (:at {e #{path}}, an entity
+ ;; built whole at each, as d/pull holds it), each path's pattern (:spec {path spec}: two paths can pull one entity by
+ ;; different sub-patterns), what each join [e key] watches ([attribute value] keys, :watch) and its reverse (:watching);
+ ;; each a map checked shallowly: a contract checked on every call of the walk must not cost what the walk is proven not to (the record's size)
+ :seon.ctx/ix [:map [:at {:optional true} :map] [:spec {:optional true} :map]
+               [:watch {:optional true} :map] [:watching {:optional true} :map]
                ;; the entity index (seon.db/index-of) the record's pattern and joins read schemas in; built again by a patch that moved a schema entry
                [:index {:optional true} :map] [:own-index? {:optional true} :boolean]]}
