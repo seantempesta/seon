@@ -946,6 +946,15 @@
      (:ns/name t) [:section [:h3 (str (:ns/name t))] [:p (str "A namespace your plan names." (when (:ns/doc t) (str " " (:ns/doc t))))] [:p "Read it: " [:code (help-form (:ns/name t))]]]
      (:file/path t) [:section [:h3 (:file/path t)] [:p "A file your plan names."] [:p "Read it: " [:code (str "(slurp \"" (:file/path t) "\")")]]])))
 
+(defn cite
+  "Cite c as pulled with its target joined (the declared html render of :seon.cite/cite-fact), by `cite-hiccup`: a wiki section, a
+  function, a schema key, a namespace, a task or a file, at the cite's depth; opts' :lookups and :changing? are what the placement
+  knows of the agent's question (`cited`). A pulled section or var alone is not rendered by this: it prints as the data it is. See
+  docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
+  [{db :seon.db/db lookups :lookups changing? :changing?} c]
+  (cite-hiccup db (ratom/realize c) {:lookups (or lookups []) :changing? (boolean changing?)}))
+
 (defn cited
   "One thing the agent's task or its needs cite (a component over ctx and the db), named by its target k: the cite at ctx path :at
   as ctx holds it, each entity it joined that ctx holds at another path filled from there (:held, e to that path, which the layout
@@ -953,7 +962,7 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]] [:held [:map-of :int [:vector :any]]] [:lookups {:optional true} [:sequential :any]] [:changing? {:optional true} :boolean]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db at :at held :held lookups :lookups changing? :changing?}]
   (when-let [x (get-in c at)]
-    (cite-hiccup db (fill c held (ratom/realize x)) {:lookups (or lookups []) :changing? (boolean changing?)})))
+    (cite {:seon.db/db db :lookups lookups :changing? changing?} (fill c held (ratom/realize x)))))
 
 (defn citations
   "The heading of what the task and its needs cite (a component over ctx): what it is and why it is here. The cites follow it, each a

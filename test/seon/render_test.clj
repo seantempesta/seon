@@ -3494,3 +3494,14 @@
     (let [h (walk #{:seon.render/hiccup}) _ (r/flush! h nil)]
       (is (= [] (r/openai-compat h)) "a walk asked for the page alone runs no model render")
       (is (not-any? :outs (vals @(:cache h)))))))
+
+;; docs/references.md#an-entity-cites: a cite is rendered by its schema's render wherever a walk places it; a pulled var or section alone
+;; is not (it prints as the data it is), since an agent's eval of a pull reads the data it asked for (Context, 2026-11-10)
+(deftest a-placed-cite-is-its-schemas-render
+  (let [ix (seon.db/index)
+        a (seon.ratom/atom {:db/id 1 :c {:db/id 2 :seon.cite/id "c1" :seon.cite/depth :summary :seon.cite/order 0
+                                         :seon.cite/target {:db/id 3 :file/path "README.md"}}
+                            :v {:db/id 4 :var/name 'demo/f :var/ns 'demo}})
+        view (seon.ratom/ref-view a seon.ctx/changes)]
+    (is (= [#'ui/cite {:key "c1"}] (r/entity-render ix (get view :c))) "a cite: its schema's render, keyed by its identity")
+    (is (nil? (r/entity-render ix (get view :v))) "a pulled var: no render, it prints")))
