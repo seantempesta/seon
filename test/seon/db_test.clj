@@ -1426,3 +1426,28 @@
       (is (nil? (pdb/invalid-datom db [{:seon.eval/id "x" :seon.eval/call [:seon.model-call/id "c"]} [:db/retract 1 :seon.task/execution :held] [:db.fn/retractAttribute 1 :seon.task/execution]])) "a ref's lookup, a retraction, a function")
       (is (nil? (pdb/invalid-datom db [{:lab.own/thing (Object.)}])) "an attribute no schema declares: the store's to judge"))))
 
+
+(defn preloaded
+  "preload!'s argument: the world with n plain datoms added."
+  [n]
+  (let [[db tx] (plain-datoms n)] [(d/db-with db tx)]))
+
+(deftest preload-counts-each-index-leaf-by-leaf
+  ;; docs/machine.md#roots-heap: the fork server reads every node of main's indexes once so its agents inherit them
+  ;; decoded. The read is each index's own reduce (a leaf's datoms stepped over, nothing made), and it answers what the
+  ;; three indexes hold. Counting (d/datoms db index) made a lazy cell a datom: 1.2 s of a root's first fork
+  (let [[db tx] (plain-datoms 300)
+        db (d/db-with db tx)]
+    (is (= (+ (count (d/datoms db :aevt)) (count (d/datoms db :avet)) (count (d/datoms db :eavt))) (pdb/preload! db))
+        "the datoms of the three indexes"))
+  (cost/proof
+    {:of 'seon.db/preload! :input 'seon.db-test/preloaded
+     :n "datoms added to the world, each in two or three indexes"
+     :work "per datom per index: one step of the sorted set's reduce"
+     :growth :linear
+     ;; measured 2026-11-10 (seon.cost/measure, the world + n datoms, nodes in memory): 7,579 ticks and 4.5 KB at 100,
+     ;; 23,683 and 14.0 KB at 1,000: 18 ticks and 10 B a datom added. Counting (d/datoms db index) three times on the same
+     ;; dbs: 65,399 ticks and 387 KB at 100, 205,556 ticks and 1.23 MB at 1,000 (78 ticks and 470 B a datom in an index)
+     :per-n {:ticks 22 :bytes 13}
+     :fixed {:ticks 7000 :bytes 4500 :calls 1}
+     :sizes [100 300 1000]}))
