@@ -1268,6 +1268,10 @@
       ;; the read the boot made, made here too, so this test's digest takes it (the boot's own code is the full run's: process-vars)
       (is (= {} (:value (fx/changed-since co (ask "(:tree (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))"))))
           "the tree main holds is the checkout's: nothing differs, untracked files included")
+      (probe! 2 2)
+      (is (= [["src/seon/catchup_probe_2.clj"] false]
+             (ask (str "(let [c (seon.root/catch-up @(:conn sys) " (pr-str co) " {:fact? false})] [(:paths c) (boolean (some :seon.root/source (filter map? (:tx c))))])")))
+          "with :fact? false (a session's files as a branch) the same files are indexed and no source fact moves")
       ;; a merged task main holds unsynced (its entry declared) whose change is probe 1's file
       (is (map? (ask (str "@(seon.root/transact-main! sys [{:seon.task/id \"t/m\" :seon.task/ns 't :seon.task/name \"m\" :seon.task/plan \"p\""
                           " :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work :seon.task/outcome :merged"
