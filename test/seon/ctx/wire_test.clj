@@ -5,7 +5,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.ctx.search :as search] [seon.ctx.session :as session] [seon.ctx.status :as status] [seon.ctx.wire :as wire] [seon.print :as print]
             [seon.doc-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.doc :as doc] [seon.judge] [seon.ctx :as ctx] [seon.fixtures] [seon.render :as render] [seon.render.ui] [seon.web.html] [my.test :as t]
-            [seon.print.select :as select] [seon.ratom] [clojure.walk] [clojure.string :as str] [seon.lib] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model] [seon.config] [clojure.data.json]))
+            [seon.print.select :as select] [seon.ratom] [clojure.walk] [clojure.string :as str] [seon.lib] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model] [seon.config] [clojure.data.json] [seon.render-cost-test]))
 
 (defn- ns-fact
   "Var v's namespace with its file, as a store records it: a program namespace's under src/, a
@@ -2106,3 +2106,20 @@
     (is (not (str/includes? closed "39999")) "closed: within its budget")
     (is (< (count closed) (count opened)))))
 
+
+;; docs/storage.md#collection: a turn's basis past what collection kept names a commit the store no longer holds, so its point is read
+;; as of its t (seon.ctx.wire/db-at); the page advanced from it to the next basis (seon.ctx/moved's d/datoms-diff of an as-of value
+;; and a commit's) answers the same edits as from the commit itself, never a defect where the diff goes
+(deftest a-page-advanced-from-a-collected-basis-answers-its-diff
+  (ts/test-branch!
+    (fn [_ conn]
+      (binding [seon.render-cost-test/*conn* conn]
+        (let [[_ ix a p0] (seon.render-cost-test/newest-pair-of 3)
+              ;; the agent's state moved after the newest turn's basis: a part the page shows (seon.render.ui/agent-state)
+              _ (d/transact conn [{:db/id a :seon.agent/status :ended}])
+              db @conn p1 {:branch :b :commit (d/commit-id db) :t (:max-tx db)}
+              collected (assoc p0 :commit (random-uuid))
+              held (wire/page-edits-between db ix a p0 p1)]
+          (is (nil? (d/commit-as-db (pdb/store-of db) (:commit collected))) "the store holds no such commit: its point is read as of its t")
+          (is (seq held) "the state moved the page")
+          (is (= held (wire/page-edits-between db ix a collected p1)) "from the collected basis: the same edits"))))))
