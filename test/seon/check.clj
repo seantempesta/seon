@@ -1973,24 +1973,29 @@
 
 (defn seed
   "The one store bin/check is given (:seon.config.root/store-path; SEON_STORE names another),
-  opened before any step boots: created and seeded with about n datoms on :db when missing or past
-  :seon.config.proofs/check-store-max-bytes, else as it is, and, when seeded, what every agent and template cites
-  (seon.test-store/standing-targets-tx, the test store's same targets: a cite names what exists, docs/references.md#an-entity-cites,
-  so a step's merge task, whose instructions cite my.branch/merge-main!, is written as on main). Each step's root then works on a
-  branch of it, its own main (seon.db/open!)."
+  opened before any step boots: created and seeded with about n datoms on :db when missing, and, when seeded, what every
+  agent and template cites (seon.test-store/standing-targets-tx, the test store's same targets: a cite names what exists,
+  docs/references.md#an-entity-cites, so a step's merge task, whose instructions cite my.branch/merge-main!, is written as on
+  main). The checks' own store (:seon.config.proofs/check-store) is output: keyed by what its seed writes and remade past
+  :seon.config.proofs/check-store-max-bytes. A store named otherwise is the caller's, opened as given and never removed.
+  Each step's root then works on a branch of it, its own main (seon.db/open!). See docs/checks.md#modes."
   [n]
   (let [path (seon.config/value :seon.config.root/store-path)
-        ;; the store follows its seed (AGENTS section 5, a cache keyed by its inputs): path is a link to
+        own? (= path (seon.config/value :seon.config.proofs/check-store))
+        targets (ts/standing-targets-tx)
+        ;; the checks' own store follows its seed (AGENTS section 5, a cache keyed by its inputs): path is a link to
         ;; path-<digest of what the seed writes>, so a changed seed opens a fresh store and the old one is removed
         ;; (seon.test-store/kept-store!), never read
-        targets (ts/standing-targets-tx)
-        keyed (ts/kept-store! path (subs (lib/digest (pr-str [seon.db/schema-digest (seon.db/seed-tx (parse-long (str n))) targets])) 0 8))
-        _ (remove-store-past! keyed (seon.config/value :seon.config.proofs/check-store-max-bytes))
+        at (if own?
+             (doto (ts/kept-store! path (subs (lib/digest (pr-str [seon.db/schema-digest (seon.db/seed-tx (parse-long (str n))) targets])) 0 8))
+               (remove-store-past! (seon.config/value :seon.config.proofs/check-store-max-bytes)))
+             path)
         t0 (profile/now-ns)
-        ;; made (whole or not at all) at keyed itself, then path linked to it for every step's root to open
-        {:keys [seeded? conn]} (seon.db/open! :lmdb keyed n :db)
-        _ (java.nio.file.Files/createSymbolicLink (.toPath (java.io.File. ^String path)) (.toPath (.getAbsoluteFile (java.io.File. ^String keyed)))
-                                                  (make-array java.nio.file.attribute.FileAttribute 0))
+        ;; made (whole or not at all) at its keyed path, then path linked to it for every step's root to open
+        {:keys [seeded? conn]} (seon.db/open! :lmdb at n :db)
+        _ (when own?
+            (java.nio.file.Files/createSymbolicLink (.toPath (java.io.File. ^String path)) (.toPath (.getAbsoluteFile (java.io.File. ^String at)))
+                                                    (make-array java.nio.file.attribute.FileAttribute 0)))
         _ (when seeded? (d/transact conn {:tx-data targets}))
         ms (lib/r2 (profile/ms-since t0))
         datoms (count (d/datoms @conn :eavt))

@@ -203,7 +203,9 @@
 
 (deftest a-failed-seed-says-failed
   ;; a single mode's seed that fails (its store a regular file, which no store opens) prints why
-  ;; and the mode's verdict line; before, `run seed 2000 > /dev/null || exit 1` exited 1 with nothing
+  ;; and the mode's verdict line; before, `run seed 2000 > /dev/null || exit 1` exited 1 with nothing.
+  ;; A store SEON_STORE names is the caller's (docs/checks.md#modes): keying the checks' own store once
+  ;; removed it and seeded over it, CONFIG OK
   (let [dir (seon.config/checkout)
         path (str dir "/target/runs/check-test-not-a-store-" (random-uuid))
         _ (spit path "not a store")
@@ -213,6 +215,7 @@
       (is (not= 0 (:exit run)))
       (is (= "CONFIG FAILED (seed)" (last lines)) (:out run))
       (is (< 1 (count lines)) "the seed's own output says why")
+      (is (= "not a store" (slurp path)) "and the store the caller named is never removed or seeded over")
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-stale-binary-is-refused
