@@ -74,7 +74,7 @@ What a session does from its first command to its last.
 
 - **Combine your own ready branches,** prove once and land once. **Never wait on a landing:** start the next change in a new worktree branched from the landing branch, and never touch a worktree while its `bin/land` runs.
 - **A merge that completes a task** removes the task's entry and says `Completes: ns/name` ([merging](docs/merging.md#a-merge-says-what-it-completes)).
-- **No regressions** (owner, 2026-10-26: "don't accept regressions for no reason"): a number that got worse is refused unless the message names its reason and who follows it up. A cost bound moves only with the owner's yes.
+- **No regressions** (owner, 2026-10-26: "don't accept regressions for no reason"): a number that got worse is refused unless the message names its reason and who follows it up. A cost bound moves only with the owner's yes, and a new `:overrun` on a cost proof is added only with his yes.
 - **What a new design replaces goes with it** (tasks, wiki text, pointers); code with no caller is cut only with the owner's go.
 
 **Testing: compute only what is needed.**

@@ -135,6 +135,24 @@
       (is (= [] (:errors (program/load-all! db))))
       (is (true? (bound? 'x.rnt-thing-test/helper))))))
 
+(deftest a-test-namespace-loads-whole-from-the-tree-main-was-imported-from
+  ;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: a test namespace whose forms are all its file's is loaded whole
+  ;; by require (compiled once through Jolt's AOT cache), its file found under the tree main's program was imported from, as main
+  ;; states it on root's :seon.root/source fact. Read from the process's config instead, a root given its source as start!'s
+  ;; options (every bin/check mode, boot-twice, a cycle) held none, and its fork server loaded all 77 test namespaces form by
+  ;; form: 12.2 s of its first fork against 1.06 s whole (2026-11-10). bin/test, like those roots, sets no source root.
+  (let [path "test/seon/required_whole.clj"
+        files {path (slurp (str here "/" path))}
+        db (d/db-with (empty-db) (source/import-tx (empty-db) files))
+        db (d/db-with db [{:seon.root/id :root :seon.root/source {:root here :files 1 :forms 2 :ms 0}}])]
+    (is (nil? (get config/config :seon.config.source/root)) "this process names no source root, as a check mode's root does")
+    ;; a shard loads test/'s namespaces as it plans: this one is taken out first, as a fork server holds none of them
+    (remove-ns 'seon.required-whole)
+    (let [lf (program/live-forms db)
+          [whole errs] (#'program/required! db lf lf)]
+      (is (= [] errs))
+      (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from"))))
+
 (deftest a-config-entry-writes-back-only-its-own-bytes
   ;; docs/source.md#a-program-file: the config file is one entity per entry, each form its exact text with its tags unread, and a write-back changes only what an entry changed
   (let [p config/shipped-file

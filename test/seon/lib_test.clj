@@ -136,43 +136,11 @@
   ;; first, a preemption there switched the child to the scheduler over the parent's queue, which ran a parent's ready fiber in
   ;; the child (exit 7 here), or, once the reset had marked them, died of "fiber in unexpected state forked" (bin/check scale,
   ;; 2026-11-10: an agent exited 1 with nothing on its stderr). Forced: the smallest quantum, ready fibers queued behind each fork
-  ;; the forks are made in a child of this process that runs as a main-carrier program (its fibers on its one thread, as a root's
-  ;; boot and an agent do), since a shard has threads of its own; that child answers 0 when every one of its forks did
-  (let [run (fn []
-              (jolt.host/main-carrier-run!
-                (fn []
-                  (jolt.host/fiber-preempt-ticks-set! 100)
-                  ;; the quantum is armed at a dispatch: yield once so this fiber runs under the small one
-                  (jolt.host/fiber-yield)
-                  (let [me (lib/c-getpid)
-                        ;; fibers that are always ready behind the forking one, as a root's procs are: in a child they are the parent's
-                        _ (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when (not= me (lib/c-getpid)) (lib/c-exit 7)) (jolt.host/fiber-yield) (recur)))))
-                        exits (vec (for [_ (range 50)]
-                                     (lib/fork! {:child #(lib/c-exit 0) :parent lib/wait-status :refused (fn [n] {:refused n})})))]
-                    (lib/c-exit (if (= {{:exit 0} 50} (frequencies exits)) 0 9))))))]
-    (is (= {:exit 0} (lib/fork! {:child run :parent lib/wait-status :refused (fn [n] {:refused n})}))
-        "every child of 50 reset itself and ran only its own code (9: one did not; before the fix all 50 ran a parent's fiber)")
-    ;; the same through fork!'s double fork (a clone: the middle is reaped, the grandchild is nobody's child, so each says
-    ;; what ran in it by a line in a file): the grandchild keeps the reset its middle made, and nothing of the parent's runs
-    (let [f (str (config/checkout) "/target/tmp/fork-reset-" (random-uuid))
-          say (fn [w] (spit f (str w "\n") :append true))
-          run2 (fn []
-                 (jolt.host/main-carrier-run!
-                   (fn []
-                     (jolt.host/fiber-preempt-ticks-set! 100)
-                     (jolt.host/fiber-yield)
-                     (let [me (lib/c-getpid)
-                           ready? (volatile! true)
-                           ;; every grandchild holds w until it exits, so r's end of file is their exits: the wait is on that
-                           [r w] (sock/socketpair)]
-                       (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when @ready? (when (not= me (lib/c-getpid)) (say "parent") (lib/c-exit 7)) (jolt.host/fiber-yield) (recur))))))
-                       (dotimes [_ 50] (lib/fork! {:double? true :child #(do (say "own") (lib/c-exit 0)) :parent identity :refused (fn [n] (say (str "refused " n)))}))
-                       ;; the ready fibers end here: nothing of this process is left spinning when its main fiber waits and exits
-                       (vreset! ready? false)
-                       (sock/close! w)
-                       (let [c (sock/conn r)] (loop [] (when-not (= :eof (sock/recv! c)) (recur))))
-                       (lib/c-exit 0)))))]
-      (.mkdirs (.getParentFile (java.io.File. f)))
-      (is (= {:exit 0} (lib/fork! {:child run2 :parent lib/wait-status :refused (fn [n] {:refused n})})))
-      (is (= {"own" 50} (frequencies (str/split-lines (try (slurp f) (catch Exception _ ""))))) "each of 50 grandchildren ran its own code and nothing of the parent's")
-      (.delete (java.io.File. f)))))
+  ;; (seon.check/fork-cases "fork-reset"). The forks are made in a fresh process of the binary, on its main carrier (its fibers on
+  ;; its one thread, as a root's boot and an agent do): forked from a copy of a shard (a 2.9 GB footprint, 4,000 regions) the
+  ;; same 31 forks took 18-164 s against ~1 s alone (the batch's proves, 2026-11-10)
+  (let [{:keys [forks doubles] :as r} (fork-case "fork-reset")]
+    (is (= {{:exit 0} 10} forks)
+        (str "every child of 10 reset itself and ran only its own code (exit 7: one ran a parent's fiber; before the fix all of them, 50 of 50 when it forked 50, did): " (pr-str r)))
+    (is (= {"own" 10} doubles) (str "each of 10 grandchildren of a double fork ran its own code and nothing of the parent's: " (pr-str r)))))
+
