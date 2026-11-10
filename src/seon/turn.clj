@@ -342,23 +342,15 @@
           (and merge? (or (not whole?) (seq (:unmerged s)))) (update :merge-turns inc))))))
 
 (defn context-block
-  "The request of task as a model is sent it on this branch now: a read runs no proof and waits on none (their verdicts are the status's). What an
-  outside agent working the task reads, the system prompt, its conversation and its page, as one text, recorded as a read of the agent
-  (origin :outside, id \"<agent key>/read-<k>\", k the agent's own count of reads: a read moves no turn,
-  docs/turn.md#the-turn-is-a-number). It also makes this process work task as run, so the my.* functions act
-  on it. take?: the read is the run's turn (its
-  model is outside): it takes the messages delivered and Seon shows the page as an eval, as before a model's turn; else it is an
-  observer's, and leaves both for the model's next turn. wire?: the request body as JSON, the bytes a provider is sent
-  (seon.ctx.wire/wire-turn over the read's basis), for the text a person reads. See docs/server.md#working-a-task-from-a-worktree."
+  "The request of task as a model is sent it on this branch now, as one text: the system prompt, its conversation and its page.
+  take?: the read is the run's turn (its model is outside): this process works task, takes the messages delivered, shows the
+  page, and records the read as a model call (id \"<agent key>/read-<k>\"); else an observer's, which writes nothing. wire?:
+  the request body as JSON (seon.ctx.wire/wire-turn). A read runs no proof. See docs/turn.md#an-outside-agent."
   {:malli/schema [:function [:=> [:cat :seon.task/id :boolean] :string] [:=> [:cat :seon.task/id :boolean :boolean] :string]]}
   ([task take?] (context-block task take? false))
   ([task take? wire?]
-   (let [_ (begin! task)
+   (let [_ (when take? (begin! task))
          k (:key @agent/state)
-         ;; the agent's own count of reads, from the branch: a process, a run or a wake does not restart it
-         n (inc (or (d/q '[:find (max ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]]
-                         (agent/db) (pdb/eid (agent/db) :seon.agent/key k))
-                    0))
          turn (inc (agent/turn-now))
          ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
          _ (deliver! take?)
@@ -369,16 +361,24 @@
          max-turns (or (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key k]))
                        (cfg/value :seon.config.agent/max-turns))
          ;; the turn a model would take now: every record before it is in the request
-         basis (assoc (basis! task turn max-turns :outside true) :agent k)
+         ;; an observer's: the branch as it is, nothing committed for it
+         basis (assoc (if take?
+                        (basis! task turn max-turns :outside true)
+                        (let [db (agent/db)] {:commit (d/commit-id db) :t (:max-tx db) :task task :turn turn :max-turns max-turns :origin :outside :merge? true}))
+                      :agent k)
          walk (repl/page-walk)
          db (agent/db)
          {:keys [messages]} (wire/render db basis {:walk walk})
          ;; as a person reads it: the system prompt, then each record as the call made and its result
          text (wire/read-text db basis messages wire?)]
-     ;; the read is a model call of this agent, as a model turn's is: what it was built from and what it cost
-     (agent/transact! [(cond-> {:seon.model-call/id (lib/call-id k (str "read-" n)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
-                                :seon.model-call/origin :outside :seon.model-call/basis basis}
-                         true (assoc :seon.model-call/sent-hash (lib/digest (sedn/encode messages))))])
+     ;; the run's turn read is a model call, as a model turn's is; its number the agent's own count of reads on the branch
+     (when take?
+       (let [n (inc (or (d/q '[:find (max ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]]
+                             (agent/db) (pdb/eid (agent/db) :seon.agent/key k))
+                        0))]
+         (agent/transact! [{:seon.model-call/id (lib/call-id k (str "read-" n)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n
+                            :seon.model-call/origin :outside :seon.model-call/basis basis
+                            :seon.model-call/sent-hash (lib/digest (sedn/encode messages))}])))
      text)))
 
 (defn outside-reply!
