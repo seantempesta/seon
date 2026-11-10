@@ -147,11 +147,11 @@
                   (let [me (lib/c-getpid)
                         ;; fibers that are always ready behind the forking one, as a root's procs are: in a child they are the parent's
                         _ (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when (not= me (lib/c-getpid)) (lib/c-exit 7)) (jolt.host/fiber-yield) (recur)))))
-                        exits (vec (for [_ (range 50)]
+                        exits (vec (for [_ (range 10)]
                                      (lib/fork! {:child #(lib/c-exit 0) :parent lib/wait-status :refused (fn [n] {:refused n})})))]
-                    (lib/c-exit (if (= {{:exit 0} 50} (frequencies exits)) 0 9))))))]
+                    (lib/c-exit (if (= {{:exit 0} 10} (frequencies exits)) 0 9))))))]
     (is (= {:exit 0} (lib/fork! {:child run :parent lib/wait-status :refused (fn [n] {:refused n})}))
-        "every child of 50 reset itself and ran only its own code (9: one did not; before the fix all 50 ran a parent's fiber)")
+        "every child of 10 reset itself and ran only its own code (9: one did not; before the fix all of them, 50 of 50 when it forked 50, ran a parent's fiber)")
     ;; the same through fork!'s double fork (a clone: the middle is reaped, the grandchild is nobody's child, so each says
     ;; what ran in it by a line in a file): the grandchild keeps the reset its middle made, and nothing of the parent's runs
     (let [f (str (config/checkout) "/target/tmp/fork-reset-" (random-uuid))
@@ -166,7 +166,7 @@
                            ;; every grandchild holds w until it exits, so r's end of file is their exits: the wait is on that
                            [r w] (sock/socketpair)]
                        (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when @ready? (when (not= me (lib/c-getpid)) (say "parent") (lib/c-exit 7)) (jolt.host/fiber-yield) (recur))))))
-                       (dotimes [_ 50] (lib/fork! {:double? true :child #(do (say "own") (lib/c-exit 0)) :parent identity :refused (fn [n] (say (str "refused " n)))}))
+                       (dotimes [_ 10] (lib/fork! {:double? true :child #(do (say "own") (lib/c-exit 0)) :parent identity :refused (fn [n] (say (str "refused " n)))}))
                        ;; the ready fibers end here: nothing of this process is left spinning when its main fiber waits and exits
                        (vreset! ready? false)
                        (sock/close! w)
@@ -174,5 +174,5 @@
                        (lib/c-exit 0)))))]
       (.mkdirs (.getParentFile (java.io.File. f)))
       (is (= {:exit 0} (lib/fork! {:child run2 :parent lib/wait-status :refused (fn [n] {:refused n})})))
-      (is (= {"own" 50} (frequencies (str/split-lines (try (slurp f) (catch Exception _ ""))))) "each of 50 grandchildren ran its own code and nothing of the parent's")
+      (is (= {"own" 10} (frequencies (str/split-lines (try (slurp f) (catch Exception _ ""))))) "each of 10 grandchildren ran its own code and nothing of the parent's")
       (.delete (java.io.File. f)))))

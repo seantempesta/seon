@@ -196,15 +196,6 @@
   {:malli/schema [:=> [:cat :any] :seon.host/schema]}
   [?schema] (m/schema ?schema options))
 
-(clojure.core/defn held
-  "The compiled schema the registry in effect holds under name k, the instance itself, or nil when it names none: a
-  branch's own (malli's dynamic registry, bound by an agent's REPL) before the platform's. A value checked against a
-  name many times asks this, never `schema`: (m/schema k) of a name makes a new reference to the held schema on every
-  call, and the validator malli keeps on a schema instance is then made again for each value (seon.db/invalid-datom
-  paid 1,105 ticks and 5.3 KB a datom for it). See docs/checks.md#contracts-armed-at-definition."
-  {:malli/schema [:=> [:cat :any] [:maybe :seon.host/schema]]}
-  [k] (mr/schema (:registry options) k))
-
 ;; ---- invalid: malli's report -> the error map, thrown ---------------------------------
 
 (clojure.core/defn problems
@@ -343,9 +334,7 @@
 (defn valid?
   "Does v satisfy the registered schema (or form) s?"
   {:malli/schema [:=> [:cat :any :any] :boolean]}
-  ;; a registered name is asked of the instance the registry holds, whose validator malli keeps on it: (schema s) of a
-  ;; name makes a new reference, and its validator, on every call
-  [s v] (m/validate (or (when (keyword? s) (held s)) (schema s)) v))
+  [s v] ((m/validator (schema s)) v))
 
 (defn fits?
   "Does v satisfy schema key k, one this process holds? A stored value outlives the schema it was written under, and a branch's own key is unknown elsewhere: such a value is data, for the printer. See docs/render.md#the-page."
