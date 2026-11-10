@@ -565,7 +565,7 @@
 
 (defn required-files
   "Files ({relative path text}) with the files db holds of what they require, and so on, for each namespace loaded? says this process hasn't: analyzing a file runs its ns form, and a
-  namespace no source root reaches (test/'s, in a root) is set up only by reading it first, as a whole tree's read does. Their text is db's, so reading them writes nothing. See docs/source.md#mains-program-follows-the-tree."
+  namespace no source root reaches (test/'s, in a root) is set up only by reading it first, as a whole tree's read does. Their text is db's, so reading them writes nothing. See docs/source.md#indexing-a-tree."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] ifn?] [:map-of :string :string]]}
   [db files loaded?]
   (let [libs (fn [f] (for [c (rest f) :when (and (seq? c) (= :require (first c))) x (rest c)] (if (sequential? x) (first x) x)))]

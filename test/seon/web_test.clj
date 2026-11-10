@@ -170,7 +170,7 @@
       (clojure.test/is (= 204 (:status (post headers))) (str "served: " (pr-str headers)))
       (clojure.test/is (= :call (:op (a/poll! ch))) (str "the call reached the proc: " (pr-str headers))))))
 
-;; In-flight output (task seon.render/one-walk-per-view, rule 10; docs/render.md#in-flight-output-streams): an effect's
+;; In-flight output (docs/render.md#in-flight-output-streams; docs/render.md#in-flight-output-streams): an effect's
 ;; text held while its stream is open and appended by id in the tabs of its agent's chat that have its in-flight element,
 ;; a tab caught up with all the text held when the element is first drawn on it (or redrawn by a keyframe)
 (def ^:private keyed

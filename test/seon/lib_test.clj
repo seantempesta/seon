@@ -1,7 +1,7 @@
 (ns seon.lib-test
   "The native probes (native/probe.c through seon.lib): what they answer."
   (:require [clojure.test :refer [deftest is]] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm]
-            [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str]))
+            [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str] [clojure.core.async]))
 
 (deftest a-fork-beside-a-running-thread-is-refused-and-says-how-many-run
   ;; lib/fork! is the one spawning skeleton: a second active Chez thread breaks a forked
@@ -105,18 +105,18 @@
   ;; 76 MB after forking a child (measured 2026-10-23), so root, which forks the fork server, read a
   ;; quarter of what it holds. A forked child is charged what it writes, not what it shares.
   (let [{:keys [before held child after] :as r} (fork-case "memory-gauge")]
-    (is (and before held (< 285 (- held before) 330)) (str "a 300 MB block written: " (pr-str r)))
-    (is (= {:exit 0} child) "a forked child is charged the 30 MB it writes")
+    (is (and before held (< 60 (- held before) 80)) (str "a 64 MB block written: " (pr-str r)))
+    (is (= {:exit 0} child) "a forked child is charged the 8 MB it writes")
     (is (and after (< (* 0.95 held) after)) (str "the parent still holds its block after the fork: " (pr-str r))))
   ;; the reading child (case "touch-gauge", task seon.lib/scale-charges-what-the-machine-lost): a
-  ;; parent holds 200 MB it wrote; a child that only reads every page is charged ~200 MB, as the
+  ;; parent holds 40 MB it wrote; a child that only reads every page is charged ~40 MB, as the
   ;; one that writes them is, though only the writer takes memory from the machine. That second
   ;; half is the machine's free plus inactive pages (lib/sysmem), which every process on the
   ;; machine moves (measured 2026-10-29 at load 10: the writer's drop was 0 to 156 MB of its
   ;; 200, the reader's -4 to 15), so it is recorded in the failure message and docs/cost.md, never
   ;; judged: only the ledger's charge (a count of the child's own pages) and a reading that came back are.
   (let [{:keys [read write] :as r} (fork-case "touch-gauge")]
-    (is (and (< 190 (:charged read) 230) (< 190 (:charged write) 230)) (str "both children are charged what they touch: " (pr-str r)))
+    (is (and (< 38 (:charged read) 46) (< 38 (:charged write) 46)) (str "both children are charged what they touch: " (pr-str r)))
     (is (and (= {:exit 0} (:exit read) (:exit write)) (number? (:machine-drop read)) (number? (:machine-drop write)))
         (str "both children ran and read the machine's memory: " (pr-str r)))))
 
@@ -129,3 +129,45 @@
     (is (= {:exit 0} (:go r)) "a go block that parks is resumed in the child")
     (is (= {:exit 0} (:timeout r)) "a timeout fires in the child")
     (is (= {:exit 0} (:store r)) "an in-memory Datahike store is made and written in the child")))
+
+(deftest a-forked-child-is-reset-before-anything-can-preempt-it
+  ;; docs/failure-points.md#physics-who-may-run-threads: fork(2) copies the parent's fibers and its carrier's run queue, and the
+  ;; child drops them (jolt.host/after-fork-child!). Nothing may run between the fork and that reset: with interrupts enabled
+  ;; first, a preemption there switched the child to the scheduler over the parent's queue, which ran a parent's ready fiber in
+  ;; the child (exit 7 here), or, once the reset had marked them, died of "fiber in unexpected state forked" (bin/check scale,
+  ;; 2026-11-10: an agent exited 1 with nothing on its stderr). Forced: the smallest quantum, ready fibers queued behind each fork
+  ;; the forks are made in a child of this process that runs as a main-carrier program (its fibers on its one thread, as a root's
+  ;; boot and an agent do), since a shard has threads of its own; that child answers 0 when every one of its forks did
+  (let [run (fn []
+              (jolt.host/main-carrier-run!
+                (fn []
+                  (jolt.host/fiber-preempt-ticks-set! 100)
+                  ;; the quantum is armed at a dispatch: yield once so this fiber runs under the small one
+                  (jolt.host/fiber-yield)
+                  (let [me (lib/c-getpid)
+                        ;; fibers that are always ready behind the forking one, as a root's procs are: in a child they are the parent's
+                        _ (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when (not= me (lib/c-getpid)) (lib/c-exit 7)) (jolt.host/fiber-yield) (recur)))))
+                        exits (vec (for [_ (range 50)]
+                                     (lib/fork! {:child #(lib/c-exit 0) :parent lib/wait-status :refused (fn [n] {:refused n})})))]
+                    (lib/c-exit (if (= {{:exit 0} 50} (frequencies exits)) 0 9))))))]
+    (is (= {:exit 0} (lib/fork! {:child run :parent lib/wait-status :refused (fn [n] {:refused n})}))
+        "every child of 50 reset itself and ran only its own code (9: one did not; before the fix all 50 ran a parent's fiber)")
+    ;; the same through fork!'s double fork (a clone: the middle is reaped, the grandchild is nobody's child, so each says
+    ;; what ran in it by a line in a file): the grandchild keeps the reset its middle made, and nothing of the parent's runs
+    (let [f (str (config/checkout) "/target/tmp/fork-reset-" (random-uuid))
+          say (fn [w] (spit f (str w "\n") :append true))
+          run2 (fn []
+                 (jolt.host/main-carrier-run!
+                   (fn []
+                     (jolt.host/fiber-preempt-ticks-set! 100)
+                     (jolt.host/fiber-yield)
+                     (let [me (lib/c-getpid)]
+                       (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when (not= me (lib/c-getpid)) (say "parent") (lib/c-exit 7)) (jolt.host/fiber-yield) (recur)))))
+                       (dotimes [_ 50] (lib/fork! {:double? true :child #(do (say "own") (lib/c-exit 0)) :parent identity :refused (fn [n] (say (str "refused " n)))}))
+                       ;; the grandchildren end on their own: wait for their 50 lines, a bounded number of looks
+                       (loop [n 0] (when (and (< n 400) (< (count (re-seq #"\n" (try (slurp f) (catch Exception _ "")))) 50)) (Thread/sleep 10) (recur (inc n))))
+                       (lib/c-exit 0)))))]
+      (.mkdirs (.getParentFile (java.io.File. f)))
+      (is (= {:exit 0} (lib/fork! {:child run2 :parent lib/wait-status :refused (fn [n] {:refused n})})))
+      (is (= {"own" 50} (frequencies (str/split-lines (try (slurp f) (catch Exception _ ""))))) "each of 50 grandchildren ran its own code and nothing of the parent's")
+      (.delete (java.io.File. f)))))

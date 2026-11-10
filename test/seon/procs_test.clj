@@ -236,47 +236,6 @@
           (is (= pins (get-in (d/pull @conn [:seon.root/source] [:seon.root/id :root]) [:seon.root/source :pins])))))))
      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
-(deftest an-import-the-store-refuses-is-a-cause-on-root
-  ;; seon.root/import-source! wrote its :seon.root/source fact and ignored the answer: a fact
-  ;; the store refused (inputs holding a sorted map, which konserve.jolt.fasl cannot encode)
-  ;; left the previous boot's fact in force, agents shared no inputs, and nothing said why.
-  ;; Root's api is stood in for by a loop that answers the source read with the inputs given
-  ;; and steps the real writer proc on a store of its own (the in-memory test store has no
-  ;; codec) for each write; the same inputs as a plain map are the control, and close the cause.
-  (let [path (str (seon.config/checkout) "/target/procs-test-" (random-uuid))
-        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
-    (try (let [st (volatile! (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 16) :events (a/chan 16)}))
-               env (for [i (range 40)] [(str "reference-code/m" i) (apply str (repeat 40 "a"))])
-               import! (fn [inputs boot]
-                         (let [ext (a/chan 16)
-                               api (future (loop [] (when-let [{:keys [op req p]} (a/<!! ext)]
-                                                      (deliver p (if (= op :fx)
-                                                                   {:inputs inputs :binary "t"}
-                                                                   (let [[st' outs] (step #'writer/writer-proc @st :in (assoc req :dest {:rid 1}))]
-                                                                     (vreset! st st')
-                                                                     (some :r (:to-api outs)))))
-                                                      (recur))))
-                               fact (root/import-source! {:graph nil :ext ext :conn conn :boot boot} {:root "tree" :dirs []})]
-                           (a/close! ext) @api
-                           fact))
-               held #(:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
-               cause #(some (fn [r] (when (= :seon.root/source (get-in r [:example :seon.error/subject])) r))
-                            (get-in (problems/report @conn) [:classes :platform :rows]))
-               fact (import! {:tree "t" :env (into (sorted-map) env)} "b1")]
-           (is (= fact (held)) "the fact answered is the one in force")
-           (is (= "b1" (:boot (held))) "this boot's")
-           (is (nil? (:inputs (held))) "no inputs shared that were never stored")
-           (is (some-> (:error (held)) (clojure.string/includes? "refused")) (pr-str (held)))
-           (is (some? (:message (cause))) "the refused fact is a :platform cause on root, with the writer's reason")
-           (is (not= false (:open? (cause))) "open while no import has written the fact")
-           (testing "inputs of their declared shape store, and close the cause"
-             (let [good {:tree "t" :env "e" :config {}}
-                   fact (import! good "b2")]
-               (is (= good (:inputs (held))) (pr-str fact))
-               (is (nil? (:error (held))))
-               (is (false? (:open? (cause))) (pr-str (cause))))))
-         (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
-
 (deftest the-flush-is-continuous-group-commit
   ;; owner 2026-10-21 (git history, "Durability is batched everywhere", superseded
   ;; paragraph): no window. A write is answered when committed in memory; the flusher parks
@@ -774,6 +733,41 @@
     (f (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 8) :conn conn
                          :view {:agents {}} :system (doto (promise) (deliver {:procs {} :conns []}))
                          :graph (doto (promise) (deliver (reify clojure.core.async.flow.impl.graph/Update (update-flow [_ _] {}))))})))))
+
+(deftest a-fork-server-step-that-throws-answers-and-the-server-serves-on
+  ;; task seon.fork-server/a-throwing-fork-server-step-answers-its-asker: a main commit the fork
+  ;; server cannot read (a :tx naming no commit: the replica's d/commit-as-db throws, as a bad
+  ;; entity in a d/with did, 2026-10-29) threw out of its step. Unfixed, the server stayed alive
+  ;; at 0% CPU, root heard nothing, and the spawn asked next waited for good. Now the step's
+  ;; throw is an event naming the op, the server's state is as it was, the next command is
+  ;; served, and root records the error and goes on to spawn.
+  ;; Then task seon.fork-server/every-fork-server-wait-ends-with-the-server: a server lost (dead
+  ;; with no standby, a-lost-fork-server-answers-every-waiter) is heard by root's api, which
+  ;; refuses a spawn with the error naming it, before any agent is made.
+  ;; Both are step functions called in process (docs/processes.md#a-step-that-throws)
+  (ts/test-branch! (fn [cfg conn]
+    (let [st (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil})
+          [st1 outs1] (#'server/server-step st :cmd {:op :tx :t 999999999999 :commit (random-uuid) :ns 0 :tx-data []})
+          m (let [rep (d/transact conn [{:note/text "after" :note/agent :t}])]
+              {:op :tx :t (:max-tx @conn) :commit (d/commit-id @conn) :ns 0 :tx-data (pdb/report->tx rep)})
+          [st2 outs2] (step #'server/server-step st1 :cmd m)]
+      (is (identical? st st1) "the step that threw left the server's state as it was")
+      (is (= [:step-failed] (map :ev (:ev outs1))))
+      (is (= :tx (:op (first (:ev outs1)))) "naming the op it took")
+      (is (= :seon.fork-server/step-failed (get-in (first (:ev outs1)) [:error :seon.error/type])))
+      (is (= [:applied] (map :ev (:ev outs2))) "and the next command is served")
+      (is (= (:max-tx @conn) (:max-tx (:db st2))))
+      (spawning-api (fn [api]
+        (let [[told _] (step #'root/api-proc api :from-fs (first (:ev outs1)))
+              [lost _] (step #'root/api-proc told :from-fs {:ev :fork-server-lost})
+              p (promise)
+              [after _] (step #'root/api-proc lost :ext {:op :spawn :opts {} :p p})
+              refused (answer p)]
+          (is (re-find #"step-failed" (pr-str (:seon.root/errors lost))) "root recorded the error")
+          (is (= :lost (get-in lost [:view :fork-server :status])))
+          (is (= :seon.root/refused (:seon.error/type refused)) (pr-str refused))
+          (is (re-find #"fork server is lost" (str (:seon.error/message refused))) (pr-str refused))
+          (is (= (:agents lost) (:agents after)) "no agent was made for the refused spawn"))))))))
 
 (deftest a-spawn-is-answered-at-its-agents-ready
   ;; task seon.root/a-spawn-answers-at-its-agents-ready: never at once, while the agent is

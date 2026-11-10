@@ -117,7 +117,7 @@
   directory of files (the wiki's pages, the task files). A file listed and gone when it is read
   (a git merge or bin/update rewriting it, a link to nothing) is left out of this read, as a
   deleted file is: the change that removed it, or the one that writes it back, makes the next
-  read (task seon.watch/a-vanished-file-is-a-fact; docs/failure-points.md)."
+  read (docs/failure-points.md)."
   {:malli/schema [:=> [:cat :string :string] [:map-of :string :string]]}
   [dir suffix]
   (into (sorted-map)
@@ -156,8 +156,12 @@
                (mutex-acquire #%$tc-mutex)
                (let ([pid (if (= (jolt-active-threads) 1) (fork) -2)])
                  (mutex-release #%$tc-mutex)
-                 (enable-interrupts)
+                 ;; the child drops the parent's fibers and run queue before interrupts are enabled: a
+                 ;; preemption between the fork and that reset switched the child to the scheduler over
+                 ;; the parent's queue, which ran the parent's ready fibers in the child, or, once the
+                 ;; reset had marked them, died of \"fiber in unexpected state forked\"
                  (when (= pid 0) (jolt-after-fork-child!))
+                 (enable-interrupts)
                  pid))))")
       true))
 

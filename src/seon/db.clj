@@ -23,7 +23,7 @@
 
 (def schema-digest
   "The digest of the schema and the store's `layout`, 8 hex digits of its hasch uuid: a kept store of regenerable output is
-  named by it (seon.test-store/kept-store!), so a changed schema or layout makes a new store rather than one that refuses
+  named by it (`kept-store!`), so a changed schema or layout makes a new store rather than one that refuses
   to open (:seon.db/types-differ), keeps the old layout, or is migrated."
   (subs (clojure.string/replace (str (hasch/uuid [schema layout])) "-" "") 0 8))
 
@@ -106,7 +106,7 @@
   ({:seon.db/attributes true}) names itself (`own-keys`), to that schema; :identity-schemas, those of them that are upsert
   keys; :required-keys {schema [attribute ...]}, the keys each requires, its own and those of the schemas it extends, and
   :own-required, only its own; :schema-identities, :identity-schemas turned around; :targets, each ref attribute's target
-  entity schemas ({:seon.db/to}); :drawn-schemas, the identity schemas that declare a render (:seon.render/hiccup), theirs or a parent's; and :forms, the forms it was built from}. It is the one value every reader of what an entity
+  entity schemas ({:seon.db/to}); :drawn-schemas, the entity schemas that declare a render (:seon.render/hiccup), theirs or a parent's; and :forms, the forms it was built from}. It is the one value every reader of what an entity
   is takes first (ix): a branch's own entity schema is recognized by its own index, never the binary's.
   See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :map] [:map [:forms :map] [:entity-schemas :map] [:identity-schemas :map] [:schema-identities :map] [:drawn-schemas [:set :any]] [:required-keys :map] [:own-required :map] [:targets :map]]]}
@@ -120,7 +120,7 @@
      :identity-schemas ids
      :schema-identities (into {} (map (fn [[a k]] [k a])) ids)
      ;; the identity schemas that declare a render, theirs or a parent's: what seon.render/schema-of names a pulled map by, one lookup
-     :drawn-schemas (into #{} (filter (fn [k] (some #(:seon.render/hiccup (form-props forms %)) (tree-seq (constantly true) #(parents-in forms %) k)))) (vals ids))
+     :drawn-schemas (into #{} (filter (fn [k] (some #(:seon.render/hiccup (form-props forms %)) (tree-seq (constantly true) #(parents-in forms %) k)))) (distinct (vals es)))
      :required-keys (into {} (for [k (distinct (vals es))]
                                [k (vec (distinct (mapcat #(required (get forms %)) (filter entity? (tree-seq (constantly true) #(parents-in forms %) k)))))]))
      :own-required (into {} (for [k (distinct (vals es))] [k (vec (required (get forms k)))]))
@@ -153,6 +153,13 @@
 
 (defn- reverse-attr {:malli/schema [:=> [:cat :qualified-keyword] :qualified-keyword]} [a] (keyword (namespace a) (str "_" (name a))))
 
+(defn owners
+  "Each of attributes as with the entity schema that owns it, {attribute schema}, as the entity index ix says (its :entity-schemas):
+  the one reading of which entity schemas attributes belong to, for the write check (each schema a write touched) and for a render
+  (the one schema that names a map). An attribute no entity schema owns is left out. See docs/data-modeling.md#a-thing-is-its-attributes."
+  {:malli/schema [:=> [:cat :map [:maybe [:sequential :any]]] [:map-of :keyword :qualified-keyword]]}
+  [ix as] (let [es (:entity-schemas ix)] (into {} (keep (fn [a] (when-let [s (es a)] [a s]))) as)))
+
 (defn implied-pattern
   "The pull entity schema s implies: its own attributes, each ref it names followed to its first target and each ref
   that reaches it followed back to the schema that owns it, a schema already walked not followed again (Malli's
@@ -164,7 +171,7 @@
    (let [w (conj walked s) as (attributes-of ix s) targets (:targets ix)]
      (vec (concat (remove targets as)
                   (for [a as :when (targets a) :let [t (first (remove w (targets a)))] :when t] {a (implied-pattern ix t w)})
-                  (for [a (reaching ix s) :let [o ((:entity-schemas ix) a)] :when (and o (not (w o)))] {(reverse-attr a) (implied-pattern ix o w)}))))))
+                  (for [a (reaching ix s) :let [o (get (owners ix [a]) a)] :when (and o (not (w o)))] {(reverse-attr a) (implied-pattern ix o w)}))))))
 
 (defn extends?
   "Does schema a extend schema b, itself or through the schemas it extends (`parents`, in the entity index ix)? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
@@ -172,13 +179,19 @@
   [ix a b] (boolean (or (= a b) (some #(extends? ix % b) (parents ix a)))))
 
 (defn most-specific
-  "The entity schemas the identity attributes of map e name, as one: the one that extends all the others, nil for none,
-  or {:ambiguous [s ...]} when none does, as the entity index ix says. The order of e's keys never decides. See docs/ctx.md#the-pattern."
+  "What one entity schema map e is, for a render, which needs one: of the schemas owning its attributes (`owners`, the reading the write
+  check makes too, which holds the entity to each of them and names none as the one), the best match by attributes held: of
+  the schemas owning the attributes e holds, the best match, the one with the most of its attributes present, those it
+  inherits (`parents`) counted, so a schema beats the one it extends; nil for none, {:ambiguous [s ...]} for a tie. One lookup a key, then a sum a candidate
+  over its parents. The order of e's keys never decides. See docs/data-modeling.md#a-thing-is-its-attributes."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [ix e]
-  (let [ss (distinct (keep (:identity-schemas ix) (keys e)))]
-    (when (seq ss)
-      (or (some (fn [s] (when (every? #(extends? ix s %) ss) s)) ss) {:ambiguous (vec ss)}))))
+  (let [own (frequencies (vals (owners ix (keys e))))]
+    (when (seq own)
+      (let [score (fn score [s] (+ (get own s 0) (reduce + 0 (map score (parents ix s)))))
+            ranked (sort-by (comp - second) (map (juxt identity score) (keys own)))
+            [[s0 n0] [s1 n1]] ranked]
+        (if (and s1 (= n0 n1)) {:ambiguous (vec (sort (map first (filter #(= n0 (second %)) ranked))))} s0)))))
 
 (defn index-of
   "The `entity-index` of a branch's own schema changes (schemas, {:forms :registry}, or nil): the binary's (`index`) when it
@@ -197,7 +210,7 @@
   {:malli/schema [:=> [:cat [:maybe :map]] :map]}
   [schemas]
   (let [forms (:forms schemas)]
-    (if (some (fn [k] (or (contains? (:entity-schemas binary-index) k) (contains? (:required-keys binary-index) k)
+    (if (some (fn [k] (or (contains? (owners binary-index [k]) k) (contains? (:required-keys binary-index) k)
                           (:seon.db/attributes (form-props forms k))))
               (keys forms))
       (index-of schemas)
@@ -217,12 +230,13 @@
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :map] [:maybe :seon.error/base]] [:=> [:cat :map :map] [:maybe :seon.error/base]]]}
   ([r] (invalid-entity r binary-index))
-  ([{:keys [db-before db-after tx-data]} {:keys [entity-schemas identity-schemas required-keys own-required]}]
+  ([{:keys [db-before db-after tx-data]} {:keys [identity-schemas required-keys own-required] :as ix}]
    (let [has? (fn [db e a] (boolean (first (d/datoms db :eavt e a))))
          ;; {[e schema] {attribute added?}}: what the write did to each touched entity's attributes of each schema; a key
          ;; it only added is held after with no seek (a write that creates an entity seeks nothing after)
+         own (owners ix (distinct (map :a tx-data)))
          touched (reduce (fn [m {:keys [e a tx added]}]
-                           (if-let [k (when (not= e tx) (entity-schemas a))]
+                           (if-let [k (when (not= e tx) (own a))]
                              (update-in m [[e k] a] #(if (nil? %) (boolean added) (and % added)))
                              m))
                          {} tx-data)
@@ -616,6 +630,13 @@
   {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe :string]]}
   [cfg] (when-let [p (get-in cfg [:store :path])] (str p "-agents/" (name (main-branch cfg)))))
 
+(defn empty-db
+  "An empty db value with Seon's schema (`schema`), in memory, keeping history when history?: a test's world
+  (my.test/world) and a tree indexed with no store (seon.root/built-program). See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat :boolean] :seon.host/db]}
+  [history?] (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) schema)
+                                     {:keep-history? history? :schema-flexibility :write}))
+
 (defn delete-main!
   "Delete main and every branch held under it (of-main) from the store of conn, a connection
   to :db (datahike.api/delete-branch!; a branch's connections are released first): what a
@@ -736,6 +757,25 @@
   "Remove directory dir and what it holds, when it is there. nil."
   {:malli/schema [:=> [:cat :string] :nil]}
   [dir] (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. ^String dir)))) nil)
+
+(defn kept-store!
+  "The path of the kept store of regenerable output at base for a schema's digest (the whole schema's, `schema-digest`,
+  unless given), base-<digest>; a store at base made with another digest (base itself, or base-<8 hex digits> but this
+  one) is removed: it is output, made again from its inputs, never a record, so a changed schema or layout makes a new
+  store, nothing migrated or refused (task seon.test-store/a-kept-store-is-keyed-by-its-schema). Nothing is made here;
+  the caller opens it. The test runner's program store, the process tests' store and the build's index take it. See
+  docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:function [:=> [:cat :string] :string] [:=> [:cat :string :string] :string]]}
+  ([base] (kept-store! base schema-digest))
+  ([base digest]
+   (let [f (java.io.File. ^String base)
+         dir (.getParentFile f)
+         stem (.getName f)
+         keyed (str stem "-" digest)
+         old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
+     (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
+       (remove-dir! (str dir "/" n)))
+     (str dir "/" keyed))))
 
 (defn- compact-marker
   "The file in the store at path that says a sweep freed pages since its last compaction (compact-if-due!)."

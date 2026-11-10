@@ -9,7 +9,8 @@
 #      git update-ref with main's old value: no checkout of main is needed); a main that moved during
 #      the proof is merged in and landed without proving again (what it gained was proved when it
 #      landed), a conflict stops it;
-#   4. the main tree's files follow main (bin/update does it first) and bin/update restarts the
+#   4. the landed change enters the standing root's main as data (bridge, below: a temporary bridge), then the main
+#      tree's files follow main (bin/update does it first) and bin/update rebuilds the binary and restarts the
 #      standing root on main;
 #   5. the worktree, once landed, is removed with its merged branch (bin/worktree --remove; owner,
 #      2026-11-08: "Why are we always having to do cleanup?"), unless something in it is uncommitted
@@ -38,7 +39,37 @@ tidy() {
     print "removed worktree $HERE and its branch $B" || print "worktree kept: removing $HERE failed"
   fi
 }
+# bridge REPO OLD NEW PORT: what git landed (OLD..NEW in REPO) enters the main of the root serving PORT as data (owner,
+# 2026-11-09: "We have to accommodate you and your agents who primarily write the updates in files, but this is a
+# temporary system -- I want seon agents writing updates inside the system and pushing them to disk"): root writes on
+# main, through its writer, the changed files' facts (seon.root/landed-tx: changed-tx of every changed text file's text, a
+# removed one's nil, and modes, as a seed indexes them, and the source fact moved to the landed tree). No task, agent or judge: the change was proved before git landed it.
+# Root reads no file for it. It goes when Seon agents write the system's updates themselves
+# (docs/source.md#a-landing-enters-main-as-data). The last line says it landed or why not.
+bridge() {
+  local repo=$1 old=$2 new=$3 port=$4 r
+  r=$(git -C "$repo" diff --raw --no-renames -z "$old" "$new" | perl -e '
+    my ($repo, $new, $tree) = @ARGV; local $/; my @f = split /\0/, <STDIN>; my (%text, %mode);
+    sub edn { my $s = shift; $s =~ s/\\/\\\\/g; $s =~ s/"/\\"/g; $s =~ s/\n/\\n/g; $s =~ s/\r/\\r/g; $s =~ s/\t/\\t/g; "\"$s\"" }
+    while (@f) {
+      my ($meta, $path) = (shift @f, shift @f);
+      my ($nm, $sha, $st) = $meta =~ /^:\d+ (\d+) \S+ (\S+) (\S)/ or die "bridge: git diff --raw said $meta\n";
+      if ($st eq "D") { $text{$path} = undef; next }
+      next unless $nm eq "100644" || $nm eq "100755";   # a gitlink or a link: no text, a build input
+      open my $b, "-|", "git", "-C", $repo, "cat-file", "blob", $sha or die "bridge: git cat-file $sha: $!\n";
+      my $t = <$b>; close $b or die "bridge: git cat-file $sha failed\n";
+      next if index($t, "\0") >= 0;                     # a binary file: no text a fact holds
+      ($text{$path}, $mode{$path}) = ($t, $nm) }
+    my $ch = join " ", map { edn($_) . " " . (defined $text{$_} ? edn($text{$_}) : "nil") } sort keys %text;
+    my $md = join " ", map { edn($_) . " " . edn($mode{$_}) } sort keys %mode;
+    my $code = "(let [db @(:conn sys) r @(seon.root/transact-main! sys (seon.root/landed-tx db {$ch} {$md} " . edn($tree) . " " . edn($new) . "))] (if (seon.contract/error? r) r :landed))";
+    print "{:op :eval :agent \"root\" :code " . edn($code) . "}\n";
+  ' "$repo" "$new" "$(git -C "$repo" rev-parse "$new^{tree}")" | "$MAIN/bin/ask" $port)
+  [[ $r == *':landed'* ]] || { print "bridge: $new did not enter main: $r"; return 1 }
+  print "bridge: $new entered main"
+}
 MSG=
+[[ ${1:-} == --bridge ]] && { MAIN=$(git rev-parse --path-format=absolute --git-common-dir)/..; MAIN=${MAIN:A}; bridge "${@:2}"; exit }
 [[ ${1:-} == -F ]] && { MSG=${2:A}; [[ -f $MSG ]] || fail "no message file $2"; shift 2 }
 (( $# == 0 )) || fail "unknown arguments: $*"
 HERE=$(git rev-parse --show-toplevel) || fail "not in a git checkout"
@@ -84,6 +115,8 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
   NEW=$(git commit-tree "HEAD^{tree}" -p "$OLD" -p HEAD -F "$HERE/target/land-msg") || fail "commit-tree"
   if git update-ref -m "bin/land $B" refs/heads/main "$NEW" "$OLD" 2>/dev/null; then
     print "main $(git log --oneline -1 "$NEW" | cut -c1-100)"
+    # the landed change into the standing root's main, as data, before bin/update builds main's binary
+    bridge "$MAIN" "$OLD" "$NEW" "${$("$MAIN/bin/ports")%% *}" | tail -1
     UARGS=(${=SEON_UPDATE_ARGS:---profile deepseek})
     nice -n 15 "$MAIN/bin/update" $UARGS | tail -1
     tidy; print LANDED; exit 0

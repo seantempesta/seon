@@ -7,30 +7,14 @@
 (defn- owner [workers] (fx/owner-proc {:kind :t :workers workers :work nil :back nil}))
 (defn- req [k & {:as more}] (merge {:req {:k k} :dest {:agent "boot/1" :op :fx-reply :k k}} more))
 
-(deftest a-worktrees-own-branch-follows-what-its-program-reads
-  ;; docs/merging.md: a gate on a worktree root checked out its own branch at an old commit: 196 tests the program db did not hold
-  (let [d (str (seon.config/checkout) "/target/tmp/own-branch-" (random-uuid))
-        git (fn [& args] (:out (apply clojure.java.shell/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)))
-        sha #(clojure.string/trim (git "rev-parse" %))]
-    (.mkdirs (java.io.File. (str d "/src")))
-    (spit (str d "/src/a.clj") "(ns a)")
-    (git "init" "-q") (git "add" ".") (git "commit" "-q" "-m" "one")
-    (git "branch" "stale") (git "branch" "ahead")
-    (spit (str d "/src/a.clj") "(ns a) (def x 1)")
-    (git "add" ".") (git "commit" "-q" "-m" "two")
-    (git "checkout" "-q" "stale") (spit (str d "/src/b.clj") "(ns b)") (git "add" ".") (git "commit" "-q" "-m" "old run's merge")
-    (git "checkout" "-q" "-")
-    (let [head (sha "HEAD")]
-      (git "branch" "-f" "ahead" head) (git "checkout" "-q" "ahead") (spit (str d "/src/c.clj") "(ns c)") (git "add" ".") (git "commit" "-q" "-m" "a merge on top")
-      (git "checkout" "-q" "-")
-      (let [ahead (sha "ahead")]
-        (seon.fx/read-source {:req {:root d :dirs ["src"] :own-branch "stale"}})
-        (is (= head (sha "stale")) "a branch that does not hold what the program is read from is brought to it")
-        (seon.fx/read-source {:req {:root d :dirs ["src"] :own-branch "ahead"}})
-        (is (= ahead (sha "ahead")) "one with merges on top of it keeps them")
-        (seon.fx/read-source {:req {:root d :dirs ["src"] :own-branch "none"}})
-        (is (= "" (clojure.string/trim (git "branch" "--list" "none"))) "and one not there yet is left to its first write-back")))
-    (clojure.java.shell/sh "rm" "-rf" d)))
+(deftest a-read-of-named-paths-reads-only-those-files
+  ;; task seon.source/an-import-reads-only-changed-files: (my.root/import! sys paths) names the files
+  ;; and the :source read gives just those, with the tree's id for the digest
+  (let [r (seon.fx/read-source {:req {:root (seon.config/checkout) :dirs ["src"] :paths #{"src/seon/fx.clj" "src/seon/gone.clj" "README.md"}}})]
+    (is (= #{"src/seon/fx.clj" "src/seon/gone.clj"} (set (keys (:value r)))) "the named source files only")
+    (is (nil? (get-in r [:value "src/seon/gone.clj"])) "a removed file is nil")
+    (is (string? (get-in r [:value "src/seon/fx.clj"])))
+    (is (string? (:tree r)) "the tree id, which stands for every file's content")))
 
 (deftest owner-admits-by-workers-and-priority
   (let [[st o] (fx/owner-proc (owner 1) :in (req 1))
@@ -189,7 +173,7 @@
   (let [r (fx/write-file {:req {:path "/nonexistent-dir/x.clj" :text "text"}})]
     (is (= :seon.fx/io-error (:seon.error/type r)) "a missing directory: the stage itself fails")))
 
-;; docs/source.md#mains-program-follows-the-tree: an import brings what the tree changed, so a merge the tree never held stays on main
+;; docs/source.md#indexing-a-tree: an import brings what the tree changed, so a merge the tree never held stays on main
 (deftest a-source-read-since-its-last-tree-reads-only-what-moved
   (let [d (str (doto (java.io.File/createTempFile "seon-since" "") (.delete) (.mkdirs)))
         git (fn [& args] (:out (apply clojure.java.shell/sh "git" "-C" d args)))

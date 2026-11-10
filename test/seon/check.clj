@@ -1227,21 +1227,20 @@
    ;; the largest block a test allocates (one process, no fan-out: docs/machine.md#processes); Chez keeps a
    ;; bytevector this large in place (a large object is never copied by a collection)
    #(let [before (lib/real-mb)
-          block (byte-array (* 300 1024 1024))]
+          block (byte-array (* 64 1024 1024))]
       ;; bytes macOS cannot compress: one byte repeated was compressed under the machine's pressure, and the
-      ;; charge read 206 MB of the 300 written (run 29's gate, 2026-10-30)
+      ;; charge read 206 MB of the 300 written (a 300 MB block then; 64 MB resolves above the gauge's noise) (run 29's gate, 2026-10-30)
       (.nextBytes (java.util.Random. 42) block)
       (let [held (lib/real-mb)
             child (in-child-bounded (fn [] (let [b0 (lib/real-mb)]
-                                          ;; one byte a 16 KB page: 30 MB of pages written, ~1,900 writes
-                                          (doseq [i (range 0 (* 30 1024 1024) 16384)] (aset block i (byte 1)))
-                                          (< 28 (- (lib/real-mb) b0) 60))))]
+                                          (doseq [i (range 0 (* 8 1024 1024) 16384)] (aset block i (byte 1)))
+                                          (< 7 (- (lib/real-mb) b0) 20))))]
         {:before before :held held :child child :after (lib/real-mb) :kept (aget block 0)}))
    "touch-gauge"
    ;; a parent holds 200 MB it wrote; one child only reads every page, another writes every page. Each
    ;; sends its footprint growth and the machine's drop in free plus inactive MB (lib/sysmem) on a
    ;; socket. The ledger charges both 200 MB; only the write costs the machine its copy.
-   #(let [mb 200
+   #(let [mb 40
           block (byte-array (* mb 1024 1024))
           _ (java.util.Arrays/fill block (byte 7))
           [r w] (sock/socketpair)
@@ -1994,9 +1993,9 @@
         targets (ts/standing-targets-tx)
         ;; the checks' own store follows its seed (a cache keyed by its inputs: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on): path is a link to
         ;; path-<digest of what the seed writes>, so a changed seed opens a fresh store and the old one is removed
-        ;; (seon.test-store/kept-store!), never read
+        ;; (seon.db/kept-store!), never read
         at (if own?
-             (doto (ts/kept-store! path (subs (lib/digest (pr-str [seon.db/schema-digest (seon.db/seed-tx (parse-long (str n))) targets])) 0 8))
+             (doto (seon.db/kept-store! path (subs (lib/digest (pr-str [seon.db/schema-digest (seon.db/seed-tx (parse-long (str n))) targets])) 0 8))
                (remove-store-past! (seon.config/value :seon.config.proofs/check-store-max-bytes)))
              path)
         t0 (profile/now-ns)

@@ -26,7 +26,7 @@
 (defn- db-with-vectors
   "The test store's seed with a form per vector, each carrying its packed vector."
   [vs]
-  (d/db-with (ts/test-db) (vec (mapcat (fn [i v] [{:db/id (str "f" i) :form/id (str "f" i)} (vector/fact (str "f" i) 0 v "m")]) (range) vs))))
+  (d/db-with (ts/test-db) (vec (mapcat (fn [i v] [{:db/id (str "f" i) :form/id (str "f" i)} (vector/fact (str "f" i) "0" v "m")]) (range) vs))))
 
 (defn- embedded
   "The facts of due texts [[e text t] ...] embedded as vs, each text of 10 tokens, by model."
@@ -70,7 +70,7 @@
   (let [[a b c] (vectors 5 3 3 768)
         close (unit (mapv + a (map #(* 0.05 %) b)))
         db (d/db-with (db-with-vectors [a b c close]) [{:db/id "s" :seon.doc/address "x.md#y" :seon.doc/heading "y"}])
-        db (d/db-with db [(vector/fact [:seon.doc/address "x.md#y"] 0 close "m")])
+        db (d/db-with db [(vector/fact [:seon.doc/address "x.md#y"] "0" close "m")])
         f0 (ffirst (d/q '[:find ?e :where [?e :form/id "f0"]] db))]
     (is (= (rest (exact db (vector/vector-of db f0) 3))
            (mapv first (sort-by second > (d/q '[:find ?e ?s :in $ ?q :where [(seon.vector/near $ ?q 2 {:of :form/id}) [[?e ?s]]] [?e :form/id]] db f0))))
@@ -323,13 +323,13 @@
 (deftest a-plan-rewritten-on-a-branch-gets-its-vector-there
   (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "first plan"}])
         e (plan-of main)
-        main (d/db-with main (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) "m"))
+        main (d/db-with main (vector/tx-data [e] [(peek (first (filter (comp #{e} first) (vector/due main "m"))))] (vectors 1 1 1 768) "m"))
         branch (d/db-with main [[:db/add e :seon.task/plan "the plan rewritten"] {:form/id "y/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn h [])"}])
         [n db asked] (on-branch main branch answered #(agent/embed-written! 64 "m"))]
     (is (= [[:embed ["task: search result | query: the plan rewritten" "title: none | text: (defn h [])"]]] asked)
         "one request for what the branch wrote: the rewritten plan, as a search asks, and its new form")
     (is (= 2 n))
-    (is (= (:tx (first (d/datoms db :eavt e :seon.task/plan))) (:v (first (d/datoms db :eavt (:e (first (d/datoms db :avet :seon.vector/of e))) :seon.vector/text-t))))
+    (is (empty? (filter (comp #{e} first) (vector/due db "m")))
         "the plan's vector on the branch is made from the plan as it is now")
     (is (empty? (vector/due db "m" (vector/written main db))) "nothing the branch wrote is due any more")
     (let [f (ffirst (d/q '[:find ?e :where [?e :form/id "y/1"]] db))]
@@ -346,7 +346,7 @@
   ;; meaning (seon.render.ui/searched reads the search entity's own vector; docs/vector.md#search)
   (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}])
         e (plan-of main)
-        main (d/db-with main (into (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) "m")
+        main (d/db-with main (into (vector/tx-data [e] [(peek (first (filter (comp #{e} first) (vector/due main "m"))))] (vectors 1 1 1 768) "m")
                                    [{:seon.search/id "t/x/request" :seon.search/of e :seon.search/query "messages sent while it ran are lost"}]))
         s (:db/id (d/entity main [:seon.search/id "t/x/request"]))
         [n db asked] (on-branch main main answered #(agent/embed-written! 64 "m"))]
@@ -360,7 +360,7 @@
 (deftest a-turn-with-nothing-due-asks-nothing
   (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}])
         e (plan-of main)
-        main (d/db-with main (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) "m"))
+        main (d/db-with main (vector/tx-data [e] [(peek (first (filter (comp #{e} first) (vector/due main "m"))))] (vectors 1 1 1 768) "m"))
         ;; the branch wrote facts, none of them a text: a turn's and an eval's records
         branch (d/db-with main [{:seon.model-call/id (seon.lib/call-id "b/a1" 1) :seon.model-call/n 1}])
         [n _ asked] (on-branch main branch answered #(agent/embed-written! 64 "m"))]
@@ -372,7 +372,7 @@
 (deftest more-due-than-one-request-takes-waits-for-the-next
   (let [main (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}])
         e (plan-of main)
-        main (d/db-with main (vector/tx-data [e] [(:tx (first (d/datoms main :eavt e :seon.task/plan)))] (vectors 1 1 1 768) "m"))
+        main (d/db-with main (vector/tx-data [e] [(peek (first (filter (comp #{e} first) (vector/due main "m"))))] (vectors 1 1 1 768) "m"))
         branch (d/db-with main [{:form/id "y/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn a [])"} {:form/id "y/2" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn b [])"} {:form/id "y/3" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn c [])"}])
         old @agent/state asked (atom [])]
     (reset! agent/state {:n 0 :mode :test :db branch :base main :task "t/x"})
@@ -397,14 +397,14 @@
         t (plan-of db)
         ev (ffirst (d/q '[:find ?e :where [?e :seon.eval/id "e1"]] db))
         [v1 v2] (vectors 3 2 2 768)
-        db (d/db-with db (vector/tx-data [t ev] [1 1] [v1 v2] "m"))
+        db (d/db-with db (vector/tx-data [t ev] ["1" "1"] [v1 v2] "m"))
         vector-keys #(filter (comp #{"seon.vector"} namespace) (keys %))]
     (is (empty? (vector-keys (d/pull db '[*] t))) "an embedded task's own pull holds none of its vector")
     (is (empty? (vector-keys (d/pull db '[*] ev))) "nor an embedded eval's")
     (is (< (apply max (map #(Math/abs (- %1 %2)) v2 (vector/vector-of db ev))) 0.001) "its vector is found through :seon.vector/of")
     (is (= [ev t] (sort-by #(- %) (map :v (d/datoms db :aevt :seon.vector/of)))) "one vector entity for each entity embedded")
     (is (= #{"m"} (set (map :v (d/datoms db :aevt :seon.vector/model)))))
-    (let [db2 (d/db-with db (vector/tx-data [ev] [2] [v1] "m2"))]
+    (let [db2 (d/db-with db (vector/tx-data [ev] ["2"] [v1] "m2"))]
       (is (= 2 (count (d/datoms db2 :aevt :seon.vector/of))) "a vector written again replaces the entity's, in place")
       (is (< (apply max (map #(Math/abs (- %1 %2)) v1 (vector/vector-of db2 ev))) 0.001))
       (is (= #{[t "m"] [ev "m2"]} (set (for [e [t ev]] [e (:v (first (d/datoms db2 :eavt (:e (first (d/datoms db2 :avet :seon.vector/of e))) :seon.vector/model)))]))))
