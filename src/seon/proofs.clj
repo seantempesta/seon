@@ -548,7 +548,6 @@
         ;; rerun of one tree audits the same ones); a red is a red at a green's digest, flaky, which bin/test names a mismatch
         audit (when-not (or (true? all?) (seq names))
                 (reuse-audit reused process (:tree inputs) (cfg/value :seon.config.proofs/reuse-audit)))
-        run (into run audit)
         {run-steps true run-tests false} (group-by string? run)]
     {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused (apply dissoc reused audit) :audit (vec audit) :cand cand :process process :binary binary :no-test no-test
      ;; green and red at its digest, whatever the plan runs (the full run reruns every key): red

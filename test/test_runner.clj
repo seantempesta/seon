@@ -434,6 +434,11 @@
   (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
         {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived binary-current audit]} plan
+        ;; the reuse audit's tests run beside the plan's (seon.proofs/plan-of's :audit), never a slow one: a slow test runs
+        ;; last, once all else is green (docs/merging.md#a-slow-test-runs-last)
+        audit (let [ms (measured-ms audit) bound (config/value :seon.config.proofs/slow-test-ms)]
+                (filterv #(< (get ms % 0) bound) audit))
+        run-tests (into run-tests audit)
         ;; a merge runs these last, once all else is green (bin/prove): out/slow, names, one line
         ;; the proofs of the tree that pass by a waiver (an :overrun in the form: seon.problems/waived-proofs), for bin/prove's last lines
         _ (write! (str out "/waived") (str waived "\n"))
