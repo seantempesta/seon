@@ -815,7 +815,7 @@
     (is (str/includes? (msg cited) "your task cites it, so write it: (in-ns 'seon.reconcile) (defn to-write ...)") (msg cited))))
 
 (deftest a-broken-parser-is-named-in-a-missing-names-answer
-  ;; the eval-path review (AGENTS.md §9: no swallowed error): my.agent/no-var reads the plan with the one parser;
+  ;; the eval-path review (no swallowed error: docs/errors.md#unknown-is-never-a-default): my.agent/no-var reads the plan with the one parser;
   ;; an agent that broke seon.ref/scan is answered from the task's stored cites, and the answer names the throw,
   ;; so it learns its parser is broken (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map)
   ;; the names as quoted symbols, so the test's reach holds them (a name inside code text is no reference)
