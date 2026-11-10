@@ -19,7 +19,7 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 ## Now
 
-**The constraint (owner, 2026-11-10): the pull → ratom → render path does not change; the work is the data on entities and the renders.** Five sessions each own an area ([sessions](sessions.md#sessions-own-their-areas)); the managing session batches their ready branches, proves once and lands ([merging](merging.md#the-managing-session-lands-a-batch)).
+**The constraint (owner, 2026-11-10): the pull → ratom → render path does not change; the work is the data on entities and the renders.** Five sessions each own an area, and the managing session batches their ready branches: each session proves its own branch with `bin/prove` (everything its change reaches, the check steps included, every green at its digest reused: the whole suite at the cost of what changed), and the managing session merges the tips into one branch, proves it once and lands it ([merging](merging.md#a-branch-lands-with-binland)). Every session and agent checks its whole work before handing it over (owner, 2026-11-10: "make the entire suite run very fast so every agent can fully check their work", replacing "nobody proves a small change alone").
 
 **First: the time from a change to main** (owner, 2026-11-10: "I don't want to keep wasting time running tests all day. This is the main bottleneck for progress"). Measured that day: an agent's `done` on a one-function change 455 s against about 5 s designed; one process test 0.9-1.2 s against 60 ms, nearly all of it waiting on root; a whole prove 9-15 minutes against 60-90 s.
 

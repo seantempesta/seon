@@ -130,6 +130,12 @@ if (( ${#FAST} )); then
 fi
 # a test green and red at its digest (the plan's out/flaky) is red, though nothing ran it
 [[ -s $OUT/flaky ]] && { cat "$OUT/flaky"; st=1 }
+# a reused green the plan ran again (out/audit) that ran red: its digest missed an input (seon.proofs/plan-of's :audit)
+if [[ -s $OUT/audit ]]; then
+  for t in ${(f)"$(cat $OUT/audit)"}; do
+    for f in $F; do grep -q "^RED $t " "${f%.edn}.log" 2>/dev/null && { print -r -- "REUSE MISMATCH $t: green at its digest, red when run again; the digest missed an input"; st=1 }; done
+  done
+fi
 # the full run's outcome, beside the verdict cache, so a store erase keeps it (docs/merging.md#the-full-run-is-the-net): the commit it
 # ran, green or red with each red test, and when it ended; written whole (temp + rename), green or red. A run that died writes
 # nothing, so the file still names the last run that ended: bin/land says how many landings main is past it

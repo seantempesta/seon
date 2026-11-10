@@ -29,6 +29,13 @@ The owner's rulings of 2026-11-10, on how the work improves and lands, on what r
 ### The forks follow upstream: theirs when almost as good, ours written to be offered (owner, 2026-11-10)
 
 Owner, 2026-11-10: "Make sure deep fixes is merging all the fixes from all upstream dependencies"; "If there are two solutions and theirs is almost as good as ours choose theirs"; for Datahike, "start with the latest datahike and just overlay only the ones we need over it"; "I don't want to open upstream patches until we are sure what we did was correct and the solutions are proper high quality implementations"; "make sure all the code is well written and matches their style and coding guidelines for both datahike and jolt. I highly respect all the developers working on these projects and I don't want to waste their time or have them complain that I submitted a low effort pull request that is a nightmare to review and understand." Stated in: docs/forks.md#following-upstream.
+### Every session proves its branch before handing it over (owner, 2026-11-10)
+
+"Please task the test agent with coming up with a solution where we can catch these bugs more reliably. They are to ideally make the entire suite run very fast so every agent can fully check their work." Relayed by the managing session with the day's escapes (five changes handed over "green" on hand-picked namespaces turned whole proves red); the Tests session's plan, approved: one command checks a branch, the whole suite at the cost of what changed. That command is `bin/prove` (it runs what a change reaches, every check step a `src` change reaches, and reuses every green at its digest), not a second script beside it. Replaces "nobody proves a small change alone". Now stated in: AGENTS.md section 3 (the one way, item 2), [plan](plan.md).
+
+### A test that starts a root takes what root runs (owner, 2026-11-10)
+
+Asked with the question tool by the managing session, the Tests session's evidence beside it: on main's reach graph, of 233 process tests 7 reached `seon.writer/commit-batch`, 9 `seon.reconcile/start` and 10 `seon.fork-server/main`, though each starts a root that runs all three; a change to root's writer reused 226 of their greens, and five of them were red in the batch. The owner chose to reverse 2026-10-27's "a root's boot is no entry" ("no test includes all of src"): a process test's digest takes what root runs. Now stated in: [source](source.md#tests-run-by-reach) (a test that starts a root takes what root runs).
 
 ### The test system runs inside Seon; the outside is thin wrappers (owner, 2026-11-10)
 
@@ -744,7 +751,7 @@ Worktrees run plain `bin/prove` and report ready; the merge session merges a bat
 
 ### No test digests the whole tree; the daily full run is the net (owner, 2026-10-27)
 
-"I don't care if it's perfect and if it's possible a test could be doing other work we don't know of. no tests should include all of src." A test's digest is what it reaches: forms, the config keys and schema entries it names, the pins of the libraries it reaches, and for a process test the process entry; the cron's daily `bin/test --all` on main catches what reach misses. Stated: docs/merging.md, docs/source.md#tests-run-by-reach.
+"I don't care if it's perfect and if it's possible a test could be doing other work we don't know of. no tests should include all of src." A test's digest is what it reaches: forms, the config keys and schema entries it names, the pins of the libraries it reaches, and for a process test the process entry (since 2026-11-10 also what root runs: [a test that starts a root takes what root runs](#a-test-that-starts-a-root-takes-what-root-runs-owner-2026-11-10)); the cron's daily `bin/test --all` on main catches what reach misses. Stated: docs/merging.md, docs/source.md#tests-run-by-reach.
 
 ### A lock-free system (owner, 2026-10-27)
 

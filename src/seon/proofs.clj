@@ -488,6 +488,18 @@
      :run (filterv #(not (found (cand %))) selected)
      :reused (into {} (for [[k dg] cand :let [r (found dg)] :when r] [k r]))}))
 
+(defn reuse-audit
+  "The reused greens a run runs again (plan-of's :audit), of reused ({key result}): n of the tests that start a process
+  (process, a set of keys) and n of the others, the first by the digest of tree and the key, so a rerun of one tree audits
+  the same ones and another tree others. A check step, a red and a flaky one are never chosen. A red when run again is a
+  red at a green's digest: an input the digest missed (bin/test's REUSE MISMATCH). See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat [:map-of :any :map] [:set :any] [:maybe :string] nat-int?] [:vector :any]]}
+  [reused process tree n]
+  (let [greens (for [[k r] reused :when (and (symbol? k) (green? r) (not (:flaky r)))] k)
+        by-tree (fn [ks] (take n (sort-by #(lib/digest (str tree " " %)) ks)))
+        {starts true others false} (group-by #(contains? process %) greens)]
+    (vec (sort-by str (concat (by-tree starts) (by-tree others))))))
+
 (defn plan-of
   "What bin/prove and bin/test run on a program: the tests of names (or all) and the bin/check
   steps with no green at their digest (plan), less, when nothing is named, the ones that reach a
@@ -532,8 +544,12 @@
                (slow-of (into {} (filter (fn [[k dg]] (and (symbol? k) (not (found dg))))) cand)))
         cand (apply dissoc cand (keys slow))
         {:keys [run reused]} (plan nil cand (if (true? all?) {} found) #{})
+        ;; the reuse audit: of the greens reused, n that start a process and n that do not run again, chosen by the tree (a
+        ;; rerun of one tree audits the same ones); a red is a red at a green's digest, flaky, which bin/test names a mismatch
+        audit (when-not (or (true? all?) (seq names))
+                (reuse-audit reused process (:tree inputs) (cfg/value :seon.config.proofs/reuse-audit)))
         {run-steps true run-tests false} (group-by string? run)]
-    {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused reused :cand cand :process process :binary binary :no-test no-test
+    {:run-tests (vec run-tests) :run-steps (vec run-steps) :reused (apply dissoc reused audit) :audit (vec audit) :cand cand :process process :binary binary :no-test no-test
      ;; green and red at its digest, whatever the plan runs (the full run reruns every key): red
      :flaky (into (sorted-map-by #(compare (str %1) (str %2))) (for [[k dg] cand :let [r (found dg)] :when (:flaky r)] [k r]))
      :left (when-not (or named? merge?) (vec (sort-by str (remove #(contains? slow %) (filter all-cand process)))))

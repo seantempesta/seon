@@ -1378,46 +1378,6 @@
       stale (assoc :stale-binary stale)
       (and one? (:inputs built)) (assoc :inputs (update (:inputs built) :config merge config-input)))))
 
-(def root-entries
-  "Where the binary's own code starts, the roots of root-reach: its one entry (its modes, root's boot and procs among
-  them: system.edn's procs are edges of seon.system/read-decl, the reach graph's :data-refs). See
-  docs/source.md#the-binary-records-its-program."
-  '[seon.main/-main])
-
-(def agent-body
-  "Where a forked child stops running the binary's code and becomes an agent, which loads main's program from the db: the
-  body the fork server's :fork hands it, and the agent's process entries (:seon.config.source/process-entry's agent side),
-  which the reach graph links from every form that starts a process (seon.lib/fork!'s callers, the fork server's among
-  them). root-reach enters none of them. Sound because an agent runs main's code, not its binary's: the fork server loads
-  main's program over the binary's image at its start and at every commit (seon.program/load-all!, load-changes!), so every
-  agent it forks inherits main's forms, and a resumed agent loads its branch's difference (seon.program/load-diff!). See
-  docs/source.md#the-binary-records-its-program."
-  '[seon.repl/run! seon.repl/serve! seon.turn/work!])
-
-(defn root-roots
-  "Every name root's binary runs code from, as the data that names it says: root-entries, system.edn's procs and effects
-  (g's :data-refs, seon.fx/declared-refs), the renders schema entries name (a schema row's :refs: :seon.render/hiccup,
-  :model and their kin) and the qualified symbols the config in force holds (cfg), less any in a test namespace (a
-  scripted model's fixture is the agent's, loaded from main). requiring-resolve's run-time names are these: seon.system's
-  procs, seon.render's renders, seon.model's script; seon.cost's are a cost proof's own (a test's), seon.main's
-  seon.check/-main a test driver. See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat :map :map] [:vector :qualified-symbol]]}
-  [{:keys [data-refs rows test-nss]} cfg]
-  (vec (distinct (for [s (concat root-entries (mapcat val data-refs) (mapcat :refs (filter :schema (vals rows)))
-                                 (for [v (vals cfg) x (if (coll? v) v [v]) :when (qualified-symbol? x)] x))
-                       :when (and (qualified-symbol? s) (not (contains? test-nss (symbol (namespace s))))) ] s))))
-
-(defn root-reach
-  "The vars of reach graph g that root's process runs from its binary: the closure of root-roots (cfg the config in
-  force) over g's edges, never entering agent-body. A change to one of them is judged only by a binary built with it
-  (binary-current). See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat :map :map] [:set :qualified-symbol]]}
-  [{:keys [defs adj rows] :as g} cfg]
-  (let [cut (set (mapcat #(get defs %) agent-body))
-        start (vec (remove cut (mapcat #(get defs %) (root-roots g cfg))))
-        forms (into (set start) (program/closure start #(remove cut (get adj %))))]
-    (into #{} (for [f forms [k s] (:defines (rows f)) :when (= :var k)] s))))
-
 (defn- build-input?
   "Is changed path p (with its git modes) something the binary bakes and no load of the db brings: a pin (a gitlink),
   native code, deps.edn, bin/build, .gitmodules, or a class of resource the build compiles in (seon.fx/env-class: the
@@ -1467,7 +1427,7 @@
                  ;; a changed path the rule cannot place (the web assets the build compiles, anything else) is not current
                  unplaced (vec (for [[p om nm] changed :when (not (or (build-input? p om nm) (some #{p} src) (elsewhere? p)))] p))
                  g (or g (program/reach-graph db (fx/declared-refs system/built-text)))
-                 reach (root-reach g cfg/config)
+                 reach (program/root-reach g cfg/config)
                  ns-of (fn [p] (d/q '[:find ?n . :in $ ?p :where [?e :ns/file ?p] [?e :ns/name ?n]] db p))
                  ;; a form changed when its text on db is not in the file as the binary's tree has it (required!'s test)
                  changed-vars (fn [n p] (let [old (fx/tree-file (cfg/checkout) from p)]
