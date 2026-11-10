@@ -386,11 +386,12 @@
   {:accounts :tail :file}} (accounts, with its file's relative path). A namespace the files define
   whose file the checkout lacks (another tree's, e.g. one since renamed: in-checkout?) is marked loaded
   once analyzed, so a later file's require of it answers from the analysis, never a load from disk that
-  cannot find it; one whose file the checkout has is never marked (a real require must still load it). See
-  docs/source.md#main-s-program-follows-the-tree."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] [:map-of :symbol :map]]}
-  [db files]
-  (let [private? (tree-private db files)]
+  cannot find it; one whose file the checkout has is never marked (a real require must still load it). tree, every file
+  the same import has read (files among them, refresh-tx's earlier rounds too), is what a named var's privacy is asked of
+  (`tree-private`), never only this round's files. See docs/source.md#main-s-program-follows-the-tree."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] [:map-of :string :string]] [:map-of :symbol :map]]}
+  [db files tree]
+  (let [private? (tree-private db tree)]
     (reduce (fn [m [nsym path text]]
               (let [a (assoc (accounts nsym text private?) :file path)]
                 (when-not (in-checkout? nsym path) (@mark-loaded! (str nsym)))
@@ -484,7 +485,7 @@
   this is import-tx's program."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string]] :seon.db/tx-data]}
   [db files]
-  (let [read (read-nss db files)
+  (let [read (read-nss db files files)
         gone (for [dt (d/datoms db :aevt :ns/file) :let [n (:ns/name (d/entity db (:e dt)))] :when (not (contains? read n))] [n nil])]
     (program-tx db (into read gone) files
                 (into (set (filter config/file-kind (keys files)))
@@ -592,10 +593,15 @@
   (let [ns-of-path (fn [p] (some #(when (= p (:v %)) (:ns/name (d/entity db (:e %)))) (d/datoms db :aevt :ns/file)))
         texts (into {} (filter val) changed)
         gone (into {} (for [[p t] changed :when (and (nil? t) (str/ends-with? p ".clj")) :let [n (ns-of-path p)] :when n] [n nil]))
-        read (loop [round texts check (keys gone) read gone]
+        read (loop [round texts check (keys gone) read gone tree {}]
                (if (and (empty? round) (empty? check))
                  read
-                 (let [now (read-nss db (required-files db round #(contains? (loaded-libs) %)))
+                 (let [files (required-files db round #(contains? (loaded-libs) %))
+                       ;; a later round's privacy is the tree's as every round read it: a dependent read again names a var an
+                       ;; earlier round's file made public, which db still holds as private; a file read before keeps the text
+                       ;; it was read with (required-files adds db's text of a namespace this process has not loaded)
+                       tree (merge files tree)
+                       now (read-nss db files tree)
                        read (into read now)
                        ;; what the namespace had that it no longer has: a name removed or of another kind, a
                        ;; macro, protocol, type or inline function changed (what was added breaks no form)
@@ -605,7 +611,7 @@
                    (recur (into {} (for [[n l] lost d (dependents db n l) :when (not= d n)
                                          :let [p (:ns/file (d/entity db [:ns/name d]))] :when (and p (not (and (contains? changed p) (nil? (changed p)))))]
                                      [p (or (texts p) (file-text db d))]))
-                          [] read))))]
+                          [] read tree))))]
     (program-tx db read changed (set (filter config/file-kind (keys changed))))))
 
 (defn tx-of
