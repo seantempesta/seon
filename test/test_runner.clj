@@ -149,13 +149,14 @@
         ;; the bound is the write's: a tree the store keeps is read whatever the store's size (a shard read the plan's tree
         ;; from a store the plan's import had taken past it, removed it, and its first program reader imported the tree
         ;; again inside its own tick budget); only a tree to import starts a store past it again
-        [{:keys [conn cfg]} branches] (let [o (open) bs (d/branches (:conn o))]
-                                        (if (or (contains? (set bs) b) (<= (.length (io/file store "data.mdb")) max-bytes))
-                                          [o bs]
-                                          (do (d/release (:conn o)) (fx/remove-tree! store)
-                                              (let [o (open)] [o (d/branches (:conn o))]))))]
-    (when-not (contains? (set branches) b)
-      (keep-tree! conn cfg root tree b branches))
+        ;; the tree's branch asked for alone (seon.db/branch?, one read); the store's branches listed only for a tree to
+        ;; import (keep-tree! picks the nearest kept tree), since d/branches reads every roster entry (35k ticks, 102 KB a branch)
+        {:keys [conn cfg]} (let [o (open)]
+                             (if (or (pdb/branch? (:conn o) b) (<= (.length (io/file store "data.mdb")) max-bytes))
+                               o
+                               (do (d/release (:conn o)) (fx/remove-tree! store) (open))))]
+    (when-not (pdb/branch? conn b)
+      (keep-tree! conn cfg root tree b (d/branches conn)))
     (d/release conn)
     @(pdb/connect (assoc cfg :branch b)))))
 
