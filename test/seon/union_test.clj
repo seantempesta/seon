@@ -8,8 +8,8 @@
   "The owner's example: root's message on main, the agent's reply on its branch, as one query."
   '[:find ?body ?reply ?branch
     :in $
-    :where [?m :seon.message/from {:seon.root/id :root}] [?m :seon.message/body ?body]
-           [?r :seon.message/from {:seon.agent/key "demo/f#1"} ?tx] [?r :seon.message/body ?reply]
+    :where [?m :seon.message/from ?root] [?root :seon.root/id :root] [?m :seon.message/body ?body]
+           [?r :seon.message/from ?f ?tx] [?f :seon.agent/key "demo/f#1"] [?r :seon.message/body ?reply]
            [?tx :seon.tx/branch ?branch]])
 
 (deftest a-message-and-its-reply-on-two-branches-are-one-query

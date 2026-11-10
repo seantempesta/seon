@@ -372,7 +372,8 @@
       (let [db (seeded 60) t (:tree (ctx/build (seon.db/index) db (aid db) :b))]
         (is (= 60 (count (:evals t))))
         (let [e7 (id db [:seon.eval/id "e7"])]
-          (is (= {:seon.eval/id "e7" :by "a1"} {:seon.eval/id (get-in t [:evals e7 :seon.eval/id]) :by (get-in t [:evals e7 :seon.eval/by])}))
+          (is (= {:seon.eval/id "e7" :by {:db/id (id db [:seon.agent/key "a1"])}} {:seon.eval/id (get-in t [:evals e7 :seon.eval/id]) :by (get-in t [:evals e7 :seon.eval/by])})
+              "who ran it, a ref to the agent")
           (is (= "lab/ctx" (get-in t [:task :seon.task/id])))
           (is (= #{'app.x-test/t0} (get-in t [:task :seon.task/proofs])))
           (is (= 20 (count (:calls t))))
@@ -1110,7 +1111,7 @@
     (testing "a member's attribute, and a new member, written under its parent by the unit's ref"
       (let [[[_ same] db'] (step db #(swap! ctx/ctx (fn [c] (-> c (assoc-in [:task :seon.task/reason] "waiting for you")
                                                                 (assoc-in [:messages "m-new"]
-                                                                          {:seon.message/id "m-new" :seon.message/from {:seon.agent/key "agent"} :seon.message/body "a note to myself"})))))]
+                                                                          {:seon.message/id "m-new" :seon.message/from {:db/id (aid db)} :seon.message/body "a note to myself"})))))]
         (is (= "waiting for you" (:seon.task/reason (d/entity db' [:seon.task/id "lab/ctx"]))))
         (is (= #{(aid db)} (set (map :db/id (:seon.message/to (d/entity db' [:seon.message/id "m-new"]))))) "the new message is the agent's")
         (is same)

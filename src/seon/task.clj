@@ -379,14 +379,14 @@
 
 (def system-sender
   "The sender of a message no agent sent: the system entity (:seon.root/root-fact) by its identity. The reconciler's notices, a verdict,
-  a stage boundary, the turn's own note (owner, 2026-11-10: mechanical messages come from the system, not an agent). See docs/users.md#messages."
+  a stage boundary, the turn's own note: a mechanical message comes from the system, not an agent (the owner's ruling, docs/users.md#messages). See docs/users.md#messages."
   {:seon.root/id :root})
 
 (defn sender
   "Who sent a message or ran an eval, as the ref's value a write gives it: the entity by its identity alone, an agent (a user is an agent)
   by its key k, else the system (`system-sender`) for nil. A ref written as an entity map is an upsert by identity, so it resolves on any
   branch, one that forked before the sender was made included, and an agent's key is a content id, the same entity everywhere: a merge
-  makes no second (step 2's ruling, Optimization 2026-11-10). See docs/users.md#messages."
+  makes no second. See docs/users.md#messages."
   {:malli/schema [:=> [:cat [:maybe :string]] :map]}
   [k] (if k {:seon.agent/key k} system-sender))
 

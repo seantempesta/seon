@@ -207,8 +207,9 @@
 
 (deftest scratch-and-observations-never-merge
   (let [ours (with (base) [{:note/text "scratch" :note/agent :a1}
-                         {:seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}
-                         {:seon.agent/key "a1" :seon.process/pid 7}
+                         ;; the agent once, by its identity, under the eval's :by: two maps of one content-id identity in one write
+                         ;; resolve to two ids (a Datahike finding, sent to Deep fixes)
+                         {:seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1" :seon.process/pid 7} :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}
                          {:task/name :x/y :task/status :done}])]
     (is (= (pm/program (base) #{}) (pm/program ours #{})))
     (is (empty? (:ours (tw ours (base)))))))

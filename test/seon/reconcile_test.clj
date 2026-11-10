@@ -454,7 +454,7 @@
         (is (= :told (:seon.task/outcome (task/task db "demo/a"))))
         (is (= red (:seon.task/reasons (task/task db "demo/a"))) "the reasons are the task's, so the next judging can compare")
         (is (= :running (:seon.task/execution (task/task db "demo/a"))) "and the task stays released")
-        (is (= ["root" #{(akey "a")}] [(:seon.message/from v) (set (map :seon.agent/key (:seon.message/to v)))]) "from root, to the agent")
+        (is (= [:root #{(akey "a")}] [(:seon.root/id (d/entity db (:db/id (:seon.message/from v)))) (set (map :seon.agent/key (:seon.message/to v)))]) "from the system, to the agent")
         (is (= {:reasons red :results fail} (select-keys (sedn/decode (:seon.message/body v)) [:reasons :results])))))
     (testing "told, its process gone: the next start is a spawn, never a wake (a told task is not parked)"
       (let [told (db-of [(decl "a")] :extra (concat (work "a" :told :members {:seon.task/reasons red})
@@ -480,7 +480,7 @@
             max-b (cfg/value :seon.config.merge/max-behind)]
         (let [{:keys [db outcome]} (judged-behind 2)]
           (is (= :behind outcome) "under the bound: told again, as behind")
-          (is (= "root" (:seon.message/from (verdict-of db))))
+          (is (= :root (:seon.root/id (d/entity db (:db/id (:seon.message/from (verdict-of db)))))) "from the system")
           (is (= :running (:seon.task/execution (task/task db "demo/a"))) "and not held"))
         (let [{:keys [db outcome]} (judged-behind max-b)]
           (is (= :closed outcome) "at the bound: held for root")
@@ -488,7 +488,7 @@
     (testing "different reasons: a verdict again, which wakes"
       (let [{:keys [db outcome]} (judge! (told [{:reason :no-proofs}]) "a" {:outcome :red} :results fail)]
         (is (= :told outcome))
-        (is (= "root" (:seon.message/from (verdict-of db))))))
+        (is (= :root (:seon.root/id (d/entity db (:db/id (:seon.message/from (verdict-of db)))))) "from the system")))
     (testing "a merge refused by the done rule holds"
       (let [mdb' (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running)))
             j (judgment-of mdb' "a-merge" {:end {:outcome :red} :results fail})]

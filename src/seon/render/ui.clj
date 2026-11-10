@@ -482,7 +482,8 @@
         ;; rendered as structure (the printer's hiccup). A live reply's :text is text
         data? (and recorded? (nil? (:text r)) (nil? basis))
         r (cond-> r (and recorded? (nil? (:text r)) data? (= :inline (:as opts))) (assoc :text (print/record-text (assoc e :seon.eval/response resp) #(render/stored-model (:seon.render/index opts) %))))
-        by (or (:seon.eval/by e) (:by r))
+        ;; who evaluated, by name (seon.task/sender-name of the entity its pull joins)
+        by (or (some-> (:seon.eval/by e) ratom/realize task/sender-name) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
       ;; its code's first line ⇒ its value's line, printed now by the one printer under the line budget, else its
@@ -589,9 +590,10 @@
    :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.message/keys [from body]}]
   (if (= :inline (:as opts))
-    [:span (str from ": ") (plain body (cell) {:one-line? true})]
+    [:span (str (task/sender-name (ratom/realize from)) ": ") (plain body (cell) {:one-line? true})]
     [:section {}
-     [:p {:class "seon-note"} (str from)]
+     ;; its sender by name (seon.task/sender-name of the entity its pull joins)
+     [:p {:class "seon-note"} (str (task/sender-name (ratom/realize from)))]
      [:div {} [#'markdown (str body) {:inline? true}]]]))
 
 (declare standing)
@@ -1950,7 +1952,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] [:maybe :map]] [:map [:asked [:maybe :string]] [:reply [:maybe :string]]]]}
   [db e t]
   (let [m (when e (->> (d/datoms db :avet :seon.message/to e) (map :e)
-                       (filter #(some->> (:seon.message/from (d/entity db %)) (vector :seon.user/name) (d/entity db)))
+                       (filter #(some-> (:seon.message/from (d/entity db %)) :seon.user/name))
                        (reduce max -1)))
         m (when (and m (pos? m)) m)
         tx-of (fn [eid a] (some-> (first (d/datoms db :eavt eid a)) :tx))

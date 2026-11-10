@@ -180,7 +180,7 @@
   "The messages main holds to this agent that its branch does not hold yet (seon.task/undelivered, which says how). Main is read only
   here, through `heard-main`: where messages live is this one read. Delivery is the fact, read here, not a frame root pushes to a
   live process: a process spawned again reads what came while none lived. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:from :string] [:body :string] [:sent-ms :int]]]]}
+  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:from :map] [:body :string] [:sent-ms :int]]]]}
   [] (task/undelivered (heard-main) (db) (:key @state)))
 
 (defn untaken-facts
