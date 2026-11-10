@@ -219,7 +219,13 @@
     (is (nil? (current (built-with "test/seon/required_whole.clj" #(str % "\n;; a test changed\n")))) "a test's change: a process loads it from main")
     (is (nil? (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form's change: the agent loads it from main")
     (let [r (current (built-with "src/seon/writer.clj" (tweak "(defn writer-proc")))]
-      (is (some #{'seon.writer/writer-proc} (:reaches r)) (str "a root proc's step is root's own code: not current " (pr-str r))))
+      (is (some #{'seon.writer/writer-proc} (:reaches r)) (str "a root proc's step is root's own code: not current " (pr-str r)))
+      ;; rule (a), as bin/test reads it (the plan's out/build): a process test selected, and a build only for a binary not current
+      (testing "bin/test builds target/seon for a root-side change and for nothing else"
+        (is (seq (test-runner/build-text ['seon.agent-test/in-agent-sample] r)) "the root-side change builds")
+        (is (= "" (test-runner/build-text ['seon.agent-test/in-agent-sample] (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))))
+            "an agent-only change builds nothing")
+        (is (= "" (test-runner/build-text [] r)) "and no process test selected builds nothing")))
     (is (= ["reference-code/lmdb"] (:reaches (current (built-with "reference-code/lmdb" :pin)))) "a pin: not current")
     (let [r (current (built-with "src/seon/render/ui.clj" (tweak "(defn script")))]
       (is (some #{'seon.render.ui/script} (:reaches r)) (str "a render a schema names, which no call of root's reaches, is root's: not current " (pr-str r))))

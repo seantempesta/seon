@@ -217,6 +217,9 @@
         whole (if (seq names) (set (keep #(when-not (str/includes? % "/") (symbol %)) names)) nss)
         idx (into {} (filter #(or (whole (symbol (namespace (key %)))) (vars (key %)))) all)]
     {:graph g :inputs in
+     ;; whether the binary target/seon is (its build record, target/seon.program) runs this tree's program as a build of it would:
+     ;; nil, or what differs that it bakes (seon.root/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
+     :binary-current (seon.root/binary-current db (seon.root/binary-program) tree g)
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
@@ -381,14 +384,22 @@
   :seon.proofs/unread, when the results could not be read (read-results)."
   [root what all? names store]
   (let [unread (volatile! nil)
-        p (proofs/plan-of (assoc (tests-of root names store) :slow-of fx/slow-tests) what all? names
+        reach (tests-of root names store)
+        p (proofs/plan-of (assoc reach :slow-of fx/slow-tests) what all? names
                   (some->> (fx/base-commit root) (fx/tree-of root))
                   ;; the verdicts cached at the candidates' digests; a read that failed is the plan's
                   ;; :unread (prove! stops on it), never zero greens
                   (fn [cand]
                     (let [r (read-results cand)]
                       (if (contract/error? r) (do (vreset! unread r) {}) r))))]
-    (cond-> p @unread (assoc :unread @unread))))
+    (cond-> (assoc p :binary-current (:binary-current reach)) @unread (assoc :unread @unread))))
+
+(defn build-text
+  "out/build's text, what bin/test builds target/seon for: when a selected key reaches the binary (bin-keys) and the binary is
+  not current for the tree (binary-current's answer, seon.root/binary-current), that answer; else empty, and nothing is
+  built. docs/source.md#the-binary-records-its-program."
+  [bin-keys binary-current]
+  (if (and (seq bin-keys) binary-current) (str (pr-str binary-current) "\n") ""))
 
 (defn- prove!
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
@@ -410,7 +421,7 @@
         1)
   (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky]} plan
+        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky binary-current]} plan
         ;; a merge runs these last, once all else is green (bin/prove): out/slow, names, one line
         _ (write! (str out "/slow") (str (str/join " " (sort (map str (keys slow)))) (when (seq slow) "\n")))
         _ (when (seq slow)
@@ -440,6 +451,11 @@
         step-bin (filterv proofs/step-needs-binary? run-steps)
         bin-keys (into (vec (filter binary run-tests)) step-bin)
         _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
+        ;; out/build: what bin/test builds target/seon for, empty when the binary is current for this tree (seon.root/binary-current):
+        ;; a change that reaches nothing root runs from its binary builds nothing (rule (a), docs/source.md#the-binary-records-its-program)
+        _ (write! (str out "/build") (build-text bin-keys binary-current))
+        _ (when (and (seq bin-keys) (not binary-current))
+            (println "prove: target/seon is current for this tree (seon.root/binary-current): no build"))
         ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms)
         _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) "\n"))
         ;; the process tests' store, made here before any shard starts (shards' roots that each made
