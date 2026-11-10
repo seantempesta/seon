@@ -11,7 +11,7 @@
 (def ^:private boot-then-boot-again
   "One cycle and a second boot in a process of its own (./seon boot-twice, seon.check/boot-twice: start!, three agents
   evaluated, stop!, then start! again), on a main of its own on the test store, deleted at once: {:exit :out :err :res},
-  res its last line read. Two claims read it, so the process boots root once for both."
+  res its last line read (root-threads-are-what-root-declares reads it)."
   (delay
     (let [main (str "root-test-" (random-uuid))
           r (ts/binary-sh "env" "SEON_WEB_PORT=0" (str "SEON_STORE=" (test-store)) (str "SEON_MAIN=" main)
@@ -20,8 +20,8 @@
       (assoc r :res (edn/read-string (last (str/split-lines (:out r))))))))
 
 (deftest root-threads-are-what-root-declares
-  ;; one start!/stop! cycle, in a process of its own (a process boots root once: a
-  ;; second-boot-in-one-process-is-refused, which reads the same process): while running (three agents just
+  ;; one start!/stop! cycle, in a process of its own (a process boots root once,
+  ;; a-second-boot-in-one-process-is-refused): while running (three agents just
   ;; evaluated) and after stop!, every thread is one seon.check/declared-threads
   ;; names, by name stem, the GC's sweepers are the declared number, and the OS counts
   ;; nothing else. A cycle is a process of its own, so a second one starts from the same
@@ -39,10 +39,18 @@
   ;; root boots on its main carrier, before any thread, and forks its fork server there while it
   ;; is the one thread (seon.root/boot!); its threads (Jolt's carriers, timer, poller) outlive
   ;; stop!, so a second start! in that process would fork beside them. It is refused by name
-  ;; instead, and nothing is forked: after a real first boot, three agents and its stop! (seon.check/boot-twice),
-  ;; the process root-threads-are-what-root-declares reads, so this claim pays no boot of its own
-  (let [{:keys [out err res]} @boot-then-boot-again]
-    (is (re-find #"fibers already run on carrier threads" (str (:second res))) (str (pr-str res) "\n" out err))))
+  ;; instead (Jolt's jolt-fiber-pool-started? check in jolt.host/main-carrier-run!, the first thing boot!
+  ;; does, before the store is touched), and nothing is forked. Asked of a root that has booted: the
+  ;; shard's shared root, whose REPL starts one more (docs/testing.md#a-root-costs-what-it-boots)
+  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
+        ask #(ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code %})))
+        server "(get-in (c/state sys) [:fork-server :pid])"
+        before (ask server)
+        second-boot (ask "(try (seon.root/start! {}) :booted (catch Throwable e (ex-message e)))")
+        after (ask server)]
+    (is (re-find #"fibers already run on carrier threads" (str second-boot)) (pr-str second-boot))
+    (is (pos-int? before))
+    (is (= before after) "and nothing was forked: root's fork server is the one it had")))
 
 (deftest the-sweeper-pool-is-fixed-before-anything-collects
   ;; task seon.root/the-sweeper-pool-is-fixed-before-anything-collects: six threads allocate through 30

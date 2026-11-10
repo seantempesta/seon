@@ -1663,8 +1663,10 @@
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
-  ;; the config this process was forked holding (root read it; an agent reads no environment)
-  (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
+  ;; the config this process was forked holding (root read it; an agent reads no environment), the heap bound as its task
+  ;; states it (docs/config.md#the-resolver): a task's own :seon.config.agent/heap-extra-bytes bounds its agent
+  (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes {:task (when task (d/pull db0 (cfg/keys-declared) [:seon.task/id task]))}))
+                 (cfg/value :seon.config.agent/trip-bytes))
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   (mark! :setup)
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)

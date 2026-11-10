@@ -18,7 +18,7 @@ A session does its work itself, in one conversation, and starts no other session
 
 The night of 2026-10-27 ran sixteen sessions and a merge session, with wake pipes and orders files, each re-deriving context and reworking the others' branches. About a fifth of a week's tokens went on churn (109 merges, 6 Jolt pin bumps, 591 GB of worktrees), and the machine reached a memory limit at load 35. The tooling built to serve that parallel work is the second lesson of the night ([decisions](decisions.md#build-the-product-not-infrastructure-owner-2026-10-28)).
 
-One helper at a time on a step, briefed from a plan the session understands; steer it with a message before launching another.
+A session uses as many helpers as its work needs (owner, 2026-11-10: "What I never said one helper? Yeah allocate whatever resources we need"): each is briefed from a plan the session understands, owns its own files so no two write the same ones, and has every line reviewed by the session. What the night above got wrong was sessions nobody steered reworking each other, not the number of hands; the machine still bounds it ([machine](machine.md#processes)).
 
 ## Asking the owner
 

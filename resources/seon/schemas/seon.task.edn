@@ -20,6 +20,8 @@
                     [:seon.config.ai/script {:optional true} :seon.config.ai/script]
                     ;; what a first-move pass may spend before it scores this task (my.root/first-moves!)
                     [:seon.config.ai/judge-pass-usd {:optional true} :seon.config.ai/judge-pass-usd]
+                    ;; how far its agent's heap may grow (seon.agent/init!): a test of an agent past its heap rides its task
+                    [:seon.config.agent/heap-extra-bytes {:optional true} :seon.config.agent/heap-extra-bytes]
                     [:seon.config.merge/max-conflicts {:optional true} nat-int?]
                     [:seon.config.merge/max-merge-turns {:optional true} nat-int?]
                     ;; the relevance at which a search shows an item (seon.ctx.search/search)

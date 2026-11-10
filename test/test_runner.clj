@@ -441,8 +441,10 @@
       (println (str "prove: " (count left) " tests and steps that reach a process left out (run them by name:"
                     " bin/test NS, bin/check MODE, or the full run): " (str/join " " (map str left)))))
     (when (= :merge all?)
-      (println (str "prove: a merge's verification: " (count (filter (set process) (concat run-tests run-steps)))
-                    " keys that reach a process run (no green at their digest), 0 left out")))
+      (let [ran (count (filter (set process) (concat run-tests run-steps)))
+            late (count (filter (set process) (keys slow)))]
+        (println (str "prove: a merge's verification: " (+ ran late) " keys that reach a process run (no green at their digest), 0 left out: "
+                      ran " in this plan, " late " the slow ones run last (the process plan after it)"))))
     ;; a key green and red at one digest: red, never run again until a change moves its digest;
     ;; out/flaky names each, and bin/test ends red on it after its shards ran
     (let [flaky (for [[k r] flaky]
