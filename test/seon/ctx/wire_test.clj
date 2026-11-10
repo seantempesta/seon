@@ -1045,7 +1045,7 @@
         a (seon.ratom/atom (:tree @c))
         w (cond-> (render/walker {:ref a :changes ctx/changes} #(deref cell) [#'seon.render.ui/agent {} (seon.ratom/ref-view a ctx/changes)])
             outputs (assoc :outputs outputs))]
-    (render/flush! w nil)
+    (seon.fixtures/flush! w nil)
     [w a cell c (pdb/eid db :seon.agent/key "demo/a1")]))
 
 (defn- step!
@@ -1057,7 +1057,7 @@
     (vreset! cell (:db-after r))
     (vswap! c ctx/patch (:db-after r) (:tx-data r) :b)
     (reset! a (:tree @c))
-    (render/flush! w (:tx-data r))
+    (seon.fixtures/flush! w (:tx-data r))
     (let [u1 (into {} (map (juxt :id :html)) (render/placed-units w))]
       (vec (sort (for [[id h] u1 :when (not= h (get u0 id))] id))))))
 
@@ -1117,8 +1117,8 @@
         root #'seon.render.ui/agent
         outs #{:seon.render/hiccup :seon.render/openai-compat}
         wire #(try (render/openai-compat %) (finally (render/dispose-walk! %)))]
-    (is (= (wire (render/draw c ctx/changes db root {:model-only true :once true :outputs outs}))
-           (wire (render/draw c ctx/changes db root {:outputs outs}))))))
+    (is (= (wire (seon.fixtures/draw c ctx/changes db root {:model-only true :once true :outputs outs}))
+           (wire (seon.fixtures/draw c ctx/changes db root {:outputs outs}))))))
 
 (deftest a-cited-var-redefined-shows-in-the-next-view
   ;; the task's data is a render, never held: a var the plan cites redefined (the agent's defn, or main
@@ -1146,7 +1146,7 @@
     (is (some? ((html w) part)) "the cited section, a part of its own")
     (let [changed (step! walk [[:db/add [:seon.doc/address "docs/vector.md#the-model"] :seon.doc/lead "The model, as main now says it."]])
           live (html w)
-          cold (let [d @cell w2 (render/draw (:tree (ctx/build (seon.db/index) d (pdb/eid d :seon.agent/key "demo/a1") :b)) ctx/changes d
+          cold (let [d @cell w2 (seon.fixtures/draw (:tree (ctx/build (seon.db/index) d (pdb/eid d :seon.agent/key "demo/a1") :b)) ctx/changes d
                                              #'seon.render.ui/agent)]
                  (try (html w2) (finally (render/dispose-walk! w2))))]
       (is (= [part] changed) "the cited section's part, and nothing else, drawn again")
@@ -1609,7 +1609,7 @@
       (example-world! conn)
       (let [db @conn
             a (pdb/eid db :seon.agent/key "a1")
-            w (render/draw (:tree (ctx/build (seon.db/index) db a :b)) ctx/changes db #'seon.render.ui/agent)
+            w (seon.fixtures/draw (:tree (ctx/build (seon.db/index) db a :b)) ctx/changes db #'seon.render.ui/agent)
             html (try (pr-str (render/placed-hiccup w ["#c-rows"])) (finally (render/dispose-walk! w)))]
         (is (str/includes? html "example/abc"))
         (is (str/includes? html "(+ 1 2)") "its eval, by the one hiccup an eval has")))))
@@ -2050,7 +2050,7 @@
         r (seon.ratom/atom (ctx/agent-ctx ix db a))
         w (assoc (render/walker {:ref r :changes ctx/changes} (constantly db) [#'seon.render.ui/agent {} (seon.ratom/ref-view r ctx/changes)] ix)
                  :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
-    (try (render/flush! w nil) (render/openai-compat w) (finally (render/dispose-walk! w)))))
+    (try (seon.fixtures/flush! w nil) (render/openai-compat w) (finally (render/dispose-walk! w)))))
 
 (defn- with-system
   "Db with agent key k's :seon.agent/system written as its run's start writes it (seon.agent/begin-run-tx): the system prompt's top section."
