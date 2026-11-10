@@ -1,5 +1,5 @@
 (ns seon.web-cost-test
-  "What an effect's in-flight text costs the web proc per message (task seon.render/one-walk-per-view, rule 10;
+  "What an effect's in-flight text costs the web proc per message (docs/render.md#in-flight-output-streams;
   docs/render.md#in-flight-output-streams): flat in how long its stream already is. Run: bin/test seon.web-cost-test"
   (:require [clojure.test :refer [deftest]] [clojure.core.async :as a] [seon.cost :as cost] [seon.web :as w]))
 

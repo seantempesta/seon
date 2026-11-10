@@ -12,9 +12,9 @@
 (defn- empty-db [] (ts/test-db))
 
 (defn- shipped-task-files
-  "The task files the checkout ships (root/task-files of its resources/seon/tasks), never the running
+  "The task files the checkout ships (seon.root/task-files of its resources/seon/tasks), never the running
   root's :seon.config.root/tasks-dir, which a root may point elsewhere."
-  [] (root/task-files (str (config/checkout) "/resources/seon/tasks")))
+  [] (seon.root/task-files (str (config/checkout) "/resources/seon/tasks")))
 
 (def ^:private file-a
   "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}
@@ -157,12 +157,12 @@
   ;; need on another file's task is a need on it
   (let [dir (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-task-files-" (random-uuid))) (.mkdirs))
         _ (spit (java.io.File. dir "demo.edn") file-a)
-        load! (fn [db] (d/db-with db (task/load-tx db (root/task-files (str dir)))))
+        load! (fn [db] (d/db-with db (task/load-tx db (seon.root/task-files (str dir)))))
         db (load! (empty-db))]
     (is (= :whole (:seon.task/kind (task/task db "demo/parse"))) "parse works and merges itself")
     (is (nil? (task/task db "demo/parse-merge")) "and has no merge task")
     (is (= #{"demo/parse"} (:seon.task/needs (task/task db "demo/index"))) "a need stays on the task")
-    (is (= [] (task/load-tx db (root/task-files (str dir)))) "an unchanged file writes nothing")
+    (is (= [] (task/load-tx db (seon.root/task-files (str dir)))) "an unchanged file writes nothing")
     (spit (java.io.File. dir "demo.edn") "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}]")
     (is (= :cancelled (:seon.task/execution (task/task (load! db) "demo/index"))) "a removed task cancels")))
 

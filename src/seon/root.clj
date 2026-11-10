@@ -27,7 +27,7 @@
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
-            [seon.turn] [my.fx] [my.task] [my.turn] [my.render] [my.branch] [my.doc] [clojure.core.async.flow :as flow] [clojure.test]
+            [seon.turn] [my.fx] [my.task] [my.turn] [my.render] [my.branch] [my.doc] [my.test] [clojure.core.async.flow :as flow] [clojure.test]
             [taoensso.trove :as trove]))
 
 
@@ -930,14 +930,6 @@
 
 (declare call!)
 
-(defn platform-tx
-  "Error e, observed at ms outside root's procs (boot, the file watcher: seon.watch, a source fact
-  the store refused: import-source!), as the
-  transaction recording it on main db: a :platform error by its signature (seon.error), what
-  my.root/problems shows."
-  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
-  [db e ms] (second (err/flush-tx (err/fold {} (err/occurrence e :platform {} ms)) db)))
-
 (defn- source-digest
   "The digest of what read-source's answer r read of dirs: its git tree id (or, with none, the files), the pins and dirs, the
   same whether the tree was read whole or by its changes, so a result keyed by the inputs stays shared. A dir added moves it, though the tree didn't."
@@ -946,7 +938,7 @@
   (lib/digest (sedn/encode [(or (:tree r) (:value r)) (:pins r) (vec dirs)])))
 
 (defn- unimportable
-  "Why files ({relative path text}), read at the source root, can't become main's as tx-of would make them, or nil: each of a kind on the allow-list that does not read, by name, or the config its entries would state on db refused (seon.program/config-refused), each with the commit main last imported, which stays. So a boot says which file and which commit last worked, and goes on with that. See docs/source.md#a-file-that-does-not-load."
+  "Why files ({relative path text}), read at the source root, can't become main's as tx-of would make them, or nil: each of a kind on the allow-list that does not read, by name, or the config its entries would state on db refused (seon.program/config-refused), each with the commit main last imported, which stays. So a seed or a re-index says which file and which commit last worked, and main stays as it was. See docs/source.md#a-file-that-does-not-load."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] :any :any] [:maybe :map]]}
   [db files tx commit]
   (let [bad (for [[p t] (sort files) :when (and t (cfg/file-kind p)) :let [why (fx/unread-text p t)] :when why] (str p ": " why))
@@ -966,7 +958,7 @@
   modes, and fact the source fact with the digest, its counts as main holds them after tx; {:fact :error} when it can't
   (a read with no files, or files that don't import: unimportable), fact saying what was read and why, with no digest,
   so the next import reads again. t0: the import's start, the fact's :ms. The one computation of an import:
-  import-tree! and import-source! differ only in how they write it. See docs/source.md#a-boot-imports-main-first."
+  the seed (import-tree!) and a re-index (my.root/import!) differ only in how they write it. See docs/source.md#indexing-a-tree."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :map] :map [:map [:root :string] [:dirs [:sequential :string]]] :int] :map]}
   [db held r {:keys [root dirs]} t0]
   (let [files (:value r)
@@ -994,72 +986,6 @@
              :fact (assoc (fact-on (pdb/speculate-db db tx) (count files))
                           :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))}))))))
 
-(defn import-source!
-  "Main's program follows Seon's own source (seon.source): root's dirs read through the
-  :source effect (first brought to the main checkout's branch, seon.fx/read-source: fast-forwarded
-  when behind, a recorded gap when it holds commits main lacks; their files, the tree's HEAD commit and its reference-code pins, and the
-  tree's inputs with no program facts, seon.fx/inputs). When what they read differs from
-  what main last imported (the digest on root's :seon.root/source fact, or none recorded),
-  main's program becomes theirs in one transaction (seon.source/replace-tx: each form
-  analyzed in the running generation's namespaces, never run; data untouched); a tree that
-  reads the same imports nothing. Either way the fact is this boot's (:boot), holding the
-  inputs only when the running binary was built from this very tree (target/seon.tree,
-  written by bin/build) and why not otherwise (:unshared), so agents never key results by a
-  previous root's inputs or by code the binary does not run. A failed read is recorded with
-  the fact, its :effect row naming :seon.root/source (seon.error/asked-tx); a fact the store
-  refuses is a :platform cause with the writer's reason, and the fact in force is then this
-  boot's without its inputs, saying why (:error). Answers the fact in force, or the error a
-  write of it answered. What it imports is import-of's, as import-tree!'s is: only the write differs (root's writer here).
-  With changed (the relative paths a watcher saw change, or none), only those files are read and
-  main's program is brought up to date with them (seon.source/refresh-tx, the cost of what
-  changed in the program), and the fact's digest is still the tree's: the git tree id
-  (seon.fx/read-source's :tree) with the pins, the same whether the tree was read whole or by
-  its changes, so a result keyed by the inputs stays shared. It covers every file git sees, so a
-  boot after an edit to a page or a task file reads the source again, and writes nothing if the
-  program is the same. Only a root whose last import left a digest takes the changes (the program
-  it holds is then the tree's before them), and a repository git does not hold has no tree id:
-  both read the whole tree. The read of the inputs (seon.fx/inputs) is git's, the tree's, whichever
-  files are asked for; the files read and the forms written are the changes'."
-  {:malli/schema [:function [:=> [:cat :map :map] :map] [:=> [:cat :map :map [:maybe [:set :string]]] :map]]}
-  ([sys source] (import-source! sys source nil))
-  ([sys {:keys [root dirs branch]} changed]
-  (let [t0 (profile/now-ns)
-        held (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
-        ask (fn [paths] @(call! sys {:op :fx :kind :source :req (cond-> {:root root :dirs dirs :paths paths :follow (cfg/checkout) :own-branch branch :binary-tree (str (cfg/checkout) "/target/seon.tree")}
-                                                                  ;; only what the tree changed since its last import: what main merged and the tree never held stays main's
-                                                                  (and (nil? paths) (:digest held) (:tree held)) (assoc :since (:tree held) :since-dirs (:dirs held [])))}))
-        changed (when (:digest held) changed)
-        r (let [r (ask changed)] (if (and changed (not (:tree r))) (ask nil) r))
-        built? (and (:inputs r) (= (:binary r) (:tree (:inputs r))))
-        this-boot (fn [fact] (cond-> (assoc (dissoc fact :inputs :unshared) :boot (:boot sys))
-                               built? (assoc :inputs (:inputs r))
-                               (and (:inputs r) (not built?)) (assoc :unshared (str "the binary was built from tree " (or (:binary r) "unknown")
-                                                                                       ", the source is tree " (:tree (:inputs r))))))
-        {:keys [tx fact error]} (import-of @(:conn sys) held r {:root root :dirs dirs} t0)
-        w (when tx @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}}))
-        fact (this-boot (cond (nil? fact) held
-                              (contract/error? w) (-> fact (dissoc :digest :retracted) (assoc :error (:seon.error/message w)))
-                              :else fact))]
-    ;; a source the running image cannot analyze is root's defect to show, a :platform cause; the import
-    ;; changed nothing, so no digest is recorded and the next batch tries again (a failed read is the asked-tx's below)
-    (when (and error (:value r))
-      @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (platform-tx @(:conn sys) (assoc error :seon.error/subject :seon.root/source) (System/currentTimeMillis))}}))
-    ;; a failed read is recorded here, with the fact, in one transaction (seon.error/asked-tx)
-    (let [w @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (err/asked-tx @(:conn sys) r :seon.root/source [{:seon.root/id :root :seon.root/source fact}])}})]
-      (if-not (contract/error? w)
-        fact
-        ;; the store refused the fact (a value its codec cannot encode): in force, this boot's
-        ;; fact with what it read and why it holds nothing more, so no agent keys results by
-        ;; inputs never stored; then root's own defect, a :platform cause with the writer's
-        ;; reason, written after the fact so that only a later import's write closes it.
-        ;; Either write refused too is the answer
-        (let [refused (-> (select-keys fact [:root :commit :pins :files :forms :ms :boot])
-                          (assoc :error (str (some-> (:error fact) (str "; ")) "the store refused root's source fact: " (:seon.error/message w))))
-              f @(call! sys {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/source refused}]}})
-              c @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (platform-tx @(:conn sys) (assoc w :seon.error/subject :seon.root/source) (System/currentTimeMillis))}})]
-          (cond (contract/error? f) f (contract/error? c) c :else refused)))))))
-
-
 (defn baseline-of
   "wiki-baseline's answer for db: the plan read from db, the history asked of (ask {:root :sections}), the effect owner's
   answer (seon.fx/wiki-history), as root asks it through its api and a seed asks it directly."
@@ -1084,28 +1010,17 @@
   (baseline-of @(:conn sys) #(deref (call! sys {:op :fx :kind :history :req %})) checkout dir))
 
 (defn wiki-tx
-  "The wiki (the checkout's :seon.config.root/wiki-dirs: docs/ and the top-level pages) onto main db, written by the boot right after its boot fact (wiki-boot!) so main
-  holds it before any agent forks: the system prompt every agent reads first is one of its pages
+  "The wiki (the checkout's :seon.config.root/wiki-dirs: docs/ and the top-level pages) onto main db, indexed by a seed (seed!) or a
+  re-index (my.root/load-docs!): the system prompt every agent reads first is one of its pages
   (seon.ctx.wire/system-text), and the help page another (seon.ctx.wire/help-text). An unchanged wiki writes nothing. A link to no section refuses
   the write, :seon.db/no-target naming it (docs/references.md#the-wiki-in-the-store).
+
   baseline: what the sections with no record were last written against (wiki-baseline)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector :any]]
                   [:=> [:cat :seon.host/db :string :map] [:vector :any]]]}
   ([db checkout] (wiki-tx db checkout {}))
   ([db checkout baseline]
    (doc/load-dir-tx db checkout (cfg/value :seon.config.root/wiki-dirs) baseline)))
-
-(defn wiki-digest
-  "The digest of what the boot's wiki load reads: the pages of the checkout's wiki dirs, the program db
-  holds (seon.program/program-digest: the vars a section's names and references resolve to, and the forms
-  its read ids come from), its task ids (a text word may name a task) and the form of the doc fact the
-  load writes (:seon.doc/fact: a store written under other attributes, as a rename of them leaves it,
-  loads again). docs/root.md#boot."
-  {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
-  [db checkout]
-  (lib/digest (str (program/program-digest db) "\n" (str/join " " (map :v (d/datoms db :avet :seon.task/id))) "\n"
-                   (lib/digest (sedn/encode (get contract/forms :seon.doc/fact))) "\n"
-                   (str/join "\n" (for [dir (cfg/value :seon.config.root/wiki-dirs) [p t] (doc/pages checkout dir)] (str p "\n" t))))))
 
 (def ^:private root-session-plan
   "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-session."
@@ -1144,81 +1059,218 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db] (if (pdb/eid db :seon.agent/key "root") [{:seon.agent/key "root" :seon.ctx/pattern (root-session-pattern)}] []))
 
-(defn wiki-boot-tx
-  "The wiki's load at boot (wiki-boot!, its own transaction after the boot fact): wiki-tx, with the digest of what it read (wiki-digest) on root's
-  fact, or [] when main already holds that digest (the load is a function of that input, so it would write
-  nothing). baseline: a function answering wiki-tx's baseline, called only when it loads. docs/root.md#boot."
-  {:malli/schema [:=> [:cat :seon.host/db :string :seon.host/fn] [:vector :any]]}
-  [db checkout baseline]
-  (let [digest (wiki-digest db checkout)]
-    (if (= digest (when-let [e (pdb/eid db :seon.root/id :root)] (:seon.root/wiki (d/pull db [:seon.root/wiki] e))))
-      []
-      (conj (vec (wiki-tx db checkout (baseline))) {:seon.root/id :root :seon.root/wiki digest}))))
-
-(defn- wiki-boot!
-  "The wiki's load at boot (wiki-boot-tx on db, main before the boot), written in a transaction of its own after the boot
-  fact, so a page the write refuses (a link to no section, :seon.db/no-target) never stops the boot: the refusal is a
-  :platform error on main naming :seon.root/wiki as its subject, open until a load writes the wiki's digest (a fixed
-  page). See docs/root.md#boot."
-  {:malli/schema [:=> [:cat :seon.root/sys :seon.host/db] :nil]}
-  [sys db]
-  (let [tx (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))]
-    (when (seq tx)
-      (let [r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}})]
-        (when (contract/error? r)
-          @(call! sys {:op :write :req {:op :tx :branch :db
-                                        :tx-data (platform-tx @(:conn sys) (assoc r :seon.error/subject :seon.root/wiki) (System/currentTimeMillis))}}))))
-    nil))
-
 (defn import-tree!
-  "Main's program on conn brought to the source tree {:root :dirs :follow :branch} (branch, root's merges branch, brought
-  to what it read as import-source! brings it), only what it changed since root's :seon.root/source fact (import-of),
-  written with the fact in one transaction while this is the store's only process (a boot, a seed); nothing when main
+  "Main's program on conn brought to the source tree {:root :dirs}, only what it changed since root's :seon.root/source fact
+  (import-of), written with the fact in one transaction while this is the store's only process (a seed); nothing when main
   holds its digest, and :error saying why when it can't import. t0: the caller's phase start, the fact's :ms. Answers
-  {:imported? :digest :error}. See docs/source.md#a-boot-imports-main-first."
-  {:malli/schema [:=> [:cat :seon.host/conn [:map [:root :string] [:dirs [:sequential :string]] [:follow {:optional true} :string] [:branch {:optional true} :any]] :int] :map]}
-  [conn {:keys [root dirs follow branch] :as source} t0]
+  {:imported? :digest :error}. See docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/conn [:map [:root :string] [:dirs [:sequential :string]]] :int] :map]}
+  [conn {:keys [root dirs] :as source} t0]
   (let [held (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
-        r (fx/read-source {:req (cond-> {:root root :dirs dirs :own-branch branch}
-                                  follow (assoc :follow follow)
+        r (fx/read-source {:req (cond-> {:root root :dirs dirs}
                                   ;; only what the tree changed since its last import: what main merged and the tree never held stays main's
                                   (and (:digest held) (:tree held)) (assoc :since (:tree held) :since-dirs (:dirs held [])))})
         {:keys [digest tx fact error]} (import-of @conn held r source t0)]
     (cond
-      ;; a failed read, or a tree that main is not behind (a gap of commits main holds, or a refused fast-forward)
-      ;; the error without the read it may carry: a boot keeps this answer in its view
-      (and (contract/error? r) (not (and (:value r) (= 0 (:behind r))))) {:imported? false :error (select-keys r [:seon.error/type :seon.error/operation :seon.error/message])}
+      (contract/error? r) {:imported? false :error (select-keys r [:seon.error/type :seon.error/operation :seon.error/message])}
       error {:imported? false :error error}
       (nil? tx) {:imported? false :digest digest}
       :else (do (d/transact conn {:tx-data (conj tx {:seon.root/id :root :seon.root/source fact})})
                 {:imported? true :digest digest}))))
 
+(defn tasks-of
+  "The task files' texts ({file name text}, a name being its owning namespace and .edn) as seon.task/load-tx takes them:
+  {owning-ns declarations or error}. Each declaration is one :whole task (seon.template/request) that merges itself, so a
+  need on another file's task is a need on it; the kind is derived here and never written in a file. See docs/tasks.md#task-files."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :symbol :any]]}
+  [texts]
+  (let [read (into (sorted-map)
+                   (for [[n text] texts
+                         :let [ns-sym (symbol (subs n 0 (- (count n) 4)))]]
+                     [ns-sym (task/file-declarations ns-sym text)]))
+        refused (into {} (filter (comp contract/error? val)) read)]
+    (if (seq refused)
+      read
+      (merge (zipmap (keys read) (repeat []))
+             (group-by :seon.task/ns (into [] (mapcat tpl/request) (apply concat (vals read))))))))
+
+(defn task-files
+  "The task files under dir (:seon.config.root/tasks-dir by default), read (tasks-of). See docs/tasks.md#task-files."
+  {:malli/schema [:function [:=> [:cat] [:map-of :symbol :any]] [:=> [:cat :string] [:map-of :symbol :any]]]}
+  ([] (task-files (cfg/value :seon.config.root/tasks-dir)))
+  ([dir] (tasks-of (lib/dir-texts dir ".edn"))))
+
+(defn changed-tx
+  "The facts that bring db's index of the tree up to date with the files that changed (changed: {relative path text}, a
+  removed file's text nil; modes: {path git mode}, a mode kept only for a file the allow-list names, as a read keeps it),
+  as a seed indexes them and in its order (seed!): the source dirs' files (seon.fx/source-file?: seon.source/refresh-tx,
+  seon.source/modes-tx), then on the db those make the wiki's pages
+  (seon.doc/load-tx; a removed page loads empty, so its sections go) and the task files (seon.task/load-tx of tasks-of; a
+  removed file declares none, so its tasks are cancelled). A path of none of these (native code, deps.edn, system.edn, a
+  gitlink) is a build input, which the binary's build takes. What root writes on main for a Claude session's landing
+  (bin/land's bridge, a temporary one). tasks-dir: the tree's task files' directory, relative to the tree (the files' paths
+  are; nil: the tree holds no task files this root reads), so what a path is follows the tree, not this process's own task dir (a test root's is under its runs).
+  See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string]] :seon.db/tx-data]}
+  [db changed modes tasks-dir]
+  (let [under? (fn [p d] (if (= "." d) (not (str/includes? p "/")) (and (str/starts-with? p (str d "/")) (not (str/includes? (subs p (inc (count d))) "/")))))
+        program? (fn [p] (and (fx/source-file? p) (some #(str/starts-with? p (str % "/")) (cfg/value :seon.config.source/dirs))))
+        wiki (cfg/value :seon.config.root/wiki-dirs)
+        pick (fn [f] (into {} (filter (comp f key)) changed))
+        ;; a mode is a fact of a file the allow-list names (seon.source/modes-tx), as a read records it (seon.fx/read-source)
+        code (into (source/refresh-tx db (pick program?)) (source/modes-tx db (into {} (filter #(and (program? (key %)) (cfg/file-kind (key %)))) modes)))
+        db1 (pdb/speculate-db db code)
+        pages (update-vals (pick (fn [p] (and (str/ends-with? p ".md") (some #(under? p %) wiki)))) #(or % ""))
+        docs (if (seq pages) (doc/load-tx db1 wiki pages) [])
+        db2 (pdb/speculate-db db1 docs)
+        task-texts (into {} (for [[p t] changed :when (and tasks-dir (str/ends-with? p ".edn") (under? p tasks-dir))]
+                              [(subs p (inc (count tasks-dir))) (or t "[]")]))
+        tasks (if (seq task-texts) (task/load-tx db2 (tasks-of task-texts)) [])]
+    (if (contract/error? tasks)
+      (throw (ex-info (str "the landed task files were refused: " (:seon.error/message tasks)) tasks))
+      (vec (concat code docs tasks)))))
+
+(defn- seed!
+  "Index the checkout into conn's branch while this is the store's only process: the source tree {:root :dirs}'s program
+  (import-tree!; none when source is nil), then the wiki with its baseline (wiki-tx) until it states nothing more (its
+  citations resolve to the program; a link to no section refuses the seed, :seon.db/no-target naming it), then the task
+  files (task-files, seon.task/load-tx). A branch whose fact already
+  holds the tree's digest is left as it is. Answers {:imported? :digest :forms}, with :tasks when the task files were
+  refused, or :error. See docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/conn [:maybe [:map [:root :string] [:dirs [:sequential :string]]]] :int] :map]}
+  [conn source t0]
+  (let [r (if source (import-tree! conn source t0) {:imported? true})]
+    (if-not (:imported? r)
+      r
+      (let [db (loop [db @conn]
+                 (let [w (wiki-tx db (cfg/checkout) (baseline-of db #(fx/wiki-history {:req %}) (cfg/checkout) "docs"))]
+                   (if (empty? w) db (recur (:db-after (d/transact conn {:tx-data w}))))))
+            tasks (task/load-tx db (task-files))
+            db (if (or (contract/error? tasks) (empty? tasks)) db (:db-after (d/transact conn {:tx-data tasks})))]
+        (cond-> (assoc r :forms (count (d/datoms db :aevt :form/id)))
+          (contract/error? tasks) (assoc :tasks tasks))))))
+
+(def index-roots
+  "The vars an index of a tree reaches: what makes a program's facts from its files (import-tree!, down through the
+  analysis and the account) and what digests them. See docs/source.md#the-binary-records-its-program."
+  '[seon.root/import-tree! seon.program/program-digest])
+
+
+(defn landed-tx
+  "What root writes on main for a change git landed (bin/land's bridge, docs/source.md#a-landing-enters-main-as-data):
+  changed-tx of its changed files and modes, and root's :seon.root/source fact moved to the landed tree (its :tree,
+  :commit and :digest, as an import of that tree records them), so the next re-index (my.root/import!) reads only what
+  differs from that tree, not every file landed since the last import."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] :string :string] :seon.db/tx-data]}
+  [db changed modes tree commit]
+  (let [held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
+        ;; the tree's task files: root's task dir as a path in the checkout it serves
+        co (.getCanonicalPath (java.io.File. ^String (cfg/checkout)))
+        td (.getCanonicalPath (java.io.File. ^String (cfg/value :seon.config.root/tasks-dir)))
+        tasks-dir (when (str/starts-with? td (str co "/")) (subs td (inc (count co))))]
+    (cond-> (changed-tx db changed modes tasks-dir)
+      held (conj {:seon.root/id :root
+                  :seon.root/source (assoc held :tree tree :commit commit :digest (source-digest {:tree tree :pins (:pins held)} (:dirs held [])))}))))
+
+(defn index-code
+  "The code that indexes a tree, as db's program states it, under inputs: the reach digest of roots
+  (seon.program/graph-index over db's seon.program/reach-graph, as a check step's root is digested), its components and
+  the runtime pins and config keys they read, never the tree or the program's source (blank in inputs: the files are the
+  index's other input). nil when db defines none of roots. What a kept index was made by, so one whose code moved is
+  made again. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat [:or :seon.host/db :map] :seon.program/inputs [:vector :qualified-symbol]] [:maybe :string]]}
+  [db-or-graph inputs roots]
+  (let [g (if (:rows db-or-graph) db-or-graph (program/reach-graph db-or-graph nil))]
+    (get-in (program/graph-index g (assoc inputs :tree "" :code "") {"index" roots}) ["index" :digest])))
+
+(defn with-index-code
+  "inputs with the code that indexes the process store, the seeded store a process test's root takes (index-code of
+  index-roots over db or its reach graph), as :seon.env/index in its :config: every process test's digest takes it, so a
+  verdict of a run on a store indexed by other code is no verdict of this one. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat [:or :seon.host/db :map] :seon.program/inputs] :seon.program/inputs]}
+  [db-or-graph inputs]
+  (assoc-in inputs [:config :seon.env/index] (or (index-code db-or-graph inputs index-roots) "none")))
+
+(defn- kept-index!
+  "The kept store at path (its :db) brought to a tree by index (a function of the connection answering import-tree!'s
+  answer: a seed's, or the program alone), and keyed by the code that made it (index-code of roots under inputs, kept as
+  :indexed-by on its :seon.root/source fact, read before the index, whose fact replaces it): when what the tree changed
+  moves that code, or the store holds an index no key names, the store is removed and the tree indexed into it again from nothing, since a store brought up to
+  date keeps what the old code made of each form whose text did not change, its id included
+  (seon.program/account-diff-tx). Answers index's answer with the store's :program digest, or its error. See
+  docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string :seon.host/fn :seon.program/inputs [:vector :qualified-symbol]] :map]}
+  [path index inputs roots]
+  (let [once (fn []
+               (let [{:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
+                     fact #(:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root]))
+                     before (fact)
+                     held (:indexed-by before)
+                     r (index conn)
+                     code (when (and (not (:error r)) (or (:imported? r) (nil? held))) (index-code @conn inputs roots))
+                     ;; a store indexed before it held a key is no less stale: made by a code nobody recorded
+                     moved? (and code (not= held code) (some? before))]
+                 ;; the index's fact replaced the one held: the key is written again whenever the fact lacks it
+                 (when (and (not moved?) (or code held) (not= (or code held) (:indexed-by (fact))))
+                   (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/source (assoc (fact) :indexed-by (or code held))}]}))
+                 (let [out (cond (:error r) r
+                                 moved? {:moved code}
+                                 :else (assoc r :program (program/program-digest @conn) :indexed-by (or code held)))]
+                   (pdb/sync! cfg)
+                   (d/release conn)
+                   out)))
+        r (once)]
+    (if (:moved r) (do (fx/remove-tree! path) (once)) r)))
+
 (defn seed-program!
-  "Bring the program and the wiki on :db of the store at path (made when missing) up to the tree
-  root would import (source-root and dirs from the config, as import-source! reads them): the
-  program as a boot imports it (import-tree!), then the wiki loaded with its baseline (wiki-tx) until it states nothing more,
-  so a root whose main is made from :db finds its program, its wiki and a digest equal to the tree's, and imports and loads nothing: a
-  boot once per root cost 5-12 s of analysis and 2 s of wiki per fresh main (docs/machine.md#a-root-boots-from-a-seeded-store).
-  A :db whose fact already holds the tree's digest is left as it is. Answers {:digest :forms :ms :imported?}
-  or the error that stopped it (a source the image cannot analyze, a read that failed)."
+  "Index the tree (source root and dirs from the config) into :db of the store at path (made when missing): seed!, so a
+  root whose main is made from :db resumes it and indexes nothing (docs/machine.md#a-root-boots-from-a-seeded-store);
+  the store kept between seeds and keyed by the code that indexes (kept-index!, as the build's index is). Answers
+  {:digest :forms :ms :imported? :program} or the error that stopped it (a source the image cannot analyze, a read that
+  failed). See docs/source.md#indexing-a-tree."
   {:malli/schema [:=> [:cat :string] :map]}
   [path]
   (let [t0 (profile/now-ns)
-        {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
-        r (import-tree! conn {:root (get cfg/config :seon.config.source/root) :dirs (cfg/value :seon.config.source/dirs)} t0)
-        out (cond
-              (:error r) (assoc (:error r) :imported? false)
-              (not (:imported? r)) r
-              :else
-              ;; the wiki's citations resolve to the program: loaded until it states nothing more (its fixpoint,
-              ;; which a root's second boot reached by itself, 41 s of git history at the first)
-              (let [db (loop [db @conn]
-                         (let [w (wiki-tx db (cfg/checkout) (baseline-of db #(fx/wiki-history {:req %}) (cfg/checkout) "docs"))]
-                           (if (empty? w) db (recur (:db-after (d/transact conn {:tx-data w}))))))]
-                (assoc r :forms (count (d/datoms db :aevt :form/id)))))]
-    (pdb/sync! cfg)
-    (d/release conn)
+        root (get cfg/config :seon.config.source/root)
+        r (kept-index! path #(seed! % {:root root :dirs (cfg/value :seon.config.source/dirs)} t0) (fx/inputs root) index-roots)
+        out (if (:error r) (assoc (:error r) :imported? false) r)]
     (assoc out :ms (lib/r2 (profile/ms-since t0)))))
+
+(defn built-program
+  "The program of the tree at root as a seed indexes it, and the inputs bin/test keys verdicts by: {:program
+  (seon.program/program-digest of the tree's index) :inputs (seon.fx/inputs)}, or the error of a read or an analysis.
+  The index is the build's cache, a store other than the one store because it is regenerable from the tree at any time
+  and root never reads it: kept between builds under base (bin/build's target/seon.index, keyed by the schema and layout:
+  seon.db/kept-store!, so one of another layout is dropped, never opened), brought to the tree as a seed brings a store
+  (import-tree!: only the files the tree changed) and keyed by the code that made it (kept-index!, roots index-roots by
+  default), so a build pays for what changed. What bin/build records beside the binary it built (target/seon.program,
+  `binary-program`). See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:vector :qualified-symbol]] :map]]}
+  ([root base] (built-program root base index-roots))
+  ([root base roots]
+   (let [inputs (fx/inputs root)
+         r (kept-index! (str (pdb/kept-store! base) "/index") #(import-tree! % {:root root :dirs (cfg/value :seon.config.source/dirs)} (profile/now-ns)) inputs roots)]
+     (if (:error r) (:error r) {:program (:program r) :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}))))
+
+(defn binary-program
+  "What the running binary was built from, as bin/build recorded it beside the binary (target/seon.program,
+  `built-program`'s answer), or nil when it recorded none. Read once, at boot. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat] [:maybe :map]]}
+  []
+  (let [f (java.io.File. (str (cfg/checkout) "/target/seon.program"))]
+    (when (.isFile f) (sedn/decode (slurp f)))))
+
+(defn booted-source
+  "Root's :seon.root/source fact held, as this boot (id boot) states it: the program the binary was built from (built, `binary-program`'s
+  :program, absent when bin/build recorded none) beside main's (main-digest, seon.program/program-digest of main at boot),
+  and, only when the two are one program, the binary's inputs with the config in force (config-input, seon.fx/config-input),
+  which agents key their test results by (seon.agent/test-inputs). A binary of another program is
+  seon.problems/stale-binary's row, never imported. See docs/source.md#a-boot-resumes-from-the-db."
+  {:malli/schema [:=> [:cat :map :string [:maybe :map] :string :map] :map]}
+  [held boot built main-digest config-input]
+  (cond-> (-> held (dissoc :inputs :binary) (assoc :boot boot :program main-digest))
+    (:program built) (assoc :binary (:program built))
+    (and (:inputs built) (= (:program built) main-digest)) (assoc :inputs (update (:inputs built) :config merge config-input))))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
@@ -1232,14 +1284,16 @@
 
 (defn- boot!
   "Root's boot up to its first thread, on the main carrier (jolt.host/main-carrier-run!: one OS
-  thread drives every fiber, so a go block a library starts is a fiber, and clojure.java.shell/sh,
-  which import-tree! reads git through, copies its pipes on fibers; a future is an OS thread of its
-  own, and must have ended before the fork, which seon.lib/fork! refuses beside another thread): main opened on the store at path and brought to the source tree (import-tree!, docs/source.md#a-boot-imports-main-first), its program loaded and instrumented, the warm
-  paths run and the heap made static, then the fork server forked from it (which preloads main's
-  indexes for its agents: seon.fork-server/main), sharing all of that copy-on-write while this is the one thread there is
-  (docs/failure-points.md, physics). Its return starts the process's threads (Jolt's carriers,
-  timer and poller; main-carrier-run! returns into an ordinary process), and root's follow.
-  open!'s answer with main's :db as forked, the fork server's :pid and :fd, the import's answer and each phase's ms."
+  thread drives every fiber, so a go block a library starts is a fiber; a future is an OS thread of its
+  own, and must have ended before the fork, which seon.lib/fork! refuses beside another thread): main opened on the
+  store at path and resumed as it is, reading no file and no git, or, when nothing was ever indexed into it nor a root
+  booted on it, the checkout indexed into it first (seed!); main's config held, its program digested (seon.program/program-digest), the
+  contracts instrumented, the warm paths run and the heap made static, then the fork server forked from it (which preloads
+  main's indexes for its agents: seon.fork-server/main), sharing all of that copy-on-write while this is the one thread
+  there is (docs/failure-points.md, physics). Its return starts the process's threads (Jolt's carriers, timer and poller;
+  main-carrier-run! returns into an ordinary process), and root's follow. open!'s answer with main's :db as forked, the
+  fork server's :pid and :fd, the seed's answer when it seeded, main's :digest and each phase's ms. See
+  docs/source.md#a-boot-resumes-from-the-db."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch [:maybe :map] :int] :map]}
   [backend path datoms main source t0]
   (jolt.host/main-carrier-run!
@@ -1258,21 +1312,24 @@
             agents-dir (pdb/agents-dir store-cfg)
             _ (.mkdirs (java.io.File. agents-dir))
             open-ms (profile/ms-since t0)
-            load-ms (profile/ms-since t0)
             t1 (profile/now-ns)
-            import (when source (import-tree! conn (assoc source :follow (cfg/checkout)) t1))
-            program (program/load-all! @conn {:tests? false})
+            ;; a main nothing was ever indexed into or booted on is indexed now, once; every other boot resumes it
+            seeded (when (every? nil? (vals (d/pull @conn [:seon.root/source :seon.root/boot] [:seon.root/id :root])))
+                     (seed! conn source t1))
+            seed-ms (profile/ms-since t1)
+            t2 (profile/now-ns)
             ;; main's own config, before anything below reads one and before the fork server inherits it
-            program (update program :errors into (program/hold-config! @conn))
-            program-ms (profile/ms-since t1)
+            config-errors (program/hold-config! @conn)
+            digest (program/program-digest @conn)
+            digest-ms (profile/ms-since t2)
             contracts (contract/instrument! contract/boot-nss)]
         (warm! conn)
         (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         (lib/static!)
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
-                 {:db db :agents-dir agents-dir :open-ms open-ms :load-ms load-ms :compacted compacted :retained retained
-                  :import import :program program :program-ms program-ms :contracts contracts}))))))
+                 {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained
+                  :seeded seeded :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts}))))))
 
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
@@ -1295,10 +1352,9 @@
    :backend :lmdb|:file :log? true :max-running n (parallel runs) :provider p (the
    runs' model) :started-by \"ns/test\" (the test whose process started it, :seon.root/started-by) :stall-ms (the stall bound, :seon.config.agent/stall-ms by default, for the checks that
    move it) :source s}. s: Seon's own source
-   is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: main's program follows
-   root's dirs at boot (import-source!: replaced when they read otherwise than main's last
-   import), and each merge that changes them
-   is committed on branch (the reconciler's write-back); absent, the config's
+   is the program, {:root dir :dirs [\"src\"] :branch \"jolt/seon-merges\"}: indexed into a main
+   that holds none (boot!'s seed; every other boot resumes main and reads no file), and each merge
+   that changes it is committed on branch (the reconciler's write-back); absent, the config's
    :seon.config.source/* (no :seon.config.source/root: no source). What opts leave out is the config's: :seon.config.root/store-path,
   :seon.config.root/main (resumed; made from :db when the store has none), :seon.config.store/backend, :seon.config.agent/max-running and the provider of
   :seon.config.ai/*. The config in force is written on main's root entity."
@@ -1317,7 +1373,7 @@
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
-        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms load-ms import program program-ms contracts pid fd compacted retained]}
+        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded seed-ms config-errors digest digest-ms contracts pid fd compacted retained]}
         (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
@@ -1349,7 +1405,8 @@
               :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
-              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :load-ms (lib/r2 load-ms) :import import :program (assoc program :ms (lib/r2 program-ms))
+              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :seeded seeded :seed-ms (lib/r2 seed-ms)
+                     :config-errors config-errors :digest digest :digest-ms (lib/r2 digest-ms)
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)}}
         graph-p (promise)
         root-procs-p (promise)
@@ -1367,7 +1424,7 @@
                          :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)
                          :embed-model (vector/model-id (cfg/value :seon.config.vector/model))
                          :embed-texts (cfg/value :seon.config.vector/texts)})
-        decl (system/read-decl (cfg/value :seon.config.root/system-path))
+        decl (system/read-decl)
         built (system/build decl bindings nil)
         root-procs (:procs built) root-conns (:conns built)
         _ (deliver root-procs-p built)
@@ -1388,14 +1445,15 @@
     ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
+          held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (person)) (into (task/earlier-agents-tx db)) (into (task/config-tx config in-force-sources))
                                                                                   (into (root-session-refresh-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
+                                                                         ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
+                                                                         held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (binary-program) digest (fx/config-input cfg/config (cfg/checkout)))})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
-    (wiki-boot! sys db)
-    (when source (import-source! sys source))
     ;; what the first agent's fork would wait for is done now, as main stands (seon.fork-server/preload); nothing waits on its answer
     (call! sys {:op :fs :req {:op :preload :t (:max-tx @conn)}})
     sys))

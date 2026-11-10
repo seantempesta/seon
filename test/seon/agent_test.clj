@@ -572,6 +572,9 @@
     (is (re-find #":body \"while proving\"" (:text taken)) (:text taken))))
 
 (deftest a-wide-reach-reuses-unchanged-results
+  ;; its root shares inputs only when the binary is main's program (seon.root/booted-source), so it reads the process store
+  ;; bin/test seeds: red while that store held what older binaries made of unchanged files (seon.root/kept-index! now
+  ;; keys it by the code that indexes), an input its digest misses
   ;; a wide reach reuses what is unchanged:
   ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
   ;; built from that tree: bin/test built it), the agent keys its digests by them and selects
@@ -883,6 +886,8 @@
     (is (< (* 10 held) whole) (str "a held read allocated " held " bytes; a whole read " whole))))
 
 (deftest an-agents-first-search-reads-the-index-it-inherited
+  ;; root's REPL writes main through my.test/code, a namespace the binary holds (seon.root requires it): a boot loads
+  ;; nothing of main's program (docs/source.md#a-boot-resumes-from-the-db), and this test was red on a binary without it
   ;; docs/vector.md#search: an agent's first grep built the search's text index from nothing (seon.doc/text-index).
   ;; The fork server builds main's once and each move carries it (seon.doc/carry-index!): the
   ;; first search finds the index held for its db and builds none, and its FTS5 table, an in-memory SQLite database,

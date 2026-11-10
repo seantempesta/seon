@@ -453,6 +453,19 @@
   [ks process asked? proofs]
   (if asked? #{} (into #{} (filter #(and (contains? process %) (not (contains? proofs %)))) ks)))
 
+(defn main-red
+  "The red tests of results ({test status}) that are main's, not the branch's change: red as its base holds them, the
+  digest the branch has base's own (nothing it changed reaches the test) or base's verdict at base's digest red (base's
+  digests, base-found {digest result}: seon.fx/stored-results of the red tests' base digests). A test with no base digest
+  is new on the branch, so its red is the branch's. The done rule never closes a task on one (docs/tasks.md#the-done-rule).
+  Cost: one lookup per red test."
+  {:malli/schema [:=> [:cat :seon.proof/results [:map-of :qualified-symbol :string] [:maybe [:map-of :qualified-symbol :string]] [:map-of :string :map]] [:set :qualified-symbol]]}
+  [results cand base base-found]
+  (into #{} (filter (fn [t] (let [b (get base t)]
+                              (and b (#{:fail :error} (get results t))
+                                   (or (= b (get cand t)) (red? (get base-found b)))))))
+        (keys results)))
+
 (defn plan
   "What a change runs: of cand ({key digest}, the candidate's), base (the base's {key digest},
   nil: none), found ({digest result}, the verdicts cached at cand's digests: seon.fx/stored-results) and proofs

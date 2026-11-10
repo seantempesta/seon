@@ -1993,9 +1993,9 @@
         targets (ts/standing-targets-tx)
         ;; the checks' own store follows its seed (a cache keyed by its inputs: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on): path is a link to
         ;; path-<digest of what the seed writes>, so a changed seed opens a fresh store and the old one is removed
-        ;; (seon.test-store/kept-store!), never read
+        ;; (seon.db/kept-store!), never read
         at (if own?
-             (doto (ts/kept-store! path (subs (lib/digest (pr-str [seon.db/schema-digest (seon.db/seed-tx (parse-long (str n))) targets])) 0 8))
+             (doto (seon.db/kept-store! path (subs (lib/digest (pr-str [seon.db/schema-digest (seon.db/seed-tx (parse-long (str n))) targets])) 0 8))
                (remove-store-past! (seon.config/value :seon.config.proofs/check-store-max-bytes)))
              path)
         t0 (profile/now-ns)

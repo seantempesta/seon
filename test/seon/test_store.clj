@@ -57,26 +57,6 @@
   "program-schema-digest of this process's schema."
   (program-schema-digest pdb/schema))
 
-(defn kept-store!
-  "The path of the kept store of regenerable output at base for a schema's digest (the whole schema's,
-  seon.db/schema-digest, unless given: the program store passes kept-program-digest),
-  base-<digest> (the test runner's program store, the process tests' store); a store at base made
-  with another digest (base itself, or base-<8 hex digits> but this one) is removed: it is output, made
-  again from its inputs, never a record, so a changed schema makes a new store, nothing migrated or
-  refused (task seon.test-store/a-kept-store-is-keyed-by-its-schema). Nothing is made here; the caller
-  opens it."
-  {:malli/schema [:function [:=> [:cat :string] :string] [:=> [:cat :string :string] :string]]}
-  ([base] (kept-store! base pdb/schema-digest))
-  ([base digest]
-   (let [f (java.io.File. ^String base)
-         dir (.getParentFile f)
-         stem (.getName f)
-         keyed (str stem "-" digest)
-         old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
-     (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
-       (fx/remove-tree! (str dir "/" n)))
-     (str dir "/" keyed))))
-
 (def ^:private program-store-path
   "This process's store of kept program dbs, one branch per git tree (test-runner/program-db),
   under target/tmp: a test process's own, so shards running at once never share one; removed
@@ -93,7 +73,7 @@
   imports another tree takes program-store, a store of its process's own: its branches are scratch, and
   never the plan's to choose a nearest tree from. docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat] :string]}
-  [] (kept-store! (config/value :seon.config.proofs/program-store) kept-program-digest))
+  [] (pdb/kept-store! (config/value :seon.config.proofs/program-store) kept-program-digest))
 
 (defn reach-index
   "{key {:digest :process? :binary?}} of db's tests under inputs (or of each key of roots, {key [var ...]}):
@@ -118,7 +98,7 @@
 
 (defn process-store
   "The path of the one durable store the process tests' roots take a branch of (each its own
-  main): <checkout>/target/runs/test-store-<schema digest> (kept-store!), made once by bin/test's
+  main): <checkout>/target/runs/test-store-<schema digest> (seon.db/kept-store!), made once by bin/test's
   plan before any shard starts (make-process-store!), so no two shards' roots ever create it at once.
   A root that found it missing created it (seon.db/open!), and another root starting in
   another shard meanwhile saw its data file and opened a database not yet made: \"Database
@@ -136,11 +116,11 @@
 (defn make-process-store!
   "The process tests' store (process-store) of checkout, made when missing (the schema and no
   example program on :db, as a root's own store starts) and every one of another schema removed
-  (kept-store!): bin/test's plan calls it before any shard starts, when a selected test runs
+  (seon.db/kept-store!): bin/test's plan calls it before any shard starts, when a selected test runs
   the binary. Answers its path."
   {:malli/schema [:=> [:cat :string] :string]}
   [checkout]
-  (let [path (kept-store! (str checkout "/target/runs/test-store"))]
+  (let [path (pdb/kept-store! (str checkout "/target/runs/test-store"))]
     (.mkdirs (.getParentFile (java.io.File. ^String path)))
     (d/release (:conn (pdb/open! :lmdb path 0 :db)))
     path))

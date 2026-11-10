@@ -1364,8 +1364,8 @@
   the binary: its tests are digested by what they reach), and src's readers of a checkout
   directory (the wiki, read or loaded, and the source dirs: seon.repl-test/the-template-instructions-and-the-help-page-run read
   the help page through seon.doc/pages and was reused over its edits; seon.task-files-test reads the
-  task files through my.root/task-files and was marked flaky over an edit to one). See docs/source.md#tests-run-by-reach."
-  (-> tree-readers (disj 'seon.test-store/binary-sh) (conj 'seon.doc/load-dir-tx 'seon.doc/pages 'my.root/task-files 'seon.fx/read-source)))
+  task files through seon.root/task-files and was marked flaky over an edit to one). See docs/source.md#tests-run-by-reach."
+  (-> tree-readers (disj 'seon.test-store/binary-sh) (conj 'seon.doc/load-dir-tx 'seon.doc/pages 'seon.root/task-files 'seon.fx/read-source)))
 
 (def env-class-readers
   "The vars that read one class of the checkout's files that have no program facts
@@ -1383,6 +1383,11 @@
     ;; and keep those of a namespace: a new attribute changes what they do, though no test names it
     seon.reconcile/index :seon.env/schemas
     seon.merge/content-datoms :seon.env/schemas
+    ;; the entity index: which entity schema an entity is, by the attributes it holds, chosen at run time from every entity
+    ;; schema's form, so a test naming only attributes reads the entity schemas (their renders, patterns, refs) no name
+    ;; reaches (a render removed from :seon.cite/cite-fact kept a test green at its digest, 2026-11-10). About 1,150 of
+    ;; 1,612 tests reach it: an entity schema edited reruns them (docs/source.md#tests-run-by-reach)
+    seon.db/entity-index :seon.env/schemas
     ;; the test that reads the checkout's own program from its kept db (docstrings, form sources): a
     ;; change to any src or test text is a change to what it reads, though no test names the var
     seon.test-store/kept-program-store :seon.env/src

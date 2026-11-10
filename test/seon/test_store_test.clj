@@ -69,7 +69,7 @@
           (d/release c)))
       (.mkdirs (java.io.File. base))
       (.mkdirs (java.io.File. runs))
-      (let [path (ts/kept-store! base)]
+      (let [path (pdb/kept-store! base)]
         (is (= (str base "-" pdb/schema-digest) path) "named by this schema's digest")
         (is (not (.exists (java.io.File. old))) "the store of another schema is removed")
         (is (not (.exists (java.io.File. base))) "and the unkeyed one")

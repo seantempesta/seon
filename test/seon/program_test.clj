@@ -750,6 +750,9 @@
              ;; every-key-is-documented-by-its-schema stayed green over a key with no unit: it walks the
              ;; registry, and a config map's fields are in no digest (seon.program/registry-walkers)
              (form 'app.fc-test "walks-the-keys" :test '#{seon.config/keys-declared})
+             ;; task seon.program/an-attribute-reaches-the-entity-schemas-that-declare-it: a render removed from
+             ;; :seon.cite/cite-fact left seon.render-test/a-placed-cite-is-its-schemas-render green at its old digest
+             (form 'app.fc-test "reads-entity-index" :test '#{seon.db/entity-index})
              (form 'app.fc-test "walk-helper" :fn '#{seon.contract/forms})
              (form 'app.fc-test "walks-by-a-helper" :test '#{app.fc-test/walk-helper})
              (form 'app.fc "boots" :fn '#{seon.config/keys-declared seon.config/schema-forms})
@@ -774,6 +777,7 @@
     (is (schemas 'reads-schemas) "a test reaching seon.reconcile/index takes the schema class")
     (is (not (schemas 'pure)) "a pure test takes no schema class")
     (is (schemas 'walks-the-keys) "a test walking the registry takes the schema class: every entry is its input")
+    (is (schemas 'reads-entity-index) "a test reading the entity index takes the schema class: the entity schema it chooses at run time is its input")
     (is (schemas 'walks-by-a-helper) "and so does one walking it by a helper of its namespace")
     (is (not (schemas 'boots-a-root)) "a test reaching src's use of the registry does not: 1,426 of 1,469 tests do")
     (doseq [[c m] [[:bin bin] [:web web] [:system system] [:deps deps]]]
@@ -1133,7 +1137,7 @@
   ;; import of the same tree. The same commit, imported twice and from a copy at another path,
   ;; gives the same digest for every test: a second run reruns nothing, two worktrees share.
   ;; And root's import of it (seon.source/import-tx of :seon.config.source/dirs, as
-  ;; seon.root/import-source! reads them) gives bin/test's digests: bin/test imported src and test
+  ;; a seed reads them, seon.root/import-tree!) gives bin/test's digests: bin/test imported src and test
   ;; only, root the schemas too, so 882 of 922 differed and the judge reused 0 of 917 greens
   ;; bin/prove stored (task an-outside-branch-hands-back-through-the-store, experiment 2)
   ;; A small tree of eight files in two repositories (tiny-tree): a function calling another file's, and names quoted
@@ -1223,7 +1227,7 @@
       (is (contains? moved 'seon.render-test/one-printer-and-no-cut-before-it) "a test slurping a doc takes the tree")
       (is (contains? moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead) "a test loading the wiki takes the tree")
       (is (contains? moved 'seon.repl-test/the-template-instructions-and-the-help-page-run) "a test reading the wiki through seon.doc/pages takes the tree (it was reused over edits to the help page)")
-      (is (contains? moved 'seon.task-files-test/no-shipped-task-is-merged-work) "and one reading the task files through my.root/task-files")
+      (is (contains? moved 'seon.task-files-test/no-shipped-task-is-merged-work) "and one reading the task files through seon.root/task-files")
       ;; 2026-11-08: a process test reading its root's log by slurp took the tree, so a wiki edit reran all of them
       (is (not (contains? moved 'seon.agent-test/an-agent-ends-when-its-root-is-gone)) "a test reading only its own outputs (seon.test-store/output, its root's log) takes no tree")
       (is (< (* 4 (count moved)) (count a)) (str (count moved) " of " (count a) " tests read the checkout's files from their own namespace: a few, not the 286 whose reach reads one"))
@@ -1257,7 +1261,7 @@
         in {:env "e" :tree "t" :config {} :data-refs '{app.pt-sys/read-decl #{app.pt-procs/writer-proc}}}
         k 'app.pt-sys-test/boot-test]
     (is (not= ((ts/reach-digests db in) k) ((ts/reach-digests db' in) k)) "the proc changed: the test booting through the declaration moves")
-    (is (contains? (get (fx/declared-refs (str (seon.config/checkout) "/resources/seon/system.edn")) 'seon.system/read-decl) 'seon.writer/writer-proc)
+    (is (contains? (get (fx/declared-refs (slurp (str (seon.config/checkout) "/resources/seon/system.edn"))) 'seon.system/read-decl) 'seon.writer/writer-proc)
         "the shipped declaration's procs are the reader's data refs")))
 
 (deftest the-config-in-force-is-an-input

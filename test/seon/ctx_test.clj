@@ -151,7 +151,7 @@
            :seon.task/kind :work :seon.task/execution :held :seon.task/branch (keyword "main" (str "lab-other" i))}
           [:db/add [:seon.agent/key k] :seon.agent/task [:seon.task/id (str "lab/other" i)]]]
       ;; what the task's derived members read: the plan's vector written, a program form written
-      13 (vector/tx-data [(:db/id (d/entity db [:seon.task/id "lab/ctx"]))] [i] [(mapv #(Math/sin (* (inc i) (inc %) 0.37)) (range 768))] "m")
+      13 (vector/tx-data [(:db/id (d/entity db [:seon.task/id "lab/ctx"]))] [(str i)] [(mapv #(Math/sin (* (inc i) (inc %) 0.37)) (range 768))] "m")
       14 [{:db/id "f" :form/id (str "app.x/g" i) :form/src (str "(defn g" i " [])")} {:var/name (symbol "app.x" (str "g" i)) :var/form "f"}]
       ;; what a task's lookups read: a cited var redefined, a new caller, the var not written yet
       ;; defined (or gone again), a reference added or dropped
@@ -916,7 +916,7 @@
                                      {:seon.search/id "a1/messages" :seon.search/query "the messages addressed to this session" :seon.search/k 5}))
         e (id db1 [:seon.search/id "a1/messages"])
         ;; its query's vector, as the vectors proc writes it: a search is drawn once its query has one
-        db1 (d/db-with db1 (seon.vector/tx-data [e] [(:tx (first (d/datoms db1 :eavt e :seon.search/query)))] [(vec (repeat 768 0.036))] "m"))
+        db1 (d/db-with db1 (seon.vector/tx-data [e] ["query"] [(vec (repeat 768 0.036))] "m"))
         p1 (draw db1)]
     (is (some? e) "the swap! wrote the search, the agent's")
     (is (= (aid db1) (:db/id (:seon.search/of (d/entity db1 e)))) "of the agent, joined by its pattern")
@@ -1330,7 +1330,7 @@
         [parts unwatched watched page] (as #(let [p (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w))) u (ledger) pg (seon.repl/render-ctx-hiccup)]
                                               [p u (ledger) pg]))
         whole (as #(do (seon.repl/render-ctx-hiccup) (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w)))))]
-    (is (unwatched 'seon.render.ui/task-list) "the model's list is drawn")
+    (is (unwatched 'seon.render.ui/agent-parts) "the model's list is drawn")
     (is (every? unwatched '[seon.render.ui/conversation-list seon.render.ui/eval-item]) "and the conversation, which it reads as messages")
     (is (not-any? unwatched '[seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) (pr-str unwatched))
     (is (every? watched '[seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) "a person's page draws what is its alone")
