@@ -117,7 +117,7 @@
   ;; this tree), loads by the checked write with no refusal: the wiki first, then the tasks that cite it. A task file is
   ;; no input of the digest: an edit to one is found by the full run (bin/test --all)
   (let [co (config/checkout)
-        db0 (runner/program-db co (ts/kept-program-store))
+        db0 (runner/program)
         db0 (d/db-with db0 (vec (remove #(contains? (:schema db0) (:db/ident %)) pdb/schema)))
         ps (into (sorted-map) (mapcat #(doc/pages co %)) (config/value :seon.config.root/wiki-dirs))
         [db wiki-refused] (refusal db0 (seon.root/wiki-tx db0 co))

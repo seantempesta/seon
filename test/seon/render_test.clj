@@ -238,7 +238,7 @@
   []
   ;; the checkout this process runs from (seon.config/checkout), never the working directory: an agent's is empty,
   ;; and a test of it was red in every agent's run (md-scan #23)
-  (runner/program-db (seon.config/checkout) (ts/kept-program-store)))
+  (runner/program))
 
 (defn- src-nss
   "The namespaces of db whose file is under src/."
