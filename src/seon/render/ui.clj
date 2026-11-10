@@ -1601,15 +1601,15 @@
 
 (declare agent-parts conversation-list tiles)
 
-(defn render-ctx
-  "The render of an agent's ctx, the one tree the model and the person read (the declared html
-  render of :seon.render/render-ctx, which an agent overrides on its branch like any render): components placed in its
+(defn agent
+  "An agent's page, the render of its pull c, the one tree the model and the person read (the declared html render of
+  :seon.db/agent-fact, which an agent overrides on its branch like any render): components placed in its
   lists, each keyed by what it shows, each holding what the agent's pull holds, so a smaller pattern is a smaller tree. The agent's page parts (p-task, `agent-parts`, given the pull), which the model reads as
   parts; and the conversation (c-rows, `conversation-list`), which it reads as messages. Each
   list is a component of its own, and the layout reads nothing, so a change of one list's members reruns that list alone: an eval
   added never reruns the task's. See docs/render.md#the-page and docs/render.md#a-layout-places-its-lists."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
+  [_ c]
   [:div {:id "render-ctx"} [#'agent-parts {} c] [#'conversation-list {}]
    [#'rules-list {}]])
 
@@ -1748,8 +1748,8 @@
       turns (assoc :detail (str turns (if (= 1 turns) " turn" " turns")))
       reason (assoc :reason reason))))
 
-(defn agent
-  "An agent's view (the declared html render of :seon.db/agent-fact), its head: its id, status,
+(defn agent-head
+  "An agent's head (on its page and in its pill's title): its id, status,
   what it runs and on which branch. Its page is its parts (seon.render.proc's agent page,
   parts-page)."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
@@ -1778,8 +1778,8 @@
      (when-let [r (:reason stands)] [:p {:class "min-w-0 break-words text-text-300"} r])
      (when-not (str/blank? description) [:p {:class "text-text-300"} (plain description (part))])]))
 
-(defn root
-  "What root's head adds (the declared html render of :seon.root/root-fact): when it last went quiet, its root causes a line each."
+(defn root-quiet
+  "What root's head adds: when it last went quiet, its root causes a line each."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_ v]
   (let [{:seon.root/keys [quiescent]} v]
@@ -1934,7 +1934,7 @@
         (str (str/join ", " (remove nil? [(when (pos? parked) (str parked " parked")) (when (pos? running) (str running " running"))])) ".")
         "Nothing running.")]
      (when (pos? held) [:p {:class "seon-note"} (str held (if (= 1 held) " task" " tasks") " not released yet.")])
-     (render/hiccup {:seon.render/index ix :schema :seon.root/root-fact} (relevant :seon.root/root-fact c))]))
+     (root-quiet {} (relevant :seon.root/root-fact c))]))
 
 (defn problems-tile
   "Main's open problems (a component over root's ctx, its :health: the report the render proc keeps
@@ -2122,23 +2122,23 @@
     [:section (sessions-by-standing db ks)]
     [:p {:class "muted"} "No agents yet: ask for something below."]))
 
-(defn user-ctx
-  "A user's page, the render of its ctx (the declared html render of :seon.render/user-ctx, which a branch overrides like any render): root and its agents in the agents list, its agents as cards. See docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_]
+(defn user
+  "A user's page, the render of its pull (the declared html render of :seon.db/user-fact, which a branch overrides like any render): root and its agents in the agents list, its agents as cards. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
+  [_ _]
   [:div {:id "user-ctx"}
    [:ol {:id "c-side"} [#'root-side {}] [#'started-side {}]]
    [:ol {:id "c-rows"} [#'started-cards {}]]
    [#'rules-list {}]])
 
-(defn root-ctx
-  "Root's page, the render of root's ctx (the declared html render of :seon.render/root-ctx, which a
+(defn root
+  "Root's page, the render of root's pull (the declared html render of :seon.root/root-fact, which a
   branch overrides like any render), drawn by the walk as components in its lists: its agents list
   (c-side: root, then this boot's sessions with a task, then the earlier ones folded, `sessions-by-boot`), its head (p-head),
   its work and the evals sent to it (c-rows: `work-list`, `root-evals`) and its tiles (p-tiles: root's process, then main's
   problems). An agent's page shows the same agents list (seon.render.proc's agent page). See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
-  [{db :seon.db/db}]
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :any] :any]}
+  [{db :seon.db/db} _]
   [:div {:id "root-ctx"}
    ;; every session on main, of any boot: root's ctx holds this boot's agents alone (a new boot unlinks the earlier ones from root)
    (let [now (task/boot-of db)

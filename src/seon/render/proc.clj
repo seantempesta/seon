@@ -298,7 +298,7 @@
 
 (defn- kept-walk
   "A walk kept across moves: entity e's ctx on db (seon.ctx/build, its tree as mark makes it) in a reactive
-  atom, drawn once by the layout its entity names (seon.render/layout-of: its tree, with ident, the identity the caller
+  atom, drawn once by its entity's render (seon.render/render-var-of: its tree, with ident, the identity the caller
   holds of it, for a branch that holds no entity yet) over the db it holds: {:w :a :c :at}, :at a volatile of that db.
   Root's own page (root-walk), each user's (`user-walk`) and each watched agent's branch (`branch-walk!`) keep one; `advance-walk!`
   moves it. See docs/render.md#a-page-is-a-kept-walk."
@@ -306,7 +306,7 @@
   [db e branch ident mark]
   (let [ix (program/index-of-db db)
         c (assoc-in (ctx/build ix db e branch) [:ix :own-index?] true) at (volatile! db) a (ratom/atom (mark (:tree c)))
-        w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/layout-of ix (merge ident (:tree c))) {}] ix)]
+        w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/render-var-of ix (merge ident (:tree c))) {} (ratom/ref-view a ctx/changes)] ix)]
     (render/flush! w nil)
     {:w w :a a :c c :at at}))
 
@@ -426,7 +426,7 @@
         branch-units (fn [] (if-let [kw (or (walked) (user-walk st db e))]
                               (quiet #(render/placed-units (:w kw)))
                               (let [t (cond-> (cold-tree) (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
-                                    w (quiet #(render/draw t ctx/changes bdb (render/layout-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
+                                    w (quiet #(render/draw t ctx/changes bdb (render/render-var-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
                                 (try (render/placed-units w) (finally (render/dispose-walk! w))))))
         ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside
         ;; its unit as the page draws it, from one walk of the page
@@ -444,7 +444,7 @@
                                t (if kw (:tree (:c kw)) (cold-tree))
                                part-unit (if kw
                                            (quiet #(pairs (:w kw)))
-                                           (let [w (quiet #(render/draw t ctx/changes bdb (render/layout-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
+                                           (let [w (quiet #(render/draw t ctx/changes bdb (render/render-var-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
                                              (try (quiet #(pairs w)) (finally (render/dispose-walk! w)))))]
                            [part-unit
                             {:id "d-ctx" :container "#c-rows" :rev (:t t)
@@ -462,7 +462,7 @@
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
                (not (task/this-boots db e)) (dissoc :processes))
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
-                   :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent {} head)])}]
+                   :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent-head {} head)])}]
     (ui/page-chrome {:units (vec (concat sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))

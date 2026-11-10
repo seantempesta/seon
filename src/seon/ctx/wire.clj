@@ -154,7 +154,7 @@
      (request walk)
      (let [ix (or index (program/index-of-db db))
            t (or ctx (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key agent)))
-           w (render/draw t ctx/changes db (render/layout-of ix (merge {:seon.agent/key agent} t)) {:model-only true :once true :index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
+           w (render/draw t ctx/changes db (render/render-var-of ix (merge {:seon.agent/key agent} t)) {:model-only true :once true :index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
        (try (request w) (finally (render/dispose-walk! w)))))))
 
 (defn provider-of

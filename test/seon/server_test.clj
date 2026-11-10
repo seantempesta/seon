@@ -406,7 +406,7 @@
                              "            :pages (some (fn [f] (when (= 'seon.render/draw (:var f)) (:calls f))) (seon.profile/touched))}))]"
                              "  {:reads (vec (repeatedly 9 m))"
                              "   :live=cold (let [pw (seon.repl/page-walk) db (seon.agent/db) page (seon.render/placed-hiccup pw (seon.render/page-lists pw)) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
-                             "                    w (seon.render/draw (:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (datahike.api/entity db a)))) seon.ctx/changes db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {:model-only true})"
+                             "                    w (seon.render/draw (:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (datahike.api/entity db a)))) seon.ctx/changes db #'seon.render.ui/agent {:model-only true})"
                              "                    cold (seon.render/placed-hiccup w (seon.render/page-lists w))]"
                              "                (or (= page cold) (vec (for [k (distinct (concat (keys page) (keys cold))) :when (not= (get page k) (get cold k))] k))))})")]))
         later (rest (:reads (:value reads)))]

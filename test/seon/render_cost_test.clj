@@ -307,7 +307,7 @@
         c (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.agent/key k) :b)
         at (volatile! db)
         a (seon.ratom/atom (:tree c))
-        w (seon.render/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [(requiring-resolve (seon.render/declared (seon.db/index) :seon.render/render-ctx)) {}])]
+        w (seon.render/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [#'seon.render.ui/agent {} (seon.ratom/ref-view a seon.ctx/changes)])]
     (seon.render/flush! w nil)
     (swap! kept-walks conj w)
     [{:w w :a a :c c :at at} db (with-turn db (dec n))]))
@@ -501,7 +501,7 @@
                    db (range n))
         a (:db/id (d/entity db [:seon.agent/key k]))
         src (seon.ratom/atom (:tree (seon.ctx/build (seon.db/index) db a :b)))
-        walk (fn [outs] (cond-> (seon.render/walker {:ref src :changes seon.ctx/changes} (constantly db) [(seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {}])
+        walk (fn [outs] (cond-> (seon.render/walker {:ref src :changes seon.ctx/changes} (constantly db) [#'seon.render.ui/agent {} (seon.ratom/ref-view src seon.ctx/changes)])
                           outs (assoc :outputs outs)))
         w (walk nil)
         prints (fn [f] (seon.profile/measure! f (fn [_])) (or (some (fn [x] (when (= 'seon.print/record-text (:var x)) (:calls x))) (seon.profile/touched)) 0))]
@@ -535,7 +535,7 @@
       (d/transact conn [{:seon.model-call/id (seon.lib/call-id k (inc i))
                          :seon.model-call/basis {:commit (random-uuid) :t (:max-tx @conn) :task tid :turn (inc i) :max-turns 9 :origin :model}}]))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
-      (into [(:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx)] (some-> *sels* vector)))))
+      (into [(:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db #'seon.render.ui/agent] (some-> *sels* vector)))))
 
 ;; See docs/render.md#the-models-context-a-cached-prefix-then-the-turn
 (deftest a-cold-request-draws-what-the-model-reads

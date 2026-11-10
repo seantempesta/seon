@@ -464,7 +464,7 @@
   (let [doc-load (requiring-resolve 'seon.doc/load-tx)
         page (requiring-resolve 'seon.doc/system-page)
         db (if (@(requiring-resolve 'seon.doc/page-text) db @page) db (datahike.api/db-with db (doc-load db "docs" {@page "# A stub of the system prompt\n\nBe brief."})))
-        w (seon.render/draw c @(requiring-resolve 'seon.ctx/changes) db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx)
+        w (seon.render/draw c @(requiring-resolve 'seon.ctx/changes) db #'seon.render.ui/agent
                             {:model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
     (try (vec (remove (fn [[r]] (or (nil? r) (#{:section :session} (first r)))) (:parts (@(requiring-resolve (quote seon.ctx.wire/request)) w))))
          (finally (seon.render/dispose-walk! w)))))
@@ -478,5 +478,5 @@
   "The parts of agent record c ({:tree}) on db as the model reads them, drawn cold: {id form}."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
-  (let [w (seon.render/draw (:tree c) @(requiring-resolve 'seon.ctx/changes) db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {:model-only true})]
+  (let [w (seon.render/draw (:tree c) @(requiring-resolve 'seon.ctx/changes) db #'seon.render.ui/agent {:model-only true})]
     (try (seon.render/placed-hiccup w (seon.render/page-lists w)) (finally (seon.render/dispose-walk! w)))))

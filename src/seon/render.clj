@@ -348,9 +348,8 @@
             ;; the page alone pays nothing here
             others (disj (or (:outputs w) #{}) :seon.render/hiccup)
             ix @(:index w)
-            ;; the entity: the component's argument, else, for the walk's root called with none (a layout), the walk's source, the pull it walks:
-            ;; a bridge until 2b with 7c roots the agent's walk on [#'seon.render.ui/agent {} view], which deletes this case (docs/render.md)
-            ev (when (seq others) (or (first children) (when (or (nil? @(:out w)) (= k @(:out w))) (ratom/ref-view (:ref (:src w)) (:changes (:src w))))))
+            ;; the entity: the component's argument (a walk is rooted on [render {} view], so its root has one too)
+            ev (when (seq others) (first children))
             e0 (some-> ev ratom/untracked)
             ;; an entity's schema by its identity attributes, never a value's metadata: an agent's @ctx carries :seon.ctx/ctx's, which
             ;; names no model render, so the agent's own went unasked
@@ -387,9 +386,9 @@
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
             one #(try (let [env' (assoc env :children kids :self k)
-                            ;; the bridge's root (no entity of its own): its source's identity read tracked, so the root runs again
-                            ;; when the entity first appears (a walk made before its agent's entity is on the branch)
-                            _ (when (and ev (empty? children)) (get ev :db/id))
+                            ;; an entity's component reads its identity tracked, so it runs again when the entity first appears (a walk made
+                            ;; before its agent's entity is on the branch) and its model render is looked up then
+                            _ (when (ratom/view? ev) (get ev :db/id))
                             ;; a call an output placed answers that output (and what it places), kept as this component's answer to it
                             as (:seon.render/as opts)
                             out (if as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil) (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
@@ -859,9 +858,11 @@
                   [:=> [:cat :map :seon.host/fn :seon.host/db :any [:map [:model-only {:optional true} :boolean] [:once {:optional true} :boolean] [:index {:optional true} :map] [:outputs {:optional true} [:set :keyword]]]] :map]]}
   ([t changes db root-var] (draw t changes db root-var {}))
   ([t changes db root-var opts]
-   (let [w (merge (if-let [ix (:index opts)]
-                       (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}] ix)
-                       (walker {:ref (ratom/atom t) :changes changes} (constantly db) [root-var {}])) (select-keys opts [:model-only :once :outputs]))]
+   (let [r (ratom/atom t)
+         ;; the walk is rooted on the entity's render with the entity, a view of the tree, as its argument
+         w (merge (if-let [ix (:index opts)]
+                       (walker {:ref r :changes changes} (constantly db) [root-var {} (ratom/ref-view r changes)] ix)
+                       (walker {:ref r :changes changes} (constantly db) [root-var {} (ratom/ref-view r changes)])) (select-keys opts [:model-only :once :outputs]))]
      (flush! w nil)
      w)))
 
@@ -1004,18 +1005,16 @@
   [ix k p]
   (when k (or (get (contract/properties k) p) (some #(schema-property ix % p) (parents ix k)))))
 
-(defn layout-of
-  "The layout var that draws record e (a ctx's tree, an entity pulled by its pattern): the render schema its entity schema
-  names as :seon.render/layout, or the one a schema it extends names (an agent's :seon.render/render-ctx, a user's
-  :seon.render/user-ctx, root's :seon.render/root-ctx), through declared-var, so a branch that redefines that var draws its
-  own. A record no schema names a layout for throws :seon.render/no-layout naming its identity attributes, since every
-  walk draws from it. See docs/render.md#the-page."
+(defn render-var-of
+  "The render var of entity e (a ctx's tree, an entity pulled by its pattern): its entity schema's :seon.render/hiccup (`entity-schema`,
+  `declared-var`, so a branch that redefines that var renders by its own), the render a walk of e is rooted on as [f {} view]. An entity
+  no schema names a render for throws :seon.render/no-render naming its identity attributes. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [ix e]
   (let [s (entity-schema ix e nil)]
-    (or (some->> (schema-property ix s :seon.render/layout) (declared-var ix))
-        (throw (ex-info (str "no layout draws this record: its schema " s " names none")
-                        (contract/error :seon.render/no-layout #'layout-of "no entity schema of this record names a layout (:seon.render/layout)"
+    (or (some->> s (declared-var ix))
+        (throw (ex-info (str "no render renders this entity: its schema " s " names none")
+                        (contract/error :seon.render/no-render #'render-var-of "no entity schema of this entity names a render (:seon.render/hiccup)"
                                         {:schema s :identity (vec (filter (:identity-schemas ix) (keys e)))}))))))
 
 (defn forward

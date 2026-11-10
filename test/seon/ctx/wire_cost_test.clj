@@ -136,7 +136,7 @@
         cell (volatile! db)
         c (seon.ctx/build (seon.db/index) db a :b)
         src (seon.ratom/atom (:tree c))
-        w (assoc (seon.render/walker {:ref src :changes seon.ctx/changes} #(deref cell) [(seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {}]) :model-only true :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
+        w (assoc (seon.render/walker {:ref src :changes seon.ctx/changes} #(deref cell) [#'seon.render.ui/agent {} (seon.ratom/ref-view src seon.ctx/changes)]) :model-only true :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
     (seon.render/flush! w nil)
     (seon.ctx.wire/request w)
     (let [r (d/with db (conj (turn-tx n) {:seon.agent/key "b/a1" :seon.agent/turn (inc n)}))]

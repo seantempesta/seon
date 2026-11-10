@@ -1029,7 +1029,7 @@
         cell (volatile! db)
         c (volatile! (ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "demo/a1") :b))
         a (seon.ratom/atom (:tree @c))
-        w (cond-> (render/walker {:ref a :changes ctx/changes} #(deref cell) [(requiring-resolve (render/declared (seon.db/index) :seon.render/render-ctx)) {}])
+        w (cond-> (render/walker {:ref a :changes ctx/changes} #(deref cell) [#'seon.render.ui/agent {} (seon.ratom/ref-view a ctx/changes)])
             outputs (assoc :outputs outputs))]
     (render/flush! w nil)
     [w a cell c (pdb/eid db :seon.agent/key "demo/a1")]))
@@ -1100,7 +1100,7 @@
         db (d/db-with db (conj (ts/turn-tx "demo/a1" 1 {:seon.model-call/reply "Reading."})
                                {:seon.agent/key "demo/a1" :seon.agent/task {:seon.task/id "demo/r"}}))
         c (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "demo/a1") :b))
-        root (render/declared-var (seon.db/index) :seon.render/render-ctx)
+        root #'seon.render.ui/agent
         outs #{:seon.render/hiccup :seon.render/openai-compat}
         wire #(try (render/openai-compat %) (finally (render/dispose-walk! %)))]
     (is (= (wire (render/draw c ctx/changes db root {:model-only true :once true :outputs outs}))
@@ -1133,7 +1133,7 @@
     (let [changed (step! walk [[:db/add [:seon.doc/address "docs/vector.md#the-model"] :seon.doc/lead "The model, as main now says it."]])
           live (html w)
           cold (let [d @cell w2 (render/draw (:tree (ctx/build (seon.db/index) d (pdb/eid d :seon.agent/key "demo/a1") :b)) ctx/changes d
-                                             (requiring-resolve (render/declared (seon.db/index) :seon.render/render-ctx)))]
+                                             #'seon.render.ui/agent)]
                  (try (html w2) (finally (render/dispose-walk! w2))))]
       (is (= [part] changed) "the cited section's part, and nothing else, drawn again")
       (is (str/includes? (live part) "The model, as main now says it.") "with the section as it is now")
@@ -1594,7 +1594,7 @@
       (example-world! conn)
       (let [db @conn
             a (pdb/eid db :seon.agent/key "a1")
-            w (render/draw (:tree (ctx/build (seon.db/index) db a :b)) ctx/changes db (render/declared-var (seon.db/index) :seon.render/render-ctx))
+            w (render/draw (:tree (ctx/build (seon.db/index) db a :b)) ctx/changes db #'seon.render.ui/agent)
             html (try (pr-str (render/placed-hiccup w ["#c-rows"])) (finally (render/dispose-walk! w)))]
         (is (str/includes? html "example/abc"))
         (is (str/includes? html "(+ 1 2)") "its eval, by the one hiccup an eval has")))))

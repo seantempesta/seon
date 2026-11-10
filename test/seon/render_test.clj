@@ -498,7 +498,7 @@
   "a3's page walked once from branch (seon.render/draw of its ctx by the layout its schema declares)."
   [branch]
   (r/draw (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key "a3") :task-demo-f))
-          seon.ctx/changes branch (requiring-resolve (r/declared (seon.db/index) :seon.render/render-ctx))))
+          seon.ctx/changes branch #'seon.render.ui/agent))
 
 (defn- drawn-parts
   "a3's page's units as its process draws them (seon.repl/render-ctx), drawn here from branch: what the
@@ -742,7 +742,7 @@
         cell (get-in st2 [:branch-reads :task-demo-f :walk])
         e (d/entity main [:seon.agent/key k])
         cold (let [w (r/draw (:tree (seon.ctx/build (seon.db/index) branch' (seon.db/eid branch' :seon.agent/key k) (:seon.agent/branch e))) seon.ctx/changes branch'
-                             (r/declared-var (seon.db/index) :seon.render/render-ctx))]
+                             #'seon.render.ui/agent)]
                (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))))]
     (is (some? (:w @cell)) "the branch's read holds its walk")
     (is (= cold (mapv (juxt :id :html) (r/placed-units (:w @cell)))) "after the move, what a cold draw at the head draws")
@@ -757,7 +757,7 @@
     (testing "a move to a value that does not follow it (the eval gone again): what a cold draw there draws"
       (let [st5 (#'p/answered st2 o [:branch :task-demo-f] {:db branch})
             back (let [w (r/draw (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key k) (:seon.agent/branch e))) seon.ctx/changes branch
-                                 (r/declared-var (seon.db/index) :seon.render/render-ctx))]
+                                 #'seon.render.ui/agent)]
                    (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))))]
         (is (= back (mapv (juxt :id :html) (r/placed-units (:w @(get-in st5 [:branch-reads :task-demo-f :walk]))))))))
     (testing "the branch's read let go: its walk is disposed"
@@ -794,7 +794,7 @@
         c (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.agent/key k) :task-demo-f)
         at (volatile! db)
         a (seon.ratom/atom (:tree c))
-        w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [(r/declared-var (seon.db/index) :seon.render/render-ctx) {}])]
+        w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [#'seon.render.ui/agent {} (seon.ratom/ref-view a seon.ctx/changes)])]
     (r/flush! w nil)
     {:w w :a a :c c :at at}))
 
@@ -803,7 +803,7 @@
   [db]
   (let [k "a3"
         c (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.agent/key k) :task-demo-f)
-        w (r/draw (:tree c) seon.ctx/changes db (r/declared-var (seon.db/index) :seon.render/render-ctx))]
+        w (r/draw (:tree c) seon.ctx/changes db #'seon.render.ui/agent)]
     [(try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))) (dissoc (:tree c) :t :commit)]))
 
 (deftest a-kept-walk-steps-any-way
@@ -1254,7 +1254,7 @@
         (is (not (str/includes? (h/html (ui/problems {:seon.render/index (seon.db/index)} (assoc r :open #{}))) "boom")))
         (is (str/includes? (h/html (ui/problems {:seon.render/index (seon.db/index)} (assoc r :open #{"pc-error"}))) "boom"))
         (is (str/includes? (h/html (ui/problems {:seon.render/index (seon.db/index)} (assoc r :open #{}))) "unit=pc-error") "its toggle"))))
-  (let [html (h/html (ui/root {}
+  (let [html (h/html (ui/root-quiet {}
                              {:seon.root/id :root :seon.root/boot "b1" :seon.root/generation {:commit "abc" :ms 1}
                               :seon.root/quiescent {:t 9 :root-causes [{:task "demo/f" :cause "red proof" :blocks ["demo/g"]}]}}))]
     (is (str/includes? html "1 root cause when it went quiet"))
@@ -1545,7 +1545,7 @@
                                    :seon.test/failures [{:type :fail :expected "(= 4 (f 2))" :actual "(not (= 4 5))" :got "(= 4 5)"}]}])
         rid (seon.db/eid branch :seon.agent/key k)
         draw #(let [w (r/draw (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch
-                              (requiring-resolve (r/declared (seon.db/index) :seon.render/render-ctx)))]
+                              #'seon.render.ui/agent)]
                 (try (r/placed-units w) (finally (r/dispose-walk! w))))
         units (draw)
         task (filterv #(= "#p-task" (:container %)) units)
@@ -1587,7 +1587,7 @@
   (let [[_ branch _] (paged-dbs)
         k "a3"
         draw #(let [w (r/draw (:tree (seon.ctx/build (seon.db/index) % (seon.db/eid % :seon.agent/key k) :task-demo-f)) seon.ctx/changes %
-                              (requiring-resolve (r/declared (seon.db/index) :seon.render/render-ctx)))]
+                              #'seon.render.ui/agent)]
                 (try (:html (unit-of (r/placed-units w) "status")) (finally (r/dispose-walk! w))))
         written (d/db-with branch [{:db/id "f" :form/id "demo/f-test-1" :form/src "(deftest f-test (is (= 4 (f 2))))"}
                                    {:var/name 'demo/f-test :var/meta #{:test} :var/form "f"}])
@@ -1611,7 +1611,7 @@
   (let [[_ branch _] (paged-dbs)
         k "a3"
         branch (d/db-with branch [{:var/name 'demo/f-test :seon.test/status :green}])
-        w (r/draw (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch (requiring-resolve (r/declared (seon.db/index) :seon.render/render-ctx)))
+        w (r/draw (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch #'seon.render.ui/agent)
         standing (try (unit-of (r/placed-units w) "status") (finally (r/dispose-walk! w)))
         h (:html standing)]
     (is (some? standing) "the status is drawn")
@@ -1654,7 +1654,7 @@
   []
   (let [[_ branch _] (paged-dbs)
         a (seon.ratom/atom (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key "a3") :task-demo-f)))
-        w (r/walker {:ref a :changes seon.ctx/changes} (constantly branch) [(requiring-resolve (r/declared (seon.db/index) :seon.render/render-ctx)) {}])]
+        w (r/walker {:ref a :changes seon.ctx/changes} (constantly branch) [#'seon.render.ui/agent {} (seon.ratom/ref-view a seon.ctx/changes)])]
     (r/flush! w nil)
     [w a branch]))
 
@@ -1997,7 +1997,7 @@
             k "a3"
             tree (assoc (:tree (seon.ctx/build (seon.db/index) @conn (seon.db/eid @conn :seon.agent/key k) :task-demo-f)) :seon.agent/main-commit c0 :seon.agent/main-program c0 :seon.agent/base-commit c0)
             a (seon.ratom/atom tree)
-            w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @conn) [(r/declared-var (seon.db/index) :seon.render/render-ctx) {}])
+            w (r/walker {:ref a :changes seon.ctx/changes} (fn [] @conn) [#'seon.render.ui/agent {} (seon.ratom/ref-view a seon.ctx/changes)])
             views '#{seon.render.ui/status}
             ran (fn [] (into {} (for [[f v] (r/ledger w) :when (views f)] [f (+ (:miss v 0) (:same v 0))])))]
         (try
@@ -2220,13 +2220,13 @@
 
 (deftest an-entitys-schema-names-its-layout
   ;; docs/render.md#the-page: the layout that draws a record is the one its entity schema names, or the one it extends names
-  (is (= #'ui/render-ctx (r/layout-of (seon.db/index) {:seon.agent/key "b2/a1"})))
-  (is (= #'ui/user-ctx (r/layout-of (seon.db/index) (array-map :seon.user/name "sean" :seon.agent/key "sean"))))
-  (is (= #'ui/root-ctx (r/layout-of (seon.db/index) {:seon.root/id :root})))
-  (let [e (is (thrown? clojure.lang.ExceptionInfo (r/layout-of (seon.db/index) {:seon.eval/id "e1" :seon.eval/code "x"})) "a record no layout draws is an error, never a nil walk")]
-    (is (= :seon.render/no-layout (:seon.error/type (ex-data e))))
+  (is (= #'ui/agent (r/render-var-of (seon.db/index) {:seon.agent/key "b2/a1"})))
+  (is (= #'ui/user (r/render-var-of (seon.db/index) (array-map :seon.user/name "sean" :seon.agent/key "sean"))))
+  (is (= #'ui/root (r/render-var-of (seon.db/index) {:seon.root/id :root})))
+  (let [e (is (thrown? clojure.lang.ExceptionInfo (r/render-var-of (seon.db/index) {:seon.eval/id "e1" :seon.eval/code "x"})) "a record no layout draws is an error, never a nil walk")]
+    (is (= :seon.render/no-render (:seon.error/type (ex-data e))))
     (is (= [:seon.eval/id] (:identity (ex-data e))) "naming what it is"))
-  (is (= :seon.render/no-layout (:seon.error/type (ex-data (is (thrown? clojure.lang.ExceptionInfo (r/layout-of (seon.db/index) {})))))) "and one with no identity at all"))
+  (is (= :seon.render/no-render (:seon.error/type (ex-data (is (thrown? clojure.lang.ExceptionInfo (r/render-var-of (seon.db/index) {})))))) "and one with no identity at all"))
 
 (deftest each-page-draws-its-entitys-layout
   ;; docs/render.md#a-page-is-a-kept-walk: root's, a user's and an agent's kept walks each draw the layout their entity names, no
@@ -2235,10 +2235,10 @@
         db (d/db-with db0 [{:seon.agent/key "sean" :seon.user/name "sean"}])
         walk-layout (fn [eid branch ident] (let [kw (#'p/kept-walk db eid branch ident identity)]
                                               (try (first (:root (:w kw))) (finally (r/dispose-walk! (:w kw))))))]
-    (is (= #'ui/user-ctx (walk-layout (:db/id (d/entity db [:seon.user/name "sean"])) :main {})))
-    (is (= #'ui/root-ctx (walk-layout (:db/id (d/entity db [:seon.root/id :root])) :main {})))
-    (is (= #'ui/render-ctx (walk-layout (:db/id (d/entity db [:seon.agent/key "b2/a1"])) :main {:seon.agent/key "b2/a1"})))
-    (is (= #'ui/render-ctx (walk-layout nil :task-a {:seon.agent/key "b2/a1"})) "a branch that holds no entity yet: the agent's key names it")))
+    (is (= #'ui/user (walk-layout (:db/id (d/entity db [:seon.user/name "sean"])) :main {})))
+    (is (= #'ui/root (walk-layout (:db/id (d/entity db [:seon.root/id :root])) :main {})))
+    (is (= #'ui/agent (walk-layout (:db/id (d/entity db [:seon.agent/key "b2/a1"])) :main {:seon.agent/key "b2/a1"})))
+    (is (= #'ui/agent (walk-layout nil :task-a {:seon.agent/key "b2/a1"})) "a branch that holds no entity yet: the agent's key names it")))
 
 (defn- booted
   "The test world after a root's boot and the person's first message to root, which makes root's session (seon.root/root-session-message-tx,
@@ -2259,7 +2259,7 @@
     (is (= :parked (:seon.task/outcome t)) "its task waits for a message")
     (is (= "root" (seon.task/session-key db "request/root")) "and the ordinary spawn continues it by its key")
     (is (= :seon.db/agent-fact (r/entity-schema (seon.db/index) (d/pull db '[*] (:db/id s)) nil)) "an agent like any other")
-    (is (= #'ui/render-ctx (r/layout-of (seon.db/index) (d/pull db '[*] (:db/id s)))) "drawn by the agent's layout")
+    (is (= #'ui/agent (r/render-var-of (seon.db/index) (d/pull db '[*] (:db/id s)))) "drawn by the agent's layout")
     (is (= ["Hi root."] (mapv #(:seon.message/body (d/entity db (:e %))) (d/datoms db :avet :seon.message/to (:db/id s)))) "made by the first message, which it holds")
     (let [db2 (d/db-with db (seon.root/root-session-refresh-tx db))
           same (fn [d] [(dissoc (d/pull d '[*] [:seon.agent/key "root"]) :db/id) (dissoc (d/pull d '[*] [:seon.task/id "request/root"]) :db/id)])]
@@ -2283,7 +2283,7 @@
                            {:seon.message/from "sean" :seon.message/to [[:seon.agent/key "root"]] :seon.message/body "What is running?" :seon.message/sent-ms 1}])
         db (d/db-with db [{:seon.agent/key "root" :seon.agent/task [:seon.task/id "request/root"]}])
         part (fn [k] (let [c (seon.ctx/agent-ctx (seon.db/index) db (:db/id (d/entity db [:seon.agent/key k])))
-                           w (r/draw c seon.ctx/changes db (r/layout-of (seon.db/index) c) {:model-only true})]
+                           w (r/draw c seon.ctx/changes db (r/render-var-of (seon.db/index) c) {:model-only true})]
                        (try (pr-str (r/placed-hiccup w (r/page-lists w))) (finally (r/dispose-walk! w)))))
         root-text (part "root")]
     (is (str/includes? root-text "/agent/b1/a2") "root's session reads the other session by its address")
@@ -2312,7 +2312,7 @@
             ;; the session's branch: main as it forked, and the main its last turn heard
             ours (d/db-with (d/commit-as-db conn fork) [{:seon.agent/key "root" :seon.agent/main-commit main}])
             c (seon.ctx/agent-ctx (seon.db/index) ours (seon.db/eid ours :seon.agent/key "root"))
-            w (r/draw c seon.ctx/changes ours (r/layout-of (seon.db/index) c) {:model-only true})
+            w (r/draw c seon.ctx/changes ours (r/render-var-of (seon.db/index) c) {:model-only true})
             text (try (pr-str (r/placed-hiccup w (r/page-lists w))) (finally (r/dispose-walk! w)))]
         (is (nil? (seon.db/eid ours :seon.agent/key "b1/a7")) "the later session is not on the branch")
         (is (str/includes? text "/agent/b1/a7") "and root's session lists it, from main as it last heard it")))))
@@ -2449,7 +2449,7 @@
 (deftest a-stopped-agent-does-not-read-as-waiting-in-its-head-or-its-lists
   (let [a {:seon.agent/id :a6 :seon.agent/status :idle :seon.agent/max-turns 40 :seon.agent/key "b2/a6"}
         t {:seon.task/id "seon.ref/an-alias" :seon.task/outcome :cap :seon.task/reason "proof-red seon.ref-test/an-alias"}
-        head (h/html (ui/agent {} (assoc a :seon.agent/task t)))
+        head (h/html (ui/agent-head {} (assoc a :seon.agent/task t)))
         db (sessions-db "b2" [["b2/a6" :a6 :idle "seon.ref/an-alias" :cap :task-b] ["b2/a7" :a7 :idle "x/y" :parked :task-y]])
         side (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/a6")))
         card (h/html (ui/session-card {:seon.db/db db} "b2/a6"))]
@@ -2461,7 +2461,7 @@
     (is (str/includes? card "stopped at its cap") card)
     (is (not (str/includes? card "idle")))
     (is (str/includes? (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/a7"))) "parked") "a parked task can be answered")
-    (is (str/includes? (h/html (ui/agent {} {:seon.agent/id :a7 :seon.agent/status :idle :seon.agent/task {:seon.task/outcome :parked}})) "● parked"))))
+    (is (str/includes? (h/html (ui/agent-head {} {:seon.agent/id :a7 :seon.agent/status :idle :seon.agent/task {:seon.task/outcome :parked}})) "● parked"))))
 
 (deftest an-agents-pill-is-one-link-that-names-its-task
   ;; owner, 2026-11-05: the agents list read "a6 idle" and only the name was a link, though the pill looks like a button.
@@ -2687,7 +2687,7 @@
 (deftest an-agents-head-names-a-pid-only-while-its-process-runs
   ;; the browser check of 2026-10-29: a page showed an ended process's pid beside "idle"; the head names
   ;; the current process's pid (seon.task/newest-process) only while that process has not ended
-  (let [head (fn [ps] (pr-str (ui/agent {} {:seon.agent/id :a1 :seon.agent/status :idle :processes ps})))]
+  (let [head (fn [ps] (pr-str (ui/agent-head {} {:seon.agent/id :a1 :seon.agent/status :idle :processes ps})))]
     (is (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0}}) "pid 7") "a running process's pid")
     (is (not (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0 :seon.process/ended-ms 2.0}}) "pid 7")) "an ended one's is not shown")
     (is (str/includes? (head {1 {:seon.process/pid 7 :seon.process/forked-ms 1.0 :seon.process/ended-ms 2.0}
@@ -3416,7 +3416,7 @@
     (let [tile (h/html (ui/session-card {:seon.db/db db} "b2/a2"))]
       (is (str/includes? tile "Which of the two names should the function take?") (str "the tile says what its agent asked, while it waits: " tile))
       (is (str/includes? tile "class=\"said\"") "in the tile's own text"))
-    (is (not-any? #(= "user-messages" %) (map #(when (var? %) (name (symbol %))) (tree-seq coll? seq (ui/user-ctx {:seon.ctx/ctx {}}))))
+    (is (not-any? #(= "user-messages" %) (map #(when (var? %) (name (symbol %))) (tree-seq coll? seq (ui/user {:seon.ctx/ctx {}} {}))))
         "and the page has no feed of every message")))
 
 ;; Stage 2a's walk (docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09): one pass over a pull renders the page and
