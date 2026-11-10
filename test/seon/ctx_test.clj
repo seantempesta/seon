@@ -1305,15 +1305,16 @@
   [_] [:li "the other layout"])
 
 (defn other-layout
-  "A layout an agent registers for its page: one list holding one line."
-  {:malli/schema [:=> [:cat :map] :any]}
-  [_] [:div {:id "render-ctx"} [:ul {:id "p-task"} [#'other-part {}]]])
+  "A render an agent registers for its page (its entity schema's): one list holding one line."
+  {:malli/schema [:=> [:cat :map :any] :any]}
+  [_ _] [:div {:id "render-ctx"} [:ul {:id "p-task"} [#'other-part {}]]])
 
 (deftest a-layout-declared-after-the-first-draw-is-the-page
   ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 2; docs/ctx.md, "the page is the agent's to change": the
-  ;; walk held the layout of its first draw, so one registered later drew nothing
+  ;; walk held the layout of its first draw, so one registered later drew nothing. The page is the agent schema's render
   (let [db (seeded 3)
-        db2 (:db-after (d/with db (:tx (my.schema/registration db :seon.render/render-ctx '[:map {:seon.render/hiccup seon.ctx-test/other-layout}] false))))]
+        form (assoc-in (get (:forms (seon.db/index)) :seon.db/agent-fact) [1 :seon.render/hiccup] 'seon.ctx-test/other-layout)
+        db2 (:db-after (d/with db (:tx (my.schema/registration db :seon.db/agent-fact form false))))]
     (try (enter-agent! {:db db :key k :branch :b})
          (let [before (pr-str (seon.repl/render-ctx-hiccup))]
            (is (not (str/includes? before "the other layout")) "the declared layout first")

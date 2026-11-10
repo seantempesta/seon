@@ -257,7 +257,7 @@
         g (runner/reach-graph-of db (:data-refs in) (ts/kept-program-store))
         idx (seon.program/graph-index g in
                                       {"agent" '[seon.render.ui/agent] "root" '[seon.render.ui/root] "root-ctx" '[seon.render.ui/root-ctx] "render-ctx" '[seon.render.ui/render-ctx]})]
-    (is (= {"agent" false "root" false "root-ctx" false "render-ctx" false} (update-vals idx :process?))
+    (is (= {"agent" false "root" false} (update-vals idx :process?))
         "no render reaches a process var (:seon.config.source/process-vars)")))
 
 (defn- sites
@@ -1328,7 +1328,7 @@
 (deftest every-sent-part-names-its-record
   ;; root, 2026-10-26: a part kind with no clause in the debug page's source line made every pass
   ;; of the render proc throw, so no page answered; each ref kind seon.ctx.wire/request documents names its record
-  (doseq [ref [[:section 397 536870918] [:reply "b/a1/3"] [:eval "e3"] [:message "m1"] [:example "example/abc" 12] [:session "demo/g#1"] [:render]]]
+  (doseq [ref [[:section 397 536870918] [:reply "b/a1/3"] [:eval "e3"] [:message "m1"] [:example "example/abc" 12] [:session "demo/g#1"] [:page 3]]]
     (is (string? (#'ui/source ref)) (pr-str ref))))
 
 (deftest a-debug-page-before-a-model-turn-answers
@@ -2219,13 +2219,13 @@
   (is (nil? (r/schema-of (seon.db/index) (array-map :seon.task/id "x/y" :seon.agent/key "k") nil)) "no schema is guessed for a value"))
 
 (deftest an-entitys-schema-names-its-layout
-  ;; docs/render.md#the-page: the layout that draws a record is the one its entity schema names, or the one it extends names
+  ;; docs/render.md#the-page: the render a walk of an entity is rooted on is the one its entity schema names, or the one it extends names
   (is (= #'ui/agent (r/render-var-of (seon.db/index) {:seon.agent/key "b2/a1"})))
   (is (= #'ui/user (r/render-var-of (seon.db/index) (array-map :seon.user/name "sean" :seon.agent/key "sean"))))
   (is (= #'ui/root (r/render-var-of (seon.db/index) {:seon.root/id :root})))
-  (let [e (is (thrown? clojure.lang.ExceptionInfo (r/render-var-of (seon.db/index) {:seon.eval/id "e1" :seon.eval/code "x"})) "a record no layout draws is an error, never a nil walk")]
+  (let [e (is (thrown? clojure.lang.ExceptionInfo (r/render-var-of (seon.db/index) {:var/name 'a/b})) "an entity whose schema names no render is an error, never a nil walk")]
     (is (= :seon.render/no-render (:seon.error/type (ex-data e))))
-    (is (= [:seon.eval/id] (:identity (ex-data e))) "naming what it is"))
+    (is (= [:var/name] (:identity (ex-data e))) "naming what it is"))
   (is (= :seon.render/no-render (:seon.error/type (ex-data (is (thrown? clojure.lang.ExceptionInfo (r/render-var-of (seon.db/index) {})))))) "and one with no identity at all"))
 
 (deftest each-page-draws-its-entitys-layout
@@ -3434,7 +3434,6 @@
 (defn lab-call-wire [_ x] [{:role "assistant" :content (str (:lab.ow/reply x))}])
 (defn lab-eval [_ x] [:code (str (:lab.ow/code x))])
 (defn lab-eval-wire [_ x] [{:role "tool" :content (str (:lab.ow/code x))}])
-(defn lab-layout [_] [:main "a layout over the walk's source"])
 
 (deftest one-pass-renders-the-page-and-the-models-messages
   (let [forms {:lab.ow/key [:and {:seon.db/identity true} :string] :lab.ow/n :int :lab.ow/reply :string :lab.ow/code :string :lab.ow/turn :int
@@ -3477,13 +3476,10 @@
       (is (= (into [{:role "user" :content "open"}] (conj (r/openai-compat w) {:role "user" :content "close"}))
              (:messages (r/render-pull @a db #'lab-session-wire ix #{:seon.render/openai-compat} {:seon.render/as :seon.render/openai-compat})))
           "a root call answers the model output itself, placing the pull's entities each by its own model render"))
-    (let [lw (assoc (r/walker {:ref a :changes seon.ctx/changes} (constantly db) [#'lab-layout {}] ix) :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
-      (r/flush! lw nil)
-      (is (= (r/openai-compat w) (r/openai-compat lw)) "a root called with no entity (a layout) answers its walk's source entity's model render")
-      (r/dispose-walk! lw))
-    ;; the bridge's root before its entity exists: a walk flushed on an empty pull, then the entity, answers the entity's model render
+    ;; a walk rooted on its entity's render before the entity exists: flushed on an empty pull, then the entity, it answers the entity's
+    ;; model render (the root's component reads its identity tracked)
     (let [e (seon.ratom/atom {})
-          ew (assoc (r/walker {:ref e :changes seon.ctx/changes} (constantly db) [#'lab-layout {}] ix) :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
+          ew (assoc (r/walker {:ref e :changes seon.ctx/changes} (constantly db) [#'lab-agent {} (seon.ratom/ref-view e seon.ctx/changes)] ix) :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
       (r/flush! ew nil)
       (is (= [] (r/openai-compat ew)) "no entity yet: no model output")
       (reset! e @a)

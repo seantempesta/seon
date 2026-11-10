@@ -350,7 +350,8 @@
             ix @(:index w)
             ;; the entity: the component's argument (a walk is rooted on [render {} view], so its root has one too)
             ev (when (seq others) (first children))
-            e0 (some-> ev ratom/untracked)
+            ;; as of now: a view holds the value it was made with, and a root's argument is the view the walk was made with
+            e0 (some-> ev ratom/fresh ratom/untracked)
             ;; an entity's schema by its identity attributes, never a value's metadata: an agent's @ctx carries :seon.ctx/ctx's, which
             ;; names no model render, so the agent's own went unasked
             s0 (when (and (map? e0) (:db/id e0)) (entity-schema ix e0 nil))
@@ -393,7 +394,17 @@
                             as (:seon.render/as opts)
                             out (if as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil) (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
                         ;; an entity's own render for each other output, where no call answers that output for it
-                        (doseq [[op of] fs :when (not= op as)] (vswap! outs assoc op (place op env' (of {:seon.db/db ((:db w)) :seon.render/index ix} (or (first args) ev)))))
+                        ;; each in a run of its own at this edge: a model render that throws is that output's defect (health sees it, its
+                        ;; output answers nothing), never the page's, which the person still reads
+                        (doseq [[op of] fs :when (not= op as)]
+                          (vswap! outs assoc op
+                                  (try (place op env' (of {:seon.db/db ((:db w)) :seon.render/index ix} (or (first args) ev)))
+                                       (catch Throwable e
+                                         (when (:interrupted (ex-data e)) (throw e))
+                                         (vswap! (:defects w) conj (contract/error :seon.render/component-defect #'render!
+                                                                                   (str (symbol of) " threw: " (or (ex-message e) (str e)))
+                                                                                   (cond-> {:seon.error/in (symbol of)} (map? (ex-data e)) (assoc :seon.render/threw (ex-data e)))))
+                                         []))))
                         out)
                       ;; a component that throws draws its error in its place: a call of the error's render on the error as data (what
                       ;; threw, and the thrown error's own data: a contract's problems), so the page writes that render and the model
