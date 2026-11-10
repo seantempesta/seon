@@ -1395,9 +1395,11 @@
   ;; its content's hash, so a branch that takes main's changes by merge names main's nodes for them, and holds as its own
   ;; only the nodes its own datoms are in. With random addresses every node a merge rewrote stayed the branch's own: 66 to
   ;; 81 percent of a long-lived branch's nodes after 100 merges in the lab, against 6 to 9 with content addresses. A store
-  ;; on disk of its own, the last resort: a node has an address only once a durable store holds it; removed at the end
+  ;; on disk of its own, the last resort: a node has an address only once a durable store holds it; removed at the end.
+  ;; Its seed is 5 namespaces of the example program (550), not 18 (2000): seeding a durable store was 361 M of the
+  ;; test's 552 M ticks, and the claim holds as sharply at either size (5 of 85 own; 39 of 85 with random addresses)
   (let [path (str (seon.config/checkout) "/target/db-test-nodes-" (random-uuid))
-        {cfg :cfg main :conn} (pdb/open! :lmdb path 2000 :db)]
+        {cfg :cfg main :conn} (pdb/open! :lmdb path 550 :db)]
       (let [b (keyword (str "test-" (random-uuid)))
             _ (d/branch! main :db b)
             br (pdb/connect (assoc cfg :branch b))
@@ -1417,7 +1419,7 @@
           (let [[own total] (private)]
             (is (:crypto-hash? (:config @br)) "the store's nodes are addressed by their content")
             ;; the branch's own nodes are its one write's path and a few leaves, under a tenth of the tree (Sean, 2026-11-10; measured 9 of
-            ;; 156): persistent-sorted-set is a plain B-tree whose leaf cut depends on insertion order, and seon.merge/merge-tx inserts
+            ;; 156 on a seed of 2000, 5 of 85 on this one): persistent-sorted-set is a plain B-tree whose leaf cut depends on insertion order, and seon.merge/merge-tx inserts
             ;; main's datoms in another order than main did, so a branch can own leaves holding only main's datoms (the literal 8 passed
             ;; by luck). Random addresses kept 76 of 157 (48%) after the same 20 merges, red here; docs/sharing.md#what-a-branchs-nodes-are
             (is (<= own (quot total 10)) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
