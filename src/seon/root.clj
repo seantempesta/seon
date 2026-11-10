@@ -1108,13 +1108,14 @@
   (seon.doc/load-tx; a removed page loads empty, so its sections go) and the task files (seon.task/load-tx of tasks-of; a
   removed file declares none, so its tasks are cancelled). A path of none of these (native code, deps.edn, system.edn, a
   gitlink) is a build input, which the binary's build takes. What root writes on main for a Claude session's landing
-  (bin/land's bridge, a temporary one). See docs/source.md#a-landing-enters-main-as-data."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string]] :seon.db/tx-data]}
-  [db changed modes]
+  (bin/land's bridge, a temporary one). tasks-dir: the tree's task files' directory, relative to the tree (the files' paths
+  are; nil: the tree holds no task files this root reads), so what a path is follows the tree, not this process's own task dir (a test root's is under its runs).
+  See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] [:maybe :string]] :seon.db/tx-data]}
+  [db changed modes tasks-dir]
   (let [under? (fn [p d] (if (= "." d) (not (str/includes? p "/")) (and (str/starts-with? p (str d "/")) (not (str/includes? (subs p (inc (count d))) "/")))))
         program? (fn [p] (and (fx/source-file? p) (some #(str/starts-with? p (str % "/")) (cfg/value :seon.config.source/dirs))))
         wiki (cfg/value :seon.config.root/wiki-dirs)
-        tasks-dir (cfg/value :seon.config.root/tasks-dir)
         pick (fn [f] (into {} (filter (comp f key)) changed))
         ;; a mode is a fact of a file the allow-list names (seon.source/modes-tx), as a read records it (seon.fx/read-source)
         code (into (source/refresh-tx db (pick program?)) (source/modes-tx db (into {} (filter #(and (program? (key %)) (cfg/file-kind (key %)))) modes)))
@@ -1122,9 +1123,8 @@
         pages (update-vals (pick (fn [p] (and (str/ends-with? p ".md") (some #(under? p %) wiki)))) #(or % ""))
         docs (if (seq pages) (doc/load-tx db1 wiki pages) [])
         db2 (pdb/speculate-db db1 docs)
-        task-texts (into {} (for [[p t] changed :let [f (java.io.File. (str (cfg/checkout) "/" p))]
-                                  :when (and (str/ends-with? p ".edn") (= (.getCanonicalPath (java.io.File. ^String tasks-dir)) (.getCanonicalPath (.getParentFile f))))]
-                              [(.getName f) (or t "[]")]))
+        task-texts (into {} (for [[p t] changed :when (and tasks-dir (str/ends-with? p ".edn") (under? p tasks-dir))]
+                              [(subs p (inc (count tasks-dir))) (or t "[]")]))
         tasks (if (seq task-texts) (task/load-tx db2 (tasks-of task-texts)) [])]
     (if (contract/error? tasks)
       (throw (ex-info (str "the landed task files were refused: " (:seon.error/message tasks)) tasks))
@@ -1163,8 +1163,12 @@
   differs from that tree, not every file landed since the last import."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] :string :string] :seon.db/tx-data]}
   [db changed modes tree commit]
-  (let [held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))]
-    (cond-> (changed-tx db changed modes)
+  (let [held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
+        ;; the tree's task files: root's task dir as a path in the checkout it serves
+        co (.getCanonicalPath (java.io.File. ^String (cfg/checkout)))
+        td (.getCanonicalPath (java.io.File. ^String (cfg/value :seon.config.root/tasks-dir)))
+        tasks-dir (when (str/starts-with? td (str co "/")) (subs td (inc (count co))))]
+    (cond-> (changed-tx db changed modes tasks-dir)
       held (conj {:seon.root/id :root
                   :seon.root/source (assoc held :tree tree :commit commit :digest (source-digest {:tree tree :pins (:pins held)} (:dirs held [])))}))))
 

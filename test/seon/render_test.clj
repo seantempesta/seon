@@ -3555,3 +3555,12 @@
         view (seon.ratom/ref-view a seon.ctx/changes)]
     (is (= [#'ui/cite {:key "c1"}] (r/entity-render ix (get view :c))) "a cite: its schema's render, keyed by its identity")
     (is (nil? (r/entity-render ix (get view :v))) "a pulled var: no render, it prints")))
+
+;; docs/render.md#the-page: a person's page asks for work; spawning agents and evaluating in every agent are root's debug page's
+(deftest a-persons-input-holds-no-dev-tools
+  (let [person (h/html (ui/root-input {:unit "p-input"} {}))
+        debug (h/html (:seon.render/hiccup (ui/debug :root nil nil {:id "d-ctx"})))]
+    (is (str/includes? person "What would you like done?"))
+    (is (not (str/includes? person "spawn 10")) "no spawn on a person's page")
+    (is (not (str/includes? person "all=&gt;")) "no eval-every-agent form")
+    (is (str/includes? debug "spawn 10") "root's debug page holds them")))

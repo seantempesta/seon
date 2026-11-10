@@ -348,8 +348,8 @@
         _ (doseq [[path text] a :when (.exists (java.io.File. (str here "/" path)))] (require (source/file-ns text)))
         db0 (pdb/empty-db false)
         ;; through the write check every write takes (seon.db/with), as the agent's transact! does
-        main-a (:db-after (pdb/with db0 (root/changed-tx db0 a modes)))
-        main-b (:db-after (pdb/with main-a (root/changed-tx main-a changed modes)))
+        main-a (:db-after (pdb/with db0 (root/changed-tx db0 a modes "resources/seon/tasks")))
+        main-b (:db-after (pdb/with main-a (root/changed-tx main-a changed modes "resources/seon/tasks")))
         program-paths (filter #(or (str/starts-with? % "src/") (str/starts-with? % "bin/")) (keys b))
         seeded-b (let [db (pdb/empty-db false)] (d/db-with db (source/tx-of db (select-keys b program-paths) false)))]
     (is (= (set (keys changed)) #{"src/app/imp.clj" "src/app/land.clj" "bin/zz-land" "docs/zz-land.md" "docs/zz-gone.md" "resources/seon/tasks/zz-land.edn"}))
