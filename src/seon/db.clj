@@ -114,7 +114,7 @@
   entity schemas ({:seon.db/to}); :drawn-schemas, the entity schemas that declare a render (:seon.render/hiccup), theirs or a parent's; and :forms, the forms it was built from}. It is the one value every reader of what an entity
   is takes first (ix): a branch's own entity schema is recognized by its own index, never the binary's.
   See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :map] [:map [:forms :map] [:entity-schemas :map] [:identity-schemas :map] [:schema-identities :map] [:drawn-schemas [:set :any]] [:required-keys :map] [:own-required :map] [:targets :map]]]}
+  {:malli/schema [:=> [:cat :map] [:map [:forms :map] [:entity-schemas :map] [:identity-schemas :map] [:schema-identities :map] [:drawn-schemas [:set :any]] [:required-keys :map] [:own-required :map] [:targets :map] [:required-refs [:vector :qualified-keyword]]]]}
   [forms]
   (let [entity? #(:seon.db/attributes (form-props forms %))
         required (fn [form] (for [e (own-entries form) :let [p (second e)] :when (not (and (map? p) (:optional p)))] (first e)))
@@ -130,7 +130,9 @@
                                [k (vec (distinct (mapcat #(required (get forms %)) (filter entity? (tree-seq (constantly true) #(parents-in forms %) k)))))]))
      :own-required (into {} (for [k (distinct (vals es))] [k (vec (required (get forms k)))]))
      ;; each ref attribute's target entity schemas, as its own schema states them ({:seon.db/to [...]}), once
-     :targets (into {} (for [[a _] es :let [to (:seon.db/to (form-props forms a))] :when to] [a to]))}))
+     :targets (into {} (for [[a _] es :let [to (:seon.db/to (form-props forms a))] :when to] [a to]))
+     ;; the ref attributes some entity schema requires: what the write check's cascade follows from a retracted entity, once
+     :required-refs (vec (sort (distinct (for [k (distinct (vals es)) a (required (get forms k)) :when (:seon.db/to (form-props forms a))] a))))}))
 
 (def ^:private binary-index
   "The binary's `entity-index`, derived once from its registry. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
@@ -304,14 +306,17 @@
                       (if-not (some whole? tx-data)
                         tx-data
                         (let [schema (:schema db)
-                              refs (filterv #(= :db.type/ref (get-in schema [% :db/valueType])) (distinct (mapcat val (:required-keys ix))))]
+                              ;; the refs some entity schema requires, read once with the index (:required-refs), not walked each write
+                              refs (filterv #(= :db.type/ref (get-in schema [% :db/valueType])) (:required-refs ix))]
                           (loop [todo (keep #(when (whole? %) (:db/id (d/entity db (second %)))) tx-data) seen #{} cites [] out (vec tx-data)]
                             (if-let [e (first todo)]
                               (if (seen e)
                                 (recur (rest todo) seen cites out)
-                                (let [dependents (for [a refs d (d/datoms db :avet a e)] (:e d))]
+                                (let [found (for [a refs d (d/datoms db :avet a e)] [a (:e d)])
+                                      dependents (map second found)]
                                   (recur (concat (rest todo) dependents) (conj seen e)
-                                         (into cites (for [d (d/datoms db :avet :seon.cite/target e)] [(:e d) e]))
+                                         ;; the cites among them, from the same seek
+                                         (into cites (for [[a x] found :when (= a :seon.cite/target)] [x e]))
                                          (into out (for [x dependents :when (not (seen x))] [:db.fn/retractEntity x])))))
                               (into out (gone-tx seen cites))))))))
         tx-data (ends-with tx-data)]
