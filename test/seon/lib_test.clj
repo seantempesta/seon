@@ -161,11 +161,16 @@
                    (fn []
                      (jolt.host/fiber-preempt-ticks-set! 100)
                      (jolt.host/fiber-yield)
-                     (let [me (lib/c-getpid)]
-                       (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when (not= me (lib/c-getpid)) (say "parent") (lib/c-exit 7)) (jolt.host/fiber-yield) (recur)))))
+                     (let [me (lib/c-getpid)
+                           ready? (volatile! true)
+                           ;; every grandchild holds w until it exits, so r's end of file is their exits: the wait is on that
+                           [r w] (sock/socketpair)]
+                       (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when @ready? (when (not= me (lib/c-getpid)) (say "parent") (lib/c-exit 7)) (jolt.host/fiber-yield) (recur))))))
                        (dotimes [_ 50] (lib/fork! {:double? true :child #(do (say "own") (lib/c-exit 0)) :parent identity :refused (fn [n] (say (str "refused " n)))}))
-                       ;; the grandchildren end on their own: wait for their 50 lines, a bounded number of looks
-                       (loop [n 0] (when (and (< n 400) (< (count (re-seq #"\n" (try (slurp f) (catch Exception _ "")))) 50)) (Thread/sleep 10) (recur (inc n))))
+                       ;; the ready fibers end here: nothing of this process is left spinning when its main fiber waits and exits
+                       (vreset! ready? false)
+                       (sock/close! w)
+                       (let [c (sock/conn r)] (loop [] (when-not (= :eof (sock/recv! c)) (recur))))
                        (lib/c-exit 0)))))]
       (.mkdirs (.getParentFile (java.io.File. f)))
       (is (= {:exit 0} (lib/fork! {:child run2 :parent lib/wait-status :refused (fn [n] {:refused n})})))
