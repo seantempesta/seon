@@ -1264,7 +1264,7 @@
   [:div
    (for [k (added-keys c)] [#'ctx-key {} k])])
 
-(declare eval-output eval-glance)
+(declare eval-output)
 
 (defn eval-hiccup
   "Eval e of the conversation as a step of the chat and a call of the model's, one hiccup (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): one quiet line, a mark only when it threw, what it set out
@@ -1280,11 +1280,7 @@
         seon? (= "seon" by)
         said? (not (str/blank? intent))
         called? (or call-id said?)]
-    [:li (cond-> (if called?
-                   {}
-                   {})
-           true (assoc)
-           seon? (assoc))
+    [:li
      [:details (cond-> {:class "seon-eval" :id (str "eval-" id)} opened (assoc :open true))
       ;; opening it is a fact on main (seon.root/opened!), which the agent takes before it draws again
       (into (if key [:summary {:seon/call 'seon.root/opened! :seon/agent agent :seon/args {:key key :eval id}}] [:summary])
@@ -1299,7 +1295,7 @@
        ;; the code as the agent wrote it, whole, highlighted
        [:div {:class "min-w-0"} [#'emit/marked-hiccup :seon.print/code (or code "")]]
        (when at [#'eval-output {:key id :at at :agent agent :wire/for "page"}])]]
-     (when at [#'eval-glance {:key id :at at :wire/for "page"}])]))
+     ]))
 
 (defn eval-item
   "An eval of the conversation (a component over ctx and the db), its one hiccup (`eval-hiccup`) (owner: \"I
@@ -1321,24 +1317,21 @@
                             :let [v (ratom/realize (get-in c (conj at k)))] :when (some? v)] [k v]))]
       (-> e (assoc :seon.eval/response (pdb/response-of db e)) (dissoc :seon.eval/result)))))
 
-(defn eval-glance
-  "What came of an eval, in the chat with no click (a component over ctx and the db, for the page alone): its value through the one render (render/hiccup: the render it has, else the value printer), whole once its step is opened; or, closed, what went wrong on a line, the opened step having the rest. See docs/render.md#a-value-draws-itself. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
-  {:seon.render/style ".eval-glance { margin: 0.25rem 0 0.25rem 1rem; min-width: 0; overflow-x: auto; font-size: 0.75rem; }\n.eval-item:has(> details[open]) .eval-glance-line { display: none; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
+(defn eval-tile
+  "An eval's rendered value as a tile of the agent's page parts (a component over ctx and the db): a value with a render (its own
+  :seon.render/hiccup, or a render its record's schema declares) drawn whole by it, the same tile the person sees and the model reads
+  (owner, 2026-11-10: \"the rendered tile is the only version of the rendered value that is seen by the model\"); nothing for any
+  other value, whose eval's tool result holds it. See docs/render.md#a-value-draws-itself."
+  {:seon.render/style ".eval-tile { min-width: 0; overflow-x: auto; font-size: 0.75rem; }"
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db at :at ix :seon.render/index}]
   (when-let [e (eval-shown c db at)]
-    (let [{:keys [ex value handle out err warnings]} (:seon.eval/response e)
-          r (:seon.eval/response e)
+    (let [{:keys [value handle]} (:seon.eval/response e)
           v (ratom/realize value)
-          k (:seon.eval/schema e)
-          failed (or (ratom/realize ex) (when (contract/error? v) v))
-          opened? (ratom/realize (get-in c (conj at :seon.eval/opened)))
-          budget (if opened? (inc (render/tokens-of ix v)) (config/value :seon.config.render/value-budget))
-          whole (cond-> v (and opened? (instance? clojure.lang.IObj v)) (vary-meta assoc :seon.print/full true))]
-      (cond
-        failed [:div [:span {:class "eval-glance-line text-error"} (print/line (or (:seon.error/message failed) failed) (config/value :seon.config.render/line-budget) nil)]]
-        ;; a nil beside output is the output's whole answer (clojure.repl/source prints and answers nil)
-        (and (contains? r :value) (not (and (nil? v) (or (ratom/realize out) (ratom/realize err) (seq (ratom/realize warnings))))))
-        [:div (render/hiccup (cond-> {:seon.render/index ix :budget budget :handle handle :db db} k (assoc :as :block :schema k)) whole)]))))
+          k (:seon.eval/schema e)]
+      (when (or (and (map? v) (contains? v :seon.render/hiccup)) (and k (render/declared ix k)))
+        [:section [:h3 (str "eval " (:seon.eval/id e))]
+         (render/hiccup (cond-> {:seon.render/index ix :handle handle :db db} k (assoc :as :block :schema k)) v)]))))
 
 (defn- step-tools
   "An opened step's buttons, for a live agent (the page's stylesheet shows them only beside its REPL's input, so no step is drawn again as its status moves): run it again in its place,
@@ -1395,7 +1388,12 @@
           (render/hiccup {:seon.render/index ix :budget (budget s) :handle (when handle (list k handle))} (whole s))])
        (when err
          [:div {:class "text-error"} "✗ " (:seon.error/message err)
-          (render/hiccup {:seon.render/index ix :budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))])])))
+          (render/hiccup {:seon.render/index ix :budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))])
+       ;; its value, inline once the person opens it (owner, 2026-11-10: \"If the user expands the UI > for the evals then yeah render it
+       ;; inline too\"), by the render it has, else the printer; a nil beside output is the output's whole answer (clojure.repl/source)
+       (when (and (not err) (contains? (:seon.eval/response e) :value) (not (and (nil? v) (or (seq printed)))))
+         (let [k (:seon.eval/schema e)]
+           [:div (render/hiccup (cond-> {:seon.render/index ix :budget (budget v) :handle handle :db db} k (assoc :as :block :schema k)) (whole v))]))])))
 
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
@@ -1618,13 +1616,14 @@
 (defn agent-parts
   "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists),
   in the order they are placed here: the task, its proofs, what it cites, each search, the references its agent cites, its added
-  keys, and last its own problems, its turn and its state; what a turn's diff compares. A piece is here when the pull holds what it
+  keys, the tiles of its evals' rendered values (`eval-tile`), and last its own problems, its turn and its state; what a turn's diff compares. A piece is here when the pull holds what it
   shows; :seon.ctx/pattern is what it reads of the agent, so a past point's parts are pulled by that alone (its added keys are
   the agent's own pattern's, which a point's pull by this one leaves out). See docs/render.md#the-page."
   {:seon.render/list "p-task"
    :seon.ctx/pattern [:seon.agent/key :seon.agent/status :seon.agent/outcome :seon.agent/reason :seon.agent/turn :seon.agent/max-turns
                       :seon.agent/ended-turn :seon.agent/ns {:seon.agent/task :seon.task/task-fact} {:seon.cite/_of :seon.cite/cite-fact}
-                      {:seon.search/_of :seon.search/search-fact}]
+                      {:seon.search/_of :seon.search/search-fact}
+                      {:seon.eval/_agent [:seon.eval/id :seon.eval/schema :seon.eval/response :seon.eval/result]}]
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
   [_ c]
   [:div {:id "p-task"}
@@ -1640,6 +1639,8 @@
    (when (seq (:seon.cite/_of c)) [#'references {:at [:seon.cite/_of]}])
    (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])
    (when (:seon.agent/task c) [#'own-problems {:at [:seon.agent/task]}])
+   ;; each eval's rendered value a tile of its own (`eval-tile`), newest first; an eval whose value has no render places nothing
+   (for [e (keys (:seon.eval/_agent c))] [#'eval-tile {:key (ratom/realize (get-in c [:seon.eval/_agent e :seon.eval/id])) :at [:seon.eval/_agent e]}])
    [#'turn {:at [:seon.agent/ns]}]
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])
 

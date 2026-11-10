@@ -1211,7 +1211,7 @@
     (is (str/includes? silent "nil") "a real nil with no output is still shown")
     (is (str/includes? both "printed-out") "output beside a value")
     (is (str/includes? both "warned-err") "and its stderr, under :err")
-    (is (str/includes? both ">7<") "the value is still drawn when it is not nil")
+    (is (str/includes? both ">7<") "the value is in the step, shown once it is opened")
     (is (and (str/includes? cut "line-0") (not (str/includes? cut "line-2999"))) "output over the value budget is cut")
     (is (< (count cut) 6000) (str "cut by the value's budget: " (count cut) " chars"))
     (is (str/includes? cut "(subs (:seon.print/code (:out result/e23))") "and the cut says how to read the rest")))
@@ -1664,7 +1664,7 @@
   (let [[w a branch] (live-walk)
         e3 (seon.db/eid branch :seon.eval/id "e3")]
     (swap! a assoc-in [:seon.eval/_agent e3 :seon.eval/opened] true)
-    (is (= {[`ui/eval-item "e3"] :miss [`ui/eval-output "e3"] :same, [`ui/eval-glance "e3"] :same} (r/flush! w nil)) "an eval opened: that eval's line and its output run (opened, the output is whole); its turn's and its list's layout do not")
+    (is (= {[`ui/eval-item "e3"] :miss [`ui/eval-output "e3"] :same} (r/flush! w nil)) "an eval opened: that eval's line and its output run (opened, the output is whole); its turn's and its list's layout do not")
     (swap! a assoc :t 99)
     (is (= {} (r/flush! w nil)) "a change no component read: nothing runs")
     (swap! a assoc-in [:seon.eval/_agent e3 :seon.eval/opened] true)
@@ -2900,13 +2900,13 @@
       (is (str/includes? e "Run the proofs.") "a step's line is what it set out to do")
       (is (= 1 (count (re-seq #"\(prove-it\)" e))) "its code once, under the line")
       (is (not (re-find #"<details[^>]* open" e)) "closed until opened"))
-    (is (str/includes? (h/html (ui/eval-glance (assoc opts :at [:seon.eval/_agent (eid "e3")]))) "prove") "its value by the render its record names")))
+    (is (str/includes? (h/html (ui/eval-output (assoc opts :at [:seon.eval/_agent (eid "e3")]))) "prove") "opened, its value by the render its record names")))
 
 (deftest an-opened-step-shows-its-result-whole
   ;; docs/render.md#the-page: expanding expands: a step closed holds a start, opened all of it, with nothing further to open
   (let [v (mapv (fn [i] {:n i :name (str "row-" i)}) (range 800))
         e {:seon.eval/id "e1" :seon.eval/code "(rows)" :seon.eval/response {:handle 'result/e1 :value v}}
-        draw (fn [e] (h/html (ui/eval-glance {:seon.render/index (seon.db/index) :seon.ctx/ctx {:seon.eval/_agent {1 e}} :seon.db/db (ts/test-db) :at [:seon.eval/_agent 1]})))
+        draw (fn [e] (h/html (ui/eval-output {:seon.render/index (seon.db/index) :seon.ctx/ctx {:seon.eval/_agent {1 e}} :seon.db/db (ts/test-db) :at [:seon.eval/_agent 1]})))
         closed (draw e)
         opened (draw (assoc e :seon.eval/opened true))]
     (is (not (str/includes? closed "row-799")) "closed: its start")
@@ -3218,10 +3218,13 @@
         w (a3-walk db)]
     (try
       (let [html (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w))))
-            g1 (str/index-of html "eval-glance-g1")
+            tiles (apply str (map :html (filter #(= "#p-task" (:container %)) (r/placed-units w))))
+            g1 (str/index-of tiles "eval-tile-g1")
             ;; what the model reads of the eval: its model render's messages (seon.ctx.wire/eval-msgs), never the chat's elements
             read (pr-str (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "g2"])))]
-        (is (str/includes? html "<svg") "the chart is drawn, closed step and all")
+        (is (str/includes? tiles "<svg") "the chart is a tile of the agent's parts (owner, 2026-11-10: rendered values in the tiles)")
+        (is (not (str/includes? tiles "plain-value")) "a value with no render is no tile")
+        (is (str/includes? html "<svg") "and inline in its step, drawn when the step is opened")
         (is (not (str/includes? html "<svg height=\"0")) "drawn as it is")
         (is (str/includes? html "plain-value") "a value with no render: the value printer")
         (is (some? g1))
