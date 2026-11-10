@@ -2182,16 +2182,18 @@
     (is (str/includes? card "working") "how its work stands")
     (is (str/includes? card "href=\"/agent/b2/a3\"") "its page")))
 
-;; docs/users.md#whats-on-screen: a request and its work read as one tree: an agent's tile holds, under it, the tile of each agent doing a
-;; task it started (the task's :seon.task/started-by, reversed in the tile's pull). Cost: n = the agents under one tile (what that agent
-;; started); the reverse join is one VAET seek on the tile's own entity and a pull of each child, so a tile costs its own children, never
-;; the store's agents, and each child tile is its own component, reused by its key
+;; docs/users.md#whats-on-screen: a request and its work read as one tree: an agent's tile holds, under it, the tile of each agent it
+;; started (its :seon.agent/agents, read forward in the tile's pull). Cost: n = the agents under one tile (what that agent started); the
+;; join is the tile's own entity's datoms of that attribute and a pull of each child, so a tile costs its own children, never the store's
+;; agents, and each child tile is its own component, reused by its key
 (deftest a-tile-holds-the-agents-its-agent-started
   (let [db (sessions-db "b2" [["b2/a2" :a2 :running "seon.print/a-long-string" :parked :task-a]
                               ["b2/a3" :a3 :running "seon.print/b-short-string" :running :task-b]])
         work-task (:db/id (:seon.agent/task (d/entity db [:seon.agent/key "b2/a3"])))
-        ;; as production writes a started task: who started it, and the agent working it
-        db (d/db-with db [[:db/add work-task :seon.task/started-by [:seon.agent/key "b2/a2"]] [:db/add work-task :seon.task/agent [:seon.agent/key "b2/a3"]]])
+        ;; as production writes a started task: who started it, the agent working it, and the starter's :seon.agent/agents (seon.task's
+        ;; agent-tx writes it from the task's started-by)
+        db (d/db-with db [[:db/add work-task :seon.task/started-by [:seon.agent/key "b2/a2"]] [:db/add work-task :seon.task/agent [:seon.agent/key "b2/a3"]]
+                          [:db/add [:seon.agent/key "b2/a2"] :seon.agent/agents [:seon.agent/key "b2/a3"]]])
         kids (fn [hc] (keep #(when (and (vector? %) (= #'ui/session-card (first %))) (nth % 2)) (tree-seq coll? seq hc)))]
     (is (= ["b2/a3"] (kids (ui/session-card {:seon.db/db db} "b2/a2"))) "the request's tile holds its work agent's")
     (is (empty? (kids (ui/session-card {:seon.db/db db} "b2/a3"))) "the work agent's holds none")))
@@ -2211,11 +2213,13 @@
     (let [entries (fn [db hc] (map #(:seon.agent/key (d/entity db (last %))) (filter #(and (vector? %) (= #'ui/agent-side (first %))) (tree-seq coll? seq hc))))]
       (is (= ["b2/a1" "b2/a2"] (sort (entries db (ui/started-side {:seon.ctx/ctx c :seon.db/db db}))))
           "the agents list every page shows: what the user started, each by the one entry render")
-      ;; docs/render.md#a-sessions-address-and-the-agents-list: an entry holds, by the same render, the agents of the tasks it started
+      ;; docs/render.md#a-sessions-address-and-the-agents-list: an entry holds, by the same render, the agents it started
       (let [a1 (d/entity db [:seon.agent/key "b2/a1"])
             a3 (d/entity db [:seon.agent/key "b2/a3"])
-            ;; as my.task/launch! writes it: the task names who started it, and the agent made for it (seon.task/agent)
-            work (d/db-with db [{:db/id (:db/id (:seon.agent/task a3)) :seon.task/started-by (:db/id a1) :seon.task/agent (:db/id a3)}])]
+            ;; as my.task/launch! writes it: the task names who started it, the agent made for it (seon.task/agent), and the starter's
+            ;; :seon.agent/agents (seon.task's agent-tx, from the task's started-by)
+            work (d/db-with db [{:db/id (:db/id (:seon.agent/task a3)) :seon.task/started-by (:db/id a1) :seon.task/agent (:db/id a3)}
+                                [:db/add (:db/id a1) :seon.agent/agents (:db/id a3)]])]
         (is (= ["b2/a3"] (entries work (ui/agent-side {:seon.db/db work} (:db/id a1)))) "a request's entry holds its work agent's")
         (is (empty? (entries db (ui/agent-side {:seon.db/db db} (:db/id a1)))) "and nothing when it started none")))))
 

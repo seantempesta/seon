@@ -6,6 +6,10 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
 
+### A run far past its measured time is ended, after its evidence (owner, 2026-11-10)
+
+The fourth clock exception, relayed by the managing session at 20:35: a script may end a run that goes far past its measured time, after capturing the evidence (sample, logs, process list and the Seon state: root's stall check, each agent proc's), reported red with a typed reason, never retried; the cause still gets its task. Before it, a stuck step ran until someone noticed. Stated in [clocks](clocks.md#time-decides-the-owners-exceptions): `bin/check` ends a step past `:seon.config.check/step-end-factor` times its median measured run (STEP-OVERRAN), after `bin/evidence`.
+
 ### A write to main is answered after the store holds it (owner, 2026-11-10)
 
 Asked with the question tool (relayed by Point, 2026-11-10 ~19:40) between answering root's write at its apply, with root's api storing what ran ahead before any request reaches an agent, and answering after the store commit; the owner chose the second (in Point's relay: "answered means every process can read it"), one rule, no gate at root, no class of missed reads. Stated in [storage](storage.md#durability-is-continuous-group-commit).

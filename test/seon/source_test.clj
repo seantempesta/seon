@@ -287,7 +287,7 @@
 (deftest a-branchs-config-is-its-own-and-reaches-the-next-process
   ;; docs/config.md#a-process-holds-its-branchs-config, reproducing 2026-11-07: one agent's unmerged spit of a key with no schema into the config file reached a second agent's live test
   ;; and stopped a new process. Here it acts on nothing, a boot reads no file and a re-index that meets it says which file and which commit, and a key a branch adds merges, writes back byte-preserved and reads at the next process.
-  (let [{:keys [tree cloned root ask restart! at-root in]} (config-root!)
+  (let [{:keys [tree cloned root ask at-root in]} (config-root!)
         k a-branchs-key
         file (str tree "/" config/shipped-file)
         held (slurp file)
@@ -314,11 +314,9 @@
           (is (= 7 (at-root (str "(get-in (datahike.api/pull @(:conn sys) [{:seon.root/config [" k "]}] [:seon.root/id :root]) [:seon.root/config " k "])"))) "and main's config in force, the entity root's :seon.root/config names, says so")
           (is (= (let [end (str/last-index-of held "}")] (str (subs held 0 end) "\n " k " 7" (subs held end)))
                  (at-root "(get (seon.source/files @(:conn sys) [seon.config/shipped-file]) seon.config/shipped-file)")))))
-      (testing "a boot on a file that doesn't load comes up and keeps main's, reading no file; a re-index says which file and which commit"
+      ;; a boot on a file that doesn't load reads no file: seon.root-test/a-boot-reads-no-file-a-commit-broke
+      (testing "a re-index that meets a file that doesn't load says which file and which commit, and main keeps its own"
         (spit file bad)
-        (restart!)
-        (is (:port @root) (:log @root))
-        (is (nil? (at-root "(:error (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))")) "the boot read no file")
         (let [err (str (at-root "(:seon.error/message (my.root/import! sys))"))]
           (is (str/includes? err config/shipped-file) err)
           (is (str/includes? err "seon.config.nope/key") err)
@@ -328,8 +326,8 @@
             (is (some? commit) err)
             (is (= 0 (:exit shown)) (pr-str shown))
             (is (and (some? (:out shown)) (not (str/includes? (:out shown) "seon.config.nope/key"))) "the file as that commit holds it is free of the bad key")))
-        (is (= 7 (at-root reads-the-key)) "the next process reads the merged key from main")
-        (is (= 7 (in (:agent (ask {:op :attach :task "cfgt/three"})) reads-the-key)) "and so does an agent forked from it"))
+        (is (= 7 (at-root reads-the-key)) "root reads the merged key from main")
+        (is (= 7 (in (:agent (ask {:op :attach :task "cfgt/three"})) reads-the-key)) "and so does the next process, an agent forked from it"))
       (finally
         (when @root (ts/stop-root! @root))))))
 
@@ -1250,8 +1248,7 @@
         restart! #(do (ts/stop-root! @root) (%) (start!))
         ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
                          (if (:error a) a (ts/value-of (:response a)))))
-        src-of (fn [n] (ask (str "(some-> (datahike.api/entity @(:conn sys) [:var/name 'seon.catchup-probe-" n "/probe]) :var/form :form/src)")))
-        caught "(get-in @(seon.root/call! sys {:op :state}) [:boot :caught-up])"]
+        src-of (fn [n] (ask (str "(some-> (datahike.api/entity @(:conn sys) [:var/name 'seon.catchup-probe-" n "/probe]) :var/form :form/src)")))]
     (try
       (.mkdirs (java.io.File. (str co "/src/seon")))
       (spit (str co "/deps.edn") "{:deps {}}")
@@ -1265,11 +1262,11 @@
       (is (re-find #"(?m)^ROOT CAUGHT UP \d+ files" (log)) (log))
       (is (re-find #"(?m)^ROOT CATCH-UP LEFT OUT src/seon/catchup_broken.clj: " (log)) "a file that does not read is named and left out")
       (is (false? (ask "(some? (seon.db/eid @(:conn sys) :ns/name 'seon.catchup-broken))")))
-      (restart! #(.delete (java.io.File. (str co "/src/seon/catchup_broken.clj"))))
-      (restart! (fn []))
-      (is (= {:paths []} (ask caught)) "nothing changed: the boot indexed nothing")
-      (is (not (re-find #"(?m)^ROOT CAUGHT UP" (log))))
-      ;; the read the boot made, made here too, so this test's digest takes it (the boot's own code is the full run's: process-vars)
+      ;; the rest is seon.root/catch-up itself, the boot's read, on the running root: one restart is the boot's claim
+      (.delete (java.io.File. (str co "/src/seon/catchup_broken.clj")))
+      (is (= [["src/seon/catchup_probe_1.clj"] []] (ask (str "(let [c (seon.root/catch-up @(:conn sys) " (pr-str co) ")] @(seon.root/transact-main! sys (:tx c)) [(:paths c) (:skipped c)])")))
+          "a catch-up that left a file out kept the source fact where it was, so the next one reads what differs again; the broken file is gone")
+      (is (= {:paths []} (ask (str "(seon.root/catch-up @(:conn sys) " (pr-str co) ")"))) "nothing changed: nothing to index")
       (is (= {} (:value (fx/changed-since co (ask "(:tree (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))"))))
           "the tree main holds is the checkout's: nothing differs, untracked files included")
       (probe! 2 2)
@@ -1280,9 +1277,12 @@
       (is (map? (ask (str "@(seon.root/transact-main! sys [{:seon.task/id \"t/m\" :seon.task/ns 't :seon.task/name \"m\" :seon.task/plan \"p\""
                           " :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work :seon.task/outcome :merged"
                           " :seon.task/declared \"{}\" :seon.task/changed #{\"[:form \\\"seon.catchup-probe-1/x\\\"]\"}}])"))))
-      (restart! #(probe! 1 11))
-      (is (re-find #"(?m)^ROOT CATCH-UP LEFT OUT src/seon/catchup_probe_1.clj: merged task t/m " (log)) (log))
-      (is (str/includes? (str (src-of 1)) "(defn probe [] 1)") "main keeps the merge's text, never the checkout's over it")
+      (probe! 1 11)
+      (let [[skipped src] (ask (str "(let [c (seon.root/catch-up @(:conn sys) " (pr-str co) ")] @(seon.root/transact-main! sys (:tx c))"
+                                    " [(:skipped c) (some-> (datahike.api/entity @(:conn sys) [:var/name 'seon.catchup-probe-1/probe]) :var/form :form/src)])"))]
+        (is (= ["src/seon/catchup_probe_1.clj"] (mapv :path skipped)) (pr-str skipped))
+        (is (str/starts-with? (str (:reason (first skipped))) "merged task t/m ") (pr-str skipped))
+        (is (str/includes? (str src) "(defn probe [] 1)") "main keeps the merge's text, never the checkout's over it"))
       (finally
         (when @root (ts/stop-root! @root))
         (seon.lib/remove-tree! dir)))))

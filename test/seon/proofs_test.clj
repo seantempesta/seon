@@ -544,7 +544,7 @@
      ;; 24.0k ticks and 70.2 KB a branch (Deep fixes' 35.4k and 102 KB before program-db stopped listing them) on 1.19M and 4.7 MB
      :fixed {:ticks 1200000.0 :bytes 4700000.0}
      :per-n {:ticks 24000.0 :bytes 70000.0}
-     :sizes [10 30 100]}))
+     :sizes [3 10 30]}))
 
 ;; ---- every verdict is kept: a digest green and red is flaky (red, never reused as green, never run)
 

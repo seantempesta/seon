@@ -69,9 +69,10 @@
 (defn- file-of [dir k dg st] (java.io.File. (str dir "/" (namespace k) "/" (name k) "/" dg "." (name st) ".edn")))
 
 (defn- age!
-  "Set the mtime of key k's verdict at digest dg and status st to age-s seconds ago."
+  "Set the mtime of key k's verdict at digest dg and status st to age-s seconds before a fixed instant (2023-11-14), older
+  than any read, which sets a verdict's mtime to now: the order is the claim, never the clock."
   [dir k dg st age-s]
-  (.setLastModified (file-of dir k dg st) (- (System/currentTimeMillis) (* 1000 age-s))))
+  (.setLastModified (file-of dir k dg st) (- 1700000000000 (* 1000 age-s))))
 
 (defn- bytes-in
   "Bytes of the verdict files under dir."

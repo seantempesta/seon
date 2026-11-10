@@ -537,6 +537,12 @@
     (when checks?
       (write! (str out "/steps") (str (str/join " " run-steps) (when (seq run-steps) "\n")))
       (write! (str out "/steps.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys steps run-steps)}))
+      ;; each measured step's bound, past which bin/check captures its evidence and ends it red (STEP-OVERRAN): the step-end
+      ;; factor times its median measured run, floored at the stall bound; a step never measured has none (the owner's fourth
+      ;; clock exception, docs/clocks.md#time-decides-the-owners-exceptions)
+      (let [k (config/value :seon.config.check/step-end-factor) floor (config/value :seon.config.agent/stall-ms)]
+        (write! (str out "/step-bounds") (apply str (for [[st m] (sort-by key (measured-ms (remove proofs/mg-key? run-steps)))]
+                                                      (str st " " (max floor (* k m)) "\n")))))
       (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)
                                      ))
       (when (seq missing)
@@ -562,10 +568,15 @@
         ;; a step that runs a seon.check mode ran on target/seon: kept only if built from the plan's tree;
         ;; laws, lmdb-kill and lmdb-sem ran no mode, so no binary's tree is theirs to compare
         keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
+        ;; each step's wall ms as bin/check measured it (out/step-ms, "<step> <ms>" a line; a kill/reopen pair's two phases
+        ;; summed under their step), kept on its verdict: its bound's measure (out/step-bounds) and the deal's
+        step-ms (let [f (io/file out "step-ms")]
+                  (reduce (fn [m [nm ms]] (update m (str/replace nm #"-(write|read)$" "") (fnil + 0) (parse-long ms))) {}
+                          (when (.isFile f) (keep #(next (re-matches #"(\S+) (\d+)" %)) (str/split-lines (slurp f))))))
         unstored (do (when (and (not= tree built) (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)))
                        (println "prove: the binary was built from another tree than the plan's: no step that ran on it stored"))
                      (record-run! {:id (str "bin/prove steps " tree " " (random-uuid)) :tree tree}
-                                  (into {} (for [[k dg] digests :when (keep? k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}])) {}))]
+                                  (into {} (for [[k dg] digests :when (keep? k)] [k (cond-> {:step k :digest dg :pass 1 :fail 0 :error 0} (step-ms k) (assoc :ms (step-ms k)))])) {}))]
     (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
     (println (str "prove: " (count (filter green (keys digests))) " check steps green, " (count red) " red"
                   (when (seq red) (str ": " (str/join " " red)))))
