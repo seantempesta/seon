@@ -295,7 +295,7 @@
   "Whether a commit's resolved ops move main's content: a datom of an attribute a program key's content reads with no
   declared data (`content-attr`), or of task content a branch carries (carried-platform-attrs). What the writer marks
   main's commits by (docs/storage.md#mains-content-mark). Cost: the ops, one predicate each."
-  {:malli/schema [:=> [:cat [:sequential :any]] :boolean]}
+  {:malli/schema [:=> [:cat :seon.db/resolved-tx] :boolean]}
   [ops]
   (let [content? (content-attr #{} #{})]
     (boolean (some (fn [[_ _ a]] (or (content? a) (contains? carried-platform-attrs a))) ops))))
