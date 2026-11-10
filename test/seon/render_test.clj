@@ -1588,10 +1588,10 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.ctx.wire-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= ["status" "turn" "agent-state"] (vec (take 3 (mapv :id task))))
-        "first the agent's own state, from its own attributes (open problems and added keys only when there are some)")
-    (is (= "task-view-demo_2Ff" (nth (mapv :id task) 3)) "then what its pull joins, by its own schema's render: its task (seon.render.ui/tiles)")
-    (is (every? #(str/starts-with? % "cite-") (drop 4 (mapv :id task))) "then a tile for each thing the task and the agent cite, by the cite's own render")
+    (is (= "task-view-demo_2Ff" (first (mapv :id task))) "first what its pull joins, by its own schema's render: its task, joined first (seon.render.ui/tiles)")
+    (is (every? #(str/starts-with? % "cite-") (take-while #(not (#{"status" "turn" "agent-state"} %)) (rest (mapv :id task)))) "then a tile for each thing the task and the agent cite, by the cite's own render")
+    (is (= ["status" "turn" "agent-state"] (vec (take-last 3 (mapv :id task))))
+        "then the agent's own state, from its own attributes (open problems and added keys only when there are some)")
     (let [h (:html (unit-of task "status"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
       (is (str/includes? h "demo/f-test</code> fails") "the failing proof's verdict is the status's")

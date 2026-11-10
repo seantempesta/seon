@@ -1523,25 +1523,26 @@
 
 (defn agent-parts
   "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists): the
-  agent's own state, drawn from its own attributes (how its work stands, its open problems, the keys it added, its turn, its state),
-  then the tiles of what its pull joins (`tiles`, by the agent's own pattern less its conversation, seon.render/page-pattern: no part named here), then the tiles of its evals' rendered
+  tiles of what its pull joins (`tiles`, by the agent's own pattern less its conversation, seon.render/page-pattern: no part named here;
+  its task first, as its pattern joins it first), then the agent's own state, drawn from its own attributes (how its work stands, its
+  open problems, the keys it added, its turn, its state); between them the tiles of its evals' rendered
   values (`eval-tiles`, by the seek). Each cite, the task's and the agent's own, is a tile like any
   (seon.render.ui/cite judges from its own pull). See docs/render.md#the-page."
   {:seon.render/list "p-task"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.render/index :map]]] :any] :any]}
   [{ix :seon.render/index} c]
   [:div {:id "p-task"}
-   ;; the agent's own state, from its own attributes
+   ;; what its pull joins, each by its own render, in the pull's order: its task first, as the agent's pattern joins it first
+   (seq (tiles ix c (render/page-pattern ix (or (render/entity-pattern ix (ratom/untracked c)) []))))
+   [#'eval-tiles {} c]
+   ;; until root's page is root's agent drawn by this render (step 3): root's session reads every agent here
+   (when (:seon.agent/root c) [#'sessions {:at [:seon.agent/root]}])
+   ;; then the agent's own state, from its own attributes
    (when (:seon.agent/task c) [#'status {:at [:seon.agent/task :proved]}])
    (when (:seon.agent/task c) [#'own-problems {:at [:seon.agent/task]}])
    (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])
    [#'turn {:at [:seon.agent/ns]}]
-   [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]
-   ;; what its pull joins, each by its own render, in the pull's order (the cites until their render resolves its joins)
-   (seq (tiles ix c (render/page-pattern ix (or (render/entity-pattern ix (ratom/untracked c)) []))))
-   ;; until root's page is root's agent drawn by this render (step 3): root's session reads every agent here
-   (when (:seon.agent/root c) [#'sessions {:at [:seon.agent/root]}])
-   [#'eval-tiles {} c]])
+   [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])
 
 (defn steps
   "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many: the
