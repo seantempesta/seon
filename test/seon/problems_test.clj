@@ -718,15 +718,15 @@
         source #(:seon.root/source (d/pull % [:seon.root/source] [:seon.root/id :root]))
         rows #(mapv (juxt :binary :tree) (get-in (problems/health %) [:classes :stale-binary :rows]))
         messages #(mapv :message (get-in (problems/health %) [:classes :stale-binary :rows]))
-        stale (boot db0 "b1" {:program "p0" :tree "t0" :inputs in} "p1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]})]
+        stale (boot db0 "b1" {:program "p0" :inputs (assoc in :tree "t0")} "p1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]})]
     (is (= [] (rows db0)) "no source fact: nothing known, no row")
     (is (= [["t0" "t1"]] (rows stale)) "a binary not current for main's tree: one row naming both trees")
     (is (some #(str/includes? % "seon.writer/commit-batch") (messages stale)) "and what between them reaches root's own code")
     (is (nil? (:inputs (source stale))) "and no inputs to key agents' verdicts by")
     (is (= [[nil "t1"]] (rows (boot db0 "b1" nil "p1" {:binary nil :tree "t1" :missing :binary-tree}))) "a binary whose build recorded no tree is unknown, never current")
-    (let [merged (boot stale "b2" {:program "p0" :tree "t1" :inputs in} "p2" nil)]
+    (let [merged (boot stale "b2" {:program "p0" :inputs (assoc in :tree "t1")} "p2" nil)]
       (is (= [] (rows merged)) "a current binary, main moved by what its agents merged (p2): no row, the last boot's answer gone")
-      (is (= (assoc in :config cfg-in) (:inputs (source merged))) "its inputs, with the config in force, are what agents key verdicts by")
+      (is (= (assoc in :tree "t1" :config cfg-in) (:inputs (source merged))) "its inputs, with the config in force, are what agents key verdicts by")
       (is (= ["b2" "p0" "p0" "t1"] ((juxt :boot :binary :program :binary-tree) (source merged)))
           "and its program the binary's, the one those inputs describe"))))
 

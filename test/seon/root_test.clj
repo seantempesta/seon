@@ -349,7 +349,7 @@
         db0 (mt/world)
         on (fn [db tree] (d/db-with db [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :tree tree}}]))
         merged (mt/with db0 (mt/code 'app.merged "(ns app.merged)\n(defn f [x] x)"))]
-    (is (string? (:tree built)) (str "bin/build recorded the tree it was built from: " (pr-str (dissoc built :inputs))))
+    (is (string? (get-in built [:inputs :tree])) (str "bin/build recorded the tree it was built from: " (pr-str (:program built))))
     (is (not= (program/program-digest db0) (program/program-digest merged)) "the merge moved main's program")
     (is (nil? (root/stale-binary (on merged (get-in built [:inputs :tree])))) "main of the binary's tree with an agent's merge on it: no refusal")
     (is (= [(get-in built [:inputs :tree]) "another-tree"] ((juxt :binary :tree) (root/stale-binary (on db0 "another-tree"))))

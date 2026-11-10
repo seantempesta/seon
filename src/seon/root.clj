@@ -1217,8 +1217,7 @@
   :indexed-by on its :seon.root/source fact, read before the index, whose fact replaces it): when what the tree changed
   moves that code, or the store holds an index no key names, the store is removed and the tree indexed into it again from nothing, since a store brought up to
   date keeps what the old code made of each form whose text did not change, its id included
-  (seon.program/account-diff-tx). Answers index's answer with the store's :program digest and the git :tree its source fact
-  holds (the tree indexed), or its error. See
+  (seon.program/account-diff-tx). Answers index's answer with the store's :program digest, or its error. See
   docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :string :seon.host/fn :seon.program/inputs [:vector :qualified-symbol]] :map]}
   [path index inputs roots]
@@ -1236,8 +1235,7 @@
                    (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/source (assoc (fact) :indexed-by (or code held))}]}))
                  (let [out (cond (:error r) r
                                  moved? {:moved code}
-                                 :else (cond-> (assoc r :program (program/program-digest @conn) :indexed-by (or code held))
-                                         (:tree (fact)) (assoc :tree (:tree (fact)))))]
+                                 :else (assoc r :program (program/program-digest @conn) :indexed-by (or code held)))]
                    (pdb/sync! cfg)
                    (d/release conn)
                    out)))
@@ -1260,7 +1258,7 @@
 
 (defn built-program
   "The program of the tree at root as a seed indexes it, and the inputs bin/test keys verdicts by: {:program
-  (seon.program/program-digest of the tree's index) :tree (its git tree id, absent outside git) :inputs (seon.fx/inputs)}, or the error of a read or an analysis.
+  (seon.program/program-digest of the tree's index) :inputs (seon.fx/inputs, whose :tree is the tree's git id: what binary-current and the source fact compare)}, or the error of a read or an analysis.
   The index is the build's cache, a store other than the one store because it is regenerable from the tree at any time
   and root never reads it: kept between builds under base (bin/build's target/seon.index, keyed by the schema and layout:
   seon.db/kept-store!, so one of another layout is dropped, never opened), brought to the tree as a seed brings a store
@@ -1272,8 +1270,7 @@
   ([root base roots]
    (let [inputs (fx/inputs root)
          r (kept-index! (str (pdb/kept-store! base) "/index") #(import-tree! % {:root root :dirs (cfg/value :seon.config.source/dirs)} (profile/now-ns)) inputs roots)]
-     (if (:error r) (:error r) (cond-> {:program (:program r) :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}
-                                 (:tree r) (assoc :tree (:tree r)))))))
+     (if (:error r) (:error r) {:program (:program r) :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}))))
 
 (defn binary-program
   "What the running binary was built from, as bin/build recorded it beside the binary (target/seon.program,
@@ -1293,10 +1290,10 @@
   and refuses spawns: stale, stale-binary's answer at this boot, is held as :stale-binary for the row. Never imported. See docs/source.md#a-boot-resumes-from-the-db."
   {:malli/schema [:=> [:cat :map :string [:maybe :map] :string :map [:maybe :map]] :map]}
   [held boot built main-digest config-input stale]
-  (let [one? (and (:tree built) (= (:tree built) (:tree held)))]
+  (let [one? (and (get-in built [:inputs :tree]) (= (get-in built [:inputs :tree]) (:tree held)))]
     (cond-> (-> held (dissoc :inputs :binary :binary-tree :stale-binary) (assoc :boot boot :program (if one? (:program built) main-digest)))
       (:program built) (assoc :binary (:program built))
-      (:tree built) (assoc :binary-tree (:tree built))
+      (get-in built [:inputs :tree]) (assoc :binary-tree (get-in built [:inputs :tree]))
       ;; stale-binary's answer at this boot: what the :stale-binary row shows (seon.problems/stale-binary)
       stale (assoc :stale-binary stale)
       (and one? (:inputs built)) (assoc :inputs (update (:inputs built) :config merge config-input)))))
