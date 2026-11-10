@@ -2,7 +2,7 @@
   "Root as a whole process, run as the built binary (target/seon, bin/build seon): a root
   boots its fork server, so it runs in a process of its own rather than in the test
   runner's, whose threads and GC sweepers are the runner's."
-  (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
+  (:require [seon.lib] [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts] [seon.config :as config] [seon.contract :as contract]
             [seon.root :as root] [seon.program :as program] [my.test :as mt]))
 
@@ -87,7 +87,7 @@
          root (ts/start-root! (cond-> {:store path :main main :runs runs :args (vec args)} env (assoc :env env)))
          answers (when (:port root) (mapv #(ts/ask root %) requests))
          stopped (ts/stop-root! root)]
-     (sh/sh "rm" "-rf" runs)
+     (seon.lib/remove-tree! runs)
      ;; each answer as the data it is (an error value among them), one per line
      (str (str/join "\n" (map pr-str answers)) (when (seq answers) "\n") "STARTED " (:started root) "\n" "EXIT " (or (:exit stopped) (pr-str stopped)) "\n" (:log stopped)))))
 
@@ -132,7 +132,7 @@
       (is (map? (:tasks (answer agents-line))) "{:op :agents} answers its tasks")
       (is (= 0 (ts/value-of (:response (answer problems-line)))) "and nothing it read was a defect")
       (is (str/includes? out "EXIT 0") "and it stops when its stdin closes")
-      (finally (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-agents"))))))
+      (finally (seon.lib/remove-tree! path (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest an-agent-resumes-a-branch-cut-before-an-attribute
   ;; root, 2026-10-25 (ctx-atom's finding): a branch made before :form/keywords existed killed its
@@ -169,7 +169,7 @@
     (try
       (is (str/includes? (str (answer (first (str/split-lines out)))) ":value true")
           (str "the agent on the branch cut before :form/keywords is ready, its branch holding the attribute: " (subs out 0 (min 2000 (count out)))))
-      (finally (sh/sh "rm" "-rf" path (str path "-in") (str path ".log") (str path "-agents"))))))
+      (finally (seon.lib/remove-tree! path (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest a-second-boot-resumes-the-same-main
   ;; task seon.root/one-main-resumed: a root started with no main named works on the
@@ -240,7 +240,7 @@
         (is (some #{(name again)} addresses-2) "and its page address")
         (is (not-any? #(re-find #"^:?a\d+$" %) (concat (all-names attached agents-1 view-1 addresses-1) (all-names again agents-2 view-2 addresses-2)))
             "no id of a counter's form"))
-      (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
+      (finally (seon.lib/remove-tree! path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest a-root-stops-in-a-second
   ;; task seon.root/a-root-stops-in-a-second (measured 2026-11-10): every stop of a root less than ~35 s old took 26-32 s,
@@ -291,7 +291,7 @@
       (is (= [{:ok true :files 1} true {:files 1} {:ok true :changed 0 :files 1}]
              (ask "(let [r (my.root/load-tasks! sys)] [(select-keys r [:ok :files]) (contains? (seon.task/tasks @(:conn sys)) \"demo/t\") (:seon.root/tasks (datahike.api/pull @(:conn sys) [:seon.root/tasks] [:seon.root/id :root])) (my.root/load-tasks! sys)])"))
           "a load a person asks for reads its own dir's one whole task, records the read's outcome, and a read that finds it so writes nothing")
-      (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
+      (finally (ts/stop-root! root) (ts/drop-main! path main) (seon.lib/remove-tree! runs)))))
 
 (def ^:private boot-probe
   "What a boot of `boots-on-a-tree` answers: the config key and the schema entry the trees change, as root holds them; the
@@ -352,7 +352,7 @@
                    (assoc v :also (mapv read-line (take (count also) more)) :listening? (str/includes? out "ROOT LISTENING") :tree rel
                           :started (some #(when (str/starts-with? % "STARTED ") (subs % 8)) more))
                    out))))
-       (finally (sh/sh "rm" "-rf" tree store (str store "-agents") (str store "-in") (str store ".log")))))))
+       (finally (seon.lib/remove-tree! tree store (str store "-agents") (str store "-in") (str store ".log")))))))
 
 (deftest a-boot-on-a-binary-of-another-program-holds-mains-config
   ;; task seon.root/a-boot-resumes-from-the-db, THE GAP: a landing moves git first, and its bridge's merge brings main in
@@ -426,7 +426,7 @@
     (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
     (is (= :seon.root/refused type) (str "the spawn is refused: " (pr-str (first (:also two)))))
     (is stale? "naming the two trees")
-    (doseq [act ["rm -rf runs/store" "bin/root start --reindex" "my.root/import!" "bin/root next"]]
+    (doseq [act ["bin/remove-tree runs/store" "bin/root start --reindex" "my.root/import!" "bin/root next"]]
       (is (str/includes? (str message) act) (str "its message names " act))
       ;; docs/source.md#files-and-the-db-two-directions: a mismatch is never silent to a person
       (is (str/includes? (str (:started two)) act) (str "and bin/root start's last line names it too: " (:started two))))

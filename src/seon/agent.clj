@@ -1195,7 +1195,7 @@
                       st (:status read)]
                   (swap! state dissoc :test-child)
                   (lib/c-close r) (swap! fds disj r)
-                  (fx/remove-tree! (fx/run-dir pid))
+                  (seon.lib/remove-tree! (fx/run-dir pid))
                   (if (contract/error? read)
                     read
                     (-> (select-keys @lines [:streamed :ended :fns :heap :measured]) (assoc :answer (test-run-answer (:line read) st (:held? read)) :pid pid :exit st)))))})))

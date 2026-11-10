@@ -1341,7 +1341,7 @@
                    (d/release conn)
                    out)))
         r (once)]
-    (if (:moved r) (do (fx/remove-tree! path) (once)) r)))
+    (if (:moved r) (do (seon.lib/remove-tree! path) (once)) r)))
 
 (defn seed-program!
   "Index the tree (source root and dirs from the config) into :db of the store at path (made when missing): seed!, so a

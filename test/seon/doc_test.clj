@@ -2,7 +2,7 @@
   "The wiki as data in the store (task seon.doc/docs-are-data-in-the-store): a section entity
   per heading, written only where a section changed; its references are what its own text
   cites, so its backlinks are who cites it."
-  (:require [seon.test-store :as ts] [my.test :as mt] [clojure.java.shell] [clojure.test :refer [deftest is testing]]
+  (:require [seon.lib] [seon.test-store :as ts] [my.test :as mt] [clojure.java.shell] [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
@@ -359,7 +359,7 @@
     (put "AGENTS.md" "# AGENTS\n\nHow we build, see [agent](docs/agent.md#agent) and app.calc/add.\n")
     (put "BAGGAGE.md" "# BAGGAGE\n\nWhat was left out, see [turns](docs/agent.md#turns).\n")
     (put "README.md" "# README\n\nStart with [AGENTS](AGENTS.md#agents).\n")
-    (try (f dir) (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+    (try (f dir) (finally (seon.lib/remove-tree! dir)))))
 
 (deftest the-wiki-holds-the-top-level-pages-beside-docs
   ;; one-index step 6: AGENTS.md, BAGGAGE.md and README.md are sections beside docs/'s, so one search and
