@@ -172,12 +172,17 @@
   (when k (or (get (props ix k) o) (some #(render-for ix % o) (parents ix k)))))
 
 (defn entity-render
-  "The hiccup render var of x, a view of a pulled entity, by its schema as the entity index ix reads it (`schema-of`), or nil
-  for any other value: what the walk runs x as a component of. See docs/render.md#one-rendering-system-drawn-from-the-data."
+  "The component call x, a view of a pulled entity, is run as: [f opts], f the hiccup render var of its schema as the entity index ix
+  reads it (`schema-of`), opts' :key its identity value (so its element id names what it shows, never where the pull held it), or nil
+  for any other value. See docs/render.md#one-rendering-system-drawn-from-the-data."
   {:malli/schema [:=> [:cat :map :any] :any]}
   [ix x]
   (when (ratom/view? x)
-    (let [v (ratom/untracked x)] (when (and (map? v) (:db/id v)) (some->> (schema-of ix v nil) (declared-var ix))))))
+    (let [v (ratom/untracked x)]
+      (when (and (map? v) (:db/id v))
+        (when-let [s (schema-of ix v nil)]
+          (when-let [f (declared-var ix s)]
+            [f (if-some [id (some #(get v %) (keep #(get (:schema-identities ix) %) (tree-seq (constantly true) #(parents ix %) s)))] {:key id} {})]))))))
 
 (defn hiccup
   "v rendered: (render-fn opts v), the function its override or schema names, else the printer's
@@ -347,8 +352,8 @@
                  (some-> (schema-of ix e0 nil) (#(render-for ix % :seon.render/openai-compat)) requiring-resolve))
             ;; the model output: its messages, and each entity or call it places run as a component (the one the hiccup placed is a
             ;; hit), kept as its marker, so the parent orders and each child's output stays its own
-            place (fn [env' xs] (mapv (fn [x] (if-let [ef (entity-render ix x)]
-                                                (render! w ef {} [x] env')
+            place (fn [env' xs] (mapv (fn [x] (if-let [[ef eo] (entity-render ix x)]
+                                                (render! w ef eo [x] env')
                                                 (if (and (vector? x) (or (var? (first x)) (fn? (first x))) (not (keyword? (first x))))
                                                   (render! w (first x) (assoc (or (second x) {}) :seon.render/as :seon.render/openai-compat) (vec (nnext x)) env')
                                                   x)))
@@ -504,9 +509,8 @@
        (seq? x) (doall (map #(go % env) x))
        (h/raw? x) x
        ;; a pulled entity placed in hiccup is rendered by its schema's render as a component of its own, the view its argument
-       (ratom/view? x) (let [ix @(:index w) v (ratom/untracked x)
-                             f (when (and (map? v) (:db/id v)) (some->> (schema-of ix v nil) (declared-var ix)))]
-                         (if f (render! w f {} [x] env) (hiccup {:seon.render/index ix} (ratom/unwrap x))))
+       (ratom/view? x) (let [ix @(:index w)]
+                         (if-let [[f o] (entity-render ix x)] (render! w f o [x] env) (hiccup {:seon.render/index ix} (ratom/unwrap x))))
        :else (ratom/realize x)))
    x0 env0))
 

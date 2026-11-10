@@ -1001,8 +1001,8 @@
                [:li (or (:seon.doc/heading sec) (str x)) ": " (:seon.doc/lead sec) " " [:code (help-form x)]]))])))
 
 (defn searched
-  "One search the agent's context holds (a component over ctx and the db), drawn as one compact hiccup that the
-  page shows and the model is sent as it is: the search fact at ctx path :at, its query searched on the branch's
+  "Search s (the declared html render of :seon.search/search-fact, a component over the db), drawn as one compact hiccup that the
+  page shows and the model is sent as it is: its query searched on the branch's
   db by seon.ctx.search/search (exact words, meaning once its query has a vector, and the names it holds;
   functions, wiki sections and schema keys, no relevance cut), its :seon.search/k hits (else
   :seon.config.render/search's), each a line: its name (its first sentence added nothing a model used, at
@@ -1011,9 +1011,9 @@
   redraws this part alone, and the model is sent what changed of it
   (docs/render.md#the-render-is-an-eval). What it finds for a request is measured in
   docs/vector.md#what-the-work-is-likely-to-need-as-an-eval."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db at :at}]
-  (when-let [s (some-> (get-in c at) ratom/realize)]
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
+  [{db :seon.db/db} s0]
+  (when-let [s (some-> s0 ratom/realize)]
     (let [q (:seon.search/query s)
           ;; the search fact's own vector, once the pipeline has embedded its query (seon.vector's due texts)
           e (pdb/eid db :seon.search/id (:seon.search/id s))]
@@ -1025,7 +1025,7 @@
               hits (remove #(= :more (:kind %))
                            (search/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) e))]
           ;; the task's own request is on the page already: the heading names it rather than repeating it
-          [:section [:h3 (if (= q (get-in c [:seon.agent/task :seon.task/plan])) "search: this task's request" (str "search: " q))]
+          [:section [:h3 (if (= q (:seon.task/plan (:seon.search/of (d/pull db [{:seon.search/of [:seon.task/plan]}] e)))) "search: this task's request" (str "search: " q))]
            (into [:ol] (for [{:keys [name]} hits] [:li [:code (str name)]]))])))))
 
 (defn- held-whole
@@ -1628,7 +1628,7 @@
            ;; each search its task and the agent hold, a part each, drawn on the branch's db
            (for [p (concat (for [e (keys (get-in c [:seon.agent/task :seon.search/_of]))] [:seon.agent/task :seon.search/_of e])
                            (for [e (keys (get c :seon.search/_of))] [:seon.search/_of e]))]
-             [#'searched {:key (get-in c (conj p :seon.search/id)) :at p}])))
+             (get-in c p))))
    (when (seq (:seon.cite/_of c)) [#'references {:at [:seon.cite/_of]}])
    (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])
    (when (:seon.agent/task c) [#'own-problems {:at [:seon.agent/task]}])
