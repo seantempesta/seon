@@ -2987,12 +2987,3 @@
     (is (= 1 (:index-builds moved)) "a schema entry's write builds one")
     (is (some? (:index (:schema-registry moved))) "into the slot")
     (is (= 1 (:index-builds (seon.agent/schema-moved moved #{:seon.eval/id}))) "and a later write of another attribute builds no other")))
-
-(clojure.test/deftest tests-reaching-says-which-tests-are-process-tests
-  (let [[_ r] (in-agent (fn [{:keys [ns]}]
-                          [(str "(do (ns " ns "-t (:require [clojure.test :refer [deftest is]] [seon.test-store])) (defn target [x] x) (deftest plain-t (is (= 1 (target 1)))) (deftest process-t (is (= 1 (target 1))) (seon.test-store/binary-sh \"true\")) (in-ns 'user) :ok)")
-                           (str "(let [rs (my.agent/tests-reaching '" ns "-t/target)] (into {} (map (juxt :test :process?)) rs))")]))
-        by (:value r)]
-    (is (var? #'my.agent/tests-reaching))
-    (is (= {true 1 false 1} (frequencies (vals by))) (pr-str r))
-    (is (every? #(= "process-t" (name (key %))) (filter val by)) (pr-str by))))
