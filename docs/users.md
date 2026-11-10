@@ -240,7 +240,7 @@ Tasks are small and their proofs are ours, written and watched red before releas
 
 Read from the code, not run; each has a task.
 - The user has gained special cases in six places (`earlier-agents-tx`, `write`, `tell-tx`, `agent-view`'s input, `users-side`, `user-walk`), which says the model isn't finished. `user-walk` is a third walk keeper beside `root-walk` and `branch-walk!` (``seon.render/a-users-walk-is-a-branch-walk``).
-- ``seon.root/person`` reads the OS account outside the config loader; only boot still uses it (a fresh store's user name needs a documented config key, the owner's call). A person's `ask!` and `message!` are from the signed-in user's key on main, refused when no one is signed in.
+- Done 2026-11-10: a fresh store's user is named by ``:seon.config.root/user-name`` (config, "user" by default, a person's own in config/local.edn); a person's `ask!` and `message!` are from the signed-in user, refused with none; ``seon.root/person`` and its OS account read are gone.
 - `:lost` reads "stopped by a restart" also when its parked process died; the task's reason should give the words.
 - ``seon.reconcile/after-work`` skips tests only for tasks with no proofs; if a park claims nothing, it never should.
 - ``seon.db/response-of`` glues a result back onto its eval for every reader; a pull pattern joining `:seon.eval/result` would replace it.
