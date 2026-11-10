@@ -100,4 +100,4 @@ reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/t
 reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/branching_factor.jolt {:test 5, :pass 25, :fail 0, :error 0}
 reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/contract.jolt {:test 5, :pass 28, :fail 0, :error 0}
 reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/jolt_count_fixes.jolt {:test 7, :pass 760, :fail 0, :error 0}
-datahike.test.run-ahead-test {:test 5, :pass 47, :fail 0, :error 0}
+datahike.test.run-ahead-test {:test 5, :pass 49, :fail 0, :error 0}
