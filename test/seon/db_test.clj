@@ -542,6 +542,23 @@
              (finally (d/release c))))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest hasch-ids-are-the-jvms
+  ;; A content key is hasch's uuid of the value (docs/storage.md#values-out-of-line), and reference-code/jolt-overlay's
+  ;; hasch.platform is Jolt's copy of hasch's encoding, tuned for Jolt's host calls: every id below was computed by
+  ;; hasch 0.4.100 on the JVM, so a change to the copy that changes one byte of a digest is red here
+  (let [u #uuid "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+        vs [nil true false 0 1 -7 42 3.5 "" "hello" "a\u0001b" :k :ns/k 'sym 'ns/sym u #uuid "00000000-0000-0000-0000-000000000000"
+            [] [1 2 3] [u #uuid "6ba7b811-9dad-11d1-80b4-00c04fd430c8"] (vec (for [i (range 64)] (java.util.UUID. (* 7919 i) (* 104729 (inc i)))))
+            '(1 :a "b") {} {:a 1 :b [1 2]} #{1 2 3} {:nested {:v [u {:x #{:y}}]}} #inst "2026-11-10T00:00:00.000Z" (apply str (repeat 2000 "x"))]
+        jvm ["38244d02-8981-5693-af7b-456af8efa4ca" "1ddffc2c-6730-53c7-87b8-9cbbc98c2363" "36006e3f-9e89-5059-9ceb-6bd5549f1b19" "0b0e9316-7a2b-5336-9cdb-7b1bf5f46758"
+             "1b1349bd-d9c2-5f35-a58c-ee0d8495eef1" "25f89a35-a881-5cab-a043-30c864f31246" "0fc20a9a-c153-592d-888a-707ff306fbb6" "013738d3-bda2-533e-9f9c-f5e1d18dd33d"
+             "245bf581-7ddf-54aa-af7a-407071f0eedc" "327209f3-0396-5084-acd8-3c576c220223" "290fdec6-0ee8-5054-980a-0194180e0fdd" "16578c9d-cf43-5729-8969-04d3ea45964f"
+             "345868c2-6019-54a9-bcb6-cbfdd3e30f0f" "1e03fec1-7877-5030-9a6c-40c4ef2d81cd" "37565de9-2bfa-5f99-b755-e85f044b6cb4" "2ae63b86-cb22-5a0b-9416-c1919bdf5cdf"
+             "3a3ed45a-46cd-5357-af3f-b0c12a87982d" "117935a6-8abd-57b5-974f-4eff93989ada" "00bd2dcb-5c15-555e-a1c8-6166a78fc808" "3cf45474-ca87-5c37-8517-35103d3bc363"
+             "0d46f929-9dd6-5c1e-bba1-f925cbed46f1" "288078dd-6c67-5916-9b90-e61e242d2847" "3e688838-ca86-56e5-8906-89bf2ab585ce" "194c8971-4e3c-5157-a8f8-0b28d73b856c"
+             "01f79275-5eae-546e-97d9-c74e79081428" "397b6583-eceb-5568-aeb9-8c9fa6fd000f" "2c937c35-50a3-5159-91ed-2747306a8b66" "3b4ec618-caca-5161-8602-695fada7ce97"]]
+    (is (= jvm (mapv #(str (hasch.core/uuid %)) vs)))))
+
 (deftest gc-runs-through-the-sync-writer
   ;; datahike.api/gc-storage through Seon's :sync writer (seon.db/writer-cfg) answers what it
   ;; swept: the writer applied every op as a transaction and committed its result, so a
