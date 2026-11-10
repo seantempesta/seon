@@ -531,9 +531,9 @@
       (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
                          :seon.eval/call (assoc (seon.task/call-ref k (inc i)) :seon.model-call/origin :model :seon.model-call/reply (str "Trying " i "."))
                          :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/intent (str "Step " i ".")}])
-      ;; the turn's basis, at the branch's t as the loop writes it (seon.turn/basis!): what a message delivered before it is placed by
+      ;; the turn's basis, the branch's commit and t as the loop writes it (seon.turn/basis!: a commit the store holds): what a message delivered before it is placed by
       (d/transact conn [{:seon.model-call/id (seon.lib/call-id k (inc i))
-                         :seon.model-call/basis {:commit (random-uuid) :t (:max-tx @conn) :task tid :turn (inc i) :max-turns 9 :origin :model}}]))
+                         :seon.model-call/basis {:commit (d/commit-id @conn) :t (:max-tx @conn) :task tid :turn (inc i) :max-turns 9 :origin :model}}]))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
       (into [(:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db #'seon.render.ui/agent] (some-> *sels* vector)))))
 
