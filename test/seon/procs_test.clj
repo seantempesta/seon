@@ -98,7 +98,7 @@
 
 (deftest the-writer-marks-the-commit-that-moves-mains-content
   ;; docs/storage.md#mains-content-mark: every commit that moves main's content carries a new content mark, in that same
-  ;; commit (what an agent reads from the store to skip its diffs of main), and a commit of records leaves it: run ahead, a
+  ;; commit (what an agent reads from the store to skip its diffs of main), and a commit of records leaves it: a write, a
   ;; :flush? batch, an octopus merge, and the writer's start. Red before: no commit carried one
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         mark (fn [db] (:seon.root/content-t (d/entity db [:seon.root/id :root])))
@@ -111,13 +111,13 @@
                             :form/src (str "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x " (count id) "))")}
                            [:db/add v :var/form "f"]])]
     (is (< t0 m0) "the writer's start moves it past what a boot wrote")
-    (let [[st outs] (committed st {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})]
+    (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})]
       (is (= m0 (mark (at outs))) "a commit of records leaves it")
-      (let [[st outs] (committed st {:op :tx :branch :db :tx-data (redefine "app.m0/f2-a") :dest {:rid 2}})
+      (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data (redefine "app.m0/f2-a") :dest {:rid 2}})
             m1 (mark (at outs))]
-        (is (< m0 m1) "a definition run ahead moves it, in its own stored commit")
+        (is (< m0 m1) "a definition moves it, in its own stored commit")
         (is (some (fn [[_ _ a]] (= :seon.root/content-t a)) (:ops (last (:main outs)))) "and the notice's ops carry it")
-        (let [[st outs] (committed st {:op :tx :branch :db :flush? true :tx-data (redefine "app.m0/f2-b") :dest {:rid 3}})
+        (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :flush? true :tx-data (redefine "app.m0/f2-b") :dest {:rid 3}})
               m2 (mark (at outs))]
           (is (< m1 m2) "a :flush? batch's definition moves it")
           (let [b (pdb/on-main (:branch cfg) :a1)
