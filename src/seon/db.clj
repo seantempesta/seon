@@ -341,6 +341,21 @@
   {:malli/schema [:=> [:cat :any :any] :any]}
   [db tx-data] (:db-after (speculate db tx-data)))
 
+(defn project-tx
+  "tx-data cut to the attributes attr? keeps (a set of them, or a predicate), so a speculation that reads only those attributes after it (a config check,
+  a count) applies what it reads and not the rest: each map keeps its :db/id and those attributes (one left with none goes),
+  each :db/add and :db/retract of such an attribute stays, and every :db/retractEntity stays, in order. Tempids join the maps
+  that kept them as before. The full import of the checkout speculated whole cost 2.7 G ticks and 4.7 GB a call
+  (2026-11-10). See docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:=> [:cat :any [:or [:set :keyword] :seon.host/fn]] [:vector :any]]}
+  [tx-data attr?]
+  (into [] (keep (fn [x] (cond (map? x) (let [m (into {} (filter (fn [[k _]] (or (= :db/id k) (attr? k)))) x)]
+                                         (when (seq (dissoc m :db/id)) m))
+                               (= :db/retractEntity (first x)) x
+                               (#{:db/add :db/retract} (first x)) (when (attr? (nth x 2)) x)
+                               :else x)))
+        tx-data))
+
 (defn db-with
   "The db after tx-data (`with`'s :db-after). See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :any :any] :any] [:=> [:cat :any :any [:maybe :map]] :any]]}

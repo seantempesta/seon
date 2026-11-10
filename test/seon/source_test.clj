@@ -153,6 +153,34 @@
       (is (= [] errs))
       (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from"))))
 
+(deftest a-speculation-of-what-it-reads-reads-what-the-whole-would
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches: seon.db/project-tx cuts a transaction to the attributes a speculation reads
+  ;; after it (program/config-refused's config and schema entries, root/import-of's counts), so a full import is applied once, by its
+  ;; write, not three times (the checkout's: 2.7 G ticks and 4.7 GB a speculation, 2026-11-10). What is read after the cut is what is
+  ;; read after the whole, on an import of real files and on a refresh that removes one (its retractions)
+  (let [files (into {} (for [p ["src/seon/lib.clj" "src/seon/ref.clj" "resources/seon/schemas/seon.config.edn" config/shipped-file]]
+                         [p (slurp (str here "/" p))]))
+        counted #{:form/id :ns/name :ns/file :schema/key :schema/file}
+        read-after (fn [db] {:entries (seon.config/entries db) :schemas (program/schema-changes db)
+                             :forms (count (d/datoms db :aevt :form/id)) :ns-files (count (d/datoms db :aevt :ns/file))
+                             :schema-files (count (d/datoms db :aevt :schema/file))})
+        same? (fn [db tx]
+                (let [whole (read-after (pdb/speculate-db db tx))
+                      config-cut (pdb/speculate-db db (pdb/project-tx tx #(#{"config" "schema"} (namespace %))))
+                      count-cut (pdb/speculate-db db (pdb/project-tx tx counted))]
+                  (is (seq (:entries whole)) "the import states config entries")
+                  (is (= (select-keys whole [:entries :schemas]) (select-keys (read-after config-cut) [:entries :schemas])) "the config check's cut")
+                  (is (= (select-keys whole [:forms :ns-files :schema-files]) (select-keys (read-after count-cut) [:forms :ns-files :schema-files])) "the counts' cut")
+                  (is (< (count (pdb/project-tx tx counted)) (count tx)) "and the cut is smaller than the whole")))
+        db0 (empty-db)
+        tx (source/tx-of db0 files false)
+        db1 (d/db-with db0 tx)]
+    (same? db0 tx)
+    (testing "a refresh that removes a file and changes the config"
+      (let [refresh (source/tx-of db1 {"src/seon/ref.clj" nil config/shipped-file (str/replace (files config/shipped-file) #"(?m)^ :seon.config.root/view-window .*$" "")} true)]
+        (is (some #(and (vector? %) (= :db/retractEntity (first %))) refresh) "it retracts")
+        (same? db1 refresh)))))
+
 (deftest a-config-entry-writes-back-only-its-own-bytes
   ;; docs/source.md#a-program-file: the config file is one entity per entry, each form its exact text with its tags unread, and a write-back changes only what an entry changed
   (let [p config/shipped-file

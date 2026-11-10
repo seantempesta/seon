@@ -983,7 +983,8 @@
           {:digest digest :fact (assoc (fact-on db (count files)) :error (:seon.error/message bad)) :error bad}
           (let [tx (into (vec tx) (source/modes-tx db (:modes r)))]
             {:digest digest :tx tx
-             :fact (assoc (fact-on (pdb/speculate-db db tx) (count files))
+             ;; the counts read three attributes after tx: only their part of it is applied (seon.db/project-tx), never the whole import
+             :fact (assoc (fact-on (pdb/speculate-db db (pdb/project-tx tx #{:form/id :ns/name :ns/file :schema/key :schema/file})) (count files))
                           :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))}))))))
 
 (defn baseline-of
