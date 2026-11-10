@@ -1087,12 +1087,14 @@
   {:malli/schema [:function [:=> [:cat :map :seon.host/db :any :map [:set :keyword]] [:map [:hiccup :any] [:messages [:vector :any]]]]
                   [:=> [:cat :map :seon.host/db :any :map [:set :keyword] :map] [:map [:hiccup :any] [:messages [:vector :any]]]]]}
   ([pull db f ix outputs] (render-pull pull db f ix outputs {}))
-  ;; opts: the root call's (f opts view); {:seon.render/as :seon.render/openai-compat} makes the root a model output's call, its answer
+  ;; opts: the root call's (f opts view), and :seon.render/changes, the pull's diff (seon.ctx/changes for a ctx tree; without it a
+  ;; component reading :seon.ctx/ctx reads nothing); {:seon.render/as :seon.render/openai-compat} makes the root a model output's call, its answer
   ;; (messages and what it places) the walk's model output, as a call a model output places is
   ([pull db f ix outputs opts]
   (let [r (ratom/atom pull)
-        ;; one pass: nothing swaps this ref, so no change of it is ever diffed
-        w (assoc (walker {:ref r :changes (fn [_ _] nil)} (constantly db) [f opts (ratom/ref-view r (fn [_ _] nil))] ix) :outputs outputs)]
+        ;; the pull's own diff (opts' :seon.render/changes, seon.ctx/changes for a ctx tree): a view reads a pull's collections by it
+        ch (or (:seon.render/changes opts) (fn [_ _] nil))
+        w (assoc (walker {:ref r :changes ch} (constantly db) [f (dissoc opts :seon.render/changes) (ratom/ref-view r ch)] ix) :outputs outputs)]
     (try (flush! w nil) {:hiccup (resolved w @(:out w) false) :messages (openai-compat w)}
          (finally (dispose-walk! w))))))
 
