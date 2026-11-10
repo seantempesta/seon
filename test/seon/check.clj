@@ -1260,6 +1260,30 @@
                         line (loop [] (let [ls (rd)] (if (seq ls) (first ls) (recur))))]
                     (assoc (sedn/decode line) :exit st)))]
       {:read (touch false) :write (touch true)})
+   "fork-reset"
+   ;; docs/failure-points.md#physics-who-may-run-threads: nothing runs in a child between the fork and its reset. Forced: the
+   ;; smallest quantum, four always-ready fibers behind each fork (a root's procs are); in a child they are the parent's, and
+   ;; one that runs there says "parent". 10 forks, then 10 through fork!'s double fork (the grandchild is nobody's child, so
+   ;; each says what ran in it by a line in a file; every grandchild holds w, so r's end of file is their exits)
+   #(let [me (lib/c-getpid)
+          f (java.io.File/createTempFile "seon-fork-reset" ".txt")
+          say (fn [w] (spit f (str w "\n") :append true))
+          ready? (volatile! true)
+          spin (fn [] (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when @ready? (when (not= me (lib/c-getpid)) (say "parent") (lib/c-exit 7)) (jolt.host/fiber-yield) (recur)))))))
+          refused (fn [n] {:refused n})]
+      (jolt.host/fiber-preempt-ticks-set! 100)
+      ;; the quantum is armed at a dispatch: yield once so this fiber runs under the small one
+      (jolt.host/fiber-yield)
+      (spin)
+      (let [forks (frequencies (for [_ (range 10)] (lib/fork! {:child #(lib/c-exit 0) :parent lib/wait-status :refused refused})))
+            [r w] (sock/socketpair)]
+        (dotimes [_ 10] (lib/fork! {:double? true :child #(do (say "own") (lib/c-exit 0)) :parent identity :refused (fn [n] (say (str "refused " n)))}))
+        ;; the ready fibers end here: nothing of this process is left spinning when it waits and answers
+        (vreset! ready? false)
+        (sock/close! w)
+        (let [c (sock/conn r)] (loop [] (when-not (= :eof (sock/recv! c)) (recur))))
+        (try {:forks forks :doubles (frequencies (clojure.string/split-lines (slurp f)))}
+             (finally (.delete f)))))
    "go-blocks"
    #(let [c (a/chan) r (a/go (a/<! c))]
       (a/>!! c 41)

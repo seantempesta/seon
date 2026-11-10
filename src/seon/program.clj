@@ -1201,7 +1201,11 @@
   (let [tnss (test-nss db)
         ;; lf: db's live forms, which load-all! has read (a second read was 0.6-1.1 s of a fork server's start)
         live (group-by :ns lf)
-        root (get cfg/config :seon.config.source/root)
+        ;; the tree db's program was imported from, as db states it (root's :seon.root/source fact), which every :ns/file is
+        ;; relative to: never this process's config, which a root given its source as start!'s options (every check mode,
+        ;; boot-twice, a cycle) never holds, so its fork server loaded all 77 test namespaces form by form, 12.2 s of its
+        ;; first fork against 1.06 s whole (measured 2026-11-10)
+        root (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source :root)
         ;; the file require reads is the one a source dir holds at the namespace's path, and it holds every
         ;; form main has of it, as main has it: a file edited since its import, or one on no source dir (a
         ;; fixture under test/build/), is never what require loads
