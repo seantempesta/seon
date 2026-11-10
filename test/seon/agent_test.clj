@@ -7,7 +7,7 @@
   no clock ends it; the child's exit does, and a child that died names the test it was running.
   Run: bin/test seon.agent-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
-            [clojure.string :as str] [seon.agent :as agent] [seon.proofs :as proofs] [seon.contract :as contract]
+            [clojure.string :as str] [seon.agent :as agent] [seon.reconcile :as r] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
             [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
 
@@ -1063,28 +1063,34 @@
 (deftest a-branch-that-deletes-mains-test-it-breaks-is-not-merged
   ;; owner, 2026-10-26: "auto merge (the goal) means the old tests need to pass too. So deleting
   ;; the old test doesn't stop the old test from running": a branch breaks what one of main's
-  ;; tests checks and deletes that test (unmapped, staged as its removal); the test still judges,
-  ;; from main's definition, so the end is red, the task not merged, and its reason names main's test
-  (let [main-test 'seon.ref-test/a-section-summary-is-its-heading-and-leads-first-sentence
-        [_ _ _ _ _ _ done seen]
-        (in-agent (fn [{:keys [agent task]}]
-                    [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
-                     "(ns demo-test (:require [clojure.test :refer [deftest is]]))"
-                     "(deftest t (is (= 2 (inc 1))))"
-                     "(in-ns 'seon.ref) (defn- first-sentence \"Every sentence of flat text.\" {:malli/schema [:=> [:cat :string] :string]} [flat] flat)"
-                     (str "(ns-unmap 'seon.ref-test '" (name main-test) ") (seon.stage/stage!) (in-ns 'agent." agent ")")
-                     before-done {:op :done :agent agent}
-                     {:op :eval :agent "root"
-                      :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
-                                 " [" (ended-code task)
-                                 "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")])")}])
-                  {})
-        [[t end] state] (:value seen)]
-    (is (str/includes? (:line done) ":outcome :closed") (str "the answer is the verdict line: " (pr-str done)))
-    (is (= :red (:outcome end)) (pr-str end))
-    (is (not (#{:done :merged} state)) (str "not merged: " state))
-    (is (str/includes? (str (:reason end)) (str main-test)) "its end names main's failing test")
-    (is (str/includes? (str (:seon.task/reason t)) (str main-test)) "and so does the task's reason")))
+  ;; tests checks and deletes that test; the test still judges, from main's definition, so the
+  ;; end is red, the task not merged, and its reason names main's test. The decision is the
+  ;; judge's pure functions on two db values (docs/testing.md#testing-in-the-world): the plan
+  ;; seon.agent/test-plan selects the removed test with main's source, the runner runs it against
+  ;; the branch's program, and seon.reconcile/done-explain refuses the end naming it
+  (let [main-test 'app.calc-test/add-adds
+        main (mt/world)
+        branch (mt/with main
+                        (mt/code 'app.calc "(ns app.calc)\n(defn add [x y] (- x y))\n(defn inc2 [x] (add x 2))\n(defn total [xs] (reduce add 0 xs))\n")
+                        (mt/without main-test))
+        plan (agent/test-plan branch main #{})
+        src (get (:removed plan) main-test)
+        ran (atom [])
+        results (try (remove-ns 'app.calc-test) (remove-ns 'app.calc)
+                     ;; the branch's program, then main's removed test as the test child defines it
+                     (binding [*ns* (create-ns 'app.calc)] (refer-clojure) (load-string "(defn add [x y] (- x y))"))
+                     (#'agent/load-removed! (:removed plan))
+                     (proofs/run-tests! [main-test] {main-test nil}
+                                        (fn [x] (when-let [m (:seon.test/report x)] (swap! ran conj {:type (:type m) :var (str "#'" (:test x))}))))
+                     (proofs/results {:reports @ran})
+                     (finally (remove-ns 'app.calc-test) (remove-ns 'app.calc)))
+        idx (r/index main)
+        reasons (r/done-explain (r/done-input idx "app.calc/total-is-exact" (assoc results 'app.calc-test/total-sums :pass) #{} [] nil nil #{}))]
+    (is (string? src) (str "the plan holds main's test with its source: " (pr-str (:removed plan))))
+    (is (some #{main-test} (:run plan)) "and runs it, though the branch holds none")
+    (is (= :fail (get results main-test)) (str "main's test is red against the branch's program: " (pr-str results)))
+    (is (seq reasons) "the end is refused: not merged")
+    (is (str/includes? (r/explain-text reasons) (str main-test)) (str "its reason names main's failing test: " (pr-str reasons)))))
 
 ;; docs/merging.md#main-moved-is-said-at-every-eval, the owner 2026-11-07: an agent never runs old code. A model's turn merged main when it moved; an
 ;; outside agent was told and went on running what it had, until it chose to merge. Its reply merges as a turn does
