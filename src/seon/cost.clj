@@ -190,7 +190,7 @@
   {:malli/schema [:=> [:cat] [:set :string]]}
   []
   (set (for [[n text] (lib/dir-texts (str (config/checkout) "/resources/seon/tasks") ".edn")
-             :let [ns-sym (symbol (subs n 0 (- (count n) 4)))]
+             :let [ns-sym (symbol (str/replace n #"\.edn$" ""))]
              d (let [r (task/file-declarations ns-sym text)] (when (vector? r) r))]
          (task/task-id ns-sym (:seon.task/name d)))))
 
