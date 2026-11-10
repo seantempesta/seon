@@ -1,0 +1,5 @@
+[{:seon.task/name "the-branch-roster-is-compacted"
+  :seon.task/plan "What exists: the branch roster is a konserve append log (`datahike.roster`), one entry a `branch!` or delete, never compacted. `d/branches` reads the whole log, one konserve read an entry (11.7k ticks and 33 KB each, measured 2026-11-11), deleted branches included: 94k ticks at 1 branch, 1.25 M at 100, 11.8 M and 34 MB at 1,000. A root's store gains a branch an agent, so the log only grows. Correct: the log is folded into one value when it is read past a bound, or a delete rewrites it, so `d/branches` costs the live branches (one read when compact). Upstream's own versioning first (`branch-history`, durable GC roots): take its shape if it has one. Proof when built: `d/branches` after n branches made and deleted costs what the live ones cost."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+]
