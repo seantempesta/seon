@@ -96,23 +96,25 @@
     (is (= {'demo/f :doc} (cited-in tx)))
     (is (nil? (refusal db tx)) "and the write is not refused")))
 
-(deftest deleting-a-cited-var-ends-its-cites-and-the-text-names-it
-  ;; docs/references.md#an-entity-cites: a cite is a ref to what exists, and it ends with its target
+(deftest deleting-a-cited-var-ends-its-cites-and-the-task-holds-what-is-gone
+  ;; docs/references.md#task-references: a cite is a ref to what exists, and it ends with its target
   ;; (docs/storage.md#the-write-checks-every-entity-it-touches): the write that deletes what a task's text cites is accepted
-  ;; (it was refused, so an import retracting a var a generated task cited refused whole, 2026-11-10), and the text still
-  ;; names it, which seon.task/gone reads (the task's problem, docs/health.md#a-task-that-cites-nothing)
+  ;; (it was refused, so an import retracting a var a generated task cited refused whole, 2026-11-10), and leaves the task
+  ;; :seon.task/gone naming it, which the text written again clears
   (let [db0 (db-with-program)
         db (pdb/db-with db0 (task/create-tx db0 [(decl "Make `demo/f` exact.")]))
         gone [[:db/retractEntity (pdb/eid db :var/name 'demo/f)]]
         after (pdb/db-with db gone)
-        t (d/pull after [:seon.task/plan :seon.task/instructions] [:seon.task/id "demo/t"])]
+        held #(:seon.task/gone (d/pull % [:seon.task/gone] [:seon.task/id "demo/t"]))]
     (is (nil? (refusal db gone)) "the delete is not refused")
     (is (nil? (pdb/eid after :var/name 'demo/f)) "the var is deleted")
     (is (= [] (task/cites-of after (pdb/eid after :seon.task/id "demo/t"))) "and its cite with it")
-    (is (= ['demo/f] (task/gone after t)) "the text names what is gone")
-    (is (= [] (task/gone db t)) "and named nothing gone before")
+    (is (= ['demo/f] (held after)) "the task holds what is gone")
+    (is (nil? (held db)) "and held nothing before")
     (let [plan "Make ``demo/f`` exact again, once it is written."]
-      (is (= [] (task/gone after {:seon.task/plan plan})) "a two-backtick literal names what a plan will make: nothing gone"))))
+      (is (nil? (held (pdb/db-with after (into [[:db/add [:seon.task/id "demo/t"] :seon.task/plan plan]]
+                                               (task/rederive-tx after {:seon.task/id "demo/t" :seon.task/plan plan})))))
+          "the text written again clears it"))))
 
 (deftest a-page-cited-whole-is-its-top-section
   ;; docs/references.md#an-entity-cites: a path with no anchor cites the page's top section, whose sections join below it

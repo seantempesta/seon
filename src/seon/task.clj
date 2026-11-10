@@ -67,15 +67,6 @@
   [db decl]
   (into [] (remove :seon.ref/problem-kind) (ref/kept db (ref/cited (texts-citations (cited-texts decl))))))
 
-(defn gone
-  "What declaration decl's text cites (its delimited citations, `text-citations`, a resolve-only word left out: it may name
-  what a plan will make) that db no longer holds, each as its target's identity value: a cite ends with its target
-  (docs/storage.md#the-write-checks-every-entity-it-touches), so the text is what still names it. See
-  docs/health.md#a-task-that-cites-nothing."
-  {:malli/schema [:=> [:cat :seon.host/db [:map [:seon.task/plan {:optional true} [:maybe :string]] [:seon.task/instructions {:optional true} [:maybe :string]]]] [:vector :any]]}
-  [db decl]
-  (into [] (keep #(when-not (:seon.ref/resolve-only %) (let [[a v] (ref/target db %)] (when-not (pdb/eid db a v) v)))) (text-citations db decl)))
-
 (defn cite-tx
   "The cite entity of entity of (a lookup ref, or the tempid of the write that makes it; of-id its identity
   value) for citation c at place order: its target (seon.ref/target on db, the db the write holds: a lookup that resolves
@@ -124,8 +115,8 @@
 
 (defn cites-tx
   "The facts that make entity of (as cite-tx takes it) cite exactly citations cs on db: one cite entity per
-  target (cite-tx), at the strongest depth any of cs asks for it and its first's place, and each cite of of on db no
-  longer among them retracted whole. The one writer of a text's cites, called where the text is written (create-tx,
+  target (cite-tx), at the strongest depth any of cs asks for it and its first's place, each cite of of on db no
+  longer among them retracted whole, and its :seon.task/gone cleared. The one writer of a text's cites, called where the text is written (create-tx,
   load-tx, rederive-tx), after what the same write makes. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :any :string [:sequential [:map [:seon.ref/depth :seon.ref/depth]]]] [:vector :any]]}
   [db of of-id cs]
@@ -136,8 +127,10 @@
                                          {:by (assoc by id m) :order (conj order id)})))
                                    {:by {} :order []} cs)
         e (when (vector? of) (pdb/eid db (first of) (second of)))]
-    (into (mapv by order)
-          (for [c (cites-of db e) :when (not (by (:seon.cite/id c)))] [:db/retractEntity (:db/id c)]))))
+    (-> (mapv by order)
+        (into (for [c (cites-of db e) :when (not (by (:seon.cite/id c)))] [:db/retractEntity (:db/id c)]))
+        ;; the text written again clears what its ended cites left (docs/references.md#task-references): it cites what exists
+        (into (for [d (when e (d/datoms db :eavt e :seon.task/gone))] [:db/retract e :seon.task/gone (:v d)])))))
 
 (defn rederive-tx
   "The facts that make task t's cites those its text states now (`text-citations` over its plan and

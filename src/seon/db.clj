@@ -286,21 +286,34 @@
         ;; target, and the entity check would refuse it left without a key its schema requires, so it ends with it, as Datahike
         ;; ends a component with its parent; derived from the schema (a ref attribute an entity schema requires), so no writer
         ;; retracts it by hand. One AVET seek per required ref a retraction names (no attribute is a component, so none of
-        ;; Datahike's own cascade is followed)
+        ;; Datahike's own cascade is followed). A cite it ends leaves its task :seon.task/gone, its target's identity value
+        ;; added, in the same write (docs/references.md#task-references): the text that still names it is the task's problem
+        gone-tx (fn [ended cites]
+                  (let [ids (keys (:identity-schemas ix))
+                        by (reduce (fn [m [x e]]
+                                     (let [of (:v (first (d/datoms db :eavt x :seon.cite/of)))
+                                           v (some #(:v (first (d/datoms db :eavt e %))) ids)]
+                                       (if (and of (not (ended of)) (seq (d/datoms db :eavt of :seon.task/id)) (some? v))
+                                         (update m of (fnil conj []) v)
+                                         m)))
+                                   {} cites)]
+                    (for [[t vs] by]
+                      [:db/add t :seon.task/gone (vec (distinct (into (vec (:v (first (d/datoms db :eavt t :seon.task/gone)))) vs)))])))
         ends-with (fn [tx-data]
                     (let [whole? (fn [op] (and (vector? op) (#{:db.fn/retractEntity :db/retractEntity} (first op))))]
                       (if-not (some whole? tx-data)
                         tx-data
                         (let [schema (:schema db)
                               refs (filterv #(= :db.type/ref (get-in schema [% :db/valueType])) (distinct (mapcat val (:required-keys ix))))]
-                          (loop [todo (keep #(when (whole? %) (:db/id (d/entity db (second %)))) tx-data) seen #{} out (vec tx-data)]
+                          (loop [todo (keep #(when (whole? %) (:db/id (d/entity db (second %)))) tx-data) seen #{} cites [] out (vec tx-data)]
                             (if-let [e (first todo)]
                               (if (seen e)
-                                (recur (rest todo) seen out)
+                                (recur (rest todo) seen cites out)
                                 (let [dependents (for [a refs d (d/datoms db :avet a e)] (:e d))]
                                   (recur (concat (rest todo) dependents) (conj seen e)
+                                         (into cites (for [d (d/datoms db :avet :seon.cite/target e)] [(:e d) e]))
                                          (into out (for [x dependents :when (not (seen x))] [:db.fn/retractEntity x])))))
-                              out))))))
+                              (into out (gone-tx seen cites))))))))
         tx-data (ends-with tx-data)]
     (when-let [e (invalid-datom db tx-data schemas)] (refuse! e))
     ;; Datahike refuses a lookup ref that names no entity (a cite's target, a wiki link: its :entity-id/missing): made the

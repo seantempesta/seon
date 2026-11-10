@@ -377,6 +377,7 @@
                                  [:api {:optional true} :map]]]
                    [:what {:optional true} :string] [:evidence {:optional true} :map]
                    [:bug? {:optional true} :boolean] [:defect {:optional true} :seon.task/id]]
+ :seon.task/gone [:and {:description "What the task's text cites whose cites ended with their targets (each target's identity value), written by the write that ended them and cleared when the text is written again. See docs/references.md#task-references."} [:vector :any] :seon.db/plain]
  :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:agent {:optional true} :string] [:turn {:optional true} :int]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
@@ -392,7 +393,7 @@
                           [:seon.task/model {:optional true} :seon.task/model]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
                           [:seon.task/gate? {:optional true} :seon.task/gate?]
-                          [:seon.task/failure {:optional true} :seon.task/failure]
+                          [:seon.task/failure {:optional true} :seon.task/failure] [:seon.task/gone {:optional true} :seon.task/gone]
                           [:seon.task/cause {:optional true} :seon.task/cause]
                           [:seon.task/agent {:optional true} :seon.task/agent] [:seon.task/outcome {:optional true} :seon.task/outcome]
                           [:seon.task/started-by {:optional true} :seon.task/started-by] [:seon.task/reason {:optional true} :seon.task/reason] [:seon.task/reasons {:optional true} :seon.task/reasons]

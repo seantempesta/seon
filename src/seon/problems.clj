@@ -549,10 +549,10 @@
   "Each ready task, which holds the plans along its :needs (seon.task/accumulate), whatever its kind, whose
   accumulated plan cites no program var (no cite of one along its needs, seon.task/cites-of: the context pulls
   no var for it), that names no proof, one of whose proofs is still the placeholder seon.ctx writes, or whose own
-  text cites what db no longer holds (seon.task/gone: its cite ended with its target), as an :uncited-task row
-  with its reason (:no-references, :no-proofs, :placeholder-proof, :gone). Closed when its plan cites a name that
-  exists and its proofs are named and written. Cost: the task, reference and proof datoms once, then a walk of
-  each ready task's needs and a parse of its own text."
+  text cites what db no longer holds (:seon.task/gone, which the write that ended those cites left), as an
+  :uncited-task row with its reason (:no-references, :no-proofs, :placeholder-proof, :gone). Closed when its plan
+  cites a name that exists and its proofs are named and written. Cost: the task, reference and proof datoms once,
+  then a walk of each ready task's needs."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
   (let [;; every task's outcome read once, so each task's readiness is a lookup (seon.task/done? per task was two contracted calls a task)
@@ -572,8 +572,8 @@
                :when (ready? e)
                :let [es (chain #{} e)
                      proofs (vals-of es :seon.task/proofs)
-                     ;; what its own text cites that is gone: a cite ends with its target, the text still names it
-                     gone (task/gone db (d/pull db [:seon.task/plan :seon.task/instructions] e))
+                     ;; what its text cites whose cites ended with their targets, as the write that ended them left it
+                     gone (:v (first (d/datoms db :eavt e :seon.task/gone)))
                      reasons (cond-> []
                                (not-any? @program (mapcat cited es))
                                (conj :no-references)
