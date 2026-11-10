@@ -3505,3 +3505,10 @@
         view (seon.ratom/ref-view a seon.ctx/changes)]
     (is (= [#'ui/cite {:key "c1"}] (r/entity-render ix (get view :c))) "a cite: its schema's render, keyed by its identity")
     (is (nil? (r/entity-render ix (get view :v))) "a pulled var: no render, it prints")))
+
+;; docs/render.md#one-rendering-system-drawn-from-the-data: a view's units are rendered in main's entity index as root's walk holds it,
+;; never the binary's once main is read, so a render main declares or changes is the one a unit runs
+(deftest a-views-units-render-in-mains-index
+  (let [ix {:forms {} :entity-schemas {} :marker ::mains}]
+    (is (= ix (#'p/units-index {:root-walk {:w {:index (volatile! ix)}}})) "main's, as root's walk holds it")
+    (is (= (seon.db/index) (#'p/units-index {})) "the binary's before main is read")))
