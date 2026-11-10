@@ -221,7 +221,7 @@
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
     (is (clojure.string/includes? text "(my.render/page {:commit") "the page, as the call Seon made and its answer")
-    (is (re-find #":class \"task\"" text) "each part headed by the render that drew it (its class's first word: seon.ctx.wire/presentation-free)")
+    (is (re-find #":class \"task-view\"" text) "each part headed by the render that drew it (its class's first word: seon.ctx.wire/presentation-free); the task's, seon.render.ui/task-view")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:ns (:value sent))) "and the read records the hash of what it sent, as a model turn does (the debug page compares its redraw with it)")
