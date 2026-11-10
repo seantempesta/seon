@@ -227,7 +227,7 @@
         file (str runs "/records.edn")
         key (str "example/" id)
         _ (spit file (pr-str [[{:seon.agent/key key :seon.agent/status :ended :seon.agent/description "Make h."}]
-                              [{:seon.eval/id (str key "/s1") :seon.eval/by "src" :seon.eval/agent [:seon.agent/key key]
+                              [{:seon.eval/id (str key "/s1") :seon.eval/by {:seon.agent/key "src"} :seon.eval/agent [:seon.agent/key key]
                                 :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol (str "result/example-" id "-s1")) :value 3} :seon.eval/call-id (str "example-" id "-call_1")}]]))
         _ (spit (str runs "/bad.edn") "[[{:seon.agent/key \"someone\"}]]")
         _ (spit (str runs "/unreadable.edn") "[[{:seon.agent/key")

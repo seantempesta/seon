@@ -711,7 +711,7 @@
                    tx)
         from (:seon.agent/key (:seon.task/agent (d/entity db [:seon.task/id id])))]
     (if k
-      (task/message-tx (lib/id (lib/digest (str "asked/" id "/" (:max-tx db)))) (or from "root") [k]
+      (task/message-tx (lib/id (lib/digest (str "asked/" id "/" (:max-tx db)))) (task/sender from) [k]
                        (str "Task " id " " (ends-told to) (when said (str ": " said))
                             (when (and from (#{:parked :cap} to) (not (:seon.user/name (:seon.task/started-by (d/entity db [:seon.task/id id]))))) (str "\nTo answer it: (send-message [:" from "] \"...\")")))
                        now)
@@ -900,7 +900,7 @@
         tx (-> move
                (into [{:seon.agent/key k :seon.agent/ended-ms now}])
                (into (when (and (:verdict j) (not marked?))
-                       (task/message-tx (str "v-" id "-" turn) "root" [k]
+                       (task/message-tx (str "v-" id "-" turn) task/system-sender [k]
                                         (verdict-body (:verdict j) {:results results :deferred deferred :unmerged unmerged :caused (:caused diff)
                                                                     :basis (or base-t (:max-tx main))})
                                         now)))

@@ -133,7 +133,7 @@
         ;; and one attribute installed before it was indexed
         _ (d/transact c0 {:tx-data (mapv #(if (= :seon.message/from (:db/ident %)) (dissoc % :db/index) %) (butlast pdb/schema))})
         ;; a datom written before the index: an AVET read of an unindexed attribute answers empty, with no error
-        _ (d/transact c0 {:tx-data [{:db/id "f" :form/id "v/1" :form/src "(def v 1)" :form/ns {:ns/name (quote v)} :form/order 0} {:seon.message/id "m-42" :seon.message/from "x42" :seon.message/body "b"}]})
+        _ (d/transact c0 {:tx-data [{:db/id "f" :form/id "v/1" :form/src "(def v 1)" :form/ns {:ns/name (quote v)} :form/order 0} {:seon.message/id "m-42" :seon.message/from {:seon.agent/key "x42"} :seon.message/body "b"}]})
         _ (is (empty? (d/datoms @c0 :avet :seon.message/from)) "unindexed, an AVET read finds nothing")
         _ (d/release c0)
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
@@ -455,7 +455,7 @@
     :seon.model-call/reply (slice @text k 1500) :seon.model-call/forms 1
     :seon.model-call/basis {:commit (java.util.UUID. 0 k) :task "t/x" :turn k :max-turns 8 :origin :model}}
    ;; the call's eval, whose record holds its response as the next turn reads it
-   {:seon.eval/id (str "e" k) :seon.eval/by "a1" :seon.eval/code "(f 2)" :seon.eval/response {:handle (symbol "result" (str "e" k)) :value (slice @code k 2000)}}])
+   {:seon.eval/id (str "e" k) :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(f 2)" :seon.eval/response {:handle (symbol "result" (str "e" k)) :value (slice @code k 2000)}}])
 
 (defn- write-turns!
   "Bytes the store at path gains when branch b gets n turns through the agent's run-ahead

@@ -115,7 +115,7 @@
               "e2" {:code "(rows)" :value (vec rows) :out "---- budget 16\n[:kw …]\n"}
               "e3" {:code "(other)" :value (vec rows) :out "other\n"}}
         db-of (fn [ids] (d/db-with (db-with-program) (for [id ids :let [r (recs id)]]
-                                                      {:seon.eval/id id :seon.eval/by "a1"
+                                                      {:seon.eval/id id :seon.eval/by {:seon.agent/key "a1"}
                                                        :seon.eval/code (:code r) :seon.eval/call-id (str "c" id) :seon.eval/response {:handle (symbol "result" id) :value (:value r) :out (:out r) :ms 1}})))
         record (fn [db id] (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id id])))
         after (db-of ["e1" "e2" "e3"])
@@ -302,7 +302,7 @@
   ;; scrollback. Each eval renders its own part (seon.seon.fixtures/eval-messages): the assistant message with
   ;; the call, then the response as a tool message; the provider's format folds a reply's calls
   ;; into one assistant message (docs/render.md, the request is a render)
-  (let [ev (fn [id value] {:seon.eval/id id :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
+  (let [ev (fn [id value] {:seon.eval/id id :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
                            :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value value} :seon.eval/call-id (str "c-" id)})
         db (d/db-with (db-with-program) (into (ts/turn-tx "a1" 1 {}) [(ev "e1" "E1") (ev "e2" "E2") (ev "e3" "E3")]))
         ;; as the walk hands them to the model render: the entities of the db, a reply naming its number by the call it belongs to
@@ -319,7 +319,7 @@
       (is (not-any? #(contains? % :reply) wire) "the reply's number never reaches the wire")))
   (testing "a user's form is one user message carrying its response"
     (is (= [{:role "user" :content "{:by \"user\" :code \"(+ 1 2)\" :response {:handle result/e4, :value 3}}"}]
-           (seon.fixtures/eval-messages {} {:seon.eval/id "e4" :seon.eval/by "user" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e4 :value 3}})))))
+           (seon.fixtures/eval-messages {} {:seon.eval/id "e4" :seon.eval/by {:seon.agent/key "user"} :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e4 :value 3}})))))
 
 (deftest an-inserted-eval-reaches-the-model-as-a-call-of-its-own
   ;; docs/turn.md#an-eval-can-be-inserted: an eval someone asked before (or between) the model's turns has intent and
@@ -334,7 +334,7 @@
         "a call made from the eval's own intent and code, answered by its response; turn 0 has no reply to name")
     (is (= ms (seon.fixtures/eval-messages {} (ev "e1" "anyone at all" 0))) "who asked is read by no one")
     (testing "after a model's reply it stands alone: the reply's own message is never edited"
-      (let [model-eval {:seon.eval/id "e4" :seon.eval/by "a1" :seon.eval/code "(e4)" :seon.eval/call-id "c-e4"
+      (let [model-eval {:seon.eval/id "e4" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(e4)" :seon.eval/call-id "c-e4"
                         :seon.eval/response {:handle 'result/e4 :value 1}}
             conv (into [] (mapcat #(seon.fixtures/eval-messages {} %)) [model-eval (ev "e5" "root" 2)])
             wire (seon.model/wire-messages true conv)]
@@ -434,7 +434,7 @@
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
       (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
-      (let [call! (fn [n] (d/transact conn [{:seon.eval/id (str "e" n) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "a1"}
+      (let [call! (fn [n] (d/transact conn [{:seon.eval/id (str "e" n) :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"}
                                              :seon.eval/code (str "(+ " n " 1)") :seon.eval/response {:handle (symbol "result" (str "e" n)) :value (inc n)} :seon.eval/call (seon.task/call-ref "a1" n) :seon.eval/call-id (str "c" n) :seon.eval/intent (str "Step " n ".")}]))
             ;; as seon.turn goes: the turn recorded, its request made on the db that holds it
             request (fn [n] (let [b {:commit (d/commit-id @conn) :task "demo/f" :turn n :max-turns 4 :origin :model :agent "a1"}
@@ -549,7 +549,7 @@
   ;; root's delivery; the turn that takes them writes the message fact on its branch, so the
   ;; conversation holds it in tx order (seon.ctx/turn-members), rendered by the message fact's
   ;; own messages (seon.seon.fixtures/eval-messages; docs/render.md)
-  (let [[m] (seon.fixtures/message-messages {} {:seon.message/from "owner" :seon.message/body "use demo/g, not a new helper"})]
+  (let [[m] (seon.fixtures/message-messages {} {:seon.message/from {:seon.agent/key "owner"} :seon.message/body "use demo/g, not a new helper"})]
     (is (= "user" (:role m)))
     (is (str/includes? (:content m) "use demo/g, not a new helper"))
     (is (str/includes? (:content m) ":from \"owner\"") "who sent it"))
@@ -573,7 +573,7 @@
   ;; (a 400 otherwise, measured: docs/model.md): the reply's own message (its model call's) carries it,
   ;; exactly as returned, and the provider's format sends it unless replay-reasoning is false
   (let [db (d/db-with (db-with-program) (into (ts/turn-tx "a1" 1 {:seon.model-call/reply "" :seon.model-call/reasoning "Square it first."})
-                                              [{:seon.eval/id "e1" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
+                                              [{:seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
                                                 :seon.eval/code "(f 3)" :seon.eval/response {:value 9} :seon.eval/call-id "c1" :seon.eval/intent "f triples."}]))
         ;; the call as ctx holds it: its pull, with the evals that name it
         call (assoc (d/pull db '[*] [:seon.model-call/id (seon.lib/call-id "a1" 1)]) :seon.eval/_call {(pdb/eid db :seon.eval/id "e1") {}})
@@ -597,7 +597,7 @@
   "The conversation of agent b/a1 on the world, as ctx holds it: model call 1 (text \"I look.\", reasoning \"think\") with evals e1 e2
   e3, call 2 (\"Then.\", \"more\") with e4 e5, call 3 (no text, reasoning \"quiet\") with e6. Answers [db ctx-value]."
   []
-  (let [ev (fn [n turn] {:seon.eval/id (str "e" n) :seon.eval/by "a1" :seon.eval/agent [:seon.agent/key "a1"] :seon.eval/call (seon.task/call-ref "a1" turn) :seon.eval/call-id (str "c" n)
+  (let [ev (fn [n turn] {:seon.eval/id (str "e" n) :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent [:seon.agent/key "a1"] :seon.eval/call (seon.task/call-ref "a1" turn) :seon.eval/call-id (str "c" n)
                          :seon.eval/code (str "(f " n ")") :seon.eval/response {:handle (symbol "result" (str "e" n)) :value n} :seon.eval/intent (str "Call " n ".")})
         db (t/with (t/world)
                    [{:seon.agent/key "a1" :seon.agent/turn 3}]
@@ -694,7 +694,7 @@
     (fn [_ conn]
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make f."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-      (let [ev! (fn [id agent code turn] (d/transact conn [{:seon.eval/id id :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key agent}
+      (let [ev! (fn [id agent code turn] (d/transact conn [{:seon.eval/id id :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key agent}
                                                             :seon.eval/code code :seon.eval/response {:handle (symbol "result" id) :value 1} :seon.eval/call (seon.task/call-ref "a1" turn)}]))
             _ (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "a1" :seon.agent/turn 2 :seon.agent/task {:seon.task/id "demo/f"}}}])
             _ (ev! "e1" "a1" "(f 1)" 1)
@@ -769,7 +769,7 @@
                            _ (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" (inc n)) :seon.model-call/basis b}])
                            r (wire/render @conn b)
                            body (seon.model/request-body p {:messages (:messages r) :task "demo/g" :turn (inc n)})]
-                       (d/transact conn [{:seon.eval/id (str "e" n) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "a1"}
+                       (d/transact conn [{:seon.eval/id (str "e" n) :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"}
                                           :seon.eval/code (str "(e" n ")") :seon.eval/response {:handle (symbol "result" (str "e" n)) :value (vec (range (* 5 (inc n))))} :seon.eval/call (seon.task/call-ref "a1" (inc n)) :seon.eval/call-id (str "c" n) :seon.eval/intent (str "Step " n ".")}])
                        ;; the task's own config moves after turn 0: a later turn's provider, never turn 0's
                        (when (zero? n) (d/transact conn [{:seon.task/id "demo/g" :seon.config.ai/max-tokens 77}]))
@@ -876,9 +876,9 @@
         r {:handle 'result/e7 :value v}
         live (seon.print/response-text r #(seon.render/model (seon.db/index) %))
         rec (repl/record-details "(my.agent/prove)" r {})
-        db (d/db-with (db-with-program) [(into {:seon.eval/id "e7" :seon.eval/by "a1"} rec)])
+        db (d/db-with (db-with-program) [(into {:seon.eval/id "e7" :seon.eval/by {:seon.agent/key "a1"}} rec)])
         stored (d/pull db '[:seon.eval/code :seon.eval/response :seon.eval/result :seon.eval/schema] [:seon.eval/id "e7"])
-        sent (:content (second (seon.fixtures/eval-messages {:db db} (assoc stored :seon.eval/id "e7" :seon.eval/by "a1" :seon.eval/call-id "c1"))))]
+        sent (:content (second (seon.fixtures/eval-messages {:db db} (assoc stored :seon.eval/id "e7" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/call-id "c1"))))]
     (is (= :seon.test/proved (:seon.eval/schema stored)) "the eval keeps the value's schema")
     (is (str/includes? live "green: 5 of 5 passed") "the live response is its one line")
     (is (= live sent) (str "the record's tool message reads as the live response did: " sent))
@@ -891,7 +891,7 @@
   (let [db (db-with-program)
         r {:handle 'result/e5 :value (vec (for [i (range 300)] {:i i :name (str "row-" i)})) :ms 1.0}
         rec (repl/record-details "(rows)" r {})
-        stored (d/db-with db [(into {:seon.eval/id "e5" :seon.eval/by "a1"} rec)])]
+        stored (d/db-with db [(into {:seon.eval/id "e5" :seon.eval/by {:seon.agent/key "a1"}} rec)])]
     (is (= (:value r) (:value (seon.db/response-of nil rec))) "the whole value, not a printout of it")
     (is (not (contains? (seon.db/response-of nil rec) :text)) "no text made for a reader")
     (is (= (select-keys rec [:seon.eval/code :seon.eval/response]) (select-keys (d/pull stored '[:seon.eval/code :seon.eval/response] [:seon.eval/id "e5"]) [:seon.eval/code :seon.eval/response])) "what the eval keeps round-trips through the store")
@@ -912,7 +912,7 @@
         at (apply str (repeat bound "x"))
         details (fn [v] (repl/record-details "(read-it)" {:handle 'result/e1 :value v} {:call-id "c1"}))
         value-of #(:value (seon.db/response-of nil %))
-        sent (:content (second (seon.fixtures/eval-messages nil (assoc (details big) :seon.eval/id "e1" :seon.eval/by "a1"))))]
+        sent (:content (second (seon.fixtures/eval-messages nil (assoc (details big) :seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1"}))))]
     (is (= {:seon.value/gone {:type (.getName (class big)) :over bound}} (value-of (details big))) "a string past the bound")
     (is (= at (value-of (details at))) "and at the bound it is kept whole")
     (is (= bound (:over (:seon.value/gone (value-of (details (range (inc bound))))))) "a lazy seq past it too, never realized further")
@@ -925,7 +925,7 @@
   ;; query finds a model's evals by the call they answered, with no record to unpack
   (let [db (d/db-with (db-with-program)
                       (for [[id call] [["e1" "c1"] ["e2" nil] ["e3" "c3"]]]
-                        (into {:seon.eval/id id :seon.eval/by "a1"}
+                        (into {:seon.eval/id id :seon.eval/by {:seon.agent/key "a1"}}
                               (repl/record-details (str "(" id ")") {:handle (symbol "result" id) :value 1} (cond-> {} call (assoc :call-id call :intent (str "ask " call)))))))]
     (is (= #{"e1" "e3"} (set (d/q '[:find [?id ...] :where [?e :seon.eval/call-id _] [?e :seon.eval/id ?id]] db))) "the model's evals, by the call id they answered")
     (is (= "ask c3" (d/q '[:find ?p . :in $ ?c :where [?e :seon.eval/call-id ?c] [?e :seon.eval/intent ?p]] db "c3")) "and the text beside one call")
@@ -939,7 +939,7 @@
         rec (repl/record-details "(f 1)" {:text "2"} {:intent text})]
     (is (= text (:seon.eval/intent rec)) "the text, kept as written")
     (is (not (contains? rec :cites)) "and nothing parsed from it")
-    (let [row #(seon.web.html/html (seon.render.ui/evaluation {:seon.render/index (seon.db/index) :as :inline} (assoc (repl/record-details "(x)" {:text "x" :value %} {}) :seon.eval/by "a1")))]
+    (let [row #(seon.web.html/html (seon.render.ui/evaluation {:seon.render/index (seon.db/index) :as :inline} (assoc (repl/record-details "(x)" {:text "x" :value %} {}) :seon.eval/by {:seon.agent/key "a1"})))]
       (is (str/includes? (row {:a 1}) "{:a 1}") "its value in one line, printed now, for the collapsed eval")
       (is (str/includes? (row nil) ">nil</code>") "a value of nil is nil, not nothing (such evals' collapsed rows showed nothing)"))))
 
@@ -1325,7 +1325,7 @@
                                        :seon.model-call/errors 0 :seon.model-call/ms 1}))]
          (wire/render @conn (assoc b :commit (d/commit-id @conn)))))
      ;; a record of the turn in force
-     (fn ev! [id] (d/transact conn [{:seon.eval/id id :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" @turn)
+     (fn ev! [id] (d/transact conn [{:seon.eval/id id :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" @turn)
                                      :seon.eval/code (str "(f " id ")") :seon.eval/response {:handle (symbol "result" id) :value 1} :seon.eval/call-id (str "c-" id) :seon.eval/intent (str "Step " id ".")}]))
      (fn plan! [p] (d/transact conn [{:seon.task/id "demo/f" :seon.task/plan p}]))]))
 
@@ -1408,7 +1408,7 @@
   ;; message taken by the second turn, an outside eval made during it and its message reply (a record, after what else the turn holds)
   (let [ev (fn [id by turn & [more]] (merge {:seon.eval/id id :seon.eval/by by :seon.eval/agent [:seon.agent/key "a1"] :seon.eval/call (seon.task/call-ref "a1" turn)
                                               :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value 1}} more))
-        msg (fn [id] {:seon.message/id id :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body id})
+        msg (fn [id] {:seon.message/id id :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body id})
         db (t/with (t/world)
                    [{:seon.agent/key "a1" :seon.agent/turn 2}]
                    ;; written in time order, though not the transcript's: a message before the turn that reads it, a reply before an eval of its turn
@@ -1435,7 +1435,7 @@
       (let [[ask! ev!] (parts-session conn)
             r0 (ask! 0)
             _ (ev! "e1")
-            _ (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body "note taken in turn 1"}])
+            _ (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "note taken in turn 1"}])
             r1 (ask! 1)]
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "request 2 starts with request 1 whole, its page the first request's")
         (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "user"] (mapv :role (:messages r1)))
@@ -1455,13 +1455,13 @@
             _ (d/branch! conn (:branch cfg) mb)
             main (pdb/connect (assoc cfg :branch mb))]
         (try
-          (d/transact main [{:seon.message/id "early" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body "sent before turn 1"}])
+          (d/transact main [{:seon.message/id "early" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "sent before turn 1"}])
           (let [r0 (ask! 0)
                 _ (ev! "e1")
                 m (d/entity @main [:seon.message/id "early"])
                 ;; main merged into the branch mid-turn: the message comes whole, its id main's
                 _ (d/merge-db conn #{(d/commit-id @main)} [{:db/id (:db/id m) :seon.message/id "early" :seon.message/to [[:seon.agent/key "a1"]]
-                                                            :seon.message/from "owner" :seon.message/body "sent before turn 1"}])
+                                                            :seon.message/from {:seon.agent/key "owner"} :seon.message/body "sent before turn 1"}])
                 r1 (ask! 1)
                 call1 (pdb/eid @conn :seon.model-call/id (seon.lib/call-id "a1" 1))]
             (is (= (:db/id m) (pdb/eid @conn :seon.message/id "early")) "the branch holds main's entity, its id the content id main minted")
@@ -1485,9 +1485,9 @@
       (let [[ask! ev!] (parts-session conn)]
         (ask! 0)
         (ev! "e1")
-        (d/transact conn [{:seon.eval/id "x1" :seon.eval/by "owner" :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
+        (d/transact conn [{:seon.eval/id "x1" :seon.eval/by {:seon.agent/key "owner"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
                            :seon.eval/code "(f 9)" :seon.eval/response {:handle 'result/x1 :value 9}}])
-        (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body "taken in turn 1"}])
+        (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "taken in turn 1"}])
         (ask! 1)
         (ev! "e2")
         (let [db @conn ix (seon.db/index)
@@ -1634,7 +1634,7 @@
       (let [basis (fn [i] {:commit (d/commit-id @conn) :task "demo/g" :turn (inc i) :max-turns 9 :origin :model :agent "a1"})
             turn! (fn [i] (let [b (basis i)]
                             (d/transact conn (ts/turn-tx "a1" (inc i) {:seon.model-call/basis b}))
-                            (d/transact conn [{:seon.eval/id (str "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" (inc i))
+                            (d/transact conn [{:seon.eval/id (str "e" i) :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" (inc i))
                                                :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "e" i)) :value i} :seon.eval/call-id (str "c" i)}])
                             b))
             b0 (turn! 0) _ (turn! 1) b2 (turn! 2)
@@ -1652,9 +1652,9 @@
   ([conn code]
    (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "h" :seon.task/plan "Make h." :seon.task/proofs #{'demo-test/h-test}}]))
    (d/transact conn [{:seon.agent/key "b/src" :seon.agent/turn 2 :seon.agent/task [:seon.task/id "demo/h"]}])
-   (d/transact conn [{:seon.eval/id "s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "b/src"] :seon.eval/call (seon.task/call-ref "b/src" 1)
+   (d/transact conn [{:seon.eval/id "s1" :seon.eval/by {:seon.agent/key "src"} :seon.eval/agent [:seon.agent/key "b/src"] :seon.eval/call (seon.task/call-ref "b/src" 1)
                       :seon.eval/code code :seon.eval/response {:handle 'result/s1 :value 3} :seon.eval/call-id "call_1" :seon.eval/intent "Add."}])
-   (d/transact conn [{:seon.message/id "m1" :seon.message/to [[:seon.agent/key "b/src"]] :seon.message/from "owner" :seon.message/body "Looks right."}])
+   (d/transact conn [{:seon.message/id "m1" :seon.message/to [[:seon.agent/key "b/src"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "Looks right."}])
    (d/transact conn [{:seon.model-call/id (seon.lib/call-id "b/src" 2) :seon.model-call/agent [:seon.agent/key "b/src"] :seon.model-call/n 2 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "Done."}])))
 
 (defn- example-world!
@@ -1686,7 +1686,7 @@
     (fn [_ conn]
       (example-world! conn)
       (let [r0 (turn! conn 0)
-            _ (d/transact conn [{:seon.eval/id "e0" :seon.eval/by "a1" :seon.eval/agent [:seon.agent/key "a1"]
+            _ (d/transact conn [{:seon.eval/id "e0" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent [:seon.agent/key "a1"]
                                  :seon.eval/call (seon.task/call-ref "a1" 1) :seon.eval/code "(+ 5 1)" :seon.eval/response {:handle 'result/e0 :value 6} :seon.eval/call-id "c0"}])
             r1 (turn! conn 1)
             ms (:messages r0)
@@ -1772,9 +1772,9 @@
   (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
   (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
   (let [r0 (turn! conn 0)]
-    (d/transact conn [{:seon.eval/id "e0" :seon.eval/by "a1" :seon.eval/agent [:seon.agent/key "a1"] :seon.eval/call (seon.task/call-ref "a1" 1)
+    (d/transact conn [{:seon.eval/id "e0" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent [:seon.agent/key "a1"] :seon.eval/call (seon.task/call-ref "a1" 1)
                        :seon.eval/code "(+ 5 1)" :seon.eval/response {:handle 'result/e0 :value 6} :seon.eval/call-id "c0" :seon.eval/intent "Add."}])
-    (d/transact conn [{:seon.message/id "m0" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body "Go on."}])
+    (d/transact conn [{:seon.message/id "m0" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "Go on."}])
     (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" 2) :seon.model-call/agent [:seon.agent/key "a1"] :seon.model-call/n 2 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "Thinking."}])
     {:r0 r0 :r1 (turn! conn 2)}))
 
@@ -1822,7 +1822,7 @@
   (ts/test-branch!
     (fn [_ conn]
       (source-session! conn)
-      (d/transact conn [{:seon.eval/id "s3" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "b/src"] :seon.eval/call (seon.task/call-ref "b/src" 1) :seon.eval/schema :seon.ctx/ctx
+      (d/transact conn [{:seon.eval/id "s3" :seon.eval/by {:seon.agent/key "src"} :seon.eval/agent [:seon.agent/key "b/src"] :seon.eval/call (seon.task/call-ref "b/src" 1) :seon.eval/schema :seon.ctx/ctx
                          :seon.eval/basis {:t 5 :branch :b} :seon.eval/code "(swap! ctx assoc :x 1)" :seon.eval/call-id "call_3"
                          :seon.eval/response {:handle 'result/s3}}])
       (let [recs (->> (session/session-tx @conn "b/src" "abc") (mapcat identity) (filter :seon.eval/code))
@@ -1838,7 +1838,7 @@
   (ts/test-branch!
     (fn [_ conn]
       (source-session! conn)
-      (d/transact conn [{:seon.eval/id "s2" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "b/src"]
+      (d/transact conn [{:seon.eval/id "s2" :seon.eval/by {:seon.agent/key "src"} :seon.eval/agent [:seon.agent/key "b/src"]
                          :seon.eval/call (seon.task/call-ref "b/src" 1) :seon.eval/code "(atom 1)" :seon.eval/response {:handle 'result/s2 :value {:seon.value/type "clojure.lang.Atom"}} :seon.eval/call-id "call_2"}])
       (let [recs (->> (session/session-tx @conn "b/src" "abc") (mapcat identity) (filter :seon.eval/code))]
         (is (= 2 (count recs)))
@@ -1916,7 +1916,7 @@
                   (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/sent-hash (seon.lib/digest (seon.edn/encode ms))}])
                   ms))
         r0 (turn! 1 {:seon.model-call/reasoning "why"})
-        _ (d/transact conn [{:seon.eval/id "e2" :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/code "(f 1)"
+        _ (d/transact conn [{:seon.eval/id "e2" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/code "(f 1)"
                              :seon.eval/response {:handle 'result/e2 :value 1} :seon.eval/call-id "call-0" :seon.eval/intent "I call f." :seon.eval/call (seon.task/call-ref "a1" 1)}])
         _ (d/transact conn [{:seon.task/id "demo/f" :seon.task/plan "Make f triple."}])
         r1 (turn! 2 {})
@@ -2156,7 +2156,7 @@
       (fn [_ conn]
         (d/transact conn [{:seon.agent/key "a1"}])
         (doseq [[id r] answers]
-          (d/transact conn [(into {:seon.eval/id id :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call-id (str "c-" id)}
+          (d/transact conn [(into {:seon.eval/id id :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call-id (str "c-" id)}
                                   (repl/record-details (str "(" id ")") r {}))]))
         (let [db @conn]
           (doseq [[id r] answers
@@ -2214,7 +2214,7 @@
   ;; owner, 2026-11-09: opening an eval changes what the agent's model reads ("Model reads it too"): its result whole, not budgeted
   (let [[db] (tree-world)
         big (vec (range 40000))
-        e {:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/code "(range 40000)" :seon.eval/call-id "c9" :seon.eval/intent "Count."
+        e {:seon.eval/id "e9" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(range 40000)" :seon.eval/call-id "c9" :seon.eval/intent "Count."
            :seon.eval/response {:handle 'result/e9 :value big}}
         tool (fn [e] (:content (peek (wire/eval-msgs {:seon.db/db db :seon.render/index (seon.program/index-of-db db)} e))))
         closed (tool e) opened (tool (assoc e :seon.eval/opened true))]

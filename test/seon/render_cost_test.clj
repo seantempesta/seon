@@ -57,7 +57,7 @@
   printed by the default render under a budget that shows them all."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n] [{:budget 200000 :seon.render/index (seon.db/index)}
-       (vec (for [i (range n)] {:seon.message/id (str "m" i) :seon.message/from "user" :seon.message/body "hello"}))])
+       (vec (for [i (range n)] {:seon.message/id (str "m" i) :seon.message/from {:seon.agent/key "user"} :seon.message/body "hello"}))])
 
 (deftest the-printer-renders-nested-values-in-one-pass
   ;; the printer's auto-render: each nested value with a render is named in one lookup per key
@@ -522,7 +522,7 @@
   (let [k "b/a1" n 5
         db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.doc/system-page "# You are\n\nRules."}))
         db (reduce (fn [db i] (d/db-with db [{:seon.agent/key k :seon.agent/turn (inc i)}
-                                             {:seon.eval/id (str "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k} :seon.eval/call (seon.task/call-ref k (inc i))
+                                             {:seon.eval/id (str "e" i) :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key k} :seon.eval/call (seon.task/call-ref k (inc i))
                                               :seon.eval/code (str "(f " i ")") :seon.eval/call-id (str "c" i) :seon.eval/response {:handle (symbol "result" (str "e" i)) :value i}}]))
                    db (range n))
         a (:db/id (d/entity db [:seon.agent/key k]))
@@ -554,7 +554,7 @@
       ;; a message is delivered before the turn that reads it, so it comes before that turn's call is made
       (when (even? i)
         (d/transact conn (seon.task/message-tx (str "p" n "m" i) "user" [k] (str "note " i) 1000)))
-      (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
+      (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key k}
                          :seon.eval/call (assoc (seon.task/call-ref k (inc i)) :seon.model-call/origin :model :seon.model-call/reply (str "Trying " i "."))
                          :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/intent (str "Step " i ".")}])
       ;; the turn's basis, the branch's commit and t as the loop writes it (seon.turn/basis!: a commit the store holds): what a message delivered before it is placed by
@@ -598,7 +598,7 @@
     (d/transact conn [{:seon.agent/key k :seon.agent/turn 0 :seon.agent/task {:seon.task/id tid}}])
     (let [ps (vec (for [i (range n)]
                     (do (d/transact conn [{:seon.agent/key k :seon.agent/turn (inc i)}
-                                          {:seon.eval/id (str "t" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
+                                          {:seon.eval/id (str "t" n "e" i) :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key k}
                                            :seon.eval/call (assoc (seon.task/call-ref k (inc i)) :seon.model-call/origin :model :seon.model-call/reply (str "Trying " i "."))
                                            :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "t" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/intent (str "Step " i ".")}])
                         (point))))

@@ -204,11 +204,14 @@
   [] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key @state)])) 0))
 
 (defn own-message-tx
-  "Message mid from from, sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
-  took it is derived from the transaction that wrote it (seon.ctx/turn-members). See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :string :string :any :int] :seon.db/tx-data]}
+  "Message mid from from (its sender's lookup, seon.task/sender), sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
+  took it is derived from the transaction that wrote it (seon.ctx/turn-members). An agent sender is written with it by its identity alone,
+  {:seon.agent/key k}: a sender made after this branch forked is no entity of it, and its key, a content id, is the same entity on every
+  branch, so the ref resolves and a merge makes no second (the system sender is on every branch from root's boot). See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :string [:tuple :keyword :any] :any :int] :seon.db/tx-data]}
   [mid from body sent-ms]
-  (task/message-tx mid from [(:key @state)] body sent-ms))
+  (cond->> (task/message-tx mid from [(:key @state)] body sent-ms)
+    (= :seon.agent/key (first from)) (into [{:seon.agent/key (second from)}])))
 
 (defn entries-tx
   "The transaction that writes entries (undelivered) on this branch: the entity root wrote on main, with this agent's ref only (own-message-tx)."

@@ -654,25 +654,32 @@
   [r req] (cond-> r (seq (:repaired req)) (assoc :repaired (:repaired req))))
 
 (defn- by
-  "Who evaluated, as the record names it (:seon.eval/by): whoever asked an inserted eval (the request's :by), the user (the page), an outside
-  session (root's server), a context read (seon.turn/context-block), else the agent itself (its model's turn)."
-  {:malli/schema [:=> [:cat :map] :string]}
+  "Who evaluated, as the record names it (:seon.eval/by, a ref): :self, the evaluating agent itself (its model's turn, an outside model working
+  its task, its own code), written as the record's own agent; the user, by the configured name (:seon.config.root/user-name), for a
+  person's eval from the page; the system (seon.task/system-sender) for an eval root inserts or root's own; else the agent an inserted
+  eval names (seon.task/sender). A context read is recorded by no one. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat :map] [:or [:= :self] [:tuple :keyword :any]]]}
   [{:keys [origin] asked :by}]
-  (case origin :insert asked :ui "user" :outside "outside" :context "context" (name (or (:id @agent/state) :root))))
+  (case origin
+    :insert (if (#{"root" "seon"} asked) task/system-sender (task/sender asked))
+    :ui (task/sender (cfg/value :seon.config.root/user-name))
+    (if (:id @agent/state) :self task/system-sender)))
 
 (defn record-tx
-  "The recording transaction of one eval: its entity, on the agent's, who evaluated it (:seon.eval/by), and its
-  details, each its own attribute (`record-details`). Who is the one upsert, by its identity: an
+  "The recording transaction of one eval: its entity, on the agent's, who evaluated it (:seon.eval/by, `by`: :self is the agent the
+  record is on, else its lookup), and its details, each its own attribute (`record-details`). Who is the one upsert, by its identity: an
   agent's key ({:seon.agent/key k}, its id's name) or root's ({:seon.root/id :root}); an agent's holds the
   namespace the eval left its REPL in (:seon.agent/ns), a datom only when it moved (an unchanged value adds none),
-  which seon.ctx/current-ns reads. See docs/render.md#a-component-answers-hiccup."
-  {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
+  which seon.ctx/current-ns reads. An evaluator that is another agent (a user) is written with it by its identity alone, so its ref
+  resolves on a branch forked before it was made (its key is a content id: the same entity everywhere). See docs/render.md#a-component-answers-hiccup."
+  {:malli/schema [:=> [:cat :map :string [:or [:= :self] [:tuple :keyword :any]] :map] :seon.db/tx-data]}
   [who id by details]
   ;; the agent one upsert, the model call naming it by the same tempid: two would refuse a new agent's first record
-  [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by}
-         (cond-> details (:seon.eval/call details) (assoc-in [:seon.eval/call :seon.model-call/agent] "agent")))
-   (cond-> (assoc who :db/id "agent")
-     (and (:seon.agent/key who) (symbol? (get-in details [:seon.eval/response :ns]))) (assoc :seon.agent/ns (get-in details [:seon.eval/response :ns])))])
+  (cond-> [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by (if (= :self by) "agent" by)}
+                 (cond-> details (:seon.eval/call details) (assoc-in [:seon.eval/call :seon.model-call/agent] "agent")))
+           (cond-> (assoc who :db/id "agent")
+             (and (:seon.agent/key who) (symbol? (get-in details [:seon.eval/response :ns]))) (assoc :seon.agent/ns (get-in details [:seon.eval/response :ns])))]
+    (and (vector? by) (= :seon.agent/key (first by)) (not= (second by) (:seon.agent/key who))) (conj {:seon.agent/key (second by)})))
 
 (defn- kept
   "Value v as an eval's record keeps it, [value drawn?]: plain data (seon.contract/plainly); past the largest value kept
@@ -1164,7 +1171,7 @@
        (contract/error :seon.repl/no-eval #'again (str "no eval " id " in this agent's record") {:seon.eval/id id})
        (let [before (last (take-while #(not= id (:seon.eval/id %)) evals))]
          (eval-string (or code (:seon.eval/code e))
-                      (cond-> {:origin :insert :by (:seon.eval/by e) :id id}
+                      (cond-> {:origin :insert :by (or (get-in e [:seon.eval/by :seon.agent/key]) "seon") :id id}
                         (get-in before [:seon.eval/response :ns]) (assoc "ns" (str (get-in before [:seon.eval/response :ns]))))))))))
 
 (defn again-to
@@ -1172,7 +1179,7 @@
   {:malli/schema [:=> [:cat :string] [:vector [:map [:id :string] [:failed? :boolean]]]]}
   [id]
   (let [evals (map val (sort-by key (:seon.eval/_agent @ctx/ctx)))
-        work? #(and (:seon.eval/call %) (not= "seon" (:seon.eval/by %)))]
+        work? #(and (:seon.eval/call %) (not (get-in % [:seon.eval/by :seon.root/id])))]
     (if (some #(= id (:seon.eval/id %)) evals)
       (reduce (fn [acc ev]
                 (let [e (:seon.eval/id ev)

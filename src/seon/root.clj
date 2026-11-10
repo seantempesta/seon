@@ -293,13 +293,13 @@
   (when (or (get-in st [:agents id]) (pdb/eid @(:conn st) :seon.agent/key (name id))) (name id)))
 
 (defn- message-write
-  "The writer's request for one message: from `from` (a keyword or string) to the agents with keys tos, its body: the one message entity
+  "The writer's request for one message: from `from` (a keyword or string: an agent's key, a user's included, its sender by seon.task/sender) to the agents with keys tos, its body: the one message entity
   on main (seon.task/message-tx, sent now), which the writer syncs before it answers dest; each recipient is then woken (back-op: the
   writer's answer is what wakes, never a commit). The one write of a person's message and an agent's send. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.root/api-state :any [:sequential :string] :any :map] :map]}
   [st from tos body dest]
   {:op :tx :branch :db :flush? true :dest (assoc dest :wake (vec tos))
-   :tx-data (task/message-tx (lib/unique-id) (name from) tos body (System/currentTimeMillis))})
+   :tx-data (task/message-tx (lib/unique-id) (task/sender (name from)) tos body (System/currentTimeMillis))})
 
 (defn- deliver-message
   "An agent's send m ({:from :to [id ...] :body}) written as one message entity on main to every agent it names, live or not

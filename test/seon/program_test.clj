@@ -211,7 +211,7 @@
 (deftest the-program-digest-moves-with-the-program-and-not-with-data
   (let [db (record (empty-db) 'app.pt-pd "(defn f [x] x)")
         dg (program/program-digest db)]
-    (is (= dg (program/program-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from "root" :seon.message/body "hello"}])))
+    (is (= dg (program/program-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from {:seon.root/id :root} :seon.message/body "hello"}])))
         "a write of data (a message) leaves it")
     (is (not= dg (program/program-digest (record db 'app.pt-pd "(defn f [x] (inc x))"))) "a replaced form moves it")
     (is (not= dg (program/program-digest (record db 'app.pt-pd "(defn g [x] x)"))) "an added form moves it")
@@ -223,7 +223,7 @@
   ;; them, "green: ran 0"; a run selects the task's proofs, so its key moves with them
   (let [db (d/db-with (record (empty-db) 'app.pt-rd "(defn f [x] x)\n(defn g [x] x)") [{:seon.task/id "app.pt-rd/t"}])
         dg (program/run-digest db)]
-    (is (= dg (program/run-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from "root" :seon.message/body "hello"}])))
+    (is (= dg (program/run-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from {:seon.root/id :root} :seon.message/body "hello"}])))
         "a write of other data leaves it")
     (is (not= dg (program/run-digest (record db 'app.pt-rd "(defn f [x] (inc x))"))) "the program moves it")
     (let [proved (d/db-with db [{:seon.task/id "app.pt-rd/t" :seon.task/proofs ['app.pt-rd/f]}])]
