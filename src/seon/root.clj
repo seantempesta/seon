@@ -276,11 +276,6 @@
     (-> st (to-agent o id {:op :write :msg {:op :evals :by "root" :evals es}}) (update ::inserting dissoc id))
     st))
 
-(defn- person
-  "The name of the user this root serves until there is a login: the OS account running it. See docs/users.md#what-each-thing-is."
-  {:malli/schema [:=> [:cat] :string]}
-  [] (System/getProperty "user.name"))
-
 (defn- signed-in-key
   "The :seon.agent/key of the user signed in on db (root's :seon.root/signed-in), who a person's ask and message are from, else op's refusal: no default. See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:or :string :seon.root/refused]]}
@@ -1573,10 +1568,9 @@
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
     ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
-    ;; owed (owner's call): a fresh store's user name needs a documented config key, not the OS account (person)
     (let [prev (previous-end db)
           held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
-          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (person)) (into (task/earlier-agents-tx db)) (into (task/config-tx config in-force-sources))
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (cfg/value :seon.config.root/user-name)) (into (task/earlier-agents-tx db)) (into (task/config-tx config in-force-sources))
                                                                                   (into (root-session-refresh-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row

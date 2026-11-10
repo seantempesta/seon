@@ -13,6 +13,7 @@
         :description "The resolved config: every limit, bound and default of the platform, one key each."}
   ;; root and its procs
   [:seon.config.root/profile {:optional true} :seon.config.root/profile]
+  [:seon.config.root/user-name {:optional true} :seon.config.root/user-name]
   [:seon.config.root/max-agents {:optional true} :seon.config.root/max-agents]
   [:seon.config.root/death-stderr-bytes {:optional true} :seon.config.root/death-stderr-bytes]
   [:seon.config.root/flow-stop-ms {:optional true} :seon.config.root/flow-stop-ms]
