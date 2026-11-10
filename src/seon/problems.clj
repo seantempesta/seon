@@ -190,19 +190,20 @@
                           {:kind :stale-pin :section a :path path :stated sha :recorded g} {:section a :path path :stated sha :recorded g}))))))
 
 (defn stale-binary
-  "A :stale-binary row while root's binary was built from another program than the main it booted on: root's
-  :seon.root/source fact as its boot wrote it (seon.root/booted-source), the binary's program (:binary, none when its
-  build recorded none) beside main's (:program). None on a boot whose binary is main's program, or with no source fact;
-  gone at the next boot on a matching binary. Derived, never stored, no clock, and never an import: the binary is rebuilt
-  (bin/update). Cost: one pull. See docs/health.md#a-stale-binary."
+  "A :stale-binary row while root's binary was built from another git tree than the one main was last brought to from outside
+  (an import or a landing): root's :seon.root/source fact as its boot wrote it (seon.root/booted-source), the binary's tree
+  (:binary-tree, none when its build recorded none) beside main's (:tree). What agents merged into main since is main's own,
+  never a row. None on a boot whose binary is of main's tree, or with no tree on the fact; gone at the next boot on a matching
+  binary. While it shows, root forks no agent (seon.root/stale-binary). Derived, never stored, no clock, and never an import:
+  the binary is rebuilt (bin/update) or the store erased. Cost: one pull. See docs/health.md#a-stale-binary."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
-  (let [{:keys [boot binary program]} (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source)]
-    (if (and program (not= binary program))
+  (let [{:keys [boot binary-tree tree]} (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source)]
+    (if (and tree (not= binary-tree tree))
       [(derived-row ans (str "stale-binary " boot) 'seon.root
-                    (str "root's binary was built from " (if binary (str "program " binary) "a program its build did not record")
-                         ", and main's program is " program ": agents fork main's code over another image and share no verdicts until bin/update rebuilds it")
-                    {:kind :stale-binary :binary binary :program program} {:binary binary :program program})]
+                    (str "root's binary was built from " (if binary-tree (str "tree " binary-tree) "a tree its build did not record")
+                         ", and main was last brought from tree " tree ": agents would fork main's code over another image, so none is forked until bin/update rebuilds it or the store is erased")
+                    {:kind :stale-binary :binary binary-tree :tree tree} {:binary binary-tree :tree tree})]
       [])))
 
 ;; ---- the wiki kept true: code that moved under its text, pages nothing links, issues with no page ----

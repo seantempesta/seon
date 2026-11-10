@@ -414,15 +414,16 @@
     (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts)))))
 
 (defn stale-binary
-  "{:binary :program} when this root's binary was built from another program than the one main holds (db, main as it booted;
-  digest, seon.program/program-digest of it), else nil: a main indexed from a tree (it holds a :seon.root/source fact) on a
-  binary whose bin/build recorded another program. Agents would load main's forms over the binary's code and run the two
-  mixed, so no agent is forked (no-room) until they agree. See docs/source.md#a-boot-resumes-from-the-db."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:map [:binary :string] [:program :string]]]]}
-  [db digest]
-  (let [held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
-        built (:program (binary-program))]
-    (when (and held built (not= built digest)) {:binary built :program digest})))
+  "{:binary :tree} when this root's binary was built from another git tree than the one main was last brought to from
+  outside (db's :seon.root/source :tree, moved only by an import or a landing), else nil. What agents merged into main since
+  is main's own and never a mismatch (docs/source.md#a-boot-resumes-from-the-db: the db is the source of truth); a store left
+  by another tree is: agents would load its forms over this binary's code, so no agent is forked (no-room) until they agree.
+  Nil when either side holds no tree (a store seeded with no source, a build outside git)."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:binary :string] [:tree :string]]]]}
+  [db]
+  (let [held (:tree (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root])))
+        built (:tree (binary-program))]
+    (when (and held built (not= built held)) {:binary built :tree held})))
 
 (defn- no-room
   "Why no agent can be started now, or nil: no fork server to fork it (refused before an agent proc and its socket are made: a socket the lost server closes would end that agent first, as a death), or too many live agents. n: the agents the start would leave, a Back's old one not among them."
@@ -1216,7 +1217,8 @@
   :indexed-by on its :seon.root/source fact, read before the index, whose fact replaces it): when what the tree changed
   moves that code, or the store holds an index no key names, the store is removed and the tree indexed into it again from nothing, since a store brought up to
   date keeps what the old code made of each form whose text did not change, its id included
-  (seon.program/account-diff-tx). Answers index's answer with the store's :program digest, or its error. See
+  (seon.program/account-diff-tx). Answers index's answer with the store's :program digest and the git :tree its source fact
+  holds (the tree indexed), or its error. See
   docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :string :seon.host/fn :seon.program/inputs [:vector :qualified-symbol]] :map]}
   [path index inputs roots]
@@ -1234,7 +1236,8 @@
                    (d/transact conn {:tx-data [{:seon.root/id :root :seon.root/source (assoc (fact) :indexed-by (or code held))}]}))
                  (let [out (cond (:error r) r
                                  moved? {:moved code}
-                                 :else (assoc r :program (program/program-digest @conn) :indexed-by (or code held)))]
+                                 :else (cond-> (assoc r :program (program/program-digest @conn) :indexed-by (or code held))
+                                         (:tree (fact)) (assoc :tree (:tree (fact)))))]
                    (pdb/sync! cfg)
                    (d/release conn)
                    out)))
@@ -1257,7 +1260,7 @@
 
 (defn built-program
   "The program of the tree at root as a seed indexes it, and the inputs bin/test keys verdicts by: {:program
-  (seon.program/program-digest of the tree's index) :inputs (seon.fx/inputs)}, or the error of a read or an analysis.
+  (seon.program/program-digest of the tree's index) :tree (its git tree id, absent outside git) :inputs (seon.fx/inputs)}, or the error of a read or an analysis.
   The index is the build's cache, a store other than the one store because it is regenerable from the tree at any time
   and root never reads it: kept between builds under base (bin/build's target/seon.index, keyed by the schema and layout:
   seon.db/kept-store!, so one of another layout is dropped, never opened), brought to the tree as a seed brings a store
@@ -1269,7 +1272,8 @@
   ([root base roots]
    (let [inputs (fx/inputs root)
          r (kept-index! (str (pdb/kept-store! base) "/index") #(import-tree! % {:root root :dirs (cfg/value :seon.config.source/dirs)} (profile/now-ns)) inputs roots)]
-     (if (:error r) (:error r) {:program (:program r) :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}))))
+     (if (:error r) (:error r) (cond-> {:program (:program r) :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}
+                                 (:tree r) (assoc :tree (:tree r)))))))
 
 (defn binary-program
   "What the running binary was built from, as bin/build recorded it beside the binary (target/seon.program,
@@ -1280,16 +1284,20 @@
     (when (.isFile f) (sedn/decode (slurp f)))))
 
 (defn booted-source
-  "Root's :seon.root/source fact held, as this boot (id boot) states it: the program the binary was built from (built, `binary-program`'s
-  :program, absent when bin/build recorded none) beside main's (main-digest, seon.program/program-digest of main at boot),
-  and, only when the two are one program, the binary's inputs with the config in force (config-input, seon.fx/config-input),
-  which agents key their test results by (seon.agent/test-inputs). A binary of another program is
-  seon.problems/stale-binary's row, never imported. See docs/source.md#a-boot-resumes-from-the-db."
+  "Root's :seon.root/source fact held, as this boot (id boot) states it: the git tree the binary was built from (built,
+  `binary-program`'s :tree, as :binary-tree) and its program (:binary), absent when bin/build recorded none. When that tree is
+  held's :tree, the one main was last brought to from outside (an import, a landing; what agents merged since is main's own and
+  never a mismatch), the binary's inputs with the config in force (config-input, seon.fx/config-input), which agents key their
+  test results by (seon.agent/test-inputs), and :program the binary's, the program those inputs describe; otherwise :program is
+  main's at boot (main-digest, seon.program/program-digest) and no inputs. Another tree is seon.problems/stale-binary's row
+  and refuses spawns (stale-binary), never imported. See docs/source.md#a-boot-resumes-from-the-db."
   {:malli/schema [:=> [:cat :map :string [:maybe :map] :string :map] :map]}
   [held boot built main-digest config-input]
-  (cond-> (-> held (dissoc :inputs :binary) (assoc :boot boot :program main-digest))
-    (:program built) (assoc :binary (:program built))
-    (and (:inputs built) (= (:program built) main-digest)) (assoc :inputs (update (:inputs built) :config merge config-input))))
+  (let [one? (and (:tree built) (= (:tree built) (:tree held)))]
+    (cond-> (-> held (dissoc :inputs :binary :binary-tree) (assoc :boot boot :program (if one? (:program built) main-digest)))
+      (:program built) (assoc :binary (:program built))
+      (:tree built) (assoc :binary-tree (:tree built))
+      (and one? (:inputs built)) (assoc :inputs (update (:inputs built) :config merge config-input)))))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
@@ -1427,7 +1435,7 @@
               :boot {:gc-sweepers sweepers :compacted compacted :retained retained :seeded seeded :seed-ms (lib/r2 seed-ms)
                      :config-errors config-errors :digest digest :digest-ms (lib/r2 digest-ms)
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)
-                     :stale-binary (stale-binary db digest)}}
+                     :stale-binary (stale-binary db)}}
         graph-p (promise)
         root-procs-p (promise)
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
