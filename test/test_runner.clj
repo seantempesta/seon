@@ -108,11 +108,17 @@
         ;; a namespace the kept tree holds whose file the checkout lacks (another tree's, e.g. one since
         ;; renamed) is read again from this tree with the change, so a changed file requiring it finds it
         ;; analyzed in this process (seon.source's read-nss marks it loaded), never a load from disk that cannot
+        ;; and every file where tree differs from the checkout this process runs (fx/tree-id): analysis resolves a name the
+        ;; changed files use against what this process has loaded, so a file left unread because the kept tree holds it as tree
+        ;; does is still this process's text, not tree's (health's base, main, read by a branch that deleted a var main's tests
+        ;; use: `Unable to resolve var`). Nothing for the checkout's own tree; for another, the files the two differ by
         paths (if from
-                (into (set paths) (for [dt (d/datoms parent :aevt :ns/file) :let [p (:v dt)]
-                                        :when (not (.exists (io/file root p)))
-                                        :when (zero? (:exit (sh/sh "git" "-C" root "cat-file" "-e" (str tree ":" p))))]
-                                    p))
+                (-> (set paths)
+                    (into (for [dt (d/datoms parent :aevt :ns/file) :let [p (:v dt)]
+                                :when (not (.exists (io/file root p)))
+                                :when (zero? (:exit (sh/sh "git" "-C" root "cat-file" "-e" (str tree ":" p))))]
+                            p))
+                    (into (let [running (fx/tree-id root)] (when (not= running tree) (changed-paths root running tree)))))
                 paths)
         tx (if from
              (source/refresh-tx parent (tree-files root tree paths))
@@ -137,25 +143,29 @@
   seon.proofs/a-failed-import-leaves-no-branch: one selected 0 tests and said OK). Every text is
   read from the tree's git objects (tree-files). Two runs on one new tree both import it and the first to
   finish keeps the branch (keep-tree!). A store past
-  :seon.config.proofs/program-store-max-bytes on disk (an LMDB file never shrinks; max-bytes, else that key) is removed
-  when a tree must be imported into it, and starts again from that tree; a tree it keeps is read whatever its size. The branch's connection stays open for
+  max-bytes on disk (an LMDB file never shrinks) is removed when a tree must be imported into it, and starts again from
+  that tree; a tree it keeps is read whatever its size. Only the plan passes a bound (tests-of:
+  :seon.config.proofs/program-store-max-bytes), before anything of its run reads the store: the health step importing
+  the base tree beside the shards removed the store, and the head's branch the plan had kept with it, so every shard's
+  first program reader imported the program inside its own budget. Any other caller (nil) imports beside what is kept. The branch's connection stays open for
   the process (the db value reads the store); the store's main connection is released. tree: the
   checkout's tree-id when the caller holds it (the plan computes it once)."
   ([root store] (program-db root store (fx/tree-id root)))
-  ([root store tree] (program-db root store tree (config/value :seon.config.proofs/program-store-max-bytes)))
+  ([root store tree] (program-db root store tree nil))
   ([root store tree max-bytes]
   (let [b (tree-branch tree)
         open #(pdb/open! :lmdb store 0 :db)
         ;; the bound is the write's: a tree the store keeps is read whatever the store's size (a shard read the plan's tree
         ;; from a store the plan's import had taken past it, removed it, and its first program reader imported the tree
         ;; again inside its own tick budget); only a tree to import starts a store past it again
-        [{:keys [conn cfg]} branches] (let [o (open) bs (d/branches (:conn o))]
-                                        (if (or (contains? (set bs) b) (<= (.length (io/file store "data.mdb")) max-bytes))
-                                          [o bs]
-                                          (do (d/release (:conn o)) (fx/remove-tree! store)
-                                              (let [o (open)] [o (d/branches (:conn o))]))))]
-    (when-not (contains? (set branches) b)
-      (keep-tree! conn cfg root tree b branches))
+        ;; the tree's branch asked for alone (seon.db/branch?, one read); the store's branches listed only for a tree to
+        ;; import (keep-tree! picks the nearest kept tree), since d/branches reads every roster entry (35k ticks, 102 KB a branch)
+        {:keys [conn cfg]} (let [o (open)]
+                             (if (or (nil? max-bytes) (pdb/branch? (:conn o) b) (<= (.length (io/file store "data.mdb")) max-bytes))
+                               o
+                               (do (d/release (:conn o)) (fx/remove-tree! store) (open))))]
+    (when-not (pdb/branch? conn b)
+      (keep-tree! conn cfg root tree b (d/branches conn)))
     (d/release conn)
     @(pdb/connect (assoc cfg :branch b)))))
 
@@ -213,7 +223,8 @@
   (let [vars (set (keep #(when (str/includes? % "/") (symbol %)) names))
         nss (set (if (seq names) (map #(symbol (first (str/split % #"/"))) names) (test-namespaces root)))
         tree (fx/tree-id root)
-        db (program-db root store tree)
+        ;; the plan alone bounds the store, at its own import, before anything of this run reads it
+        db (program-db root store tree (config/value :seon.config.proofs/program-store-max-bytes))
         in (fx/inputs root config/config (config/checkout) tree)
         g (reach-graph-of db (:data-refs in) store)
         ;; the process store a process test's root takes is indexed by this tree's code: its key is an input of theirs
@@ -428,7 +439,12 @@
         1)
   (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived binary-current]} plan
+        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived binary-current audit]} plan
+        ;; the reuse audit's tests run beside the plan's (seon.proofs/plan-of's :audit), never a slow one: a slow test runs
+        ;; last, once all else is green (docs/merging.md#a-slow-test-runs-last)
+        audit (let [ms (measured-ms audit) bound (config/value :seon.config.proofs/slow-test-ms)]
+                (filterv #(< (get ms % 0) bound) audit))
+        run-tests (into run-tests audit)
         ;; a merge runs these last, once all else is green (bin/prove): out/slow, names, one line
         ;; the proofs of the tree that pass by a waiver (an :overrun in the form: seon.problems/waived-proofs), for bin/prove's last lines
         _ (write! (str out "/waived") (str waived "\n"))
@@ -492,6 +508,11 @@
                       ran " in this plan, " late " the slow ones run last (the process plan after it)"))))
     ;; a key green and red at one digest: red, never run again until a change moves its digest;
     ;; out/flaky names each, and bin/test ends red on it after its shards ran
+    ;; the reuse audit (seon.proofs/plan-of): reused greens run again; out/audit names them, and bin/test calls a red among
+    ;; them a reuse mismatch: a digest that missed an input
+    (write! (str out "/audit") (apply str (map #(str % "\n") audit)))
+    (when (seq audit)
+      (println (str "prove: reuse audit: " (count audit) " reused greens run again (chosen by the tree): " (str/join " " (map str audit)))))
     (let [flaky (for [[k r] flaky]
                   (str "FLAKY " k " " (:digest r) ": green and red at this digest, red until a change moves it (seon.proofs/flaky)"))]
       (write! (str out "/flaky") (apply str (map #(str % "\n") flaky)))

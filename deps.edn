@@ -18,12 +18,13 @@
         jolt-lang/crypto {:local/root "reference-code/crypto"}
 
         ;; unmodified, pinned
+        ;; 9b6fae80 (#56): send-all copies with the typed write-array; Jolt 0.8.25's old 4-arg form raises on every response
         jolt-lang/ring-chez-adapter {:git/url "https://github.com/jolt-lang/ring-chez-adapter.git"
-                                     :git/sha "fa0674e3627186fab1ed81c8ea069a66007edd57"}
+                                     :git/sha "9b6fae804e06a8877149ff3ce0531f0b30f881d0"}
         jolt-lang/multipart {:git/url "https://github.com/jolt-lang/multipart.git"
                              :git/sha "ca51dd47aff27dac3cc09557682e82ec63720310"}
         jolt-lang/time {:git/url "https://github.com/jolt-lang/time.git"
-                        :git/sha "a28ab100111050356957eb42b7ec89a4065de754"}
+                        :git/sha "80e5fc22d9ddd8ee2f2f525580fbc643d0ecba4c"}
         ;; our fork: a read from a fiber parks the fiber, not its carrier (jolt/fiber-aware-read)
         jolt-lang/http-client {:git/url "https://github.com/seantempesta/http-client.git"
                                :git/sha "e866277d81f89f7278f47da1e48048610ce6feed"}

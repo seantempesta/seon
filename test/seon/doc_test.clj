@@ -61,8 +61,8 @@
   (let [broken (assoc pages "demo/async.md" (str/replace async "flow.md#idioms" "flow.md#nowhere"))
         db (empty-db)
         refusal (try (pdb/with db (doc/load-tx db "demo" broken)) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-    (is (= {:seon.error/type :seon.db/no-target :target [:seon.doc/address "demo/flow.md#nowhere"]}
-           (select-keys refusal [:seon.error/type :target])) "refused, naming the link")
+    (is (= {:seon.error/type :seon.db/no-target :target [:seon.doc/address "demo/flow.md#nowhere"] :by "demo/async.md#waiting"}
+           (select-keys refusal [:seon.error/type :target :by])) "refused, naming the link and the section that holds it")
     (let [fixed (pdb/db-with db (doc/load-tx db "demo" (assoc broken "demo/flow.md" (str flow "\n## Nowhere\n\nNow it exists.\n"))))]
       (is (= ["demo/flow.md#nowhere"] (mapv :seon.doc/address (:seon.doc/references (d/pull fixed [{:seon.doc/references [:seon.doc/address]}] [:seon.doc/address "demo/async.md#waiting"]))))
           "the page that adds the section: the link is its ref"))))

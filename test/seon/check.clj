@@ -414,7 +414,7 @@
 
 (defn problems-check
   "Provoke every class of problem through the paths agents and root use (:stall-ms 1000
-  for the stall), then read my.root/problems: an eval error and a contract's error, an
+  for the stall, the eval held on a fifo until main holds it, so it comes at any load), then read my.root/problems: an eval error and a contract's error, an
   effect's io error, a platform defect in the api, a stall, an agent's death with its exit
   status and stderr, a red proof's assertions and a cost proof's verdict. It reads them
   once main holds each (seon.root/await-db over seon.problems/report)."
@@ -426,12 +426,25 @@
         ;; one error each: a request stops at its first
         r1 [@(c/submit! sys a "(/ 1 0)") @(c/submit! sys a "(defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")")
             @(c/submit! sys a "(my.fx/call :file {:path \"/nonexistent-d2/x\" :text \"x\"})")]
-        ;; a stall (1,000 ms bound): an open :stalled problem while it sleeps, closed once it answers
+        ;; a stall (1,000 ms bound): an open :stalled problem while the eval is held, closed once it answers. Held on a
+        ;; fifo the step writes only once main holds the stall: a sleep let root's stall timer come after the eval
+        ;; answered under load (or its assert and retract share one commit), and the wait for a stall that never was
+        ;; ran 77 minutes (batch 9, load 26-32; task seon.check/the-problems-step-holds-its-stall-until-it-sees-it)
         stalled-rows #(get-in (seon.problems/health %) [:classes :stalled :rows])
-        r2p (c/submit! sys a "(Thread/sleep 2500) :awake")
-        during (seon.root/await-db sys #(seq (stalled-rows %)))
+        hold (str (System/getProperty "java.io.tmpdir") "/problems-stall-" (random-uuid) ".fifo")
+        made (clojure.java.shell/sh "mkfifo" hold)
+        _ (when-not (zero? (:exit made)) (throw (ex-info (str "mkfifo " hold ": " (:err made)) made)))
+        held (str "(slurp " (pr-str hold) ") :awake")
+        r2p (c/submit! sys a held)
+        ;; it ends, too, if the eval answers first (no stall came): the step then fails on :stalled, never waits on
+        during (seon.root/await-db sys #(or (seq (stalled-rows %)) (realized? r2p)))
         stall (first (some-> during stalled-rows))
+        ;; the release, written here to the fifo itself (spit writes a file beside it and renames it over the fifo, which
+        ;; the reader never sees): the held eval is blocked opening the read end, so the write end opens at once; an eval
+        ;; that answered already (no stall came) reads nothing, and nothing is written
+        _ (when-not (realized? r2p) (with-open [w (java.io.FileOutputStream. ^String hold)] (.write w (.getBytes "go"))))
         r2 @r2p
+        _ (clojure.java.shell/sh "rm" "-f" hold)
         after (seon.root/await-db sys #(empty? (stalled-rows %)))
         _ (a/>!! (:back sys) {:op :writer :tx-count 1 :batch-ms 1 :n-tx "not a number" :commits 1})
         r3 @(c/submit! sys b "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)")
@@ -464,7 +477,7 @@
        :checks {:eval (every? (types :eval) [:seon.agent/eval-error :seon.instrument/contract-error])
                 :effect (contains? (types :effect) :seon.fx/io-error)
                 :platform (contains? (types :platform) :seon.root/proc-defect)
-                :stalled (and (= a (:agent stall)) (re-find #"Thread/sleep 2500" (str (:message stall))) (not (contract/error? after)))
+                :stalled (and (= a (:agent stall)) (clojure.string/includes? (str (:message stall)) "problems-stall-") (not (contract/error? after)))
                 :died (and died (= {:exit 3} (get-in died [:example :exit])) (re-find #"D2 boom" (str (get-in died [:example :stderr]))))
                 :red (and red (seq (:assertions red)) (= ['app.proofs/p1-test] (:proofs red)))
                 :cost (and cost-row (false? (get-in cost-row [:verdict :ok?])) (seq (:rows cost-row)))}}))))
@@ -603,8 +616,8 @@
   once its first agent runs. With a running sys, also one thread per :mixed proc of its
   declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
   readers (Flow's error channel, the fork server's socket) and, while the web proc listens,
-  the web server's acceptor and sweeper (ring-chez-adapter's, each a future of Jolt's agent
-  pool; task seon.web/web-server-threads-are-joined-at-stop). The embedding model's threads are the
+  the web server's acceptor and sweeper (ring-chez-adapter's, each a future, which runs on Jolt's
+  solo pool as clojure-agent-send-off-pool-N, the JVM's name; task seon.web/web-server-threads-are-joined-at-stop). The embedding model's threads are the
   helper's process's, none root's (docs/vector.md#the-model)."
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-asleep" 1 "jolt-carrier" (fiber-carriers)}
        :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)
@@ -617,7 +630,7 @@
          web? (true? (get-in (c/state sys) [:web :listening]))]
      (update (declared-threads) :roster merge
              (cond-> {"async-mixed" mixed "seon-fs-events" 1}
-               web? (assoc "clojure-agent-pool" 2))))))
+               web? (assoc "clojure-agent-send-off-pool" 2))))))
 
 (defn- threads
   "The threads this process runs now, measured as declared-threads declares them, and :os,
@@ -641,6 +654,18 @@
 
 ;; ---- scale ------------------------------------------------------------------------
 
+(defn- fan
+  "(mapv f coll) on at most 32 threads of its own, all gone when it returns. A check that counts
+  root's threads fans out with this and not pmap: pmap's futures run on Jolt's solo pool, whose
+  idle workers live on for its keep-alive as the JVM's do, so the count would hold the check's
+  own workers (docs/checks.md#the-suites)."
+  {:malli/schema [:=> [:cat fn? [:sequential :any]] [:vector :any]]}
+  [f coll]
+  (let [ex (java.util.concurrent.Executors/newFixedThreadPool 32)]
+    (try (mapv deref (mapv (fn [x] (.submit ex ^Callable (fn [] (f x)))) coll))
+         (finally (.shutdown ex)
+                  (.awaitTermination ex Long/MAX_VALUE java.util.concurrent.TimeUnit/NANOSECONDS)))))
+
 (defn scale [n]
   (run-check "SCALE" {:datoms 2000}
    (fn [sys]
@@ -651,7 +676,7 @@
           mem0 (lib/sysmem)
         th-boot (thread-diff (declared-threads sys) (threads))
         t0 (profile/now-ns)
-        ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "scale " i)})) (range n))))
+        ids (ready! sys #(fan (fn [i] (c/spawn! sys {:task (str "scale " i)})) (vec (range n))))
         t-ready (profile/ms-since t0)
         th-ready (thread-diff (declared-threads sys) (threads))
         _ (out! "ready in " (lib/r2 t-ready) " ms: " (frequencies (map #(get-in (c/state sys) [:agents % :status]) ids)))
@@ -672,7 +697,7 @@
                    ;; function costs (:error 2 with no reports, under load, said nothing of why)
                    (not (and (map? r) (not (:ex r)) (= 1 (:pass tr)) (zero? (+ (:fail tr) (:error tr)))))
                    (assoc :eval r :tests (dissoc tr :fns)))))
-        results (vec (pmap work ids))
+        results (fan work ids)
         t-done (profile/ms-since t0)
         _ (doseq [r results :when (not (:ok r))] (out! "NOT OK: " (pr-str r)))
         th-work (thread-diff (declared-threads sys) (threads))

@@ -7,7 +7,7 @@
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn] [clojure.java.shell]
             [aero.core :as aero] [datahike.api :as d] [seon.model]
-            [jolt.scheme :as scm] [jolt.analyzer :as an] [jolt.ir :as ir]
+            [test-runner :as runner]
             [seon.config :as config] [seon.contract :as contract] [seon.db :as pdb] [seon.task :as task] [seon.source :as source] [my.test :as mt]))
 
 (def ^:private dir (str (config/checkout) "/test/seon/config"))
@@ -302,32 +302,15 @@
 
 ;; ---- no environment read outside the loader -------------------------------------------------
 
-(defn- src-files []
-  (sort (for [f (file-seq (io/file (config/checkout) "src")) :when (str/ends-with? (.getName f) ".clj")] f)))
-
-(defn- getenv-refs
-  "The System/getenv references of file f's top-level forms, by Jolt's analyzer (each form
-  analyzed in its namespace, never run): [[ns form-head] ...]."
-  [f]
-  (with-open [r (java.io.PushbackReader. (io/reader f))]
-    (loop [nsx 'user acc []]
-      (let [form (binding [*ns* (or (find-ns nsx) *ns*)] (read {:eof ::eof :read-cond :allow} r))]
-        (if (= ::eof form)
-          acc
-          (let [nsx' (if (and (seq? form) (= 'ns (first form))) (second form) nsx)
-                ;; its namespace loaded (as the platform loads it), so its aliases resolve
-                _ (when (not= nsx nsx') (require nsx'))
-                node (an/analyze (scm/call "make-analyze-ctx" (str nsx')) form)
-                hits (volatile! [])]
-            ((fn walk [n]
-               (when (and (= :host-static (:op n)) (= "getenv" (:member n)) (#{"System" "java.lang.System"} (:class n)))
-                 (vswap! hits conj [nsx' (when (seq? form) (take 2 form))]))
-               (ir/reduce-ir-children (fn [_ c] (walk c)) nil n))
-             node)
-            (recur nsx' (into acc @hits))))))))
-
 (deftest no-environment-read-in-src-but-the-loader
-  (let [refs (mapcat getenv-refs (src-files))]
+  ;; the analyzer's references of each src form (:form/refs: a host call is Class/member) as the program holds them, so
+  ;; no file is analyzed again here (that was the test's work, every src form): the forms naming System/getenv
+  (let [db (runner/program)
+        getenv? #(and (= "getenv" (name %)) (#{"System" "java.lang.System"} (namespace %)))
+        calling (into #{} (keep #(when (getenv? (:v %)) (:e %))) (d/datoms db :aevt :form/refs))
+        refs (for [[nsn src] (d/q '[:find ?nsn ?src :in $ [?f ...] :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn]
+                                    [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db (vec calling))]
+               [nsn (take 2 (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))])]
     ;; the analyzer does find them: the loader's own two (checkout, secret); the profile is a
     ;; command-line layer (--profile), not an environment read
     (is (= #{'seon.config} (set (map first refs))))

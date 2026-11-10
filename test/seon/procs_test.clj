@@ -194,6 +194,42 @@
         (is (= at (get-in problem [:error :commit])))
         (remote/close! end) (sock/close! a'))))))
 
+(deftest a-context-read-makes-its-agent-neither-busy-nor-idle
+  ;; docs/server.md#ops: a read never writes (owner, 2026-11-10). A :context read is an eval of origin :context: in
+  ;; flight, the agent is not made busy, and its answer reports the status it already had, so root's view of the agent
+  ;; does not move and nothing is written to main for it (seon.root's record-agents writes only a change). An eval that
+  ;; is work still makes it busy. Red before: every request sent {:status :busy}, and its answer :idle: two commits on
+  ;; main for each read.
+  (let [[r a'] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        statuses (fn [outs] (keep #(when (= :status (:op %)) (get-in % [:set :status])) (:to-api outs)))]
+    (try
+      (let [[st outs] (step #'ap/agent-proc st :in {:op :req :rid 5 :kind :eval :msg {:op :eval :forms "(ctx)" :origin :context}})]
+        (is (empty? (statuses outs)) "a read in flight reports no status")
+        (is (contains? (:inflight st) 5) "and is in flight, answered when it ends")
+        (let [[st outs] (step #'ap/agent-proc st :from {:op :reply :id 5 :response {:value 1} :t 1})]
+          (is (= [:idle] (statuses outs)) "its answer reports the agent as it was: idle")
+          (let [[st outs] (step #'ap/agent-proc st :in {:op :req :rid 6 :kind :eval :msg {:op :eval :forms "(+ 1 2)"}})]
+            (is (= [:busy] (statuses outs)) "an eval that is work makes it busy")
+            (let [[_ outs] (step #'ap/agent-proc st :in {:op :req :rid 7 :kind :eval :msg {:op :eval :forms "(ctx)" :origin :context}})]
+              (is (empty? (statuses outs)) "a read beside it changes nothing")))))
+      (finally (remote/close! end) (sock/close! a')))))
+
+(deftest an-agent-that-reads-nothing-is-seen-as-a-stall
+  ;; docs/processes.md#a-stalled-agent: root's frames to an agent never block its proc. An agent that stopped reading its
+  ;; socket (an eval held in a blocking open(2)) left the proc's blocking put parked in its step, so it never took root's
+  ;; :stall? and no stall was recorded (batch 16's problems step, 8.5 min). Here nothing ever takes from the end's :out:
+  ;; each step returns, the frames wait in order, and the stall check answers. No load, no clock: red before, the first
+  ;; step never returned (shown once under a bound outside this test).
+  (let [out (a/chan)
+        st (#'ap/agent-proc {:id :a1 :end {:out out :in (a/chan)} :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        [st _] (step #'ap/agent-proc st :in {:op :req :rid 5 :kind :eval :msg {:op :eval :forms "(open-a-fifo)"}})
+        [st _] (step #'ap/agent-proc st :in {:op :req :rid 6 :kind :eval :msg {:op :eval :forms "(+ 1 2)"}})
+        [_ outs] (step #'ap/agent-proc (assoc st :last-frame-ms 0) :in {:op :stall? :now-ms 10000 :stall-ms 1000})]
+    (is (= [:stalled] (map :op (:to-api outs))) "the proc takes :stall? and answers the stall")
+    (is (= [5 6] [(:id (a/poll! out)) (:id (a/poll! out))]) "and its frames wait for the agent, in order")))
+
 (deftest a-reply-the-wire-cannot-encode-answers-its-asker-and-the-end-serves-on
   ;; task jolt.async/a-value-a-remote-end-cannot-encode-answers-its-asker: root's end sent an agent
   ;; a reply holding a sorted map (no stable encoding), and the writer pump closed the end, which
@@ -570,7 +606,28 @@
         (is (= [:seon.agent/died :a1] ((juxt :seon.error/type :agent) @p)) (pr-str @p))
         (is (re-find #"ended by root" (:seon.error/message @p))))
       (is (empty? (:seon.root/dying st')) "nothing is parked")
-      (is (nil? (:seon.root/stall-due st')) "and no stall timer was armed"))))
+      (is (false? @(:seon.root/stall-timer st')) "and no stall timer was armed"))))
+
+(deftest a-step-that-throws-after-a-stall-check-leaves-the-check-armed
+  ;; docs/clocks.md: root's stall check is a timer to itself (seon.step/timer). A step that took :stall-check and then
+  ;; threw is undone by Flow (its state from before the step is kept); the timer's armed flag is a host object, so the
+  ;; next step with an eval in flight arms it again. Red before: the flag was in the state (::stall-due), kept true by
+  ;; the undo, and no check was armed for the life of root. No clock: each arm's put is recorded as it is asked for
+  ;; (seon.step/put-after! redefined), never waited on.
+  (let [puts (atom [])
+        st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+        st (assoc st :stall-ms 2 :seon.root/busy #{:a1})]
+    (with-redefs [step/put-after! (fn [_ _ m] (swap! puts conj m) nil)]
+      (let [[st _] (#'root/api-proc st :ext {:op :noop})]
+        (is (= [{:op :stall-check}] @puts) "an eval in flight arms the check")
+        (let [[st _] (#'root/api-proc st :ext {:op :noop})]
+          (is (= 1 (count @puts)) "armed once: a second step arms nothing more")
+          ;; the step that takes it throws after the take: Flow keeps the state from before it
+          (is (thrown? Throwable (with-redefs [root/record-agents (fn [& _] (throw (ex-info "after the take" {})))]
+                                   (#'root/api-proc st :back {:op :stall-check}))))
+          (#'root/api-proc st :ext {:op :noop})
+          (is (= [{:op :stall-check} {:op :stall-check}] @puts) "the next step arms it again"))))))
 
 (deftest root-records-what-it-observes-of-its-agents
   ;; what root observes of an agent is facts on the
