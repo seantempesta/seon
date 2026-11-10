@@ -1164,12 +1164,9 @@
   differs from that tree, not every file landed since the last import."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] :string :string] :seon.db/tx-data]}
   [db changed modes tree commit]
-  (let [held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
-        ;; the tree's task files: root's task dir as a path in the checkout it serves
-        co (.getCanonicalPath (java.io.File. ^String (cfg/checkout)))
-        td (.getCanonicalPath (java.io.File. ^String (cfg/value :seon.config.root/tasks-dir)))
-        tasks-dir (when (str/starts-with? td (str co "/")) (subs td (inc (count co))))]
-    (cond-> (changed-tx db changed modes tasks-dir)
+  (let [held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))]
+    ;; the tree's task files where the tree keeps them (its layout, :seon.config.source/tasks-dir), never this root's own task dir
+    (cond-> (changed-tx db changed modes (cfg/value :seon.config.source/tasks-dir))
       held (conj {:seon.root/id :root
                   :seon.root/source (assoc held :tree tree :commit commit :digest (source-digest {:tree tree :pins (:pins held)} (:dirs held [])))}))))
 
