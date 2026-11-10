@@ -61,6 +61,9 @@
  :seon.render/unknown-mark [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/unknown-mark]] [:mark :string]]]
  ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
  :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
+ ;; a value that draws itself, its render or the hiccup it is under :seon.render/hiccup (docs/render.md#a-value-draws-itself):
+ ;; what an eval of one records as its :seon.eval/schema, so its eval is a tile as one a declared render draws
+ :seon.render/drawn [:any {:seon.render/hiccup seon.render/hiccup}]
  ;; a component whose render threw (seon.render/render!, a failure point: renders are code, and agents write
  ;; them), a call of its render in the component's place: :seon.error/in the render, and the thrown error's own data
  :seon.render/component-defect [:and {:seon.render/openai-compat seon.ctx.wire/defect-msgs} :seon.error/base [:map [:seon.error/type [:= :seon.render/component-defect]] [:seon.error/in {:optional true} :symbol]

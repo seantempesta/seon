@@ -720,7 +720,11 @@
         [kv drawn?] (when (and (contains? resp :value) (not basis))
                       (if (:forms resp) [(mapv kept-form v) false] (kept v)))
         ;; a value its model render has already drawn prints as it is
-        schema (when (and (contains? resp :value) (not drawn?)) (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k)))]
+        schema (when (and (contains? resp :value) (not drawn?))
+                 (or (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k))
+                     ;; a value that holds its own render (an SVG chart under :seon.render/hiccup) is named by the schema of such
+                     ;; values, so its eval is a tile as one a schema draws (docs/render.md#a-value-draws-itself)
+                     (when (some? (or (when (map? v) (get v :seon.render/hiccup)) (get (meta v) :seon.render/hiccup))) :seon.render/drawn)))]
     (cond-> (let [kept-resp (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value kv) :else resp)
                   id (:eval-id req)
                   ;; an answer not kept as it is (a host object, a value past the bound, a ctx, several forms) is named by its eval, so its handle is its own

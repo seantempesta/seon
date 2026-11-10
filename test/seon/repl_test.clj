@@ -1364,3 +1364,12 @@
     (is (= "(swap! tick + 10)" code))
     (is (= was still) (pr-str old))
     (is (= "(+ 5 6)" old-code))))
+
+(deftest a-value-that-draws-itself-is-recorded-as-one
+  ;; Web, 2026-11-10: a tile is read by a seek on :seon.eval/schema, so an SVG chart's eval (its hiccup under :seon.render/hiccup)
+  ;; named no schema and was no tile; it records :seon.render/drawn (docs/render.md#a-value-draws-itself)
+  (let [svg {:seon.render/hiccup [:svg {:width 10} [:rect {:width 5}]] :points [1 2 3]}
+        meta-drawn (with-meta [1 2 3] {:seon.render/hiccup [:p "three"]})]
+    (is (= :seon.render/drawn (:seon.eval/schema (repl/record-details "(chart)" {:handle 'result/e1 :value svg} {}))) "a map holding its hiccup")
+    (is (= :seon.render/drawn (:seon.eval/schema (repl/record-details "(xs)" {:handle 'result/e2 :value meta-drawn} {}))) "a value holding it in its metadata")
+    (is (nil? (:seon.eval/schema (repl/record-details "(+ 1 2)" {:handle 'result/e3 :value 3} {}))) "a plain value names none")))
