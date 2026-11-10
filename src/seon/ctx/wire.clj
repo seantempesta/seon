@@ -31,15 +31,15 @@
   [db] (doc/page-text db help-page))
 
 (defn system-text
-  "The system prompt as db holds it (seon.doc/page-text): a turn's, at the commit it read. A db
-  without it is refused by this contract, never answered empty."
-  {:malli/schema [:=> [:cat :seon.host/db] :string]}
+  "The system prompt as db holds it (seon.doc/page-text): a turn's, at the commit it read; nil on a db without it, which the
+  request refuses (`request`: :seon.ctx/no-system-message), never answered empty."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
   [db] (doc/page-text db doc/system-page))
 
 (defn agent-system-text
   "The system message of agent record c on db: the doc sections its :seon.agent/system join names and every section below each, each its heading at its level and its text, in the order the wiki was written; with none, the
-  system prompt (`system-text`). See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :seon.host/db :map] :string]}
+  system prompt (`system-text`), nil when db holds neither. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe :string]]}
   [db c]
   (if-let [es (seq (distinct (mapcat #(doc/subtree db %) (keys (:seon.agent/system c)))))]
     (->> (map #(d/pull db [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/text :seon.doc/position] %) es)
@@ -395,7 +395,8 @@
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
   [{db :seon.db/db} a]
   (let [k (:seon.agent/key a)]
-    (-> [{:role "system" :content (agent-system-text db a)}]
+    ;; no prompt on db: no system message, so the request is refused by its own check (a typed error), not thrown inside the render
+    (-> (if-let [t (agent-system-text db a)] [{:role "system" :content t}] [])
         (into (map (fn [ek] [#'example-msgs {} ek])) (session/session-examples db a))
         (into (when k [{:role "user" :content (session/session-open k)}]))
         (into (turn-entities db a)))))
