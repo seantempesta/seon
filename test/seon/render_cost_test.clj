@@ -581,7 +581,10 @@
            :growth :linear
            ;; measured 2026-11-08 on the :memory test store (a commit's diff walks the whole index there, so the bytes creep up; LMDB's costs what changed):
            ;; 20.0 MB / 3,362 calls / 7.1M ticks at 4 turns, 41.7 MB / 5,714 / 15.8M at 8, 84.6 MB / 10,418 / 33.0M at 16
-           :per-n {:calls 600 :bytes 5400000}
+           ;; 2026-11-10 (batch 2, jolt/discovery): every task holds its plan's search (seon.task/plan-search-tx), so the agent's ctx joins one
+           ;; more entity: its part is drawn once (seon.render.ui/searched, 1 call at 4 turns), and each turn's patch costs ~40 calls more for
+           ;; the join's views (seon.ratom) and agent-parts keying one more child: 3,345 -> 3,557 calls at 4 turns. per-n 600 -> 640
+           :per-n {:calls 640 :bytes 5400000}
            :fixed {:calls 1000 :bytes 1000000}
            :sizes [4 8 16]})))))
 

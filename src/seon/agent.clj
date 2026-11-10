@@ -1312,10 +1312,8 @@
         run-all (fn [say]
             (if (empty? run)
               {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
-              (let [typical (fx/typical-ms run)
-                    ;; a test never measured counts as the mean of those measured, else the default
-                    mean (if (seq typical) (quot (reduce + (vals typical)) (count typical)) (cfg/value :seon.config.proofs/unmeasured-ms))
-                    ms (into {} (map (fn [t] [t (get typical t mean)])) run)
+              (let [;; each test's measured ms, or its class's configured estimate (seon.proofs/estimated-ms)
+                    ms (proofs/estimated-ms run (fx/typical-ms run) (:process plan))
                     ;; no more children than the work needs: each is worth at least what a fork and a child's start cost
                     n (-> (quot (reduce + (vals ms)) (cfg/value :seon.config.proofs/child-min-ms)) (max 1) (min (cfg/value :seon.config.proofs/jobs)))
                     fds (atom #{})

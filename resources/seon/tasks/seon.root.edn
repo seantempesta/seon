@@ -7,7 +7,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{}}
  {:seon.task/name "roots-log-is-bounded"
-  :seon.task/plan "What exists: `bin/root start` sends a detached root's output to runs/root.log (bin/root), appended across every start for the checkout's life; nothing bounds or rotates it. Correct: when bin/root starts a root and the log is past a config key's bound (bytes, its unit and provenance in resources/seon/config/default.edn), it moves the log to root.log.1, replacing the one before, so a checkout keeps the current log and one previous. Rotation happens at start, an event, never on a timer. Replaces nothing."
+  :seon.task/plan "What exists: `bin/root start` truncates runs/root.log at each start (bin/root: `: > \"$LOG\"`), so the log no longer grows across starts, and the previous start's log is lost with it; within one root's life nothing bounds it. Correct: a root's log is bounded within its life by a config key's bound (bytes, its unit and provenance in resources/seon/config/default.edn) and keeps one previous log (root.log.1) across a start, so a crash's log survives the next start. Rotation happens at an event (a start, the bound reached by a write), never on a timer."
   :seon.task/kind :work
   :seon.task/proofs #{seon.root-test/a-start-past-the-bound-keeps-one-previous-log}}
  {:seon.task/name "operator-commands"

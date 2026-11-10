@@ -31,6 +31,8 @@
                        [:gen {:optional true} :qualified-symbol]]
  ;; a generated estimate of a function whose contract carries no bound (seon.cost/bound)
  :seon.cost/no-bound [:and :seon.error/base [:map [:seon.error/type [:= :seon.cost/no-bound]] [:var :qualified-symbol]]]
+ ;; what prices an estimate (per-unit, expected): its growth and costs, a proof's whole estimate or the part of its form that states them
+ :seon.cost/priced [:map [:growth :seon.cost/growth] [:ops {:optional true} [:map-of :keyword :seon.cost/amount]] [:per-n {:optional true} :seon.cost/dims] [:fixed {:optional true} :seon.cost/dims]]
  :seon.cost/sized [:map {:closed true}
                       ;; the function measured, and the function of n answering its argument vector
                       [:of :qualified-symbol]
@@ -47,9 +49,12 @@
                       [:fixed {:optional true} :seon.cost/dims]
                       ;; ascending, at least three, spanning at least 100x
                       [:sizes [:vector {:min 3} pos-int?]]
-                      ;; an overrun accepted while its task is open: the task (a task-file entry) and what
-                      ;; the largest size measured when it was filed; red again past ratchet x that
-                      [:overrun {:optional true} [:map {:closed true} [:task :string] [:measured :seon.cost/dims]]]]
+                      ;; an overrun accepted while its task is open: the task (a task-file entry), the size it was
+                      ;; taken at (:n, the proof's largest) and what that size measured when it was filed; red again
+                      ;; past ratchet x that. A task no file declares, a missing :n or one that is not the largest
+                      ;; size makes the proof red (:waiver-fault of its verdict)
+                      [:overrun {:optional true} :seon.cost/overrun]]
+ :seon.cost/overrun [:map {:closed true} [:task :string] [:n {:optional true} pos-int?] [:measured :seon.cost/dims]]
  ;; one size measured: n, what it cost, what the estimate allows there
  ;; (a generated case: n its place, :args the arguments that reproduce it)
  :seon.cost/row [:map {:closed true} [:n pos-int?] [:measured :seon.cost/dims] [:expected :seon.cost/dims] [:args {:optional true} [:vector {:gen/max 3} :any]]]
@@ -69,4 +74,7 @@
                      ;; no counted dimension (ticks, bytes, calls) both estimated and measured: red, the proof could not fail
                      [:uncounted {:optional true} :boolean]
                      ;; the over and steeper findings an open overrun task accepts (still shown, not red)
-                     [:accepted {:optional true} [:map [:task :string] [:over [:vector {:gen/max 3} :seon.cost/over]] [:steeper [:vector {:gen/max 3} :seon.cost/fit]]]]]}
+                     [:accepted {:optional true} [:map [:task :string] [:over [:vector {:gen/max 3} :seon.cost/over]] [:steeper [:vector {:gen/max 3} :seon.cost/fit]]]]
+                     ;; a broken waiver, red: its :overrun names no task entry (:no-task), states no size (:no-size) or one
+                     ;; that is not the proof's largest (:wrong-size, :largest the size measured)
+                     [:waiver-fault {:optional true} [:map [:fault [:enum :no-task :no-size :wrong-size]] [:task :string] [:n {:optional true} pos-int?] [:largest {:optional true} pos-int?]]]]}
