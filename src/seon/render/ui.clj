@@ -557,14 +557,18 @@
          [:details [:summary {:class "seon-note"} "its reasoning"] [:p {:class "seon-text text-text-300"} (plain reasoning (part))]])])))
 
 (defn message
-  "A message to a run (the declared html render of :seon.message/fact): who sent it and its body as text."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  "A message to an agent (the declared html render of :seon.message/fact), one render wherever it is placed: in a conversation the
+  walk places the message's own view, so this one component answers the page and, by the schema's model render beside it, the
+  model (seon.render/render!); who sent it and its body as Markdown, a person's on the right; :as :inline, one line. See
+  docs/render.md#the-page."
+  {:seon.render/style ".message { max-width: 85%; width: fit-content; margin-left: auto; border-radius: 0.5rem; background: var(--color-base-800); padding: 0.5rem 0.75rem; font-size: 0.875rem; line-height: 1.25rem; color: var(--color-text-100); }"
+   :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.message/keys [from body]}]
   (if (= :inline (:as opts))
     [:span (str from ": ") (plain body (cell) {:one-line? true})]
-    [:div {:class "border-l-2 border-info pl-3 py-1"}
-     [:span {:class "seon-note"} (str "message from " from)]
-     [:p {:class "seon-text"} (plain body (part))]]))
+    [:section {}
+     [:p {:class "seon-note"} (str from)]
+     [:div {} [#'markdown (str body) {:inline? true}]]]))
 
 (declare standing)
 
@@ -1481,21 +1485,6 @@
           (markdown plan {:inline? true})]
          [:div {:class "seon-message"} (markdown plan {:inline? true})])])))
 
-(defn message-hiccup
-  "A message to the agent as the chat shows it and the model reads it, one user message: who sent it and its body. See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :map] :any]}
-  [{:seon.message/keys [id from body]}]
-  [:section {}
-   [:p {:class "seon-note"} (str from)]
-   [:div {} [#'markdown (str body) {:inline? true}]]])
-
-(defn chat-message
-  "A message to the agent (a component over ctx, the message at ctx path :at), a person's on the right: `message-hiccup`. See docs/render.md#the-page."
-  {:seon.render/style ".chat-message { max-width: 85%; width: fit-content; margin-left: auto; border-radius: 0.5rem; background: var(--color-base-800); padding: 0.5rem 0.75rem; font-size: 0.875rem; line-height: 1.25rem; color: var(--color-text-100); }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx at :at}]
-  (let [m (get-in c at)]
-    (message-hiccup {:seon.message/id (ratom/realize (:seon.message/id m)) :seon.message/from (ratom/realize (:seon.message/from m)) :seon.message/body (ratom/realize (:seon.message/body m))})))
-
 (defn chat-end
   "How the work ended, the chat's last card (a component over ctx and the db): the end its agent wrote (:seon.agent/outcome and
   the rest, while the agent is still at the turn it ended on: a wake that took another turn has no end yet), the turns it
@@ -1583,7 +1572,7 @@
                         model? #(get-in c [:seon.eval/_agent % :seon.eval/call-id])
                         step #(eval-hiccup {:db db} (get-in c [:seon.eval/_agent %]))]]
               (into [:div {}]
-                    (concat (for [[m] messages] (message-hiccup (get-in c [:seon.message/_to m])))
+                    (concat (for [[m] messages] (message {} (get-in c [:seon.message/_to m])))
                             [(reply-hiccup (get-in c [:seon.model-call/_agent cid]) (boolean (seq (filter model? evals))) (map step (filter model? evals)))]
                             (map step (remove model? evals)))))
             [[:p {} "</session>"]]))))
@@ -1670,7 +1659,7 @@
           ours (filter (comp model? first) evals)]
       (when call
         ;; a turn nothing has come of yet (a call its messages or evals have not reached) is no element
-        (when-let [kids (seq (remove nil? (concat (for [[m id] messages] [#'chat-message {:key id :at [:seon.message/_to m]}])
+        (when-let [kids (seq (remove nil? (concat (for [[m id] messages] (get-in c [:seon.message/_to m]))
                                                   [(reply-hiccup (cond-> (into {} (for [k [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]
                                                                                         :let [v (ratom/realize (get call k))] :when (some? v)] [k v]))
                                                                    ;; in flight: the model's call until its evals have all run (:seon.model-call/forms, written by seon.turn after
@@ -1686,7 +1675,7 @@
           (into [:div {:class "seon-stack"}] kids))))
     ;; the turn now opening has no call yet: what was delivered since the last turn's edge reads here, before the turn begins
     (when-let [ms (seq messages)]
-      (into [:div {:class "seon-stack"}] (for [[m id] ms] [#'chat-message {:key id :at [:seon.message/_to m]}])))))
+      (into [:div {:class "seon-stack"}] (for [[m id] ms] (get-in c [:seon.message/_to m]))))))
 
 (defn conversation-list
   "The conversation of an agent's page (c-rows), what the model reads as messages (:seon.render/messages) and the person as the chat: its system message, the example sessions it reads, what opens its own session (every conversation opens on a user

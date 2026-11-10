@@ -838,7 +838,7 @@
         ran-now (fn [f] (- (get after (str f) 0) (get before (str f) 0)))]
     (is (= 1 (ran-now `ui/conversation-turn)) "the turn the eval took draws again")
     (is (= 1 (ran-now `ui/eval-item)) "and the eval, new")
-    (is (zero? (+ (ran-now `ui/conversation-list) (ran-now `ui/chat-message))) "no other turn's records, nor the list, are read again")
+    (is (zero? (+ (ran-now `ui/conversation-list) (ran-now `ui/message))) "no other turn's records, nor the list, are read again")
     (r/dispose-walk! (:w kw))))
 
 (deftest a-walk-made-before-its-agent-takes-the-agent
@@ -1572,7 +1572,7 @@
         "the conversation by turn number, each turn a component keyed by the agent and its number (turn 0 took no record, and the agent's turn 2 said and ran nothing: no element), then how the agent stands")
     (let [turn1 (:html (unit-of conv "conversation-turn-"))
           at #(str/index-of turn1 %)]
-      (is (< (at "id=\"chat-message-m-1\"") (at "seon-message")
+      (is (< (at "id=\"message-m-1\"") (at "seon-message")
              (at "id=\"eval-item-e3\""))
           "a turn: the messages it took, its model call, then the evals of other hands")
       (is (every? #(str/includes? turn1 (str "id=\"eval-item-" % "\"")) ["e1" "e2" "e3"]) "its model call's evals among its steps"))
@@ -2671,7 +2671,7 @@
         (is (not (str/includes? t "turn 1")) "its turn and tokens are for the debug tab"))
       (is (nil? (ui/reply-hiccup (get-in c [:seon.model-call/_agent 3]) false [])) "a turn that said nothing draws no bubble"))
     (testing "a message is a bubble with its sender"
-      (let [m (h (ui/chat-message {:seon.ctx/ctx c :at [:seon.message/_to 4]}))]
+      (let [m (h (ui/message {} (get-in c [:seon.message/_to 4])))]
         (is (str/includes? m "user"))
         (is (str/includes? m "Is the premise right?"))))
     (testing "the agent's status is the last line"
