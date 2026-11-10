@@ -14,8 +14,8 @@
   [] (render/tree (repl/page-walk)))
 
 (defn diff
-  "What moved of your page between point p0 and point p1 of your branch ({:branch :commit :t}; p0 nil: nothing before it, so each part whole, [[id] :+ form]), as edits [[path op value] ...], each path starting with the part's id: the page drawn at each point with today's renders and the edits `seon.render/page-edits` makes of the two. Pure in the points: the same points and renders give the same edits, which the model reads for each turn between the points of its two requests (:seon.model-call/basis). The same edits your turn's page message prints (seon.ctx.wire/page-edits-between). See docs/render.md#a-change-is-edits-by-name."
-  {:malli/schema [:=> [:cat [:maybe [:map [:branch :any] [:commit :uuid] [:t :int]]] [:map [:branch :any] [:commit :uuid] [:t :int]]] [:or [:vector :any] :map]]}
+  "What moved of your page between point p0 and point p1 of your branch ({:commit :t}, as a page call prints it; :branch optional; p0 nil: nothing before it, so each part whole, [[id] :+ form]), as edits [[path op value] ...], each path starting with the part's id: the page drawn at each point with today's renders and the edits `seon.render/page-edits` makes of the two. Pure in the points: the same points and renders give the same edits, which the model reads for each turn between the points of its two requests (:seon.model-call/basis). The same edits your turn's page message prints (seon.ctx.wire/page-edits-between). See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat [:maybe [:map [:branch {:optional true} :any] [:commit :uuid] [:t :int]]] [:map [:branch {:optional true} :any] [:commit :uuid] [:t :int]]] [:or [:vector :any] :map]]}
   [p0 p1] (wire/page-edits-between (agent/db) (agent/branch-index) (:db/id @seon.ctx/ctx) p0 p1))
 
 (defn page
