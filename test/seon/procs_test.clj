@@ -146,6 +146,28 @@
         (is (= at (get-in problem [:error :commit])))
         (remote/close! end) (sock/close! a'))))))
 
+(deftest a-context-read-makes-its-agent-neither-busy-nor-idle
+  ;; docs/server.md#ops: a read never writes (owner, 2026-11-10). A :context read is an eval of origin :context: in
+  ;; flight, the agent is not made busy, and its answer reports the status it already had, so root's view of the agent
+  ;; does not move and nothing is written to main for it (seon.root's record-agents writes only a change). An eval that
+  ;; is work still makes it busy. Red before: every request sent {:status :busy}, and its answer :idle: two commits on
+  ;; main for each read.
+  (let [[r a'] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        statuses (fn [outs] (keep #(when (= :status (:op %)) (get-in % [:set :status])) (:to-api outs)))]
+    (try
+      (let [[st outs] (step #'ap/agent-proc st :in {:op :req :rid 5 :kind :eval :msg {:op :eval :forms "(ctx)" :origin :context}})]
+        (is (empty? (statuses outs)) "a read in flight reports no status")
+        (is (contains? (:inflight st) 5) "and is in flight, answered when it ends")
+        (let [[st outs] (step #'ap/agent-proc st :from {:op :reply :id 5 :response {:value 1} :t 1})]
+          (is (= [:idle] (statuses outs)) "its answer reports the agent as it was: idle")
+          (let [[st outs] (step #'ap/agent-proc st :in {:op :req :rid 6 :kind :eval :msg {:op :eval :forms "(+ 1 2)"}})]
+            (is (= [:busy] (statuses outs)) "an eval that is work makes it busy")
+            (let [[_ outs] (step #'ap/agent-proc st :in {:op :req :rid 7 :kind :eval :msg {:op :eval :forms "(ctx)" :origin :context}})]
+              (is (empty? (statuses outs)) "a read beside it changes nothing")))))
+      (finally (remote/close! end) (sock/close! a')))))
+
 (deftest a-reply-the-wire-cannot-encode-answers-its-asker-and-the-end-serves-on
   ;; task jolt.async/a-value-a-remote-end-cannot-encode-answers-its-asker: root's end sent an agent
   ;; a reply holding a sorted map (no stable encoding), and the writer pump closed the end, which
