@@ -59,8 +59,8 @@
 
 (defn- busy
   "The agent's status as root records it: :busy while a request that is work is in flight; a read (a :context read,
-  an eval of origin :context) is in flight without making it busy, so a read writes nothing to main (owner, 2026-11-10:
-  a read never writes; docs/server.md#ops)."
+  an eval of origin :context) is in flight without making it busy, so a read writes nothing to main (the owner's ruling, a read
+  never writes: docs/decisions.md; docs/server.md#ops)."
   {:malli/schema [:=> [:cat :map] [:enum :busy :idle]]}
   [st] (if (some (complement :read?) (vals (:inflight st))) :busy :idle))
 
