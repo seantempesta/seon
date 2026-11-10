@@ -1835,7 +1835,9 @@
 (def ^:private session-attrs
   "What an entry of the agents list reads of an agent on main: its identity, its process's status, its branch and turns, and its task."
   [:seon.agent/key :seon.agent/started-ms :seon.agent/status :seon.agent/branch :seon.agent/max-turns
-   {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure :seon.task/plan {:seon.task/started-by [:seon.user/name]}]}])
+   {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure :seon.task/plan {:seon.task/started-by [:seon.user/name]}]}
+   ;; the agents doing the tasks it started (a request's work agents), shown under its tile
+   {:seon.task/_started-by [{:seon.task/agent [:seon.agent/key]}]}])
 
 (defn session-address
   "The name of an agent's page: its key (:seon.agent/key, its id's name), the one name of a session that survives a root's restart,
@@ -2011,7 +2013,7 @@
   what it works on in words and how it stands (standing), then what it last told whoever started it, a few lines of it (the
   task's reason, which root's message to them carries: seon.reconcile/tell-tx), so a person can tell which to open. See
   docs/users.md#whats-on-screen."
-  {:seon.render/style ".session-card > a { display: flex; flex-direction: column; gap: 0.5rem; height: 100%; min-height: 12rem; border: 1px solid var(--color-base-800); border-radius: 0.5rem; background: var(--color-base-900); padding: 0.75rem 0.875rem; color: inherit; text-decoration: none; } .session-card > a:hover { border-color: var(--color-base-600); } .session-card .said { max-height: 16rem; overflow: hidden; font-size: 0.875rem; line-height: 1.375rem; color: var(--color-text-300); -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); } .session-card .said p { margin: 0 0 0.375rem; } .session-card .said .asked { color: var(--color-text-400); border-left: 2px solid var(--color-base-700); padding-left: 0.5rem; }"
+  {:seon.render/style ".session-card .started { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.5rem 0 0 1rem; } .session-card .started .session-card > a { min-height: 0; } .session-card > a { display: flex; flex-direction: column; gap: 0.5rem; height: 100%; min-height: 12rem; border: 1px solid var(--color-base-800); border-radius: 0.5rem; background: var(--color-base-900); padding: 0.75rem 0.875rem; color: inherit; text-decoration: none; } .session-card > a:hover { border-color: var(--color-base-600); } .session-card .said { max-height: 16rem; overflow: hidden; font-size: 0.875rem; line-height: 1.375rem; color: var(--color-text-300); -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent); mask-image: linear-gradient(to bottom, black 70%, transparent); } .session-card .said p { margin: 0 0 0.375rem; } .session-card .said .asked { color: var(--color-text-400); border-left: 2px solid var(--color-base-700); padding-left: 0.5rem; }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :string] :any]}
   [{db :seon.db/db} k]
   (let [a (d/pull db session-attrs [:seon.agent/key k])
@@ -2031,7 +2033,10 @@
       ;; the person's newest message, then the agent's answer to it: what was asked and what came of it is the point
       [:div {:class "said"}
        (when asked [:p {:class "asked"} [#'markdown asked {:inline? true}]])
-       (when reply [#'markdown reply {:inline? true}])]]]))
+       (when reply [#'markdown reply {:inline? true}])]]
+     ;; the agents doing what it started, each its own tile under it, so a request and its work read as one tree
+     (when-let [ks (seq (distinct (keep #(get-in % [:seon.task/agent :seon.agent/key]) (:seon.task/_started-by a))))]
+       (into [:div {:class "started"}] (for [k ks] [#'session-card {} k])))]))
 
 (defn- sessions-by-standing
   "Sessions ks (agent keys, newest first) as tiles grouped by how each stands, in its state's plain word: parked (a message wakes it),

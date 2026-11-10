@@ -2132,6 +2132,18 @@
     (is (str/includes? card "working") "how its work stands")
     (is (str/includes? card "href=\"/agent/b2/a3\"") "its page")))
 
+;; docs/users.md#whats-on-screen: a request and its work read as one tree: an agent's tile holds, under it, the tile of each agent doing a
+;; task it started (the task's :seon.task/started-by, reversed in the tile's pull)
+(deftest a-tile-holds-the-agents-its-agent-started
+  (let [db (sessions-db "b2" [["b2/a2" :a2 :running "seon.print/a-long-string" :parked :task-a]
+                              ["b2/a3" :a3 :running "seon.print/b-short-string" :running :task-b]])
+        work-task (:db/id (:seon.agent/task (d/entity db [:seon.agent/key "b2/a3"])))
+        ;; as production writes a started task: who started it, and the agent working it
+        db (d/db-with db [[:db/add work-task :seon.task/started-by [:seon.agent/key "b2/a2"]] [:db/add work-task :seon.task/agent [:seon.agent/key "b2/a3"]]])
+        kids (fn [hc] (keep #(when (and (vector? %) (= #'ui/session-card (first %))) (nth % 2)) (tree-seq coll? seq hc)))]
+    (is (= ["b2/a3"] (kids (ui/session-card {:seon.db/db db} "b2/a2"))) "the request's tile holds its work agent's")
+    (is (empty? (kids (ui/session-card {:seon.db/db db} "b2/a3"))) "the work agent's holds none")))
+
 (deftest a-users-page-draws-the-agents-it-started
   ;; docs/users.md#whats-on-screen: a user is an agent found by its name; its pull joins the agents it started, and the one list's and card's renders draw them
   (let [db (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a] ["b2/a2" :a2 :idle "x/asks" :parked :task-b] ["b2/a3" :a3 :idle "x/other" :parked :task-c]])
