@@ -13,8 +13,15 @@
  * 5. a killed process's read txn does not keep freed pages from reuse: 40 commits rewriting one
  *    48 KB value grow the file by at most a few pages, not by the 3 pages a commit it pins;
  * 6. a process of a store kept with MDB_SAFENOSYNC SIGKILLed with 3 commits made since its last
- *    sync: the next opener (exclusive, the same OS boot) reads all of them: a kill loses nothing.
- * CASES, default 123456, names the cases to run. Prints LMDB-KILL OK and exits 0 only when every case
+ *    sync: the next opener (exclusive, the same OS boot) reads all of them: a kill loses nothing;
+ * 7. a writer that forked a child that forked a grandchild (root, fork server, agent), killed inside
+ *    its write txn while both live and open nothing: the writer lock is free at once and the next
+ *    write commits while they still live (a child closes the lock descriptions it inherited);
+ * 8. the same with a descendant made by posix_spawn (/bin/sleep): no fork handler runs; the exec
+ *    closes the descriptions (opened close-on-exec);
+ * 9. a thread holds the writer lock while another forks: the child, where that thread does not exist,
+ *    opens the store and writes after the parent's commit, and the parent writes on.
+ * CASES, default 123456789, names the cases to run. Prints LMDB-KILL OK and exits 0 only when every case
  * run holds. */
 #include <lmdb.h>
 #include <stdio.h>
@@ -26,6 +33,8 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <pthread.h>
+#include <spawn.h>
 
 #ifndef MDB_SAFENOSYNC
 #define MDB_SAFENOSYNC 0	/* a LMDB without it */
@@ -216,17 +225,129 @@ static int killed_after_sync(const char *dir) {
   return ok;
 }
 
+/* Is the writer lock's byte of lock file l held by anyone (F_GETLK sees description locks too)? */
+static int writer_held(const char *l) {
+  int fd = open(l, O_RDWR); struct flock f;
+  if (fd < 0) return -1;
+  memset(&f, 0, sizeof f); f.l_type = F_WRLCK; f.l_whence = SEEK_SET; f.l_start = 0x40000000 + 1; f.l_len = 1;
+  int r = fcntl(fd, F_GETLK, &f);
+  close(fd);	/* this process holds no lock on l */
+  return r ? -1 : f.l_type != F_UNLCK;
+}
+
+/* The writer, killed inside its write txn after it made descendants that outlive it: by fork (a child
+ * that forks a grandchild, as root -> fork server -> agent) or by posix_spawn of /bin/sleep. Neither
+ * descendant opens anything. Right after the kill, while both still live, the writer lock is free and
+ * this process begins a write txn and commits; the killed write is gone. */
+static int killed_with_descendants(const char *dir, int spawned) {
+  char p[512], l[600]; int ready[2], hold[2]; pid_t ds[2] = {0, 0};
+  path(p, sizeof p, dir, spawned ? "spawned" : "descendants"); snprintf(l, sizeof l, "%s-lock", p);
+  printf("%d. a writer that %s, SIGKILLed inside its write txn\n", spawned ? 8 : 7,
+         spawned ? "spawned /bin/sleep (posix_spawn: no fork handler, the exec closes)" : "forked a child that forked a grandchild");
+  if (pipe(ready) || pipe(hold)) return 0;
+  pid_t w = fork();
+  if (!w) {
+    MDB_env *e = open_env(p, 0); MDB_txn *t; MDB_dbi d; MDB_val K = {6, "killed"}, V = {1, "v"};
+    if (mdb_txn_begin(e, NULL, 0, &t) || mdb_dbi_open(t, NULL, 0, &d) || mdb_put(t, d, &K, &V, 0)) _exit(1);
+    pid_t got[2] = {0, 0};
+    if (spawned) {
+      char *argv[] = {"/bin/sleep", "100000", NULL}; extern char **environ;
+      if (posix_spawn(&got[0], "/bin/sleep", NULL, NULL, argv, environ)) _exit(1);
+    } else {
+      int cp[2]; char b; if (pipe(cp)) _exit(1);
+      got[0] = fork();
+      if (!got[0]) {	/* the child: makes the grandchild, then waits to be told */
+        pid_t g = fork();
+        if (!g) { close(hold[1]); if (read(hold[0], &b, 1) < 0) {} _exit(0); }
+        if (write(cp[1], &g, sizeof g) != sizeof g) _exit(1);
+        close(hold[1]); if (read(hold[0], &b, 1) < 0) {} _exit(0);
+      }
+      if (read(cp[0], &got[1], sizeof got[1]) != sizeof got[1]) _exit(1);
+    }
+    if (write(ready[1], got, sizeof got) != sizeof got) _exit(1);
+    for (;;) pause();	/* holding the writer lock until killed */
+  }
+  int ok = read(ready[0], ds, sizeof ds) == sizeof ds;
+  kill(w, SIGKILL);
+  int st; waitpid(w, &st, 0);
+  int alive = kill(ds[0], 0) == 0 && (spawned || kill(ds[1], 0) == 0);
+  int held = writer_held(l);
+  int put_ok = !held && !put(open_env(p, 0), "after", 0);
+  int still = kill(ds[0], 0) == 0 && (spawned || kill(ds[1], 0) == 0);	/* the bound: they lived through it */
+  printf("  descendants alive %s; the writer lock %s; a write now %s, the descendants still alive %s\n",
+         alive ? "yes" : "no", held == 0 ? "free" : held == 1 ? "HELD" : "?", put_ok ? "commits" : "FAILED", still ? "yes" : "no");
+  MDB_env *e = open_env(p, 0);
+  ok = ok && WIFSIGNALED(st) && alive && held == 0 && put_ok && still && has(e, "after") && !has(e, "killed");
+  mdb_env_close(e);
+  close(hold[1]); close(hold[0]);	/* the forked descendants end */
+  if (spawned) kill(ds[0], SIGKILL);
+  if (spawned) waitpid(ds[0], NULL, 0);
+  close(ready[0]); close(ready[1]);
+  return ok;
+}
+static int killed_with_children(const char *dir) { return killed_with_descendants(dir, 0); }
+static int killed_with_spawned(const char *dir) { return killed_with_descendants(dir, 1); }
+
+/* A thread of this process holds the writer lock (inside a write txn) while another thread forks: in
+ * the child only the forking thread exists, and the writer mutex it inherited is locked by a thread it
+ * does not have. The child opens the env and writes (after the parent's commit: the writer lock is the
+ * parent's until then), with its own mutexes and descriptions; the parent commits as before. */
+static MDB_env *fenv; static int fgo[2], fdone[2];
+static void *holder(void *a) {
+  MDB_txn *t; MDB_dbi d; MDB_val K = {6, "parent"}, V = {1, "v"}; char b = 0;
+  int r = mdb_txn_begin(fenv, NULL, 0, &t);
+  if (!r) r = mdb_dbi_open(t, NULL, 0, &d);
+  if (!r) r = mdb_put(t, d, &K, &V, 0);
+  b = r ? 'n' : 'y';
+  if (write(fdone[1], &b, 1) != 1 || read(fgo[0], &b, 1) != 1) return NULL;
+  r = r ? r : mdb_txn_commit(t);
+  b = r ? 'n' : 'y';
+  if (write(fdone[1], &b, 1) != 1) return NULL;
+  return NULL;
+}
+static int fork_beside_holder(const char *dir) {
+  char p[512]; pthread_t th; char b; int cr[2];
+  path(p, sizeof p, dir, "threadfork");
+  printf("9. a thread holds the writer lock while another thread forks\n");
+  if (pipe(fgo) || pipe(fdone) || pipe(cr)) return 0;
+  fenv = open_env(p, 0);
+  pthread_create(&th, NULL, holder, NULL);
+  int held = read(fdone[0], &b, 1) == 1 && b == 'y';
+  pid_t c = fork();
+  if (!c) {
+    MDB_env *ce = open_env(p, 0);
+    int r = put(ce, "child", 0);	/* waits for the parent's commit, then commits */
+    b = r ? 'n' : 'y';
+    if (write(cr[1], &b, 1) != 1) _exit(1);
+    _exit(r ? 1 : 0);
+  }
+  close(cr[1]);
+  if (write(fgo[1], "g", 1) != 1) return 0;	/* the parent commits after the fork */
+  int pc = read(fdone[0], &b, 1) == 1 && b == 'y';
+  pthread_join(th, NULL);
+  int cc = read(cr[0], &b, 1) == 1 && b == 'y';
+  int st; waitpid(c, &st, 0);
+  int again = !put(fenv, "again", 0);
+  printf("  the parent's write %s; the child's %s; the parent writes again: %s\n",
+         pc ? "commits" : "FAILED", cc ? "commits" : "FAILED", again ? "yes" : "NO");
+  int ok = held && pc && cc && again && has(fenv, "parent") && has(fenv, "child");
+  mdb_env_close(fenv);
+  close(cr[0]); close(fgo[0]); close(fgo[1]); close(fdone[0]); close(fdone[1]);
+  return ok;
+}
+
 int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
   signal(SIGPIPE, SIG_IGN);	/* a write to a dead child is an error, not this process's death */
   if (argc < 2 || argc > 3) { printf("usage: lmdb-kill DIR [CASES]\n"); return 2; }
-  const char *only = argc == 3 ? argv[2] : "123456";	/* the cases to run, by number */
+  const char *only = argc == 3 ? argv[2] : "123456789";	/* the cases to run, by number */
   mkdir(argv[1], 0755);
 #define RUN(n, f) (strchr(only, n) ? f(argv[1]) : 1)
   int c1 = RUN('1', killed_writer), c2 = RUN('2', dead_reader_lock), c3 = RUN('3', fork_held),
-      c4 = RUN('4', readers_full), c5 = RUN('5', dead_reader_pins), c6 = RUN('6', killed_after_sync);
-  printf("cases: %d %d %d %d %d %d\n", c1, c2, c3, c4, c5, c6);
-  int ok = c1 && c2 && c3 && c4 && c5 && c6;
+      c4 = RUN('4', readers_full), c5 = RUN('5', dead_reader_pins), c6 = RUN('6', killed_after_sync),
+      c7 = RUN('7', killed_with_children), c8 = RUN('8', killed_with_spawned), c9 = RUN('9', fork_beside_holder);
+  printf("cases: %d %d %d %d %d %d %d %d %d\n", c1, c2, c3, c4, c5, c6, c7, c8, c9);
+  int ok = c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9;
   printf(ok ? "LMDB-KILL OK\n" : "LMDB-KILL FAILED\n");
   return ok ? 0 : 1;
 }

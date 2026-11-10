@@ -314,7 +314,18 @@ process shares its descriptors and the mutexes, and the last env to close closes
 closes the descriptions it inherited (through them it would share every lock its parent holds, which
 would then outlive the parent) and opens its own: root forks agents with its store open, each agent
 opens the store itself (```seon.db/after-fork!```), and an agent still reads main's value it inherited
-through its parent's env, whose reader slots carry the parent's pid, as LMDB has always done. A dead process's reader slot is
+through its parent's env, whose reader slots carry the parent's pid, as LMDB has always done (task
+`seon.agent/an-agent-reads-main-through-its-own-env`). The child shares its parent's descriptions from the
+fork until the fork handler has closed them, inside `fork()` in the child before it returns, so no code of
+the child runs meanwhile: a parent killed in that window has its locks given back when the handler closes
+the copies, and a child killed in it takes its copies with it. A process made without the handler runs
+`exec`, which closes them (they are opened close-on-exec): Seon forks with libc `fork()` (Jolt's
+`fork-alone`, `reference-code/jolt/host/chez/java/fibers-async.ss`, and ```seon.lib/fork!```'s second fork)
+and starts programs with `posix_spawn` or Chez's `fork` then `exec`; neither Jolt's host, Chez's `c/` nor
+`native/` calls `vfork`, `rfork`, `clone` or a raw fork syscall. A `fork()` waits while an open in another
+thread holds the process's lock-file table; Jolt forks only while one thread runs, so it never forks beside
+an open. `lmdb-kill` cases 7 (a writer killed while a forked child and grandchild live), 8 (the same with
+`posix_spawn`) and 9 (a thread holds the writer lock while another forks) prove it. A dead process's reader slot is
 cleared without anyone calling `mdb_reader_check`: by a reader that finds the table full, and by a
 writer whose oldest reader belongs to a dead process (before it reads the freelist), so killed agents
 neither fill the table nor keep freed pages from reuse. The lock region's format is the build's
