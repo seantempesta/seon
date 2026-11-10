@@ -189,20 +189,33 @@
              (derived-row ans s 'seon.doc (str a " states " path " pinned at " sha ", its gitlink is " (or g "none"))
                           {:kind :stale-pin :section a :path path :stated sha :recorded g} {:section a :path path :stated sha :recorded g}))))))
 
+(def stale-binary-acts
+  "What brings a root's binary and its main into agreement, each then a restart of root: what the :stale-binary row, root's
+  refused spawn and the last line of bin/root start and bin/update say. See docs/source.md#files-and-the-db-two-directions."
+  (str "Bring them into agreement, then restart root: erase the store and seed it from the tree (bin/root stop; bin/root start --reindex, "
+       "which is rm -rf runs/store and bin/root start), or reindex main from disk at root ((my.root/import! sys), (my.root/load-docs! sys), "
+       "(my.root/load-tasks! sys); then bin/root stop and bin/root start), or start the binary main's program was built from (bin/root next)"))
+
 (defn stale-binary
-  "A :stale-binary row while root's binary was built from another program than the main it booted on: root's
-  :seon.root/source fact as its boot wrote it (seon.root/booted-source), the binary's program (:binary, none when its
-  build recorded none) beside main's (:program). None on a boot whose binary is main's program, or with no source fact;
-  gone at the next boot on a matching binary. Derived, never stored, no clock, and never an import: the binary is rebuilt
-  (bin/update). Cost: one pull. See docs/health.md#a-stale-binary."
+  "A :stale-binary row while root's binary is not current for its main: seon.root/stale-binary's answer as its boot held it on
+  root's :seon.root/source fact (:stale-binary, seon.root/booted-source), naming the binary's tree, main's and what between
+  them reaches root's own code or a build input (or what is missing). What agents merged into main since is main's own, never a
+  row. None on a boot whose binary is current, or with no source fact; gone at the next boot on a current binary. While it
+  shows, root forks no agent. Derived from the fact, never computed here, no clock; its message names the acts
+  (`stale-binary-acts`). Cost: one pull. See docs/health.md#a-stale-binary."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
-  (let [{:keys [boot binary program]} (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source)]
-    (if (and program (not= binary program))
+  (let [{:keys [boot stale-binary]} (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source)
+        {:keys [binary tree reaches missing error]} stale-binary]
+    (if stale-binary
       [(derived-row ans (str "stale-binary " boot) 'seon.root
-                    (str "root's binary was built from " (if binary (str "program " binary) "a program its build did not record")
-                         ", and main's program is " program ": agents fork main's code over another image and share no verdicts until bin/update rebuilds it")
-                    {:kind :stale-binary :binary binary :program program} {:binary binary :program program})]
+                    (str "root's binary was built from " (if binary (str "tree " binary) "a tree its build did not record")
+                         ", and main was last brought from tree " tree
+                         (cond missing (str ": " (name missing) " is unknown")
+                               error (str ": " error)
+                               :else (str ", and what differs reaches root's own code: " (str/join ", " reaches)))
+                         ". Root forks no agent. " stale-binary-acts)
+                    {:kind :stale-binary :binary binary :tree tree} {:binary binary :tree tree})]
       [])))
 
 ;; ---- the wiki kept true: code that moved under its text, pages nothing links, issues with no page ----
@@ -580,9 +593,10 @@
 (defn uncited-tasks
   "Each ready task, which holds the plans along its :needs (seon.task/accumulate), whatever its kind, whose
   accumulated plan cites no program var (no cite of one along its needs, seon.task/cites-of: the context pulls
-  no var for it), that names no proof, or one of whose proofs is still the placeholder seon.ctx writes, as an
-  :uncited-task row with its reason (:no-references, :no-proofs, :placeholder-proof). Closed when its plan
-  cites a name and its proofs are named and written. Cost: the task, reference and proof datoms once, then a
+  no var for it), that names no proof, one of whose proofs is still the placeholder seon.ctx writes, or whose own
+  text cites what db no longer holds (:seon.task/gone, which the write that ended those cites left), as an
+  :uncited-task row with its reason (:no-references, :no-proofs, :placeholder-proof, :gone). Closed when its plan
+  cites a name that exists and its proofs are named and written. Cost: the task, reference and proof datoms once, then a
   walk of each ready task's needs."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]]}
   ([db ans] (uncited-tasks db ans (task-reads db)))
@@ -600,19 +614,24 @@
                :when (ready? e)
                :let [es (chain #{} e)
                      proofs (vals-of es :seon.task/proofs)
+                     ;; what its text cites whose cites ended with their targets, as the write that ended them left it
+                     gone (:v (first (d/datoms db :eavt e :seon.task/gone)))
                      reasons (cond-> []
                                (not-any? @program (mapcat cited es))
                                (conj :no-references)
                                (empty? proofs) (conj :no-proofs)
-                               (some placeholder? proofs) (conj :placeholder-proof))]
+                               (some placeholder? proofs) (conj :placeholder-proof)
+                               (seq gone) (conj :gone))]
                reason reasons
-               :let [s (str "uncited-task " v " " (name reason))]]
+               :let [s (str "uncited-task " v " " (name reason))
+                     fields (cond-> {:task v :reason reason} (= :gone reason) (assoc :gone gone))]]
            (derived-row ans s 'seon.task
                         (case reason
                           :no-references (str v " is ready and its plan cites no var, attribute or section: the context pulls nothing for it")
                           :no-proofs (str v " is ready and names no proof")
-                          :placeholder-proof (str v " is ready and a proof of it is still the placeholder assertion (seon.task/placeholder-assertion)"))
-                        {:kind :uncited-task :task v :reason reason} {:task v :reason reason}))))))
+                          :placeholder-proof (str v " is ready and a proof of it is still the placeholder assertion (seon.task/placeholder-assertion)")
+                          :gone (str v " is ready and its plan cites " (str/join ", " gone) ", which no longer exist: their cites ended with them"))
+                        (assoc fields :kind :uncited-task) fields))))))
 
 (defn stale-plans
   "Each ready task (its own plan, not its needs') citing a var whose form was written after the task's plan, as a

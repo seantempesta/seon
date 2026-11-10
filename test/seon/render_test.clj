@@ -554,6 +554,18 @@
     (is (not (str/includes? html "effect")) "nor its class, which holds no open row")
     (is (str/includes? html "arity") "an open row is")))
 
+(deftest a-stale-binary-is-on-the-problems-tile-with-its-acts
+  ;; docs/source.md#files-and-the-db-two-directions: a mismatch is never silent to a person. The :stale-binary row health derives
+  ;; (seon.problems/stale-binary) is drawn on root's problems tile, never folded under upkeep, its message naming the acts
+  (let [db (seon.db/db-with (my.test/world {:history? true}) [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :boot "b" :binary "p0" :binary-tree "t0" :tree "t1" :program "p1" :stale-binary {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]}}}])
+        h (seon.problems/health db)
+        html (h/html (ui/problems-tile {:seon.render/index (seon.db/index) :seon.ctx/ctx {:health h}}))]
+    (is (= 1 (get-in h [:classes :stale-binary :n])) "health holds the row")
+    (is (str/includes? html "stale-binary") "the tile draws its class")
+    (is (not (str/includes? (h/html (ui/problems-tile {:seon.render/index (seon.db/index) :seon.ctx/ctx {:health (update h :classes select-keys [:stale-section])}})) "stale-binary"))
+        "and draws it from the row, not by itself")
+    (is (str/includes? (get-in h [:classes :stale-binary :rows 0 :message]) "bin/root start --reindex") "its message names the acts")))
+
 (deftest an-agents-page-draws-the-problems-of-its-own-task
   ;; task seon.problems/health-in-context: its task's open problems, by the report's render, beside the
   ;; task; none when none is open; another task's and main's classes are not drawn
