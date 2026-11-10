@@ -9,5 +9,6 @@
  :seon.config.web/feed-deflate-level [:int {:min 1 :max 9 :seon.config/unit "zlib level" :description "The feed's deflate level: higher is fewer bytes and more work per update."}]
  :seon.config.web/stylesheet [:string {:seon.config/at-load true :min 1 :seon.config/unit "path" :description "The page's stylesheet, bin/build's css step's output (read per request)."}]
  :seon.config.contract/instrument [:enum {:seon.config/at-load true :seon.config/unit "mode" :description "Contracts and their recording: on, contracts (wrappers, no recording), off."} :on :contracts :off]
+ :seon.config.contract/private-checked? [:boolean {:seon.config/at-load true :seon.config/unit "boolean" :description "Is a private function's contract (defn-) checked on each call? True in test processes (--profile scripted; an agent's test child sets it at its fork), false in root and its agents otherwise: docs/checks.md#contracts-armed-at-definition."}]
  :seon.config.native/probe-lib [:string {:min 1 :seon.config/unit "path" :description "native/probe.c's library (bin/build native)."}]
  :seon.config.native/sqlite-lib [:string {:min 1 :seon.config/unit "path" :description "The libsqlite3 seon.sqlite binds on first use, built with FTS5 (docs/vector.md#search). Missing or without FTS5: the first text index throws :seon.sqlite/unloaded or :seon.sqlite/refused, so no search by text runs."}]}

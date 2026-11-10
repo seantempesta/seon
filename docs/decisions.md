@@ -4,7 +4,7 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-10 rulings
 
-The owner's rulings of 2026-11-10, on how the machine's load is judged and on what an agent reads.
+The owner's rulings of 2026-11-10, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
 
 ### The forks follow upstream: theirs when almost as good, ours written to be offered (owner, 2026-11-10)
 
@@ -21,6 +21,10 @@ Owner, 2026-11-10: "Make sure deep fixes is merging all the fixes from all upstr
 ### The agent's history is native, and what is looked up goes through the hiccup (owner, 2026-11-10)
 
 "The UI version of the mesesages, tool calls etc, is a repeat. ... If we want to identify the "parts" from the hiccup and then render them differently for the model into the openai-compat format that's fine. But I don't want to fuckup the agents context. ... The agent gets raw info like it's message and eval calls in it's native format and anything that's processed or dunamically looked up should go in the hiccup render (make this intermediate and not HTML so it can render well into each of it's output for the model and for the html)". And the same day: "I want the core openai-compat format to be normal system, user, assistant and tool calls and that to be where the agent understands it's history -- not from the hiccup web render ... just make it a [fn-call args children] style vector that will be expanded in the html version ... remove style info by default ... make sure the agent knows what function was called for each part of the hiccup render so they can edit it to change the page." It stands over the 2026-11-09 reading that a render deposits message values into the hiccup. Stated in: [render](render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup).
+
+### Private helpers: tests only (owner, 2026-11-10)
+
+"Private helpers: tests only" (asked with the question tool). Every function still has a contract and every contract still generates; a private function's contract (`seon.contract/defn-`, a var with `:private`) is checked at its definition, in tests and in the gate, and not on each production call, while a public function's stays checked on every call. Measured: a contracted call costs about 70 engine ticks to check; a small value's print was 25.8k ticks with the contracts on and 12.9k with them off, nearly all of it private per-node helpers; a whole cold request is about 3% contract checking on the in-memory store (3-10% by request). Stated in: [checks](checks.md#contracts-armed-at-definition).
 
 ## 2026-11-09 rulings
 

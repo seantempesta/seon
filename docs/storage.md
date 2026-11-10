@@ -195,7 +195,7 @@ Proof: `datahike.test.run-ahead-test` ([forks](forks.md#datahike)).
 
 ## What a connection's deref reads
 
-A deref of a connection whose writer does not stream reads the branch's head from the store and builds a db value from it, every time: 58.7k ticks and 259 KB on a store of 7,675 datoms, against 24 ticks for the value the connection already holds (measured 2026-11-10, `datahike.connector/deref-conn`). The read is there so a process sees commits another process made to the branch. A value shown by a run-ahead is answered without it.
+A deref of a connection whose writer does not stream reads the branch's head from the store and builds a db value from it, every time: 58.7k ticks and 259 KB on a store of 7,675 datoms, against 24 ticks for the value the connection already holds (measured 2026-11-10, `datahike.connector/deref-conn`). The read is there so a process sees commits another process made to the branch. A value shown by a run-ahead is answered without it. A `:sync` writer made with `{:writer {:backend :sync :streaming? true}}` answers upstream's `-streaming?` (Datahike `a8887be5`): its connection's deref is the value the connection holds, for a process that is its branch's only writer and so has no other process's commit to see. Seon's own code does not ask for it yet.
 
 ## A commit the store refuses
 
