@@ -3442,6 +3442,7 @@
 (defn lab-call-wire [_ x] [{:role "assistant" :content (str (:lab.ow/reply x))}])
 (defn lab-eval [_ x] [:code (str (:lab.ow/code x))])
 (defn lab-eval-wire [_ x] [{:role "tool" :content (str (:lab.ow/code x))}])
+(defn lab-layout [_] [:main "a layout over the walk's source"])
 
 (deftest one-pass-renders-the-page-and-the-models-messages
   (let [forms {:lab.ow/key [:and {:seon.db/identity true} :string] :lab.ow/n :int :lab.ow/reply :string :lab.ow/code :string :lab.ow/turn :int
@@ -3484,6 +3485,10 @@
       (is (= (into [{:role "user" :content "open"}] (conj (r/openai-compat w) {:role "user" :content "close"}))
              (:messages (r/render-pull @a db #'lab-session-wire ix #{:seon.render/openai-compat} {:seon.render/as :seon.render/openai-compat})))
           "a root call answers the model output itself, placing the pull's entities each by its own model render"))
+    (let [lw (assoc (r/walker {:ref a :changes seon.ctx/changes} (constantly db) [#'lab-layout {}] ix) :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
+      (r/flush! lw nil)
+      (is (= (r/openai-compat w) (r/openai-compat lw)) "a root called with no entity (a layout) answers its walk's source entity's model render")
+      (r/dispose-walk! lw))
     (let [h (walk #{:seon.render/hiccup}) _ (r/flush! h nil)]
       (is (= [] (r/openai-compat h)) "a walk asked for the page alone runs no model render")
       (is (not-any? :outs (vals @(:cache h)))))))
