@@ -46,7 +46,7 @@
         [(:tree (seon.ctx/build (seon.db/index) db e :b)) db]))
 
 (deftest a-request-reads-what-the-agents-ctx-holds
-  ;; docs/render.md#the-render-is-an-eval; the owner, 2026-10-26: nothing in a request is read from
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn; the owner, 2026-10-26: nothing in a request is read from
   ;; anywhere but its ctx: a record the ctx does not hold is not sent
   (let [[c db] (records-of 6)
         evals (fn [c] (filter #(= :eval (ffirst %)) (seon.fixtures/tree-parts c db)))]
@@ -136,7 +136,7 @@
         cell (volatile! db)
         c (seon.ctx/build (seon.db/index) db a :b)
         src (seon.ratom/atom (:tree c))
-        w (assoc (seon.render/walker {:ref src :changes seon.ctx/changes} #(deref cell) [(seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {}]) :model-only true)]
+        w (assoc (seon.render/walker {:ref src :changes seon.ctx/changes} #(deref cell) [(seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {}]) :model-only true :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
     (seon.render/flush! w nil)
     (seon.ctx.wire/request w)
     (let [r (d/with db (conj (turn-tx n) {:seon.agent/key "b/a1" :seon.agent/turn (inc n)}))]
@@ -150,7 +150,7 @@
   ;; revision, so a turn reads what moved and walks the rest. Linear, not flat: the wire body holds n messages anyway
   (cost/proof {:of 'seon.ctx.wire/request :input 'seon.ctx.wire-cost-test/request-of
                :n "evals of the session before the turn"
-               :work "the new turn's messages read, each earlier component's as they were kept, the tree walked once; the page at the end, its forms made once"
+               :work "the new turn's messages read, each earlier component's as they were kept, the tree walked once; the turn's page message, its edits made once"
                :growth :linear
                :per-n {:calls 8 :bytes 15000}
                :fixed {:calls 900 :bytes 600000}

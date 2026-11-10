@@ -501,21 +501,16 @@
     (is (true? (:value live2)))
     (is (not (contract/error? (:value failed))) (str "its fail! records on its task: " (pr-str failed)))))
 
-;; See docs/merging.md#main-moved-is-said-at-every-eval
-;; docs/turn.md#an-outside-agent: an attached agent's answer is what a model's next request adds; asking again is answered plainly
-(deftest an-outside-reply-carries-the-page-seon-showed
-  (let [[_ first-reply moved asked]
+;; docs/turn.md#an-outside-agent: an attached agent reads the page as the model does, Seon's message of the turn, and what moved after
+(deftest an-outside-agents-read-carries-the-page-and-what-moved
+  (let [[_ first-read _ moved-read]
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :attach :task task}
-                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 1)"}]}
+                        {:op :context :agent agent}
                         {:op :eval :agent agent :message-md "Changing my plan." :evals [{:intent "change it" :code "(swap! ctx assoc-in [:seon.agent/task :seon.task/plan] \"A plan that moved.\")"}]}
-                        {:op :eval :agent agent :message-md "Asking." :evals [{:intent "ask" :code "(my.render/render-changes)"}]}]))
-        page (last (:responses moved))]
-    (is (some #(contains? (:value %) :components) (:responses first-reply)) "the page whole, the first time")
-    (is (clojure.string/includes? (str (:text page)) "A plan that moved.") (str "the change, with the reply that made it: " (pr-str (keys page))))
-    (is (not (clojure.string/includes? (str (:text page)) ":since")) "no t is the reader's")
-    (is (= [] (:edits (:value (first (:responses asked))))) "asked after it was shown")
-    (is (:shown-by (:value (first (:responses asked)))) "says what showed it")))
+                        {:op :context :agent agent}]))]
+    (is (clojure.string/includes? (str (:context first-read)) "<page from=\"seon\"") "the page, the first time")
+    (is (clojure.string/includes? (str (:context moved-read)) "A plan that moved.") "and what moved, the next time")))
 
 (deftest green-work-behind-main-is-merged-at-done
   ;; an outside agent's green work was closed "ended green: behind 6", its agent gone, while each answer said to merge when it chose: seon.turn/hand-back! merges main first

@@ -246,7 +246,7 @@
     {:of 'seon.render.proc/pass-view :input 'seon.render-cost-test/latest-of
      :n "earlier evals in the agent's session"
      :work (str "one request made at the branch's head (seon.ctx.wire/render: the system prompt, the session's records each "
-                "printed by its own render, the page drawn cold at the head as the call Seon made when the records hold none) "
+                "printed by its own render, the turn's page message made at the head) "
                 "under its provider, put in the wire shape "
                 "(seon.model/request-body) and drawn once (seon.render.ui/debug-turn: an entry a message), and the timeline's "
                 "strip (a pull of each model call's basis). Linear in the evals: the page's rows, and the cold draw's ctx")
@@ -486,10 +486,10 @@
 
 (def ^:dynamic *sels*
   "The draw proof's opts (bound by its deftest)."
-  {:model-only true :once true})
+  {:model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})
 
 (deftest printing-a-result-is-the-models-reading-of-it
-  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an eval's printed result is computed the first time the model reads that eval and is a lookup after: a person's walk prints no model text at all
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an eval's printed result is computed the first time its model render runs and is a lookup after: a person's walk (no model output asked) prints no model text at all
   (let [k "b/a1" n 5
         db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.doc/system-page "# You are\n\nRules."}))
         db (reduce (fn [db i] (d/db-with db [{:seon.agent/key k :seon.agent/turn (inc i)}
@@ -498,13 +498,19 @@
                    db (range n))
         a (:db/id (d/entity db [:seon.agent/key k]))
         src (seon.ratom/atom (:tree (seon.ctx/build (seon.db/index) db a :b)))
-        w (seon.render/walker {:ref src :changes seon.ctx/changes} (constantly db) [(seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {}])
+        walk (fn [outs] (cond-> (seon.render/walker {:ref src :changes seon.ctx/changes} (constantly db) [(seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {}])
+                          outs (assoc :outputs outs)))
+        w (walk nil)
         prints (fn [f] (seon.profile/measure! f (fn [_])) (or (some (fn [x] (when (= 'seon.print/record-text (:var x)) (:calls x))) (seon.profile/touched)) 0))]
     (try
       (clojure.test/is (zero? (prints #(do (seon.render/flush! w nil) (seon.render/placed-units w)))) "a page drawn and written prints none")
-      (clojure.test/is (<= n (prints #(seon.render/wire w))) "the first reading prints each")
-      (clojure.test/is (zero? (prints #(seon.render/wire w))) "the next finds each where the walk keeps it")
-      (finally (seon.render/dispose-walk! w)))))
+      (finally (seon.render/dispose-walk! w)))
+    ;; the walk asked for the model's output prints each result in the eval's model render, and keeps its messages
+    (let [w (walk #{:seon.render/hiccup :seon.render/openai-compat})]
+      (try
+        (clojure.test/is (<= n (prints #(seon.render/flush! w nil))) "the first reading prints each")
+        (clojure.test/is (zero? (prints #(seon.render/openai-compat w))) "the next finds each where the walk keeps it")
+        (finally (seon.render/dispose-walk! w))))))
 
 (defn page-of
   "The input at n: the arguments of seon.render/draw for agent b/p<n>'s page on a branch where it
@@ -524,7 +530,7 @@
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
       (into [(:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx)] (some-> *sels* vector)))))
 
-;; See docs/render.md#the-render-is-an-eval
+;; See docs/render.md#the-models-context-a-cached-prefix-then-the-turn
 (deftest a-cold-request-draws-what-the-model-reads
   ;; docs/render.md#a-layout-places-its-lists: a request with no live walk (a replay at a turn's commit, a judge's first move) draws the tree the model reads,
   ;; its conversation among it, and nothing for the page alone: no tile, no eval's cost or structured value

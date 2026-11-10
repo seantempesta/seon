@@ -302,9 +302,7 @@
 ;; docs/render.md#one-path-to-the-model: what the compiler's facts and a form's read say of who makes what the model is sent
 (def ^:private the-path
   "Each step of the one path to a provider, and who may reference it."
-  '{seon.render/wire #{seon.ctx.wire/request}
-    seon.render/hiccup-wire #{seon.ctx.wire/request}
-    seon.ctx.wire/request #{seon.ctx.wire/render}
+  '{seon.ctx.wire/request #{seon.ctx.wire/render}
     seon.model/wire-messages #{seon.model/request-body}
     seon.model/request-body #{seon.model/openai-compat seon.ctx.wire/wire-turn}})
 
@@ -333,14 +331,14 @@
   '#{seon.ctx.wire/agent-msgs seon.ctx.wire/eval-msgs seon.ctx.wire/message-msgs seon.ctx.wire/model-call-msgs seon.ctx.wire/page-message seon.ctx.wire/example-msgs seon.ctx.wire/example-session-msgs})
 
 (defn- outside-the-path
-  "The vars of db in namespaces nss that make provider messages other than through seon.render/wire: one that references a step of `the-path` and is not named for it, or
+  "The vars of db in namespaces nss that make provider messages other than through seon.ctx.wire/request: one that references a step of `the-path` and is not named for it, or
   whose code holds a message ({:role :content}) or a request ({:messages} of a turn or a model) and is not a step."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:set :any]]}
   [db nss]
   (let [refs (->> (d/datoms db :aevt :form/refs) (keep #(when (contains? the-path (:v %)) [(:v %) (:e %)])) distinct)
         by-ref (for [[step e] refs :let [r (seon.program/form-row db e)] :when (nss (:ns r)) v (named-by r) :when (not (or (= step v) (contains? (get the-path step) v)))] v)
         role (for [r (rows-with db nss [":role"]) :when (some #(and (map? %) (contains? % :role) (contains? % :content)) (tree-seq coll? seq (:read r))) v (named-by r)
-                   :when (not (or (#{'seon.render/wire-parts 'seon.model/wire-message} v) (model-renders v)))] v)
+                   :when (not (or (#{'seon.model/wire-message} v) (model-renders v)))] v)
         asks (for [r (rows-with db nss [":messages"])
                    :when (some #(and (map? %) (contains? % :messages) (or (contains? % :turn) (contains? % :model))) (tree-seq coll? seq (:read r)))
                    v (named-by r)
@@ -1078,7 +1076,7 @@
                                                                                 :seon.error/message "no model provider"}}])
                 html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-o2"})) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
-            (is (str/includes? html "eval p101") "beside what it sent: the page, the first eval")))))))
+            (is (str/includes? html "page from") "beside what it sent: the page, the turn's message")))))))
 
 (deftest a-page-opened-before-its-first-turn-takes-it
   ;; the browser check of 4bc612cf89: a debug page opened at "no model turn yet" never showed the turns that
@@ -2745,13 +2743,6 @@
          (is (= [] (r/take-defects! w)))
          (finally (r/dispose-walk! w)))))
 
-(deftest a-mark-no-message-has-is-an-error
-  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: a typo in a role or a field would lose the model a message without a word
-  (let [type-of #(try (r/hiccup-wire (seon.db/index) %) nil (catch Throwable e (:seon.error/type (ex-data e))))]
-    (is (= :seon.render/unknown-mark (type-of [:li {:wire/role "sytem"} "x"])))
-    (is (= :seon.render/unknown-mark (type-of [:li {:wire/role "assistant"} [:pre {:wire/field "cod"} "(f)"]])))
-    (is (nil? (type-of [:li {:wire/role "assistant" :wire/call-id "c"} [:pre {:wire/field "code"} "(f)"]])) "and the marks it knows read")))
-
 (deftest a-wire-mark-never-reaches-the-browser
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: :wire/* is for the reading alone, so nothing in it can name a Datastar attribute (`ref` made a signal per element, posted back by @post); what Datastar reads stays :data-*
   (let [e {:seon.eval/id "e1" :seon.eval/code "(f)" :seon.eval/response {:value 1 :handle 'result/e1} :seon.eval/call-id "c"}
@@ -2760,14 +2751,6 @@
     (is (not (str/includes? html "data-role")) "no marker under its old name")
     (is (str/includes? html "id=\"eval-e1\"") "an element's id stays: a patch lands by it")
     (is (= "<li data-x=\"1\"></li>" (h/html [:li {:wire/role "user" :data-x "1"}])))))
-
-(deftest parts-print-in-the-order-they-are-placed
-  ;; docs/render.md#the-render-is-an-eval: past eight keys a map is hash ordered, and the live run read "task" fifth; the value is pairs, so any store, printer and reader keeps them
-  (let [ids (mapv #(str "p" %) (range 12))
-        v (r/parts-value (map (fn [id] [id [:li id]]) ids))]
-    (is (= ids (map first (:components v))))
-    (is (= ids (map first (:components (read-string (pr-str v))))) "read back")
-    (is (= (sort-by #(str/index-of (seon.print/text v) %) ids) ids) "printed")))
 
 ;; docs/render.md#a-change-is-edits-by-name: what the keyed read and its edits are, on the shape status draws
 (def ^:private proofs-a
@@ -2887,8 +2870,7 @@
     (doseq [[k t] drawn] (is (not (re-find #":depth|:symbol|:change|:read " t)) (str k " carries none of how it was fetched")))))
 
 (deftest a-chat-is-the-agent-talking-and-its-steps
-  ;; docs/render.md#the-page: a turn is what the agent said, then its evals as steps; Seon's own evals are the model's, not
-  ;; this conversation; a step opens once to its code and its value, drawn by the render its record names
+  ;; docs/render.md#the-page: a turn is what the agent said, then its evals as steps; a step opens once to its code and its value, drawn by the render its record names
   (let [[db aid] (cited-world)
         k (:seon.agent/key (d/pull db [:seon.agent/key] aid))
         db (d/db-with db [{:db/id aid :seon.agent/turn 1}
@@ -2903,9 +2885,8 @@
         turn (ui/conversation-turn (assoc opts :key 1))
         shown (set (for [c (drop 2 turn) :when (= #'ui/eval-item (first c))] (:key (second c))))
         reply (some #(when (= :section (first %)) %) (drop 2 turn))]
-    (is (= #{"e2" "e4"} shown) "an eval of another hand is a line after the reply, and Seon's its own, for the model alone")
+    (is (= #{"e2" "e4"} shown) "an eval of another hand, Seon's among them, is a line after the reply")
     (is (= ["e3"] (map (comp :key second) (last (last reply)))) "the agent's eval is its reply's step")
-    (is (not (str/includes? (h/html (ui/eval-item (assoc opts :at [:seon.eval/_agent (eid "e2")]))) "render-ctx")) "Seon's own is not on the page")
     (let [t (h/html (ui/reply-hiccup (d/pull db '[*] call) false []))]
       (is (str/includes? t "Found <strong>it</strong>") "what it said, its Markdown drawn")
       (is (not (str/includes? t "of context")) "its tokens are for whoever opens a step"))
@@ -3232,12 +3213,14 @@
     (try
       (let [html (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w))))
             g1 (str/index-of html "eval-glance-g1")
-            wire (pr-str (r/placed-hiccup w ["#c-rows"]))]
+            ;; what the model reads of the eval: its model render's messages (seon.ctx.wire/eval-msgs), never the chat's elements
+            read (pr-str (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "g2"])))]
         (is (str/includes? html "<svg") "the chart is drawn, closed step and all")
         (is (not (str/includes? html "<svg height=\"0")) "drawn as it is")
         (is (str/includes? html "plain-value") "a value with no render: the value printer")
         (is (some? g1))
-        (is (not (str/includes? wire "eval-glance")) "the model reads no glance"))
+        (is (str/includes? read "plain-value") "the model reads the value as data")
+        (is (not (str/includes? read "eval-glance")) "and no glance"))
       (finally (r/dispose-walk! w))))
   (testing "a render no process here holds: the data, never a throw"
     (let [v {:n 1 :seon.render/hiccup 'agent.nobody/chart}]
@@ -3372,7 +3355,7 @@
     (is (str/includes? busy (str "id=\"" sel "\"")) (str "the in-flight element, its id the call's: " busy))
     (is (str/includes? busy "aria-busy=\"true\"") "busy while the model answers")
     (is (str/includes? busy "data-ignore-morph") "kept as it is through the turn's redraws")
-    (is (empty? (mapcat second (seon.render/hiccup-wire (seon.db/index) (turn open)))) "the model reads nothing of it")
+    (is (= [] (seon.ctx.wire/model-call-msgs {:seon.db/db open} (d/pull open '[*] [:seon.model-call/id cid]))) "the model reads nothing of it")
     (let [replied (d/db-with open [{:seon.model-call/id cid :seon.model-call/reply "Found it."}])]
       (is (str/includes? (at replied) "Found it.") "the committed reply draws while its evals run")
       (is (str/includes? (at replied) "aria-busy") "beside the element, until its evals have run")
@@ -3398,8 +3381,11 @@
     (is (some #(and (vector? %) (= :ol (first %)) (= ["e3"] (map (comp :key second) (second (rest %))))) reply)
         (str "its eval is the reply's step: " (pr-str reply)))
     (is (str/includes? (pr-str turn) "aria-busy") "beside the in-flight element")
-    (is (some #(and (vector? %) (map? (second %)) (= "seon-stream" (:class (second %))) (= "page" (:wire/for (second %)))) (tree-seq coll? seq turn))
-        "the element is the page's alone")))
+    (is (some #(and (vector? %) (map? (second %)) (= "seon-stream" (:class (second %)))) (tree-seq coll? seq turn)) "the element is in the turn the page draws")
+    (is (not-any? #(str/includes? (pr-str %) "seon-stream")
+                  (concat (seon.ctx.wire/model-call-msgs {:seon.db/db db} (d/pull db '[*] [:seon.model-call/id (seon.lib/call-id k 1)]))
+                          (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "e3"]))))
+        "and the model's renders of its call and eval never read it: the element is the page's alone")))
 
 (deftest a-components-root-keeps-its-classes
   ;; owner, 2026-11-08: the home page's messages touched; a root's own classes (its layout, seon-stack's gap) were replaced

@@ -1355,41 +1355,6 @@
     (is (= #{:seon.agent/key} (set (keys (:value (seon.db/response-of nil (rec part)))))) (str "kept as the data it was: " (pr-str (select-keys (seon.db/response-of nil (rec part)) [:value]))))
     (is (not (str/includes? (text (rec part)) ":evals")) "the model reads what the value was, not the whole record")))
 
-(deftest render-ctx-and-render-changes-answer-the-render-as-evals
-  ;; owner, 2026-11-05: the whole render as an ordinary eval, whole; what changed from the walk, computing nothing when nothing moved;
-  ;; 2026-11-06: "we only show the changed parts so we never reprint the full data structure"
-  (let [db (seeded 3 nil)]
-    (try
-      (enter-agent! {:db db :key k :branch :b})
-      (let [all (my.render/render-ctx)
-            after-all (my.render/render-changes)
-            again (my.render/render-changes)
-            tid (get-in @ctx/ctx [:seon.agent/task :seon.task/id])
-            _ (swap! seon.agent/state assoc :db (d/db-with db [{:seon.task/id tid :seon.task/plan "A plan that moved."}]))
-            moved (my.render/render-changes)
-            _ (seon.repl/page-walk)
-            later (my.render/render-changes)
-            ;; what a new process is: a walk that has shown nothing
-            _ (vreset! (:shown (:walk @seon.agent/state)) nil)
-            restarted (my.render/render-changes)]
-        (is (seq (:components all)) "every part")
-        (is (every? (fn [[_ f]] (and (symbol? (first f)) (map? (second f)))) (:components all)) "each headed by its function and its path")
-        (is (= [] (:edits after-all)) "shown whole by render-ctx, nothing has moved since")
-        (is (= [] (:edits again)) "nothing moved: nothing")
-        (is (contains? after-all :shown-by) "and says what showed it")
-        (is (= #{:components} (set (keys all))) "no t in what a reader reads")
-        (is (= (:t (:seon.render/page (meta all))) (:since (:seon.render/page (meta after-all)))) "the eval keeps the t it diffs from")
-        (is (= (map first (:components all)) (map first (:components restarted))) "a walk that has shown nothing (a restart) is every part, the one rule")
-        (is (= {:seon.render/schema :seon.render/parts :seon.print/full true} (dissoc (meta all) :seon.render/page)) "named, so its record prints it whole")
-        (is (some #(= "task" (first (first %))) (:edits moved)) "the plan moved: the task's part")
-        (is (not-any? #(= "status" (first (first %))) (:edits moved)) "and not what read nothing of it")
-        (is (str/includes? (pr-str (:edits moved)) "A plan that moved.") "its new text")
-        (is (not-any? #(contains? moved %) [:t :since]))
-        (let [pm (:seon.render/page (meta moved))]
-          (is (< (:since pm) (:t pm)) "from a t to a later one")
-          (is (= (:t pm) (:since (:seon.render/page (meta later)))) "and the next diff from there")))
-      (finally (end-agent!)))))
-
 (deftest the-rules-move-only-when-a-rule-does
   ;; docs/render.md#style: the page draws the CSS and the model's request holds none (owner, 2026-11-08); a rule edited moves the page's rules, never the model's page
   (let [db (seeded 3 nil)
@@ -1399,34 +1364,21 @@
         rules-of (fn [page] (some #(when (str/starts-with? (:id %) "page-rules") (:html %)) (:units page)))]
     (try
       (enter-agent! {:db db :key k :branch :b})
-      (let [all (my.render/render-ctx)
-            page (seon.repl/render-ctx)
+      (let [page (seon.repl/render-ctx)
+            read #(pr-str (:messages (seon.ctx.wire/request (seon.repl/page-walk))))
+            before (read)
             _ (alter-meta! v assoc :seon.render/style ".task { color: red; }")
             _ (alter-var-root v (fn [f] (fn [& args] (apply f args))))
-            edited (my.render/render-changes)
             page' (seon.repl/render-ctx)]
-        (is (seq (:components all)) "the model reads its page")
-        (is (not-any? (fn [[id _]] (= "page-rules" id)) (:components all)) "and no rule of it")
-        (is (not (str/includes? (pr-str all) ".task >")) "no CSS anywhere in what it reads")
+        (is (not (str/includes? before ".task >")) "no CSS anywhere in what the model reads")
         (is (str/includes? (rules-of page) ".task") "the page holds the rules")
         (is (str/includes? (rules-of page) ".chat-ask") "a page-only render's too")
-        (is (not-any? #(= "page-rules" (first (first %))) (:edits edited)) "a rule edited moves nothing the model reads")
-        (is (str/includes? (rules-of page') "color: red") "and moves the page's rules"))
+        (is (str/includes? (rules-of page') "color: red") "and a rule edited moves the page's rules")
+        (is (= before (read)) "and nothing the model reads"))
       (finally
         (alter-var-root v (constantly was-f))
         (alter-meta! v assoc :seon.render/style was-style)
         (end-agent!)))))
-
-(deftest a-diff-holds-what-it-needs-in-the-walk
-  ;; docs/render.md#the-render-is-an-eval: the walk keeps the form it last showed of a part, and a part it let go is gone from it
-  (let [db (seeded 3 nil)]
-    (try
-      (enter-agent! {:db db :key k :branch :b})
-      (let [all (my.render/render-ctx)
-            shown @(:shown (:walk @seon.agent/state))]
-        (is (= (set (map first (:components all))) (set (keys (:forms shown)))) "the form of each part it showed, nothing else")
-        (is (nil? (:render-seen @seon.agent/state)) "no memory of it beside the walk"))
-      (finally (end-agent!)))))
 
 (deftest a-value-that-is-a-page-prints-whole-stored-and-live
   ;; the printer cut a render-sized value (12,697 chars to 4,258) because :seon.print/full is metadata and the store keeps none:

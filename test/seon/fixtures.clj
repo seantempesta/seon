@@ -437,32 +437,33 @@
     (calls "Waiting on a promise nothing delivers." "@(promise)")
     (reply request)))
 
-;; ---- what the tree reads as messages, a record at a time (docs/render.md#the-models-context-a-cached-prefix-then-the-turn) ----
+;; ---- what the model reads, an entity at a time (docs/render.md#the-models-context-a-cached-prefix-then-the-turn) ----
 
 (defn eval-messages
-  "Eval record e as the model reads it, through the one reading of the tree: its call, naming its reply when it is a model's of turn :turn, and its result."
+  "Eval record e as the model reads it, through its schema's model render (seon.ctx.wire/eval-msgs) on opts :db (else the test store's seed): its call, naming its reply when its call ref names a model call, and its result."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector :map]]}
-  [opts e]
-  (let [h (@(requiring-resolve 'seon.render.ui/eval-hiccup) {:db (:db opts)} e)
-        h (if (and (:seon.eval/call-id e) (pos? (:turn e 0))) [:section {:wire/role "assistant" :wire/reply (:turn e)} h] h)]
-    (vec (mapcat second (seon.render/hiccup-wire (seon.db/index) h (:db opts))))))
+  [opts e] (@(requiring-resolve (quote seon.ctx.wire/eval-msgs)) {:seon.db/db (or (:db opts) (@(requiring-resolve (quote seon.test-store/test-db)))) :seon.render/index (seon.db/index)} e))
 
 (defn message-messages
-  "Message m as the model reads it."
+  "Message m as the model reads it (seon.ctx.wire/message-msgs)."
   {:malli/schema [:=> [:cat :any :map] [:vector :map]]}
-  [_ m] (vec (mapcat second (seon.render/hiccup-wire (seon.db/index) (@(requiring-resolve 'seon.render.ui/message-hiccup) m)))))
+  [_ m] (@(requiring-resolve (quote seon.ctx.wire/message-msgs)) {} m))
 
 (defn turn-messages
-  "Model call c's reply as the model reads it."
+  "Model call c's reply as the model reads it (seon.ctx.wire/model-call-msgs)."
   {:malli/schema [:=> [:cat :any :map] [:vector :map]]}
-  [_ c] (vec (mapcat second (seon.render/hiccup-wire (seon.db/index) (@(requiring-resolve 'seon.render.ui/reply-hiccup) (assoc c :seon.model-call/origin :model) true [])))))
+  [db c] (@(requiring-resolve (quote seon.ctx.wire/model-call-msgs)) {:seon.db/db db} (assoc c :seon.model-call/origin :model)))
 
 (defn tree-parts
-  "The conversation of agent record c on db as the tree reads it, cold: parts [ref messages turn], its system message and its opening left out."
+  "The conversation of agent record c on db as the agent's walk answers it for the model, cold: parts [ref messages turn] of the request, its system message and its opening left out. A db that holds no system prompt gets a stub of one, which the walk needs and the parts leave out."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:vector :any]]}
   [c db]
-  (let [w (seon.render/draw c @(requiring-resolve 'seon.ctx/changes) db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {:model-only true})]
-    (try (vec (remove (fn [[r]] (or (nil? r) (#{:section :session} (first r)))) (seon.render/wire w)))
+  (let [doc-load (requiring-resolve 'seon.doc/load-tx)
+        page (requiring-resolve 'seon.doc/system-page)
+        db (if (@(requiring-resolve 'seon.doc/page-text) db @page) db (datahike.api/db-with db (doc-load db "docs" {@page "# A stub of the system prompt\n\nBe brief."})))
+        w (seon.render/draw c @(requiring-resolve 'seon.ctx/changes) db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx)
+                            {:model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
+    (try (vec (remove (fn [[r]] (or (nil? r) (#{:section :session} (first r)))) (:parts (@(requiring-resolve (quote seon.ctx.wire/request)) w))))
          (finally (seon.render/dispose-walk! w)))))
 
 (defn tree-messages
