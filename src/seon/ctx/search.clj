@@ -46,17 +46,17 @@
 
 ;; ---- relevance: one calibrated score for a context and an item (docs/vector.md#relevance) ----
 
-(defn- item-text
-  "Entity e's text as relevance's lexical feature reads it: its name twice (a var's, a section's
-  address and heading, a schema key) and its text (a form's source, a section's, a schema's form)."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :string]}
+(defn- item-name
+  "Entity e as relevance's lexical feature reads it, [name a]: its name, counted twice (a var's, a section's address and heading,
+  a schema key), and the text attribute holding its text (a form's source, a section's text, a schema's form), whose term counts
+  are kept beside the text index's row of it (seon.doc/text-terms), or nil."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:tuple :string [:maybe :qualified-keyword]]]}
   [db e]
-  (let [x (d/entity db e)
-        [n t] (cond (:form/id x) [(some->> (:var/_form x) (map :var/name) sort first str) (:form/src x)]
-                    (:seon.doc/address x) [(str (:seon.doc/address x) " " (:seon.doc/heading x)) (:seon.doc/text x)]
-                    (:schema/key x) [(str (:schema/key x)) (pr-str (:schema/form x))]
-                    :else ["" ""])]
-    (str n " " n " " t)))
+  (let [x (d/entity db e)]
+    (cond (:form/id x) [(or (some->> (:var/_form x) (map :var/name) sort first str) "") :form/src]
+          (:seon.doc/address x) [(str (:seon.doc/address x) " " (:seon.doc/heading x)) :seon.doc/text]
+          (:schema/key x) [(str (:schema/key x)) :schema/form]
+          :else ["" nil])))
 
 (defn- section-names
   "Each var name to the wiki's sections that name it, as a function of the name: one seek of :seon.doc/names (indexed) for
@@ -178,7 +178,7 @@
   neighbourhood (each seed's first neighbours by each read, and those `pushed` at
   :seon.config.render/relevance-eps reached), keep? (of kind and entity) true;
   each item scored by a logistic over five features (:seon.config.render/relevance-weights): zc its
-  cosine with qv, zb its BM25 among the pool (seon.doc/bm25: idf over the pool itself, the name counted twice; search's own text ranking is the index's, over every text) for the text's terms (seon.doc/terms), zt its cosine with the touched items' mean
+  cosine with qv, zb its BM25 among the pool (seon.doc/bm25: idf over the pool itself, the name counted twice; search's own text ranking is the index's, over every text) for the text's terms (seon.doc/terms, kept beside the text index: seon.doc/text-terms, `item-name`), zt its cosine with the touched items' mean
   vector, each a z-score over the pool, g1 log(1 + the seeds it neighbours x its rarity,
   (1 + cap)/(1 + its degree to cap)) and ppr log(1 + scale x its rank), the constants
   :seon.config.render/relevance-features; the logit read as a chance by the kind's calibration (`percent`). zb scored by the
@@ -223,7 +223,16 @@
                        []
                        (let [w (weights kind)
                              zc (z (if qv (vector/scores db qv pool) (repeat (count pool) nil)))
-                             zb (z (let [fs (mapv #(frequencies (doc/terms (item-text db %))) pool)] (doc/bm25 qs fs (mapv #(reduce + 0 (vals %)) fs))))
+                             ;; each item's counts of the query's words alone and its length, what bm25 reads of a text: its name twice and
+                             ;; its text's kept counts (seon.doc/text-terms, read for the pool at once), so an item costs its name, never its text's length
+                             zb (z (let [named (mapv #(item-name db %) pool)
+                                         held (doc/text-terms db (mapv (fn [e [_ a]] [e a]) pool named))
+                                         cs (mapv (fn [[n _] [tf tlen]]
+                                                    (let [nf (frequencies (doc/terms n))]
+                                                      [(into {} (keep (fn [w] (let [c (+ (* 2 (get nf w 0)) (get tf w 0))] (when (pos? c) [w c])))) qs)
+                                                       (+ (* 2 (reduce + 0 (vals nf))) tlen)]))
+                                                  named held)]
+                                     (doc/bm25 qs (mapv first cs) (mapv second cs))))
                              zt (z (if centroid (vector/scores db centroid pool) (repeat (count pool) nil)))]
                          (->> (map (fn [e c b t]
                                      (let [l (+ (:intercept w) (* (:zc w) c) (* (:zb w) b) (* (:zt w) t)
