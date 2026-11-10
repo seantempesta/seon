@@ -358,7 +358,7 @@
             ;; hit; a call answers o), kept as its marker, so the parent orders and each child's answer stays its own
             place (fn [o env' xs] (mapv (fn [x] (if-let [[ef eo] (entity-render ix x)]
                                                   (render! w ef eo [x] env')
-                                                  (if (and (vector? x) (or (var? (first x)) (fn? (first x))) (not (keyword? (first x))))
+                                                  (if (and (vector? x) (or (var? (first x)) (fn? (first x))))
                                                     (render! w (first x) (assoc (or (second x) {}) :seon.render/as o) (vec (nnext x)) env')
                                                     x)))
                                         xs))
