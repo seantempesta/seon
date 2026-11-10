@@ -1148,6 +1148,19 @@
   analysis and the account) and what digests them. See docs/source.md#the-binary-records-its-program."
   '[seon.root/import-tree! seon.program/program-digest])
 
+
+(defn landed-tx
+  "What root writes on main for a change git landed (bin/land's bridge, docs/source.md#a-landing-enters-main-as-data):
+  changed-tx of its changed files and modes, and root's :seon.root/source fact moved to the landed tree (its :tree,
+  :commit and :digest, as an import of that tree records them), so the next re-index (my.root/import!) reads only what
+  differs from that tree, not every file landed since the last import."
+  {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string] :string :string] :seon.db/tx-data]}
+  [db changed modes tree commit]
+  (let [held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))]
+    (cond-> (changed-tx db changed modes)
+      held (conj {:seon.root/id :root
+                  :seon.root/source (assoc held :tree tree :commit commit :digest (source-digest {:tree tree :pins (:pins held)} (:dirs held [])))}))))
+
 (defn index-code
   "The code that indexes a tree, as db's program states it, under inputs: the reach digest of roots
   (seon.program/graph-index over db's seon.program/reach-graph, as a check step's root is digested), its components and
