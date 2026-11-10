@@ -416,6 +416,11 @@
     (is (= 1 (get-in st [:items ['app.cheap-test/t "dc"] :skips])) "and the batch's item passed over ages a skip")))
 
 ;; every wait ends: a batch whose run errored (a test child that died) answers each of its askers with that error, never silence
+;; no shards: a worker pulls one item, so two items of one namespace are two grants, and a second worker takes the second
+(deftest a-worker-pulls-one-item-at-a-time
+  (let [[_ outs] (prove/ask-items (items-st 2) 1 :batch {['app.x-test/a "da"] {:agent :a1 :ms 5} ['app.x-test/b "db"] {:agent :a1 :ms 5}})]
+    (is (= [1 1] (mapv #(count (get-in % [:req :items])) (batches outs))) "two workers, one item each, though both are app.x-test's")))
+
 (deftest a-batch-that-died-answers-its-askers-with-the-error
   (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :a1 :ms 5}})
         b (first (batches o1))

@@ -69,7 +69,7 @@
 ;; ---- items: a (test, digest) pair, run once whoever asks ------------------------------------
 ;; The test service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2): an asker names the items its plan
 ;; has no verdict for; each item is queued once with every asker waiting on it, granted in batches to the agent holding
-;; its branch while a slot is free (the machine's test children: the one bound), and each asker is answered at its first
+;; its branch one at a time while a worker is free (the machine's test children: the one bound), and each asker is answered at its first
 ;; red or its last green. State: :items {[test digest] {:status :waiters :agent :ms :risk :skips}}, :askers {rid {:left
 ;; :prio :results}}, :batches {bid #{item}}, :slots n. No clock: an item passed over is aged in skips.
 
@@ -101,9 +101,9 @@
     [st (reply [] [rid] r)]))
 
 (defn- grant
-  "While a slot is free and an item is queued: the most valuable queued item (a :turn asker's first, then item-value)
-  with every queued item of its namespace and agent (one fork of the agent, one fixture run), asked of that agent as
-  {:op :tests :id agent :items [test ...]} tagged [:batch bid]; each queued item passed over ages a skip.
+  "While a worker is free (a slot) and an item is queued: the most valuable queued item (a :turn asker's first, then
+  item-value), alone (no shards: a worker pulls one item, so none idles while another holds a list), asked of the agent
+  holding it as {:op :tests :id agent :items [test]} tagged [:batch bid]; each queued item passed over ages a skip.
   Answers [st outputs]."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
   [st]
@@ -112,8 +112,7 @@
       (if (or (empty? queued) (< (:slots st 0) 1))
         [st outs]
         (let [[k it] (apply max-key (fn [[_ it]] (+ (if (turn? st it) 1e12 0) (item-value it))) queued)
-              ns-of (comp namespace first)
-              batch (into #{} (comp (filter (fn [[k2 it2]] (and (= (ns-of k2) (ns-of k)) (= (:agent it2) (:agent it))))) (map key)) queued)
+              batch #{k}
               bid (inc (:bid st 0))
               st (reduce (fn [st k2] (if (batch k2) (assoc-in st [:items k2 :status] :running) (update-in st [:items k2 :skips] (fnil inc 0))))
                          (-> st (assoc :bid bid) (update :slots dec) (assoc-in [:batches bid] batch))
