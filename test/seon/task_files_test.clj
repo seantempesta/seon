@@ -128,10 +128,13 @@
         [_ tasks-refused] (refusal db tx)]
     (is (seq files))
     (is (= [] (vec (for [[ns-sym ds] files :when (:seon.error/type ds)] ns-sym))) "every file reads")
-    (is (nil? wiki-refused) (str "the wiki loads; links to no section: " (pr-str (dead-links db0 ps))))
-    (is (vector? tx) (pr-str tx))
-    (is (nil? tasks-refused) (str "and the tasks; cites of nothing: "
-                                  (pr-str (dead-cites (:db-after (pdb/speculate db tasks-only)) decls))))))
+    ;; clojure.test evaluates an assertion's message when it passes too: each diagnosis is made only for a red (the two
+    ;; cost 150 M ticks a green run, a fifth of the test)
+    (is (nil? wiki-refused) (when wiki-refused (str "the wiki loads; links to no section: " (pr-str (dead-links db0 ps)))))
+    (is (vector? tx) (when-not (vector? tx) (pr-str tx)))
+    (is (nil? tasks-refused) (when tasks-refused
+                               (str "and the tasks; cites of nothing: "
+                                    (pr-str (dead-cites (:db-after (pdb/speculate db tasks-only)) decls)))))))
 
 (deftest no-shipped-task-is-merged-work
   ;; docs/merging.md#a-merge-says-what-it-completes: the merge
