@@ -679,6 +679,17 @@
 
 (def ^:private facts-path "resources/seon/schemas/seon.facts.edn")
 
+(deftest a-task-file-loses-only-the-entries-named
+  ;; docs/source.md#a-merged-task-reaches-mains-files: a reviewed sync removes a task's entry with its lead (the whitespace and
+  ;; comments before it), the file's first with the whitespace after it; every other byte, a namespaced map's too, is kept
+  (let [text "[#:seon.task{:name \"a\",\n             :plan \"one\"}\n ;; b is next\n {:seon.task/name \"b\" :seon.task/plan \"two\" :seon.task/proofs #{x/y}}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"]
+    (is (= "[;; b is next\n {:seon.task/name \"b\" :seon.task/plan \"two\" :seon.task/proofs #{x/y}}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"
+           (source/task-file-text text #{"a"})))
+    (is (= "[#:seon.task{:name \"a\",\n             :plan \"one\"}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"
+           (source/task-file-text text #{"b"})) "with the comment that leads it")
+    (is (= "[]\n" (source/task-file-text text #{"a" "b" "c"})) "every entry gone")
+    (is (= text (source/task-file-text text #{"z"})) "a name no entry has changes nothing")))
+
 (deftest a-changed-schema-entry-rewrites-only-itself
   ;; task seon.source/schemas-are-part-of-the-program: write-back rewrites only the changed
   ;; entries of a schema resource (v1's schema-file-text over rewrite-clj), every other byte
