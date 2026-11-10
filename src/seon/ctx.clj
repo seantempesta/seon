@@ -874,12 +874,15 @@
     (if (= ::unordered placed) (place (sort-by #(:seon.model-call/n (val %)) calls) false) placed)))
 
 (defn turn-evals
-  "What model call cid of agent record c holds that c holds too: the evals it ran, [[e id]] in the order they ran, each with its own id; one unlinked from c (a swap! on @ctx) is none. Reads each member's id alone: a member's id is written once, so an outside agent's one
+  "What model call cid of agent record c holds that c holds too: the evals of its turn, [[e id]] in the order the turn reads them, each with its own id: the
+  model's (those with a :seon.eval/call-id), as they ran, then those of other hands, as they ran, so a reply's tool results stand right after its
+  tool calls (a provider refuses anything between them). The one order of a turn's evals, which the page's chat and the model's history both read
+  (seon.ctx.wire-test/the-chat-and-the-request-walk-one-sequence). One unlinked from c (a swap! on @ctx) is none. Reads each member's id alone: a member's id is written once, so an outside agent's one
   growing turn reads no more for each it holds, and one its ctx does not hold yet is read through c. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :map :int] [:sequential [:tuple :int :string]]]}
   [c cid]
   (let [plain (ratom/untracked c)]
-    (sort-by first (keep (fn [e] (when-let [id (or (get-in plain [:seon.eval/_agent e :seon.eval/id]) (get-in c [:seon.eval/_agent e :seon.eval/id]))] [e id]))
+    (sort-by (fn [[e]] [(if (get-in plain [:seon.eval/_agent e :seon.eval/call-id]) 0 1) e]) (keep (fn [e] (when-let [id (or (get-in plain [:seon.eval/_agent e :seon.eval/id]) (get-in c [:seon.eval/_agent e :seon.eval/id]))] [e id]))
                          (when (seq (get-in c [:seon.model-call/_agent cid :seon.eval/_call])) (keys (get-in plain [:seon.model-call/_agent cid :seon.eval/_call])))))))
 
 (defn turn-members

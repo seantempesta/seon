@@ -1441,6 +1441,78 @@
             "the page, turn 1's eval and its result, then the message taken in turn 1, a user message: the page's parts did not move (the message is history, never a part), so no change follows")
         (is (str/includes? (:content (nth (:messages r1) 6)) "note taken in turn 1") "the message, read at the next turn, after the turn's evals")))))
 
+(deftest a-message-delivered-mid-turn-reads-after-that-turns-evals-on-a-branch-that-merged-main
+  ;; docs/turn.md#the-turn-is-a-number: a message sent on main before turn 1 was made (so its id, issued once across every branch,
+  ;; is older than turn 1's call) and brought to the agent's branch by a merge of main in the middle of turn 1 was read by turn 2:
+  ;; the model's history holds it after turn 1's evals, and request 2 holds request 1 whole. Its id is the send's, not the
+  ;; delivery's: a message's entity id is a content id (:seon.message/id is one, the hash of the id, the same on every branch), so
+  ;; it orders nothing; the order the chat is read in is the transaction that brought each entity to the branch
+  (ts/test-branch!
+    (fn [cfg conn]
+      (let [[ask! ev!] (parts-session conn)
+            mb (pdb/on-main (:branch cfg) :chat-main)
+            _ (d/branch! conn (:branch cfg) mb)
+            main (pdb/connect (assoc cfg :branch mb))]
+        (try
+          (d/transact main [{:seon.message/id "early" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body "sent before turn 1"}])
+          (let [r0 (ask! 0)
+                _ (ev! "e1")
+                m (d/entity @main [:seon.message/id "early"])
+                ;; main merged into the branch mid-turn: the message comes whole, its id main's
+                _ (d/merge-db conn #{(d/commit-id @main)} [{:db/id (:db/id m) :seon.message/id "early" :seon.message/to [[:seon.agent/key "a1"]]
+                                                            :seon.message/from "owner" :seon.message/body "sent before turn 1"}])
+                r1 (ask! 1)
+                call1 (pdb/eid @conn :seon.model-call/id (seon.lib/call-id "a1" 1))]
+            (is (= (:db/id m) (pdb/eid @conn :seon.message/id "early")) "the branch holds main's entity, its id the content id main minted")
+            (is (> (:db/id m) call1) "which says nothing of when it came: by ids it would sit after every call")
+            (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "request 2 starts with request 1 whole")
+            (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "user"] (mapv :role (:messages r1)))
+                "the page, turn 1's eval and its result, then the message, read at turn 2")
+            (is (str/includes? (:content (nth (:messages r1) 6)) "sent before turn 1") "the message, after turn 1's evals")
+            (ev! "e2")
+            (let [r2 (ask! 2)]
+              (is (= (:messages r1) (subvec (:messages r2) 0 (count (:messages r1))))
+                  "request 3 holds request 2 whole: the message stays at turn 2's start, before turn 2's eval, never moved after it")))
+          (finally (d/release main)))))))
+
+(deftest the-chat-and-the-request-walk-one-sequence
+  ;; docs/turn.md#the-turn-is-a-number: the page's chat and the model's request are one walk of the agent's entities, so they hold
+  ;; its messages and evals in one order: turn 1's eval of the model's, an eval of another hand in turn 1, a message delivered mid-turn
+  ;; (read at turn 2), turn 2's eval
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask! ev!] (parts-session conn)]
+        (ask! 0)
+        (ev! "e1")
+        (d/transact conn [{:seon.eval/id "x1" :seon.eval/by "owner" :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
+                           :seon.eval/code "(f 9)" :seon.eval/response {:handle 'result/x1 :value 9}}])
+        (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body "taken in turn 1"}])
+        (ask! 1)
+        (ev! "e2")
+        (let [db @conn ix (seon.db/index)
+              w (render/draw (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "a1") :b)) ctx/changes db #'seon.render.ui/agent
+                             {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})
+              ;; the chat's entities as the request holds them: an eval or a message by its id, in order, each once
+              of (fn [x] (let [x (some-> x seon.ratom/realize)] (or (some->> (:seon.eval/id x) (vector :eval)) (some->> (:seon.message/id x) (vector :message)))))
+              request (vec (dedupe (keep (fn [[_ {:keys [args]}]] (of (first args))) (render/answer-sources w :seon.render/openai-compat))))
+              ;; the page's: the conversation's rows as the page holds them, each eval's and message's own component by its root element's id (seon.render/key-id)
+              page (vec (dedupe (for [[_ k id] (re-seq #"id=\"(evaluation|message)-([^\"]+)\"" (apply str (map :html (filter #(= "#c-rows" (:container %)) (seon.fixtures/page-units w)))))]
+                                  [(if (= k "message") :message :eval) id])))]
+          (try
+            (is (= [[:eval "e1"] [:eval "x1"] [:message "mid"] [:eval "e2"]] request) "the request: turn 1's evals, the model's first, then the message turn 2 read, then turn 2's eval")
+            (is (= request page) "the page's chat holds them in the same order")
+            (finally (render/dispose-walk! w))))))))
+
+(deftest the-models-page-holds-no-attribute-of-the-pages-alone
+  ;; docs/render.md#style: what the page's script and a screen reader read (:data-*, :aria-*) is the page's alone, as class and style
+  ;; are; a link's target, a title and an image's text stay, and a component's root keeps its render's name and its id
+  (is (= [:section {:class "task-view" :id "task-view-x"} [:a {:href "/x" :title "t"} "x"] [:button "close"] [:img {:alt "a"}]]
+         (#'wire/presentation-free
+          [:section {:class "task-view big" :id "task-view-x" :data-render "seon.render.ui/task-view"}
+           [:a {:href "/x" :title "t" :aria-current "page" :class "link"} "x"]
+           [:button {:data-seon-form "(f)" (keyword "data-on:click") "@post('/open')"} "close"]
+           [:img {:alt "a" :style "w"}]]))))
+
 (deftest a-record-takes-the-agents-turn-in-force
   ;; docs/turn.md#the-turn-is-a-number: agent/turn-now is the agent's :seon.agent/turn on its branch (0 before its first turn),
   ;; and the messages the agent's code takes (seon.agent/messages) are written under it

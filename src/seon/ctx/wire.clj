@@ -244,7 +244,8 @@
   [{:role "user" :content (print/text (array-map :render-threw (some-> in str) :message (str message)) (:context print/budgets))}])
 
 (defn- presentation-free
-  "Hiccup h without what is the page's alone: each element's class, style and id, but for a component's root (an element the walk
+  "Hiccup h without what is the page's alone: each element's class, style and id, its :data-* and :aria-* attributes (what the page's script
+  and a screen reader read; :href, :title and :alt stay), but for a component's root (an element the walk
   gave an id), which keeps its render's name, the first word of its class, so the model can look up the function that drew a part
   (`(source seon.render.ui/task-view)`) and its CSS on that var's metadata, and its id (seon.render/key-id: the render and what it shows), by which
   a diff names it (seon.render/keyed); each element's children vectors only (`children`). See docs/render.md#style."
@@ -257,7 +258,11 @@
                                        (let [m (second x)
                                              r (when (:id m) (first (str/split (str (:class m)) #"\s+")))
                                              ;; and the page's own marks (:wire/for \"page\"): what the page alone shows says nothing to the model
-                                             a (cond-> (into {} (remove (fn [[k _]] (or (#{:class :style :id} k) (= "wire" (namespace k))))) m) (seq r) (assoc :class r :id (:id m)))]
+                                             ;; and what drives the page's script or a screen reader (:data-*, :aria-*): the page's alone too
+                                             a (cond-> (into {} (remove (fn [[k _]] (or (#{:class :style :id} k) (= "wire" (namespace k))
+                                                                                        (and (nil? (namespace k)) (or (str/starts-with? (name k) "data-") (str/starts-with? (name k) "aria-"))))))
+                                                             m)
+                                                 (seq r) (assoc :class r :id (:id m)))]
                                          (into (if (seq a) [(first x) a] [(first x)]) (children (nnext x))))
                                        (if (and (vector? x) (keyword? (first x))) (into [(first x)] (children (next x))) x)))
                              h)))
@@ -402,7 +407,7 @@
   messages as it read them (seon.ctx/placed-messages: those delivered by its basis, so one delivered mid-turn reads at the next
   turn), its page message between the basis of the call before that holds one and its own (`page-diff-msgs`, a placed call
   whose parts come from one walk along the bases, drawn when a pair first asks: `pages-from`),
-  the call, the call's evals of the model's, then those of other hands; a member c no longer holds (unlinked by a swap!) is
+  the call, then its evals in the one order a turn's are read in (seon.ctx/turn-evals: the model's, then other hands'); a member c no longer holds (unlinked by a swap!) is
   none. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
   [db c]
@@ -427,13 +432,14 @@
     (into (vec (for [[prev call] (map vector (reductions (fn [b x] (or (basis-of x) b)) nil cs) cs)
                :let [n (:seon.model-call/n call)
                      ms (keep (fn [[m _]] (get msgs m)) (get placed n))
-                     es (sort (filter #(contains? evals %) (keys (:seon.eval/_call call))))
+                     ;; its evals in the one order a turn's are read in (seon.ctx/turn-evals: the model's, then other hands')
+                     es (map first (ctx/turn-evals c (:db/id call)))
                      model? #(:seon.eval/call-id (get evals %))]
                x (concat ms
                          (when-let [b (basis-of call)] (let [i (pair n)] [[#'page-diff-msgs (with-meta {} {::parts #(parts i)}) (:db/id c) prev b n]]))
                          ;; a reply with no words whose calls c no longer holds (each unlinked by a swap!) says nothing: none of it stays
                          (when (or (some model? es) (not (str/blank? (:seon.model-call/reply call)))) [call])
-                         (map evals (filter model? es)) (map evals (remove model? es)))]
+                         (map evals es))]
            x))
           ;; those delivered after the last turn's edge, which the turn now opening takes (:pending): never lost before that turn's call exists
           (concat (keep (fn [[m _]] (get msgs m)) (get placed :pending))

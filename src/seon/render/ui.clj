@@ -1565,17 +1565,15 @@
 
 (defn conversation-turn
   "Turn :key as the chat shows it and the model reads it, found by its model call's id, one seek (agent -> call -> its records, so a record of another turn touches nothing this read and an earlier
-  turn never runs again): the messages it took (:messages, [[m id]] as the list placed them: `seon.ctx/placed-messages`), its reply holding the evals it ran, and the evals of other hands after it, each eval and message a component of its own. A turn whose call is not made yet (the one now opening)
+  turn never runs again): the messages it took (:messages, [[m id]] as the list placed them: `seon.ctx/placed-messages`), its reply holding the evals it ran, and the evals of other hands after it (the one order of a turn's evals: `seon.ctx/turn-evals`), each eval and message a component of its own. A turn whose call is not made yet (the one now opening)
   holds the messages delivered for it alone. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:key :int] [:messages {:optional true} [:sequential [:tuple :int :string]]]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db n :key messages :messages}]
   (if-let [cid (some->> (ratom/realize (:seon.agent/key c)) (ctx/call-of db n))]
     (let [evals (ctx/turn-evals c cid)
-          model? (let [plain (ratom/untracked c)] (fn [e] (get-in plain [:seon.eval/_agent e :seon.eval/call-id])))
           ;; each eval placed by its own view: its schema's render (`evaluation`) is one component for the page and the model (eval-msgs)
           item (fn [[e _]] (get-in c [:seon.eval/_agent e]))
-          call (get-in c [:seon.model-call/_agent cid])
-          ours (filter (comp model? first) evals)]
+          call (get-in c [:seon.model-call/_agent cid])]
       (when call
         ;; a turn nothing has come of yet (a call its messages or evals have not reached) is no element
         (when-let [kids (seq (remove nil? (concat (for [[m id] messages] (get-in c [:seon.message/_to m]))
@@ -1584,7 +1582,7 @@
                                                   ;; want them (owner, 2026-11-10: "only show messages by default and have the evals ... not shown unless
                                                   ;; they are expanded"); a call that said nothing, ran nothing and is not in flight is no element
                                                   [(when (or (seq evals) (said? call) (in-flight? call c))
-                                                     [:section {:class "flex w-full flex-col gap-1"} call (steps n (map item (concat ours (remove (comp model? first) evals))))])])))]
+                                                     [:section {:class "flex w-full flex-col gap-1"} call (steps n (map item evals))])])))]
           (into [:div {:class "seon-stack"}] kids))))
     ;; the turn now opening has no call yet: what was delivered since the last turn's edge reads here, before the turn begins
     (when-let [ms (seq messages)]
