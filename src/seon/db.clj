@@ -153,6 +153,13 @@
 
 (defn- reverse-attr {:malli/schema [:=> [:cat :qualified-keyword] :qualified-keyword]} [a] (keyword (namespace a) (str "_" (name a))))
 
+(defn owners
+  "Each of attributes as with the entity schema that owns it, {attribute schema}, as the entity index ix says (its :entity-schemas):
+  the one reading of which entity schemas attributes belong to, for the write check (each schema a write touched) and for a render
+  (the one schema that names a map). An attribute no entity schema owns is left out. See docs/data-modeling.md#a-thing-is-its-attributes."
+  {:malli/schema [:=> [:cat :map [:maybe [:sequential :any]]] [:map-of :keyword :qualified-keyword]]}
+  [ix as] (let [es (:entity-schemas ix)] (into {} (keep (fn [a] (when-let [s (es a)] [a s]))) as)))
+
 (defn implied-pattern
   "The pull entity schema s implies: its own attributes, each ref it names followed to its first target and each ref
   that reaches it followed back to the schema that owns it, a schema already walked not followed again (Malli's
@@ -164,7 +171,7 @@
    (let [w (conj walked s) as (attributes-of ix s) targets (:targets ix)]
      (vec (concat (remove targets as)
                   (for [a as :when (targets a) :let [t (first (remove w (targets a)))] :when t] {a (implied-pattern ix t w)})
-                  (for [a (reaching ix s) :let [o ((:entity-schemas ix) a)] :when (and o (not (w o)))] {(reverse-attr a) (implied-pattern ix o w)}))))))
+                  (for [a (reaching ix s) :let [o (get (owners ix [a]) a)] :when (and o (not (w o)))] {(reverse-attr a) (implied-pattern ix o w)}))))))
 
 (defn extends?
   "Does schema a extend schema b, itself or through the schemas it extends (`parents`, in the entity index ix)? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
@@ -172,14 +179,14 @@
   [ix a b] (boolean (or (= a b) (some #(extends? ix % b) (parents ix a)))))
 
 (defn most-specific
-  "What map e is, one schema, read from the index the write check reads (ix's :entity-schemas, the schema that owns each
-  attribute; the write check holds each owning schema to its required keys and names none as the one): of
+  "What one entity schema map e is, for a render, which needs one: of the schemas owning its attributes (`owners`, the reading the write
+  check makes too, which holds the entity to each of them and names none as the one), the best match by attributes held: of
   the schemas owning the attributes e holds, the best match, the one with the most of its attributes present, those it
   inherits (`parents`) counted, so a schema beats the one it extends; nil for none, {:ambiguous [s ...]} for a tie. One lookup a key, then a sum a candidate
   over its parents. The order of e's keys never decides. See docs/data-modeling.md#a-thing-is-its-attributes."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [ix e]
-  (let [own (frequencies (keep (:entity-schemas ix) (keys e)))]
+  (let [own (frequencies (vals (owners ix (keys e))))]
     (when (seq own)
       (let [score (fn score [s] (+ (get own s 0) (reduce + 0 (map score (parents ix s)))))
             ranked (sort-by (comp - second) (map (juxt identity score) (keys own)))
@@ -203,7 +210,7 @@
   {:malli/schema [:=> [:cat [:maybe :map]] :map]}
   [schemas]
   (let [forms (:forms schemas)]
-    (if (some (fn [k] (or (contains? (:entity-schemas binary-index) k) (contains? (:required-keys binary-index) k)
+    (if (some (fn [k] (or (contains? (owners binary-index [k]) k) (contains? (:required-keys binary-index) k)
                           (:seon.db/attributes (form-props forms k))))
               (keys forms))
       (index-of schemas)
@@ -223,12 +230,13 @@
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :map] [:maybe :seon.error/base]] [:=> [:cat :map :map] [:maybe :seon.error/base]]]}
   ([r] (invalid-entity r binary-index))
-  ([{:keys [db-before db-after tx-data]} {:keys [entity-schemas identity-schemas required-keys own-required]}]
+  ([{:keys [db-before db-after tx-data]} {:keys [identity-schemas required-keys own-required] :as ix}]
    (let [has? (fn [db e a] (boolean (first (d/datoms db :eavt e a))))
          ;; {[e schema] {attribute added?}}: what the write did to each touched entity's attributes of each schema; a key
          ;; it only added is held after with no seek (a write that creates an entity seeks nothing after)
+         own (owners ix (distinct (map :a tx-data)))
          touched (reduce (fn [m {:keys [e a tx added]}]
-                           (if-let [k (when (not= e tx) (entity-schemas a))]
+                           (if-let [k (when (not= e tx) (own a))]
                              (update-in m [[e k] a] #(if (nil? %) (boolean added) (and % added)))
                              m))
                          {} tx-data)
