@@ -197,20 +197,25 @@
        "(my.root/load-tasks! sys); then bin/root stop and bin/root start), or start the binary main's program was built from (bin/root next)"))
 
 (defn stale-binary
-  "A :stale-binary row while root's binary was built from another git tree than the one main was last brought to from outside
-  (an import or a landing): root's :seon.root/source fact as its boot wrote it (seon.root/booted-source), the binary's tree
-  (:binary-tree, none when its build recorded none) beside main's (:tree). What agents merged into main since is main's own,
-  never a row. None on a boot whose binary is of main's tree, or with no tree on the fact; gone at the next boot on a matching
-  binary. While it shows, root forks no agent (seon.root/stale-binary). Derived, never stored, no clock, and never an import:
-  its message names the acts (`stale-binary-acts`). Cost: one pull. See docs/health.md#a-stale-binary."
+  "A :stale-binary row while root's binary is not current for its main: seon.root/stale-binary's answer as its boot held it on
+  root's :seon.root/source fact (:stale-binary, seon.root/booted-source), naming the binary's tree, main's and what between
+  them reaches root's own code or a build input (or what is missing). What agents merged into main since is main's own, never a
+  row. None on a boot whose binary is current, or with no source fact; gone at the next boot on a current binary. While it
+  shows, root forks no agent. Derived from the fact, never computed here, no clock; its message names the acts
+  (`stale-binary-acts`). Cost: one pull. See docs/health.md#a-stale-binary."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
-  (let [{:keys [boot binary-tree tree]} (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source)]
-    (if (and tree (not= binary-tree tree))
+  (let [{:keys [boot stale-binary]} (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source)
+        {:keys [binary tree reaches missing error]} stale-binary]
+    (if stale-binary
       [(derived-row ans (str "stale-binary " boot) 'seon.root
-                    (str "root's binary was built from " (if binary-tree (str "tree " binary-tree) "a tree its build did not record")
-                         ", and main was last brought from tree " tree ": agents would fork main's code over another image, so none is forked. " stale-binary-acts)
-                    {:kind :stale-binary :binary binary-tree :tree tree} {:binary binary-tree :tree tree})]
+                    (str "root's binary was built from " (if binary (str "tree " binary) "a tree its build did not record")
+                         ", and main was last brought from tree " tree
+                         (cond missing (str ": " (name missing) " is unknown")
+                               error (str ": " error)
+                               :else (str ", and what differs reaches root's own code: " (str/join ", " reaches)))
+                         ". Root forks no agent. " stale-binary-acts)
+                    {:kind :stale-binary :binary binary :tree tree} {:binary binary :tree tree})]
       [])))
 
 ;; ---- the wiki kept true: code that moved under its text, pages nothing links, issues with no page ----

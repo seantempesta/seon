@@ -706,24 +706,26 @@
         (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
 
 (deftest a-root-on-a-stale-binary-is-a-problem
-  ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, docs/health.md#a-stale-binary: a boot writes the git tree its
-  ;; binary was built from beside the tree main was last brought to from outside (seon.root/booted-source), and health derives
-  ;; one :stale-binary row while they differ, gone at the next boot on a matching binary: never stored, no clock, never an
-  ;; import. What agents merged into main since (its program moved, its tree not) is main's own and no row
+  ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, docs/health.md#a-stale-binary: a boot holds seon.root/stale-binary's
+  ;; answer (is the binary current for the tree main was last brought to, by what differs reaching root's code) on root's source
+  ;; fact (seon.root/booted-source), and health derives one :stale-binary row from it while it is there, gone at the next boot on a
+  ;; current binary: computed at the boot, never here, no clock, never an import. Main moved by what its agents merged is no row
   (let [db0 (world)
         held {:root "/c" :files 1 :forms 1 :ms 1 :tree "t1"}
         in {:env "e" :tree "t" :config {:seon.config.agent/max-turns "40"}}
         cfg-in {:seon.config.agent/max-turns "41"}
-        boot (fn [db b built main] (d/db-with db [{:seon.root/id :root :seon.root/source (root/booted-source held b built main cfg-in)}]))
+        boot (fn [db b built main stale] (d/db-with db [{:seon.root/id :root :seon.root/source (root/booted-source held b built main cfg-in stale)}]))
         source #(:seon.root/source (d/pull % [:seon.root/source] [:seon.root/id :root]))
         rows #(mapv (juxt :binary :tree) (get-in (problems/health %) [:classes :stale-binary :rows]))
-        stale (boot db0 "b1" {:program "p0" :tree "t0" :inputs in} "p1")]
+        messages #(mapv :message (get-in (problems/health %) [:classes :stale-binary :rows]))
+        stale (boot db0 "b1" {:program "p0" :tree "t0" :inputs in} "p1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]})]
     (is (= [] (rows db0)) "no source fact: nothing known, no row")
-    (is (= [["t0" "t1"]] (rows stale)) "a binary of another tree than main's: one row naming both")
+    (is (= [["t0" "t1"]] (rows stale)) "a binary not current for main's tree: one row naming both trees")
+    (is (some #(str/includes? % "seon.writer/commit-batch") (messages stale)) "and what between them reaches root's own code")
     (is (nil? (:inputs (source stale))) "and no inputs to key agents' verdicts by")
-    (is (= [[nil "t1"]] (rows (boot db0 "b1" nil "p1"))) "a binary whose build recorded no tree is no match either")
-    (let [merged (boot stale "b2" {:program "p0" :tree "t1" :inputs in} "p2")]
-      (is (= [] (rows merged)) "a binary of main's tree, main moved by what its agents merged (p2): no row")
+    (is (= [[nil "t1"]] (rows (boot db0 "b1" nil "p1" {:binary nil :tree "t1" :missing :binary-tree}))) "a binary whose build recorded no tree is unknown, never current")
+    (let [merged (boot stale "b2" {:program "p0" :tree "t1" :inputs in} "p2" nil)]
+      (is (= [] (rows merged)) "a current binary, main moved by what its agents merged (p2): no row, the last boot's answer gone")
       (is (= (assoc in :config cfg-in) (:inputs (source merged))) "its inputs, with the config in force, are what agents key verdicts by")
       (is (= ["b2" "p0" "p0" "t1"] ((juxt :boot :binary :program :binary-tree) (source merged)))
           "and its program the binary's, the one those inputs describe"))))

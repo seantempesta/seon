@@ -475,6 +475,9 @@
                     ;; binary's, else main's at boot (seon.program/program-digest); two trees are seon.problems/stale-binary's row
                     [:boot {:optional true} :string] [:binary {:optional true} :string] [:binary-tree {:optional true} :string]
                     [:program {:optional true} :string]
+                    ;; seon.root/stale-binary's answer at the boot: why the binary is not current for main ({:binary :tree :reaches}, or what is
+                    ;; missing), absent when current; what the :stale-binary row shows
+                    [:stale-binary {:optional true} :map]
                     ;; the build's index only: the code that made it (seon.root/index-code)
                     [:indexed-by {:optional true} :string]
                     [:inputs {:optional true} :seon.program/inputs]]
