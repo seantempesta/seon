@@ -27,7 +27,7 @@
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
-            [seon.turn] [my.fx] [my.task] [my.turn] [my.render] [my.branch] [my.doc] [my.test] [clojure.core.async.flow :as flow] [clojure.test]
+            [seon.turn] [my.fx] [my.task] [my.user] [my.turn] [my.render] [my.branch] [my.doc] [my.test] [clojure.core.async.flow :as flow] [clojure.test]
             [taoensso.trove :as trove]))
 
 
@@ -276,10 +276,12 @@
     (-> st (to-agent o id {:op :write :msg {:op :evals :by "root" :evals es}}) (update ::inserting dissoc id))
     st))
 
-(defn- person
-  "The name of the user this root serves until there is a login: the OS account running it. See docs/users.md#what-each-thing-is."
-  {:malli/schema [:=> [:cat] :string]}
-  [] (System/getProperty "user.name"))
+(defn- signed-in-key
+  "The :seon.agent/key of the user signed in on db (root's :seon.root/signed-in), who a person's ask and message are from, else op's refusal: no default. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:or :string :seon.root/refused]]}
+  [db op]
+  (or (:seon.agent/key (:seon.root/signed-in (d/entity db [:seon.root/id :root])))
+      (refused op "no user is signed in" {})))
 
 (declare root-session-message-tx)
 
@@ -477,6 +479,17 @@
       (nil? commit) (refused 'seon.root/back! (str "eval " id " has no commit of its own: a sweep took it, or a later eval shares it") {:eval id})
       :else {:commit commit :t t :branch (keyword (namespace (:branch a)) (str (name (:branch a)) "-back-" (:max-tx db)))})))
 
+(defn request-name
+  "The name of the request task text asks for on db: its first sentence's words (a sentence ends at a . ! or ? before a space or
+  the end, so a dot inside a name, demo.math/double, is part of it), else \"work\"; words asked before take the next number, 2, 3, ...
+  See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
+  [db text]
+  (let [words (re-seq #"[a-z0-9]+" (str/lower-case (re-find #"(?:[^.!?\n]|[.!?](?=[^\s.!?]))*" (str/triml text))))
+        said (str/join "-" (or (seq words) ["work"]))
+        free? #(nil? (pdb/eid db :seon.task/id (task/task-id 'request %)))]
+    (if (free? said) said (some #(let [n (str said "-" %)] (when (free? n) n)) (iterate inc 2)))))
+
 (defn- ext-op {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.root/request] :seon.root/api-state]}
   [st o m]
   (let [{:keys [op p id]} m]
@@ -506,15 +519,15 @@
                               (assoc-in st [::backing id] {:p p :branch (:branch pt)}))))))
       ;; what a sentence says, or an agent's launch: a task from a template, released, answered with its id (:dest's :asked)
       :ask (let [db @(:conn st)
-                 words (re-seq #"[a-z0-9]+" (str/lower-case (re-find #"[^.!?\n]*" (str/triml (:text m)))))
-                 said (str/join "-" (or (seq words) ["work"]))
-                 ;; its first sentence's words are its name and title; the same words asked again take the one number that tells them apart
-                 nm (if (pdb/eid db :seon.task/id (task/task-id 'request said)) (str said "-" (:max-tx db)) said)
+                 nm (request-name db (:text m))
                  template (get tpl/templates (:template m :user))
                  ;; who started it, the agent that launched it or the person asking: its agent is linked to them when it starts (seon.task/start-tx), and the reconciler tells them how it ends (seon.reconcile/tell-tx)
-                 by (or (when (:agent m) (agent-key-of st (:agent m))) (person))]
-             (if-not template
+                 by (or (when (:agent m) (agent-key-of st (:agent m))) (signed-in-key db 'seon.root/ask!))]
+             (cond
+               (contract/error? by) (reply! st o p by)
+               (not template)
                (reply! st o p (refused 'seon.root/ask! (str "no template " (:template m)) {:templates (vec (sort (keys tpl/templates)))}))
+               :else
                (let [id (task/task-id 'request nm)
                      tx (tpl/request-tx db (tpl/from template {:seon.task/ns 'request :seon.task/name nm :seon.task/plan (:text m)}))]
                  (if (contract/error? tx)
@@ -522,6 +535,18 @@
                    (let [[st rid] (pend st p :tx nil)]
                      (step/out! o :to-writer {:op :tx :branch :db :tx-data (conj (vec tx) [:db/add [:seon.task/id id] :seon.task/started-by [:seon.agent/key by]]) :dest {:asked id :rid rid}})
                      (update st :writes (fnil conj #{}) rid))))))
+      ;; root's session (or any agent) moves the person's view: the signed-in user's focus to the agent named by key (docs/users.md#whats-on-screen)
+      :focus (let [db @(:conn st)
+                   by (signed-in-key db 'seon.root/focus!)]
+               (cond
+                 (contract/error? by) (reply! st o p by)
+                 ;; an agent's key, or a task's id (my.task/launch! answers the task; its agent is made a moment later, and home follows it then)
+                 (not (or (pdb/eid db :seon.agent/key (:key m)) (pdb/eid db :seon.task/id (:key m))))
+                 (reply! st o p (gone (keyword (:key m)) (str "no agent or task " (:key m) " on main")))
+                 :else (let [[st rid] (pend st p :tx nil)
+                             to (if (pdb/eid db :seon.agent/key (:key m)) [:seon.agent/key (:key m)] [:seon.task/id (:key m)])]
+                         (step/out! o :to-writer {:op :tx :branch :db :tx-data [[:db/add [:seon.user/name by] :seon.user/focus to]] :dest {:rid rid}})
+                         (update st :writes (fnil conj #{}) rid))))
       :clone (let [parent (:parent m)]
                (cond
                  (nil? (get-in st [:agents parent])) (reply! st o p (absent (get-in st [:view :agents parent]) parent))
@@ -555,14 +580,19 @@
       :message (if-let [k (or (agent-key-of st id)
                               ;; the first message to root makes root's session, in the same write (docs/users.md#roots-session)
                               (when (= :root id) ::root-session))]
-                 (let [[st rid] (pend st p :tx nil)
-                       w (if (= ::root-session k)
-                           ;; the message names the session by its tempid: a lookup ref cannot reach an entity its own transaction makes
-                           (-> (message-write st (:from m) ["root"] (:body m) {:rid rid})
-                               (update :tx-data #(root-session-message-tx @(:conn st) %)))
-                           (message-write st (:from m) [k] (:body m) {:rid rid}))]
-                   (step/out! o :to-writer w)
-                   (update st :writes (fnil conj #{}) rid))
+                 ;; who sends it: the sender the caller names (root's own, :root, as the reconciler's stage boundary sends; an agent's), else
+                 ;; the signed-in person (the page's message!, which names none); a person's with no one signed in is refused
+                 (let [from (if-some [f (:from m)] (name f) (signed-in-key @(:conn st) 'seon.root/message!))]
+                   (if (contract/error? from)
+                     (reply! st o p from)
+                     (let [[st rid] (pend st p :tx nil)
+                           w (if (= ::root-session k)
+                               ;; the message names the session by its tempid: a lookup ref cannot reach an entity its own transaction makes
+                               (-> (message-write st from ["root"] (:body m) {:rid rid})
+                                   (update :tx-data #(root-session-message-tx @(:conn st) %)))
+                               (message-write st from [k] (:body m) {:rid rid}))]
+                       (step/out! o :to-writer w)
+                       (update st :writes (fnil conj #{}) rid))))
                  (reply! st o p (gone id (str "no agent " id " on main"))))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
       ;; the store's only writer then being root's writer (seon.db/collect!)
@@ -1055,13 +1085,14 @@
 
 (def ^:private root-session-plan
   "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-session."
-  "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look for a session already on it and tell them its address; otherwise start one with (my.task/launch! \"what they want\") and tell them it started. More: docs/users.md#roots-session")
+  "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look first for a session already on it in your list of sessions; if one is, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
 (defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and root, which makes its task list draw root's sessions
-  (seon.render.ui/sessions). See docs/users.md#roots-session."
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through root's entity to every agent with its status and task,
+  which makes its task list draw root's sessions (seon.render.ui/sessions). See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat] [:vector :any]]}
-  [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern) {[:seon.agent/root :as :root] [:seon.root/id]}))
+  [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
+           {:seon.agent/root [{:seon.agent/_root [:seon.agent/key :seon.agent/status {:seon.agent/task [:seon.task/id :seon.task/outcome]}]}]}))
 
 (defn root-session-tx
   "Root's session, made by the first message to root (the api's :message), an ordinary agent made the ordinary way: an agent entity keyed
@@ -1581,7 +1612,7 @@
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
           held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
-          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (person)) (into (task/earlier-agents-tx db)) (into (task/config-tx config in-force-sources))
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (cfg/value :seon.config.root/user-name)) (into (task/earlier-agents-tx db)) (into (task/config-tx config in-force-sources))
                                                                                   (into (root-session-refresh-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
@@ -1650,7 +1681,7 @@
 
 (defn request
   "The op (named as its fn below: spawn! clone! submit! again! back! ask! run-tests! kill!
-  merge-main! message! release! opened!) on agent id with args, as the api request it is: one table for these fns
+  merge-main! message! release! opened! focus!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which
   merge-main! reads; an op the agent cannot take answers its error. A branch reaches main
   only through a merge task (seon.reconcile's octopus merge)."
@@ -1673,12 +1704,13 @@
       ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
       run-tests! {:op :judge :id id}
       kill! {:op :kill :id id}
-      message! {:op :message :id id :from (person) :body (:body args)}
+      message! {:op :message :id id :body (:body args)}
       ;; my.root/run!'s one transaction: the held task (:task) released, its next run the reconciler's
       release! {:op :write :req {:op :tx :branch :db :tx-data (task/execution-tx [(:task args)] :running)}}
       ;; a reader opened an eval of agent key's page: the fact on the agent's entity on main (opened!), named by a lookup ref:
       ;; it adds to an agent that exists, and an unknown key is refused, never an agent made of the one fact (an upsert map made one)
       opened! {:op :write :req {:op :tx :branch :db :tx-data [[:db/add [:seon.agent/key (:key args)] :seon.agent/opened (:eval args)]]}}
+      focus! {:op :focus :key (:key args)}
       merge-main! (if live?
                     {:op :merge-main :id id :data-attrs data-attrs}
                     (absent a id))
@@ -1908,6 +1940,11 @@
   "Ask for what a sentence says (args {:task text :template name}): one released task on its own branch from that template (seon.template/templates, by default the one that works for a person), which the reconciler gives an agent. A promise of {:task id}, or the refusal. See docs/tasks.md."
   {:malli/schema [:=> [:cat :seon.root/sys [:map [:task :string] [:template {:optional true} :keyword]]] :seon.host/promise]}
   [sys args] (request! sys 'ask! nil args))
+
+(defn focus!
+  "Move the signed-in user's view to the page of the agent with key k (args {:key k}): their :seon.user/focus on main. A promise of the writer's answer, or the refusal when no user is signed in or no agent has the key. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :seon.root/sys [:map [:key :string]]] :seon.host/promise]}
+  [sys args] (request! sys 'focus! nil args))
 
 (defn back!
   "Take agent id's session back to just after its eval (args {:eval id}): a new branch from that eval's commit, the old branch kept as it is, this process ended and one started on the new branch under the same key, its task parked on it. Answers the new agent's id, or the refusal. See docs/turn.md#an-agent-goes-back-to-an-eval."

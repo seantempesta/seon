@@ -28,6 +28,11 @@
  ;; limit to 256 + 2 x this at boot. Provenance: proto/flow f2-final's PROTO_MAX_AGENTS (the
  ;; first version forked a thousand agents at ~1.4 MB each, AGENTS.md).
  ;; At the bound: a spawn is refused (:seon.root/refused "too many live agents").
+ ;; Unit: a name. The one person this store's boot makes as its user (:seon.user/name) and signs in (:seon.root/signed-in), until there
+ ;; is a login; a person sets their own in config/local.edn ({:seon.config.root/user-name "sean"}). Provenance: replaced the OS
+ ;; account read at boot (seon.root/person), owner's ruling via the managing session, 2026-11-10: a default in the config file is
+ ;; config, not a fake default in code.
+ :seon.config.root/user-name "user"
  :seon.config.root/max-agents 1024
  ;; Unit: bytes. How much of a dead agent's stderr its death records: the last bytes of its
  ;; file. Provenance: the value seon.root held as a literal (shrink). At the bound: earlier

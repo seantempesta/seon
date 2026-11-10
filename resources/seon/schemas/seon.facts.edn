@@ -293,7 +293,10 @@
  ;; turn budget it also writes alone on its own branch (seon.turn), so they stay the agent's, optional
  :seon.db/agent-start-fact [:and {:seon.db/attributes true :description "An agent a root started: the boot of that root, and when."}
                             :seon.db/agent-fact [:map [:seon.agent/boot :seon.agent/boot] [:seon.agent/started-ms :seon.agent/started-ms]]]
- :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/layout :seon.render/user-ctx} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name]]]
+ ;; the agent whose page the person last opened: home is this page (docs/users.md#whats-on-screen); absent means root
+ ;; or a task: an agent focuses the person on work it just launched (my.task/launch! answers the task), its agent made a moment later
+ :seon.user/focus [:and {:seon.db/to [:seon.db/agent-fact :seon.task/task-fact]} :seon.db/ref]
+ :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/layout :seon.render/user-ctx :seon.ctx/pattern [:seon.agent/key :seon.user/name {:seon.user/focus [:seon.agent/key :seon.agent/status :seon.task/id]} {:seon.agent/agents [:seon.agent/key :seon.agent/status]} {:seon.message/_to [:seon.message/id :seon.message/from :seon.message/body]}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
  ;; :seon.agent/key) and its target's (seon.ref/target-value: an address, a name, an id, a key or a path)

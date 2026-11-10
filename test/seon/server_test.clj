@@ -195,7 +195,7 @@
                                           "(my.agent/messages)"
                                           {:op :message :agent "a0" :body "hello?"}]))]
     (is (true? (:ok sent)) "answered when its entity is on main")
-    (is (clojure.string/includes? (:text taken) (str ":from " (pr-str (System/getProperty "user.name")))) (:text taken))
+    (is (clojure.string/includes? (:text taken) (str ":from " (pr-str (seon.config/value :seon.config.root/user-name)))) (:text taken))
     (is (re-find #":body \"use demo/g\"" (:text taken)))
     (is (re-find #":sent-ms \d+" (:text taken)) "when root's writer recorded it")
     (is (re-find #":id \"[a-p][0-9a-f]{15}\"" (:text taken)) "the entity's id, which the agent writes on its branch")
