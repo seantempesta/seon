@@ -2069,7 +2069,7 @@
   (let [ix (seon.program/index-of-db db)
         r (seon.ratom/atom (ctx/agent-ctx ix db a))
         w (assoc (render/walker {:ref r :changes ctx/changes} (constantly db) [#'seon.render.ui/agent {} (seon.ratom/ref-view r ctx/changes)] ix)
-                 :outputs #{:seon.render/hiccup :seon.render/wire})]
+                 :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
     (try (render/flush! w nil) (render/wire-of w) (finally (render/dispose-walk! w)))))
 
 (defn- with-system
@@ -2115,7 +2115,7 @@
         big (vec (range 40000))
         e {:seon.eval/id "e9" :seon.eval/by "a1" :seon.eval/code "(range 40000)" :seon.eval/call-id "c9" :seon.eval/intent "Count."
            :seon.eval/response {:handle 'result/e9 :value big}}
-        tool (fn [e] (:content (peek (wire/eval-wire {:seon.db/db db :seon.render/index (seon.program/index-of-db db)} e))))
+        tool (fn [e] (:content (peek (wire/eval-msgs {:seon.db/db db :seon.render/index (seon.program/index-of-db db)} e))))
         closed (tool e) opened (tool (assoc e :seon.eval/opened true))]
     (is (str/includes? opened "39999") "opened: the whole value")
     (is (not (str/includes? closed "39999")) "closed: within its budget")

@@ -246,7 +246,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe pos-int?]]}
   [db e] (some->> (:seon.eval/call e) :db/id (d/entity db) :seon.model-call/n (#(when (pos? %) %))))
 
-(defn eval-wire
+(defn eval-msgs
   "An eval (:seon.db/eval-fact) as the model reads it: the model's call (its code, and its intent when it said one) and the
   tool message its result is, printed by the one printer, within its budget, or whole once a person opened it (:seon.eval/opened); an eval of another hand, one user message of who ran what and what
   came of it. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
@@ -262,7 +262,7 @@
        {:role "tool" :tool-call-id id :content (render/result-text ix db mark)}]
       [{:role "user" :content (render/result-text ix db (assoc mark :with (array-map :by by :code code)))}])))
 
-(defn message-wire
+(defn message-msgs
   "A message to the agent (:seon.message/fact) as the model reads it: one user message, who sent it and its body. See
   docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
   {:malli/schema [:=> [:cat :map :map] [:vector :seon.model/message]]}
@@ -305,20 +305,20 @@
                                                                    :seon.eval/response {:value (with-meta {:edits edits} {:seon.render/schema :seon.render/parts :seon.print/full true})}}})
                                  "\n</page>")}]))
 
-(defn page-diff-wire
+(defn page-diff-msgs
   "What moved of agent a's page parts between basis p0 (nil: nothing before) and basis p1, as the page message of turn n
   (`page-message`): each point's parts rendered (`page-parts-at`) and compared by seon.render/page-edits over forms-moved,
-  read from the db, never stored. Placed by the agent's model render before turn n's call, [#'page-diff-wire {} a p0 p1 n],
+  read from the db, never stored. Placed by the agent's model render before turn n's call, [#'page-diff-msgs {} a p0 p1 n],
   so the walk keeps each pair as a component keyed by its points and a new turn renders only its own pair. See
   docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :int [:maybe :map] :map :int] [:vector :seon.model/message]]}
   [{db :seon.db/db ix :seon.render/index} a p0 p1 n]
   (page-message ix n (render/page-edits ix (render/forms-moved (if p0 {"page" (page-parts-at db a p0)} {}) {"page" (page-parts-at db a p1)}))))
 
-(defn model-call-wire
+(defn model-call-msgs
   "A model call (:seon.model-call/fact) as the model reads it: what the model said and its reasoning. Whether those are sent is
   today's rule, reproduced: a model's reply only (origin :model), when it made calls or was not cut at the token limit, and
-  only with words or reasoning to send. Its turn's page message (`page-diff-wire`) and its evals are their own. See
+  only with words or reasoning to send. Its turn's page message (`page-diff-msgs`) and its evals are their own. See
   docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :seon.model/message]]}
   [{db :seon.db/db} {:seon.model-call/keys [n origin reply reasoning truncated] :as c}]
@@ -334,7 +334,7 @@
 (defn- turn-entities
   "Agent record c's turns as the entities the model reads, ordered from its pull with no seek a turn: its model calls by
   number, each call's messages as they were taken (seon.ctx/first-delivered), its page message between the basis of the call
-  before that holds one and its own (`page-diff-wire`, a placed call), the call, the call's evals of the model's, then
+  before that holds one and its own (`page-diff-msgs`, a placed call), the call, the call's evals of the model's, then
   those of other hands; a member c no longer holds (unlinked by a swap!) is none. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
   [db c]
@@ -346,14 +346,14 @@
                      es (sort (filter #(contains? evals %) (keys (:seon.eval/_call call))))
                      model? #(:seon.eval/call-id (get evals %))]
                x (concat (map msgs ms)
-                         (when-let [b (:seon.model-call/basis call)] [[#'page-diff-wire {} (:db/id c) prev b (:seon.model-call/n call)]])
+                         (when-let [b (:seon.model-call/basis call)] [[#'page-diff-msgs {} (:db/id c) prev b (:seon.model-call/n call)]])
                          [call] (map evals (filter model? es)) (map evals (remove model? es)))]
            x))))
 
-(defn example-session-wire
+(defn example-session-msgs
   "An example session's agent (its root view in a render-pull of it) as the model reads it, a model output's call: the message
   that opens it (seon.ctx.session/example-open), its turns' entities placed (`turn-entities`), each rendered by its own
-  :seon.render/wire in the walk, and the message that closes it. A call's answer stands for the agent's own model render, so an
+  :seon.render/openai-compat in the walk, and the message that closes it. A call's answer stands for the agent's own model render, so an
   example writes no session opening of its own. See docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
   [{db :seon.db/db} a]
@@ -361,28 +361,28 @@
       (into (turn-entities db a))
       (conj {:role "user" :content "</session>"})))
 
-(defn example-wire
-  "Example session ek as the model reads it, placed by the agent's model render as [#'example-wire {} ek] (the walk keeps it as
+(defn example-msgs
+  "Example session ek as the model reads it, placed by the agent's model render as [#'example-msgs {} ek] (the walk keeps it as
   a component keyed by the example, a past point that never changes): its agent pulled as of its last t and rendered in one
-  pass for the model (seon.render/render-pull, its root `example-session-wire` as a model output's call), so each of its
-  entities is rendered by its own :seon.render/wire inside a walk. See docs/tasks.md#a-task-names-example-sessions."
+  pass for the model (seon.render/render-pull, its root `example-session-msgs` as a model output's call), so each of its
+  entities is rendered by its own :seon.render/openai-compat inside a walk. See docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :string] [:vector :seon.model/message]]}
   [{db :seon.db/db} ek]
   (let [dbt (d/as-of db (session/example-t db ek))
         ix (program/index-of-db dbt)
         branch (get-in (or (:origin-db dbt) dbt) [:config :branch])
         pull (:tree (ctx/build ix dbt (pdb/eid dbt :seon.agent/key ek) branch))]
-    (:messages (render/render-pull pull dbt #'example-session-wire ix #{:seon.render/wire} {:seon.render/as :seon.render/wire}))))
+    (:messages (render/render-pull pull dbt #'example-session-msgs ix #{:seon.render/openai-compat} {:seon.render/as :seon.render/openai-compat}))))
 
-(defn agent-wire
+(defn agent-msgs
   "An agent (:seon.db/agent-fact) as the model reads it: its system message, from the doc sections :seon.agent/system names
   (only the request's root agent pulls them, so only it has one: a placed example contributes its turns, never an agent
-  message), each example session its task names as a placed call of `example-wire`, what opens its own session, then its turns'
+  message), each example session its task names as a placed call of `example-msgs`, what opens its own session, then its turns'
   entities (`turn-entities`). The task is read in the page parts alone, never here. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
   [{db :seon.db/db} a]
   (let [k (:seon.agent/key a)]
     (-> (if (seq (:seon.agent/system a)) [{:role "system" :content (agent-system-text db a)}] [])
-        (into (map (fn [ek] [#'example-wire {} ek])) (session/session-examples db a))
+        (into (map (fn [ek] [#'example-msgs {} ek])) (session/session-examples db a))
         (into (when k [{:role "user" :content (session/session-open k)}]))
         (into (turn-entities db a)))))
