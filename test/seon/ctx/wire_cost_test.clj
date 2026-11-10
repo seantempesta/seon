@@ -3,7 +3,7 @@
   (docs/render.md#the-models-context-a-cached-prefix-then-the-turn), and what reads them. Run: bin/test seon.ctx.wire-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.ctx] [seon.ctx] [seon.doc] [seon.fixtures] [seon.render]
-            [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector]))
+            [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.ctx.status]))
 
 (defn- item
   "Eval record i of a run as the conversation reads it ([ref v k tx]): a model's call whose value
@@ -155,3 +155,30 @@
                :per-n {:calls 8 :bytes 15000}
                :fixed {:calls 900 :bytes 600000}
                :sizes [10 30 100]}))
+
+(defn test-ns-of
+  "seon.ctx.status/test-shape's arguments for an unwritten proof of namespace demo-test, which holds n helpers and n tests, no
+  test calling a helper (each test is read until one uses a helper): the namespace a proof goes into, grown."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :qualified-symbol]]}
+  [n]
+  (let [db (d/db-with (t/world)
+                      (into [{:db/id "ns" :ns/name 'demo-test :ns/form {:form/id "demo-test/ns" :form/src "(ns demo-test (:require [clojure.test :refer [deftest is]]))"}}]
+                            (mapcat (fn [i] [{:var/name (symbol "demo-test" (str "helper-" i)) :var/ns "ns" :var/form {:form/id (str "demo-test/helper-" i) :form/src (str "(defn helper-" i " [] " i ")")}}
+                                             {:var/name (symbol "demo-test" (str "t" i)) :var/ns "ns" :var/meta #{:test} :var/form {:form/id (str "demo-test/t" i) :form/src (str "(deftest t" i " (is (= " i " (inc " (dec i) "))))")}}])
+                                    (range n))))]
+    [db 'demo-test/unwritten]))
+
+;; See docs/render.md#how-the-work-stands
+(deftest an-unwritten-proofs-shape-costs-its-namespace-once
+  ;; the status of a task whose proof is not yet written shows where it goes (seon.ctx.status/test-shape): it compiled a regex
+  ;; for every test and helper of the namespace (24M ticks of a 46M request on a real agent at its 30th call, seon.render-test);
+  ;; each test's called heads are read once, so the namespace costs its sources, not their product
+  (cost/proof {:of 'seon.ctx.status/test-shape :input 'seon.ctx.wire-cost-test/test-ns-of
+               :n "helpers and tests in the proof's namespace, no test calling a helper"
+               :work "each var of the namespace read once, each test's source scanned once for the heads it calls"
+               :growth :linear
+               ;; measured 2026-11-10 at 10, 40, 160: before, 0.18M, 1.13M, 12.5M ticks and 0.70, 6.3, 85.9 MB (quadratic); after,
+               ;; 0.15M, 0.52M, 1.99M ticks and 0.46, 1.70, 6.50 MB (about 40 KB a helper and test)
+               :per-n {:bytes 42000 :calls 0}
+               :fixed {:bytes 100000 :calls 4}
+               :sizes [10 40 160]}))

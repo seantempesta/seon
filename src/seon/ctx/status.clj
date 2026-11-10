@@ -189,10 +189,13 @@
     (let [vs (map #(d/entity db %) (d/q '[:find [?e ...] :in $ ?n :where [?e :var/ns ?n]] db (:db/id n)))
           {tests true others false} (group-by #(contains? (set (:var/meta %)) :test) vs)
           names (mapv #(name (:var/name %)) others)
-          srcs (keep #(get-in % [:var/form :form/src]) tests)
-          calls? (fn [s h] (re-find (re-pattern (str "\\(" (java.util.regex.Pattern/quote h) "[\\s)]")) s))
-          uses? (fn [s] (or (str/includes? s "my.test/") (some #(calls? s %) names)))
-          src (first (sort-by count (or (seq (filter uses? srcs)) srcs)))
+          named (set names)
+          ;; what a source calls: each head after an open paren, read once (a regex per test and helper was O(tests x helpers))
+          heads (fn [s] (into #{} (map second) (re-seq #"\(([^\s()\[\]{}\"]+)" s)))
+          uses? (fn [s] (or (str/includes? s "my.test/") (some named (heads s))))
+          srcs (sort-by count (keep #(get-in % [:var/form :form/src]) tests))
+          ;; the shortest that uses a helper or my.test, found from the shortest up, else the shortest
+          src (or (first (filter uses? srcs)) (first srcs))
           ns-src (get-in n [:ns/form :form/src])
           under (str/replace (namespace p) #"-test$" "")
           req (when-let [i (some-> ns-src (str/index-of "(:require"))] (form-at ns-src i))
@@ -202,7 +205,7 @@
           requires (when (seq entries) (str "(:require " (str/join " " (filter keep? entries)) ")"))]
       (cond-> {:ns (symbol (namespace p))}
         requires (assoc :requires requires)
-        (and src (seq others)) (assoc :helpers (vec (sort (map symbol (filter #(calls? src %) names)))))
+        (and src (seq others)) (assoc :helpers (vec (sort (map symbol (filter named (heads src))))))
         src (assoc :example src)))))
 
 (defn status
