@@ -327,9 +327,20 @@
                  (catch clojure.lang.ExceptionInfo x
                    (let [{:keys [error entity-id]} (ex-data x)]
                      (if (and (= :entity-id/missing error) (vector? entity-id) (= 2 (count entity-id)) (qualified-keyword? (first entity-id)))
-                       (refuse! (contract/error :seon.db/no-target #'checked (str "nothing on this branch is the lookup in :target: a cite or a link names what exists, or "
-                                                                                  "what the same write made before it; a name that does not exist yet is written in two backticks, ``ns/name``")
-                                                {:target entity-id}))
+                       ;; who names it: the entity of this write holding that lookup (a value of it, or one of a set of them: a
+                       ;; section's links); a cite's is what it is of, a lookup ref or the tempid of an entity the same write makes
+                       ;; (a task, a section), each read as its identity value (its task id, its address)
+                       (let [holds? (fn [m] (some (fn [v] (or (= v entity-id) (and (coll? v) (some #{entity-id} v)))) (vals m)))
+                             m (some #(when (and (map? %) (holds? %)) %) tx-data)
+                             named (fn [x] (or (:seon.task/id x) (:seon.doc/address x)))
+                             of (:seon.cite/of m)
+                             by (cond (vector? of) (second of)
+                                      (some? of) (some #(when (and (map? %) (= of (:db/id %))) (named %)) tx-data)
+                                      :else (some-> m named))]
+                         (refuse! (contract/error :seon.db/no-target #'checked (str (if by (str by " cites ") "a cite or a link names ") (second entity-id)
+                                                                                    ", which nothing on this branch is: a cite or a link names what exists, or "
+                                                                                    "what the same write made before it; a name that does not exist yet is written in two backticks, ``ns/name``")
+                                                  (cond-> {:target entity-id} by (assoc :by by)))))
                        (throw x)))))]
       (when-let [e (invalid-entity r ix)] (refuse! e))
       r)))
@@ -654,15 +665,20 @@
 
 (defn open-main!
   "main on the store of cfg, whose :db exists: made from :db's head when the store has no
-  such branch (one pointer write). Answers [conn existed?]."
+  such branch (one pointer write), on a connection that streams when root is the store's sole writer
+  (:seon.config.store/sole-writer?). Answers [conn existed?]."
   {:malli/schema [:=> [:cat :seon.db/cfg :seon.db/branch] [:tuple :seon.host/conn :boolean]]}
   [cfg main]
-  (let [seed-conn (connect cfg)
+  (let [;; root alone commits main when it is the store's sole writer: its connection streams (datahike's :writer :streaming?),
+        ;; so a deref is the connection's own value, never the store's head read again (24 ticks against 58,739 and 259 KB). Only
+        ;; this connection: the fork server's and the agents' read main as root commits it (the cfg answered keeps no :streaming?)
+        own (cond-> cfg (cfg/value :seon.config.store/sole-writer?) (assoc-in [:writer :streaming?] true))
+        seed-conn (connect (if (= :db main) own cfg))
         existed? (or (= :db main) (branch? seed-conn main))]
     (when-not existed? (d/branch! seed-conn :db main))
     (if (= :db main)
       [seed-conn existed?]
-      (let [conn (connect (assoc cfg :branch main))] (d/release seed-conn) [conn existed?]))))
+      (let [conn (connect (assoc own :branch main))] (d/release seed-conn) [conn existed?]))))
 
 (defn agents-dir
   "Where the agents of the root holding cfg keep their stderr (seon.agent/stderr-path):

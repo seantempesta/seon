@@ -108,7 +108,7 @@
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view). cites: what the task cites, its cite entities and its needs'
   (seon.task/task-cites). What `my.task/data` answers at the agent's REPL, on demand; the page's task part is
-  the pulled task's own renders (seon.render.ui/task, docs/render.md#a-component-answers-hiccup)."
+  the pulled task's own renders (seon.render.ui/task-view, docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map]] :map]}
   [db t cites]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
@@ -282,17 +282,7 @@
                    (task/unjudged db t (vec ds)))
         reds (vec (for [[p {:keys [failures]}] vs f failures] (assoc f :test p)))
         blockers (refused reasons reds #(doc/source-of db %) #(ctx/callees db %)
-                          #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %))))
-        ;; the next step, from the task's own data and never its kind (docs/agent.md#working-for-a-person): none of these blocks a merge
-        te (when tid (pdb/eid db :seon.task/id tid))
-        plan-tx (when te (some-> (first (d/datoms db :eavt te :seon.task/plan)) :tx))
-        me (:seon.agent/key ag)
-        asked (when plan-tx
-                (some (fn [[e m]] (let [from (:seon.message/from m)]
-                                    (when (and (not (or (= "root" from) (= me from))) (> (ctx/first-delivered [db a e]) plan-tx)) from)))
-                      (:seon.message/_to rec)))
-        next (cond-> []
-               asked (conj {:step :fold-message :from asked}))]
+                          #(or (nil? base) (not= (doc/source-of db %) (doc/source-of base %))))]
     (cond-> {:reasons reasons
              ;; each proof as :proved holds its var: its verdict (green :pass, red and flaky :fail, as `verdicts`), its source
              :proofs (vec (for [p (sort-by str proofs)
@@ -312,7 +302,6 @@
                               (seq fs) (assoc :failures (failures fs))
                               (seq calls) (assoc :calls calls))))}
       (seq blockers) (assoc :refused blockers)
-      (seq next) (assoc :next next)
       (seq also-on-main) (assoc :also-red-on-main also-on-main)
       ;; a real field, on every page from the first, not only the line an eval's answer carries: its base is behind main
       (and main base (= :agent (:mode @agent/state))) (assoc :main-moved (agent/main-line base db (d/commit-as-db (pdb/store-of db) main)))

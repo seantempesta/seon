@@ -23,7 +23,7 @@
   and the agent's entity id."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int]]}
   [n]
-  (let [db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.ctx.wire/system-page "# You are a Seon agent\n\nThe rules."}))
+  (let [db (d/db-with (ts/test-db) (seon.doc/load-tx (ts/test-db) "docs" {seon.doc/system-page "# You are a Seon agent\n\nThe rules."}))
         db (d/db-with db
                       (into [{:seon.agent/key "b/a1" :seon.agent/turn n}]
                             (for [i (range n) :let [[_ v] (item i)]]
@@ -46,7 +46,7 @@
         [(:tree (seon.ctx/build (seon.db/index) db e :b)) db]))
 
 (deftest a-request-reads-what-the-agents-ctx-holds
-  ;; docs/render.md#the-render-is-an-eval; the owner, 2026-10-26: nothing in a request is read from
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn; the owner, 2026-10-26: nothing in a request is read from
   ;; anywhere but its ctx: a record the ctx does not hold is not sent
   (let [[c db] (records-of 6)
         evals (fn [c] (filter #(= :eval (ffirst %)) (seon.fixtures/tree-parts c db)))]
@@ -136,7 +136,7 @@
         cell (volatile! db)
         c (seon.ctx/build (seon.db/index) db a :b)
         src (seon.ratom/atom (:tree c))
-        w (assoc (seon.render/walker {:ref src :changes seon.ctx/changes} #(deref cell) [(seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {}]) :model-only true)]
+        w (assoc (seon.render/walker {:ref src :changes seon.ctx/changes} #(deref cell) [#'seon.render.ui/agent {} (seon.ratom/ref-view src seon.ctx/changes)]) :model-only true :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
     (seon.render/flush! w nil)
     (seon.ctx.wire/request w)
     (let [r (d/with db (conj (turn-tx n) {:seon.agent/key "b/a1" :seon.agent/turn (inc n)}))]
@@ -150,10 +150,15 @@
   ;; revision, so a turn reads what moved and walks the rest. Linear, not flat: the wire body holds n messages anyway
   (cost/proof {:of 'seon.ctx.wire/request :input 'seon.ctx.wire-cost-test/request-of
                :n "evals of the session before the turn"
-               :work "the new turn's messages read, each earlier component's as they were kept, the tree walked once; the page at the end, its forms made once"
+               :work "the new turn's messages read, each earlier component's as they were kept, the tree walked once; the turn's page message, its edits made once"
                :growth :linear
                :per-n {:calls 8 :bytes 15000}
                :fixed {:calls 900 :bytes 600000}
+               ;; owner's yes, 2026-11-10 ("Land now, three waivers", docs/decisions.md#three-request-cost-proofs-land-waived-owner-2026-11-10): a cold request draws
+               ;; the page at the first turn's basis and advances one walk through every later basis (~6k calls), and each history record is drawn
+               ;; by its own model render (~3k, an eval's print the most); the rest is outside the model render. The waiver comes off with that task.
+               ;; Measured on jolt/pages 2026-11-10 at its largest size, 2,350 calls and 3.62 MB at 100 (its bound: 1,700 calls, 2.1 MB).
+               :overrun {:task "seon.render/a-model-render-draws-each-turns-diff" :n 100 :measured {:calls 2350.0 :bytes 3620000.0}}
                :sizes [10 30 100]}))
 
 (defn greens-of

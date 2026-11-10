@@ -172,10 +172,23 @@
 
 ;; ---- reading ----------------------------------------------------------------------------
 
+(def system-page
+  "The system prompt, docs/prompt.md: what every agent reads first (its system message, the same
+  bytes for every agent and turn, so a provider caches it): the standard format's short prompt
+  (the owner's ruling: the model's context is the standard format; the help page is read on
+  demand, doc). Main holds it as the wiki's sections, as the help page; an agent's :seon.agent/system names its top section (seon.agent/begin-run-tx)."
+  "docs/prompt.md")
+
 (defn- children
   "The docs whose parent is doc entity e on db, in the page's order (:seon.doc/position)."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :int]]}
   [db e] (mapv second (sort (d/q '[:find ?n ?c :in $ ?p :where [?c :seon.doc/parent ?p] [?c :seon.doc/position ?n]] db e))))
+
+(defn subtree
+  "Doc entity e on db and every doc below it, in the page's order (`children`): what a ref to a section names when it names
+  the section and all it holds (an agent's :seon.agent/system, seon.ctx.wire/agent-system-text)."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:vector :int]]}
+  [db e] (into [e] (mapcat #(subtree db %)) (children db e)))
 
 (declare resolve-ref)
 
