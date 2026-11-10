@@ -46,7 +46,8 @@
   (testing "a pulled entity's schema is the one its identity attribute names"
     (is (= :seon.message/fact (r/schema-of (seon.db/index) {:seon.message/id "m1"} nil)))
     (is (str/includes? (h/html (r/hiccup {:seon.render/index (seon.db/index)} {:seon.message/id "m1" :seon.message/from "owner" :seon.message/body "Looks right."}))
-                       "message from owner")))
+                       "owner")
+        "drawn by its schema's render, seon.render.ui/message: its sender above its body"))
   (testing "no declaration: the one value printer's hiccup"
     (let [out (r/hiccup {:seon.render/index (seon.db/index)} {:k [1 2 3]})]
       (is (= "seon-data-panel" (get-in out [1 :class])))))
@@ -328,7 +329,7 @@
 
 (def ^:private model-renders
   "The model renders (:seon.render/openai-compat of an entity schema, docs/users.md#the-stages-agreed-2026-11-09) and the one helper that writes a turn's page message: each writes messages as the one walk places them, which is the path."
-  '#{seon.ctx.wire/agent-msgs seon.ctx.wire/eval-msgs seon.ctx.wire/message-msgs seon.ctx.wire/model-call-msgs seon.ctx.wire/page-message seon.ctx.wire/example-msgs seon.ctx.wire/example-session-msgs})
+  '#{seon.ctx.wire/agent-msgs seon.ctx.wire/eval-msgs seon.ctx.wire/message-msgs seon.ctx.wire/model-call-msgs seon.ctx.wire/page-message seon.ctx.wire/example-msgs seon.ctx.wire/example-session-msgs seon.ctx.wire/defect-msgs})
 
 (defn- outside-the-path
   "The vars of db in namespaces nss that make provider messages other than through seon.ctx.wire/request: one that references a step of `the-path` and is not named for it, or
@@ -837,7 +838,7 @@
         after (ran)
         ran-now (fn [f] (- (get after (str f) 0) (get before (str f) 0)))]
     (is (= 1 (ran-now `ui/conversation-turn)) "the turn the eval took draws again")
-    (is (= 1 (ran-now `ui/eval-item)) "and the eval, new")
+    (is (= 1 (ran-now `ui/evaluation)) "and the eval, new")
     (is (zero? (+ (ran-now `ui/conversation-list) (ran-now `ui/message))) "no other turn's records, nor the list, are read again")
     (r/dispose-walk! (:w kw))))
 
@@ -1164,13 +1165,13 @@
     (is (str/includes? nested "vector 2 items"))))
 
 (deftest an-eval-collapses-to-its-reference
-  ;; root, 2026-10-24: a collapsed eval is its code, its time and its handle (seon.render.ui/eval-item): never
+  ;; root, 2026-10-24: a collapsed eval is its code, its time and its handle (seon.render.ui/evaluation): never
   ;; a copy of its value or its cost line, which open under it
   (let [[main branch eid] (paged-dbs)
         k (:seon.agent/key (d/pull main [:seon.agent/key] eid))
         branch (d/db-with branch (seon.repl/record-tx {:seon.agent/key k} "e9" "a3"
                                                       {:seon.eval/call (seon.task/call-ref k 1) :seon.eval/code "(+ 2 2)" :seon.eval/response {:handle 'result/e9 :ms 0.2 :ticks 900}}))
-        e9 "eval-item-e9"
+        e9 "evaluation-e9"
         closed (component-html branch e9)]
     (is (some? closed) "the eval, a component of the page")
     (is (str/includes? closed "(+ 2 2)") "its code's first line")
@@ -1186,7 +1187,7 @@
         k (:seon.agent/key (d/pull (first (paged-dbs)) [:seon.agent/key] eid))
         branch (d/db-with branch0 (seon.repl/record-tx {:seon.agent/key k} id "a3"
                                                        {:seon.eval/call (seon.task/call-ref k 1) :seon.eval/code code :seon.eval/response resp}))
-        unit (str "eval-item-" id)]
+        unit (str "evaluation-" id)]
     (component-html branch unit)))
 
 (deftest an-evals-warning-is-drawn-with-its-value
@@ -1573,9 +1574,9 @@
     (let [turn1 (:html (unit-of conv "conversation-turn-"))
           at #(str/index-of turn1 %)]
       (is (< (at "id=\"message-m-1\"") (at "seon-message")
-             (at "id=\"eval-item-e3\""))
+             (at "id=\"evaluation-e3\""))
           "a turn: the messages it took, its model call, then the evals of other hands")
-      (is (every? #(str/includes? turn1 (str "id=\"eval-item-" % "\"")) ["e1" "e2" "e3"]) "its model call's evals among its steps"))
+      (is (every? #(str/includes? turn1 (str "id=\"evaluation-" % "\"")) ["e1" "e2" "e3"]) "its model call's evals among its steps"))
     (is (every? #(str/starts-with? (:html %) (str "<" )) units))
     (is (every? #(str/includes? (:html %) (str "id=\"" (:id %) "\"")) units) "each component's root element carries its key as its id")
     (is (= units (draw)) "pure: the same ctx, the same page")))
@@ -1664,7 +1665,7 @@
   (let [[w a branch] (live-walk)
         e3 (seon.db/eid branch :seon.eval/id "e3")]
     (swap! a assoc-in [:seon.eval/_agent e3 :seon.eval/opened] true)
-    (is (= {[`ui/eval-item "e3"] :miss [`ui/eval-output "e3"] :same} (r/flush! w nil)) "an eval opened: that eval's line and its output run (opened, the output is whole); its turn's and its list's layout do not")
+    (is (= {[`ui/evaluation "e3"] :miss [`ui/eval-output "e3"] :same} (r/flush! w nil)) "an eval opened: that eval's line and its output run (opened, the output is whole); its turn's and its list's layout do not")
     (swap! a assoc :t 99)
     (is (= {} (r/flush! w nil)) "a change no component read: nothing runs")
     (swap! a assoc-in [:seon.eval/_agent e3 :seon.eval/opened] true)
@@ -1848,7 +1849,7 @@
   ;; (:seon.eval/opened, the reader's fact taken onto the branch), it draws its value
   (let [[_ branch _] (paged-dbs)
         ;; e3, an eval of another hand: the model's evals are the steps of their turn, drawn open
-        e3 "eval-item-e3"
+        e3 "evaluation-e3"
         closed (component-html branch e3)
         opened (component-html (d/db-with branch [{:seon.eval/id "e3" :seon.eval/opened true}]) e3)]
     (is (str/includes? closed "id=\"eval-e3\"") "its anchor, on the eval's own element, by its id")
@@ -2746,7 +2747,7 @@
 (deftest a-wire-mark-never-reaches-the-browser
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: :wire/* is for the reading alone, so nothing in it can name a Datastar attribute (`ref` made a signal per element, posted back by @post); what Datastar reads stays :data-*
   (let [e {:seon.eval/id "e1" :seon.eval/code "(f)" :seon.eval/response {:value 1 :handle 'result/e1} :seon.eval/call-id "c"}
-        html (h/html (seon.render.ui/eval-hiccup {} e))]
+        html (h/html (seon.render.ui/evaluation {} e))]
     (is (not (str/includes? html "wire")) html)
     (is (not (str/includes? html "data-role")) "no marker under its old name")
     (is (str/includes? html "id=\"eval-e1\"") "an element's id stays: a patch lands by it")
@@ -2889,24 +2890,24 @@
         eid #(seon.db/eid db :seon.eval/id %)
         call (seon.db/eid db :seon.model-call/id (seon.lib/call-id k 1))
         turn (ui/conversation-turn (assoc opts :key 1))
-        shown (set (for [c (drop 2 turn) :when (= #'ui/eval-item (first c))] (:key (second c))))
+        shown (set (for [c (drop 2 turn) :when (not (vector? c))] (get c :seon.eval/id)))
         reply (some #(when (= :section (first %)) %) (drop 2 turn))]
     (is (= #{"e2" "e4"} shown) "an eval of another hand, Seon's among them, is a line after the reply")
-    (is (= ["e3"] (map (comp :key second) (last (last reply)))) "the agent's eval is its reply's step")
+    (is (= ["e3"] (map #(get % :seon.eval/id) (last (last reply)))) "the agent's eval is its reply's step")
     (let [t (h/html (ui/reply-hiccup (d/pull db '[*] call) false []))]
       (is (str/includes? t "Found <strong>it</strong>") "what it said, its Markdown drawn")
       (is (not (str/includes? t "of context")) "its tokens are for whoever opens a step"))
-    (let [e (h/html (ui/eval-item (assoc opts :at [:seon.eval/_agent (eid "e3")])))]
+    (let [e (h/html (ui/evaluation opts (get-in (:seon.ctx/ctx opts) [:seon.eval/_agent (eid "e3")])))]
       (is (str/includes? e "Run the proofs.") "a step's line is what it set out to do")
       (is (= 1 (count (re-seq #"\(prove-it\)" e))) "its code once, under the line")
       (is (not (re-find #"<details[^>]* open" e)) "closed until opened"))
-    (is (str/includes? (h/html (ui/eval-output (assoc opts :at [:seon.eval/_agent (eid "e3")]))) "prove") "opened, its value by the render its record names")))
+    (is (str/includes? (h/html (ui/eval-output opts (get-in (:seon.ctx/ctx opts) [:seon.eval/_agent (eid "e3")]))) "prove") "opened, its value by the render its record names")))
 
 (deftest an-opened-step-shows-its-result-whole
   ;; docs/render.md#the-page: expanding expands: a step closed holds a start, opened all of it, with nothing further to open
   (let [v (mapv (fn [i] {:n i :name (str "row-" i)}) (range 800))
         e {:seon.eval/id "e1" :seon.eval/code "(rows)" :seon.eval/response {:handle 'result/e1 :value v}}
-        draw (fn [e] (h/html (ui/eval-output {:seon.render/index (seon.db/index) :seon.ctx/ctx {:seon.eval/_agent {1 e}} :seon.db/db (ts/test-db) :at [:seon.eval/_agent 1]})))
+        draw (fn [e] (h/html (ui/eval-output {:seon.render/index (seon.db/index) :seon.db/db (ts/test-db)} e)))
         closed (draw e)
         opened (draw (assoc e :seon.eval/opened true))]
     (is (not (str/includes? closed "row-799")) "closed: its start")
@@ -3387,7 +3388,7 @@
                            :seon.eval/intent "Run the proofs." :seon.eval/code "(prove-it)" :seon.eval/response {:handle 'result/e3 :value 1}}])
         turn (ui/conversation-turn {:seon.ctx/ctx (:tree (seon.ctx/build (seon.db/index) db aid :b)) :seon.db/db db :key 1})
         reply (some #(when (= :section (first %)) %) (drop 2 turn))]
-    (is (some #(and (vector? %) (= :ol (first %)) (= ["e3"] (map (comp :key second) (second (rest %))))) reply)
+    (is (some #(and (vector? %) (= :ol (first %)) (= ["e3"] (map #(get % :seon.eval/id) (second (rest %))))) reply)
         (str "its eval is the reply's step: " (pr-str reply)))
     (is (str/includes? (pr-str turn) "aria-busy") "beside the in-flight element")
     (is (some #(and (vector? %) (map? (second %)) (= "seon-stream" (:class (second %)))) (tree-seq coll? seq turn)) "the element is in the turn the page draws")

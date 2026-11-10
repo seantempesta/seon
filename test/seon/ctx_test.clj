@@ -847,8 +847,8 @@
           (is (str/includes? (pr-str (get page "ctx-keys")) "read the plan") "as the render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
         (let [db (:db-after (d/with db [(into {:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k]} rec)]))
-              h (seon.web.html/html (seon.render.ui/evaluation {:seon.render/index (seon.db/index) :db db} (d/pull db '[*] [:seon.eval/id "e9"])))]
-          (is (re-find (re-pattern (str "ctx · :b · t " (:t tree))) h) "the block of the record at t")
+              h (seon.web.html/html (seon.render.ui/eval-output {:seon.render/index (seon.db/index) :seon.db/db db} (d/pull db '[*] [:seon.eval/id "e9"])))]
+          (is (re-find (re-pattern (str "ctx · :b · t " (:t tree))) h) "opened, the step shows the record at t (seon.render.ui/eval-output)")
           (let [text (fn [db] (:content (first (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "e9"])))))
                 later (:db-after (d/with db [{:seon.eval/id "e10" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/code "(f)" :seon.eval/response {:value 1}}]))]
             (is (re-find #":lab.ctx/steps" (text db)) "the model's text is the one printer's, of the value rebuilt from the branch at its basis")
@@ -1332,7 +1332,7 @@
                                               [p u (ledger) pg]))
         whole (as #(do (seon.repl/render-ctx-hiccup) (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w)))))]
     (is (unwatched 'seon.render.ui/agent-parts) "the model's list is drawn")
-    (is (every? unwatched '[seon.render.ui/conversation-list seon.render.ui/eval-item]) "and the conversation, which it reads as messages")
+    (is (every? unwatched '[seon.render.ui/conversation-list seon.render.ui/evaluation]) "and the conversation, which it reads as messages")
     (is (not-any? unwatched '[seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) (pr-str unwatched))
     (is (every? watched '[seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) "a person's page draws what is its alone")
     (is (some #(str/starts-with? % "conversation-turn") (keys page)) "the conversation is on the page, a component for each turn")
