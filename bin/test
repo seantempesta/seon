@@ -54,7 +54,8 @@ runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
 jobs=$(<$OUT/jobs)
 # a test or step that reaches a process of its own (a root, an agent, the binary) runs target/seon,
 # which its digest does not cover: that binary is built from this tree first (a no-op build costs
-# ~30-45 s). The plan names what it selected that reaches one (out/binary); nothing, no build
+# ~30-45 s) unless it is current for this tree, what differs reaching nothing root runs from its binary
+# (seon.root/binary-current, the plan's out/build). The plan names what it selected that reaches one (out/binary); nothing, no build
 F=($OUT/shard-*.edn(N))
 # laws and health read the tree and answer in seconds, before any build: a run of their own beside the rest, whose red ends the run, shards and
 # steps, as no later result can make that tree mergeable and a red is reported as it stands (docs/merging.md#a-merge-runs-what-the-change-reaches)
@@ -66,7 +67,8 @@ FAST=(); if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then
     ( "$ROOT/bin/check" --steps "$OUT/fast" > "$OUT/fast.log" 2>&1 || { : > "$OUT/stopped"; [[ -s $OUT/shards.pid ]] && kill $(<$OUT/shards.pid) 2>/dev/null; [[ -s $OUT/check.pid ]] && kill $(<$OUT/check.pid) 2>/dev/null } ) & A=$!
   fi
 fi
-if [[ -s $OUT/binary ]]; then
+# built only when the binary is not current for this tree (the plan's out/build: seon.root/binary-current names what differs)
+if [[ -s $OUT/binary && -s $OUT/build ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
 fi
 # the process tests' store gets this tree's program and wiki on :db (the plan made the store), so a root
@@ -116,6 +118,16 @@ if (( ${#FAST} )); then
 fi
 # a test green and red at its digest (the plan's out/flaky) is red, though nothing ran it
 [[ -s $OUT/flaky ]] && { cat "$OUT/flaky"; st=1 }
+# the full run's outcome, beside the verdict cache, so a store erase keeps it (docs/merging.md#the-full-run-is-the-net): the commit it
+# ran, green or red with each red test, and when it ended; written whole (temp + rename), green or red. A run that died writes
+# nothing, so the file still names the last run that ended: bin/land says how many landings main is past it
+if [[ " $* " == *" --all "* && -n ${SEON_RESULTS_DIR:-} ]]; then
+  reds=(${(f)"$(for f in $F; do grep -h "^RED " "${f%.edn}.log"; done | awk '{print $2}' | sort -u)"})
+  { print -r -- "{:commit \"$(git -C "$ROOT" rev-parse HEAD)\" :status $( (( st == 0 )) && print :green || print :red)"
+    print -r -- " :reds [${reds[*]}]"
+    print -r -- " :ended \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" :logs \"$OUT\"}" } > "$SEON_RESULTS_DIR/.full-run.edn.$$" &&
+    mv "$SEON_RESULTS_DIR/.full-run.edn.$$" "$SEON_RESULTS_DIR/full-run.edn"
+fi
 # a green run's logs are read by no one: the directory a plain run made is reclaimed with it (a red run's stays)
 if (( st == 0 )); then echo "TEST OK"; (( OWN )) && rm -rf "$OUT"; else echo "TEST FAILED (logs: $OUT)"; fi
 exit $st

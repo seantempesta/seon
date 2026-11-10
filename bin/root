@@ -106,8 +106,9 @@ kill_root() {
 }
 case ${1:-start} in
   status)
-    if running; then read T R < "$PIDS"; print "root $R up: server $(cat "$PORTF" 2>/dev/null || print $PORT), dashboard http://127.0.0.1:$WEB/"
-    else print "no root running for $ROOT (ports $PORT $WEB)"; exit 1; fi ;;
+    NET=$("$ROOT/bin/full-run")
+    if running; then read T R < "$PIDS"; print "root $R up: server $(cat "$PORTF" 2>/dev/null || print $PORT), dashboard http://127.0.0.1:$WEB/"; print "$NET"
+    else print "no root running for $ROOT (ports $PORT $WEB)"; print "$NET"; exit 1; fi ;;
   stop)
     running || { print "no root running"; exit 0 }
     stop ;;
