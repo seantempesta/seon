@@ -1098,19 +1098,21 @@
                                 {:seon.task/id (str "app/" n) :seon.task/outcome done})))))
 
 (defn uncited-input
-  "The cost proof's input at n: n design steps (a finished task, a plan citing a var) and an
-  implement step each, all ready and fine."
+  "The cost proof's input at n tasks: n/2 design steps (a finished task, a plan citing a var) and an
+  implement step each, the implement steps ready and fine."
   [n] (let [v 'app.calc/inc2]
-        [(uncited-fixture (for [i (range n)] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
+        [(uncited-fixture (for [i (range (quot n 2))] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
 
-(deftest uncited-tasks-follow-the-ready-implement-steps
+(deftest uncited-tasks-cost-the-tasks-they-examine
+  ;; Sean, 2026-11-10: n restated as tasks examined (it was design/implement pairs): every task now gets its ready check, so
+  ;; the class's work is per task; 68 calls measured at 20 tasks against 85 (per-n 4, fixed 5, unchanged)
   (cost/proof {:of 'seon.problems/uncited-tasks :input 'seon.problems-test/uncited-input
-               :n "ready implement steps, each citing"
+               :n "tasks examined: finished design steps and the ready implement steps that need them, each citing"
                :work "the kind and task datoms once, then each implement step's needs walked once; the program's vars among the cites asked of the program once (seon.program/program-names, read from the cites at read time where :seon.task/references stored it at write: 43 calls before, 45 since)"
                :growth :linear
-               :per-n {:ns 100000 :bytes 130000 :calls 4}
+               :per-n {:ns 50000 :bytes 65000 :calls 4}
                :fixed {:ns 500000 :bytes 500000 :calls 5}
-               :sizes [10 30 100]}))
+               :sizes [20 60 200]}))
 
 (deftest a-ready-implement-task-that-cites-nothing-is-a-problem
   ;; the context is only as good as the plan it is built from: an implement step whose accumulated

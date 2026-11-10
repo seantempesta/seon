@@ -522,16 +522,6 @@
    :seon.task/deferred :seon.task/gate-unread :seon.task/deferred-results :seon.task/conflicts
    {:seon.task/agent [:seon.agent/key :seon.agent/ended-ms]}])
 
-(defn- task-ready?
-  "Is task te one not done whose needs are all done? Here ready deliberately means only that: the
-  question is whether its plan can be worked, not whether the reconciler would start it now
-  (seon.reconcile's index also asks for a release and no live run, which a db alone does not
-  hold). A task waiting on another is judged when its needs are done."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
-  [db te]
-  (and (not (task/done? db te))
-       (every? #(task/done? db (:v %)) (d/datoms db :eavt te :seon.task/needs))))
-
 (defn uncited-tasks
   "Each ready task, which holds the plans along its :needs (seon.task/accumulate), whatever its kind, whose
   accumulated plan cites no program var (no cite of one along its needs, seon.task/cites-of: the context pulls
@@ -541,7 +531,10 @@
   walk of each ready task's needs."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
-  (let [chain (fn chain [seen e]
+  (let [;; every task's outcome read once, so each task's readiness is a lookup (seon.task/done? per task was two contracted calls a task)
+        done (into #{} (comp (filter #(task/finished (:v %))) (map :e)) (d/datoms db :aevt :seon.task/outcome))
+        ready? (fn [e] (and (not (done e)) (every? #(done (:v %)) (d/datoms db :eavt e :seon.task/needs))))
+        chain (fn chain [seen e]
                 (if (seen e) seen
                     (reduce chain (conj seen e) (map :v (d/datoms db :eavt e :seon.task/needs)))))
         vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
@@ -552,7 +545,7 @@
         placeholder? (fn [sym] (some-> (pdb/eid db :var/name sym) (->> (d/entity db)) :var/form :form/src
                                       (str/includes? task/placeholder-assertion)))]
     (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
-               :when (task-ready? db e)
+               :when (ready? e)
                :let [es (chain #{} e)
                      proofs (vals-of es :seon.task/proofs)
                      reasons (cond-> []
