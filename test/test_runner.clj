@@ -579,16 +579,21 @@
 (defn- with-wiki
   "Program db db with the wiki and the tasks of the checkout at dir, by root's own loaders
   (seon.doc/load-dir-tx of the wiki dirs, then seon.task/load-tx: a task's cite of a section is a ref to it, so the
-  sections are there first). A task file that does not read throws its error: no tasks is no answer."
+  sections are there first), written through the one checked write (seon.db/db-with), as root writes them. Answers
+  the db, or the typed error that refused it: a task file that does not read, or a citation of nothing, which the
+  write refuses naming its target (docs/references.md#task-references), never a lookup the store throws on."
   [db dir]
   ;; the program store is keyed by the program's attributes alone (seon.test-store/program-schema-digest),
   ;; so a kept tree's db may lack an attribute a task or a page holds (the cite entities, :seon.cite/id): the ones it
   ;; lacks are added to this value first, as seon.db/install-missing! adds them to a store a root opens
   (let [db (d/db-with db (vec (remove #(contains? (:schema db) (:db/ident %)) pdb/schema)))
-        db (d/db-with db (doc/load-dir-tx db dir (config/value :seon.config.root/wiki-dirs) {}))
-        tx (task/load-tx db (seon.root/task-files (str dir "/" (tasks-dir))))
-        _ (when (contract/error? tx) (throw (ex-info (:seon.error/message tx) tx)))]
-    (d/db-with db tx)))
+        ;; the step's edge: the checked write's refusal is its answer, as a root's load answers it (seon.db/with throws it typed)
+        write (fn [db tx] (try (pdb/db-with db tx) (catch clojure.lang.ExceptionInfo e (if (:seon.error/type (ex-data e)) (ex-data e) (throw e)))))
+        db (write db (doc/load-dir-tx db dir (config/value :seon.config.root/wiki-dirs) {}))
+        tx (when-not (contract/error? db) (task/load-tx db (seon.root/task-files (str dir "/" (tasks-dir)))))]
+    (cond (contract/error? db) db
+          (contract/error? tx) tx
+          :else (write db tx))))
 
 (defn- health!
   "The health step (docs/health.md#checks-are-callers-of-seon): what this checkout caused since its
@@ -610,13 +615,17 @@
             based (try (with-wiki (program-db root store (fx/tree-of root base))
                                   (fx/checkout-at root base ["docs" (tasks-dir) "*.md"] dir))
                        (finally (fx/remove-tree! dir)))
-            {:keys [caused attention checks]} (branch-health based head classes)
-            h (problems/health head)
+            refused (first (filter contract/error? [head based]))
+            _ (when refused
+                (println (str "HEALTH FAILED: the " (if (contract/error? head) "tree's" (str "base " base "'s")) " wiki and tasks were refused by their write: "
+                              (:seon.error/message refused) " " (pr-str (dissoc refused :seon.error/message)))))
+            {:keys [caused attention checks]} (when-not refused (branch-health based head classes))
+            h (when-not refused (problems/health head))
             open (reduce + 0 (for [c (or (seq classes) (sort problems/caused-classes))] (get-in h [:classes c :n] 0)))]
         (doseq [r caused] (println (name (:class r)) (:message r)))
         (doseq [r attention] (println "attention" (name (:class r)) (:message r)))
         (println (pr-str {:base base :caused (count caused) :attention (count attention) :open-in-head open :checks checks}))
-        (let [ok (every? val checks)]
+        (let [ok (and (not refused) (every? val checks))]
           (println (if ok "HEALTH OK" "HEALTH FAILED"))
           (if ok 0 1))))))
 
