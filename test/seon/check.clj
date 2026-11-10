@@ -616,8 +616,8 @@
   once its first agent runs. With a running sys, also one thread per :mixed proc of its
   declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
   readers (Flow's error channel, the fork server's socket) and, while the web proc listens,
-  the web server's acceptor and sweeper (ring-chez-adapter's, each a future of Jolt's agent
-  pool; task seon.web/web-server-threads-are-joined-at-stop). The embedding model's threads are the
+  the web server's acceptor and sweeper (ring-chez-adapter's, each a future, which runs on Jolt's
+  solo pool as clojure-agent-send-off-pool-N, the JVM's name; task seon.web/web-server-threads-are-joined-at-stop). The embedding model's threads are the
   helper's process's, none root's (docs/vector.md#the-model)."
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-asleep" 1 "jolt-carrier" (fiber-carriers)}
        :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)
@@ -630,7 +630,7 @@
          web? (true? (get-in (c/state sys) [:web :listening]))]
      (update (declared-threads) :roster merge
              (cond-> {"async-mixed" mixed "seon-fs-events" 1}
-               web? (assoc "clojure-agent-pool" 2))))))
+               web? (assoc "clojure-agent-send-off-pool" 2))))))
 
 (defn- threads
   "The threads this process runs now, measured as declared-threads declares them, and :os,
@@ -654,6 +654,18 @@
 
 ;; ---- scale ------------------------------------------------------------------------
 
+(defn- fan
+  "(mapv f coll) on at most 32 threads of its own, all gone when it returns. A check that counts
+  root's threads fans out with this and not pmap: pmap's futures run on Jolt's solo pool, whose
+  idle workers live on for its keep-alive as the JVM's do, so the count would hold the check's
+  own workers (docs/checks.md#the-suites)."
+  {:malli/schema [:=> [:cat fn? [:sequential :any]] [:vector :any]]}
+  [f coll]
+  (let [ex (java.util.concurrent.Executors/newFixedThreadPool 32)]
+    (try (mapv deref (mapv (fn [x] (.submit ex ^Callable (fn [] (f x)))) coll))
+         (finally (.shutdown ex)
+                  (.awaitTermination ex Long/MAX_VALUE java.util.concurrent.TimeUnit/NANOSECONDS)))))
+
 (defn scale [n]
   (run-check "SCALE" {:datoms 2000}
    (fn [sys]
@@ -664,7 +676,7 @@
           mem0 (lib/sysmem)
         th-boot (thread-diff (declared-threads sys) (threads))
         t0 (profile/now-ns)
-        ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "scale " i)})) (range n))))
+        ids (ready! sys #(fan (fn [i] (c/spawn! sys {:task (str "scale " i)})) (vec (range n))))
         t-ready (profile/ms-since t0)
         th-ready (thread-diff (declared-threads sys) (threads))
         _ (out! "ready in " (lib/r2 t-ready) " ms: " (frequencies (map #(get-in (c/state sys) [:agents % :status]) ids)))
@@ -685,7 +697,7 @@
                    ;; function costs (:error 2 with no reports, under load, said nothing of why)
                    (not (and (map? r) (not (:ex r)) (= 1 (:pass tr)) (zero? (+ (:fail tr) (:error tr)))))
                    (assoc :eval r :tests (dissoc tr :fns)))))
-        results (vec (pmap work ids))
+        results (fan work ids)
         t-done (profile/ms-since t0)
         _ (doseq [r results :when (not (:ok r))] (out! "NOT OK: " (pr-str r)))
         th-work (thread-diff (declared-threads sys) (threads))
