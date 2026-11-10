@@ -516,8 +516,8 @@
    ;; 7992 -> 5476 and 4670 -> 2685 ticks
    :map/update {:ticks 81.44 :ns 206.3 :bytes 802.44 :what "update of a counter in a hash map (frequencies' step)"}
    :set/conj! {:ticks 20.25 :ns 79.1 :bytes 91.72 :what "conj! of a new integer into a transient hash set"}
-   :sorted/assoc {:ticks 837.9 :ns 1334.7 :bytes 3327.21 :what "assoc of a new integer key into a sorted map"}
-   :sort/compare {:ticks 10.97 :ns 13.51 :bytes 39.04 :what "sort of shuffled integers, per n log2 n"}
+   :sorted/assoc {:ticks 58.21 :ns 273.2 :bytes 667.91 :what "assoc of a new integer key into a sorted map"}
+   :sort/compare {:ticks 6.21 :ns 9.75 :bytes 9.66 :what "sort of shuffled integers, per n log2 n"}
    :str/append {:ticks 4.1 :ns 9.9 :bytes 36.0 :what "StringBuilder append of one char"}
    ;; :str/seq-char and :str/escape re-measured on Jolt 546c3d1f (jolt/lazy-cas: a pure lazy
    ;; producer is claim-free when threaded, and the claim path drops a box): 272 -> 80 B, 684 -> 436 B

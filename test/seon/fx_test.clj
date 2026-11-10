@@ -176,10 +176,11 @@
 ;; docs/source.md#indexing-a-tree: an import brings what the tree changed, so a merge the tree never held stays on main
 (deftest a-source-read-since-its-last-tree-reads-only-what-moved
   (let [d (str (doto (java.io.File/createTempFile "seon-since" "") (.delete) (.mkdirs)))
-        git (fn [& args] (:out (apply clojure.java.shell/sh "git" "-C" d args)))
+        ;; each read-source is about ten git children (tree-id's own index): the test reads no tree it already has
+        git (fn [& args] (:out (apply clojure.java.shell/sh "git" "-C" d "-c" "user.email=t@t" "-c" "user.name=t" args)))
         read (fn [since] (seon.fx/read-source {:req (cond-> {:root d :dirs ["src"]} since (assoc :since since))}))]
     (.mkdirs (java.io.File. (str d "/src")))
-    (git "init" "-q") (git "config" "user.email" "t@t") (git "config" "user.name" "t")
+    (git "init" "-q")
     (spit (str d "/src/a.clj") "(ns a)") (spit (str d "/src/b.clj") "(ns b)") (spit (str d "/notes.clj") "(ns notes)")
     (git "add" ".") (git "commit" "-q" "-m" "one")
     (let [t (:tree (read nil))]
@@ -189,14 +190,15 @@
         (is (= ["src/b.clj"] (:paths r))))
       (.delete (java.io.File. (str d "/src/a.clj")))
       (is (= nil (get (:value (read t)) "src/a.clj" :absent)) "a removed file reads nil")
-      (is (contains? (:value (read (apply str (repeat 40 "0")))) "src/b.clj") "a tree git can't find reads whole")
-      (testing "a dir the last import didn't read is read whole, though nothing in it moved"
-        (let [t2 (:tree (read nil))]
-          (.mkdirs (java.io.File. (str d "/bin"))) (spit (str d "/bin/x.clj") "(ns x)") (git "add" ".") (git "commit" "-q" "-m" "two")
-          (let [t3 (:tree (read nil))
-                r (seon.fx/read-source {:req {:root d :dirs ["src" "bin"] :since t3 :since-dirs ["src"]}})]
-            (is (not= t2 t3))
-            (is (= {"bin/x.clj" "(ns x)"} (:value r)))))))))
+      (let [whole (read (apply str (repeat 40 "0")))]
+        (is (contains? (:value whole) "src/b.clj") "a tree git can't find reads whole")
+        (testing "a dir the last import didn't read is read whole, though nothing in it moved"
+          (let [t2 (:tree whole)]
+            (.mkdirs (java.io.File. (str d "/bin"))) (spit (str d "/bin/x.clj") "(ns x)") (git "add" ".") (git "commit" "-q" "-m" "two")
+            (let [t3 (:tree (read nil))
+                  r (seon.fx/read-source {:req {:root d :dirs ["src" "bin"] :since t3 :since-dirs ["src"]}})]
+              (is (not= t2 t3))
+              (is (= {"bin/x.clj" "(ns x)"} (:value r))))))))))
 
 (deftest a-write-back-answers-the-bytes-on-disk
   (let [d (scratch-dir)

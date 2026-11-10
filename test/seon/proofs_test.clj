@@ -373,8 +373,8 @@
   [& paths] (run! klmdb/close-env! paths))
 
 (defn- calls-of
-  "{var calls} of the contracted functions thunk called."
-  [thunk] (profile/begin!) (thunk) (into {} (map (juxt :var :calls)) (profile/touched)))
+  "[{var calls} of the contracted functions thunk called, and thunk's answer]."
+  [thunk] (profile/begin!) (let [r (thunk)] [(into {} (map (juxt :var :calls)) (profile/touched)) r]))
 
 (deftest a-failed-import-leaves-no-branch
   ;; task seon.proofs/a-failed-import-leaves-no-branch: an import that threw left its tree's branch
@@ -430,14 +430,14 @@
   ;; branch's connection), nine of them by its end, and the shard's next opens failed with
   ;; MDB_SEM_UNDO_FULL (the LMDB fork then held one of kern.sysv.semume's 10 for each open env's
   ;; life; it holds none since lmdb 7b7de38f). A test's own store ends with the test, so a process
-  ;; plans on any number in turn
+  ;; plans on any number in turn: eleven, one past the 10 undo entries (each store made costs ~20 M ticks, its seed)
   (let [d (checkout! {"deps.edn" "{}" "src/app/ps_calc.clj" "(ns app.ps-calc)\n(defn add [a b] (+ a b))\n"
                       "test/app/ps_calc_test.clj" "(ns app.ps-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest adds (is true))\n"})
-        planned (vec (for [_ (range 12)
+        planned (vec (for [_ (range 11)
                            :let [store (str (scratch-dir) "/store")]]
                        (try (contains? (:digests (runner/plan-of d "tests" false nil store)) 'app.ps-calc-test/adds)
                             (finally (close-stores! store)))))]
-    (is (= (repeat 12 true) planned) "twelve stores in turn, each planned")))
+    (is (= (repeat 11 true) planned) "eleven stores in turn, each planned")))
 
 (deftest a-plan-reads-the-kept-program-db-of-its-tree
   ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: the program db is a function of the
@@ -452,17 +452,16 @@
         ;; stores that keep no tree, each made once: what a whole import gives
         [fresh fresh2 fresh3] (repeatedly 3 #(str (scratch-dir) "/fresh"))
         plan #(runner/plan-of d "tests" false nil store)
-        first-calls (calls-of plan)
-        p1 (plan)]
+        ;; each plan is the one whose calls are counted: a plan is a tree id's git children and the store's open
+        [first-calls p1] (calls-of plan)]
    (try
     (is (= 1 (first-calls 'seon.source/import-tx)) "an empty store: the tree is imported once")
-    (let [again (calls-of plan)]
+    (let [[again p] (calls-of plan)]
       (is (nil? (again 'seon.source/import-tx)) "the same tree: its kept branch, no import")
       (is (nil? (again 'seon.source/refresh-tx)) "and nothing to bring current")
-      (is (= (:digests p1) (:digests (plan))) "and the same digests"))
+      (is (= (:digests p1) (:digests p)) "and the same digests"))
     (spit (str d "/src/app/kc_calc.clj") "(ns app.kc-calc)\n(defn add [a b] (+ b a))\n")
-    (let [edited (calls-of plan)
-          p2 (plan)
+    (let [[edited p2] (calls-of plan)
           whole (runner/plan-of d "tests" false nil fresh)]
       (is (nil? (edited 'seon.source/import-tx)) "an edited tree: no import")
       (is (= 1 (edited 'seon.source/refresh-tx)) "the nearest kept tree brought current, once")
@@ -470,9 +469,9 @@
       (is (not= (get-in p1 [:digests 'app.kc-calc-test/adds]) (get-in p2 [:digests 'app.kc-calc-test/adds])) "the test reaching the edit moved")
       (is (= (get-in p1 [:digests 'app.kc-other-test/other]) (get-in p2 [:digests 'app.kc-other-test/other])) "the other did not"))
     (spit (str d "/src/app/kc_calc.clj") calc)
-    (let [back (calls-of plan)]
+    (let [[back p] (calls-of plan)]
       (is (nil? (back 'seon.source/refresh-tx)) "the first tree again: its kept branch")
-      (is (= (:digests p1) (:digests (plan)))))
+      (is (= (:digests p1) (:digests p))))
     (testing "a moved file and a deleted one: the kept program is what a whole import of the tree gives"
       (let [files-of (fn [db] (source/source-files db))]
         ;; a namespace moved to a new file and renamed, its body kept: git's rename detection would

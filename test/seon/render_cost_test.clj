@@ -258,7 +258,7 @@
      ;; 10 / 30 / 100 evals.
      :per-n {:calls 317 :bytes 280000}
      :fixed {:calls 1900 :bytes 6600000}
-     :sizes [10 30 100]}))
+     :sizes [3 10 30]}))
 
 (deftest a-transaction-renders-what-it-touched
   ;; task seon.render/a-page-is-its-entitys-view (4a), now every-page-is-its-parts: a commit on main touching
@@ -347,7 +347,7 @@
      :growth :linear
      :per-n {:calls 0 :bytes 3400}
      :fixed {:calls 400 :bytes 150000}
-     :sizes [100 300 1000 4000]})))
+     :sizes [30 100 300]})))
 
 ;; See docs/render.md#a-change-is-edits-by-name
 (defn keyed-part
@@ -434,7 +434,7 @@
      ;; (seon.print/response-text); the owner approved 250 for a change's 379, and said cull later
      :per-n {:calls 8.2 :bytes 37000}
      :fixed {:calls 1285 :bytes 11250000}
-     :sizes [10 40 160 640]})))
+     :sizes [10 40 160]})))
 
 (def ^:dynamic *conn*
   "The branch's connection these proofs read and write: the status's its base, main and branch, the draw's its parts (bound by each deftest)."
