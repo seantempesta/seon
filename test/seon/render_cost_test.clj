@@ -74,8 +74,11 @@
      ;; own-key, schema-of and declared (its parents) each, print/line and its message. The input was runs (a table row with no
      ;; text: 143 a run and 209 once, 2026-11-03) until they went; messages are the entity whose render is as light that is left,
      ;; and its inline line holds its body as text. Measured 2026-11-04 on sizes 20 to 180: 3,615 calls at 20, 10,375 at 60,
-     ;; 30,495 at 180 (168 a message and 255 once)
-     :per-n {:calls 170}
+     ;; 30,495 at 180 (168 a message and 255 once).
+     ;; 2026-11-10, step 2 (senders as refs): bound 170 -> 171 calls a message, the +1 the one call of seon.render/reference-value per
+     ;; sender (a printed reference is its identity value); measured 3,657 at 20 and 10,497 at 60 (170.6 a message, 168 before). Ruled
+     ;; by Point for the owner on 2026-11-10, awaiting his word; what should take it back down: task seon.print/a-one-key-map-costs-what-its-key-prints
+     :per-n {:calls 171}
      :fixed {:calls 260}
      :sizes [20 60 180]}))
 
