@@ -2293,12 +2293,12 @@
 
 (defn- source
   "What made part ref of a sent request, as a line: the help page as of a t, an eval, a message, a reply, an example session, the
-  opening of the agent's own and the page whole a read ended with: every ref kind seon.ctx.wire/request names."
+  opening of the agent's own and a turn's page message: every ref kind seon.ctx.wire/part-ref names."
   {:malli/schema [:=> [:cat :any] :string]}
   [[kind x t]]
   (case kind
     :section (str "the system message: " x)
-    :render "the page, whole (a read's last: Seon ran it as a call of its own)"
+    :page (str "the page message of turn " x ": what moved on its page since the turn before")
     :eval (str "eval " x)
     :reply (str "the reply of " x)
     :message (str "message " x)
