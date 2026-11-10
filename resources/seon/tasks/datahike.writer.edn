@@ -1,5 +1,1 @@
-[{:seon.task/name "listeners-are-notified-in-upstreams-order"
-  :seon.task/plan "Filed 2026-11-10 (Deep fixes; ruled by the managing session the same day). Our Datahike fork's writer hands transact!'s caller its result before it notifies listeners (fork commit e11845ba, on purpose: committed writes complete independently of listeners; its writer-error test checks that order). Upstream notifies listeners first, and the optimistic overlay's tests assume that: the :conn-advance listener has run when the result arrives. On Jolt the two run on different threads, so the fork-suite unit ``datahike.test.optimistic-test`` passes or fails by timing: red once on 2026-11-10 (tx-report-happy-path-converges-to-conn: no :conn-advance), and red in four assertions when a 200 ms delay is put in the notification (shown by a helper, reverted). Seon uses neither listeners nor the overlay. Ruling: in the Datahike upstream merge take upstream's order and drop e11845ba's divergence; until then that unit red under load is this race, named so, never rerun to green. Proof when done: the unit green with a delay injected in the notification."
-  :seon.task/kind :work
-  :seon.task/proofs #{}}
-]
+[]

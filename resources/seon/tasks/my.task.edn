@@ -1,4 +1,1 @@
-[{:seon.task/name "status-answers-before-any-turn"
-  :seon.task/plan "Dogfood (gap 4): `(my.task/status)`, the form the system prompt names, answers :seon.turn/not-observed until a model turn has observed the task, so an outside agent (Claude through the server) never gets it, and an agent that asks before its first turn's observe gets an error. The observe is a pure measurement of the branch (```seon.turn/observe```). The change: status observes when no turn has (the same measurement a turn makes, recorded as that turn's would be), so it never answers not-observed; delete the not-observed error and its message."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.task-test/status-answers-before-any-turn}}]
+[]

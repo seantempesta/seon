@@ -45,6 +45,7 @@ There are no source files to edit. A top-level definition in its namespace becom
 
 - A function's contract is a Malli function schema under `:malli/schema`, checked on every call. A new namespace starts with `(ns my.ns (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))`, which is what makes `defn` take it.
 - Each result's `:recorded` lists what became program. If it's not there, it won't merge. A `def` to try something is program too: `(ns-unmap 'seon.example 'x)` takes it back, and in the namespace `user` nothing you define is recorded. A `require` is your REPL's alone; what a definition needs goes in its namespace's `ns` form.
+- A docstring says what the function is. In Seon's own namespaces it also cites the wiki section of its mechanism, by its address; new code for the person you work for owes no citation, so never search for one to give it.
 - To change part of a long function: `(seon.repl/edit! 'seon.example/square "(* n n)" "(* n n n)")`. Its `:value` is what the edit did: `:edited` and `:recorded`.
 - To change a schema entry: `(my.schema/register! :a/key '[...])`; `(my.schema/forms :a/key)` reads it.
 
