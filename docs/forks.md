@@ -238,11 +238,11 @@ A background-GC hang sits in Jolt between 8e5f6304 and 2688a06f (23 commits): ``
 
 ## jolt-overlay
 
-`reference-code/jolt-overlay` pinned at `89972cb`, the tip of ``jolt/hasch-ratio`` (one commit on `4ecb7a8`, the tip of ``jolt/main`` and the fork repo's `main`).
+`reference-code/jolt-overlay` pinned at `dedfa81`, the tip of ``jolt/hasch-fewer-dispatches`` (on `89972cb`, the tip of ``jolt/hasch-ratio``, on `4ecb7a8`, the tip of ``jolt/main`` and the fork repo's `main`).
 
 - Fork repo: ``https://github.com/seantempesta/jolt-overlay``. No upstream: `.jolt` copies of two libraries Datahike needs.
 - Base: `d2013ff` "baseline" (a `deps.edn`).
-- Ours: `355f390` clojure.spec.alpha 0.5.238 verbatim; `3427652` hasch.platform 0.4.100 verbatim, plus `res` in spec.alpha (a resolved deftype is not an emittable literal); `4ecb7a8` hasch's digest names upper-cased (`SHA-512`, `MD5`). Jolt (workarounds). `89972cb` hasch encodes a `clojure.lang.Ratio` as a number, like the other numbers (the content key of a value out of line threw on one: [storage](storage.md#a-commit-the-store-refuses); `seon.db-test/a-large-value-holding-ratios-commits-and-reads-back`). Generic.
+- Ours: `355f390` clojure.spec.alpha 0.5.238 verbatim; `3427652` hasch.platform 0.4.100 verbatim, plus `res` in spec.alpha (a resolved deftype is not an emittable literal); `4ecb7a8` hasch's digest names upper-cased (`SHA-512`, `MD5`). Jolt (workarounds). `89972cb` hasch encodes a `clojure.lang.Ratio` as a number, like the other numbers (the content key of a value out of line threw on one: [storage](storage.md#a-commit-the-store-refuses); `seon.db-test/a-large-value-holding-ratios-commits-and-reads-back`). Generic. `dedfa81` the same digests in fewer host calls: a seq's element encodings joined and digested in one `MessageDigest` call, `encode` in one array, `uuid5` reading only the 16 bytes it uses (a uuid of 64 uuids 46.5k engine ticks to 20.7k, of one uuid 4.2k to 2.7k; every id still hasch 0.4.100's on the JVM: `seon.db-test/hasch-ids-are-the-jvms`). Jolt.
 - **Recommendation: don't fold it into `jolt` as is.** Each change is a workaround for a generic gap elsewhere: (1) jolt-lang/crypto's `MessageDigest/getInstance` is case-sensitive where the JVM's is not, so the fix belongs in crypto, and hasch.platform's copy then goes; (2) `resolve` of a deftype yields a value Jolt cannot emit as a literal, a Jolt compiler gap. Once both are fixed, what remains is spec.alpha verbatim, which Jolt could ship in its stdlib or we could take as a pinned dependency.
 
 ## http-client
