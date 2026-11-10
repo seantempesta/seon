@@ -271,7 +271,7 @@
 (defn newest-process
   "The newest of processes ps (entities or pulled maps of :seon.process/agent's reverse) by when
   it forked, or nil when none says when: the agent's current process, whose telemetry the agent's
-  record no longer holds (docs/ctx.md#the-record-is-the-agents-work). An agent has one process per
+  record no longer holds (docs/ctx.md#the-agents-entity-holds-its-work). An agent has one process per
   spawn, written with its pid and fork time together (agent-tx)."
   {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:maybe :any]]}
   [ps] (some->> (seq (filter :seon.process/forked-ms ps)) (apply max-key :seon.process/forked-ms)))
