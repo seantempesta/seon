@@ -220,6 +220,8 @@
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
+     ;; the proofs of this tree that pass by a waiver (an :overrun in the form), counted on the db the plan reads
+     :waived (count (problems/waived-proofs db {}))
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
      :binary (set (keep (fn [[t v]] (when (:binary? v) t)) idx))}))
 
@@ -288,9 +290,8 @@
   :digests {test digest} :tree t}, t the planned tree's id) for bin/test to run, one process each (bin/test
   removes the last run's first), and each measured test's stall bound as out/stall-bounds (\"<test> <ms>\"
   lines, for bin/stalls). Answers the shard count."
-  [out tests digests tree mg jobs]
-  (let [ms (measured-ms tests)
-        sh (proofs/shards tests jobs ms)
+  [out tests digests tree mg jobs ms]
+  (let [sh (proofs/shards tests jobs ms)
         mg-ms (measured-ms (keys mg))
         floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
         dealt (deal-mg sh mg ms mg-ms)]
@@ -381,14 +382,15 @@
   :seon.proofs/unread, when the results could not be read (read-results)."
   [root what all? names store]
   (let [unread (volatile! nil)
-        p (proofs/plan-of (assoc (tests-of root names store) :slow-of fx/slow-tests) what all? names
+        reach (tests-of root names store)
+        p (proofs/plan-of (assoc reach :slow-of fx/slow-tests) what all? names
                   (some->> (fx/base-commit root) (fx/tree-of root))
                   ;; the verdicts cached at the candidates' digests; a read that failed is the plan's
                   ;; :unread (prove! stops on it), never zero greens
                   (fn [cand]
                     (let [r (read-results cand)]
                       (if (contract/error? r) (do (vreset! unread r) {}) r))))]
-    (cond-> p @unread (assoc :unread @unread))))
+    (cond-> (assoc p :waived (:waived reach)) @unread (assoc :unread @unread))))
 
 (defn- prove!
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
@@ -410,8 +412,10 @@
         1)
   (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky]} plan
+        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived]} plan
         ;; a merge runs these last, once all else is green (bin/prove): out/slow, names, one line
+        ;; the proofs of the tree that pass by a waiver (an :overrun in the form: seon.problems/waived-proofs), for bin/prove's last lines
+        _ (write! (str out "/waived") (str waived "\n"))
         _ (write! (str out "/slow") (str (str/join " " (sort (map str (keys slow)))) (when (seq slow) "\n")))
         _ (when (seq slow)
             (println (str "prove: " (count slow) " slow tests left for last (bin/prove runs them once all else is green; run one by name: bin/test NS/TEST, all: bin/test --all): "
@@ -431,10 +435,19 @@
         ;; an incremental run (what a change reaches) is one process while four starts would cost more than the few
         ;; seconds of work they split (the owner, 2026-10-30); past that it shards, as a gate of 206 tests took 751 s on
         ;; one; the full run and a merge's verification shard
+        ;; each test's ms, measured or its class's configured estimate (never 1 ms: an unmeasured run dealt itself one shard)
+        ms (proofs/estimated-ms run-tests (measured-ms run-tests) (into #{} (filter qualified-symbol?) process))  ; process holds the check steps' names too (strings)
+        ;; as many shards as free memory holds, at most the configured jobs (never fewer for the load average: bin/test)
+        avail (long (:available-mb (seon.lib/sysmem)))
+        jobs (proofs/memory-jobs (config/value :seon.config.proofs/jobs) avail
+                                 (config/value :seon.config.proofs/shard-mb) (config/value :seon.config.proofs/free-floor-mb))
+        _ (write! (str out "/jobs") (str jobs))
+        _ (when (< jobs (config/value :seon.config.proofs/jobs))
+            (println (str "prove: " avail " MB free: " jobs " of " (config/value :seon.config.proofs/jobs) " shards at most ("
+                          (config/value :seon.config.proofs/shard-mb) " MB a shard above " (config/value :seon.config.proofs/free-floor-mb) " MB kept free)")))
         n (write-shards! out (if no-test [] run-tests) digests (:tree inputs) (select-keys steps mg-run)
-                         (if all?
-                           (config/value :seon.config.proofs/jobs)
-                           (proofs/worth-shards run-tests (config/value :seon.config.proofs/jobs) (measured-ms run-tests) (config/value :seon.config.proofs/shard-min-ms))))
+                         (if all? jobs (proofs/worth-shards run-tests jobs ms (config/value :seon.config.proofs/shard-min-ms)))
+                         ms)
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
         step-bin (filterv proofs/step-needs-binary? run-steps)
@@ -522,9 +535,10 @@
                         [(keyword (str "no-" (name c))) (not-any? #(= c (:class %)) made)]))}))
 
 (defn- tasks-dir
-  "The task files' directory relative to the checkout (:seon.config.root/tasks-dir, which the
-  config holds resolved against it), so it names the same files in a tree extracted elsewhere."
-  [] (str (.relativize (.toPath (io/file (str (config/checkout)))) (.toPath (io/file (config/value :seon.config.root/tasks-dir))))))
+  "Where the tree keeps its task files, relative to it (:seon.config.source/tasks-dir: the tree's layout, never this process's
+  own task dir, :seon.config.root/tasks-dir, which a check run points at its own), so it names the same files in a tree
+  extracted elsewhere."
+  [] (config/value :seon.config.source/tasks-dir))
 
 (defn- with-wiki
   "Program db db with the wiki and the tasks of the checkout at dir, by root's own loaders

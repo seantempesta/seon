@@ -5,7 +5,7 @@
   (konserve.jolt.fasl-store, FaslSerializer), and the JVM-written-store reader stays behind
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.print :as print] [clojure.string :as str] [malli.core :as m] [seon.schema.datahike :as sd] [seon.config :as cfg]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.print :as print] [clojure.string :as str] [malli.core :as m] [malli.registry] [seon.schema.datahike :as sd] [seon.config :as cfg]
             [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [org.replikativ.persistent-sorted-set :as pss] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core] [datahike.db.transaction]))
 
@@ -39,9 +39,14 @@
   ([db tx-data {:keys [forms registry]}]
   (let [schema (:schema db)
         known? (fn [a] (or (contains? contract/forms a) (contains? forms a)))
-        schema-of (fn [a] (if (contains? forms a) (m/schema a {:registry registry}) (contract/schema a)))]
+        schema-of (fn [a] (or (if (contains? forms a) (malli.registry/schema registry a) (contract/held a))
+                                 ;; a name the registry holds no instance of (a form given in place of a registered name)
+                                 (if (contains? forms a) (m/schema a {:registry registry}) (contract/schema a))))
+        ;; an attribute's validator is found once a transaction: a transaction writes many datoms of few attributes
+        seen (volatile! {})
+        valid-of (fn [a] (or (get @seen a) (let [f (m/validator (schema-of a))] (vswap! seen assoc a f) f)))]
     (letfn [(refused [a v]
-              (when-not (m/validate (schema-of a) v)
+              (when-not ((valid-of a) v)
                 (let [ps (contract/problems (schema-of a) v)]
                   (contract/error :seon.db/invalid-datom #'invalid-datom (let [{:keys [in value]} (first ps)] (str a " refuses this value at " in ": " (:seon.print/code value)))
                                   {:attribute a :seon.error/problems ps}))))

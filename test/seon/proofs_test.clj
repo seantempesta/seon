@@ -660,7 +660,21 @@
     (is (= 2 (proofs/worth-shards ts 4 '{a/t 15000 a/u 15000 a/v 15000 a/w 15000} 30000)) "one for each min-ms")
     (is (= 4 (proofs/worth-shards ts 4 '{a/t 200000 a/u 200000 a/v 200000 a/w 200000} 30000)) "never past jobs")
     (is (= 3 (proofs/worth-shards ts 4 '{a/t 25000 a/u 25000} 30000)) "a test never measured counts as the mean")
-    (is (= 1 (proofs/worth-shards ts 4 {} 30000)) "with none measured, one: it has nothing to split by")))
+    ;; a run's tests are dealt by seon.proofs/estimated-ms, which gives every unmeasured test its class's configured estimate:
+    ;; 234 process tests never measured (a gate's fresh checkout) were one shard and 763 s when an unknown counted as 1 ms
+    (let [gate (mapv #(symbol "a" (str "p" %)) (range 234))
+          est (proofs/estimated-ms gate {} (set gate))]
+      (is (= (seon.config/value :seon.config.proofs/unmeasured-process-ms) (est (first gate))) "an unmeasured process test is its estimate")
+      (is (= 4 (proofs/worth-shards gate 4 est 30000)) "so a run of them none measured is worth every shard, not one"))
+    (is (= (seon.config/value :seon.config.proofs/unmeasured-ms) ((proofs/estimated-ms '[a/t] {} #{}) 'a/t)) "an in-process test is its own class's")
+    (is (= 900 ((proofs/estimated-ms '[a/t] '{a/t 900} '#{a/t}) 'a/t)) "and a measured test is its measurement")))
+
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: a run takes as many shards as free memory holds, at most the configured
+;; jobs, never fewer for the load average (bin/test: load counts other sessions' niced work)
+(deftest a-run-takes-the-shards-free-memory-holds
+  (is (= 4 (proofs/memory-jobs 4 40000 2000 8000)) "memory for many: the configured ceiling")
+  (is (= 2 (proofs/memory-jobs 4 12500 2000 8000)) "memory for two above the floor: two")
+  (is (= 1 (proofs/memory-jobs 4 7000 2000 8000)) "below the floor: one, never none"))
 
 ;; docs/merging.md#a-slow-test-runs-last: asked only of what would run, out of a plain and a merge's run, in a named or full one
 (deftest a-slow-test-runs-last-unless-named-or-the-full-run

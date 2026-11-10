@@ -248,14 +248,14 @@
      (symbol "app.check" (str "v" n))]))
 
 (deftest the-health-step-reads-the-task-files-relative-to-the-checkout
-  ;; test-runner/health!: the config holds :seon.config.root/tasks-dir resolved against the
-  ;; checkout, and the base's task files are read from the base's tree extracted elsewhere, so
-  ;; the step takes the directory relative to the checkout (an absolute one read no base task)
+  ;; test-runner/health!: the base's task files are read from the base's tree extracted elsewhere, so the step takes where the
+  ;; tree keeps them, relative to it (an absolute one read no base task), and from the tree's layout
+  ;; (:seon.config.source/tasks-dir), never this process's own task dir: bin/check points that at its run's own (SEON_TASKS), and
+  ;; health read it as the tree's ("pathspec 'target/check/tasks' did not match", 2026-11-10)
   (let [rel (#'test-runner/tasks-dir)]
     (is (not (str/starts-with? rel "/")) rel)
-    (is (= (str (.getCanonicalFile (java.io.File. (str (seon.config/checkout) "/" rel))))
-           (str (.getCanonicalFile (java.io.File. (str (seon.config/value :seon.config.root/tasks-dir))))))
-        "it names the configured directory under the checkout")))
+    (is (.isDirectory (java.io.File. (str (seon.config/checkout) "/" rel))) "it names the tree's task files under the checkout")
+    (is (= rel (seon.config/value :seon.config.source/tasks-dir)) "the tree's layout, not the process's place")))
 
 (deftest a-problem-the-base-had-is-not-the-branchs
   (let [[base] (catch-db (ts/test-db) 1)
