@@ -727,12 +727,9 @@
         n 20]
     (try
       (let [once (write-turns! conn cfg path :once n n)
-            t0 (profile/now-ns)
             per-turn (write-turns! conn cfg path :per-turn n 1)
-            ms (profile/ms-since t0)
             bound (+ once (* n 32 1024))]
-        (println (str "a-commit-costs-what-it-writes: " n " turns, one commit " once " B, per turn " per-turn " B, bound " bound " B, "
-                      (format "%.1f" (/ ms n)) " ms per turn (compressor " (cfg/value :seon.config.store/compressor)
+        (println (str "a-commit-costs-what-it-writes: " n " turns, one commit " once " B, per turn " per-turn " B, bound " bound " B (compressor " (cfg/value :seon.config.store/compressor)
                       ", out of line from " (cfg/value :seon.config.store/value-out-of-line-bytes) " B)"))
         (is (<= per-turn bound)
             (str n " per-turn commits wrote " per-turn " bytes; the same turns in one commit wrote " once

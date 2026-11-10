@@ -2,7 +2,7 @@
   "Every proc's step-fn, called as a plain function (no graph, no Flow), checked against
   its `:malli/schema` (seon.step/step-schema) and against what each arity must do.
   Run: bin/test seon.procs-test (proto/flow f2-final test/proto/procs_test.clj)"
-  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing run-tests]]
+  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing run-tests]]
             [malli.core :as m] [seon.contract]
             [clojure.core.async :as a] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec]
             [clojure.core.async.flow :as flow]
@@ -284,8 +284,8 @@
         (is (some #(= {:rid 3} (:dest %)) (:to-api outs)) "clean: at once")))))))
 
 (defn- notice
-  "The writer's notice for conn's head, the commit after prev: {:t :prev :ops :commit :ns}."
-  [conn prev ops] {:t (:max-tx @conn) :prev prev :ops ops :commit (d/commit-id @conn) :ns (profile/now-ns)})
+  "The writer's notice for conn's head, the commit after prev: {:t :prev :ops :commit :ns}, its :ns stamp 0 (data no step reads here)."
+  [conn prev ops] {:t (:max-tx @conn) :prev prev :ops ops :commit (d/commit-id @conn) :ns 0})
 
 (deftest the-writers-main-notice-holds-no-db
   ;; a queued notice pins its own version of
