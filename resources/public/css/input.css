@@ -131,6 +131,7 @@
   .seon-stack { @apply flex flex-col gap-1; }
   .seon-stack-2 { @apply flex flex-col gap-2; }
   .seon-row { @apply flex gap-2; }
+  .seon-row > :first-child { flex-shrink: 0; } /* a row's label keeps its width beside a long value */
 }
 @media (min-width: 64rem) {
   .seon-page { height: 100dvh; overflow: hidden; }
@@ -183,7 +184,7 @@
 .hljs-name, .hljs-title { color: var(--color-text-100); }
 pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; background: var(--color-base-850); overflow-x: auto; }
 .seon-data-panel { display: inline; }
-/* the conversation (seon.render.ui/eval-item): messages as written, each eval a block that opens to
+/* the conversation (seon.render.ui/evaluation): messages as written, each eval a block that opens to
    its code and its value */
 .seon-text { white-space: pre-wrap; font-family: var(--font-text); font-size: 0.875rem; line-height: 1.6; color: var(--color-text-100); margin: 0; }
 .seon-eval { border: 1px solid var(--color-base-800); border-radius: 8px; background: var(--color-base-900); min-width: 0; }
@@ -193,7 +194,7 @@ pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; bac
 .seon-eval[open] > summary { border-bottom: 1px solid var(--color-base-800); border-radius: 8px 8px 0 0; }
 .seon-eval > :not(summary) { margin: 0.6rem 0.7rem; }
 .seon-eval > div { border-left: 0; padding-left: 0; }
-/* an eval's collapsed line (seon.render.ui/eval-item; the 2026-10-24 mockup's "▸ (form) · 12 ms"):
+/* an eval's collapsed line (seon.render.ui/evaluation; the 2026-10-24 mockup's "▸ (form) · 12 ms"):
    the text above, then its code's first line, its time and its handle */
 .seon-eval > summary::before { content: "▸"; color: var(--color-text-500); }
 .seon-eval[open] > summary::before { content: "▾"; color: var(--color-signal); }

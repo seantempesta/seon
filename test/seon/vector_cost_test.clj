@@ -3,7 +3,7 @@
   row once and only its shortlist's whole vectors; what is due reads each text's and vector's
   facts once."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [clojure.java.shell] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
+  (:require [seon.lib] [clojure.test :refer [deftest]] [clojure.java.shell] [seon.contract :refer [defn defn-]] [seon.cost :as cost]
             [datahike.api :as d] [my.test :as mt] [seon.db :as pdb] [seon.vector :as vector]))
 
 (def ^:private decay
@@ -189,4 +189,4 @@
        :sizes [30 100 300]})
     (finally (when (realized? store)
                (let [path (get-in @@store [:config :store :path])]
-                 (d/release @store) (clojure.java.shell/sh "rm" "-rf" path))))))
+                 (d/release @store) (seon.lib/remove-tree! path))))))

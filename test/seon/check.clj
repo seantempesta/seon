@@ -34,13 +34,19 @@
     (out! "WARM-TESTS " (count nss) " namespaces, " (count bad) " that do not load: " (pr-str bad))))
 
 (defn- run-check
-  "One check mode's frame: root booted with opts (seon.root/start!; nil boots none), (body sys)
+  "One check mode's frame: root booted with opts (seon.root/start!; nil boots none) and serving (its port in its store's
+  root.port, for bin/evidence), (body sys)
   answering {:checks {k truthy} :report m :then :stop|:kill}, the report printed with its
   checks, root stopped, then the verdict (verdict!). With :then :kill, phase 1 of a
   kill/reopen pair: the verdict line, then root SIGKILLs itself so nothing but the store
   survives (exit 137), and phase 2 reopens the store in a process of its own."
   [nm opts body]
-  (let [sys (when opts (c/start! opts))
+  (let [;; its root serves, on a port the kernel picks, written beside its store (root.port): what bin/check hands bin/evidence
+        ;; for its Seon state when the step runs past its bound (docs/clocks.md#time-decides-the-owners-exceptions); the body's
+        ;; sys holds the server socket (:server), so the threads it declares count the server's acceptor (declared-threads)
+        sys (when opts (let [sys (c/start! opts) ss (seon.server/serve! sys 0)]
+                         (spit (str (seon.config/value :seon.config.root/store-path) "/root.port") (.getLocalPort ^java.net.ServerSocket ss))
+                         (assoc sys :server ss)))
         {:keys [checks report then]} (body sys)
         checks (into (sorted-map) (for [[k v] checks] [k (boolean v)]))]
     (out! (shown (assoc report :checks checks)))
@@ -295,14 +301,9 @@
   '{[seon.config-test/env-reads-a-set-variable-and-nil-for-an-unset-one System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
     [seon.config-test/envf-formats-variables System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
     [seon.config-test/or-takes-the-first-non-nil System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
-    [seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
-    [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
     [seon.model-test/a-call-that-names-itself-is-answered-as-a-stream-over-the-socket clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
-    [seon.problems-test/an-agent-death-is-recorded-with-its-cause seon.profile/now-ns] "a fresh directory's name"
-    [seon.procs-test/notice seon.profile/now-ns] "a message's :ns stamp, data the verdict does not read (the one helper the procs and reconcile tests build their notices with)"
     [seon.step-test/timer-threads clojure.core.async/timeout] "the timers' threads are the subject; the verdict counts threads, never time"
-    [seon.profile-test/a-threads-allocation-is-its-own Thread/sleep] "a window in which bytes are counted; the verdict is on bytes"
     [seon.profile-test/reading-the-clock-allocates-nothing seon.profile/now-ns] "the clock read is the subject; the verdict is on bytes"
     [seon.profile-test/the-clock-is-the-one-every-process-reads seon.profile/now-ns] "the clock's identity is the subject"
     [test-runner/prove! seon.profile/now-ns] "the runner's printed selection time"
@@ -617,7 +618,9 @@
   declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
   readers (Flow's error channel, the fork server's socket) and, while the web proc listens,
   the web server's acceptor and sweeper (ring-chez-adapter's, each a future, which runs on Jolt's
-  solo pool as clojure-agent-send-off-pool-N, the JVM's name; task seon.web/web-server-threads-are-joined-at-stop). The embedding model's threads are the
+  solo pool as clojure-agent-send-off-pool-N, the JVM's name; task seon.web/web-server-threads-are-joined-at-stop), and, for a
+  sys that serves (:server, run-check's), the server's acceptor (seon.server/serve!: a connection's thread lives while it is
+  open). The embedding model's threads are the
   helper's process's, none root's (docs/vector.md#the-model)."
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-asleep" 1 "jolt-carrier" (fiber-carriers)}
        :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)
@@ -630,7 +633,8 @@
          web? (true? (get-in (c/state sys) [:web :listening]))]
      (update (declared-threads) :roster merge
              (cond-> {"async-mixed" mixed "seon-fs-events" 1}
-               web? (assoc "clojure-agent-send-off-pool" 2))))))
+               web? (assoc "clojure-agent-send-off-pool" 2)
+               (:server sys) (assoc "seon-server-accept" 1))))))
 
 (defn- threads
   "The threads this process runs now, measured as declared-threads declares them, and :os,
@@ -1171,6 +1175,23 @@
 
 (defn- alive? [pid] (zero? (lib/c-kill pid 0)))
 
+(defn- ps-row
+  "Process pid as ps shows it, {:pid :ppid :stat :command}, or nil when ps finds none: what a check records of a process it found left."
+  [pid]
+  (let [line (clojure.string/trim (:out (clojure.java.shell/sh "ps" "-o" "pid=,ppid=,stat=,command=" "-p" (str pid))))]
+    (when-let [[_ p pp st cmd] (re-matches #"(\d+)\s+(\d+)\s+(\S+)\s+(.*)" line)]
+      {:pid (parse-long p) :ppid (parse-long pp) :stat st :command cmd})))
+
+(defn- still-there
+  "Of pids, the ones still there after a stop, each with its ps row (docs/processes.md#a-stop-reaps-every-child). A zombie (it
+  exited; its parent has not waited for it) counts as ended only when its parent is not this process, the root under test: an
+  orphan the OS reaps. One whose parent is this process is a child root failed to reap, and stays."
+  [pids]
+  (vec (for [p pids :when (alive? p)
+             :let [row (ps-row p)]
+             :when (not (and row (clojure.string/starts-with? (:stat row) "Z") (not= (:ppid row) (lib/c-getpid))))]
+         (or row {:pid p}))))
+
 (defn- cycle-row
   "Cycle i, start! -> 3 agents evaluate -> stop!, in this process: root's threads against what
   it declares (thread-diff, {} when exact) while running and after its stop!, the stop's answer
@@ -1190,7 +1211,7 @@
     ;; kernel's count for a while (164 of 200 trials; macOS removes it after even a
     ;; pthread_join), and nothing can await its removal (docs/processes.md#a-stop-reaps-every-child)
     (let [stopped (thread-diff (declared-threads) (threads))]
-      {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
+      {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (still-there pids)
        :health (set health)
        :running running :stopped (dissoc stopped :os) :stopped-os (:os stopped)})))
 
@@ -1685,7 +1706,7 @@
                           (select-keys @(c/run-tests! sys a) [:pass :fail :error]))
            :file-text (slurp (str dir "/b.txt"))}
         echo-ping (ping sys :fx/echo)]
-      (seon.fx/remove-tree! dir)
+      (seon.lib/remove-tree! dir)
       {:report (assoc r :owner-ping echo-ping :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime"))))
        ;; the effect answered, its unknown kind is a typed error, and inside the test fork a
        ;; call is refused unless stubbed (both assertions ran and passed)
@@ -1753,7 +1774,7 @@
         got (:got (await-event ev #(and (= :probe (:type %)) (= "one" (:tag %)) (= 3 (:got %)))))
         r3 @(c/apply! sys (write! "remove" (assoc-in decl [:procs :probe] (probe "one"))))
         after (pids)]
-      (seon.fx/remove-tree! dir)
+      (seon.lib/remove-tree! dir)
       {:report {:no-answer (vec (remove booted expect)) :extra (vec (remove expect booted))
                 :add (dissoc r1 :kept) :add2 (dissoc r2 :kept) :queued-kept got :remove (dissoc r3 :kept)}
        :checks {:boot-set (= expect booted)
@@ -1766,10 +1787,11 @@
 (defn- eval-records
   "The eval records on db of whom the evals are on, by its identity (seon.repl/record-tx): an
   agent's [:seon.agent/key key], or root's [:seon.root/id :root], each its code and who
-  evaluated it (:by, :seon.eval/by): [{:code :by}]."
+  evaluated it (:by, :seon.eval/by, a ref since step 2: the identity of the entity it names,
+  {:seon.agent/key k} or {:seon.root/id :root}): [{:code :by}]."
   [db [attr id]]
   (vec (for [[code by] (d/q '[:find ?c ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/code ?c] [?e :seon.eval/by ?by]] db attr id)]
-         {:code code :by by})))
+         {:code code :by (not-empty (into {} (remove (comp nil? val)) (d/pull db [:seon.agent/key :seon.root/id] by)))})))
 
 (defn await-records
   "What (read) answers once (enough? it) holds, read again at each :commit event of agent a
@@ -1781,8 +1803,8 @@
 (defn mcp-proof
   "The MCP phase's proof: an outside client (a separate process: bin/mcp PORT, the stdio
   relay, fed JSON-RPC on stdin) lists agents, evaluates in a running agent and as root, and
-  both evaluations are recorded by \"outside\" (the agent's on its branch, root's on
-  main). The relay's peak footprint stays within :seon.config.machine/relay-mb, so a relay
+  both evaluations are recorded, each by who ran it (an outside eval in an agent is the agent's own, seon.repl's
+  by; one as root is the user's the session acts for, seon.server's root eval), the agent's on its branch, root's on main. The relay's peak footprint stays within :seon.config.machine/relay-mb, so a relay
   that boots Seon again is red; one against a port nobody listens on answers each request
   the JSON-RPC error, and exits."
   []
@@ -1817,10 +1839,10 @@
         ;; the agent's record is on its branch at its commit (await-records); answers its one
         ;; eval when recorded, else waits on the next commit (the eval failed: its text check says so)
         mine (if (clojure.string/includes? (str (text 4)) "42")
-               (await-records ev a #(filter (fn [r] (= "outside" (:by r))) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/key (name a)])) #(= 1 (count %)))
+               (await-records ev a #(filter (fn [r] (clojure.string/includes? (:code r) "outside-x")) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/key (name a)])) #(= 1 (count %)))
                [])
         _ (a/untap (:events-mult sys) ev)
-        roots (filter #(= "outside" (:by %)) (eval-records @(:conn sys) [:seon.root/id :root]))
+        roots (filter #(= "(count (:agents (c/state sys)))" (:code %)) (eval-records @(:conn sys) [:seon.root/id :root]))
         bound (seon.config/value :seon.config.machine/relay-mb)]
       {:report {:tools (count (get-in answers [2 "result" "tools"]))
                 :agents-text (text 3) :agent-eval (text 4) :root-eval (text 5)
@@ -1831,7 +1853,11 @@
                 :root-down (mapv #(get-in % ["error" "message"]) (lines down)) :root-down-exit (:exit down)}
        :checks {:tools-are-the-ops (= (set (map #(str "seon_" (name %)) (keys seon.server/ops))) (set (map #(get % "name") (get-in answers [2 "result" "tools"]))))
                 :notification-unanswered (= #{1 2 3 4 5} (set (keys answers)))
-                :both-recorded-outside (and (= 1 (count mine)) (= 1 (count roots)))
+                :both-recorded (and (= 1 (count mine)) (= 1 (count roots)))
+                ;; who ran each (step 2: :seon.eval/by a ref): the eval in an agent by the agent itself, the one as root by the user
+                ;; the outside session acts for (:seon.config.root/user-name); the system entity runs only root's inserted and Seon's own
+                :each-by-who-ran-it (and (= [{:seon.agent/key (name a)}] (mapv :by mine))
+                                         (= [{:seon.agent/key (seon.config/value :seon.config.root/user-name)}] (mapv :by roots)))
                 :agent-eval (clojure.string/includes? (str (text 4)) "42") :root-eval (clojure.string/includes? (str (text 5)) "1")
                 :relay-within-bound (boolean (some-> (peak-mb r) (<= bound)))
                 :root-down-answers-every-request (and (zero? (:exit down)) (= [1 2 3 4 5] (mapv #(get % "id") (lines down)))
@@ -2049,7 +2075,7 @@
   only appends, so a store seeded once and used for every run grew without bound, and the file and the roster were each run's to carry. See docs/checks.md#modes."
   [path max-bytes]
   (let [big? (> (.length (java.io.File. (str path "/data.mdb"))) max-bytes)]
-    (when big? (seon.fx/remove-tree! path))
+    (when big? (seon.lib/remove-tree! path))
     big?))
 
 (defn seed
@@ -2099,7 +2125,7 @@
             gone (vec (mapcat #(seon.db/delete-main! conn (keyword %)) mains))]
         (seon.db/sync! cfg)
         (d/release conn)
-        (doseq [m mains] (seon.fx/remove-tree! (seon.db/agents-dir (assoc cfg :branch (keyword m)))))
+        (doseq [m mains] (seon.lib/remove-tree! (seon.db/agents-dir (assoc cfg :branch (keyword m)))))
         ;; the store's agents directory goes when the last main's has (rmdir leaves a non-empty one)
         (clojure.java.shell/sh "rmdir" (str path "-agents"))
         (out! "deleted " (count gone) " branches of " (count mains) " mains"))

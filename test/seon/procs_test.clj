@@ -2,7 +2,7 @@
   "Every proc's step-fn, called as a plain function (no graph, no Flow), checked against
   its `:malli/schema` (seon.step/step-schema) and against what each arity must do.
   Run: bin/test seon.procs-test (proto/flow f2-final test/proto/procs_test.clj)"
-  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is testing run-tests]]
+  (:require [seon.lib] [seon.test-store :as ts] [clojure.test :refer [deftest is testing run-tests]]
             [malli.core :as m] [seon.contract]
             [clojure.core.async :as a] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec]
             [clojure.core.async.flow :as flow]
@@ -51,6 +51,21 @@
     (testing "the stop transition releases the branch connections"
       (is (map? (#'writer/writer-proc st ::flow/stop))))))))
 
+(deftest a-refused-op-keeps-the-batch-committed-before-it
+  ;; docs/storage.md#durability-is-continuous-group-commit: an op other than :tx commits the batch first; an op that then
+  ;; throws (an interop edge) is answered as its error, and the writer keeps the state after that commit. Red before: one
+  ;; catch around both handed back the state from before the commit (batch 12: with writes then held ahead, the writer and
+  ;; Datahike fell apart; here the write's commit is lost from the writer's count)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        _ (a/>!! in {:op :clone-branch :from :no-such-branch :branch (pdb/on-main (:branch cfg) :x1) :dest {:rid 2}})
+        [st2 outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})
+        answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
+    (is (:ok (answers 1)) "the write is answered, stored")
+    (is (seon.contract/error? (answers 2)) "the op that throws is answered as its error")
+    (is (= 1 (- (:commits st2) (:commits st))) "and the writer counts the commit made before the op")
+    (is (= 1 (count (:main outs))) "whose notice went out")))))
+
 (deftest the-writers-transactions-name-their-runtime
   ;; main's transactions through the writer's group
   ;; commit carry the runtime that made them, and so does the stored commit the fork server's replica reads
@@ -80,6 +95,39 @@
     (is (:merged? (first (:results (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))))) "the branch merges")
     (is (< t0 (:max-tx @conn)))
     (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "and its merge names the runtime")))))
+
+(deftest the-writer-marks-the-commit-that-moves-mains-content
+  ;; docs/storage.md#mains-content-mark: every commit that moves main's content carries a new content mark, in that same
+  ;; commit (what an agent reads from the store to skip its diffs of main), and a commit of records leaves it: a write, a
+  ;; :flush? batch, an octopus merge, and the writer's start. Red before: no commit carried one
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        mark (fn [db] (:seon.root/content-t (d/entity db [:seon.root/id :root])))
+        at (fn [outs] (d/commit-as-db conn (:commit (last (:main outs)))))
+        t0 (:max-tx @conn)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        m0 (mark @conn)
+        [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f2] [?v :var/form ?f] [?f :form/ns ?n]] @conn)
+        redefine (fn [id] [{:db/id "f" :form/id id :form/ns nsx :form/order 100 :form/defines [v]
+                            :form/src (str "(defn f2 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x " (count id) "))")}
+                           [:db/add v :var/form "f"]])]
+    (is (< t0 m0) "the writer's start moves it past what a boot wrote")
+    (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})]
+      (is (= m0 (mark (at outs))) "a commit of records leaves it")
+      (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data (redefine "app.m0/f2-a") :dest {:rid 2}})
+            m1 (mark (at outs))]
+        (is (< m0 m1) "a definition moves it, in its own stored commit")
+        (is (some (fn [[_ _ a]] (= :seon.root/content-t a)) (:ops (last (:main outs)))) "and the notice's ops carry it")
+        (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :flush? true :tx-data (redefine "app.m0/f2-b") :dest {:rid 3}})
+              m2 (mark (at outs))]
+          (is (< m1 m2) "a :flush? batch's definition moves it")
+          (let [b (pdb/on-main (:branch cfg) :a1)
+                _ (d/branch! conn (:branch cfg) b)
+                bc (pdb/connect (assoc cfg :branch b))
+                _ (d/transact bc (redefine "app.m0/f2-c"))
+                _ (d/release bc)
+                [_ outs] (step #'writer/writer-proc st :in {:op :octopus-merge :branches [b] :dest {:rid 4}})]
+            (is (:merged? (first (:results (:r (first (filter #(= {:rid 4} (:dest %)) (:to-api outs))))))) "the branch merges")
+            (is (< m2 (mark (at outs))) "and the merge moves it in its commit")))))))))
 
 (deftest a-merge-candidate-is-what-the-merge-writes
   ;; the merge gate's checkout takes the writer's :merge-candidate: the files the octopus merge would write, with their
@@ -145,6 +193,42 @@
         (is (= :seon.agent/fork-misaligned (get-in problem [:error :seon.error/type])) "is recorded as the agent's problem")
         (is (= at (get-in problem [:error :commit])))
         (remote/close! end) (sock/close! a'))))))
+
+(deftest a-context-read-makes-its-agent-neither-busy-nor-idle
+  ;; docs/server.md#ops: a read never writes (owner, 2026-11-10). A :context read is an eval of origin :context: in
+  ;; flight, the agent is not made busy, and its answer reports the status it already had, so root's view of the agent
+  ;; does not move and nothing is written to main for it (seon.root's record-agents writes only a change). An eval that
+  ;; is work still makes it busy. Red before: every request sent {:status :busy}, and its answer :idle: two commits on
+  ;; main for each read.
+  (let [[r a'] (sock/socketpair)
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode}})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        statuses (fn [outs] (keep #(when (= :status (:op %)) (get-in % [:set :status])) (:to-api outs)))]
+    (try
+      (let [[st outs] (step #'ap/agent-proc st :in {:op :req :rid 5 :kind :eval :msg {:op :eval :forms "(ctx)" :origin :context}})]
+        (is (empty? (statuses outs)) "a read in flight reports no status")
+        (is (contains? (:inflight st) 5) "and is in flight, answered when it ends")
+        (let [[st outs] (step #'ap/agent-proc st :from {:op :reply :id 5 :response {:value 1} :t 1})]
+          (is (= [:idle] (statuses outs)) "its answer reports the agent as it was: idle")
+          (let [[st outs] (step #'ap/agent-proc st :in {:op :req :rid 6 :kind :eval :msg {:op :eval :forms "(+ 1 2)"}})]
+            (is (= [:busy] (statuses outs)) "an eval that is work makes it busy")
+            (let [[_ outs] (step #'ap/agent-proc st :in {:op :req :rid 7 :kind :eval :msg {:op :eval :forms "(ctx)" :origin :context}})]
+              (is (empty? (statuses outs)) "a read beside it changes nothing")))))
+      (finally (remote/close! end) (sock/close! a')))))
+
+(deftest an-agent-that-reads-nothing-is-seen-as-a-stall
+  ;; docs/processes.md#a-stalled-agent: root's frames to an agent never block its proc. An agent that stopped reading its
+  ;; socket (an eval held in a blocking open(2)) left the proc's blocking put parked in its step, so it never took root's
+  ;; :stall? and no stall was recorded (batch 16's problems step, 8.5 min). Here nothing ever takes from the end's :out:
+  ;; each step returns, the frames wait in order, and the stall check answers. No load, no clock: red before, the first
+  ;; step never returned (shown once under a bound outside this test).
+  (let [out (a/chan)
+        st (#'ap/agent-proc {:id :a1 :end {:out out :in (a/chan)} :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        [st _] (step #'ap/agent-proc st :in {:op :req :rid 5 :kind :eval :msg {:op :eval :forms "(open-a-fifo)"}})
+        [st _] (step #'ap/agent-proc st :in {:op :req :rid 6 :kind :eval :msg {:op :eval :forms "(+ 1 2)"}})
+        [_ outs] (step #'ap/agent-proc (assoc st :last-frame-ms 0) :in {:op :stall? :now-ms 10000 :stall-ms 1000})]
+    (is (= [:stalled] (map :op (:to-api outs))) "the proc takes :stall? and answers the stall")
+    (is (= [5 6] [(:id (a/poll! out)) (:id (a/poll! out))]) "and its frames wait for the agent, in order")))
 
 (deftest a-reply-the-wire-cannot-encode-answers-its-asker-and-the-end-serves-on
   ;; task jolt.async/a-value-a-remote-end-cannot-encode-answers-its-asker: root's end sent an agent
@@ -234,7 +318,7 @@
           (is (true? (:ok (:r (first (:to-api outs))))))
           (is (seq pins))
           (is (= pins (get-in (d/pull @conn [:seon.root/source] [:seon.root/id :root]) [:seon.root/source :pins])))))))
-     (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+     (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 (deftest the-flush-is-continuous-group-commit
   ;; owner 2026-10-21 (git history, "Durability is batched everywhere", superseded
@@ -284,8 +368,8 @@
         (is (some #(= {:rid 3} (:dest %)) (:to-api outs)) "clean: at once")))))))
 
 (defn- notice
-  "The writer's notice for conn's head, the commit after prev: {:t :prev :ops :commit :ns}."
-  [conn prev ops] {:t (:max-tx @conn) :prev prev :ops ops :commit (d/commit-id @conn) :ns (profile/now-ns)})
+  "The writer's notice for conn's head, the commit after prev: {:t :prev :ops :commit :ns}, its :ns stamp 0 (data no step reads here)."
+  [conn prev ops] {:t (:max-tx @conn) :prev prev :ops ops :commit (d/commit-id @conn) :ns 0})
 
 (deftest the-writers-main-notice-holds-no-db
   ;; a queued notice pins its own version of
@@ -374,7 +458,16 @@
         (is (= [9] (map :pid (:to-api outs))))))
     (testing "EOF of an older server is ignored"
       (let [[st2 outs] (step #'server/fork-server-proc st :ev {:ev :eof :pid 2})]
-        (is (= st st2)) (is (nil? outs))))))
+        (is (= st st2)) (is (nil? outs))))
+    ;; docs/processes.md#a-stop-reaps-every-child: root's side keeps each forked pid until the server reaps it (its :exit), the pids
+    ;; a stop kills and awaits (seon.fork-server/release!), so no agent outlives a stop that killed its server's group. Red before:
+    ;; no pid was kept, and a killed agent was left to launchd (batch 21's lifecycle step, :left)
+    (testing "a forked pid is kept until the server reaps it"
+      (let [[st _] (step #'server/fork-server-proc st :ev {:ev :forked :agent :a1 :slot 0 :pid 41})
+            [st _] (step #'server/fork-server-proc st :ev {:ev :forked :agent :a2 :slot 1 :pid 42})
+            [st outs] (step #'server/fork-server-proc st :ev {:ev :exit :pid 41 :status {:exit 0}})]
+        (is (= #{42} (:forked st)) "the one not reaped is the stop's to end")
+        (is (= [41] (map :pid (:to-api outs))) "and the exit goes on to the api")))))
 
 (deftest a-lost-fork-server-answers-every-waiter
   ;; the server died with no standby to take its place (it died at boot, before its first
@@ -473,10 +566,10 @@
        (let [[_ outs] (ask {:op :ask :text "do a thing"})]
          (is (some #{[:db/add [:seon.task/id "request/do-a-thing"] :seon.task/started-by [:seon.agent/key "sean"]]} (txs outs)) "the signed-in user started it"))
        (let [[_ outs] (ask {:op :message :id :a1 :body "hi"})]
-         (is (some #(and (map? %) (= "sean" (:seon.message/from %))) (txs outs)) "from the signed-in user"))
+         (is (some #(and (map? %) (= {:seon.agent/key "sean"} (:seon.message/from %))) (txs outs)) "from the signed-in user"))
        ;; a sender the caller names is kept: root's own (the reconciler's stage boundary sends :from :root), never the person
        (let [[_ outs] (ask {:op :message :id :a1 :from :root :body "the design is done"})]
-         (is (some #(and (map? %) (= "root" (:seon.message/from %))) (txs outs)) "from root, as the caller named"))))))
+         (is (some #(and (map? %) (= {:seon.root/id :root} (:seon.message/from %))) (txs outs)) "from the system, as root names itself"))))))
 
 (deftest root-moves-the-signed-in-users-focus-and-refuses-an-unknown-agent-or-no-user
   ;; docs/users.md#whats-on-screen: root's focus! request writes the signed-in user's :seon.user/focus to the agent named by key
@@ -522,7 +615,28 @@
         (is (= [:seon.agent/died :a1] ((juxt :seon.error/type :agent) @p)) (pr-str @p))
         (is (re-find #"ended by root" (:seon.error/message @p))))
       (is (empty? (:seon.root/dying st')) "nothing is parked")
-      (is (nil? (:seon.root/stall-due st')) "and no stall timer was armed"))))
+      (is (false? @(:seon.root/stall-timer st')) "and no stall timer was armed"))))
+
+(deftest a-step-that-throws-after-a-stall-check-leaves-the-check-armed
+  ;; docs/clocks.md: root's stall check is a timer to itself (seon.step/timer). A step that took :stall-check and then
+  ;; threw is undone by Flow (its state from before the step is kept); the timer's armed flag is a host object, so the
+  ;; next step with an eval in flight arms it again. Red before: the flag was in the state (::stall-due), kept true by
+  ;; the undo, and no check was armed for the life of root. No clock: each arm's put is recorded as it is asked for
+  ;; (seon.step/put-after! redefined), never waited on.
+  (let [puts (atom [])
+        st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+        st (assoc st :stall-ms 2 :seon.root/busy #{:a1})]
+    (with-redefs [step/put-after! (fn [_ _ m] (swap! puts conj m) nil)]
+      (let [[st _] (#'root/api-proc st :ext {:op :noop})]
+        (is (= [{:op :stall-check}] @puts) "an eval in flight arms the check")
+        (let [[st _] (#'root/api-proc st :ext {:op :noop})]
+          (is (= 1 (count @puts)) "armed once: a second step arms nothing more")
+          ;; the step that takes it throws after the take: Flow keeps the state from before it
+          (is (thrown? Throwable (with-redefs [root/record-agents (fn [& _] (throw (ex-info "after the take" {})))]
+                                   (#'root/api-proc st :back {:op :stall-check}))))
+          (#'root/api-proc st :ext {:op :noop})
+          (is (= [{:op :stall-check} {:op :stall-check}] @puts) "the next step arms it again"))))))
 
 (deftest root-records-what-it-observes-of-its-agents
   ;; what root observes of an agent is facts on the
@@ -977,9 +1091,9 @@
     (d/branch! conn main ab)
     (let [[st r] (union-of st)
           _ (is (true? (:ok r)))
-          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/body "from main"}] :dest {:rid 1}})
+          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from {:seon.root/id :root} :seon.message/body "from main"}] :dest {:rid 1}})
           bc (pdb/connect (assoc cfg :branch ab))
-          _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "a1" :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
+          _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from {:seon.agent/key "a1"} :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
           _ (d/release bc)
           [st _] (step #'writer/writer-proc st :in {:op :agent-commit :branch :a1})
           [_ r2] (union-of st)]

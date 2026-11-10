@@ -446,9 +446,26 @@
   [:span {:class "tabular-nums text-text-400"}
    (if (some r [:ms :ticks :bytes]) (print/cost-text (select-keys r [:ms :ticks :bytes])) "not run")])
 
-(def ^:private asked-by
-  "Who evaluated, by its :seon.eval/by (any other: the agent's own, its model's turn)."
-  {"user" "the owner, from this page" "outside" "an outside agent, through root's server" "context" "the context, read for a turn"})
+(defn sender
+  "Who sent a message or ran an eval, from the entity the pull joins as its :seon.message/from or :seon.eval/by, as a person reads it: an
+  agent (a user is one) by its name, else its key, linked to its page; the system entity as Seon; nothing for none. The one render of a
+  sender wherever one is drawn. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [x]
+  (let [x (ratom/realize x)]
+    (cond (:seon.agent/key x) [:a {:href (str "/agent/" (:seon.agent/key x))} (or (:seon.user/name x) (:seon.agent/key x))]
+          (:seon.root/id x) [:span "Seon"])))
+
+(defn- ran-by
+  "Who ran eval e, from the entity its pull joins as :seon.eval/by (an agent, a user, the system): \"its own turn\" when that is the eval's
+  own agent (its model's turn, an outside model working its task, a session at its REPL: seon.repl's by), else \"run by\" the sender by
+  its one render (`sender`). See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [e]
+  (let [by (some-> (:seon.eval/by e) ratom/realize)
+        ;; the same entity by its id (the pattern joins :db/id with :seon.eval/by); two unknown ids are no match
+        own? (or (nil? by) (let [b (:db/id by) a (:db/id (some-> (:seon.eval/agent e) ratom/realize))] (and (some? b) (= b a))))]
+    [:span (if own? "its own turn" (list "run by " (sender by)))]))
 
 (defn- shown-value
   "What an eval's recorded response shows as its value: the response less its handle and what
@@ -457,6 +474,8 @@
   [response]
   (dissoc response :handle :ms :ticks :bytes :fns :ex :text :record :recorded))
 
+(declare eval-step)
+
 (defn evaluation
   "One eval (the declared html render of :seon.db/eval-fact, its attributes, and of a response), as
   it ran: the text beside it, its code, its response printed under its handle as it is shown
@@ -464,8 +483,11 @@
   html render; a live response's own :text; an error's by its error
   map's render; a value recorded as its basis, @ctx's, rendered from the branch at it, seon.ctx.wire/basis-value), and its cost and who evaluated it as recorded; :as :inline, its code and
   response in one line, the value's line printed now (seon.print/line: the one printer). Rendered from the eval, which never changes. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  {:seon.render/style ".evaluation > details > summary { display: flex; min-width: 0; align-items: baseline; column-gap: 0.5rem; }"
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db {:optional true} :seon.host/db] [:seon.ctx/ctx {:optional true} :map]]] :map] :any]}
   [opts e]
+  (if (and (not= :inline (:as opts)) (some? (get e :seon.eval/id)))
+    (eval-step opts e)
   (let [recorded? (contains? e :seon.eval/response)
         resp (pdb/response-of (:seon.db/db opts) e)
         basis (:seon.eval/basis e)
@@ -477,7 +499,6 @@
         ;; rendered as structure (the printer's hiccup). A live reply's :text is text
         data? (and recorded? (nil? (:text r)) (nil? basis))
         r (cond-> r (and recorded? (nil? (:text r)) data? (= :inline (:as opts))) (assoc :text (print/record-text (assoc e :seon.eval/response resp) #(render/stored-model (:seon.render/index opts) %))))
-        by (or (:seon.eval/by e) (:by r))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
       ;; its code's first line ⇒ its value's line, printed now by the one printer under the line budget, else its
@@ -523,58 +544,93 @@
              [:pre {:class "text-text-200"} [:span {:class "muted"} "⇒ "] (plain (or (:text r) "") (part))])))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
-        [:span (get asked-by by "its own turn")]
+        (ran-by e)
         (when (seq (:fns r))
           [:details [:summary (str "costliest: " (:var (first (:fns r))) " · " (count (:fns r)) (if (= 1 (count (:fns r))) " function" " functions"))]
            [:table [:tbody (for [{:keys [var calls ticks self-ticks bytes]} (:fns r)]
                              [:tr [:td [:code (str var)]] [:td {:class "tabular-nums"} (str (group3 calls) " calls")]
                               [:td {:class "tabular-nums"} (str (group3 ticks) " ticks")] [:td {:class "tabular-nums"} (str (group3 self-ticks) " own")]
-                              [:td {:class "tabular-nums"} (str (group3 bytes) " B")]])]]])]])))
+                              [:td {:class "tabular-nums"} (str (group3 bytes) " B")]])]]])]]))))
+
+(declare stream-container)
+
+(defn- in-flight?
+  "Whether model call view call, of the agent whose ctx is c, is in flight: the model's call until its evals have all run
+  (:seon.model-call/forms, written by seon.turn after the last) or it failed (:seon.model-call/error), of an agent whose process lives
+  (none when there is no ctx: an example session drawn as of its end). See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :any :any] :boolean]}
+  [call c]
+  (boolean (and c (= :model (ratom/realize (get call :seon.model-call/origin)))
+                (nil? (ratom/realize (get call :seon.model-call/forms))) (nil? (ratom/realize (get call :seon.model-call/error)))
+                (not (gone (ratom/realize (get c :seon.agent/status)))))))
+
+(defn- said?
+  "Whether model call view call holds words or thinking to show."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [call] (not (and (str/blank? (ratom/realize (get call :seon.model-call/reply))) (str/blank? (ratom/realize (get call :seon.model-call/reasoning))))))
 
 (defn model-call-view
-  "A model turn's header (the declared html render of :seon.model-call/fact), above the evaluations
-  it ran: which turn of how many, its tokens and the share its provider served from cache, how
-  its reply stopped and its model; its reply and reasoning as text, all of its model call
-  (:seon.model-call/*). Nothing it did not record is shown."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:seon.model-call/keys [n origin reply reasoning finish truncated tokens cache-hit-tokens cache-miss-tokens model errors forms basis]}]
-  (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
-        head (str (if (= :outside origin) (str "context read " n) (str "turn " n (when-let [m (:max-turns basis)] (str " of " m)))))]
-    (if (= :inline (:as opts))
-      [:span head]
-      [:div {:class "seon-stack"}
-       [:div {:class "flex flex-wrap items-baseline gap-3 text-xs"}
-        [:b {:class "text-signal"} head]
-        (when tokens [:span {:class "tabular-nums text-text-400"} (str (group3 tokens) " tokens")])
-        (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400" :title "the share of the prompt its provider served from its prefix cache"}
-                      (str (long (* 100 (/ cache-hit-tokens prompt))) "% of the prompt cached")])
-        (when finish [:span {:class "muted" :title "how its reply stopped"} (str "stopped: " finish)])
-        (when model [:span {:class "muted"} model])
-        (when truncated [:span {:class "text-error"} "cut at the token limit"])
-        (when (and errors (pos? errors)) [:span {:class "text-error"} (str errors " of " forms " forms failed")])]
-       (when-not (str/blank? reply) [:p {:class "seon-text"} (plain reply (part))])
-       (when-not (str/blank? reasoning)
-         [:details [:summary {:class "seon-note"} "its reasoning"] [:p {:class "seon-text text-text-300"} (plain reasoning (part))]])])))
+  "A model call (the declared html render of :seon.model-call/fact), one render wherever it is placed: in the conversation the walk
+  places the call's own view, so this one component answers the page and, by the schema's model render beside it, the model
+  (seon.ctx.wire/model-call-msgs). What the agent said, in Markdown, its thinking folded, and whether it was cut at the token limit;
+  its turn's tokens, cache and envelope are the debug tab's (`debug-turn`). While it is in flight (`in-flight?`, the agent's status read
+  from the walk's ctx), the element its stream's parts are appended into. Nothing said and nothing in flight, nothing. :as :inline,
+  its turn in one line. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx {:optional true} :map]]] :map] :any]}
+  [{c :seon.ctx/ctx :as opts} call]
+  (let [{:seon.model-call/keys [id n origin reply reasoning truncated basis]} (ratom/realize call)
+        head (str (if (= :outside origin) (str "context read " n) (str "turn " n (when-let [m (:max-turns basis)] (str " of " m)))))
+        flying? (in-flight? call c)]
+    (cond
+      (= :inline (:as opts)) [:span head]
+      (or (said? call) flying?)
+      (cond->
+        [:section {:class "flex w-full flex-col gap-1"}
+         (when-not (str/blank? reasoning)
+           [:details [:summary {:class "text-xs text-text-500"} "thinking"]
+            [:div {} [#'markdown reasoning {:inline? true}]]])
+         (when-not (str/blank? reply)
+           [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"} [#'markdown reply {:inline? true}]])
+         (when truncated [:span {:class "text-2xs text-error"} "cut at the token limit"])]
+        ;; kept as it is through the turn's redraws (data-ignore-morph: the reply's commit leaves an eval still running its intent, code
+        ;; and output) and gone at the redraw that no longer draws it; the model never reads it (docs/render.md#in-flight-output-streams)
+        flying? (conj (stream-container id []))))))
 
 (defn message
-  "A message to a run (the declared html render of :seon.message/fact): who sent it and its body as text."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  "A message to an agent (the declared html render of :seon.message/fact), one render wherever it is placed: in a conversation the
+  walk places the message's own view, so this one component answers the page and, by the schema's model render beside it, the
+  model (seon.render/render!); who sent it and its body as Markdown, a person's on the right; :as :inline, one line. See
+  docs/render.md#the-page."
+  {:seon.render/style ".message { max-width: 85%; width: fit-content; margin-left: auto; border-radius: 0.5rem; background: var(--color-base-800); padding: 0.5rem 0.75rem; font-size: 0.875rem; line-height: 1.25rem; color: var(--color-text-100); }"
+   :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.message/keys [from body]}]
   (if (= :inline (:as opts))
-    [:span (str from ": ") (plain body (cell) {:one-line? true})]
-    [:div {:class "border-l-2 border-info pl-3 py-1"}
-     [:span {:class "seon-note"} (str "message from " from)]
-     [:p {:class "seon-text"} (plain body (part))]]))
+    [:span (sender from) ": " (plain body (cell) {:one-line? true})]
+    [:section {}
+     ;; its sender, by the one render of a sender
+     [:p {:class "seon-note"} (sender from)]
+     [:div {} [#'markdown (str body) {:inline? true}]]]))
 
 (declare standing)
+
+(declare own-tiles)
 
 (defn task-view
   "A task (the declared html render of :seon.task/task-fact) as a person reads it, wherever the pattern joined one: inline its
   id, kind and execution; whole, its name as a title, its namespace and how its work stands above it (the task's outcome
   where it holds one: a capped task is not \"running\"), how its kind is worked and its plan accumulated over its needs
   as Markdown. The agent's own task part is `task`. See docs/render.md#a-component-answers-hiccup."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  {:seon.render/style ":is(.task-view, .cited, .citations, .references, .searched, .status) { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
+:is(.task-view, .cited, .citations, .references, .searched, .status) > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }
+.task-view h3 { font-size: 0.75rem; color: var(--color-text-300); }
+:is(.cite, .searched) details > summary { cursor: pointer; list-style: none; color: var(--color-text-400); }
+:is(.cite, .searched) details > summary::before { content: '▸ '; color: var(--color-text-500); }
+:is(.cite, .searched) details[open] > summary::before { content: '▾ '; }
+.searched ol { display: flex; flex-direction: column; gap: 0.25rem; }
+.searched li > details > p { margin: 0.25rem 0 0 1rem; font-size: 0.75rem; color: var(--color-text-400); }"
+   :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.task/keys [id kind execution instructions] :as t}]
+  ;; what the task joins (its cites, searches, needs), each by its own render inside it, nested like the pull
   (if (= :inline (:as opts))
     [:span (str "task " id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
     (let [{:keys [plan]} (task/pulled-accumulated t)]
@@ -585,7 +641,10 @@
                    execution (str " · " (kname execution))))]
        [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
        (when instructions [:details [:summary "how the agent works it"] [:p {:class "seon-text"} instructions]])
-       (when plan (markdown plan))])))
+       (when plan (markdown plan))
+       ;; its id, which an agent names its task by (my.task/*)
+       [:p {:class "seon-note"} (str "Task: " id)]
+       (seq (own-tiles (:seon.render/index opts) t))])))
 
 (defn- toggle
   "A <details>' attrs that tell the render proc it opened or closed (/open), for the conversation's
@@ -778,56 +837,6 @@
   {:seon.render/list "p-rules" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_] [:div {:id "p-rules"} [#'page-rules {:wire/for "page"}]])
 
-(defn task
-  "The task its agent works (a component over ctx alone): its name as the heading, its plan accumulated over its needs
-  (seon.task/pulled-accumulated), and under it one done line (a work or whole task's; the other kinds' instructions say what
-  they are for). Not a map of keys: what the agent reads cold. For the person, beside it, the namespace and how the
-  work stands (`standing`, from the task's outcome where the task holds one, else the agent's own end). The cites are
-  their own parts (`citations`); which proofs are written is the status's. It reads no db. See
-  docs/render.md#a-component-answers-hiccup."
-  {:seon.render/style ":is(.task, .cited, .citations, .references, .searched, .status) { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
-:is(.task, .cited, .citations, .references, .searched, .status) > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }
-.task h3 { font-size: 0.75rem; color: var(--color-text-300); }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  (when-let [t* (:seon.agent/task c)]
-    (let [own (fn [x] (into {} (for [k (keys x) :when (not= :seon.cite/_of k)] [k (ratom/realize (get x k))])))
-          t (assoc (own t*) :seon.task/needs (into {} (for [[k n] (:seon.task/needs t*)] [k (own n)])))
-          id (:seon.task/id t)
-          {:keys [plan]} (task/pulled-accumulated t)
-          agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
-                               :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
-          stands (when (or (:seon.agent/outcome agent) (:seon.task/outcome t)) (standing agent (select-keys t [:seon.task/outcome :seon.task/reason])))]
-      [:section
-       [:h2 "Your task"]
-       [:p {:wire/for "page"} (str "task · " (namespace (symbol id)) (when stands (str " · " (:text stands) (when (:detail stands) (str " · " (:detail stands))))))]
-       (when plan (markdown plan))
-       ;; a work or whole task is done by the rule in the system prompt; the other kinds (design, merge, test) say what they are for
-       (when-not (#{:work :whole} (:seon.task/kind t :work))
-         (when-let [ins (:seon.task/instructions t)] [:p ins]))
-       [:p (str "Task: " id)]])))
-
-(def ^:private cite-joins
-  "Where a cite's joins hold an entity, and the identity attribute that marks it held whole there (an entity
-  is held once in ctx, {:db/id e} at any other path: docs/ctx.md#the-pattern): each join path below a cite,
-  the ones that hold an entity by the cite's own pattern first."
-  (into (mapv (fn [a] [[:seon.cite/target] a]) ref/target-attrs)
-        [[[:seon.cite/target :var/form] :form/id] [[:seon.cite/target :seon.doc/_parent :*] :seon.doc/address]
-         [[:seon.cite/target :callers :*] :form/id] [[:seon.cite/target :callers :* :form/defines :*] :var/name]]))
-
-(defn- fill
-  "Node x with each {:db/id e} held whole at another path of ctx c (held: e to that path) replaced by the node
-  there, at any depth, each entity once: a cite drawn as the walk holds what it joined."
-  {:malli/schema [:=> [:cat :map [:map-of :int [:vector :any]] :any] :any]}
-  [c held x]
-  (let [go (fn go [seen x]
-             (cond (and (map? x) (= [:db/id] (keys x)) (held (:db/id x)) (not (seen (:db/id x))))
-                   (go (conj seen (:db/id x)) (ratom/realize (get-in c (held (:db/id x)))))
-                   (map? x) (into (if (sorted? x) (empty x) {}) (map (fn [[k v]] [k (go seen v)])) x)
-                   (set? x) (into #{} (map #(go seen %)) x)
-                   :else x))]
-    (go #{} x)))
-
-(declare page-cites held-whole)
 
 (defn help-form
   "The form an agent runs to read more of x, a wiki address (a string), a namespace or a function (a symbol), a schema key: the
@@ -929,14 +938,26 @@
   [_ {:file/keys [path] :seon.script/keys [says usage]}]
   [:section [:h3 path] (when (seq says) [:p says]) (when (seq usage) [:pre usage])])
 
+(defn- folded
+  "Tile hiccup [tag heading lead & body] with its body folded under its lead (a <details> whose summary is the lead's content), so a
+  person reads the tile's heading and one line and opens the rest; nothing for nil. Folding is presentation: the model reads the folded
+  content whole (docs/render.md#style). See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [[tag heading lead & body :as h]]
+  (cond (nil? h) nil
+        (empty? (remove nil? body)) h
+        :else [tag heading (into [:details {:data-preserve-attr "open"} (into [:summary] (if (and (vector? lead) (= :p (first lead))) (rest lead) [lead]))]
+                                 (remove nil? body))]))
+
 (defn cite-hiccup
   "A cite as pulled (and filled) with its target joined, as one hiccup by what the target is: a wiki section (`section-hiccup`),
   a function (`var-hiccup`), a schema key or setting (`key-hiccup`), a namespace (its doc and how to read it), a task (its plan)
-  or a file (how to read it). The page and the model read it alike; `doc` answers it on demand. See
-  docs/references.md#an-entity-cites."
+  or a file (how to read it), its body folded under its first line (`folded`). The page and the model read it alike; `doc` answers
+  it on demand. See docs/references.md#an-entity-cites."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] :any] [:=> [:cat :seon.host/db :map :map] :any]]}
   ([db c] (cite-hiccup db c {}))
   ([db {depth :seon.cite/depth t :seon.cite/target} {:keys [lookups changing?]}]
+   (folded
    (cond
      (:seon.doc/address t) (section-hiccup t depth)
      (:seon.task/id t) [:section [:h3 (:seon.task/id t)] [:p "Another task your plan names."]
@@ -944,67 +965,29 @@
      (:var/name t) (var-hiccup (:var/name t) t (boolean changing?))
      (:schema/key t) (key-hiccup db (:schema/key t) t (or lookups []))
      (:ns/name t) [:section [:h3 (str (:ns/name t))] [:p (str "A namespace your plan names." (when (:ns/doc t) (str " " (:ns/doc t))))] [:p "Read it: " [:code (help-form (:ns/name t))]]]
-     (:file/path t) [:section [:h3 (:file/path t)] [:p "A file your plan names."] [:p "Read it: " [:code (str "(slurp \"" (:file/path t) "\")")]]])))
+     (:file/path t) [:section [:h3 (:file/path t)] [:p "A file your plan names."] [:p "Read it: " [:code (str "(slurp \"" (:file/path t) "\")")]]]))))
 
 (defn cite
-  "Cite c as pulled with its target joined (the declared html render of :seon.cite/cite-fact), by `cite-hiccup`: a wiki section, a
-  function, a schema key, a namespace, a task or a file, at the cite's depth; opts' :lookups and :changing? are what the placement
-  knows of the agent's question (`cited`). A pulled section or var alone is not rendered by this: it prints as the data it is. See
-  docs/references.md#an-entity-cites."
+  "Cite c as pulled with its target and its owner joined (the declared html render of :seon.cite/cite-fact), by `cite-hiccup`: a
+  wiki section, a function, a schema key, a namespace, a task or a file, at the cite's depth. What the agent will do with a function
+  is judged from the cite's own joins, never stored and never the page's: one in its owner task's namespace or reached by the
+  task's proofs (their forms' refs) is one it will change (its source and tests drawn), any other one it calls. ctx holds every
+  entity whole at each path its pattern pulls it (docs/ctx.md#the-pattern), so the cite's joins are all here. A pulled section or
+  var alone is not rendered by this: it prints as the data it is. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
-  [{db :seon.db/db lookups :lookups changing? :changing?} c]
-  (cite-hiccup db (ratom/realize c) {:lookups (or lookups []) :changing? (boolean changing?)}))
+  [{db :seon.db/db} c]
+  (let [c (ratom/realize c)
+        t (:seon.cite/target c)
+        of (:seon.cite/of c)
+        task-ns (some-> (:seon.task/ns of) str)
+        reach (into #{} (for [[_ v] (:proved of) r (get-in v [:var/form :form/refs])] r))
+        sym (:var/name t)
+        id (:seon.task/id of)]
+    ;; a test its owner task proves by is drawn by the task's proofs (seon.render.ui/status), not again as a cite (Context)
+    (when-not (and sym (some #(= sym (:var/name %)) (vals (:proved of))))
+     (cite-hiccup db c {:lookups (cond-> [] id (conj [:seon.task/id id]) sym (conj [:var/name sym]))
+                       :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))}))))
 
-(defn cited
-  "One thing the agent's task or its needs cite (a component over ctx and the db), named by its target k: the cite at ctx path :at
-  as ctx holds it, each entity it joined that ctx holds at another path filled from there (:held, e to that path, which the layout
-  found), drawn by `cite-hiccup`. A part of its own, so a cite that changes is sent alone. See docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]] [:held [:map-of :int [:vector :any]]] [:lookups {:optional true} [:sequential :any]] [:changing? {:optional true} :boolean]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db at :at held :held lookups :lookups changing? :changing?}]
-  (when-let [x (get-in c at)]
-    (cite {:seon.db/db db :lookups lookups :changing? changing?} (fill c held (ratom/realize x)))))
-
-(defn citations
-  "The heading of what the task and its needs cite (a component over ctx): what it is and why it is here. The cites follow it, each a
-  `cited` part of its own (`cite-parts`). Nothing when there is none. See docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  (when (seq (page-cites c))
-    [:section
-     [:h2 "What your plan mentions"]]))
-
-(defn- cite-parts
-  "The `cited` components of the agent's page, one for each thing its task and its needs cite (`page-cites`). Each is told what
-  the agent will do with it: a function in the task's own namespace or reached by its proofs is one it will change (its source and
-  tests are drawn), any other one it calls (its signature and doc); and the lookup refs an attribute's real value is taken from
-  (this task's own entity, and the functions the cites name)."
-  {:malli/schema [:=> [:cat :map] [:vector :any]]}
-  [c]
-  (let [cs (page-cites c)
-        task-ns (some-> (ratom/realize (get-in c [:seon.agent/task :seon.task/ns])) str)
-        reach (into #{} (for [[_ v] (get-in c [:seon.agent/task :proved]) r (ratom/realize (get-in v [:var/form :form/refs]))] r))
-        lookups (into [[:seon.task/id (ratom/realize (get-in c [:seon.agent/task :seon.task/id]))]]
-                      (keep #(when (re-matches #"[^\s:/#]+/[^\s:#]+" %) [:var/name (symbol %)])) (map second cs))]
-    (vec (for [[p k held] cs
-               :let [sym (when (re-matches #"[^\s:/#]+/[^\s:#]+" k) (symbol k))]]
-           [#'cited {:key k :at p :held held :lookups lookups
-                     :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))}]))))
-
-(defn references
-  "Where to look for more, beside the task (a component over ctx): the agent's own cites (what every agent cites, the config's
-  :seon.config.agent/cites, and what it adds with my.agent/cite!), each as one line: what it is, what it answers (the section's
-  stored lead) and the form that reads it. Not shown whole: an agent reads one when it needs it. Nothing when it has none."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  (let [ks (sort-by #(get-in c [:seon.cite/_of % :seon.cite/order]) (keys (:seon.cite/_of c)))
-        held (held-whole c (for [k ks] [:seon.cite/_of k]))
-        cites (for [k ks] (fill c held (ratom/realize (get-in c [:seon.cite/_of k]))))]
-    (when (seq cites)
-      [:section
-       [:h2 "If you need more"]
-       (into [:ul]
-             (for [{t :seon.cite/target} cites :let [x (ref/target-value t)]]
-               [:li (or (:seon.doc/heading t) (str x)) ": " (:seon.doc/lead t) " " [:code (help-form x)]]))])))
 
 (defn searched
   "Search s (the declared html render of :seon.search/search-fact, a component over the db), drawn as one compact hiccup that the
@@ -1034,49 +1017,11 @@
           [:section [:h3 (if (= q (:seon.task/plan (:seon.search/of (d/pull db [{:seon.search/of [:seon.task/plan]}] e)))) "search: this task's request" (str "search: " q))]
            ;; each hit with the line of its text that holds a word of the query, as grep shows a hit: a bare name was passed over
            ;; (curated pair 1, 2026-11-10) where a line says why it matters
-           (into [:ol] (for [{:keys [name line]} hits] [:li [:code (str name)] (when (seq line) (str " " line))]))])))))
-
-(defn- held-whole
-  "Where ctx c holds whole each entity the cites at paths ps joined, {e path}: the agent's task and its needs, the
-  task's proofs (each held first, by the agent's and the task's patterns), a cite's own joins, then a section's below and a var's callers (cite-joins), the first
-  path at which its identity attribute is present (an entity is held once: docs/ctx.md#the-pattern)."
-  {:malli/schema [:=> [:cat :map [:sequential [:vector :any]]] [:map-of :int [:vector :any]]]}
-  [c ps]
-  (let [;; the paths below p that join [steps a] names (a :* step each member of the collection there), with
-        ;; whether ctx holds the entity whole at each (its identity attribute a present) and its id
-        join-paths (fn [p [steps a]]
-                     (let [paths (reduce (fn [qs step] (if (= :* step) (for [q qs k (keys (get-in c q))] (conj q k)) (map #(conj % step) qs))) [p] steps)]
-                       (for [q paths :let [id (get-in c (conj q :db/id))] :when id] [q (some? (get-in c (conj q a))) id])))
-        found (concat (join-paths [] [[:seon.agent/task] :seon.task/id]) (join-paths [] [[:seon.agent/task :seon.task/needs :*] :seon.task/id])
-                      (join-paths [] [[:seon.agent/task :proved :*] :var/name]) (join-paths [] [[:seon.agent/task :proved :* :var/form] :form/id])
-                      (join-paths [] [[:seon.agent/task :seon.task/needs :* :proved :*] :var/name]) (join-paths [] [[:seon.agent/task :seon.task/needs :* :proved :* :var/form] :form/id])
-                      (for [p ps j cite-joins q (join-paths p j)] q))]
-    (reduce (fn [m [q whole? id]] (if (and whole? (not (contains? m id))) (assoc m id q) m)) {} found)))
-
-(defn- page-cites
-  "The cites agent record c's page draws, read from ctx alone: its task's (:seon.cite/_of), then each need's (one
-  level, a merge task's left out), then the agent's own, each target once at the strongest depth any asks,
-  the task's proofs left out (the status shows them), in the order the cites were written. Each
-  [path target held]: the cite's path, its target as text and where ctx holds each entity it joined whole
-  (an entity is held once: docs/ctx.md#the-pattern)."
-  {:malli/schema [:=> [:cat :map] [:vector [:tuple [:vector :any] :string [:map-of :int [:vector :any]]]]]}
-  [c]
-  (let [task (:seon.agent/task c)
-        proofs (into (set (get task :seon.task/proofs)) (mapcat (fn [n] (get-in task [:seon.task/needs n :seon.task/proofs]))) (keys (:seon.task/needs task)))
-        sorted (fn [p] (sort-by #(get-in c (conj p % :seon.cite/order)) (keys (get-in c p))))
-        groups (concat (when task [[:seon.agent/task :seon.cite/_of]])
-                       (for [n (sort-by #(str (get-in task [:seon.task/needs % :seon.task/id])) (keys (:seon.task/needs task)))
-                             :when (not= :merge (get-in task [:seon.task/needs n :seon.task/kind]))] [:seon.agent/task :seon.task/needs n :seon.cite/_of])
-                       [])
-        paths (for [g groups k (sorted g)] (conj (vec g) k))
-        ;; each entity a cite joined is held once: a target held at another path is read from there
-        held (held-whole c paths)
-        all (for [p paths :let [t (fill c held (ratom/realize (get-in c (conj p :seon.cite/target))))]]
-              {:path p :id (:db/id t) :target (str (ref/target-value t)) :name (:var/name t) :rank (ref/strength (get-in c (conj p :seon.cite/depth)))})
-        all (remove #(proofs (:name %)) all)
-        by (group-by :id all)
-        chosen (vec (for [t (distinct (map :id all))] (reduce (fn [a b] (if (> (:rank b) (:rank a)) b a)) (by t))))]
-    (vec (for [{:keys [path target]} chosen] [path target held]))))
+           ;; each hit its name, the line folded under it: a person reads the names and opens one (folding is presentation)
+           (into [:ol] (for [{:keys [name line]} hits]
+                         (if (seq line)
+                           [:li [:details {:data-preserve-attr "open"} [:summary [:code (str name)]] [:p line]]]
+                           [:li [:code (str name)]])))])))))
 
 (def ^:private reason-words
   "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page (docs/agent.md#what-you-read: `:refused`)."
@@ -1117,7 +1062,7 @@
   Main's side only when something conflicts: both sides and the form that settles each. No table beside the same words: a list of
   the proofs' states only when there are several. See docs/render.md#how-the-work-stands."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged also-red-on-main main-moved] steps :next}]
+  [_opts {:keys [proofs refused test-run unmerged without-a-contract caused attention merge unjudged also-red-on-main main-moved]}]
   (let [state #(:status %)
         unwritten (filter #(= :undefined (state %)) proofs)
         red (filter #(#{:fail :error} (state %)) proofs)
@@ -1174,10 +1119,6 @@
         (for [{:keys [key ours theirs]} unmerged]
           [:div {:key key} [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
            [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
-     ;; the next step, from the task's data (seon.ctx.status/status :next): none blocks merging
-     (for [{:keys [step from]} steps]
-       (case step
-         :fold-message [:p {:key :fold-message} "A message from " from " came after your plan last changed. If it changes what's wanted, write that into the plan and its proofs; if it's a question or a remark, answer it."]))
      (cond
        (and green? (empty? blocks) (empty? unmerged))
        [:p {:key :merging} "Every proof passes and nothing blocks merging."]
@@ -1211,7 +1152,7 @@
 (defn agent-state
   "The agent's state for the person (a component over ctx and the db), nothing of it for the model: how its work stands
   (`standing`, from the task's outcome where it holds one), its task, the form it is running and its proofs green."
-  {:seon.render/style ".agent-state { border-radius: 0.375rem; background: var(--color-base-900); padding: 0.5rem; min-width: 0; overflow-x: auto; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  {:seon.render/style ".agent-state {border-radius: 0.375rem; background: var(--color-base-900); padding: 0.5rem; min-width: 0; overflow-x: auto; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (let [task (:seon.agent/task c)
         t (into {} (for [k [:seon.task/id :seon.task/outcome :seon.task/reason] :let [v (ratom/realize (get task k))] :when (some? v)] [k v]))
@@ -1250,97 +1191,83 @@
    [:h2 {:class "kicker"} (kname k)]
    (render/hiccup {:seon.render/index ix :schema k} (ratom/realize (get c k)))])
 
+(declare pattern-joins)
+
 (defn- added-keys
   "The keys the agent added to ctx c: any qualified key outside its own :seon.agent/* attributes,
-  its pattern, the reverse joins its pattern holds (:seon.eval/_agent: an attribute read from the entity it points at) and
-  the environment, in order. It reads ctx's own key set only."
-  {:malli/schema [:=> [:cat :map] [:sequential :qualified-keyword]]}
-  [c] (filter #(and (qualified-keyword? %) (not (#{"seon.agent" "db" "seon.ctx"} (namespace %))) (not (str/starts-with? (name %) "_"))) (sort-by str (keys c))))
+  its pattern, the reverse joins its pattern holds (:seon.eval/_agent: an attribute read from the entity it points at), the joins
+  of its own pattern (seon.render/entity-pattern in the entity index ix: what they join is drawn as tiles, `tiles`) and
+  the environment, in order. It reads ctx's own key set and its pattern only."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] [:sequential :qualified-keyword]]}
+  [ix c]
+  (let [joined (set (map first (pattern-joins (or (when ix (render/entity-pattern ix c)) []))))]
+    (filter #(and (qualified-keyword? %) (not (#{"seon.agent" "db" "seon.ctx"} (namespace %))) (not (str/starts-with? (name %) "_")) (not (joined %)))
+            (sort-by str (keys c)))))
 
 (defn ctx-keys
   "The keys the agent added to its ctx (a component over ctx, placed when there is one), each a
   component of its own (ctx-key). It reads ctx's own key set, so it runs again when ctx's own
   attributes change, and its output is the same unless a key came or went."
   {:seon.render/style ".ctx-keys { display: flex; flex-direction: column; gap: 0.5rem; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
+  [{c :seon.ctx/ctx ix :seon.render/index}]
   [:div
-   (for [k (added-keys c)] [#'ctx-key {} k])])
+   (for [k (added-keys ix c)] [#'ctx-key {} k])])
 
-(declare eval-output eval-glance)
+(declare eval-output)
 
-(defn eval-hiccup
-  "Eval e of the conversation as a step of the chat and a call of the model's, one hiccup (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): one quiet line, a mark only when it threw, what it set out
-  to do (its intent as Markdown, else its code's first line); opened, its code and what the person alone wants of it (`eval-output`, a component the model does not read). The model reads the element as its call, by
-  its marks: the id its wire goes by, its intent and code, then what came of it, the record itself as its :wire/result (seon.ctx.wire/result-mark), which the one printer prints when the model's reading reaches it; one with no intent and no call id of the model's is one user message
-  {:by :code :response}. Seon's own is the model's alone, its code and no intent. opts :at, its path in ctx, for the person's components (an example's has none: its line and its code); :key and :agent, the agent's, whose page posts that
-  it was opened (root's posts nothing). Its <details> carries its handle's anchor (eval-<id>). See docs/render.md#the-page."
+(defn- eval-step
+  "Eval e (a record, or a view of one a walk placed) as a step of the chat (docs/render.md#the-page): one quiet line, a mark only when it
+  threw, what it set out to do (its intent as Markdown, else its code's first line); opened, its code and what came of it (`eval-output`,
+  a component for the page alone, placed when the walk gives a db). Opening it is posted by the page's agent, the walk's ctx's
+  (:seon.agent/key: root's page and an example session called directly hold none, and post nothing). Its <details> carries its handle's
+  anchor (eval-<id>)."
   {:malli/schema [:=> [:cat :map :map] :any]}
-  [{:keys [at key agent db]} {:seon.eval/keys [id by code intent call-id opened] :as e}]
-  (let [mark (wire/result-mark db e)
+  [{db :seon.db/db c :seon.ctx/ctx} e]
+  (let [{:seon.eval/keys [id code intent opened] :as ev} (ratom/realize e)
+        mark (wire/result-mark db ev)
         {:keys [ex value]} (:seon.eval/response (:record mark))
         err (or ex (when (contract/error? (ratom/realize value)) value))
-        seon? (= "seon" by)
         said? (not (str/blank? intent))
-        called? (or call-id said?)]
-    [:li (cond-> (if called?
-                   {:wire/role "assistant" :wire/call-id id :wire/result mark}
-                   {:wire/role "user" :wire/result (assoc mark :with (array-map :by by :code code))})
-           true (assoc :wire/ref [:eval id])
-           seon? (assoc :wire/for "model"))
+        key (some-> c (get :seon.agent/key) ratom/realize)]
+    [:li
      [:details (cond-> {:class "seon-eval" :id (str "eval-" id)} opened (assoc :open true))
       ;; opening it is a fact on main (seon.root/opened!), which the agent takes before it draws again
-      (into (if key [:summary {:seon/call 'seon.root/opened! :seon/agent agent :seon/args {:key key :eval id}}] [:summary])
+      (into (if key [:summary {:seon/call 'seon.root/opened! :seon/agent (keyword key) :seon/args {:key key :eval id}}] [:summary])
             (remove nil?)
             [(when err [:span {:class "shrink-0 text-error"} "⚠"])
              (if said?
                ;; the agent's message is Markdown, rendered (owner, 2026-10-29); the model reads it as written
-               [:div {:class "seon-text seon-md-inline min-w-0 flex-1" :wire/field (when-not seon? "intent")} [#'markdown intent {:inline? true}]]
+               [:div {:class "seon-text seon-md-inline min-w-0 flex-1"} [#'markdown intent {:inline? true}]]
                [:code {:class "seon-form min-w-0 flex-1 truncate"} (first (str/split-lines (or code "")))])])
       ;; inside the closed details, so opening it shows it at once, on a live agent's page and on one root draws from its branch
       [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
        ;; the code as the agent wrote it, whole, highlighted
-       [:div {:class "min-w-0" :wire/field "code"} [#'emit/marked-hiccup :seon.print/code (or code "")]]
-       (when at [#'eval-output {:key id :at at :agent agent :wire/for "page"}])]]
-     (when at [#'eval-glance {:key id :at at :wire/for "page"}])]))
-
-(defn eval-item
-  "An eval of the conversation (a component over ctx and the db), its one hiccup (`eval-hiccup`) (owner: \"I
-  want the chat to look like a nice chat screen with just text unless I dig into it\"; \"show the eval intent markdown
-  descriptions and collapse the eval statement and the output by default\"), the eval at ctx path :at; drawn open when a reader opened it
-  (:seon.eval/opened, a fact the agent takes before it draws its page). See docs/render.md#the-page."
-  {:seon.render/style ".eval-item > details > summary { display: flex; min-width: 0; align-items: baseline; column-gap: 0.5rem; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db at :at :as opts}]
-  (when-let [e (ratom/realize (get-in c at))]
-    (eval-hiccup {:at at :key (:agent-key opts) :agent (:agent-id opts) :db db} e)))
+       [:div {:class "min-w-0"} [#'emit/marked-hiccup :seon.print/code (or code "")]]
+       (when db [#'eval-output {:key id :agent (some-> key keyword) :wire/for "page"} e])]]]))
 
 (defn- eval-shown
-  "Of the eval at ctx path at, what the person's pieces read: not whether it is open, so opening it runs the line alone. Its response
+  "Of eval view e, what the person's pieces read: not whether it is open, so opening it runs the line alone. Its response
   whole (seon.db/response-of), its result read from db."
-  {:malli/schema [:=> [:cat :map :seon.host/db [:vector :any]] [:maybe :map]]}
-  [c db at]
-  (when (get-in c (conj at :seon.eval/id))
-    (let [e (into {} (for [k [:seon.eval/id :seon.eval/code :seon.eval/response :seon.eval/result :seon.eval/schema :seon.eval/basis]
-                            :let [v (ratom/realize (get-in c (conj at k)))] :when (some? v)] [k v]))]
+  {:malli/schema [:=> [:cat :any :seon.host/db] [:maybe :map]]}
+  [e db]
+  (when (get e :seon.eval/id)
+    (let [e (into {} (for [k [:seon.eval/id :seon.eval/code :seon.eval/response :seon.eval/result :seon.eval/schema :seon.eval/basis :seon.eval/by :seon.eval/agent]
+                            :let [v (ratom/realize (get e k))] :when (some? v)] [k v]))]
       (-> e (assoc :seon.eval/response (pdb/response-of db e)) (dissoc :seon.eval/result)))))
 
-(defn eval-glance
-  "What came of an eval, in the chat with no click (a component over ctx and the db, for the page alone): its value through the one render (render/hiccup: the render it has, else the value printer), whole once its step is opened; or, closed, what went wrong on a line, the opened step having the rest. See docs/render.md#a-value-draws-itself. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
-  {:seon.render/style ".eval-glance { margin: 0.25rem 0 0.25rem 1rem; min-width: 0; overflow-x: auto; font-size: 0.75rem; }\n.eval-item:has(> details[open]) .eval-glance-line { display: none; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db at :at ix :seon.render/index}]
-  (when-let [e (eval-shown c db at)]
-    (let [{:keys [ex value handle out err warnings]} (:seon.eval/response e)
-          r (:seon.eval/response e)
-          v (ratom/realize value)
-          k (:seon.eval/schema e)
-          failed (or (ratom/realize ex) (when (contract/error? v) v))
-          opened? (ratom/realize (get-in c (conj at :seon.eval/opened)))
-          budget (if opened? (inc (render/tokens-of ix v)) (config/value :seon.config.render/value-budget))
-          whole (cond-> v (and opened? (instance? clojure.lang.IObj v)) (vary-meta assoc :seon.print/full true))]
-      (cond
-        failed [:div [:span {:class "eval-glance-line text-error"} (print/line (or (:seon.error/message failed) failed) (config/value :seon.config.render/line-budget) nil)]]
-        ;; a nil beside output is the output's whole answer (clojure.repl/source prints and answers nil)
-        (and (contains? r :value) (not (and (nil? v) (or (ratom/realize out) (ratom/realize err) (seq (ratom/realize warnings))))))
-        [:div (render/hiccup (cond-> {:seon.render/index ix :budget budget :handle handle :db db} k (assoc :as :block :schema k)) whole)]))))
+(defn eval-tile
+  "Eval eid's rendered value as a tile of the agent's page parts (a component over the db): its value drawn whole by the render its
+  record's schema (:seon.eval/schema) names, the same tile the person sees and the model reads (owner: \"the rendered tile is
+  the only version of the rendered value that is seen by the model\"). See docs/render.md#a-value-draws-itself."
+  {:seon.render/style ".eval-tile { min-width: 0; overflow-x: auto; font-size: 0.75rem; }"
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db] [:eid :int]]]] :any]}
+  [{db :seon.db/db eid :eid ix :seon.render/index}]
+  (let [e (d/pull db [:seon.eval/id :seon.eval/schema :seon.eval/response :seon.eval/result] eid)
+        {:keys [value handle]} (pdb/response-of db e)
+        k (:seon.eval/schema e)]
+    (when (and k (render/declared ix k))
+      [:section [:h3 (str "eval " (:seon.eval/id e))]
+       (render/hiccup {:seon.render/index ix :handle handle :db db :as :block :schema k} (ratom/realize value))])))
 
 (defn- step-tools
   "An opened step's buttons, for a live agent (the page's stylesheet shows them only beside its REPL's input, so no step is drawn again as its status moves): run it again in its place,
@@ -1367,13 +1294,15 @@
        [:button (merge {:type "button" :class (str button " self-start")} {:seon/call 'seon.root/back! :seon/agent agent :seon/args {:eval id}}) "Go back"]]]]))
 
 (defn eval-output
-  "What came of an eval as the person reads it when it is opened (a component over ctx and the db; the model reads the same response as the one printer prints it, `seon.ctx.wire/tool-text`): how long it ran, what it costs the context in tokens and its handle, what its forms printed, then its error, or its
+  "What came of eval view ev as the person reads it when it is opened (a component over the db and the eval; the model reads the same response as the one printer prints it, `seon.ctx.wire/tool-text`): how long it ran, what it costs the context in tokens and its handle, what its forms printed, then its error, or its
   value by the render its record names. See docs/render.md#cost-is-shown-one-way. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db at :at agent :agent ix :seon.render/index}]
-  (when-let [e (eval-shown c db at)]
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
+  [{db :seon.db/db agent :agent ix :seon.render/index} ev]
+  (when-let [e (eval-shown ev db)]
     (let [{:keys [ex value handle out warnings ms] errout :err} (:seon.eval/response e)
-          v (ratom/realize value)
+          ;; a value recorded as its basis (@ctx's) is rebuilt from what the branch holds at it (seon.ctx.wire/basis-value)
+          basis? (some? (:seon.eval/basis e))
+          v (if basis? (wire/basis-value ix db e) (ratom/realize value))
           ;; what its forms printed (*out*, *err*: seon.repl/response keeps each as seon.print/code), drawn before its value as a REPL shows it
           printed (into [] (keep (fn [[label k s]] (when-let [s (ratom/realize s)] [label k s]))) [["out" :out out] ["err" :err errout]
                                                                                                            ;; what its definitions warn (seon.repl's :warnings), in the words the model read
@@ -1381,13 +1310,15 @@
           ;; an error answered as a value (a function that returns its error) is a failure too
           err (or ex (when (contract/error? v) v))
           ;; opened, it is whole, so there is nothing further to open: the budget is what the text costs
-          opened? (ratom/realize (get-in c (conj at :seon.eval/opened)))
+          opened? (ratom/realize (get ev :seon.eval/opened))
           budget (fn [x] (if opened? (inc (render/tokens-of ix x)) (config/value :seon.config.render/value-budget)))
           ;; a value prints whole by the printer's own mark
           whole (fn [x] (cond-> x (and opened? (instance? clojure.lang.IObj x)) (vary-meta assoc :seon.print/full true)))]
       [:div
        (when agent (step-tools agent e))
        [:div {:class "flex items-baseline justify-end gap-2 text-2xs text-text-500"}
+        ;; who ran it: the agent's own turn, or the sender who did (`ran-by`)
+        (ran-by e)
         (when ms [:span {:class "seon-ms"} (ms-str ms)])
         [:span (print/tokens-text (+ (render/tokens-of ix (:seon.eval/code e)) (render/tokens-of ix (:seon.eval/response e))))]
         [:code {:class "seon-handle"} (str handle)]]
@@ -1397,7 +1328,12 @@
           (render/hiccup {:seon.render/index ix :budget (budget s) :handle (when handle (list k handle))} (whole s))])
        (when err
          [:div {:class "text-error"} "✗ " (:seon.error/message err)
-          (render/hiccup {:seon.render/index ix :budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))])])))
+          (render/hiccup {:seon.render/index ix :budget (budget err) :handle handle} (whole (dissoc err :seon.error/message)))])
+       ;; its value, inline once the person opens it (owner, 2026-11-10: \"If the user expands the UI > for the evals then yeah render it
+       ;; inline too\"), by the render it has, else the printer; a nil beside output is the output's whole answer (clojure.repl/source)
+       (when (and (not err) (or basis? (contains? (:seon.eval/response e) :value)) (not (and (nil? v) (or (seq printed)))))
+         (let [k (:seon.eval/schema e)]
+           [:div (render/hiccup (cond-> {:seon.render/index ix :budget (budget v) :handle handle :db db} k (assoc :as :block :schema k)) (whole v))]))])))
 
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
@@ -1424,32 +1360,6 @@
   {:malli/schema [:=> [:cat [:maybe :map]] [:set :any]]}
   [m] (cond (nil? m) #{} (instance? java.util.Map m) (set (.keySet ^java.util.Map m)) :else (set (keys m))))
 
-(declare stream-container)
-
-(defn reply-hiccup
-  "A model turn's reply and the steps it holds (children) as the chat shows it and the model reads it, one hiccup: what the agent said, in Markdown, its thinking folded, then each eval it ran. What the
-  model is sent of it is what it said and its reasoning as returned (a reply cut at the token limit is no message unless its calls were kept: called?). Nothing to say and nothing run, nothing. See
-  docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :map :boolean [:sequential :any]] :any]}
-  [{:seon.model-call/keys [id n origin reply reasoning truncated] :as call} called? children]
-  (let [spoke? (not (str/blank? reply))
-        sent? (and (= :model origin) (or called? (and (not truncated) spoke?)) (or spoke? (some? reasoning)))]
-    ;; in flight (the model's call until its evals have all run: :seon.model-call/forms or its error), one element its stream's
-    ;; parts are appended into, kept as it is through the turn's redraws (data-ignore-morph: the reply's commit leaves an eval
-    ;; still running its intent, code and output) and gone at the redraw that no longer draws it; the model never reads it
-    ;; (docs/render.md#in-flight-output-streams)
-    (when (or spoke? (not (str/blank? reasoning)) (seq children) (::in-flight call))
-      (cond->
-      [:section (cond-> {:class "flex w-full flex-col gap-1" :wire/role "assistant" :wire/ref [:reply id]} (pos? (or n 0)) (assoc :wire/reply n))
-       (if (str/blank? reasoning)
-         (when (and sent? (some? reasoning)) [:span {:wire/for "model" :wire/field "reasoning"} reasoning])
-         [:details [:summary {:class "text-xs text-text-500" :wire/for "page"} "thinking"]
-          [:div {:wire/field (when sent? "reasoning")} [#'markdown reasoning {:inline? true}]]])
-       (when spoke? [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100" :wire/field (when sent? "content")} [#'markdown reply {:inline? true}]])
-       (when (seq children) [:ol {:class "seon-turn flex flex-col"} (seq children)])]
-        (::in-flight call) (conj (stream-container id []))))))
-
-
 (defn stream-part
   "One part of an effect's in-flight text, part one of reasoning, content, message, intent, code, out or err: the element the
   web proc draws in its call's (or eval's) in-flight element (stream-container) with all its text so far (its id the
@@ -1462,7 +1372,7 @@
 (defn stream-container
   "Entity in's in-flight element with its parts, [[id part text] ...] (stream-part each): busy, kept as it is through the
   page's redraws (data-ignore-morph) and found by the web proc (data-stream-in), for the page alone. The turn draws it
-  empty while its call is in flight (reply-hiccup); the web proc draws it whole, the text so far, in its place at each
+  empty while its call is in flight (`model-call-view`); the web proc draws it whole, the text so far, in its place at each
   message. See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :string [:sequential [:tuple :string :string :string]]] :any]}
   [in parts]
@@ -1486,21 +1396,6 @@
            [:span {:class "text-xs"} [:span {:class "muted group-open:hidden"} (str (emit/cut-words omitted lines nil) " ")] [:span {:class "underline group-open:hidden"} "Read all"] [:span {:class "hidden underline group-open:inline"} "Show less"]]]
           (markdown plan {:inline? true})]
          [:div {:class "seon-message"} (markdown plan {:inline? true})])])))
-
-(defn message-hiccup
-  "A message to the agent as the chat shows it and the model reads it, one user message: who sent it and its body. See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :map] :any]}
-  [{:seon.message/keys [id from body]}]
-  [:section {:wire/role "user" :wire/ref [:message id]}
-   [:p {:class "seon-note" :wire/field "from"} (str from)]
-   [:div {:wire/field "body"} [#'markdown (str body) {:inline? true}]]])
-
-(defn chat-message
-  "A message to the agent (a component over ctx, the message at ctx path :at), a person's on the right: `message-hiccup`. See docs/render.md#the-page."
-  {:seon.render/style ".chat-message { max-width: 85%; width: fit-content; margin-left: auto; border-radius: 0.5rem; background: var(--color-base-800); padding: 0.5rem 0.75rem; font-size: 0.875rem; line-height: 1.25rem; color: var(--color-text-100); }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx at :at}]
-  (let [m (get-in c at)]
-    (message-hiccup {:seon.message/id (ratom/realize (:seon.message/id m)) :seon.message/from (ratom/realize (:seon.message/from m)) :seon.message/body (ratom/realize (:seon.message/body m))})))
 
 (defn chat-end
   "How the work ended, the chat's last card (a component over ctx and the db): the end its agent wrote (:seon.agent/outcome and
@@ -1564,9 +1459,9 @@
 (defn system-message
   "The agent's system message (a component over ctx and the db): the doc sections it links (:seon.agent/system), else the system prompt (seon.ctx.wire/agent-system-text), for the person a fold. See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:seon.render/style ":is(.system-message, .example-session, .proof-story) { font-size: 0.75rem; line-height: 1rem; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  {:seon.render/style ":is(.system-message, .example-session, .proof-story) {font-size: 0.75rem; line-height: 1rem; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
-  [:details {:wire/role "system" :wire/ref [:section (if (seq (:seon.agent/system c)) (vec (sort (keys (:seon.agent/system c)))) wire/system-page)]}
+  [:details {}
    [:summary {:class "muted" :wire/for "page"} "system message"]
    [#'markdown (wire/agent-system-text db c)]])
 
@@ -1579,20 +1474,21 @@
         db (d/as-of db0 t)
         c (ctx/agent-ctx ix db (seon.db/eid db :seon.agent/key k))
         placed (ctx/placed-messages db c)]
-    (into [:details {:wire/ref [:example k t]}
+    (into [:details {}
            [:summary {:class "muted" :wire/for "page"} (str "example session " k)]
-           [:p {:wire/role "user" :wire/for "model"} (session/example-open k (:seon.agent/description c))]]
+           [:p {} (session/example-open k (:seon.agent/description c))]]
           (concat
             (for [[n cid] (ctx/turns c)
                   :let [messages (get placed n)
                         evals (map first (ctx/turn-evals c cid))
                         model? #(get-in c [:seon.eval/_agent % :seon.eval/call-id])
-                        step #(eval-hiccup {:db db} (get-in c [:seon.eval/_agent %]))]]
-              (into [:div {:wire/turn (get-in c [:seon.model-call/_agent cid :seon.model-call/n])}]
-                    (concat (for [[m] messages] (message-hiccup (get-in c [:seon.message/_to m])))
-                            [(reply-hiccup (get-in c [:seon.model-call/_agent cid]) (boolean (seq (filter model? evals))) (map step (filter model? evals)))]
+                        step #(evaluation {:seon.db/db db :seon.render/index ix} (get-in c [:seon.eval/_agent %]))]]
+              (into [:div {}]
+                    (concat (for [[m] messages] (message {} (get-in c [:seon.message/_to m])))
+                            [[:section {} (model-call-view {} (get-in c [:seon.model-call/_agent cid]))
+                              (when-let [ss (seq (map step (filter model? evals)))] [:ol {:class "seon-turn flex flex-col"} ss])]]
                             (map step (remove model? evals)))))
-            [[:p {:wire/role "user" :wire/for "model"} "</session>"]]))))
+            [[:p {} "</session>"]]))))
 
 (defn session-examples
   "The example sessions the agent reads before its own (a component over ctx and the db), each a component: `example-session`. See docs/tasks.md#a-task-names-example-sessions."
@@ -1603,81 +1499,135 @@
 
 (declare agent-parts conversation-list tiles)
 
-(defn render-ctx
-  "The render of an agent's ctx, the one tree the model and the person read (the declared html
-  render of :seon.render/render-ctx, which an agent overrides on its branch like any render): components placed in its
+(defn agent
+  "An agent's page, the render of its pull c, the one tree the model and the person read (the declared html render of
+  :seon.db/agent-fact, which an agent overrides on its branch like any render): components placed in its
   lists, each keyed by what it shows, each holding what the agent's pull holds, so a smaller pattern is a smaller tree. The agent's page parts (p-task, `agent-parts`, given the pull), which the model reads as
   parts; and the conversation (c-rows, `conversation-list`), which it reads as messages. Each
   list is a component of its own, and the layout reads nothing, so a change of one list's members reruns that list alone: an eval
   added never reruns the task's. See docs/render.md#the-page and docs/render.md#a-layout-places-its-lists."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
+  [_ c]
   [:div {:id "render-ctx"} [#'agent-parts {} c] [#'conversation-list {}]
    [#'rules-list {}]])
 
 (declare sessions)
 
+(defn eval-tiles
+  "The tiles of agent pull c's evals whose value has a render (their record names its schema, :seon.eval/schema), each a component of its
+  own (`eval-tile`), read by the seek that answers it: the evals holding :seon.eval/schema, by that attribute's index, this agent's of
+  them whose schema declares a render (`eval-tile` draws nothing for any other, so none is placed: no empty list); an eval added
+  with no schema touches no read of this, so it reruns nothing; nothing when none has. See docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
+  [{db :seon.db/db ix :seon.render/index} c]
+  (let [aid (ratom/realize (:db/id c))]
+    (when-let [ts (seq (for [dt (d/datoms db :aevt :seon.eval/schema)
+                             :let [e (d/entity db (:e dt))] :when (= aid (:db/id (:seon.eval/agent e)))
+                             :when (render/declared ix (:v dt))]
+                         [#'eval-tile {:key (:seon.eval/id e) :eid (:e dt)}]))]
+      (into [:div] ts))))
+
+(defn- tile?
+  "Whether pulled entity e is drawn as a tile of a page: its schema (seon.render/entity-schema in the entity index ix) declares a hiccup
+  render, that render draws the entity from its own value (it takes no :seon.ctx/ctx: a render that takes one draws a whole page, as
+  an agent's, a user's and root's do) and the schema declares no :seon.render/openai-compat (the conversation's entities: the model
+  reads them as its history). Read from the schemas, never a list of names. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map :any] :boolean]}
+  [ix e]
+  (boolean (when-let [s (and (map? e) (:db/id e) (render/entity-schema ix e nil))]
+             (when-let [f (render/declared-var ix s)]
+               (and (nil? (render/render-for ix s :seon.render/openai-compat))
+                    (not (contains? (render/inputs f) :seon.ctx/ctx)))))))
+
+(defn- pattern-joins
+  "Pattern p's joins in its order, [key sub-pattern]: the key ctx holds the join under (its :as when it names one)."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:sequential :any]]}
+  [p]
+  (for [x p :when (map? x) [k sub] x]
+    [(if (vector? k) (let [[a & o] k] (or (:as (apply hash-map o)) a)) k) sub]))
+
+(defn- members
+  "The pulled entities join value v holds, as views: v itself when it is one entity, else each member of a join held as a map."
+  {:malli/schema [:=> [:cat :any] [:sequential :any]]}
+  [v]
+  (let [u (ratom/untracked v)]
+    (cond (and (map? u) (:db/id u)) [v]
+          (map? u) (for [k (keys u) :let [m (get u k)] :when (and (map? m) (:db/id m))] (get v k))
+          :else [])))
+
+(defn tiles
+  "The tiles entity c's pull joins, read by pattern p: each entity its joins hold that is a tile (`tile?`), in the pattern's order, as
+  views, so the walk draws each by its schema's render (seon.render/entity-render). One level: a tile's own render places what IT joins
+  inside itself by this same function over its own pull (the task its cites, searches and needs), nested like the pull; data a render
+  reads for itself (a cite's owner task) is no part unless that render places it. No part is named here. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map :any [:sequential :any]] [:vector :any]]}
+  [ix c p]
+  (vec (for [[k _] (pattern-joins p) m (members (get c k)) :when (tile? ix (ratom/untracked m))] m)))
+
+(defn- own-tiles
+  "Entity view e's own tiles: `tiles` by its own pattern less its conversation (seon.render/page-pattern of seon.render/entity-pattern),
+  the one call a page's top and a tile's inside make; nothing outside a walk (no entity index in opts)."
+  {:malli/schema [:=> [:cat [:maybe :map] :any] [:vector :any]]}
+  [ix e] (if ix (tiles ix e (render/page-pattern ix (or (render/entity-pattern ix (ratom/untracked e)) []))) []))
+
 (defn agent-parts
-  "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists),
-  in the order they are placed here: the task, its proofs, what it cites, each search, the references its agent cites, its added
-  keys, and last its own problems, its turn and its state; what a turn's diff compares. A piece is here when the pull holds what it
-  shows; :seon.ctx/pattern is what it reads of the agent, so a past point's parts are pulled by that alone (its added keys are
-  the agent's own pattern's, which a point's pull by this one leaves out). See docs/render.md#the-page."
+  "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists): the
+  tiles of what its pull joins (`tiles`, by the agent's own pattern less its conversation, seon.render/page-pattern: no part named here;
+  its task first, as its pattern joins it first), then the agent's own state, drawn from its own attributes (how its work stands, its
+  open problems, the keys it added, its turn, its state); between them the tiles of its evals' rendered
+  values (`eval-tiles`, by the seek). Each cite, the task's and the agent's own, is a tile like any
+  (seon.render.ui/cite judges from its own pull). See docs/render.md#the-page."
   {:seon.render/list "p-task"
-   :seon.ctx/pattern [:seon.agent/key :seon.agent/status :seon.agent/outcome :seon.agent/reason :seon.agent/turn :seon.agent/max-turns
-                      :seon.agent/ended-turn :seon.agent/ns {:seon.agent/task :seon.task/task-fact} {:seon.cite/_of :seon.cite/cite-fact}
-                      {:seon.search/_of :seon.search/search-fact}]
-   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
-  [_ c]
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.render/index :map]]] :any] :any]}
+  [{ix :seon.render/index} c]
   [:div {:id "p-task"}
-   ;; root's sessions, when this record's pull holds root (root's session's pattern does: docs/users.md#roots-session)
+   ;; what its pull joins, each by its own render, in the pull's order: its task first, as the agent's pattern joins it first
+   (seq (own-tiles ix c))
+   [#'eval-tiles {} c]
+   ;; until root's page is root's agent drawn by this render (step 3): root's session reads every agent here
    (when (:seon.agent/root c) [#'sessions {:at [:seon.agent/root]}])
-   (when (:seon.agent/task c)
-     (list [#'task {:at [:seon.agent/task]}] [#'status {:at [:seon.agent/task :proved]}] [#'citations {:at [:seon.agent/task :seon.cite/_of]}]
-           (seq (cite-parts c))
-           ;; each search its task and the agent hold, a part each, drawn on the branch's db
-           (for [p (concat (for [e (keys (get-in c [:seon.agent/task :seon.search/_of]))] [:seon.agent/task :seon.search/_of e])
-                           (for [e (keys (get c :seon.search/_of))] [:seon.search/_of e]))]
-             (get-in c p))))
-   (when (seq (:seon.cite/_of c)) [#'references {:at [:seon.cite/_of]}])
-   (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])
+   ;; then the agent's own state, from its own attributes
+   (when (:seon.agent/task c) [#'status {:at [:seon.agent/task :proved]}])
    (when (:seon.agent/task c) [#'own-problems {:at [:seon.agent/task]}])
+   (when (seq (added-keys ix c)) [#'ctx-keys {:at [:db/id]}])
    [#'turn {:at [:seon.agent/ns]}]
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])
 
+(defn steps
+  "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many: the
+  chat shows the messages and a person opens the steps; nothing for none. See docs/render.md#the-page."
+  {:seon.render/style ".seon-steps > summary { cursor: pointer; font-size: 0.75rem; color: var(--color-text-500); list-style: none; } .seon-steps > summary::before { content: '▸ '; } .seon-steps[open] > summary::before { content: '▾ '; }"
+   :malli/schema [:=> [:cat :int [:sequential :any]] :any]}
+  [n xs]
+  (when-let [xs (seq xs)]
+    [:details {:class "seon-steps" :id (str "steps-" n)}
+     [:summary (str (count xs) (if (= 1 (count xs)) " step" " steps"))]
+     [:ol {:class "seon-turn flex flex-col"} xs]]))
+
 (defn conversation-turn
   "Turn :key as the chat shows it and the model reads it, found by its model call's id, one seek (agent -> call -> its records, so a record of another turn touches nothing this read and an earlier
-  turn never runs again): the messages it took (:messages, [[m id]] as the list placed them: `seon.ctx/placed-messages`), its reply holding the evals it ran, and the evals of other hands after it, each eval and message a component of its own. A turn whose call is not made yet (the one now opening)
+  turn never runs again): the messages it took (:messages, [[m id]] as the list placed them: `seon.ctx/placed-messages`), its reply holding the evals it ran, and the evals of other hands after it (the one order of a turn's evals: `seon.ctx/turn-evals`), each eval and message a component of its own. A turn whose call is not made yet (the one now opening)
   holds the messages delivered for it alone. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:key :int] [:messages {:optional true} [:sequential [:tuple :int :string]]]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db n :key messages :messages}]
   (if-let [cid (some->> (ratom/realize (:seon.agent/key c)) (ctx/call-of db n))]
     (let [evals (ctx/turn-evals c cid)
-          model? (let [plain (ratom/untracked c)] (fn [e] (get-in plain [:seon.eval/_agent e :seon.eval/call-id])))
-          ;; who posts that it was opened, read here once and not by each eval
-          agent-key (ratom/realize (:seon.agent/key c)) agent-id (some-> agent-key keyword)
-          item (fn [[e id]] [#'eval-item {:key id :at [:seon.eval/_agent e] :agent-key agent-key :agent-id agent-id}])
-          call (get-in c [:seon.model-call/_agent cid])
-          ours (filter (comp model? first) evals)]
+          ;; each eval placed by its own view: its schema's render (`evaluation`) is one component for the page and the model (eval-msgs)
+          item (fn [[e _]] (get-in c [:seon.eval/_agent e]))
+          call (get-in c [:seon.model-call/_agent cid])]
       (when call
         ;; a turn nothing has come of yet (a call its messages or evals have not reached) is no element
-        (when-let [kids (seq (remove nil? (concat (for [[m id] messages] [#'chat-message {:key id :at [:seon.message/_to m]}])
-                                                  [(reply-hiccup (cond-> (into {} (for [k [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]
-                                                                                        :let [v (ratom/realize (get call k))] :when (some? v)] [k v]))
-                                                                   ;; in flight: the model's call until its evals have all run (:seon.model-call/forms, written by seon.turn after
-                                                                   ;; the last) or it failed (:seon.model-call/error), of an agent whose process lives; its committed reply and
-                                                                   ;; evals draw beside it all the while
-                                                                   (and (= :model (ratom/realize (:seon.model-call/origin call)))
-                                                                        (nil? (ratom/realize (:seon.model-call/forms call)))
-                                                                        (nil? (ratom/realize (:seon.model-call/error call)))
-                                                                        (not (gone (ratom/realize (:seon.agent/status c)))))
-                                                                   (assoc ::in-flight true))
-                                                                 (boolean (seq ours)) (map item ours))]
-                                                  (map item (remove (comp model? first) evals)))))]
-          (into [:div {:class "seon-stack" :wire/turn n}] kids))))
+        (when-let [kids (seq (remove nil? (concat (for [[m id] messages] (get-in c [:seon.message/_to m]))
+                                                  ;; the call by its own view (its schema's render, `model-call-view`, one component for the page and
+                                                  ;; the model), then the turn's steps, folded: a person reads the messages, and opens the steps when they
+                                                  ;; want them (owner, 2026-11-10: "only show messages by default and have the evals ... not shown unless
+                                                  ;; they are expanded"); a call that said nothing, ran nothing and is not in flight is no element
+                                                  [(when (or (seq evals) (said? call) (in-flight? call c))
+                                                     [:section {:class "flex w-full flex-col gap-1"} call (steps n (map item evals))])])))]
+          (into [:div {:class "seon-stack"}] kids))))
     ;; the turn now opening has no call yet: what was delivered since the last turn's edge reads here, before the turn begins
     (when-let [ms (seq messages)]
-      (into [:div {:class "seon-stack" :wire/turn n}] (for [[m id] ms] [#'chat-message {:key id :at [:seon.message/_to m]}])))))
+      (into [:div {:class "seon-stack"}] (for [[m id] ms] (get-in c [:seon.message/_to m]))))))
 
 (defn conversation-list
   "The conversation of an agent's page (c-rows), what the model reads as messages (:seon.render/messages) and the person as the chat: its system message, the example sessions it reads, what opens its own session (every conversation opens on a user
@@ -1692,7 +1642,7 @@
     [:ol {:id "c-rows"}
      [#'system-message {}]
      [#'session-examples {}]
-     (when k [:li {:wire/role "user" :wire/for "model" :wire/ref [:session k]} (session/session-open k)])
+     (when k [:li {} (session/session-open k)])
      (when (:seon.agent/task c) [#'chat-ask {:wire/for "page"}])
      ;; one past the turn in force: what was taken for the turn that reads it comes before that turn begins (seon.turn/take!, tell-error!); a turn no record names draws nothing
      (for [n (range 0 (+ 2 turn))] [#'conversation-turn (let [ms (get placed n (when (= n (inc turn)) (:pending placed)))] (cond-> {:key n} ms (assoc :messages ms)))])
@@ -1756,8 +1706,8 @@
       waits (assoc :detail waits)
       reason (assoc :reason reason))))
 
-(defn agent
-  "An agent's view (the declared html render of :seon.db/agent-fact), its head: its id, status,
+(defn agent-head
+  "An agent's head (on its page and in its pill's title): its id, status,
   what it runs and on which branch. Its page is its parts (seon.render.proc's agent page,
   parts-page)."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
@@ -1786,8 +1736,8 @@
      (when-let [r (:reason stands)] [:p {:class "min-w-0 break-words text-text-300"} r])
      (when-not (str/blank? description) [:p {:class "text-text-300"} (plain description (part))])]))
 
-(defn root
-  "What root's head adds (the declared html render of :seon.root/root-fact): when it last went quiet, its root causes a line each."
+(defn root-quiet
+  "What root's head adds: when it last went quiet, its root causes a line each."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_ v]
   (let [{:seon.root/keys [quiescent]} v]
@@ -1844,8 +1794,9 @@
   "What an entry of the agents list reads of an agent on main: its identity, its process's status, its branch and turns, and its task."
   [:seon.agent/key :seon.agent/started-ms :seon.agent/status :seon.agent/branch :seon.agent/max-turns
    {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure :seon.task/plan {:seon.task/started-by [:seon.user/name]}]}
-   ;; the agents doing the tasks it started (a request's work agents), shown under its tile
-   {:seon.task/_started-by [{:seon.task/agent [:seon.agent/key]}]}])
+   ;; the agents it started (a request's work agents), shown under its tile and its entry: :seon.agent/agents, the one path, read
+   ;; forward from the agent (seon.task's agent-tx writes it from the task's :seon.task/started-by)
+   {:seon.agent/agents [:db/id :seon.agent/key]}])
 
 (defn session-address
   "The name of an agent's page: its key (:seon.agent/key, its id's name), the one name of a session that survives a root's restart,
@@ -1876,11 +1827,16 @@
                       (or (some-> (:seon.task/plan t) str/split-lines first) (task-name a t)) ": " (:text stands)]))
        [:p "None yet."])]))
 
+(declare session-order)
+
 (defn agent-side
   "A session of main in the agents list (a component over the db, its agent's entity id: every agent on main, of any boot, a
   process or none): lit while it works, what it works on (its task in words, else its branch; else its id), how its work stands
-  (standing), the whole pill one link to its page by its stable address (session-address), the whole name in its title. See docs/render.md#a-sessions-address-and-the-agents-list."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
+  (standing), the whole pill one link to its page by its stable address (session-address), the whole name in its title; under it,
+  by this same render, the agents it started (its :seon.agent/agents: a request's work), so the list is the tree of what each started.
+  See docs/render.md#a-sessions-address-and-the-agents-list."
+  {:seon.render/style ".agent-side:has(> .seon-nest) { flex-direction: column; align-items: stretch; } .agent-side > .seon-nest { margin-left: 0.75rem; padding-left: 0.5rem; border-left: 1px solid var(--color-base-800); }"
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
   [{db :seon.db/db} eid]
   (let [a (d/pull db session-attrs eid)
         t (:seon.agent/task a)
@@ -1893,7 +1849,9 @@
            [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
            ;; named by what it works on (its task in words), its key in the title: a person tells agents apart by their work
            [:span {:class "min-w-0 truncate font-semibold text-text-100"} (or what (kname id))]
-           (when (:seon.agent/status a) [:span {:class (str "shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)])]]]))
+           (when (:seon.agent/status a) [:span {:class (str "shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)])]]
+     (when-let [kids (seq (distinct (keep :db/id (:seon.agent/agents a))))]
+       [:ul {:class "seon-nest"} (for [k (sort-by #(session-order db %) kids)] [#'agent-side {} k])])]))
 
 (defn- session-order
   "How a boot's sessions sort in the list: by when they started (oldest first)."
@@ -1947,7 +1905,7 @@
         (str (str/join ", " (remove nil? [(when (pos? parked) (str parked " parked")) (when (pos? running) (str running " running"))])) ".")
         "Nothing running.")]
      (when (pos? held) [:p {:class "seon-note"} (str held (if (= 1 held) " task" " tasks") " not released yet.")])
-     (render/hiccup {:seon.render/index ix :schema :seon.root/root-fact} (relevant :seon.root/root-fact c))]))
+     (root-quiet {} (relevant :seon.root/root-fact c))]))
 
 (defn problems-tile
   "Main's open problems (a component over root's ctx, its :health: the report the render proc keeps
@@ -2012,7 +1970,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] [:maybe :map]] [:map [:asked [:maybe :string]] [:reply [:maybe :string]]]]}
   [db e t]
   (let [m (when e (->> (d/datoms db :avet :seon.message/to e) (map :e)
-                       (filter #(some->> (:seon.message/from (d/entity db %)) (vector :seon.user/name) (d/entity db)))
+                       (filter #(some-> (:seon.message/from (d/entity db %)) :seon.user/name))
                        (reduce max -1)))
         m (when (and m (pos? m)) m)
         tx-of (fn [eid a] (some-> (first (d/datoms db :eavt eid a)) :tx))
@@ -2048,7 +2006,7 @@
        (when asked [:p {:class "asked"} [#'markdown asked {:inline? true}]])
        (when reply [#'markdown reply {:inline? true}])]]
      ;; the agents doing what it started, each its own tile under it, so a request and its work read as one tree
-     (when-let [ks (seq (distinct (keep #(get-in % [:seon.task/agent :seon.agent/key]) (:seon.task/_started-by a))))]
+     (when-let [ks (seq (distinct (keep :seon.agent/key (:seon.agent/agents a))))]
        (into [:div {:class "started"}] (for [k ks] [#'session-card {} k])))]))
 
 (defn- sessions-by-standing
@@ -2085,7 +2043,7 @@
     (when (seq es)
       [:details {:data-preserve-attr "open"}
        [:summary {:class "seon-note cursor-pointer"} (str (count es) (if (= 1 (count es)) " eval" " evals") " sent to root")]
-       (into [:ol {:class "seon-stack mt-2"}] (for [eid es] [#'eval-item {:key (get-in c [:evals eid :seon.eval/id]) :at [:evals eid]}]))])))
+       (into [:ol {:class "seon-stack mt-2"}] (for [eid es] (get-in c [:evals eid])))])))
 
 (defn earlier-sessions
   "Sessions of earlier boots in the agents list (a component over the db, their boots): one fold, each boot's a unit of its own. See docs/render.md#a-sessions-address-and-the-agents-list."
@@ -2111,22 +2069,6 @@
    (into [:ul {:class "seon-stack"}] (for [d (d/datoms db :aevt :seon.user/name)] [:li [:a {:href (str "/user/" (:v d))} (:v d)]]))
    [:p [:a {:href "/root"} "Root's page: every session on main"]]])
 
-(defn users-side
-  "The users in the agents list (a component over the db): each a link to its page by its :seon.user/name, then its agents of earlier boots, which the list's own boot leaves out, so a restart doesn't hide them. See docs/users.md#whats-on-screen."
-  {:seon.render/style ".users-side { display: contents; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
-  [{db :seon.db/db}]
-  (when-let [names (seq (map :v (d/datoms db :aevt :seon.user/name)))]
-    (let [now (task/boot-of db)
-          earlier (fn [n] (->> (:seon.agent/agents (d/entity db [:seon.user/name n]))
-                               (remove #(= now (:seon.agent/boot %)))
-                               (sort-by (fn [a] (- (or (:seon.agent/started-ms a) 0))))
-                               (map :seon.agent/key)))]
-      [:li {:class "contents"} [:ul {:class "contents"}
-       (for [n names]
-         (list [:li [:a {:href (str "/user/" n) :class pill-link :title (str "user: " n)}
-                     [:span {:class "flex items-baseline gap-2"} [:span {:class "text-signal"} "◆"] [:span {:class "font-semibold text-text-100"} n]]]]
-               (for [k (earlier n)] [#'agent-side {} (:db/id (d/entity db [:seon.agent/key k]))])))]])))
-
 (defn started-side
   "The agents this user started in its agents list (a component over ctx, by the pull's :seon.agent/agents join): each `agent-side`. See docs/users.md#whats-on-screen."
   {:seon.render/style ".started-side { display: contents; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
@@ -2143,33 +2085,35 @@
     [:section (sessions-by-standing db ks)]
     [:p {:class "muted"} "No agents yet: ask for something below."]))
 
-(defn user-ctx
-  "A user's page, the render of its ctx (the declared html render of :seon.render/user-ctx, which a branch overrides like any render): root and its agents in the agents list, its agents as cards. See docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_]
+(defn user
+  "A user's page, the render of its pull (the declared html render of :seon.db/user-fact, which a branch overrides like any render): root and its agents in the agents list, its agents as cards. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
+  [_ _]
   [:div {:id "user-ctx"}
    [:ol {:id "c-side"} [#'root-side {}] [#'started-side {}]]
    [:ol {:id "c-rows"} [#'started-cards {}]]
    [#'rules-list {}]])
 
-(defn root-ctx
-  "Root's page, the render of root's ctx (the declared html render of :seon.render/root-ctx, which a
+(defn root
+  "Root's page, the render of root's pull (the declared html render of :seon.root/root-fact, which a
   branch overrides like any render), drawn by the walk as components in its lists: its agents list
-  (c-side: root, then this boot's sessions with a task, then the earlier ones folded, `sessions-by-boot`), its head (p-head),
-  its work and the evals sent to it (c-rows: `work-list`, `root-evals`) and its tiles (p-tiles: root's process, then main's
-  problems). An agent's page shows the same agents list (seon.render.proc's agent page). See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
-  [{db :seon.db/db}]
+  (none of its own: every page's agents list is the signed-in user's), its head (p-head), its work, every session on main (this boot's,
+  then the earlier ones folded, `sessions-by-boot`) and the evals sent to it (c-rows) and its tiles (p-tiles: root's process, then
+  main's problems). See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :any] :any]}
+  [{db :seon.db/db} _]
   [:div {:id "root-ctx"}
-   ;; every session on main, of any boot: root's ctx holds this boot's agents alone (a new boot unlinks the earlier ones from root)
+   ;; no agents list of its own: every page's is the signed-in user's (seon.render.ui/user, placed by seon.render.proc)
+   [:div {:id "p-head"} [#'root-head {}]]
+   ;; every session on main, of any boot, root's own view of the system: root's ctx holds this boot's agents alone (a new boot unlinks
+   ;; the earlier ones from root)
    (let [now (task/boot-of db)
          boots (map first (sessions-by-boot db))
          earlier (vec (remove #{now} boots))]
-     [:ol {:id "c-side"} [#'root-side {}] [#'users-side {}]
+     [:ol {:id "c-rows"} [#'work-list {}]
       (when (some #{now} boots) [#'boot-side {} now])
-      (when (seq earlier) [#'earlier-sessions {} earlier])])
-   [:div {:id "p-head"} [#'root-head {}]]
-   [:ol {:id "c-rows"} [#'work-list {}] [#'root-evals {}]]
+      (when (seq earlier) [#'earlier-sessions {} earlier])
+      [#'root-evals {}]])
    [#'rules-list {}]
    [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}]]])
 
@@ -2183,7 +2127,8 @@
   {:malli/schema [:=> [:cat :map :any] [:map [:seon.render/hiccup :any] [:seon.render/units [:vector :map]]]]}
   [{:keys [units view input caption tab]} id]
   (let [in (fn [sel] (filterv #(= sel (:container %)) units))
-        unit (fn [u] {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)})
+        unit (fn [u] (cond-> {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)}
+                       (:parent u) (assoc :parent (:parent u))))
         side? (and (not= :debug tab) (boolean (some #(#{"#p-task" "#p-tiles"} (:container %)) units)))]
     {:seon.render/hiccup
      [:div {:id "app" :class "seon-page" :data-view view}
@@ -2315,12 +2260,12 @@
 
 (defn- source
   "What made part ref of a sent request, as a line: the help page as of a t, an eval, a message, a reply, an example session, the
-  opening of the agent's own and the page whole a read ended with: every ref kind seon.ctx.wire/request names."
+  opening of the agent's own and a turn's page message: every ref kind seon.ctx.wire/part-ref names."
   {:malli/schema [:=> [:cat :any] :string]}
   [[kind x t]]
   (case kind
     :section (str "the system message: " x)
-    :render "the page, whole (a read's last: Seon ran it as a call of its own)"
+    :page (str "the page message of turn " x ": what moved on its page since the turn before")
     :eval (str "eval " x)
     :reply (str "the reply of " x)
     :message (str "message " x)

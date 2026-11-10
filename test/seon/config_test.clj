@@ -4,7 +4,7 @@
   invalid or missing key, the config written as facts on main and read back from the db, and
   no environment read anywhere in src but the loader (asked of Jolt's analyzer, by resolved
   host reference, never by text)."
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
+  (:require [seon.lib] [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io] [clojure.string :as str] [clojure.edn :as edn] [clojure.java.shell]
             [aero.core :as aero] [datahike.api :as d] [seon.model]
             [test-runner :as runner]
@@ -373,7 +373,7 @@
         (is (= "/elsewhere/write-back" (:seon.config.source/root c)) "named, it is one")
         (is (= 4242 (:seon.config.web/port c)))
         (is (= (str "--config " local) (srcs :seon.config.source/root))))
-      (finally (clojure.java.shell/sh "rm" "-rf" co)))))
+      (finally (seon.lib/remove-tree! co)))))
 
 (deftest later-layers-win-key-by-key-and-name-their-source
   (let [ls (config/load-layers (config/checkout)

@@ -16,7 +16,7 @@
   breaks its forks; docs/failure-points.md, \"Physics\". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.ref :as ref] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [seon.system :as system] [clojure.repl]
             [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
@@ -122,6 +122,8 @@
         k [(at base) (at main)]
         {held :key after :after} (:main-changes @state)]
     (cond (= (k 0) (k 1)) {}
+          ;; main's content mark is base's: only records moved main (docs/storage.md#mains-content-mark)
+          (pm/same-content? base main) {}
           (= k held) after
           :else (let [after (into {} (map (fn [[pk [_ b]]] [pk (hash b)])) (pm/delta-changes base main #{}))]
                   (swap! state assoc :main-changes {:key k :after after})
@@ -180,7 +182,7 @@
   "The messages main holds to this agent that its branch does not hold yet (seon.task/undelivered, which says how). Main is read only
   here, through `heard-main`: where messages live is this one read. Delivery is the fact, read here, not a frame root pushes to a
   live process: a process spawned again reads what came while none lived. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:from :string] [:body :string] [:sent-ms :int]]]]}
+  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:from :map] [:body :string] [:sent-ms :int]]]]}
   [] (task/undelivered (heard-main) (db) (:key @state)))
 
 (defn untaken-facts
@@ -204,9 +206,10 @@
   [] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key @state)])) 0))
 
 (defn own-message-tx
-  "Message mid from from, sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
-  took it is derived from the transaction that wrote it (seon.ctx/turn-members). See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :string :string :any :int] :seon.db/tx-data]}
+  "Message mid from from (its sender's lookup, seon.task/sender), sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
+  took it is derived from the transaction that wrote it (seon.ctx/turn-members). Its sender is written by its identity (seon.task/sender),
+  an upsert, so a sender made after this branch forked resolves here too. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :string :map :any :int] :seon.db/tx-data]}
   [mid from body sent-ms]
   (task/message-tx mid from [(:key @state)] body sent-ms))
 
@@ -428,10 +431,11 @@
 (defn messages
   "The messages to this agent not yet delivered, delivered (deliver!, as a turn delivers them: the entities on
   main to it, another agent's sends included), then the effect outcomes of the inbox. Delivered, a message stays in `@ctx` until the agent
-  removes it (`(swap! ctx update :seon.message/_to dissoc e)`), and is not delivered again. See docs/users.md#messages."
+  removes it (`(swap! ctx update :seon.message/_to dissoc e)`), and is not delivered again. Each delivered one's :from is its sender's name
+  (seon.task/sender-name: an agent's key, \"seon\" for the system), what the agent reads of who sent it; the entity is the ref. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [es (deliver!)]
+  (let [es (mapv #(update % :from task/sender-name) (deliver!))]
     (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
 (def ^:dynamic *fx-stub*
@@ -531,8 +535,9 @@
   the other way: another session's design, root's edit) comes in the same commit, since the
   base moves to main's head and a member main changed would otherwise read, at the run's end,
   as this branch reverting it (live finding F3); one both changed keeps the branch's and is
-  answered in :task-conflicts. data-attrs: the data that merges beside the program. Answers
-  {:ok :applied :conflicts :task-conflicts :t}."
+  answered in :task-conflicts. data-attrs: the data that merges beside the program. When main's
+  content mark is the base's (seon.merge/same-content?), only records moved main: nothing is
+  diffed and nothing merges. Answers {:ok :applied :conflicts :task-conflicts :t}."
   {:malli/schema [:=> [:cat :seon.merge/data-attrs] [:map [:ok :boolean]]]}
   [data-attrs]
   (commit!)
@@ -540,10 +545,13 @@
         main-b (pdb/main-branch (:cfg @state))
         main (heard-main)
         head @conn
+        ;; main's content mark is the base's: only records moved main, so nothing merges and nothing is diffed; declared data
+        ;; moves no mark, so a merge that declares some reads the diff (docs/storage.md#mains-content-mark)
+        same? (and (= #{} data-attrs) (pm/same-content? (:base @state) main))
         ;; git's merge base: the main last merged, unless main has since merged a commit of this branch (its own merge up), which
         ;; is then the base; read from the commit graph only when main moved, over the commits since (docs/sharing.md#a-merge)
-        base (if (= (d/commit-id main) (d/commit-id (:base @state))) (:base @state) (pdb/branch-base conn main-b (:branch @state)))
-        r (pm/delta-three-way base head main data-attrs)]
+        base (if (or same? (= (d/commit-id main) (d/commit-id (:base @state)))) (:base @state) (pdb/branch-base conn main-b (:branch @state)))
+        r (if same? {:theirs {}} (pm/delta-three-way base head main data-attrs))]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
       (let [carried (task/carry-tx base main head)
@@ -1189,7 +1197,7 @@
                       st (:status read)]
                   (swap! state dissoc :test-child)
                   (lib/c-close r) (swap! fds disj r)
-                  (fx/remove-tree! (fx/run-dir pid))
+                  (seon.lib/remove-tree! (fx/run-dir pid))
                   (if (contract/error? read)
                     read
                     (-> (select-keys @lines [:streamed :ended :fns :heap :measured]) (assoc :answer (test-run-answer (:line read) st (:held? read)) :pid pid :exit st)))))})))
@@ -1642,12 +1650,14 @@
 (defn begin-run-tx
   "The write that makes task this agent's on db, its branch (begin-run-tx!'s second, and what
   the fork server applies to warm what an agent's start reads: seon.fork-server/warm-start): the task
-  running, naming the agent (key k) and its task."
+  running, naming the agent (key k), its task and what it reads as its system message (seon.doc/system-page)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] :seon.db/tx-data]}
   [db task k]
   [{:seon.task/id task :seon.task/execution :running}
    ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern)
-   {:db/id k :seon.agent/key k :seon.agent/task {:seon.task/id task}}])
+   ;; what it reads as its system message: the system prompt's page, its top section and all below (seon.ctx.wire/agent-system-text)
+   (let [sys (ref/page-top db doc/system-page)]
+     (cond-> {:db/id k :seon.agent/key k :seon.agent/task {:seon.task/id task}} sys (assoc :seon.agent/system [sys])))])
 
 (defn- begin-run-tx!
   "Task written on this agent's branch (begin-run!'s write): the task as main declares it when the

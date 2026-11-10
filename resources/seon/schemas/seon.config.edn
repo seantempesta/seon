@@ -49,6 +49,7 @@
   [:seon.config.machine/relay-mb {:optional true} :seon.config.machine/relay-mb]
   ;; the check harness
   [:seon.config.check/ping-ms {:optional true} :seon.config.check/ping-ms]
+  [:seon.config.check/step-end-factor {:optional true} :seon.config.check/step-end-factor]
   [:seon.config.check/hold-ms {:optional true} :seon.config.check/hold-ms]
   [:seon.config.check/pages-ms {:optional true} :seon.config.check/pages-ms]
   [:seon.config.check/sample-ms {:optional true} :seon.config.check/sample-ms]
@@ -159,6 +160,7 @@
   [:seon.config.ctx/window {:optional true} :seon.config.ctx/window]
   [:seon.config.ctx/callers {:optional true} :seon.config.ctx/callers]
   [:seon.config.ctx/cited-by {:optional true} :seon.config.ctx/cited-by]
+  [:seon.config.ctx/kept-walk-steps {:optional true} :seon.config.ctx/kept-walk-steps]
   [:seon.config.shrink/form-tokens {:optional true} :seon.config.shrink/form-tokens]
   [:seon.config.render/relevance-weights {:optional true} :seon.config.render/relevance-weights]
   [:seon.config.render/relevance-features {:optional true} :seon.config.render/relevance-features]

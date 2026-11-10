@@ -102,7 +102,7 @@
       (is (= [s] (map first (filter (comp #{s} first) (vector/due db "m")))) "a vector of the text before is no vector of the text now"))
     (is (= #{f s} (set (filter #{f s} (map first (vector/due db "m2"))))) "another model's vectors are due again")
     (let [db (d/db-with db [{:db/id "a" :seon.agent/key "demo/a1"}
-                            {:seon.eval/id "e1" :seon.eval/agent "a" :seon.eval/by "a1" :seon.eval/code "(f)" :seon.eval/response {}}])
+                            {:seon.eval/id "e1" :seon.eval/agent "a" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(f)" :seon.eval/response {}}])
           ev (:e (first (d/datoms db :avet :seon.eval/id "e1")))]
       (is (empty? (filterv (comp #{ev} first) (vector/due db "m")))
           "an eval is no text to embed: nothing reads its vector, and a turn would wait on the model for it"))))
@@ -393,7 +393,7 @@
 ;; its work; its embedding is a vector entity pointing at it (:seon.vector/of)
 (deftest a-vector-is-its-own-entity
   (let [db (d/db-with (ts/test-db) [{:seon.task/id "t/x" :seon.task/plan "a plan"}
-                                    {:db/id "e" :seon.eval/id "e1" :seon.eval/by "a1" :seon.eval/code "(f)" :seon.eval/response {}}])
+                                    {:db/id "e" :seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(f)" :seon.eval/response {}}])
         t (plan-of db)
         ev (ffirst (d/q '[:find ?e :where [?e :seon.eval/id "e1"]] db))
         [v1 v2] (vectors 3 2 2 768)

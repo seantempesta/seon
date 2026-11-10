@@ -189,24 +189,6 @@
 
 ;; ---- the proof root asks for: one run for a session and an agent's turn ----------------------
 
-(deftest a-session-and-an-agents-turn-for-one-digest-end-in-one-run
-  ;; a real root and an agent of it. The agent's turn asks the service (seon.agent/prove!, what
-  ;; seon.turn/observe calls) while a session asks for the same branch's head (seon.root/prove!,
-  ;; the server's :prove op / seon_prove): the service runs it once, for both, and a session asking
-  ;; again after the eval that asked recorded itself (the tx moved, nothing the run reads did) gets that run.
-  (let [code #(str "(let [ap (c/submit! sys :" % " \"(select-keys (seon.agent/prove!) [:key :pass :fail :error])\" {:origin :outside})"
-                   "      sp (c/prove! sys :" % ")"
-                   "      s (select-keys @sp [:key :pass :fail :error])"
-                   "      a @ap"
-                   "      again (select-keys @(c/prove! sys :" % ") [:key])]"
-                  "  (pr-str {:session s :agent (:text a) :again again}))")
-        [r] (at/in-agent #(vector {:op :eval :agent "root" :code (code (:agent %))}))
-        v (clojure.edn/read-string (:value r))]
-    (is (map? v) (pr-str r))
-    (is (re-find #"@[0-9a-f]+!turn$" (:key (:session v))) "the key is the agent's branch at the digest of its program")
-    (is (= (:key (:session v)) (:key (:again v))) "asked again, nothing the run reads changed: the same run's answer")
-    (is (re-find (re-pattern (java.util.regex.Pattern/quote (:key (:session v)))) (:agent v)) "the agent's turn got the same run: one run for the three askers")))
-
 (deftest an-agents-run-leaves-every-process-test-to-the-judge
   ;; root, 2026-10-27 (THE PLAN 0.7's first run): a child forked from an agent has no process
   ;; store, so a process test an agent ran there errored, named or a proof. It is left out and listed

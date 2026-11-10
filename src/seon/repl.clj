@@ -30,7 +30,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [hasch.core :as hasch] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.fx :as fx] [seon.source :as source] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.source :as source] [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.ctx.search :as search] [seon.ctx.wire :as wire] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
+            [seon.source :as source] [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.ratom :as ratom] [seon.ctx.search :as search] [seon.ctx.wire :as wire] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (def ^:private budgeted
@@ -654,22 +654,29 @@
   [r req] (cond-> r (seq (:repaired req)) (assoc :repaired (:repaired req))))
 
 (defn- by
-  "Who evaluated, as the record names it (:seon.eval/by): whoever asked an inserted eval (the request's :by), the user (the page), an outside
-  session (root's server), a context read (seon.turn/context-block), else the agent itself (its model's turn)."
-  {:malli/schema [:=> [:cat :map] :string]}
+  "Who evaluated, as the record names it (:seon.eval/by, a ref): :self, the evaluating agent itself (its model's turn, an outside model working
+  its task, or a session at its REPL: where an eval came from is its model call's origin, not its author; its own code), written as the
+  record's own agent; the user, by the configured name (:seon.config.root/user-name), for a
+  person's eval from the page; the system (seon.task/system-sender) for an eval root inserts or root's own; else the agent an inserted
+  eval names (seon.task/sender). A context read is recorded by no one. See docs/users.md#what-each-thing-is."
+  {:malli/schema [:=> [:cat :map] [:or [:= :self] :map]]}
   [{:keys [origin] asked :by}]
-  (case origin :insert asked :ui "user" :outside "outside" :context "context" (name (or (:id @agent/state) :root))))
+  (case origin
+    :insert (if (#{"root" "seon"} asked) task/system-sender (task/sender asked))
+    :ui (task/sender (cfg/value :seon.config.root/user-name))
+    (if (:id @agent/state) :self task/system-sender)))
 
 (defn record-tx
-  "The recording transaction of one eval: its entity, on the agent's, who evaluated it (:seon.eval/by), and its
-  details, each its own attribute (`record-details`). Who is the one upsert, by its identity: an
+  "The recording transaction of one eval: its entity, on the agent's, who evaluated it (:seon.eval/by, `by`: :self is the agent the
+  record is on, else its lookup), and its details, each its own attribute (`record-details`). Who is the one upsert, by its identity: an
   agent's key ({:seon.agent/key k}, its id's name) or root's ({:seon.root/id :root}); an agent's holds the
   namespace the eval left its REPL in (:seon.agent/ns), a datom only when it moved (an unchanged value adds none),
-  which seon.ctx/current-ns reads. See docs/render.md#a-component-answers-hiccup."
-  {:malli/schema [:=> [:cat :map :string :string :map] :seon.db/tx-data]}
+  which seon.ctx/current-ns reads. Another evaluator (a user, the system) is written by its identity (seon.task/sender), an upsert, so it
+  resolves on a branch forked before it was made. See docs/render.md#a-component-answers-hiccup."
+  {:malli/schema [:=> [:cat :map :string [:or [:= :self] :map] :map] :seon.db/tx-data]}
   [who id by details]
   ;; the agent one upsert, the model call naming it by the same tempid: two would refuse a new agent's first record
-  [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by by}
+  [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by (if (or (= :self by) (= by (select-keys who [:seon.agent/key :seon.root/id]))) "agent" by)}
          (cond-> details (:seon.eval/call details) (assoc-in [:seon.eval/call :seon.model-call/agent] "agent")))
    (cond-> (assoc who :db/id "agent")
      (and (:seon.agent/key who) (symbol? (get-in details [:seon.eval/response :ns]))) (assoc :seon.agent/ns (get-in details [:seon.eval/response :ns])))])
@@ -720,7 +727,11 @@
         [kv drawn?] (when (and (contains? resp :value) (not basis))
                       (if (:forms resp) [(mapv kept-form v) false] (kept v)))
         ;; a value its model render has already drawn prints as it is
-        schema (when (and (contains? resp :value) (not drawn?)) (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k)))]
+        schema (when (and (contains? resp :value) (not drawn?))
+                 (or (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k))
+                     ;; a value that holds its own render (an SVG chart under :seon.render/hiccup) is named by the schema of such
+                     ;; values, so its eval is a tile as one a schema draws (docs/render.md#a-value-draws-itself)
+                     (when (some? (or (when (map? v) (get v :seon.render/hiccup)) (get (meta v) :seon.render/hiccup))) :seon.render/drawn)))]
     (cond-> (let [kept-resp (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value kv) :else resp)
                   id (:eval-id req)
                   ;; an answer not kept as it is (a host object, a value past the bound, a ctx, several forms) is named by its eval, so its handle is its own
@@ -1160,7 +1171,7 @@
        (contract/error :seon.repl/no-eval #'again (str "no eval " id " in this agent's record") {:seon.eval/id id})
        (let [before (last (take-while #(not= id (:seon.eval/id %)) evals))]
          (eval-string (or code (:seon.eval/code e))
-                      (cond-> {:origin :insert :by (:seon.eval/by e) :id id}
+                      (cond-> {:origin :insert :by (or (get-in e [:seon.eval/by :seon.agent/key]) "seon") :id id}
                         (get-in before [:seon.eval/response :ns]) (assoc "ns" (str (get-in before [:seon.eval/response :ns]))))))))))
 
 (defn again-to
@@ -1168,7 +1179,7 @@
   {:malli/schema [:=> [:cat :string] [:vector [:map [:id :string] [:failed? :boolean]]]]}
   [id]
   (let [evals (map val (sort-by key (:seon.eval/_agent @ctx/ctx)))
-        work? #(and (:seon.eval/call %) (not= "seon" (:seon.eval/by %)))]
+        work? #(and (:seon.eval/call %) (not (get-in % [:seon.eval/by :seon.root/id])))]
     (if (some #(= id (:seon.eval/id %)) evals)
       (reduce (fn [acc ev]
                 (let [e (:seon.eval/id ev)
@@ -1181,11 +1192,11 @@
       [])))
 
 (defn- layout
-  "The layout this branch renders its ctx with: the one its entity names (seon.render/layout-of: an agent's
-  :seon.render/render-ctx, root's :seon.render/root-ctx), its own var when its branch defines one; its key names it
-  before its branch holds its entity. See docs/render.md#the-page."
+  "The render this branch renders its ctx with: its entity's own (seon.render/render-var-of: an agent's seon.render.ui/agent, root's
+  seon.render.ui/root), its own var when its branch defines one; its key names it before its branch holds its entity. See
+  docs/render.md#the-page."
   {:malli/schema [:=> [:cat] :any]}
-  [] (render/layout-of (agent/branch-index) (merge {:seon.agent/key (:key @agent/state)} @ctx/ctx)))
+  [] (render/render-var-of (agent/branch-index) (merge {:seon.agent/key (:key @agent/state)} @ctx/ctx)))
 
 (defn- the-walk
   "This agent's walk of its render of ctx (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
@@ -1197,11 +1208,11 @@
   (let [held (:walk @agent/state) l (layout)]
     (if (and held (= l (first (:root held))))
       held
-      (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes
-                              :points (fn [] (wire/points-of (agent/db) (:db/id @ctx/ctx) (:branch @agent/state)))
-                              :diffs-through (fn [chain] (wire/diffs-through (agent/db) (:db/id @ctx/ctx) chain))}
-                             agent/db [l {}] (agent/branch-index))
-                (or (nil? held) (:model-only held)) (assoc :model-only true))]
+      (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes}
+                             agent/db [l {} (ratom/ref-view ctx/ctx ctx/changes)] (agent/branch-index))
+                (or (nil? held) (:model-only held)) (assoc :model-only true)
+                ;; its model output too: each entity's model render, read as the request (seon.ctx.wire/request)
+                true (assoc :outputs #{:seon.render/hiccup :seon.render/openai-compat}))]
         (some-> held render/dispose-walk!)
         (swap! agent/state assoc :walk w)
         w))))

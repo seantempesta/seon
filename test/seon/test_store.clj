@@ -33,14 +33,17 @@
                        (:doc (meta v)) (assoc :var/doc (:doc (meta v))))))))))
 
 (def ^:private store
-  "The test store's config, made and seeded with about 2,000 datoms on first use, and what every agent and template cites
-  (standing-targets-tx)."
+  "The test store's config, made and seeded with about 2,000 datoms on first use, what every agent and template cites
+  (standing-targets-tx) and a stub of the system prompt."
   (delay (let [cfg (pdb/made-cfg {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write
                                    :writer pdb/writer-cfg})]
            (d/create-database cfg)
            (let [conn (pdb/connect cfg)]
              (pdb/ids! conn) (pdb/seed! conn 2000)
              (d/transact conn {:tx-data (standing-targets-tx)})
+             ;; a stub of the system prompt, as a root's store holds the real one: every agent's request needs one (seon.ctx.wire/system-text),
+             ;; and a world without it renders an error where the agent's page goes. A test of the prompt itself loads the wiki's
+             (d/transact conn {:tx-data (doc/load-tx @conn "docs" {doc/system-page "# A stub of the system prompt\n\nBe brief."})})
              (d/release conn))
            cfg)))
 
@@ -62,7 +65,7 @@
   under target/tmp: a test process's own, so shards running at once never share one; removed
   when the process ends (a shutdown hook)."
   (delay (let [path (str (seon.config/checkout) "/target/tmp/program-store-" (random-uuid))]
-           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (fx/remove-tree! path))))
+           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (seon.lib/remove-tree! path))))
            path)))
 
 (defn kept-program-store
@@ -290,7 +293,7 @@
         conn (pdb/connect cfg)
         gone (try (pdb/delete-main! conn (keyword main))
                   (finally (pdb/sync! cfg) (d/release conn)))]
-    (fx/remove-tree! (pdb/agents-dir (assoc cfg :branch (keyword main))))
+    (seon.lib/remove-tree! (pdb/agents-dir (assoc cfg :branch (keyword main))))
     {:deleted gone}))
 
 (defn start-args
@@ -418,7 +421,7 @@
   arguments args, on a main of its own of the process store and a merges branch of its own
   (:seon.config.source/branch, named by that main: the roots of other shards in this checkout commit their
   merges on theirs, so a candidate the merge gate judged is still its branch's head when it is asked
-  again, seon.agent-test/a-real-gate-judges-a-candidate-once); stopped, its main dropped and its branch
+  again, the real gate's case: task seon.agent/a-real-gate-is-proved-in-seconds); stopped, its main dropped and its branch
   deleted when the process ends (a shutdown hook)."
   {:malli/schema [:=> [:cat :string [:vector :string]] :map]}
   [checkout args]
@@ -429,7 +432,7 @@
                            :args (into ["--set" (str ":seon.config.source/branch=" (pr-str branch))] args)})]
     (.addShutdownHook (Runtime/getRuntime)
                       (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "shared root" main "not stopped:" (pr-str s)))))
-                                               (drop-main! store main) (fx/remove-tree! (:runs root))
+                                               (drop-main! store main) (seon.lib/remove-tree! (:runs root))
                                                (sh/sh "git" "-C" checkout "branch" "-q" "-D" branch))))
     root))
 

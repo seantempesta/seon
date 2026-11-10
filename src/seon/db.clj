@@ -327,9 +327,20 @@
                  (catch clojure.lang.ExceptionInfo x
                    (let [{:keys [error entity-id]} (ex-data x)]
                      (if (and (= :entity-id/missing error) (vector? entity-id) (= 2 (count entity-id)) (qualified-keyword? (first entity-id)))
-                       (refuse! (contract/error :seon.db/no-target #'checked (str "nothing on this branch is the lookup in :target: a cite or a link names what exists, or "
-                                                                                  "what the same write made before it; a name that does not exist yet is written in two backticks, ``ns/name``")
-                                                {:target entity-id}))
+                       ;; who names it: the entity of this write holding that lookup (a value of it, or one of a set of them: a
+                       ;; section's links); a cite's is what it is of, a lookup ref or the tempid of an entity the same write makes
+                       ;; (a task, a section), each read as its identity value (its task id, its address)
+                       (let [holds? (fn [m] (some (fn [v] (or (= v entity-id) (and (coll? v) (some #{entity-id} v)))) (vals m)))
+                             m (some #(when (and (map? %) (holds? %)) %) tx-data)
+                             named (fn [x] (or (:seon.task/id x) (:seon.doc/address x)))
+                             of (:seon.cite/of m)
+                             by (cond (vector? of) (second of)
+                                      (some? of) (some #(when (and (map? %) (= of (:db/id %))) (named %)) tx-data)
+                                      :else (some-> m named))]
+                         (refuse! (contract/error :seon.db/no-target #'checked (str (if by (str by " cites ") "a cite or a link names ") (second entity-id)
+                                                                                    ", which nothing on this branch is: a cite or a link names what exists, or "
+                                                                                    "what the same write made before it; a name that does not exist yet is written in two backticks, ``ns/name``")
+                                                  (cond-> {:target entity-id} by (assoc :by by)))))
                        (throw x)))))]
       (when-let [e (invalid-entity r ix)] (refuse! e))
       r)))
@@ -481,13 +492,20 @@
 
 (def ^:private MDB_NOSYNC 0x10000)
 
+(defn data-file
+  "The file that holds the durable store at path: an LMDB store's data.mdb, or path itself for
+  the :file backend. What tells whether a store is there, and what the ids page's stamp names
+  (ids!, docs/storage.md#ids)."
+  {:malli/schema [:=> [:cat [:enum :lmdb :file] :string] :string]}
+  [backend path] (if (= backend :lmdb) (str path "/data.mdb") path))
+
 (defn- stored-id
   "The id the store cfg names was made with, read from its :db head's stored config (0.8 ms),
   or nil when no store is there yet. The store it connects for the read is released."
   {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe :uuid]]}
   [cfg]
   (let [{:keys [backend path]} (:store cfg)]
-    (when (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))
+    (when (posix/exists? (data-file backend path))
       (let [store (konserve.store/connect-store (:store cfg) {:sync? true})
             id (-> (datahike.store/add-cache-and-handlers store (datahike.config/load-config cfg))
                    (datahike.writing/read-head :db)
@@ -654,15 +672,20 @@
 
 (defn open-main!
   "main on the store of cfg, whose :db exists: made from :db's head when the store has no
-  such branch (one pointer write). Answers [conn existed?]."
+  such branch (one pointer write), on a connection that streams when root is the store's sole writer
+  (:seon.config.store/sole-writer?). Answers [conn existed?]."
   {:malli/schema [:=> [:cat :seon.db/cfg :seon.db/branch] [:tuple :seon.host/conn :boolean]]}
   [cfg main]
-  (let [seed-conn (connect cfg)
+  (let [;; root alone commits main when it is the store's sole writer: its connection streams (datahike's :writer :streaming?),
+        ;; so a deref is the connection's own value, never the store's head read again (24 ticks against 58,739 and 259 KB). Only
+        ;; this connection: the fork server's and the agents' read main as root commits it (the cfg answered keeps no :streaming?)
+        own (cond-> cfg (cfg/value :seon.config.store/sole-writer?) (assoc-in [:writer :streaming?] true))
+        seed-conn (connect (if (= :db main) own cfg))
         existed? (or (= :db main) (branch? seed-conn main))]
     (when-not existed? (d/branch! seed-conn :db main))
     (if (= :db main)
       [seed-conn existed?]
-      (let [conn (connect (assoc cfg :branch main))] (d/release seed-conn) [conn existed?]))))
+      (let [conn (connect (assoc own :branch main))] (d/release seed-conn) [conn existed?]))))
 
 (defn agents-dir
   "Where the agents of the root holding cfg keep their stderr (seon.agent/stderr-path):
@@ -706,21 +729,29 @@
 (lib/defc c-ids-open "seon_ids_open" [:string] :pointer {:capture-native-error true})
 (lib/defc c-ids-take "seon_ids_take" [:pointer :int] :uint64)
 (lib/defc c-ids-reach "seon_ids_reach" [:pointer :int :uint64] :void)
+(lib/defc c-ids-trusted "seon_ids_trusted" [:pointer :string :string] :int)
+(lib/defc c-ids-stamp "seon_ids_stamp" [:pointer :string :string] :void)
 
 (defn ids!
   "Make the store of conn take its entity ids and transaction ids from one page every
   process writing it shares (native/ids.c): the file `ids` beside a durable store, or an
   anonymous page for a store in memory; a process forked from this one maps the same page.
   Each id is issued once across every branch and process, so a datom keeps its e and tx
-  wherever it travels (docs/storage.md: 28-34 ns an id, 200-240 ns with 10
-  processes contending). The page is moved past every branch head's ids
-  (datahike.writing/set-ids!), so an id issued but never committed is a gap, never reused,
-  and a page lost in a crash is reseeded from the heads. A page the OS refuses is
-  :seon.db/ids-unopened (docs/failure-points.md). nil."
+  wherever it travels (docs/storage.md#ids: 28-34 ns an id, 200-240 ns with 10
+  processes contending). Every branch head is read, and the page moved past their ids
+  (datahike.writing/set-ids!, O(branches)), only when the page's stamp is not this boot's
+  and this file's and the store's data file's (seon_ids_trusted, data-file): a new page, a copied
+  one, one made again, one beside a data file replaced or copied in, one from before the OS last
+  booted, or an anonymous one; the page is then stamped. A stamped page is already
+  past every head, so an open reads none. An id issued but never committed is a gap, never
+  reused. A page the OS refuses is :seon.db/ids-unopened (docs/failure-points.md). nil."
   {:malli/schema [:=> [:cat :seon.host/conn] :nil]}
   [conn]
-  (let [{:keys [backend path]} (get-in @conn [:config :store])
+  ;; one deref: each reads the branch head from the store (two reads, ~58k ticks)
+  (let [db @conn
+        {:keys [backend path id]} (get-in db [:config :store])
         file (if (= :memory backend) "" (str path "/ids"))
+        data (if (= :memory backend) "" (data-file backend path))
         [page errno] (c-ids-open file)]
     (when (zero? (ffi/address page))
       (let [e (contract/error :seon.db/ids-unopened #'seon.db/ids!
@@ -728,16 +759,20 @@
                               {:path file :errno errno
                                :seon.error/fix "Make the store's directory writable (the ids page lives beside data.mdb), then open the store again."})]
         (throw (ex-info (:seon.error/message e) e))))
-    (datahike.writing/set-ids! (:store @conn) (get-in @conn [:config :store :id])
-                               (reify datahike.ids/IIds
-                                 (-take! [_ kind] (c-ids-take page (if (= :eid kind) 0 1)))
-                                 (-reach! [_ kind id] (c-ids-reach page (if (= :eid kind) 0 1) id) nil)))
+    (let [store (:store db)
+          ids (reify datahike.ids/IIds
+                (-take! [_ kind] (c-ids-take page (if (= :eid kind) 0 1)))
+                (-reach! [_ kind n] (c-ids-reach page (if (= :eid kind) 0 1) n) nil))]
+      (if (= 1 (c-ids-trusted page file data))
+        (datahike.writing/set-ids! store id ids {:past-heads? true})
+        ;; stamped only once moved past the heads: a process killed between the two leaves no stamp
+        (do (datahike.writing/set-ids! store id ids) (c-ids-stamp page file data))))
     nil))
 
 (defn store?
   "Does a durable LMDB store exist at path (its data file)?"
   {:malli/schema [:=> [:cat :string] :boolean]}
-  [path] (boolean (posix/exists? (str path "/data.mdb"))))
+  [path] (boolean (posix/exists? (data-file :lmdb path))))
 
 (defn- make!
   "A store made whole at path, or none (task seon.db/a-store-is-made-whole-or-not-at-all): built
@@ -760,7 +795,7 @@
       (let [conn (connect tcfg)] (try (seed! conn n) (sync! tcfg) (finally (d/release conn))))
       (let [[rc errno] (posix/c-rename tmp path)]
         (vreset! placed (zero? rc))
-        (when-not (or @placed (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path)))
+        (when-not (or @placed (posix/exists? (data-file backend path)))
           (let [e (contract/error :seon.db/store-unplaced #'seon.db/make!
                                   (str "a store made at " tmp " could not be renamed to " path ": " (ffi/errno-message errno))
                                   {:path path :errno errno
@@ -782,7 +817,7 @@
   store's LMDB env, and a read after it answers :lmdb-env-closed (docs/storage.md)."
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string :int :seon.db/branch] :seon.db/open]}
   [backend path n main]
-  (let [made? (and (not (posix/exists? (if (= backend :lmdb) (str path "/data.mdb") path))) (make! backend path n))
+  (let [made? (and (not (posix/exists? (data-file backend path))) (make! backend path n))
         ;; a store this call did not make: found there, or made by a creator that won the rename
         exists? (not made?)
         ;; read once the store is there: it records the id it was made with (store-cfg)
@@ -795,11 +830,6 @@
       ;; fsync, ~5-10 ms); a recovered main with its schema whole wrote nothing
       (when-not (and exists? existed? (empty? added)) (sync! cfg))
       {:cfg cfg :conn conn :recovered? (and exists? existed?) :seeded? (not exists?)})))
-
-(defn- remove-dir!
-  "Remove directory dir and what it holds, when it is there. nil."
-  {:malli/schema [:=> [:cat :string] :nil]}
-  [dir] (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. ^String dir)))) nil)
 
 (defn kept-store!
   "The path of the kept store of regenerable output at base for a schema's digest (the whole schema's, `schema-digest`,
@@ -817,7 +847,7 @@
          keyed (str stem "-" digest)
          old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
      (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
-       (remove-dir! (str dir "/" n)))
+       (lib/remove-tree! (str dir "/" n)))
      (str dir "/" keyed))))
 
 (defn- compact-marker
@@ -842,20 +872,20 @@
   [path]
   (when (posix/exists? (compact-marker path))
     (let [t0 (profile/now-ns)
-          data (str path "/data.mdb")
+          data (data-file :lmdb path)
           dir (str path ".compact")
           size #(.length (java.io.File. ^String %))
           before (size data)]
-      (remove-dir! dir)
+      (lib/remove-tree! dir)
       (.mkdirs (java.io.File. ^String dir))
       (let [e (try (lmdb-ffi/compact-copy! (klmdb/open-env! path nil) dir) nil
                    (catch Throwable e e))]
         (klmdb/close-env! path)
         (if e
-          (do (remove-dir! dir)
+          (do (lib/remove-tree! dir)
               (contract/error :seon.db/compact-failed #'seon.db/compact-if-due! (str "compacting the store at " path ": " (ex-message e)) {:path path}))
-          (do (posix/c-rename (str dir "/data.mdb") data)
-              (remove-dir! dir)
+          (do (posix/c-rename (data-file :lmdb dir) data)
+              (lib/remove-tree! dir)
               (.delete (java.io.File. ^String (compact-marker path)))
               {:bytes-before before :bytes-after (size data) :ms (profile/ms-since t0)}))))))
 
@@ -948,7 +978,7 @@
   {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe [:map [:used-bytes :int] [:map-bytes :int]]]]}
   [cfg]
   (when (= :lmdb (get-in cfg [:store :backend]))
-    {:used-bytes (.length (java.io.File. (str (get-in cfg [:store :path]) "/data.mdb")))
+    {:used-bytes (.length (java.io.File. (data-file :lmdb (get-in cfg [:store :path]))))
      :map-bytes (get-in cfg [:store :lmdb :map-size])}))
 
 (defn head

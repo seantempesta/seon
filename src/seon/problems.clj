@@ -195,7 +195,7 @@
   "What brings a root's binary and its main into agreement, each then a restart of root: what the :stale-binary row, root's
   refused spawn and the last line of bin/root start and bin/update say. See docs/source.md#files-and-the-db-two-directions."
   (str "Bring them into agreement, then restart root: erase the store and seed it from the tree (bin/root stop; bin/root start --reindex, "
-       "which is rm -rf runs/store and bin/root start), or reindex main from disk at root ((my.root/import! sys), (my.root/load-docs! sys), "
+       "which is bin/remove-tree runs/store and bin/root start), or reindex main from disk at root ((my.root/import! sys), (my.root/load-docs! sys), "
        "(my.root/load-tasks! sys); then bin/root stop and bin/root start), or start the binary main's program was built from (bin/root next)"))
 
 (defn stale-binary

@@ -395,7 +395,8 @@
   "Release what init opened: its standbys killed; the server's socket closed for writing, and the boot server's
   process group (it and every child it forked) ended at once, so no stop waits for a server still warming to read its
   EOF (a promoted server, which leads no group, reads the EOF, kills and reaps its children and exits); its exit
-  awaited when it is root's child; then the event reader joined, whose EOF follows. Answers how the server ended:
+  awaited when it is root's child; every process it forked and has not reaped killed and its exit awaited (`:forked`, kept from
+  its :forked and :exit events); then the event reader joined, whose EOF follows. Answers how the server ended:
   :group-ended (the boot server's group, ended here) or :eof (a promoted server, left to read its EOF)."
   {:malli/schema [:=> [:cat :map] [:enum :group-ended :eof]]}
   [{:keys [pid fd reader] :as st}]
@@ -407,6 +408,12 @@
   ;; A promoted server leads no group: kill answers false, and it exits on the EOF as before
   (let [ended (if (and pid (lib/kill! (- pid) 9)) :group-ended :eof)]
     (some-> pid (lib/c-waitpid (ffi/alloc 4) 0))
+    ;; every process it forked that has not been reaped (:forked, emptied by each :exit) is killed and its exit awaited, so a stop
+    ;; answers only once every process it started has exited: killed with the group, an agent whose parent died was reaped later by
+    ;; launchd, and outlived the stop under load (batch 21's lifecycle step, :left). The wait ends by the kernel: a SIGKILLed
+    ;; process exits, and exit-chan answers at once for a pid already gone. Only a pid the kill reached is awaited: one gone, or
+    ;; never ours to signal (lib/kill! answers false for ESRCH and EPERM), is not waited on, so no wait can be a hang
+    (doseq [p (filterv #(lib/kill! % 9) (:forked st))] (a/<!! (poller/exit-chan p)))
     (some-> ^Thread reader (.join 5000))
     ended))
 
@@ -519,5 +526,10 @@
                           :standby (do (drop-standby (:standby-pending st)) [(assoc st :standby-pending nil) {:to-api [m]}])
                           [st {:to-api [m]}])
            (:forked :fork-failed) (do (some-> (get-in st [:in-flight (:agent m)]) sock/close!)
-                                      [(update st :in-flight dissoc (:agent m)) {:to-api [m]}])
+                                      ;; a forked process is root's to see end at its stop (release!): its pid kept until its :exit
+                                      [(cond-> (update st :in-flight dissoc (:agent m))
+                                         (and (= :forked (:ev m)) (:pid m)) (update :forked (fnil conj #{}) (:pid m)))
+                                       {:to-api [m]}])
+           ;; the server reaped a child: no longer one release! awaits
+           :exit [(update st :forked (fnil disj #{}) (:pid m)) {:to-api [m]}]
            [st {:to-api [m]}]))))

@@ -2,7 +2,7 @@
   "(actions-for db), index then actions, answers exactly the expected actions for a table of task graphs: needs
   DAGs, max-running, held and cancelled tasks, environment changes, a previous root's
   work, the end of an agent's work judged once by the done rule (`judgment`) and stored on its task, dead agents."
-  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is are testing]]
+  (:require [seon.lib] [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is are testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.task :as task]
@@ -454,11 +454,11 @@
         (is (= :told (:seon.task/outcome (task/task db "demo/a"))))
         (is (= red (:seon.task/reasons (task/task db "demo/a"))) "the reasons are the task's, so the next judging can compare")
         (is (= :running (:seon.task/execution (task/task db "demo/a"))) "and the task stays released")
-        (is (= ["root" #{(akey "a")}] [(:seon.message/from v) (set (map :seon.agent/key (:seon.message/to v)))]) "from root, to the agent")
+        (is (= [:root #{(akey "a")}] [(:seon.root/id (d/entity db (:db/id (:seon.message/from v)))) (set (map :seon.agent/key (:seon.message/to v)))]) "from the system, to the agent")
         (is (= {:reasons red :results fail} (select-keys (sedn/decode (:seon.message/body v)) [:reasons :results])))))
     (testing "told, its process gone: the next start is a spawn, never a wake (a told task is not parked)"
       (let [told (db-of [(decl "a")] :extra (concat (work "a" :told :members {:seon.task/reasons red})
-                                                    (task/message-tx "v-demo/a-1" "root" [(akey "a")] (sedn/encode {:reasons red}) 1000)))]
+                                                    (task/message-tx "v-demo/a-1" seon.task/system-sender [(akey "a")] (sedn/encode {:reasons red}) 1000)))]
         (is (= [(spawn "a")] (actions-for told :woken [(akey "a")])))
         (is (= [] (actions-for told)) "until it is woken")))
     (testing "the same reasons again: held for root, saying so, and no message"
@@ -480,7 +480,7 @@
             max-b (cfg/value :seon.config.merge/max-behind)]
         (let [{:keys [db outcome]} (judged-behind 2)]
           (is (= :behind outcome) "under the bound: told again, as behind")
-          (is (= "root" (:seon.message/from (verdict-of db))))
+          (is (= :root (:seon.root/id (d/entity db (:db/id (:seon.message/from (verdict-of db)))))) "from the system")
           (is (= :running (:seon.task/execution (task/task db "demo/a"))) "and not held"))
         (let [{:keys [db outcome]} (judged-behind max-b)]
           (is (= :closed outcome) "at the bound: held for root")
@@ -488,7 +488,7 @@
     (testing "different reasons: a verdict again, which wakes"
       (let [{:keys [db outcome]} (judge! (told [{:reason :no-proofs}]) "a" {:outcome :red} :results fail)]
         (is (= :told outcome))
-        (is (= "root" (:seon.message/from (verdict-of db))))))
+        (is (= :root (:seon.root/id (d/entity db (:db/id (:seon.message/from (verdict-of db)))))) "from the system")))
     (testing "a merge refused by the done rule holds"
       (let [mdb' (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running)))
             j (judgment-of mdb' "a-merge" {:end {:outcome :red} :results fail})]
@@ -692,7 +692,7 @@
   ;; carries, not only for the one tell-tx adds, so a verdict the judge writes to the agent itself (:told) wakes it as a person's message
   ;; does (a refused green waited for a restart: an audit, 2026-11-08)
   (let [db (db-of [(decl "a")] :extra (work "a" :running))
-        verdict (task/message-tx "m-verdict" "root" [(akey "a")] "The done rule refused it: make the proof green." 1)
+        verdict (task/message-tx "m-verdict" seon.task/system-sender [(akey "a")] "The done rule refused it: make the proof green." 1)
         [st _] (#'r/write (st-of db) "demo/a" :done verdict)]
     (is (contains? (get-in st [:idx :late]) (akey "a")) "the agent the verdict is to is held for waking")
     (let [e (:db/id (d/entity db [:seon.agent/key (akey "a")]))
@@ -745,7 +745,7 @@
            _ (d/transact conn (into (task/execution-tx ["demo/a"] :running) (booted-tx "boot-1" 4)))
            _ (d/transact conn (work "a" :running))
            _ (d/branch! conn (:branch cfg) sb)
-           _ (d/transact conn (task/message-tx "m1" "owner" [k] "carry on" 1000))
+           _ (d/transact conn (task/message-tx "m1" (seon.task/sender "owner") [k] "carry on" 1000))
            at (fn [late] (let [db @conn] {:db db :conn conn :idx (assoc (r/index db) :late late :woken #{}) :boot "boot-1" :rid 0 :pending {} :flights {}}))
            running (at #{})
            held (r/wake (:idx running) (:db running) k)]
@@ -758,7 +758,7 @@
            (is (= ["demo/a"] (mapv :task (r/actions (:idx st)))))))
        (testing "parked with the message on its branch (kept there, or removed): not woken, nothing starts"
          (let [bc (pdb/connect (assoc cfg :branch sb))]
-           (try (d/transact bc (task/message-tx "m1" "owner" [k] "carry on" 1000))
+           (try (d/transact bc (task/message-tx "m1" (seon.task/sender "owner") [k] "carry on" 1000))
                 (let [st (#'r/settle-late (at #{k}))]
                   (is (= [#{} #{}] [(get-in st [:idx :woken]) (get-in st [:idx :late])]))
                   (is (= [] (r/actions (:idx st)))))
@@ -798,7 +798,7 @@
   gigabyte under the quadratic schema transaction), and its nodes are at addresses, which is why these proofs
   are not on the in-memory test store. Removed when the process ends."
   (delay (let [path (str (seon.config/checkout) "/target/tmp/observed-" (random-uuid))]
-           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (sh/sh "rm" "-rf" path))))
+           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (seon.lib/remove-tree! path))))
            path)))
 
 (defn- disk-main
@@ -1525,7 +1525,14 @@
       (is (= [] (actions-for (db-of [(decl "a")] :extra (parked :parked)))))
       (is (= [{:task "demo/a" :cause "parked: cap, waiting for a message" :agent (akey "a") :blocks ["demo/b"]}]
              (r/root-causes (r/index (db-of [(decl "a") (decl "b" :needs ["a"])] :extra (parked :cap)))))
-          "quiet names it, with what it blocks"))
+          "quiet names it, with what it blocks")
+      ;; a session parked for its person (outcome :parked) is a root cause only while it holds up other work: one that blocks nothing is
+      ;; at rest (root's own session, made at every boot, parks so). Red before: every parked session was listed, root's included
+      (is (= [] (r/root-causes (r/index (db-of [(decl "a")] :extra (parked :parked)))))
+          "a parked session that blocks nothing is no cause")
+      (is (= [{:task "demo/a" :cause "parked: parked, waiting for a message" :agent (akey "a") :blocks ["demo/b"]}]
+             (r/root-causes (r/index (db-of [(decl "a") (decl "b" :needs ["a"])] :extra (parked :parked)))))
+          "and one that holds up released work is"))
     (testing "a wake in flight: more wakes start nothing more, since one process runs one work! (flow-lab's hazard 4)"
       (is (= [] (actions-for (db-of [(decl "a")] :extra (work "a" :running)) :woken [(akey "a") (akey "a")]))))
     (testing "woken: a wake on its process"

@@ -151,7 +151,7 @@
                  (if (and old (= input (:input old)))
                    [[view patch n] prev placed]
                    (let [[hiccup html kept] (render-unit ix u (:kept old))
-                         view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container) (some? kept) (assoc :kept kept)))]
+                         view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container) (:parent u) (assoc :parent (:parent u)) (some? kept) (assoc :kept kept)))]
                      (cond
                        (= html (:html old)) [[view patch (update n :same inc)] prev placed]
                        (and container (nil? old))
@@ -173,14 +173,22 @@
   (str/replace html #"<!--s:([^>]*?)-->" (fn [[_ id]] (compose (get-in units [id :html] "") units))))
 
 (defn- finish-patch
-  "A patch's appends and prepends as HTML (a container's new rows before what it holds as one
-  prepend, in the layout's order), and the removes of the contained units the layout no longer has."
+  "A patch's units as HTML, each composed with its children's (a unit's slots), a unit inside an ancestor the patch also sends left
+  to it, its appends and prepends (a container's new rows before what it holds as one prepend, in the layout's order), and the removes
+  of the contained units the layout no longer has. See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :map :map [:set :string]] [:tuple :map :map]]}
   [view patch live-ids]
   (let [gone (for [[id u] (:units view) :when (and (:container u) (not (live-ids id)))] id)
         view (update view :units #(apply dissoc % gone))
-        html #(compose (get-in view [:units % :html]) (:units view))]
+        html #(compose (get-in view [:units % :html]) (:units view))
+        ;; a unit sent inside an ancestor this patch also sends (a parent re-drawn carries its children, composed) is not sent again
+        sent (into #{} (concat (map first (:frags patch)) (map second (:appends patch)) (map second (:prepends patch)) (map second (:afters patch))))
+        inside? (fn inside? [id] (when-let [p (get-in view [:units id :parent])] (or (contains? sent p) (inside? p))))
+        own (fn [k xs] (vec (remove #(inside? (nth % k)) xs)))
+        patch (-> patch (update :frags #(own 0 %)) (update :appends #(own 1 %)) (update :prepends #(own 1 %)) (update :afters #(own 1 %)))]
     [view (-> patch
+              ;; each sent unit's html with its children's composed into its slots
+              (update :frags (fn [fs] (vec (for [[id _] fs] [id (html id)]))))
               (update :appends (fn [as] (vec (for [[c el] as] [c (html el)]))))
               (update :prepends (fn [ps] (vec (for [[c group] (group-by first ps)] [c (apply str (map (comp html second) group))]))))
               ;; a unit placed after its sibling: by the sibling's element id
@@ -317,7 +325,7 @@
 
 (defn- kept-walk
   "A walk kept across moves: entity e's ctx on db (seon.ctx/build, its tree as mark makes it) in a reactive
-  atom, drawn once by the layout its entity names (seon.render/layout-of: its tree, with ident, the identity the caller
+  atom, drawn once by its entity's render (seon.render/render-var-of: its tree, with ident, the identity the caller
   holds of it, for a branch that holds no entity yet) over the db it holds: {:w :a :c :at}, :at a volatile of that db.
   Root's own page (root-walk), each user's (`user-walk`) and each watched agent's branch (`branch-walk!`) keep one; `advance-walk!`
   moves it. See docs/render.md#a-page-is-a-kept-walk."
@@ -325,7 +333,7 @@
   [db e branch ident mark]
   (let [ix (program/index-of-db db)
         c (assoc-in (ctx/build ix db e branch) [:ix :own-index?] true) at (volatile! db) a (ratom/atom (mark (:tree c)))
-        w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/layout-of ix (merge ident (:tree c))) {}] ix)]
+        w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/render-var-of ix (merge ident (:tree c))) {} (ratom/ref-view a ctx/changes)] ix)]
     (render/flush! w nil)
     {:w w :a a :c c :at at}))
 
@@ -399,16 +407,39 @@
             (vswap! cell assoc n kw)
             kw)))))
 
+(defn- list-units
+  "The units of list sel among units (seon.render/placed-units, a parent before its children): those placed in it and every unit
+  nested in one of them, at any depth. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat [:sequential :map] :string] [:vector :map]]}
+  [units sel]
+  (first (reduce (fn [[out ids] u] (if (or (= sel (:container u)) (contains? ids (:parent u))) [(conj out u) (conj ids (:id u))] [out ids]))
+                 [[] #{}] units)))
+
 (defn- user-walks
   "St with each user's kept walk advanced to main db, and the views that show one dirty, as root's own is (`root-walk`): the components the move reached are drawn, nothing else. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
   [st db]
-  (let [cell (or (:user-walks st) (volatile! {}))]
+  (let [cell (or (:user-walks st) (volatile! {}))
+        ;; the signed-in user's agents list is every page's (`user-sides`): its change redraws every view
+        signed (some-> db (d/entity [:seon.root/id :root]) :seon.root/signed-in :seon.user/name)
+        side (fn [] (when-let [kw (get @cell signed)] (into {} (for [u (list-units (render/placed-units (:w kw)) "#c-side")] [(:id u) (:rev u)]))))
+        before (side)]
     (doseq [[n kw] @cell] (vswap! cell assoc n (advance-walk! kw db :main identity)))
     (cond-> st
+      (not= before (side)) (update :dirty (fnil into #{}) (keys (:views st)))
       (seq @cell) (update :dirty (fnil into #{})
                           (filter (fn [v] (let [x (if (vector? v) (second v) v)]
                                             (when (keyword? x) (when (not= :root x) (some->> (location db x) (d/entity db) :seon.user/name))))) (keys (:views st)))))))
+
+(defn- user-sides
+  "The agents list every page shows: the signed-in user's (root's :seon.root/signed-in), as that user's kept walk drew it (seon.render.ui/user's
+  c-side): root, then what the user started, each with what it started under it. Nothing before main is read or with no one signed in.
+  See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :map [:maybe :seon.host/db]] [:vector :map]]}
+  [st db]
+  (if-let [kw (when-let [u (some-> db (d/entity [:seon.root/id :root]) :seon.root/signed-in)] (user-walk st db u))]
+    (list-units (render/placed-units (:w kw)) "#c-side")
+    []))
 
 (defn- agent-view
   "View's page when it names an agent (entity eid on main db): its components as its process drew
@@ -445,25 +476,30 @@
         branch-units (fn [] (if-let [kw (or (walked) (user-walk st db e))]
                               (quiet #(render/placed-units (:w kw)))
                               (let [t (cond-> (cold-tree) (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
-                                    w (quiet #(render/draw t ctx/changes bdb (render/layout-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
+                                    w (quiet #(render/draw t ctx/changes bdb (render/render-var-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
                                 (try (render/placed-units w) (finally (render/dispose-walk! w))))))
         ;; @ctx's part pairs (seon.render.ui/ctx-parts): what the model reads of each part of the task's list, beside
         ;; its unit as the page draws it, from one walk of the page
         ;; the part texts the tab opened (/open: a long one is drawn closed, ui/ctx-parts)
         opened-parts (into #{} (filter #(str/starts-with? % "d-part-")) (get-in st [:tab view :open] #{}))
         pairs (fn [w] (let [all (render/placed-units w)
+                            by (into {} (map (juxt :id identity)) all)
                             lists (render/page-lists w)
-                            us (filterv #((set lists) (:container %)) all)
+                            ;; each list's units, the ones nested in them too: a nested one's change is the pair's
+                            us (vec (mapcat #(list-units all %) lists))
                             ;; the page's rules come with the parts they style
-                            rules (filterv #(= "#p-rules" (:container %)) all)]
+                            rules (list-units all "#p-rules")
+                            ;; a part's unit as the page shows it, its nested units composed into it
+                            html #(compose (:html %) by)]
                         {:id "d-parts" :container "#c-rows" :rev (hash [(mapv (juxt :id :rev) (concat us rules)) opened-parts])
-                         :html (h/html (ui/ctx-parts (render/placed-hiccup w lists) (into {} (map (juxt :id :html)) us) opened-parts (apply str (map :html rules))))}))
+                         :html (h/html (ui/ctx-parts (render/placed-hiccup w lists) (into {} (map (juxt :id html)) (remove :parent us)) opened-parts
+                                                     (apply str (map html (remove :parent rules)))))}))
         ;; the debug view: @ctx, its part pairs and the agent's record as data by the one printer (its :seon.ctx/ctx render)
         ctx-units (fn [] (let [kw (walked)
                                t (if kw (:tree (:c kw)) (cold-tree))
                                part-unit (if kw
                                            (quiet #(pairs (:w kw)))
-                                           (let [w (quiet #(render/draw t ctx/changes bdb (render/layout-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
+                                           (let [w (quiet #(render/draw t ctx/changes bdb (render/render-var-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
                                              (try (quiet #(pairs w)) (finally (render/dispose-walk! w)))))]
                            [part-unit
                             {:id "d-ctx" :container "#c-rows" :rev (:t t)
@@ -476,12 +512,13 @@
                       ;; a branch that could not be read: its error, by the error's render
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/hiccup {:seon.render/index (seon.db/index)} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
-        sides (when-not (some #(= "#c-side" (:container %)) units) (filterv #(= "#c-side" (:container %)) (some-> (:root-walk st) :w render/placed-units)))
+        ;; the signed-in user's agents list, the one every page shows (`user-sides`), and the agent's head from its facts on main
+        sides (when-not (some #(= "#c-side" (:container %)) units) (user-sides st db))
         head (cond-> (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
                (not (task/this-boots db e)) (dissoc :processes))
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
-                   :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent {} head)])}]
+                   :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent-head {} head)])}]
     (ui/page-chrome {:units (vec (concat sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
@@ -499,13 +536,12 @@
   "St with root's walk current as of main db: root's ctx (seon.ctx/build of root's entity on main)
   held in a reactive atom its walk draws by the layout root's entity names (:seon.render/root-ctx), built at main's
   first read, then advanced by what each move of main changed (seon.ctx/advance, its datoms
-  flushed): the walk draws the components their change reached, nothing else. Every page whose
-  agents list it shows (root's, each agent's) is dirty when one of its units moved."
+  flushed): the walk draws the components their change reached, nothing else. Root's page is dirty when it moves; the agents
+  list every page shows is the signed-in user's (`user-sides`), not root's."
   {:malli/schema [:=> [:cat :map :seon.host/db [:maybe :seon.host/db]] :map]}
   [st db held]
   (let [root (:db/id (d/entity db [:seon.root/id :root]))
-        rw (:root-walk st)
-        side (fn [w] (into {} (for [u (render/placed-units w) :when (= "#c-side" (:container u))] [(:id u) (:rev u)])))]
+        rw (:root-walk st)]
     (cond
       (nil? root) st
       (nil? rw)
@@ -513,14 +549,11 @@
           (update :dirty (fnil into #{}) (keys (:views st))))
       (nil? held) st
       :else
-      (let [{:keys [w a]} rw
-            before (side w)
+      (let [{:keys [a]} rw
             ;; root's process (process!) is root's own data beside the pull: kept across a move of main
             p (:process @a) h (:health @a)
             rw (advance-walk! rw db :main #(cond-> % p (assoc :process p) h (assoc :health h)))]
-        (cond-> (assoc st :root-walk rw)
-          true (update :dirty (fnil conj #{}) :root)
-          (not= before (side w)) (update :dirty (fnil into #{}) (keys (:views st))))))))
+        (update (assoc st :root-walk rw) :dirty (fnil conj #{}) :root)))))
 
 (defn- process!
   "St with root's process value p (root's ruling on root's process values, option a: the writer's, the fork
@@ -597,7 +630,7 @@
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
   [st]
   (when-let [{:keys [w]} (:root-walk st)]
-    (ui/page-chrome {:units (render/placed-units w) :view (ui/view-param :root) :tab :chat :input {:schema :seon.render/root-input :value {}}} :root)))
+    (ui/page-chrome {:units (into (user-sides st (:main-db st)) (render/placed-units w)) :view (ui/view-param :root) :tab :chat :input {:schema :seon.render/root-input :value {}}} :root)))
 
 (defn- second-of
   "The name inside a view, [:chat v]'s v, else nil."
@@ -939,7 +972,7 @@
         detail (print/text r)]
     (when form
       (let [rec (repl/record-details form (if err {:ex r} {:value r}) {})]
-        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) "user" rec)}}
+        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) (task/sender (config/value :seon.config.root/user-name)) rec)}}
                               :route [:render :answers] :tag [:web-record]})))
     (ask-state (cond-> (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail})
                  ;; an eval opened is a fact on main the agent takes when it draws: ask it to draw again
