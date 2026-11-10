@@ -13,7 +13,7 @@
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt] [seon.stage :as stage] [seon.root :as root] [seon.doc]))
+            [seon.program-test :as pt] [seon.stage :as stage] [seon.root :as root] [seon.doc] [seon.system] [test-runner]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -195,6 +195,32 @@
         (is (:seon.error/type (program/config-refused db0 tx)) "the entry it refuses is refused, read through the cut")
         (is (nil? (program/config-refused db0 (source/tx-of db0 (assoc files schema-file schema-text config/shipped-file (str/replace-first conf ":seon.config.zz/k 0" ":seon.config.zz/k 5")) false)))
             "and one valid only under the schema the same import registers is not")))))
+
+(deftest a-binary-is-current-for-a-tree-unless-what-differs-reaches-root
+  ;; docs/source.md#the-binary-records-its-program: the one rule (Point, 2026-11-10) the gate's build, the spawn refusal and the
+  ;; stale-binary row ask. db is the checkout's program, so tree is its working tree; each case is the binary's tree made from it
+  ;; with one change (a git index of its own: the repository is not touched)
+  (let [db (test-runner/program)
+        tree (fx/tree-id here)
+        g (program/reach-graph db (fx/declared-refs seon.system/built-text))
+        git (fn [env & args] (:out (apply sh/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
+        built-with (fn [path f]
+                     ;; tree with path's text replaced by (f text), or its gitlink moved when f is :pin
+                     (let [idx (str here "/target/tmp/binary-current-" (random-uuid) ".index") env {"GIT_INDEX_FILE" idx}]
+                       (git env "read-tree" tree)
+                       (if (= :pin f)
+                         (git env "update-index" "--cacheinfo" (str "160000," (apply str (repeat 40 "1")) "," path))
+                         (let [blob (str/trim (:out (sh/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (f (slurp (str here "/" path))))))]
+                           (git env "update-index" "--cacheinfo" (str "100644," blob "," path))))
+                       (let [t (str/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
+        current (fn [from] (root/binary-current db {:inputs {:tree from}} tree g))
+        tweak (fn [marker] (fn [text] (str/replace-first text marker (str marker " "))))]
+    (is (nil? (current tree)) "the same tree")
+    (is (nil? (current (built-with "test/seon/required_whole.clj" #(str % "\n;; a test changed\n")))) "a test's change: a process loads it from main")
+    (is (nil? (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form's change: the agent loads it from main")
+    (let [r (current (built-with "src/seon/writer.clj" (tweak "(defn writer-proc")))]
+      (is (some #{'seon.writer/writer-proc} (:reaches r)) (str "a root proc's step is root's own code: not current " (pr-str r))))
+    (is (= ["reference-code/lmdb"] (:reaches (current (built-with "reference-code/lmdb" :pin)))) "a pin: not current")))
 
 (deftest a-config-entry-writes-back-only-its-own-bytes
   ;; docs/source.md#a-program-file: the config file is one entity per entry, each form its exact text with its tags unread, and a write-back changes only what an entry changed
