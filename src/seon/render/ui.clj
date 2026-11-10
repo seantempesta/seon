@@ -1789,22 +1789,25 @@
          [:p (str task ": " cause (when run (str " (" run ")")) (when (seq blocks) (str " · blocks " (count blocks))))])])))
 
 (defn root-input
-  "Root's input on its page: a sentence asking for something (seon.root/ask!); under More, spawn agents (seon.root/spawn!) or evaluate forms in
-  every live agent (seon.root/submit! to :all)."
+  "Root's input on a person's page: a sentence asking for something (seon.root/ask!). What is for whoever works on Seon itself is on
+  root's debug page (`root-tools`). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts _]
   [:section {:id (:unit opts) :class "flex flex-col gap-2 xl:flex-row"}
    ;; a sentence is a request: a task an agent starts on (seon.root/ask!)
    [:form {:class "flex min-w-0 flex-1 gap-2" :seon/call 'seon.root/ask! :seon/agent :root}
-    [:input {:name "task" :class "flex-1 min-w-0" :autocomplete "off" :placeholder "What would you like done?"}]]
-   ;; for whoever is working on Seon itself
-   [:details {:data-preserve-attr "open" :class "text-xs"}
-    [:summary {:class "seon-note cursor-pointer"} "More"]
-    [:div {:class "mt-1 flex flex-wrap items-baseline gap-2"}
-     [:button {:type "button" :class "rounded border border-base-700 px-2" :seon/call 'seon.root/spawn! :seon/agent :root :seon/args {:n 10}} "spawn 10"]
-     [:form {:class "flex min-w-0 flex-1 items-baseline gap-2" :seon/call 'seon.root/submit! :seon/agent :all}
-      [:span {:class "text-signal"} "all=>"]
-      [:input {:name "forms" :class "flex-1 min-w-0" :autocomplete "off" :spellcheck "false" :placeholder "a form every live agent evaluates"}]]]]])
+    [:input {:name "task" :class "flex-1 min-w-0" :autocomplete "off" :placeholder "What would you like done?"}]]])
+
+(defn root-tools
+  "Root's tools for whoever works on Seon itself, on root's debug page: spawn agents (seon.root/spawn!) or evaluate forms in every live
+  agent (seon.root/submit! to :all). See docs/render.md#the-debug-page-is-the-wire-request."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  [:section {:class "flex flex-wrap items-baseline gap-2 text-xs"}
+   [:button {:type "button" :class "rounded border border-base-700 px-2" :seon/call 'seon.root/spawn! :seon/agent :root :seon/args {:n 10}} "spawn 10"]
+   [:form {:class "flex min-w-0 flex-1 items-baseline gap-2" :seon/call 'seon.root/submit! :seon/agent :all}
+    [:span {:class "text-signal"} "all=>"]
+    [:input {:name "forms" :class "flex-1 min-w-0" :autocomplete "off" :spellcheck "false" :placeholder "a form every live agent evaluates"}]]])
 
 ;;; --- root-ctx: root's ctx as components (docs/render.md#components) ---------------------------
 
@@ -2251,6 +2254,7 @@
        [:p {:class "text-text-400"} (if context
                                       "Its page as it reads it: the render of its ctx, each component's hiccup by its id, the text /context.txt serves, drawn again when its ctx changes."
                                       "A bar is one request to the model: its height the tokens sent, blue what the provider's cache served. Below, the request chosen, as it went on the wire, each message by its role; open one to read its fields as sent.")]]
+      (when (= :root focus) (root-tools))
       (when context (slot (:id context)))
       ;; an agent's: its strip and its turn are units, so its layout never moves: a step, a turn added or the first
       ;; turn patches them in place (a patch reaches only the elements the tab holds)
