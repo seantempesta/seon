@@ -288,7 +288,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :any] :map]}
   [db branch] (let [c (d/commit-id db)] (cond-> {:t (:max-tx db) :branch branch} c (assoc :commit c))))
 
-;; ---- provenance: a query on the tx-meta (docs/ctx.md#provenance) --------------------------
+;; ---- provenance: a query on the tx-meta (docs/ctx.md#provenance-who-made-each-fact) --------------------------
 
 (defn- with-environment
   "Map t with db's environment on branch in place of the one it held (environment-keys)."

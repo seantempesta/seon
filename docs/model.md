@@ -36,7 +36,7 @@ With thinking on, DeepSeek answers a `reasoning_content` beside the reply, and a
 
 ## Usage is recorded, never assumed
 
-A completion carries what the provider reported: prompt, completion and reasoning tokens, and the prompt tokens its prefix cache served and did not. ```seon.turn/usage``` records them on the turn's model call (`:seon.model-call/tokens`, `:seon.model-call/cache-hit-tokens`, `:seon.model-call/cache-miss-tokens`; [ctx](ctx.md#the-record-is-the-agents-work)); a count the provider did not send is absent, never 0. Prices per model are in the manifest, so spend is tokens times price.
+A completion carries what the provider reported: prompt, completion and reasoning tokens, and the prompt tokens its prefix cache served and did not. ```seon.turn/usage``` records them on the turn's model call (`:seon.model-call/tokens`, `:seon.model-call/cache-hit-tokens`, `:seon.model-call/cache-miss-tokens`; [ctx](ctx.md#the-agents-entity-holds-its-work)); a count the provider did not send is absent, never 0. Prices per model are in the manifest, so spend is tokens times price.
 
 ## Failures
 

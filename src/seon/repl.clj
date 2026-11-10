@@ -1188,7 +1188,7 @@
 (defn- the-walk
   "This agent's walk of its render of ctx (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
   branch's db), held in its state: the one cache of its components, made again when the branch declares another
-  layout (docs/ctx.md#the-record-is-the-agents-work). It draws what its model reads until a
+  layout (docs/ctx.md#the-agents-entity-holds-its-work). It draws what its model reads until a
   person's page asks for the rest (`whole-walk`): what nobody reads costs nothing."
   {:malli/schema [:=> [:cat] :map]}
   []

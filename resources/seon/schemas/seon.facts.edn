@@ -576,7 +576,7 @@
  ;; ---- a process: one spawn of an agent, its telemetry on its own entity pointing at the agent
  ;; (seon.ctx/the-record-is-facts-about-the-work, move 2), so the agent's pull holds its work and no more; an agent's
  ;; current process is its newest (seon.task/current-process); root's agents card joins them
- ;; (docs/ctx.md#the-record-is-the-agents-work) ----
+ ;; (docs/ctx.md#the-agents-entity-holds-its-work) ----
  ;; the agent's key and the process's pid (seon.task/agent-tx)
  :seon.process/id [:and {:seon.db/identity true} :string]
  :seon.process/agent [:and {:seon.db/to [:seon.db/agent-fact] :seon.db/index true} :seon.db/ref]
@@ -598,7 +598,7 @@
  ;; ---- a model call: one request to the model, on its own entity pointing at its agent (the turn is a
  ;; number on each record, docs/turn.md#the-turn-is-a-number: what a turn entity held is the model call's). Its reply, its
  ;; reasoning and how it stopped are the model's words; its tokens, sent-hash and split are bookkeeping, which the agent's
- ;; pull leaves out (docs/ctx.md#the-record-is-the-agents-work); the debug page and the turn's header read it ----
+ ;; pull leaves out (docs/ctx.md#the-agents-entity-holds-its-work); the debug page and the turn's header read it ----
  ;; "<agent key>/<n>", n the agent's turn it answers; an outside read of the context (seon.turn/context-block) "<agent key>/read-<k>"
  :seon.model-call/id [:and {:seon.db/identity true} :string]
  ;; the agent whose request it is, and the turn it answers (a model's: :seon.agent/turn when it started) or the read's own
