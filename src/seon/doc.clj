@@ -480,22 +480,17 @@
    :line (str/trim (subs v (inc (or (str/last-index-of v "\n" (max 0 (dec i))) -1)) (or (str/index-of v "\n" i) (count v))))})
 
 (defn- named-hits
-  "The hits of text v of entity e under attribute a, naming it as its kind does: [{:kind :name :rank}]
-  (rank 0 when the name holds s, 1 when its doc or heading does, 2 else), kinds the ones asked; has? asks whether a text holds s."
-  {:malli/schema [:=> [:cat :seon.host/db :int :qualified-keyword [:set :keyword] ifn?] [:vector :map]]}
-  [db e a kinds has?]
-  (let [x (d/entity db e)
-        in? (fn [t] (and t (has? (str t))))]
-    (case a
-      :form/src (vec (for [dv (d/datoms db :eavt e :form/defines)
-                           :let [v (d/entity db (:v dv)) n (:var/name v) kind (if (contains? (set (:var/meta v)) :test) :test :var)]
-                           :when (and n (kinds kind))]
-                       {:kind kind :name n :rank (cond (in? (name n)) 0 (in? (:var/doc v)) 1 :else 2)}))
-      :seon.doc/text (when (kinds :section)
-                           [{:kind :section :name (:seon.doc/address x)
-                             :rank (cond (in? (:seon.doc/address x)) 0 (in? (:seon.doc/heading x)) 1 :else 2)}])
-      :seon.task/plan (when (kinds :task) [{:kind :task :name (:seon.task/id x) :rank (if (in? (:seon.task/id x)) 0 2)}])
-      :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key x) :rank (if (in? (str (:schema/key x))) 0 2)}]))))
+  "The hits of text v of entity e under attribute a, naming it as its kind does: [{:kind :name}], kinds the ones asked."
+  {:malli/schema [:=> [:cat :seon.host/db :int :qualified-keyword [:set :keyword]] [:vector :map]]}
+  [db e a kinds]
+  (case a
+    :form/src (vec (for [dv (d/datoms db :eavt e :form/defines)
+                         :let [v (d/entity db (:v dv)) n (:var/name v) kind (if (contains? (set (:var/meta v)) :test) :test :var)]
+                         :when (and n (kinds kind))]
+                     {:kind kind :name n}))
+    :seon.doc/text (when (kinds :section) [{:kind :section :name (:seon.doc/address (d/entity db e))}])
+    :seon.task/plan (when (kinds :task) [{:kind :task :name (:seon.task/id (d/entity db e))}])
+    :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key (d/entity db e))}])))
 
 (defn terms
   "Text s's terms, its identifier tokens, lower case: s split at every character that is no letter or digit
@@ -646,7 +641,7 @@
   (when (= :form/src a)
     (when-let [n (some (fn [dv] (:ns/name (d/entity db (:v dv)))) (d/datoms db :eavt e :form/defines))]
       (let [kind (if (str/ends-with? (str n) "-test") :test :var)]
-        (when (kinds kind) [{:kind kind :name n :rank 2}])))))
+        (when (kinds kind) [{:kind kind :name n}])))))
 
 (defn grep
   "Every line of the texts of kinds on db that pattern matches, as grep answers them, one row each
@@ -672,7 +667,7 @@
                e (if indexed? (distinct (map first (get candidates a))) (map :e (d/datoms db :aevt a)))
                :let [v (:v (first (d/datoms db :eavt e a)))]
                :when (and v (re-find re v))
-               h (or (seq (named-hits db e a kinds (constantly true))) (ns-hit db e a kinds))
+               h (or (seq (named-hits db e a kinds)) (ns-hit db e a kinds))
                :when (or (nil? ns) (named-under? (str (:name h)) ns))
                [i line] (map-indexed vector (str/split-lines v))
                :when (re-find re line)
@@ -731,11 +726,12 @@
         (if (zero? sd)
           []
           (let [hits (for [d scored :let [z (/ (- (:score d) mean) sd)] :when (>= z z-min)
-                           h (named-hits db (:e d) (:a d) kinds (fn [t] (some #(str/includes? (str/lower-case t) %) ws)))]
+                           h (named-hits db (:e d) (:a d) kinds)]
                        ;; where its text is, [e a]: its line is read for the hits a caller shows (`line-of`), never for every hit
                        (assoc h :z z :bm25 (:score d) :in [(:e d) (:a d)]))]
-            (->> hits (sort-by (juxt (comp - :z) (comp str :name)))
-                 (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out (dissoc h :rank))])))
+            ;; each sort key made once, never in the comparator
+            (->> (vec hits) (map-indexed (fn [i h] [(- (:z h)) (str (:name h)) i h])) (sort-by pop) (map peek)
+                 (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out h)])))
                          [#{} []])
                  second)))))))
 

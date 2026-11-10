@@ -100,14 +100,15 @@
  :seon.config.root/main #or [#env SEON_MAIN "main"]
  ;; Root's system declaration (owner, 2026-10-20: the definition lives in a file).
  :seon.config.root/system-path #seon/checkout "resources/seon/system.edn"
- ;; The task files (resources/seon/tasks/<owning-ns>.edn, docs/tasks.md#task-files).
- :seon.config.root/tasks-dir #seon/checkout "resources/seon/tasks"
+ ;; The task files (resources/seon/tasks/<owning-ns>.edn, docs/tasks.md#task-files). bin/check sets SEON_TASKS
+ ;; to its run's own (none), so every root a check step starts, and every process it starts, indexes no task file of
+ ;; the checkout's: they cite the checkout's program, which a check's example program does not hold.
+ :seon.config.root/tasks-dir #or [#env SEON_TASKS #seon/checkout "resources/seon/tasks"]
  ;; Unit: directories of the checkout ("." is its top level, the .md files there: AGENTS.md, BAGGAGE.md,
- ;; README.md). The pages root loads into main as wiki sections at boot (seon.root/wiki-tx), so one search
- ;; and one view reach them (owner, 2026-10-27: "everything of consequence that is for seon agents use
- ;; should be indexed into the db"). docs/ is also watched and reloaded on change (my.root/loader-dirs);
- ;; the top level is read at boot only (watching it would watch the whole checkout, which kept
- ;; fseventsd saturated). Provenance: one-index audit, step 6 (root's scratchpad one-index.md). At the
+ ;; README.md). The pages an index (a seed, or my.root/load-docs!) writes into main as wiki sections
+ ;; (seon.root/wiki-tx), so one search and one view reach them (owner, 2026-10-27: "everything of
+ ;; consequence that is for seon agents use should be indexed into the db"); a boot reads none.
+ ;; Provenance: one-index audit, step 6 (root's scratchpad one-index.md). At the
  ;; bound: n/a; a dir with no .md files loads nothing.
  :seon.config.root/wiki-dirs ["docs" "."]
 
@@ -417,6 +418,10 @@
  ;; own dirs. It costs each boot the test forms' evaluation (+5 s a restart, measured
  ;; 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
  :seon.config.source/dirs ["src" "test" "resources/seon/schemas" "resources/seon/config" "bin"]
+ ;; Unit: path, relative to the source root. Where the tree keeps its task files: a fact of the tree's layout, what a reader of a
+ ;; tree's task files at a commit takes (bin/check's health step, test-runner/tasks-dir), never a process's place. A root's own
+ ;; task dir is :seon.config.root/tasks-dir (the same path under the checkout by default; a check run's root takes its run's own).
+ :seon.config.source/tasks-dir "resources/seon/tasks"
  ;; Unit: {path pattern, kind}. The allow-list of the files under the dirs above that are facts of the program and not namespaces: a kind is how seon.source
  ;; reads and draws the file, a pattern a path whose one * stands for any name in that directory. Read by the import, the merge and the write-back
  ;; (seon.config/file-kind). Provenance: the owner, 2026-11-07: "an allow list with patterns seems like a good idea". At the bound: a file no pattern
@@ -578,15 +583,32 @@
  ;; costs about 5 s, and 8 s more for its process tests' root (docs/testing.md#a-root-costs-what-it-boots), so it saves its cost past
  ;; about twice that on each side. At the bound: a run of less work than this runs in one shard, as the owner ruled 2026-10-30.
  :seon.config.proofs/shard-min-ms 30000
+ ;; Unit: MB. What one shard of a run takes at its peak, its own process and the roots and agents its tests start
+ ;; (seon.proofs/memory-jobs). Provenance: measured 2026-11-10, the summed RSS of one shard's process tree sampled every 2 s
+ ;; (the shard, its roots and agents: 9 processes at the peak) over seon.root-test's 12 process tests, 64 s: peak 2,046 MB. A
+ ;; 2 s sample can miss a shorter peak, and another namespace's tests may boot more: a floor, not a ceiling.
+ :seon.config.proofs/shard-mb 2048
+ ;; Unit: MB. The free memory a run leaves the machine (seon.proofs/memory-jobs): below it a run takes one shard. Provenance:
+ ;; a quarter of Seon's target machine (:seon.config.machine/memory-mb, 16 GB), the share other work keeps.
+ :seon.config.proofs/free-floor-mb 4096
  ;; Unit: ms. The least work a test child of an agent's test run is worth (seon.agent/run-tests-forked): the run forks
  ;; no more children than its tests' typical ms (seon.fx/typical-ms) divided by this, so a handful of quick tests run in
  ;; one. Provenance: measured 2026-10-29 (load ~10): a run of one trivial test in a fresh child took 36-42 ms (fork,
  ;; child start, exit); a child saves its cost only past twice that on each side, so 100 (docs/merging.md#a-merge-runs-what-the-change-reaches).
  ;; At the bound: a run of less work than this runs in one child.
  :seon.config.proofs/child-min-ms 100
- ;; Unit: ms. What a test counts for in that division when none of the run's tests was ever measured (the mean of those
- ;; measured, when some were). Provenance: the median typical ms of the main tests, 2026-10-29 (a verdict cache read).
+ ;; Unit: ms. What a test never measured counts for in a deal of tests into shards or children (seon.proofs/estimated-ms):
+ ;; never 1 ms, which dealt a run of 234 unmeasured process tests into one shard. Provenance: the mean typical ms (fx/typical-ms)
+ ;; of the verdict cache's in-process tests, 2026-11-10: 172 over 1,381 measured of 1,385 (median 10).
+ ;; 16, the MEDIAN typical ms of the in-process tests (a verdict cache read, 2026-10-29), not their mean of 172: the mean is
+ ;; pulled up by a few slow tests, and at 172 a handful of unmeasured tests counted as work for four children
+ ;; (seon.agent-test/a-handful-of-tests-runs-in-one-child, batch 2, 2026-11-10).
  :seon.config.proofs/unmeasured-ms 16
+ ;; Unit: ms. The same for a process test (one that reaches a process of its own: seon.program/graph-index's :process?), by
+ ;; the same rule, the MEDIAN, what a test usually costs, not a mean a few slow ones pull up. Provenance: the median typical ms of
+ ;; the verdict cache's process tests, 2026-11-10: 1,220 over 228 of 228 (mean 3,027). A gate of 234 unmeasured process tests is
+ ;; still worth every shard (234 x 1,220 / 30,000 = 9.5).
+ :seon.config.proofs/unmeasured-process-ms 1220
  ;; Unit: boolean. Whether each commit that moves main's program starts a run of main's tests
  ;; (seon.prove: a prove agent forked from main, results as facts every agent forked after reuses).
  ;; Provenance: task seon.proofs/main-is-proved-in-a-fork. Off: the run of all of main's

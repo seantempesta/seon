@@ -447,15 +447,47 @@
   (let [m (volatile! nil) h (profile/measure! #(problems/health db) #(vreset! m %))]
     [h @m]))
 
+(defn- calls-of
+  "The contracted calls of thunk f."
+  [f]
+  (let [m (volatile! nil)] (profile/measure! f #(vreset! m %)) (:calls @m)))
+
 (deftest health-reads-each-part-once
   (let [db0 (seeded 3 2)
         db (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" "# P\n\nIt says what it is about.\n"}))
         [h m] (measured-health db)
-        rows (get-in h [:classes :problem-unlinked :rows])]
+        rows (get-in h [:classes :problem-unlinked :rows])
+        ans (problems/answers db)
+        classes {:stalled #(problems/stalled-agents db ans) :stale-pin #(problems/stale-pins db ans)
+                 :stale-binary #(problems/stale-binary db ans) :orphan-page #(problems/orphan-pages db ans)
+                 :leadless-section #(problems/leadless-sections db ans) :uncited-task #(problems/uncited-tasks db ans)
+                 :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
+                 :stale-plan #(problems/stale-plans db ans) :waived-proof #(problems/waived-proofs db ans)
+                 ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it, over the derived rows as health hands them), and the folds
+                 :fixed (let [derived (#'problems/other-derived db ans)]
+                          #(let [a (problems/answers db)]
+                             (#'problems/health-with db a (:classes (#'problems/report-with db a {} nil)) derived)))}
+        measured (update-vals classes calls-of)
+        ;; 74 -> 86 -> 88 -> 89 on 2026-11-10 (uncited-tasks every ready task, stale-binary, waived-proof), one total; per class since. Each bound is the contracted calls measured on this world.
+        bounds {:stalled 1             ; the processes holding a stall fact, one range
+                :stale-pin 2           ; the pins of the branch scheme
+                :stale-binary 2        ; root's source fact: one seon.db/eid and one pull
+                :orphan-page 1         ; the sections' references, one scan
+                :leadless-section 1    ; the stored sections' first blocks
+                :uncited-task 15       ; the ready tasks' plans, cites and proofs (12 are the proofs read, seon.db/eid per proof), and task-reads (19 while it asked the program which cited vars were its own)
+                :unnamed-site 9        ; the catch sites of the program's forms (live? and form-of per form, the namespaces once)
+                :stale-section 2       ; the read datoms and the vars' forms, one scan each
+                :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
+                :waived-proof 1        ; the test forms' cost proofs passing by :overrun, one scan (Deep fixes' class)
+                :fixed 50              ; answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
+                :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (<= (:calls m) 74) "the contracted calls of one health read (74 on the world: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the fold of the counted classes is one, fold-counted)")))
+    (doseq [[c bound] (dissoc bounds :wrappers)]
+      (is (<= (measured c) bound) (str c " reads " (measured c) " contracted calls, bound " bound)))
+    ;; task-reads is in both uncited-task's row and stale-plan's (each measured alone makes it), and health makes it once (other-derived)
+    (is (<= (:calls m) (dec (apply + (vals bounds)))) (str "one health read makes " (:calls m) " contracted calls: the classes' bounds sum to " (apply + (vals bounds)) ", less task-reads counted twice"))))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -510,8 +542,9 @@
                :growth :linear
                :ops {:db/pull 7 :db/pull-attr 38 :edn/read-char 500}
                :sizes [2 6 18]
-               ;; measured on Jolt 00a3b321 (pulls got cheaper with J3's try; the read did not as much)
-               :overrun {:task "seon.problems/report-beyond-its-pulls" :measured {:ns 218794000.0 :bytes 227801600.0}}}))
+               ;; its waiver (task seon.problems/report-beyond-its-pulls, never filed) closed 2026-11-10: with it deleted the proof
+               ;; is green, 0.95x the ticks and 0.91x the bytes of its bound at 18
+               }))
 
 (defn clean-input
   "The flatness proof's input at k: 4 problems of each class over k clean tasks, each done."
@@ -559,7 +592,11 @@
                :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched task and its agent's task, the derived classes are carried and read where the two dbs differ; the program's changes come from the moved datoms (seon.merge/delta-changes given them), and the per-task part is the cold index nodes the task scans touch"
                :growth :linear
                :per-n {:ticks 1700 :bytes 10500 :calls 0}
-               :fixed {:ticks 650000 :bytes 3000000 :calls 54}
+               ;; fixed calls, once a read whatever n, summed by what makes them: Point, 2026-11-10 (in Sean's absence, reported to him): 54 -> 56
+               :fixed {:ticks 650000 :bytes 3000000 :calls (+ 54   ; the read before 2026-11-10 (with :waived-proof's one)
+                                                              1    ; seon.problems/task-reads: the tasks' readiness and cites, once
+                                                              1    ; seon.problems/stale-plans' own contract
+                                                              1)}  ; and its seon.db/eid of the var the world's ready task cites
                :sizes [10 30 100]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
@@ -696,6 +733,31 @@
     (testing "the page names it: no problem, nothing written to close it"
       (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
         (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
+
+(deftest a-root-on-a-stale-binary-is-a-problem
+  ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, docs/health.md#a-stale-binary: a boot holds seon.root/stale-binary's
+  ;; answer (is the binary current for the tree main was last brought to, by what differs reaching root's code) on root's source
+  ;; fact (seon.root/booted-source), and health derives one :stale-binary row from it while it is there, gone at the next boot on a
+  ;; current binary: computed at the boot, never here, no clock, never an import. Main moved by what its agents merged is no row
+  (let [db0 (world)
+        held {:root "/c" :files 1 :forms 1 :ms 1 :tree "t1"}
+        in {:env "e" :tree "t" :config {:seon.config.agent/max-turns "40"}}
+        cfg-in {:seon.config.agent/max-turns "41"}
+        boot (fn [db b built main stale] (d/db-with db [{:seon.root/id :root :seon.root/source (root/booted-source held b built main cfg-in stale)}]))
+        source #(:seon.root/source (d/pull % [:seon.root/source] [:seon.root/id :root]))
+        rows #(mapv (juxt :binary :tree) (get-in (problems/health %) [:classes :stale-binary :rows]))
+        messages #(mapv :message (get-in (problems/health %) [:classes :stale-binary :rows]))
+        stale (boot db0 "b1" {:program "p0" :inputs (assoc in :tree "t0")} "p1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]})]
+    (is (= [] (rows db0)) "no source fact: nothing known, no row")
+    (is (= [["t0" "t1"]] (rows stale)) "a binary not current for main's tree: one row naming both trees")
+    (is (some #(str/includes? % "seon.writer/commit-batch") (messages stale)) "and what between them reaches root's own code")
+    (is (nil? (:inputs (source stale))) "and no inputs to key agents' verdicts by")
+    (is (= [[nil "t1"]] (rows (boot db0 "b1" nil "p1" {:binary nil :tree "t1" :missing :binary-tree}))) "a binary whose build recorded no tree is unknown, never current")
+    (let [merged (boot stale "b2" {:program "p0" :inputs (assoc in :tree "t1")} "p2" nil)]
+      (is (= [] (rows merged)) "a current binary, main moved by what its agents merged (p2): no row, the last boot's answer gone")
+      (is (= (assoc in :tree "t1" :config cfg-in) (:inputs (source merged))) "its inputs, with the config in force, are what agents key verdicts by")
+      (is (= ["b2" "p0" "p0" "t1"] ((juxt :boot :binary :program :binary-tree) (source merged)))
+          "and its program the binary's, the one those inputs describe"))))
 
 (deftest a-pin-the-wiki-states-is-the-recorded-gitlink
   (let [db0 (world)
@@ -989,7 +1051,7 @@
   (let [;; the world holds docs/calc.md; the test's first case is a db with no wiki, so its sections go
         db0 (let [db (world)] (d/db-with db (for [{:keys [e]} (d/datoms db :aevt :seon.doc/address)] [:db/retractEntity e])))
         err {:seon.error/signature "eeeeeeeeeeeeeeee" :seon.error/class :platform :seon.error/count 1 :seon.error/agents 0
-             :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.watch/died}
+             :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.fx/io-error}
         unlinked #(filterv #{:platform} (mapv :class (get-in (problems/health %) [:classes :problem-unlinked :rows])))
         with-err (d/db-with db0 [err])]
     (is (= [] (unlinked with-err)) "no wiki loaded: unknown")
@@ -1056,7 +1118,8 @@
                ;; 47: the :stalled class (seon.problems/stalled-agents) is one more class to look up;
                ;; 49: :flaky (seon.proofs/flaky) one more
                ;; 52: :long-form one more class to look up
-               :fixed {:ns 3000000 :bytes 4000000 :calls 52}
+               ;; 54: :stale-plan one more (its seon.db/eid and derived-row), 2026-11-10
+               :fixed {:ns 3000000 :bytes 4000000 :calls 54}
                :sizes [10 30 100]}))
 
 (deftest attention-survives-a-store-write
@@ -1098,19 +1161,21 @@
                                 {:seon.task/id (str "app/" n) :seon.task/outcome done})))))
 
 (defn uncited-input
-  "The cost proof's input at n: n design steps (a finished task, a plan citing a var) and an
-  implement step each, all ready and fine."
+  "The cost proof's input at n tasks: n/2 design steps (a finished task, a plan citing a var) and an
+  implement step each, the implement steps ready and fine."
   [n] (let [v 'app.calc/inc2]
-        [(uncited-fixture (for [i (range n)] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
+        [(uncited-fixture (for [i (range (quot n 2))] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
 
-(deftest uncited-tasks-follow-the-ready-implement-steps
+(deftest uncited-tasks-cost-the-tasks-they-examine
+  ;; Sean, 2026-11-10: n restated as tasks examined (it was design/implement pairs): every task now gets its ready check, so
+  ;; the class's work is per task; 68 calls measured at 20 tasks against 85 (per-n 4, fixed 5, unchanged)
   (cost/proof {:of 'seon.problems/uncited-tasks :input 'seon.problems-test/uncited-input
-               :n "ready implement steps, each citing"
-               :work "the kind and task datoms once, then each implement step's needs walked once; the program's vars among the cites asked of the program once (seon.program/program-names, read from the cites at read time where :seon.task/references stored it at write: 43 calls before, 45 since)"
+               :n "tasks examined: finished design steps and the ready implement steps that need them, each citing"
+               :work "the kind and task datoms once, then each implement step's needs walked once; whether any cite exists along them (one seek a task; until 2026-11-10 the program's vars among the cites, asked of seon.program/program-names)"
                :growth :linear
-               :per-n {:ns 100000 :bytes 130000 :calls 4}
+               :per-n {:ns 50000 :bytes 65000 :calls 4}
                :fixed {:ns 500000 :bytes 500000 :calls 5}
-               :sizes [10 30 100]}))
+               :sizes [20 60 200]}))
 
 (deftest a-ready-implement-task-that-cites-nothing-is-a-problem
   ;; the context is only as good as the plan it is built from: an implement step whose accumulated
@@ -1124,13 +1189,76 @@
                ["waits" "Text, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]
         db (uncited-fixture pairs #{"waits"})
         rows #(into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health %) [:classes :uncited-task :rows]))]
-    (is (= #{["app/text-impl" :no-references] ["app/stubbed-impl" :placeholder-proof] ["app/bare-impl" :no-proofs]} (rows db))
-        "an implement step citing nothing, one whose proof is the stub, one with no proof; design steps' text plans and an implement step whose design is not done are not judged; a real proof is fine")
+    (is (= #{["app/text-impl" :no-references] ["app/stubbed-impl" :placeholder-proof] ["app/bare-impl" :no-proofs] ["app/waits" :no-references]} (rows db))
+        "a step citing nothing, one whose proof is the stub, one with no proof, and a ready step whose plan is text, whatever its kind; a finished step and one whose needs are not done are not judged; a real proof is fine")
     (testing "each closes with nothing written to close it"
       (let [fixed [["cites" cited] ["text" (str "Show `" v "` somewhere.")] ["stubbed" cited :seon.task/proofs #{'app-test/real}]
                    ["bare" cited :seon.task/proofs #{'app-test/real}] ["waits" "Text, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]]
-        (is (= #{} (rows (uncited-fixture fixed #{"waits"}))))))
+        (is (= #{["app/waits" :no-references]} (rows (uncited-fixture fixed #{"waits"}))) "only the ready step still citing nothing")))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))
+
+(deftest a-plan-goes-stale-when-what-it-cites-changes
+  ;; in a real run two agents spent evals because a plan, written before a function existed, said it was missing
+  ;; (docs/health.md#a-plan-that-went-stale)
+  (let [v 'app.calc/inc2
+        redefine [{:var/name v :var/form -1} {:db/id -1 :form/id "f-inc2-new" :form/src "(defn inc2 [x] (+ x 2))"}]
+        db0 (world)
+        planned (d/db-with db0 (seon.task/create-tx db0 [{:seon.task/ns 'app :seon.task/name "plan" :seon.task/kind :whole :seon.task/proofs #{'app-test/real}
+                                                          :seon.task/plan (str "It changes `" v "`.")}]))
+        rows #(mapv :evidence (get-in (problems/health %) [:classes :stale-plan :rows]))]
+    (is (= [] (rows planned)) "a var defined before the plan: no row")
+    (let [moved (d/db-with planned redefine)]
+      (is (= [{:kind :stale-plan :task "app/plan" :var v}] (rows moved)) "the var redefined after the plan: one row naming both")
+      (is (= [] (rows (d/db-with moved [{:seon.task/id "app/plan" :seon.task/plan (str "It changes `" v "`, as it now is.")}])))
+          "the plan written again closes it"))))
+
+(deftest a-ready-task-of-any-kind-that-cites-nothing-is-a-problem
+  ;; the class judged only :implement tasks, and no task on the store had that kind (all :whole, 2026-11-10): a check keyed on a
+  ;; kind matched nothing and never fired. A ready task is judged by its plan, whatever its kind
+  (let [db (world)
+        db (d/db-with db (seon.task/create-tx db [{:seon.task/ns 'app :seon.task/name "tile" :seon.task/kind :whole :seon.task/proofs #{'app-test/real}
+                                                   :seon.task/plan "The root tile shows what boot loaded."}]))
+        rows (into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health db) [:classes :uncited-task :rows]))]
+    (is (contains? rows ["app/tile" :no-references]) "a ready :whole task whose plan names nothing the context can pull")))
+
+(deftest a-cite-ends-with-its-target-and-its-task-shows-what-is-gone
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches, docs/references.md#task-references: an import that retracts a var
+  ;; a task cites left the cite without its required target, so the write check refused the whole import (2026-11-10:
+  ;; generated slow-test tasks citing tests, and root on main's older code could not boot). The cite ends with its target on
+  ;; the one path, and that write leaves the task :seon.task/gone naming it, which health reads (a datom, no parse)
+  (let [db (t/with (world) (t/task 'app.calc "gone" "Make `app.calc/inc2` add two exactly." #{'app.calc-test/total-sums}))
+        task #(d/pull % [:seon.task/gone] [:seon.task/id "app.calc/gone"])
+        cites #(set (map seon.task/cited-name (seon.task/cites-of % (pdb/eid % :seon.task/id "app.calc/gone"))))
+        files (into {} (for [n ['app.report 'app.calc-test]] [(:ns/file (d/entity db [:ns/name n])) (seon.source/file-text db n)]))
+        calc (str/replace (seon.source/file-text db 'app.calc) #"\n\n\(defn inc2[^\n]*\n" "\n")
+        _ (is (contains? (cites db) 'app.calc/inc2) "the task cites the var")
+        _ (is (not (str/includes? calc "inc2")) "the file the import reads no longer defines it")
+        after (t/with db (seon.source/replace-tx db (assoc files "src/app/calc.clj" calc)))
+        rows (fn [db] (filter #(= "app.calc/gone" (:task %)) (get-in (problems/health db) [:classes :uncited-task :rows])))]
+    (is (nil? (pdb/eid after :var/name 'app.calc/inc2)) "the import is accepted and the var is gone")
+    (is (not (contains? (cites after) 'app.calc/inc2)) "its cite ended with it")
+    (is (empty? (d/datoms after :avet :seon.cite/id "app.calc/gone app.calc/inc2")) "nothing of the cite is left")
+    (is (= ['app.calc/inc2] (:seon.task/gone (task after))) "the write that ended it left the task what is gone")
+    (is (= #{[:gone ['app.calc/inc2]] [:no-references nil]} (set (map (juxt :reason :gone) (rows after))))
+        "the task shows that its plan names what no longer exists (and, its one cite gone, that it cites nothing the context pulls)")
+    (is (empty? (rows db)) "before the import it was no problem")
+    (let [plan "Make ``app.calc/inc2`` add two again, once it is written."
+          fixed (t/with after (into [[:db/add [:seon.task/id "app.calc/gone"] :seon.task/plan plan]]
+                                    (seon.task/rederive-tx after {:seon.task/id "app.calc/gone" :seon.task/plan plan})))]
+      (is (nil? (:seon.task/gone (task fixed))) "the plan rewritten without the name clears the fact")
+      (is (not-any? #(= :gone (:reason %)) (rows fixed)) "and the row"))))
+
+(deftest a-task-citing-a-section-cites-something
+  ;; the standing root, 2026-11-10: 100 of 132 :no-references rows cited sections, files, schema keys or a dependency's vars, which
+  ;; the context pulls; only a cite of a program var counted. Any cite counts: each names what exists, a dead one refused at the write
+  (let [db0 (world)
+        db0 (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/p.md" "# P\n\nIt says what it is about.\n"}))
+        db (d/db-with db0 (seon.task/create-tx db0 [{:seon.task/ns 'app :seon.task/name "doc" :seon.task/kind :whole :seon.task/proofs #{'app-test/real}
+                                                     :seon.task/plan "Change what `docs/p.md#p` says."}]))
+        e (:db/id (d/entity db [:seon.task/id "app/doc"]))
+        rows (into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health db) [:classes :uncited-task :rows]))]
+    (is (seq (d/datoms db :avet :seon.cite/of e)) "the plan's cite of the section is written")
+    (is (not (contains? rows ["app/doc" :no-references])) "a task citing a section is not one that cites nothing")))
 
 (defn- var-forms
   "db0 with the vars app.cite/v0..: each in a src namespace, its form src, docstring and kind as given
@@ -1138,9 +1266,10 @@
   [db0 n spec]
   (let [ns-e (:db/id (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))
         nsym (:ns/name (d/entity db0 ns-e))]
-    (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/cite.clj"]]
-                         (mapcat (fn [i] (let [{:keys [src doc meta]} (spec i)]
-                                           [{:db/id (- (inc (* 2 i))) :form/id (str "cite-form-" i) :form/ns ns-e :form/order i :form/src src :form/defines [(- (* 2 i))]}
+    (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/cite.clj"] [:db/add ns-e :ns/doc "What the cite namespace does. See docs/health.md#a-function-that-cites-no-section."]]
+                         (mapcat (fn [i] (let [{:keys [src doc meta refs]} (spec i)]
+                                           [(cond-> {:db/id (- (inc (* 2 i))) :form/id (str "cite-form-" i) :form/ns ns-e :form/order i :form/src src :form/defines [(- (* 2 i))]}
+                                              refs (assoc :form/refs refs))
                                             (cond-> {:db/id (- (* 2 i)) :var/name (symbol (str nsym) (str "v" i)) :var/ns ns-e :var/form (- (inc (* 2 i))) :var/meta (or meta #{:arglists})}
                                               doc (assoc :var/doc doc))]))
                                  (range 1 (inc n)))))))
@@ -1177,6 +1306,17 @@
         (is (empty? (:caused split)) "and it refuses nothing")
         (is (not-any? #(re-find #"/v1 is public" %) (:attention split)))))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-var))))
+
+(deftest a-persons-code-owes-no-wiki-citation
+  ;; the request measurement, 2026-11-10: an agent adding demo.math/triple for a person spent its turns finding a section to cite,
+  ;; because the write-back gave demo.math a file under src/ and the class judged it as the program's. The wiki describes Seon's own
+  ;; namespaces, each docstring citing its section; a person's namespace cites none, and its code owes none
+  (let [db0 (var-forms (world) 1 (fn [_] {:src "(defn f [])" :doc "Does a thing."}))
+        ns-e (:db/id (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))
+        v (symbol (cite-ns db0) "v1")
+        persons (d/db-with db0 [[:db/retract ns-e :ns/doc (:ns/doc (d/entity db0 ns-e))]])]
+    (is (= [v] (mapv (comp :var :evidence) (problems/uncited-vars db0 {} #{v}))) "a namespace the wiki describes: its uncited var is a row")
+    (is (= [] (problems/uncited-vars persons {} #{v})) "the same var in a namespace whose docstring cites no section, a person's: no row")))
 
 ;; See docs/health.md#a-function-that-cites-no-section
 (deftest uncited-vars-follow-the-vars-asked-for
@@ -1230,3 +1370,39 @@
                :per-n {:ticks 13000 :bytes 39500 :calls 3}
                :fixed {:ticks 10000 :bytes 30000 :calls 5}
                :sizes [10 30 100]}))
+
+;; See docs/health.md#a-proof-that-passes-by-waiver
+(deftest a-proof-whose-form-carries-an-overrun-is-a-waived-proof-until-it-is-deleted
+  (let [proof (fn [overrun] (str "(deftest p [] (cost/proof {:of 'a/b :input 'a/c :n \"x\" :work (str \"w\") :growth :linear"
+                                 " :per-n {:ticks 1000 :bytes 100} :sizes [10 30 100]" overrun "}))"))
+        world-of (fn [overrun] (var-forms (world) 2 (fn [i] (case (int i)
+                                                              1 {:src (proof overrun) :meta #{:test} :refs #{'seon.cost/proof}}
+                                                              2 {:src "(defn f [] 1)"}))))
+        waiver " :overrun {:task \"a/task\" :n 100 :measured {:ticks 300000.0 :bytes 20000.0 :ns 1.0}}"
+        rows #(mapv (juxt :test :task :n :multiple) (problems/waived-proofs % {}))
+        db (world-of waiver)
+        t (symbol (cite-ns db) "v1")]
+    (is (= [[t "a/task" 100 3.0]] (rows db)) "one row: the test, its task, the size, the worst counted dimension's multiple of the bound at that size (ticks 300000 over 1000 x 100)")
+    (is (= [[t "a/task" 100 3.0]] (mapv (juxt :test :task :n :multiple) (get-in (problems/health db) [:classes :waived-proof :rows]))) "health shows it")
+    (is (= [] (rows (world-of ""))) "deleting the :overrun removes the row")
+    (is (= [] (rows (var-forms (world) 1 (fn [_] {:src (proof waiver) :meta #{:test}})))) "a form that does not call seon.cost/proof is not read")
+    (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :waived-proof))))
+
+;; See docs/health.md#a-proof-that-passes-by-waiver
+(deftest a-branch-that-adds-an-overrun-is-not-caused-the-waived-proof
+  ;; measured, 2026-11-10: seon.problems/caused-split reads only `caused-classes` (:unnamed-site :stale-section :uncited-var
+  ;; :long-form), so a branch that adds an :overrun to a proof is shown no :waived-proof row, as caused or as attention, and
+  ;; one that deletes one closes nothing: the class is listed by `health`, never judged on a branch
+  (let [proof (fn [overrun] (str "(deftest p [] (cost/proof {:of 'a/b :input 'a/c :n \"x\" :work (str \"w\") :growth :linear"
+                                 " :per-n {:ticks 1000 :bytes 100} :sizes [10 30 100]" overrun "}))"))
+        world-of (fn [overrun] (var-forms (world) 1 (fn [_] {:src (proof overrun) :meta #{:test} :refs #{'seon.cost/proof}})))
+        waiver " :overrun {:task \"a/task\" :n 100 :measured {:ticks 300000.0 :bytes 20000.0}}"
+        without (world-of "") with (world-of waiver)
+        waived? (fn [db] (boolean (seq (get-in (problems/health db) [:classes :waived-proof :rows]))))
+        mentions? (fn [split] (some #(re-find #"waiver" (str %)) (concat (:caused split) (:attention split) (map :message (:rows split)) (map :message (:closed split)))))]
+    (is (and (waived? with) (not (waived? without))) "the world has the row exactly when the proof carries the :overrun")
+    (testing "adding an :overrun"
+      (is (not (mentions? (problems/caused-split without with))) "is neither caused nor attention"))
+    (testing "deleting one"
+      (is (not (mentions? (problems/caused-split with without))) "causes nothing and closes nothing"))
+    (is (not (contains? seon.problems/caused-classes :waived-proof)))))

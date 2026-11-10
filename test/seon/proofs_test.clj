@@ -660,7 +660,21 @@
     (is (= 2 (proofs/worth-shards ts 4 '{a/t 15000 a/u 15000 a/v 15000 a/w 15000} 30000)) "one for each min-ms")
     (is (= 4 (proofs/worth-shards ts 4 '{a/t 200000 a/u 200000 a/v 200000 a/w 200000} 30000)) "never past jobs")
     (is (= 3 (proofs/worth-shards ts 4 '{a/t 25000 a/u 25000} 30000)) "a test never measured counts as the mean")
-    (is (= 1 (proofs/worth-shards ts 4 {} 30000)) "with none measured, one: it has nothing to split by")))
+    ;; a run's tests are dealt by seon.proofs/estimated-ms, which gives every unmeasured test its class's configured estimate:
+    ;; 234 process tests never measured (a gate's fresh checkout) were one shard and 763 s when an unknown counted as 1 ms
+    (let [gate (mapv #(symbol "a" (str "p" %)) (range 234))
+          est (proofs/estimated-ms gate {} (set gate))]
+      (is (= (seon.config/value :seon.config.proofs/unmeasured-process-ms) (est (first gate))) "an unmeasured process test is its estimate")
+      (is (= 4 (proofs/worth-shards gate 4 est 30000)) "so a run of them none measured is worth every shard, not one"))
+    (is (= (seon.config/value :seon.config.proofs/unmeasured-ms) ((proofs/estimated-ms '[a/t] {} #{}) 'a/t)) "an in-process test is its own class's")
+    (is (= 900 ((proofs/estimated-ms '[a/t] '{a/t 900} '#{a/t}) 'a/t)) "and a measured test is its measurement")))
+
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: a run takes as many shards as free memory holds, at most the configured
+;; jobs, never fewer for the load average (bin/test: load counts other sessions' niced work)
+(deftest a-run-takes-the-shards-free-memory-holds
+  (is (= 4 (proofs/memory-jobs 4 40000 2000 8000)) "memory for many: the configured ceiling")
+  (is (= 2 (proofs/memory-jobs 4 12500 2000 8000)) "memory for two above the floor: two")
+  (is (= 1 (proofs/memory-jobs 4 7000 2000 8000)) "below the floor: one, never none"))
 
 ;; docs/merging.md#a-slow-test-runs-last: asked only of what would run, out of a plain and a merge's run, in a named or full one
 (deftest a-slow-test-runs-last-unless-named-or-the-full-run
@@ -675,3 +689,24 @@
     (is (= '[a/quick] (:run-tests (plan :merge nil))) "a merge's run leaves it out too")
     (is (some #{'a/slow} (:run-tests (plan false ["a/slow"]))) "named, it runs")
     (is (some #{'a/slow} (:run-tests (plan true nil))) "and the full run runs it")))
+
+(deftest the-program-a-test-judges-is-its-processs-branch
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a test that walks the program reads test-runner/program. In a process
+  ;; that holds a branch (an agent's test child) that is the branch's db itself: nothing is imported, and the test judges
+  ;; the agent's change. Red before: such a test composed program-db of the checkout's tree, so in an agent's prove, where
+  ;; no plan had kept the tree, it imported the whole program inside its own budget (3.87 G ticks of 4.0 G, the stray reds
+  ;; of 2026-11-10) and judged root's checkout, never the branch
+  (let [w (my.test/world) before @seon.agent/state]
+    (try (reset! seon.agent/state {:db w})
+         (is (identical? w (test-runner/program)) "the branch's db, as held: no import, and the branch's own program")
+         (finally (reset! seon.agent/state before)))))
+
+(deftest a-red-at-bases-digest-or-red-at-base-is-mains
+  ;; docs/tasks.md#the-done-rule: of the reds of a run, those the branch's change did not make
+  (let [results {'t/same :error 't/based :fail 't/mine :error 't/new :error 't/ok :pass}
+        cand {'t/same "d1" 't/based "d2x" 't/mine "d3x" 't/new "d4" 't/ok "d5x"}
+        base {'t/same "d1" 't/based "d2" 't/mine "d3" 't/ok "d5"}
+        found {"d2" {:fail 1} "d3" {:pass 1}}]
+    (is (= #{'t/same 't/based} (proofs/main-red results cand base found))
+        "its digest is base's, or base's verdict at it is red; green at base, new on the branch, or passing: the branch's")
+    (is (= #{} (proofs/main-red results cand nil {})) "with no base nothing is main's")))

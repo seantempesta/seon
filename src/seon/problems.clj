@@ -30,7 +30,7 @@
   `report` reads what was recorded, at a cost that follows the problems. `health` adds the
   derived classes, read from the program's facts when asked (docs/health.md#cost)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config] [seon.cost :as cost] [seon.reader :as reader]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
@@ -169,12 +169,12 @@
 
 (def pins
   "Where the wiki states each customized library's pin: the page, and the line that states one
-  (`reference-code/x` pinned at `sha`), compared with the gitlinks root's source import
-  recorded (:seon.root/source :pins, seon.root/import-source!)."
+  (`reference-code/x` pinned at `sha`), compared with the gitlinks root's last index of its source
+  recorded (:seon.root/source :pins, seon.root/import-tree!)."
   {:page "docs/forks.md" :line #"(?m)^`(reference-code/[^`]+)` pinned at `([0-9a-f]+)`"})
 
 (defn stale-pins
-  "Each pin the wiki states (`pins`) that is not the gitlink root's source import recorded, as a
+  "Each pin the wiki states (`pins`) that is not the gitlink root's last index of its source recorded, as a
   :stale-pin row; none while root has recorded no import (unknown, not a mismatch). Cost: the
   page's sections (one AVET range of addresses) and their text."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
@@ -188,6 +188,35 @@
                  :let [s (str "stale-pin " a " " path)]]
              (derived-row ans s 'seon.doc (str a " states " path " pinned at " sha ", its gitlink is " (or g "none"))
                           {:kind :stale-pin :section a :path path :stated sha :recorded g} {:section a :path path :stated sha :recorded g}))))))
+
+(def stale-binary-acts
+  "What brings a root's binary and its main into agreement, each then a restart of root: what the :stale-binary row, root's
+  refused spawn and the last line of bin/root start and bin/update say. See docs/source.md#files-and-the-db-two-directions."
+  (str "Bring them into agreement, then restart root: erase the store and seed it from the tree (bin/root stop; bin/root start --reindex, "
+       "which is rm -rf runs/store and bin/root start), or reindex main from disk at root ((my.root/import! sys), (my.root/load-docs! sys), "
+       "(my.root/load-tasks! sys); then bin/root stop and bin/root start), or start the binary main's program was built from (bin/root next)"))
+
+(defn stale-binary
+  "A :stale-binary row while root's binary is not current for its main: seon.root/stale-binary's answer as its boot held it on
+  root's :seon.root/source fact (:stale-binary, seon.root/booted-source), naming the binary's tree, main's and what between
+  them reaches root's own code or a build input (or what is missing). What agents merged into main since is main's own, never a
+  row. None on a boot whose binary is current, or with no source fact; gone at the next boot on a current binary. While it
+  shows, root forks no agent. Derived from the fact, never computed here, no clock; its message names the acts
+  (`stale-binary-acts`). Cost: one pull. See docs/health.md#a-stale-binary."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [{:keys [boot stale-binary]} (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source)
+        {:keys [binary tree reaches missing error]} stale-binary]
+    (if stale-binary
+      [(derived-row ans (str "stale-binary " boot) 'seon.root
+                    (str "root's binary was built from " (if binary (str "tree " binary) "a tree its build did not record")
+                         ", and main was last brought from tree " tree
+                         (cond missing (str ": " (name missing) " is unknown")
+                               error (str ": " error)
+                               :else (str ", and what differs reaches root's own code: " (str/join ", " reaches)))
+                         ". Root forks no agent. " stale-binary-acts)
+                    {:kind :stale-binary :binary binary :tree tree} {:binary binary :tree tree})]
+      [])))
 
 ;; ---- the wiki kept true: code that moved under its text, pages nothing links, issues with no page ----
 
@@ -368,19 +397,23 @@
 
 (defn uncited-vars
   "Each of the named vars (a set of symbols, the vars a branch changed) that is public in a
-  namespace of the program's own source and has a docstring citing no docs/ section, or none, as
+  namespace of the program's own source that the wiki describes (its ns docstring cites a docs/ section: a person's
+  namespace, written back under src/ too, cites none and is not judged) and has a docstring citing no docs/ section, or none, as
   an :uncited-var row: a function states its mechanism by citing the wiki section that describes
   it (docs/references.md#the-delimiter-picks-the-depth), and does not restate it. A private var
   (defn-) and a test are not judged. Closed by citing a section in the docstring.
-  Cost: one seek per named var, and its form's text for a var with no citation."
+  Cost: one seek per named var, its namespace's docstring, and its form's text for a var with no citation."
   {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
   [db ans names]
-  (let [program (delay (program/program-nss db))]
+  (let [program (delay (program/program-nss db))
+        ;; a namespace the wiki describes: its own docstring cites a docs/ section, as every one of Seon's does (AGENTS.md section 7);
+        ;; one made for a person's work, written back under src/ as the program's are, cites none, and its code owes no citation
+        described? (fn [nsym] (some-> (d/entity db [:ns/name nsym]) :ns/doc (str/includes? "docs/")))]
     (vec (for [v (sort names)
                :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e))
                      doc (:var/doc ent) nsym (some-> (namespace v) symbol)]
                :when (and ent (not (contains? (set (:var/meta ent)) :test)) (not (and doc (str/includes? doc "docs/")))
-                          (contains? @program nsym)
+                          (contains? @program nsym) (described? nsym)
                           (contains? #{"defn" "defmacro" "def" "defmulti"} (some->> ent :var/form :form/src (source/first-head nsym))))
                :let [s (str "uncited-var " v)]]
            (derived-row ans s nsym (str v " is public and its docstring cites no docs/ section: cite the one that describes it")
@@ -402,6 +435,34 @@
                :let [n (emit/chars-tokens (count src)) s (str "long-form " v) nsym (some-> (namespace v) symbol)]]
            (derived-row ans s nsym (str v " is " n " tokens, over the bound of " bound ": split it by what it does")
                         {:kind :long-form :var v :tokens n :bound bound} {:var v :tokens n :bound bound})))))
+
+(defn waived-proofs
+  "Each cost proof of a test form of the program that carries an `:overrun` (a waiver: seon.cost/proof), as a
+  :waived-proof row with its test, the task it names, the size it was taken at (:n), the numbers it recorded and
+  `multiple`, the greatest of the counted dimensions' recorded multiples of the proof's own bound at that size (the
+  arithmetic of a verdict: seon.cost/expected, seon.cost/row-ratio; nil when the record states no size or the
+  estimate is not literal). Found by the forms that reference seon.cost/proof (one :form/refs seek), the
+  `:overrun` map read out of the form by the reader. Closed when the proof's `:overrun` is deleted. Cost: the forms that call
+  seon.cost/proof, each read once. See docs/health.md#a-proof-that-passes-by-waiver."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (vec (for [{:keys [e]} (d/datoms db :avet :form/refs 'seon.cost/proof)
+             :let [f (d/entity db e) nsym (:ns/name (:form/ns f))]
+             v (:form/defines f) :when (contains? (set (:var/meta v)) :test)
+             :let [t (:var/name v)
+                   proofs (filter #(and (map? %) (map? (:overrun %))) (tree-seq coll? seq (reader/read-all (:form/src f) nsym)))]
+             [i m] (map-indexed vector proofs)
+             :let [{:keys [task n measured]} (:overrun m)
+                   estimate (select-keys m [:ops :per-n :fixed :growth])
+                   literal? (and (every? map? (vals (dissoc estimate :growth))) (keyword? (:growth estimate)) (pos-int? n))
+                   bound (when literal? (cost/expected estimate cost/units n))
+                   multiple (when bound (some->> (for [d (keys measured) :when (and (cost/exact d) (contains? bound d))]
+                                                   (cost/row-ratio {:measured measured :expected bound} d))
+                                                 seq (apply max)))
+                   s (str "waived-proof " t " " i)]]
+         (derived-row ans s nsym (str t " passes by a waiver for task " task (when multiple (format ", at %.2fx its bound" multiple)) ": fix the task, then delete the :overrun")
+                      {:kind :waived-proof :test t :task task :n n :measured measured :multiple multiple}
+                      {:test t :task task :n n :measured measured :multiple multiple}))))
 
 (def caused-classes
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
@@ -522,55 +583,81 @@
    :seon.task/deferred :seon.task/gate-unread :seon.task/deferred-results :seon.task/conflicts
    {:seon.task/agent [:seon.agent/key :seon.agent/ended-ms]}])
 
-(defn- task-ready?
-  "Is task te one not done whose needs are all done? Here ready deliberately means only that: the
-  question is whether its plan can be worked, not whether the reconciler would start it now
-  (seon.reconcile's index also asks for a release and no live run, which a db alone does not
-  hold). A task waiting on another is judged when its needs are done."
-  {:malli/schema [:=> [:cat :seon.host/db :int] :boolean]}
-  [db te]
-  (and (not (task/done? db te))
-       (every? #(task/done? db (:v %)) (d/datoms db :eavt te :seon.task/needs))))
+(defn- task-reads
+  "The one reading of which tasks are ready and what they cite, on db: {:ready? :cited}, `ready?` a function of a task
+  entity (not done, every task it needs done; every task's outcome read once, so readiness is a lookup) and `cited`
+  one of a task entity giving the var names its cites target. What `uncited-tasks` and `stale-plans` share.
+  See docs/health.md#a-task-that-cites-nothing."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db]
+  (let [done (into #{} (comp (filter #(task/finished (:v %))) (map :e)) (d/datoms db :aevt :seon.task/outcome))]
+    {:ready? (fn [e] (and (not (done e)) (every? #(done (:v %)) (d/datoms db :eavt e :seon.task/needs))))
+     :cited (fn [e] (into [] (comp (map #(:var/name (:seon.cite/target (d/entity db (:e %))))) (filter qualified-symbol?)) (d/datoms db :avet :seon.cite/of e)))}))
 
 (defn uncited-tasks
-  "Each ready :implement task, which holds its design step's plan along :needs (seon.task/accumulate),
-  whose accumulated plan cites no program var (no cite of one along its needs, seon.task/cites-of: the
-  context pulls no var for it), that names no proof, or one of whose proofs is still the placeholder
-  seon.ctx writes, as an :uncited-task row with its reason (:no-references, :no-proofs,
-  :placeholder-proof). A design step's plan is text, its input: design writes the cited plan,
-  so only the implement step is judged. Closed when the design step's plan cites a name, the
-  proofs are named and written. Cost: the task, kind, reference and proof datoms once, then a
-  walk of each implement task's needs."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
-  [db ans]
-  (let [kinds (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/kind))
-        chain (fn chain [seen e]
+  "Each ready task, which holds the plans along its :needs (seon.task/accumulate), whatever its kind, whose
+  accumulated plan cites nothing (no cite along its needs, seon.task/cites-of, of a var, a section, a schema key, a file,
+  a task or a namespace: the context pulls nothing for it), that names no proof, one of whose proofs is still the
+  placeholder seon.ctx writes, or whose own text cites what db no longer holds (:seon.task/gone, which the write that
+  ended those cites left), as an :uncited-task row with its reason (:no-references, :no-proofs, :placeholder-proof,
+  :gone). Closed when its plan cites a name that exists and its proofs are named and written. Cost: the task, reference and proof datoms once, then a
+  walk of each ready task's needs."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]]}
+  ([db ans] (uncited-tasks db ans (task-reads db)))
+  ([db ans {:keys [ready?]}]
+  (let [chain (fn chain [seen e]
                 (if (seen e) seen
                     (reduce chain (conj seen e) (map :v (d/datoms db :eavt e :seon.task/needs)))))
         vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
-        ;; the program's vars among every task's cites, asked of the program once, when a ready implement step asks
-        ;; (seon.program/program-names)
-        cited (fn [e] (into [] (comp (map #(:var/name (:seon.cite/target (d/entity db (:e %))))) (filter qualified-symbol?)) (d/datoms db :avet :seon.cite/of e)))
-        program (delay (set (program/program-names db (vec (distinct (mapcat #(cited (:e %)) (d/datoms db :aevt :seon.task/id)))))))
         placeholder? (fn [sym] (some-> (pdb/eid db :var/name sym) (->> (d/entity db)) :var/form :form/src
                                       (str/includes? task/placeholder-assertion)))]
     (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
-               :when (and (= :implement (kinds e)) (task-ready? db e))
+               :when (ready? e)
                :let [es (chain #{} e)
                      proofs (vals-of es :seon.task/proofs)
+                     ;; what its text cites whose cites ended with their targets, as the write that ended them left it
+                     gone (:v (first (d/datoms db :eavt e :seon.task/gone)))
                      reasons (cond-> []
-                               (not-any? @program (mapcat cited es))
+                               ;; any cite: each names what exists (a dead one is refused at the write), and the context pulls it,
+                               ;; a section, a schema key, a file, a task or a dependency's var as much as one of the program
+                               (not-any? #(seq (d/datoms db :avet :seon.cite/of %)) es)
                                (conj :no-references)
                                (empty? proofs) (conj :no-proofs)
-                               (some placeholder? proofs) (conj :placeholder-proof))]
+                               (some placeholder? proofs) (conj :placeholder-proof)
+                               (seq gone) (conj :gone))]
                reason reasons
-               :let [s (str "uncited-task " v " " (name reason))]]
+               :let [s (str "uncited-task " v " " (name reason))
+                     fields (cond-> {:task v :reason reason} (= :gone reason) (assoc :gone gone))]]
            (derived-row ans s 'seon.task
                         (case reason
-                          :no-references (str v " is ready and its plan cites no var, attribute or section: the context pulls nothing for it")
+                          :no-references (str v " is ready and its plan cites nothing (no var, section, schema key, file or task): the context pulls nothing for it")
                           :no-proofs (str v " is ready and names no proof")
-                          :placeholder-proof (str v " is ready and a proof of it is still the placeholder assertion (seon.task/placeholder-assertion)"))
-                        {:kind :uncited-task :task v :reason reason} {:task v :reason reason})))))
+                          :placeholder-proof (str v " is ready and a proof of it is still the placeholder assertion (seon.task/placeholder-assertion)")
+                          :gone (str v " is ready and its plan cites " (str/join ", " gone) ", which no longer exist: their cites ended with them"))
+                        (assoc fields :kind :uncited-task) fields))))))
+
+(defn stale-plans
+  "Each ready task (its own plan, not its needs') citing a var whose form was written after the task's plan, as a
+  :stale-plan row naming the task and the var: the plan was written before the var took its present form, so its
+  premise (a function it says is missing, code it describes) may have moved. Closed when the plan is written again
+  (a new :seon.task/plan datom). Cost: the ready tasks, then two datom reads a cite (the plan's and the var form's
+  transaction). tr, the reading of readiness and cites it shares with `uncited-tasks` (`task-reads`), made once a health read
+  (`other-derived`). See docs/health.md#a-plan-that-went-stale."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]]}
+  ([db ans] (stale-plans db ans (task-reads db)))
+  ([db ans {:keys [ready? cited]}]
+    (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
+               :when (ready? e)
+               :let [plan-tx (:tx (first (d/datoms db :eavt e :seon.task/plan)))]
+               :when plan-tx
+               var (distinct (cited e))
+               :let [ve (pdb/eid db :var/name var)]
+               :when (and ve (> (or (:tx (first (d/datoms db :eavt ve :var/form))) 0) plan-tx))]
+           (derived-row ans (str "stale-plan " v " " var) 'seon.task
+                        (str v " cites " var ", which changed after the plan was written, so what the plan says of it may no longer hold. To close it: read "
+                             var " against the plan and rewrite what no longer holds, or, if it all holds, add the line \"Checked <date> against "
+                             var ": holds.\" (a plan written again with the same text is no change, so it closes nothing)")
+                        {:kind :stale-plan :task v :var var} {:task v :var var})))))
 
 ;; ---- tasks held for root -----------------------------------------------------------------
 
@@ -716,13 +803,17 @@
   "The derived classes `caused-split` does not read, their rows on db."
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
   [db ans]
-  {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :orphan-page (orphan-pages db ans)
-   :leadless-section (leadless-sections db ans) :uncited-task (uncited-tasks db ans)})
+  (let [tr (task-reads db)]
+  {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :stale-binary (stale-binary db ans) :orphan-page (orphan-pages db ans)
+   :leadless-section (leadless-sections db ans)
+   ;; the tasks' readiness and cites read once for the two classes that judge them
+   :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr)
+   :waived-proof (waived-proofs db ans)}))
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
-  program's facts make true now (`unnamed-sites`, `stale-pins`, `stale-sections`,
-  `orphan-pages`, `leadless-sections`, `uncited-tasks`, and `problem-unlinked` over all of them). What the page, an agent's context and
+  program's facts make true now (`unnamed-sites`, `stale-pins`, `stale-binary`, `stale-sections`,
+  `orphan-pages`, `leadless-sections`, `uncited-tasks`, `stale-plans`, and `problem-unlinked` over all of them). What the page, an agent's context and
   the done and merge gates read: computed when read, never stored, never polled."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}

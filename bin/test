@@ -42,21 +42,20 @@ case ${1:-} in
   *) WHAT=tests OWN=1 OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; echo "test: run ${OUT:t}, logs in $OUT" ;;
 esac
 mkdir -p "$OUT"; rm -f $OUT/shard-*(N)
-# this run's shards (:seon.config.proofs/jobs): one, two only when 12 cores are free. A measure read once at the plan, deciding how many shards, never when.
-# Given to the plan (its shards) and the check steps (as many at once): the roots a shard's tests boot and an agent's test children read
-# jobs as configured (the audit of 2026-11-09: exported to all, it also capped every agent's test children in the run at one)
-jobs=${SEON_PROOF_JOBS:-}
-if [[ -z $jobs ]]; then
-  ncpu=$(sysctl -n hw.ncpu); load=$(sysctl -n vm.loadavg | awk '{print int($2)}')
-  # one shard: a shard is a process of its own that loads every test namespace and boots a shared root per test
-  # group, so a second one doubles the roots and memory for the same tests; it pays only on an idle machine, never
-  # beside other sessions' runs (owner, 2026-11-08: "Why are we doing so much sharding?")
-  free=$(( ncpu - load )); jobs=1; (( free >= 12 )) && jobs=2
-fi
-SEON_PROOF_JOBS=$jobs runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
+# this run's shards (:seon.config.proofs/jobs, at most; the plan deals what the work is worth, seon.proofs/worth-shards) are
+# as many as the machine's free memory holds (seon.proofs/memory-jobs: each shard's footprint, :seon.config.proofs/shard-mb,
+# above a floor kept free, :seon.config.proofs/free-floor-mb), never fewer for the load average: load counts other sessions'
+# niced work, so a rule on it dealt one shard at load 12 on 18 cores and a gate of 234 process tests ran 763 s in series.
+# The owner, 2026-11-08: "Why are we doing so much sharding?", when a shard booted a root per test group (now one per
+# shard, slowfix); 2026-11-10: "I have 18 cores and load is 8" (heavy runs judged by cores and free memory, AGENTS.md §8),
+# "allocate whatever resources we need" and "I'm more upset about the wasted time not processing". The plan writes the
+# count it took to out/jobs, which the check steps take too. SEON_PROOF_JOBS, when set, is the ceiling instead.
+runner --plan $WHAT "$OUT" "$@" || { echo "TEST FAILED (the plan)"; exit 1 }
+jobs=$(<$OUT/jobs)
 # a test or step that reaches a process of its own (a root, an agent, the binary) runs target/seon,
 # which its digest does not cover: that binary is built from this tree first (a no-op build costs
-# ~30-45 s). The plan names what it selected that reaches one (out/binary); nothing, no build
+# ~30-45 s) unless it is current for this tree, what differs reaching nothing root runs from its binary
+# (seon.root/binary-current, the plan's out/build). The plan names what it selected that reaches one (out/binary); nothing, no build
 F=($OUT/shard-*.edn(N))
 # laws and health read the tree and answer in seconds, before any build: a run of their own beside the rest, whose red ends the run, shards and
 # steps, as no later result can make that tree mergeable and a red is reported as it stands (docs/merging.md#a-merge-runs-what-the-change-reaches)
@@ -68,6 +67,10 @@ FAST=(); if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then
     ( "$ROOT/bin/check" --steps "$OUT/fast" > "$OUT/fast.log" 2>&1 || { : > "$OUT/stopped"; [[ -s $OUT/shards.pid ]] && kill $(<$OUT/shards.pid) 2>/dev/null; [[ -s $OUT/check.pid ]] && kill $(<$OUT/check.pid) 2>/dev/null } ) & A=$!
   fi
 fi
+# built whenever a selected key reaches it, bin/build skipping a binary already built from this tree. Rule (a) (build
+# only when not current, the plan's out/build: seon.root/binary-current) waits until every reader of the binary's tree
+# asks the same rule: bin/check's stale-binary refusal and seon.root/booted-source's :inputs still compare trees and
+# programs literally, so a binary current by reach failed three tests in a real done's gate (2026-11-10)
 if [[ -s $OUT/binary ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
 fi
@@ -118,6 +121,16 @@ if (( ${#FAST} )); then
 fi
 # a test green and red at its digest (the plan's out/flaky) is red, though nothing ran it
 [[ -s $OUT/flaky ]] && { cat "$OUT/flaky"; st=1 }
+# the full run's outcome, beside the verdict cache, so a store erase keeps it (docs/merging.md#the-full-run-is-the-net): the commit it
+# ran, green or red with each red test, and when it ended; written whole (temp + rename), green or red. A run that died writes
+# nothing, so the file still names the last run that ended: bin/land says how many landings main is past it
+if [[ " $* " == *" --all "* && -n ${SEON_RESULTS_DIR:-} ]]; then
+  reds=(${(f)"$(for f in $F; do grep -h "^RED " "${f%.edn}.log"; done | awk '{print $2}' | sort -u)"})
+  { print -r -- "{:commit \"$(git -C "$ROOT" rev-parse HEAD)\" :status $( (( st == 0 )) && print :green || print :red)"
+    print -r -- " :reds [${reds[*]}]"
+    print -r -- " :ended \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" :logs \"$OUT\"}" } > "$SEON_RESULTS_DIR/.full-run.edn.$$" &&
+    mv "$SEON_RESULTS_DIR/.full-run.edn.$$" "$SEON_RESULTS_DIR/full-run.edn"
+fi
 # a green run's logs are read by no one: the directory a plain run made is reclaimed with it (a red run's stays)
 if (( st == 0 )); then echo "TEST OK"; (( OWN )) && rm -rf "$OUT"; else echo "TEST FAILED (logs: $OUT)"; fi
 exit $st

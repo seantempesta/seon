@@ -60,26 +60,6 @@
   "program-schema-digest of this process's schema."
   (program-schema-digest pdb/schema))
 
-(defn kept-store!
-  "The path of the kept store of regenerable output at base for a schema's digest (the whole schema's,
-  seon.db/schema-digest, unless given: the program store passes kept-program-digest),
-  base-<digest> (the test runner's program store, the process tests' store); a store at base made
-  with another digest (base itself, or base-<8 hex digits> but this one) is removed: it is output, made
-  again from its inputs, never a record, so a changed schema makes a new store, nothing migrated or
-  refused (task seon.test-store/a-kept-store-is-keyed-by-its-schema). Nothing is made here; the caller
-  opens it."
-  {:malli/schema [:function [:=> [:cat :string] :string] [:=> [:cat :string :string] :string]]}
-  ([base] (kept-store! base pdb/schema-digest))
-  ([base digest]
-   (let [f (java.io.File. ^String base)
-         dir (.getParentFile f)
-         stem (.getName f)
-         keyed (str stem "-" digest)
-         old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
-     (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
-       (fx/remove-tree! (str dir "/" n)))
-     (str dir "/" keyed))))
-
 (def ^:private program-store-path
   "This process's store of kept program dbs, one branch per git tree (test-runner/program-db),
   under target/tmp: a test process's own, so shards running at once never share one; removed
@@ -96,7 +76,7 @@
   imports another tree takes program-store, a store of its process's own: its branches are scratch, and
   never the plan's to choose a nearest tree from. docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat] :string]}
-  [] (kept-store! (config/value :seon.config.proofs/program-store) kept-program-digest))
+  [] (pdb/kept-store! (config/value :seon.config.proofs/program-store) kept-program-digest))
 
 (defn reach-index
   "{key {:digest :process? :binary?}} of db's tests under inputs (or of each key of roots, {key [var ...]}):
@@ -121,7 +101,7 @@
 
 (defn process-store
   "The path of the one durable store the process tests' roots take a branch of (each its own
-  main): <checkout>/target/runs/test-store-<schema digest> (kept-store!), made once by bin/test's
+  main): <checkout>/target/runs/test-store-<schema digest> (seon.db/kept-store!), made once by bin/test's
   plan before any shard starts (make-process-store!), so no two shards' roots ever create it at once.
   A root that found it missing created it (seon.db/open!), and another root starting in
   another shard meanwhile saw its data file and opened a database not yet made: \"Database
@@ -139,11 +119,11 @@
 (defn make-process-store!
   "The process tests' store (process-store) of checkout, made when missing (the schema and no
   example program on :db, as a root's own store starts) and every one of another schema removed
-  (kept-store!): bin/test's plan calls it before any shard starts, when a selected test runs
+  (seon.db/kept-store!): bin/test's plan calls it before any shard starts, when a selected test runs
   the binary. Answers its path."
   {:malli/schema [:=> [:cat :string] :string]}
   [checkout]
-  (let [path (kept-store! (str checkout "/target/runs/test-store"))]
+  (let [path (pdb/kept-store! (str checkout "/target/runs/test-store"))]
     (.mkdirs (.getParentFile (java.io.File. ^String path)))
     (d/release (:conn (pdb/open! :lmdb path 0 :db)))
     path))
@@ -344,7 +324,7 @@
   inherited (a caller's SEON_STORE or SEON_MAIN, a bin/check run's, opened a store another run
   had written). Its server is on a port the kernel assigns (:seon.config.root/server-port -1),
   read back from its ROOT LISTENING line: bin/root returns at that line or at the root's death,
-  never on a clock. runs: its pids, log and port; env: more variables {name value}; args: more
+  never on a clock (:started, the last line bin/root start printed). runs: its pids, log and port; env: more variables {name value}; args: more
   root arguments. Answers the options with :port, nil when the root died before listening, and
   then its :log, which says why (ask answers it as the test's error). runs is one root's, named per main by its caller: a root still running there
   is refused, never answered (bin/root start in it would only report that root, and the test
@@ -367,9 +347,9 @@
   (when (zero? (:exit (root-sh root "status" [])))
     (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
                     {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
-  (root-sh root "start" (start-args root))
-  (let [port (fx/bound-port runs)]
-    (cond-> (assoc root :port port)
+  (let [started (:out (root-sh root "start" (start-args root)))
+        port (fx/bound-port runs)]
+    (cond-> (assoc root :port port :started (last (clojure.string/split-lines (str started))))
       ;; it died before listening: its log says why, kept with it for the test's error (ask)
       (nil? port) (assoc :log (output (str runs "/root.log"))))))
 

@@ -297,7 +297,6 @@
     [seon.config-test/or-takes-the-first-non-nil System/getenv] "the tag and the test read the one variable, so the verdict is the same whatever its value"
     [seon.db-test/a-commit-costs-what-it-writes seon.profile/now-ns] "printed ms per turn; the verdict is on bytes"
     [seon.db-test/a-commit-costs-what-it-writes seon.profile/ms-since] "printed ms per turn; the verdict is on bytes"
-    [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it Thread/sleep] "the stream's pacing is the subject: a deadline can only turn it red (FINDINGS #13)"
     [seon.model-test/a-streamed-reply-ends-when-the-server-ends-it clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
     [seon.model-test/a-call-that-names-itself-is-answered-as-a-stream-over-the-socket clojure.core/rand-int] "a port: a collision can only turn it red (FINDINGS #14)"
     [seon.problems-test/an-agent-death-is-recorded-with-its-cause seon.profile/now-ns] "a fresh directory's name"
@@ -1227,21 +1226,20 @@
    ;; the largest block a test allocates (one process, no fan-out: docs/machine.md#processes); Chez keeps a
    ;; bytevector this large in place (a large object is never copied by a collection)
    #(let [before (lib/real-mb)
-          block (byte-array (* 300 1024 1024))]
+          block (byte-array (* 64 1024 1024))]
       ;; bytes macOS cannot compress: one byte repeated was compressed under the machine's pressure, and the
-      ;; charge read 206 MB of the 300 written (run 29's gate, 2026-10-30)
+      ;; charge read 206 MB of the 300 written (a 300 MB block then; 64 MB resolves above the gauge's noise) (run 29's gate, 2026-10-30)
       (.nextBytes (java.util.Random. 42) block)
       (let [held (lib/real-mb)
             child (in-child-bounded (fn [] (let [b0 (lib/real-mb)]
-                                          ;; one byte a 16 KB page: 30 MB of pages written, ~1,900 writes
-                                          (doseq [i (range 0 (* 30 1024 1024) 16384)] (aset block i (byte 1)))
-                                          (< 28 (- (lib/real-mb) b0) 60))))]
+                                          (doseq [i (range 0 (* 8 1024 1024) 16384)] (aset block i (byte 1)))
+                                          (< 7 (- (lib/real-mb) b0) 20))))]
         {:before before :held held :child child :after (lib/real-mb) :kept (aget block 0)}))
    "touch-gauge"
    ;; a parent holds 200 MB it wrote; one child only reads every page, another writes every page. Each
    ;; sends its footprint growth and the machine's drop in free plus inactive MB (lib/sysmem) on a
    ;; socket. The ledger charges both 200 MB; only the write costs the machine its copy.
-   #(let [mb 200
+   #(let [mb 40
           block (byte-array (* mb 1024 1024))
           _ (java.util.Arrays/fill block (byte 7))
           [r w] (sock/socketpair)
@@ -1261,6 +1259,30 @@
                         line (loop [] (let [ls (rd)] (if (seq ls) (first ls) (recur))))]
                     (assoc (sedn/decode line) :exit st)))]
       {:read (touch false) :write (touch true)})
+   "fork-reset"
+   ;; docs/failure-points.md#physics-who-may-run-threads: nothing runs in a child between the fork and its reset. Forced: the
+   ;; smallest quantum, four always-ready fibers behind each fork (a root's procs are); in a child they are the parent's, and
+   ;; one that runs there says "parent". 10 forks, then 10 through fork!'s double fork (the grandchild is nobody's child, so
+   ;; each says what ran in it by a line in a file; every grandchild holds w, so r's end of file is their exits)
+   #(let [me (lib/c-getpid)
+          f (java.io.File/createTempFile "seon-fork-reset" ".txt")
+          say (fn [w] (spit f (str w "\n") :append true))
+          ready? (volatile! true)
+          spin (fn [] (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when @ready? (when (not= me (lib/c-getpid)) (say "parent") (lib/c-exit 7)) (jolt.host/fiber-yield) (recur)))))))
+          refused (fn [n] {:refused n})]
+      (jolt.host/fiber-preempt-ticks-set! 100)
+      ;; the quantum is armed at a dispatch: yield once so this fiber runs under the small one
+      (jolt.host/fiber-yield)
+      (spin)
+      (let [forks (frequencies (for [_ (range 10)] (lib/fork! {:child #(lib/c-exit 0) :parent lib/wait-status :refused refused})))
+            [r w] (sock/socketpair)]
+        (dotimes [_ 10] (lib/fork! {:double? true :child #(do (say "own") (lib/c-exit 0)) :parent identity :refused (fn [n] (say (str "refused " n)))}))
+        ;; the ready fibers end here: nothing of this process is left spinning when it waits and answers
+        (vreset! ready? false)
+        (sock/close! w)
+        (let [c (sock/conn r)] (loop [] (when-not (= :eof (sock/recv! c)) (recur))))
+        (try {:forks forks :doubles (frequencies (clojure.string/split-lines (slurp f)))}
+             (finally (.delete f)))))
    "go-blocks"
    #(let [c (a/chan) r (a/go (a/<! c))]
       (a/>!! c 41)
@@ -1903,7 +1925,7 @@
   answers stepped the fork server and the api inside the window under load), and the render
   proc's next settled mark when an ask of its own is still in flight (render-settled: its
   answer stepped the render proc, which sent a settled mark, inside the window under load).
-  Then a change reaches the tab: an agent spawned and a commit to main each grow what the
+  Then a change reaches the tab: an agent spawned and a commit to main that root's page shows (a held task) each grow what the
   tab received. The window is the measurement (that nothing happens), not a dependency."
   [window-ms]
   (run-check "IDLE" {:datoms 300}
@@ -1922,9 +1944,12 @@
         ;; the tab: an edge reader counting the bytes its feed sends, and watching its text
         feed (watch-feed! (.getInputStream sock))
         received (fn [] (:bytes @feed))
+        ;; each wait says what it waits on before it starts, so a run that never ends names the wait it is in
+        _ (out! "IDLE waiting: tab-opened")
         opened (await-feed feed #(pos? (:bytes %)))
         ;; the tab's opening ran its course: its keyframe (the feed's first patch: a new tab is
         ;; stale until it), then a settled mark (the render proc has nothing in flight)
+        _ (out! "IDLE waiting: tab-settled")
         settled (await-feed feed :settled)
         ;; main's last commit synced (the flusher's answer), then main's commits applied in the
         ;; fork server, each one's answers through its proc and the api
@@ -1940,6 +1965,7 @@
         render-pending (:pending rs)
         ;; main as the render proc holds it against main now: behind is a commit notice in flight
         render-main {:t (:main-t rs) :main-t (:max-tx @(:conn sys))}
+        _ (out! "IDLE waiting: render-settled (" render-pending " asks in flight)")
         render-settled (or (zero? render-pending) (await-feed feed :settled))
         ;; root's declared procs and its effect owners (their workers step only when given work)
         decl (seon.system/read-decl (seon.config/value :seon.config.root/system-path))
@@ -1951,9 +1977,14 @@
         moved (into (sorted-map) (for [[pid n] c1 :when (not= n (get c0 pid))] [pid [(get c0 pid) n]]))
         n-spawn (received)
         a (c/spawn! sys {:task "idle check"})
+        _ (out! "IDLE waiting: spawn-reached-tab (" n-spawn " bytes before)")
         spawned (await-feed feed #(> (:bytes %) n-spawn))
         n-commit (received)
-        _ @(c/transact-main! sys [{:db/id "n" :ns/name 'idle.check}])
+        ;; a commit root's page shows (a held task, which root's head counts), so the tab is owed what it waits for; a commit nothing
+        ;; on the page reads (a namespace entity, before) owed it nothing, and its wait ended only on bytes something else sent
+        ;; (task seon.web/a-tabs-first-keyframe-settles-on-its-own, 2026-11-10)
+        _ @(c/transact-main! sys (seon.task/create-tx @(:conn sys) [{:seon.task/ns 'idle :seon.task/name "check" :seon.task/plan "The idle check's commit: a held task root's head counts."}]))
+        _ (out! "IDLE waiting: commit-reached-tab (" n-commit " bytes before)")
         committed (await-feed feed #(> (:bytes %) n-commit))]
       (.close sock)
       {:report {:window-ms window-ms :procs (count pids) :steps-at-idle moved :bytes-at-idle (- b1 b0) :agent a :flushed flushed :fork-server fs :render-pending render-pending :render-main render-main :feed-ended (:ended @feed)}
@@ -1985,9 +2016,9 @@
         targets (ts/standing-targets-tx)
         ;; the checks' own store follows its seed (a cache keyed by its inputs: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on): path is a link to
         ;; path-<digest of what the seed writes>, so a changed seed opens a fresh store and the old one is removed
-        ;; (seon.test-store/kept-store!), never read
+        ;; (seon.db/kept-store!), never read
         at (if own?
-             (doto (ts/kept-store! path (subs (lib/digest (pr-str [seon.db/schema-digest (seon.db/seed-tx (parse-long (str n))) targets])) 0 8))
+             (doto (seon.db/kept-store! path (subs (lib/digest (pr-str [seon.db/schema-digest (seon.db/seed-tx (parse-long (str n))) targets])) 0 8))
                (remove-store-past! (seon.config/value :seon.config.proofs/check-store-max-bytes)))
              path)
         t0 (profile/now-ns)

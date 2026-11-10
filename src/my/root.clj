@@ -3,7 +3,7 @@
   the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.doc :as doc] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
-            [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.watch :as watch] [datahike.api :as d]
+            [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.profile :as profile] [datahike.api :as d]
             [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err] [seon.source :as source] [seon.program :as program] [seon.agent]))
 
 (defn- write-declared!
@@ -186,24 +186,6 @@
                            [aid rs])))]
     {:asked (vec ids) :ran ran}))
 
-(defn task-files
-  "The task files under dir (:seon.config.root/tasks-dir by default), read:
-  {owning-ns declarations or error}. A file's name is its owning namespace. Each
-  declaration is one :whole task (seon.template/request) that merges itself, so a need on
-  another file's task is a need on it; the kind is derived here and never written in a file."
-  {:malli/schema [:function [:=> [:cat] [:map-of :symbol :any]] [:=> [:cat :string] [:map-of :symbol :any]]]}
-  ([] (task-files (config/value :seon.config.root/tasks-dir)))
-  ([dir]
-   (let [read (into (sorted-map)
-                    (for [[n text] (lib/dir-texts dir ".edn")
-                          :let [ns-sym (symbol (subs n 0 (- (count n) 4)))]]
-                      [ns-sym (task/file-declarations ns-sym text)]))
-         refused (into {} (filter (comp contract/error? val)) read)]
-     (if (seq refused)
-       read
-       (merge (zipmap (keys read) (repeat []))
-              (group-by :seon.task/ns (into [] (mapcat tpl/request) (apply concat (vals read)))))))))
-
 (defn tasks-read-tx
   "The write of outcome, the last read of the task files (:seon.root/tasks: {:files} or {:error}),
   on root. A refused read's error names it as its subject and is written with it, in one
@@ -218,33 +200,25 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [r] (cond-> r (contract/error? r) (assoc :seon.error/subject :seon.root/tasks)))
 
-(defn load-error-tx
-  "The write of load error e at ms on main db: a :platform error (seon.root/platform-tx) and, in
-  the same transaction, the outcome its subject holds (a refused task-file read's, tasks-read-tx)."
-  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
-  [db e ms]
-  (cond-> (root/platform-tx db e ms)
-    (= :seon.root/tasks (:seon.error/subject e)) (into (tasks-read-tx {:error (:seon.error/message e)}))))
-
 (def ^:private load-lock
   "The one lock every loader of main's declared state takes around its read of main's db and the write
-  decided from it (load-tasks!, load-docs!, load-kinds!, the watcher's batches): a load writes what it
+  decided from it (load-tasks!, load-docs!, load-example!, import!: two clients may call them at once): a load writes what it
   read against the db it read, so two interleaved would write the second's decisions against a db the
-  first had changed (docs/health.md#every-writer-root-loads-what-changed). Reentrant."
+  first had changed (docs/source.md#indexing-a-tree). Reentrant."
   (Object.))
 
 (defn load-tasks!
   "Reconcile the task files into main (seon.task/load-tx): new entries created held, changed
   ones updated, removed ones cancelled; unchanged ones write nothing. A good read writes its
   outcome, root's :seon.root/tasks (tasks-read-tx), with the declarations when it differs from the
-  one held; a refused one answers its error (load-answer), whose recorder writes both
-  (load-error-tx). Answers the writer's answer with the counts, or the error. Releasing stays run!'s."
+  one held; a refused one answers its error (load-answer) to whoever asked. A person's re-index
+  (docs/source.md#indexing-a-tree). Answers the writer's answer with the counts, or the error. Releasing stays run!'s."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]
    (locking load-lock
      (let [db @(:conn sys)
-           files (if dir (task-files dir) (task-files))
+           files (if dir (root/task-files dir) (root/task-files))
            tx (task/load-tx db files)
            outcome {:files (count files)}
            held (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/tasks]) :seon.root/tasks)]
@@ -260,7 +234,7 @@
 (defn example-txs
   "The tx-data of the example session file at path (seon.ctx.session/session-tx's answer written with pr-str: a
   non-empty vector of transactions, the first writing the example agent keyed \"example/<id>\"), read as
-  `task-files` reads a task file (seon.lib/dir-texts, so a file gone when read is a file not found), or the
+  seon.root/task-files reads a task file (seon.lib/dir-texts, so a file gone when read is a file not found), or the
   :seon.root/example-refused error naming path: not found, not readable EDN, or not that vector. The one edge
   of an example file (docs/failure-points.md); the read is of the directory's files named like path, the
   one by that name taken."
@@ -300,18 +274,16 @@
                    :batches (count txs))))))))
 
 (defn load-docs!
-  "Load the wiki (the pages under dir of the checkout, docs by default) into main as section
-  entities (seon.doc/load-tx): a changed section rewritten, a removed one retracted, an
-  unchanged wiki writing nothing. Answers the writer's answer with the counts; a link to no section is its refusal,
-  :seon.db/no-target naming it (docs/references.md#the-wiki-in-the-store)."
+  "Re-index the wiki (the pages under dir of the checkout, docs by default) into main as section
+  entities (seon.doc/load-tx), a person's explicit act: a changed section rewritten, a removed one retracted, an
+  unchanged wiki writing nothing. Answers the writer's answer with the counts; a link to no section is its refusal, :seon.db/no-target naming
+  it (docs/references.md#the-wiki-in-the-store). See docs/source.md#indexing-a-tree."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
   ([sys dir]
    (locking load-lock
-     ;; the boot's digest of the wiki no longer says what main holds: dropped, so the next boot loads
      (let [db @(:conn sys)]
-       (write-declared! sys (into (when-let [e (pdb/eid db :seon.root/id :root)] [[:db.fn/retractAttribute e :seon.root/wiki]])
-                                  (doc/load-dir-tx db (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir)))
+       (write-declared! sys (doc/load-dir-tx db (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir))
                         {:pages (count (doc/pages (config/checkout) dir))})))))
 
 (defn problems
@@ -326,139 +298,32 @@
   {:malli/schema [:=> [:cat :seon.root/sys] :seon.problems/report]}
   [sys] @(root/call! sys {:op :health :db @(:conn sys)}))
 
-(defn- load-kinds!
-  "Each of ks loaded into main once by its own loader: the wiki (load-docs!), the task files
-  (load-tasks!), Seon's source (seon.root/import-source!: main's program follows the tree,
-  imported only when it reads otherwise; none when root follows no source), which only import!
-  asks for. Answers each loader's answer and :opened, the derived problems the loads made true
-  (seon.problems/caused of main before and after). With changed the source loads only those files."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys [:set [:enum :docs :tasks :source]]] [:map [:loaded :map] [:opened [:set :string]]]]
-                  [:=> [:cat :seon.root/sys [:set [:enum :docs :tasks :source]] [:maybe [:set :string]]] [:map [:loaded :map] [:opened [:set :string]]]]]}
-  ([sys ks] (load-kinds! sys ks nil))
-  ([sys ks changed]
-  (locking load-lock
-  (let [before @(:conn sys)
-        source (get-in sys [:bindings :source])
-        loaded (into {} (for [k (sort ks) :when (or (not= :source k) source)]
-                          [k (case k
-                               :docs (load-docs! sys)
-                               :tasks (load-tasks! sys)
-                               :source (root/import-source! sys source changed))]))]
-    {:loaded loaded :opened (problems/caused before @(:conn sys))}))))
-
-(defn load-errors
-  "The typed errors among the answers of load-kinds! (a refused task file, a refused load): each
-  is to be recorded, never dropped."
-  {:malli/schema [:=> [:cat :map] [:vector :map]]}
-  [loaded] (filterv contract/error? (vals loaded)))
-
-(defn- loader-dirs
-  "Where each of main's watched loaders reads: {kind [dir]}, absolute. The wiki and the task files
-  are the checkout co's. The source is no watched loader (import!)."
-  {:malli/schema [:=> [:cat :string] [:map-of [:enum :docs :tasks] [:vector :string]]]}
-  [co]
-  {:docs [(str co "/docs")] :tasks [(config/value :seon.config.root/tasks-dir)]})
-
-(defn- loader
-  "Which of main's watched loaders reads path (absolute), for checkout co: :docs (a page, .md,
-  under the wiki's dir), :tasks (a task file, .edn, under the task dir, which a test root keeps
-  outside its checkout), or nil: the dirs are loader-dirs, the ones watched."
-  {:malli/schema [:=> [:cat :string :string] [:maybe [:enum :docs :tasks]]]}
-  [co path]
-  (let [dirs (loader-dirs co)
-        under? (fn [k] (some #(str/starts-with? path (str % "/")) (get dirs k)))]
-    (cond (and (under? :docs) (str/ends-with? path ".md")) :docs
-          (and (under? :tasks) (str/ends-with? path ".edn")) :tasks)))
-
-(defn watch-loads
-  "What a watcher's batch makes root load, each kind with the first record of the batch that made
-  it ({kind [record-kind path]}: what root's watch fact keeps as :last-load, so a load says why): a changed path by its
-  loader; a rescan or a moved root (FSEvents coalesced or dropped what happened under it) the
-  loaders reading under that path. Never the source: a disk edit, a branch's commit and a ref
-  moving act on nothing until someone calls import! (docs/health.md#the-source-watcher)."
-  {:malli/schema [:=> [:cat :string [:vector [:tuple :keyword :string]]]
-                  [:map-of [:enum :docs :tasks] [:tuple :keyword :string]]]}
-  [co batch]
-  (let [dirs (loader-dirs co)
-        overlap? (fn [p d] (or (= p d) (str/starts-with? d (str p "/")) (str/starts-with? p (str d "/"))))]
-    (reduce (fn [m [kind path :as r]]
-              (let [ks (if (#{:rescan :root} kind)
-                         (for [[k ds] dirs :when (some #(overlap? path %) ds)] k)
-                         (keep identity [(loader co path)]))]
-                ;; the first record that made each kind keeps it
-                (reduce (fn [m k] (if (contains? m k) m (assoc m k r))) m ks)))
-            {} batch)))
-
 (defn import!
-  "Imports Seon's source into main now, the one manual call for a disk edit made from outside
-  (a Claude session, an editor): with paths (relative to the source root) only those files, else
-  the whole tree. The same load as boot's (seon.root/import-source!, under load-lock); answers
-  what it answered, or nil when root follows no source. See docs/health.md#the-source-watcher."
+  "Re-index Seon's source into main now, a person's explicit act (docs/source.md#indexing-a-tree): with paths (relative
+  to the source root) only those files, else the tree's changes since main's last index (the :source read,
+  seon.fx/read-source), as a seed indexes it (seon.root/import-of), written on main with root's :seon.root/source fact
+  in one transaction, which keeps what this boot recorded of its binary. Answers the fact written, main's fact when
+  nothing differs, the error that stopped it (a read that failed, a file that does not load), or nil when root has no
+  source tree."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :any]
                   [:=> [:cat :seon.root/sys [:maybe [:set :string]]] :any]]}
   ([sys] (import! sys nil))
-  ([sys paths] (get-in (load-kinds! sys #{:source} (some-> paths set)) [:loaded :source])))
-
-
-(defn watch-died-tx
-  "The write of watcher error e at ms on main db, with held root's current :seon.root/watch fact: a :platform error
-  (seon.root/platform-tx) whose subject is the watch fact, and that fact with its :error, in one
-  transaction. Only a live watcher writes the fact after it (a new boot's start, a batch), so
-  that write closes the error (seon.problems/closed?) and nothing is written to close it."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.root/watch :map :int] [:vector :map]]}
-  [db held e ms]
-  (conj (root/platform-tx db (assoc e :seon.error/subject :seon.root/watch) ms)
-        {:seon.root/id :root :seon.root/watch (assoc held :error (:seon.error/message e))}))
-
-(defn watch!
-  "Root watches what its watched loaders read, loader-dirs (the wiki and the task files)
-  (seon.watch, FSEvents: every writer, a Claude session, an agent, the owner's editor, git), never
-  the whole checkout, whose builds (target/), store (runs/) and, in the main tree, other worktrees
-  no loader reads. It never loads the source, nor on a ref move: that is import!'s. What changed while root was down is
-  boot's to load, as it always was: the wiki (seon.root/wiki-tx) and the source
-  (seon.root/import-source!), and here the task files, once the watcher is ready (a fresh or
-  erased store holds none, and a file changed while root was down is read; an unchanged read
-  writes nothing). The boot's load and the batches' run one at a time, so a change after ready
-  is read by the boot's load, a batch's, or both, in order. Then each batch loads what it makes root load (watch-loads),
-  and a batch that loads, its paths and any rescan are counted in root's :seon.root/watch fact (which
-  closes an earlier error). A watcher that cannot start or dies is a :platform error on main
-  (seon.root/platform-tx), and root goes on unwatched: nothing falls back to a poll. A batch whose
-  handler throws is the same kind of error (:seon.watch/batch-failed) and the watcher reads the next
-  batch. Answers the watcher, or the error."
-  {:malli/schema [:=> [:cat :seon.root/sys] :any]}
-  [sys]
-  (let [co (config/checkout)
-        roots (vec (distinct (mapcat val (sort-by key (loader-dirs co)))))
-        fact (fn [f] (root/transact-main! sys [{:seon.root/id :root :seon.root/watch f}]))
-        fresh {:roots roots :boot (:boot sys) :batches 0 :paths 0 :rescans 0}
-        held #(or (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) fresh)
-        died (fn [e] @(root/transact-main! sys (watch-died-tx @(:conn sys) (held) e (System/currentTimeMillis))))
-        ;; a loader's typed error (a refused task file) is a recorded :platform error; the problems
-        ;; the load made true are shown by health. One load at a time (load-lock, the REPL's loads too): a load
-        ;; writes what it read against the db it read, so the boot's and a first batch's must not interleave (a stale
-        ;; one written after a newer one would undo it, and its event is spent)
-        load! (fn [ks]
-                (locking load-lock
-                  (let [r (load-kinds! sys ks)]
-                    (doseq [e (load-errors (:loaded r))]
-                      @(root/transact-main! sys (load-error-tx @(:conn sys) e (System/currentTimeMillis))))
-                    r)))
-        w (watch/start! roots
-                        (fn [batch]
-                          (let [why (watch-loads co batch)
-                                ks (set (keys why))
-                                rescan (last (filter (comp #{:rescan :root} first) batch))]
-                            ;; a batch no loader reads (root's own store under runs/, target/) writes
-                            ;; nothing, so root's writes never feed its watcher
-                            (when (seq ks)
-                              ;; the problems the load made true, the last kept in the fact
-                              (let [{:keys [opened]} (load! ks)]
-                                @(fact (cond-> (-> (held) (dissoc :error) (update :batches inc) (update :paths + (count batch)) (assoc :last-opened (vec (sort opened)) :last-load why))
-                                         rescan (-> (update :rescans inc) (assoc :last-rescan {:kind (first rescan) :path (second rescan)}))))))))
-                        died died)]
-    (if (contract/error? w)
-      (do (died w) (load! #{:tasks}) w)
-      (do @(fact fresh) (load! #{:tasks}) w))))
+  ([sys paths]
+   (when-let [{:keys [root dirs] :as source} (get-in sys [:bindings :source])]
+     (locking load-lock
+       (let [t0 (profile/now-ns)
+             db @(:conn sys)
+             held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
+             paths (when (:digest held) (some-> paths set))
+             r @(root/effect! sys :source (cond-> {:root root :dirs dirs :paths paths}
+                                           (and (nil? paths) (:digest held) (:tree held)) (assoc :since (:tree held) :since-dirs (:dirs held []))))
+             {:keys [tx fact error]} (root/import-of db held r source t0)]
+         (cond (contract/error? r) r
+               error error
+               (nil? tx) held
+               :else (let [fact (merge fact (select-keys held [:boot :binary :program :inputs]))
+                           w @(root/transact-main! sys (conj tx {:seon.root/id :root :seon.root/source fact}))]
+                       (if (contract/error? w) w fact))))))))
 
 (defn union
   "Every branch's history as one db (seon.union): (d/q '[:find ... :where ...] (my.root/union
@@ -642,7 +507,7 @@
   {:malli/schema [:=> [:cat :seon.root/sys] [:vector :string]]}
   [sys]
   (let [db @(:conn sys)
-        g (program/reach-indexed (program/reach-graph db (fx/declared-refs (config/value :seon.config.root/system-path)))
+        g (program/reach-indexed (program/reach-graph db (fx/declared-refs seon.system/built-text))
                                  (second (seon.agent/test-inputs db)))
         tx (findings-tx db g)]
     (when (seq tx) @(root/transact-main! sys tx))

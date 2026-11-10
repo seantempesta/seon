@@ -55,8 +55,8 @@
                 (fn [req]
                   (deliver seen (json/read-str (slurp (:body req)) :key-fn keyword))
                   (let [out (a/chan 16)]
-                    ;; the server streams the reply over more than a second, a piece at a time
-                    (a/thread (doseq [c chunks] (Thread/sleep 200) (a/>!! out c)) (a/close! out))
+                    ;; the server streams the reply a piece at a time, each its own write
+                    (a/thread (doseq [c chunks] (a/>!! out c)) (a/close! out))
                     {:status 200 :headers {"Content-Type" "text/event-stream"} :body out}))
                 {:port port :host "127.0.0.1" :strategy :fibers})]
     (try

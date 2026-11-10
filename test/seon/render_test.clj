@@ -238,7 +238,7 @@
   []
   ;; the checkout this process runs from (seon.config/checkout), never the working directory: an agent's is empty,
   ;; and a test of it was red in every agent's run (md-scan #23)
-  (runner/program-db (seon.config/checkout) (ts/kept-program-store)))
+  (runner/program))
 
 (defn- src-nss
   "The namespaces of db whose file is under src/."
@@ -555,6 +555,18 @@
     (is (not (str/includes? html "helper died")) "a row whose cause passed is not drawn")
     (is (not (str/includes? html "effect")) "nor its class, which holds no open row")
     (is (str/includes? html "arity") "an open row is")))
+
+(deftest a-stale-binary-is-on-the-problems-tile-with-its-acts
+  ;; docs/source.md#files-and-the-db-two-directions: a mismatch is never silent to a person. The :stale-binary row health derives
+  ;; (seon.problems/stale-binary) is drawn on root's problems tile, never folded under upkeep, its message naming the acts
+  (let [db (seon.db/db-with (my.test/world {:history? true}) [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :boot "b" :binary "p0" :binary-tree "t0" :tree "t1" :program "p1" :stale-binary {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]}}}])
+        h (seon.problems/health db)
+        html (h/html (ui/problems-tile {:seon.render/index (seon.db/index) :seon.ctx/ctx {:health h}}))]
+    (is (= 1 (get-in h [:classes :stale-binary :n])) "health holds the row")
+    (is (str/includes? html "stale-binary") "the tile draws its class")
+    (is (not (str/includes? (h/html (ui/problems-tile {:seon.render/index (seon.db/index) :seon.ctx/ctx {:health (update h :classes select-keys [:stale-section])}})) "stale-binary"))
+        "and draws it from the row, not by itself")
+    (is (str/includes? (get-in h [:classes :stale-binary :rows 0 :message]) "bin/root start --reindex") "its message names the acts")))
 
 (deftest an-agents-page-draws-the-problems-of-its-own-task
   ;; task seon.problems/health-in-context: its task's open problems, by the report's render, beside the
@@ -2980,7 +2992,7 @@
             s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))
             unembedded (search-part (draw))
             ;; its query's vector, as main's vectors proc writes it (seon.vector/tx-data)
-            _ (d/transact conn (seon.vector/tx-data [s] [(:tx (first (d/datoms @conn :eavt s :seon.search/query)))] [(vec (repeat 768 0.036))] "m"))
+            _ (d/transact conn (seon.vector/tx-data [s] ["query"] [(vec (repeat 768 0.036))] "m"))
             before (search-part (draw))]
         (is (nil? unembedded) "a query with no vector yet draws nothing: words alone are no search the page shows")
         (is (some? before) "the request's search is a part of the page once its query has a vector")
@@ -3422,6 +3434,46 @@
     (is (not-any? #(= "user-messages" %) (map #(when (var? %) (name (symbol %))) (tree-seq coll? seq (ui/user {:seon.ctx/ctx {}} {}))))
         "and the page has no feed of every message")))
 
+;; seon.web/a-tabs-first-keyframe-settles-on-its-own (the 2026-11-10 occurrence): seon.check/idle's last wait, a commit to main reaching
+;; root's quiet tab. A held task is one root's head counts (the tab is owed a patch); a namespace entity is nothing root's page reads,
+;; so that commit owes the tab nothing, and a wait on it could only be met by bytes something else happened to send
+(defn- root-tab-after
+  "What the render proc sends root's tab when main moves by tx-data, from root's view walked and quiet on conn's main."
+  [conn tx-data]
+  (let [[_ branch _] (paged-dbs conn)
+        main0 (:db-after (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}))
+        st0 (#'p/pass (assoc (#'p/advance-main (assoc (proc-state main0 branch) :watch #{:root} :main-db nil) main0) :conn conn) (volatile! {}))
+        st0 (#'p/pass st0 (volatile! {}))
+        o (volatile! {})
+        main1 (:db-after (d/transact conn {:tx-data tx-data}))]
+    (#'p/pass (#'p/advance-main st0 main1) o)
+    (filter #(and (#{:patch :keyframe} (:op %)) (= :root (:view %))) (:to-web @o))))
+
+(deftest a-commit-root-shows-reaches-a-quiet-root-tab
+  (ts/test-branch! (fn [_ conn]
+    (is (seq (root-tab-after conn [{:seon.task/id "idle/check" :seon.task/ns 'idle :seon.task/name "check" :seon.task/plan "p" :seon.task/execution :held
+                                    :seon.task/branch :task-idle-check :seon.task/kind :work}]))
+        "a held task moves root's head: the tab is sent it"))))
+
+(deftest a-commit-root-does-not-show-owes-its-tab-nothing
+  (ts/test-branch! (fn [_ conn]
+    (is (empty? (root-tab-after conn [{:db/id "n" :ns/name 'idle.check}]))
+        "the idle check's old commit: nothing root's page reads, so nothing is sent"))))
+
+;; seon.web/a-tabs-first-keyframe-settles-on-its-own (the 2026-11-10 occurrence): a tab on root's view, walked and quiet, then an
+;; agent spawned: its event and root's view with the new agent reach the render proc, and the tab is sent what moved
+(deftest a-spawn-reaches-a-quiet-root-tab
+  (let [[main branch _] (paged-dbs)
+        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
+        o (volatile! {})
+        st0 (#'p/pass (#'p/advance-main (assoc (proc-state main branch) :watch #{:root} :main-db nil) main) (volatile! {}))
+        _ (#'p/pass st0 (volatile! {}))
+        st1 (#'p/on-event st0 {:type :spawn :agent :a9 :at-ms 1})
+        view (assoc-in (:view st0) [:agents :a9] {:status :spawning :branch :task-demo-g})
+        st2 (#'p/answered (assoc-in st1 [:pending 9] :state) o :state view)
+        to-root (filter #(and (#{:patch :keyframe} (:op %)) (= :root (:view %))) (:to-web @o))]
+    (is (seq to-root) (str "the spawn reaches root's tab: " (pr-str (map :op (:to-web @o)))))
+    (is (some? st2))))
 ;; Stage 2a's walk (docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09): one pass over a pull renders the page and
 ;; the model's messages. A lab schema in a branch's index names each entity's two renders; recognition is the best match of the
 ;; attributes an entity holds; a parent's render orders and places its children; a call placed in a model output is a
@@ -3537,3 +3589,20 @@
           moved (apply concat (d/datoms-diff db db2 :eavt []))
           touched (seq (filter (fn [dt] (some #(contains? (d/reads-index reads) %) (datahike.reads/datom-keys dt))) moved))]
       (is (nil? touched) "an eval added with no schema touches nothing the tile list read"))))
+
+;; docs/render.md#the-page: a person's page asks for work; spawning agents and evaluating in every agent are root's debug page's
+(deftest a-persons-input-holds-no-dev-tools
+  (let [person (h/html (ui/root-input {:unit "p-input"} {}))
+        debug (h/html (:seon.render/hiccup (ui/debug :root nil nil {:id "d-ctx"})))]
+    (is (str/includes? person "What would you like done?"))
+    (is (not (str/includes? person "spawn 10")) "no spawn on a person's page")
+    (is (not (str/includes? person "all=&gt;")) "no eval-every-agent form")
+    (is (str/includes? debug "spawn 10") "root's debug page holds them")))
+
+(clojure.test/deftest the-root-tile-shows-the-defs-boot-loaded
+  ;; docs/render.md#tiles-are-data-the-context-reads-the-pages-derivations: boot's program count is root's process data, drawn by the tile
+  (let [tile (fn [view] (pr-str (seon.render.ui/process-tile {:seon.ctx/ctx {:process (seon.render.proc/process-value {:view view})}})))]
+    (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "1233 forms loaded"))
+    (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "40"))
+    (is (str/includes? (tile {:boot {:program {:loaded 0 :ms 5}}}) "image held main's program"))
+    (is (str/includes? (tile {}) "program load not measured"))))

@@ -607,3 +607,44 @@
            :growth :constant
            :fixed {:calls 2000 :bytes 4000000}
            :sizes [4 16 64]})))))
+
+(defn val-member
+  "A member of a list, its text its own value in ctx's :vals."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :int] :any]}
+  [{c :seon.ctx/ctx} id] [:li (str id ":" (get-in c [:vals id :v]))])
+(defn val-list
+  "A list of ctx's :ids, each member reading its own value."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] (into [:ol] (for [id (seon.ratom/realize (:ids c))] [#'val-member {} id])))
+
+(defn vals-of
+  "The input of size n: a list of n members drawn, each reading its own value, and the atom holding them."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/deref]]}
+  [n]
+  ;; held as ctx holds a join: a map sorted by its members' ids, each member an entity
+  (let [a (seon.ratom/atom {:db/id 1 :ids (vec (range 10 (+ 10 n))) :vals (into (sorted-map-by (fn [a b] (cond (and (int? a) (int? b)) (compare b a) (int? a) -1 (int? b) 1 :else (compare (str a) (str b))))) (map (fn [i] [i {:db/id i :v i}])) (range 10 (+ 10 n)))})
+        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'val-list {}] (seon.db/index))]
+    (seon.render/flush! w nil)
+    [w a]))
+
+(defn one-member-changed!
+  "One member's value changed and drawn, then changed back and drawn."
+  {:malli/schema [:=> [:cat :map :seon.host/deref] :any]}
+  [w a]
+  (swap! a update-in [:vals 10 :v] inc)
+  (seon.render/flush! w nil)
+  (swap! a update-in [:vals 10 :v] dec)
+  (seon.render/flush! w nil))
+
+(deftest a-flush-costs-the-children-that-changed
+  ;; seon.render/a-flush-costs-the-children-that-changed: one member changed reruns that member alone, whatever the list holds
+  (cost/proof
+    {:of 'seon.render-cost-test/one-member-changed! :input 'seon.render-cost-test/vals-of
+     :n "members of the list, one of them changed"
+     :work (str "the changed member run twice and nothing else run: calls flat in the members; the swap's diff (seon.ctx/changes) steps past "
+                "each other member of the collection it enters, about 0.8 KB a member")
+     :growth :linear
+     ;; measured 2026-11-10: 81 calls at 10, 40 and 160; 99 KB, 124 KB, 217 KB
+     :per-n {:calls 0 :bytes 900}
+     :fixed {:calls 85 :bytes 100000}
+     :sizes [10 40 160]}))

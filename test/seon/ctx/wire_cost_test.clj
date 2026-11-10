@@ -3,7 +3,7 @@
   (docs/render.md#the-models-context-a-cached-prefix-then-the-turn), and what reads them. Run: bin/test seon.ctx.wire-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.ctx] [seon.ctx] [seon.doc] [seon.fixtures] [seon.render]
-            [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector]))
+            [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.ctx.status] [seon.ctx.wire-test]))
 
 (defn- item
   "Eval record i of a run as the conversation reads it ([ref v k tx]): a model's call whose value
@@ -56,13 +56,13 @@
 (defn ring-of
   "seon.ctx.search/pushed's arguments at n forms in a ring, each calling the next: every node two
   neighbours, so the push's reach is bounded by its threshold, not by n. Seeded at the first."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:set :int] number?]]}
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/fn [:set :int] number?]]}
   [n]
   (let [db (d/db-with (t/world) (vec (mapcat (fn [i] [{:db/id (str "f" i) :form/id (str "demo/r" i) :form/src "(r)"
                                                           :form/refs #{(symbol "demo" (str "r" (mod (inc i) n)))}}
                                                          {:var/name (symbol "demo" (str "r" i)) :var/form (str "f" i)}])
                                                  (range n))))]
-    [db {} #{(pdb/eid db :form/id "demo/r0")} 0.001]))
+    [db (#'seon.ctx.search/section-names db) #{(pdb/eid db :form/id "demo/r0")} 0.001]))
 
 (deftest a-push-reads-what-its-threshold-reaches
   (cost/proof {:of 'seon.ctx.search/pushed :input 'seon.ctx.wire-cost-test/ring-of
@@ -81,12 +81,12 @@
   "seon.ctx.search/pushed's arguments at n forms each naming hub var demo/h, seeded at a form that calls
   h (as a function calls seon.contract/checked): the push's mass reaches h's form, whose callers are
   read to :hub (seon.config.render/relevance-features), so it is never read whole."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:set :int] number?]]}
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/fn [:set :int] number?]]}
   [n]
   (let [db (d/db-with (ts/test-db) (into [{:db/id "h" :form/id "demo/h" :form/src "(defn h [])"} {:var/name 'demo/h :var/form "h"}
                                           {:db/id "s" :form/id "demo/s" :form/src "(defn s [] (h))" :form/refs #{'demo/h}} {:var/name 'demo/s :var/form "s"}]
                                          (for [i (range n)] {:form/id (str "demo/u" i) :form/src "(h)" :form/refs #{'demo/h}})))]
-    [db {} #{(pdb/eid db :form/id "demo/s")} 0.001]))
+    [db (#'seon.ctx.search/section-names db) #{(pdb/eid db :form/id "demo/s")} 0.001]))
 
 (deftest a-push-counts-a-hub-and-reads-it-not
   (cost/proof {:of 'seon.ctx.search/pushed :input 'seon.ctx.wire-cost-test/hub-of
@@ -108,7 +108,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Say it."}]))
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range n)] (pdb/eid db :seon.doc/address (str "docs/p.md#s" i))))]
-    [(d/db-with db (vector/tx-data es (repeat (count es) 1) (mapv unit (range (count es))) "m")) te]))
+    [(d/db-with db (vector/tx-data es (repeat (count es) "1") (mapv unit (range (count es))) "m")) te]))
 
 (defn task-data-of
   "seon.ctx.status/task-data's arguments at n wiki sections with vectors: the task demo/r as of the db and
@@ -155,3 +155,56 @@
                :per-n {:calls 8 :bytes 15000}
                :fixed {:calls 900 :bytes 600000}
                :sizes [10 30 100]}))
+
+(defn greens-of
+  "seon.ctx.status/status's arguments for agent a1 on task demo/f, its proof red, on a branch holding n more green tests no
+  proof names: the tests a run judged that the done rule never reads, grown."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map]]}
+  [n]
+  (let [db (#'seon.ctx.wire-test/db-f (#'seon.ctx.wire-test/db-with-program))
+        db (d/db-with db (into [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"]}
+                                {:var/name 'demo-test/f-test :seon.test/status :red :seon.test/failures [{:type :fail :expected "(= 4 (f 2))" :actual "(not (= 4 5))"}]}]
+                               (for [i (range n)] {:var/name (symbol "other-test" (str "t" i)) :seon.test/status :green})))]
+    [db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) {}]))
+
+;; See docs/render.md#how-the-work-stands
+(deftest a-status-costs-its-proofs-and-its-reds
+  ;; the status read every test's verdict on the branch each turn (seon.ctx.status's verdicts: one scan of :seon.test/status);
+  ;; the done rule reads the task's proofs and the tests that are not green, so the greens no proof names cost nothing
+  (ts/test-branch!
+    (fn [_ _]
+      (cost/proof {:of 'seon.ctx.status/status :input 'seon.ctx.wire-cost-test/greens-of
+                   :n "green tests on the branch that no proof of the task names"
+                   :work "the task's proof's verdict and source, a seek of :seon.test/status per value that is not green, the done rule"
+                   :growth :constant
+                   ;; measured 2026-11-10 at 10, 40, 160 greens: before, 142k, 278k, 836k ticks and 0.58, 1.06, 3.03 MB (about 4.8k ticks
+                   ;; and 16 KB a green test: a branch of 1,600 verdicts about 8M ticks and 27 MB a turn); after, 108k ticks and 0.46 MB at each
+                   :fixed {:bytes 500000 :calls 45}
+                   :sizes [10 40 160]}))))
+
+(defn test-ns-of
+  "seon.ctx.status/test-shape's arguments for an unwritten proof of namespace demo-test, which holds n helpers and n tests, no
+  test calling a helper (each test is read until one uses a helper): the namespace a proof goes into, grown."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :qualified-symbol]]}
+  [n]
+  (let [db (d/db-with (t/world)
+                      (into [{:db/id "ns" :ns/name 'demo-test :ns/form {:form/id "demo-test/ns" :form/src "(ns demo-test (:require [clojure.test :refer [deftest is]]))"}}]
+                            (mapcat (fn [i] [{:var/name (symbol "demo-test" (str "helper-" i)) :var/ns "ns" :var/form {:form/id (str "demo-test/helper-" i) :form/src (str "(defn helper-" i " [] " i ")")}}
+                                             {:var/name (symbol "demo-test" (str "t" i)) :var/ns "ns" :var/meta #{:test} :var/form {:form/id (str "demo-test/t" i) :form/src (str "(deftest t" i " (is (= " i " (inc " (dec i) "))))")}}])
+                                    (range n))))]
+    [db 'demo-test/unwritten]))
+
+;; See docs/render.md#how-the-work-stands
+(deftest an-unwritten-proofs-shape-costs-its-namespace-once
+  ;; the status of a task whose proof is not yet written shows where it goes (seon.ctx.status/test-shape): it compiled a regex
+  ;; for every test and helper of the namespace (24M ticks of a 46M request on a real agent at its 30th call, seon.render-test);
+  ;; each test's called heads are read once, so the namespace costs its sources, not their product
+  (cost/proof {:of 'seon.ctx.status/test-shape :input 'seon.ctx.wire-cost-test/test-ns-of
+               :n "helpers and tests in the proof's namespace, no test calling a helper"
+               :work "each var of the namespace read once, each test's source scanned once for the heads it calls"
+               :growth :linear
+               ;; measured 2026-11-10 at 10, 40, 160: before, 0.18M, 1.13M, 12.5M ticks and 0.70, 6.3, 85.9 MB (quadratic); after,
+               ;; 0.15M, 0.52M, 1.99M ticks and 0.46, 1.70, 6.50 MB (about 40 KB a helper and test)
+               :per-n {:bytes 42000 :calls 0}
+               :fixed {:bytes 100000 :calls 4}
+               :sizes [10 40 160]}))

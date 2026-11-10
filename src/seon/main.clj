@@ -7,7 +7,7 @@
   (:require [seon.contract :refer [defn defn-]] [seon.root :as c] [seon.lib :as lib] [seon.print :as print]
             [seon.config] [seon.server] [my.root] [clojure.edn] [jolt.deps]
             ;; the e2e loop's subject: the binary built from a merge answers its new value
-            [seon.generation] [seon.vector]
+            [seon.generation] [seon.vector] [seon.problems :as problems]
             ;; the procs system.edn names, resolved by name at boot (seon.system/proc-var)
             [seon.fork-server] [seon.prove] [seon.reconcile] [seon.render.proc] [seon.web] [seon.writer]))
 
@@ -41,11 +41,12 @@
 (defn root-serve
   "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
   until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
-  what an outside agent's MCP relay (bin/mcp) talks to. It watches what its loaders read
-  (my.root/watch!: every writer's changes loaded as they happen). Its end is a fact on main
+  what an outside agent's MCP relay (bin/mcp) talks to. It runs off its store and reads no
+  file (docs/source.md#a-boot-resumes-from-the-db). Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
   serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
-  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand.
+  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand; a ROOT STALE BINARY line
+  before it, on one line, when the binary is not current for main (seon.root/stale-binary), which bin/root start ends on.
   args: the mode's own, `--started-by ns/test` naming the test that started it (its boot's
   :seon.root/started-by)."
   {:malli/schema [:=> [:cat [:sequential :string]] :any]}
@@ -74,9 +75,14 @@
       ;; the fork server (a thread before it would refuse the fork); the fork server and agents end with root
       (let [p (seon.config/value :seon.config.root/end-with)] (when (pos? p) (lib/end-with! p false)))
       (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))]
-        ;; the watcher ends with this process (target/watch exits on its parent's exit)
-        (let [w (my.root/watch! sys)]
-          (out! "ROOT WATCHING " (if (seon.contract/error? w) (str "nothing: " (:seon.error/message w)) "what its loaders read and its refs")))
+        ;; a binary of another program than main's is never silent: said before the listening line, so bin/root start and
+        ;; bin/update end on it (docs/source.md#files-and-the-db-two-directions)
+        ;; the boot view's :stale-binary (seon.root/stale-binary's answer), on one line: bin/root start and bin/update keep the
+        ;; line that starts with it, so its fields are joined as text, never a value a printer may break across lines
+        (when-let [{:keys [binary tree reaches missing error]} (get-in @(c/call! sys {:op :state}) [:boot :stale-binary])]
+          (out! "ROOT STALE BINARY binary " (or binary "unrecorded") ", main's tree " tree
+                (cond missing (str ", " (name missing) " missing") error (str ", " error) :else (str ", what differs reaches " (clojure.string/join " " reaches)))
+                ": root forks no agent. " problems/stale-binary-acts))
         (out! "ROOT LISTENING " bound))
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))
@@ -111,5 +117,9 @@
     "seed-program" (let [r (c/seed-program! (second (seon.config/without-overrides args)))]
              (out! (if (seon.contract/error? r) "SEED FAILED " "SEED OK ") (shown r))
              (lib/c-exit (if (seon.contract/error? r) 1 0)))
+    ;; what bin/build records beside the binary it built (target/seon.program): the program of the tree it was built from
+    "built-program" (let [r (c/built-program (checkout) (second (seon.config/without-overrides args)))]
+                      (if (seon.contract/error? r) (out! "BUILT-PROGRAM FAILED " (shown r)) (out! (seon.edn/encode r)))
+                      (lib/c-exit (if (seon.contract/error? r) 1 0)))
     "embed-worker" (seon.vector/serve!)
     (apply (driver! (checkout)) args)))

@@ -235,32 +235,32 @@
       (some-> (stored db e :schema/key) str)))
 
 (defn- due-among
-  "Of the text datoms ds, those whose vector is due for model, made (an entity's
-  :seon.vector/text-t), of (its :seon.vector/model) and title-of (its title) read as functions of the entity:
-  [[e text t] ...] in entity order."
-  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn :seon.host/fn :seon.host/fn :string] [:vector [:tuple :int :string :int]]]}
+  "Of the text datoms ds, those whose vector is due for model, made (an entity's :seon.vector/text, the digest of the text it
+  embeds), of (its :seon.vector/model) and title-of (its title) read as functions of the entity: [[e text digest] ...] in entity
+  order. See docs/vector.md#what-is-embedded."
+  {:malli/schema [:=> [:cat [:sequential :any] :seon.host/fn :seon.host/fn :seon.host/fn :string] [:vector [:tuple :int :string :string]]]}
   [ds made of title-of model]
-  (vec (sort (for [{:keys [e a v tx]} ds
-                   :when (or (not= model (of e)) (not= tx (made e)))]
-               [e ((texts a) (title-of e) v) tx]))))
+  (vec (sort (for [{:keys [e a v]} ds
+                   :let [text ((texts a) (title-of e) v) h (lib/digest text)]
+                   :when (or (not= model (of e)) (not= h (made e)))]
+               [e text h]))))
 
 (defn due
   "The texts on db whose vector is due for model: each form's source, wiki section's text, schema
-  entry's form and task's plan with no vector, a vector made from an earlier text (its :seon.vector/text-t is not
-  the text's transaction), or another model's. [[e text t] ...] in entity order, t the text's
-  transaction. With ds, only those of the text datoms ds (`written`), each one's vector read by
+  entry's form and task's plan with no vector, a vector made from another text (its :seon.vector/text is not the text's
+  digest), or another model's. [[e text digest] ...] in entity order. With ds, only those of the text datoms ds (`written`), each one's vector read by
   one seek: the cost of ds, not of the store."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector [:tuple :int :string :int]]]
-                  [:=> [:cat :seon.host/db :string [:sequential :any]] [:vector [:tuple :int :string :int]]]]}
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector [:tuple :int :string :string]]]
+                  [:=> [:cat :seon.host/db :string [:sequential :any]] [:vector [:tuple :int :string :string]]]]}
   ([db model]
    (let [on (vectors-of db)
          by-e (fn [a] (into {} (keep (fn [d] (when-let [e (on (:e d))] [e (:v d)]))) (d/datoms db :aevt a)))
-         made (by-e :seon.vector/text-t)
+         made (by-e :seon.vector/text)
          of (by-e :seon.vector/model)]
      (let [title-of (titles db)]
        (due-among (for [a (keys texts) d (d/datoms db :aevt a)] d) #(made %) #(of %) #(title-of %) model))))
   ([db model ds]
-   (due-among (filter (comp texts :a) ds) #(stored-of db % :seon.vector/text-t) #(stored-of db % :seon.vector/model) #(title db %) model)))
+   (due-among (filter (comp texts :a) ds) #(stored-of db % :seon.vector/text) #(stored-of db % :seon.vector/model) #(title db %) model)))
 
 (defn written
   "The text datoms db holds that db from does not (datahike.api/datoms-diff, which skips the
@@ -270,19 +270,19 @@
   [from db] (filterv (comp texts :a) (second (d/datoms-diff from db :eavt []))))
 
 (defn fact
-  "The vector entity of entity e (an id, tempid or lookup ref): its vector v of the text at transaction t, made by
+  "The vector entity of entity e (an id, tempid or lookup ref): its vector v of the text whose digest is h, made by
   model. Its identity is :seon.vector/of, so a vector written again replaces e's
   (docs/vector.md#a-vector-is-its-own-entity)."
-  {:malli/schema [:=> [:cat :seon.db/ref :int [:vector {:min 1} number?] :string] :map]}
-  [e t v model]
-  (assoc (pack v) :seon.vector/of e :seon.vector/model model :seon.vector/text-t t))
+  {:malli/schema [:=> [:cat :seon.db/ref :string [:vector {:min 1} number?] :string] :map]}
+  [e h v model]
+  (assoc (pack v) :seon.vector/of e :seon.vector/model model :seon.vector/text h))
 
 (defn tx-data
-  "The vector entities of embedded texts: entity es[i]'s vector vs[i] of the text at transaction ts[i], made by
+  "The vector entities of embedded texts: entity es[i]'s vector vs[i] of the text whose digest is hs[i], made by
   model (`fact`)."
-  {:malli/schema [:=> [:cat [:sequential :int] [:sequential :int] [:sequential [:vector {:min 1} number?]] :string] [:vector :map]]}
-  [es ts vs model]
-  (mapv (fn [e t v] (fact e t v model)) es ts vs))
+  {:malli/schema [:=> [:cat [:sequential :int] [:sequential :string] [:sequential [:vector {:min 1} number?]] :string] [:vector :map]]}
+  [es hs vs model]
+  (mapv (fn [e h v] (fact e h v model)) es hs vs))
 
 ;; ---- the model (native/embed.c over llama.cpp: only the exec'd helper loads it) ------------
 ;; Bound here, resolved on the first call: the library is loaded by `open-model`, in the helper
@@ -500,11 +500,10 @@
 
 (defn- round
   "At main's commit (a notice {:t :commit}), the next round: the first :texts due (:seon.config.vector/texts; 0 asks nothing) go
-  to the :embed effect. When the proc is caught up (:clean, the commit at which everything due was asked
-  for), only the texts that commit to this one changed are looked at (`written`: the cost of the commit,
-  not of the store); otherwise, at the first round and after a backlog, a failure or an unwritten
-  answer, all of them (`due`). A round that asks for all that is due leaves the proc caught up at the
-  commit. Both dbs are made from their commits here (seon.db/at-commit) and let go with the round: the
+  to the :embed effect. After a round (:clean, the commit it scanned at, and :owed, the entities it found due and left
+  for later), only the texts that commit to this one changed are looked at (`written`: the cost of the commit, not of the
+  store), then as many owed as the round has room for; at the first round and after a failure or an unwritten answer, all
+  of them (`due`). Catching up on a backlog of n texts is n/texts rounds of seeks, never a scan a round. Both dbs are made from their commits here (seon.db/at-commit) and let go with the round: the
   proc keeps references, never db values (docs/storage.md#a-kept-db-value-is-a-reference).
   A vector ends with the entity it embeds in that entity's own retraction (docs/storage.md#the-write-checks-every-entity-it-touches), so a round has none to sweep.
   Answers [st outputs]; nothing due, nothing asked."
@@ -516,16 +515,24 @@
         from (when (and clean (:seen st)) (pdb/at-commit (:conn st) (:seen st)))
         [_ added] (when from (d/datoms-diff from db :eavt []))
         base (when clean (if (= (:commit clean) (:seen st)) from (pdb/at-commit (:conn st) (:commit clean))))
-        todo (remove (comp (:unembeddable st) first)
-                     (cond (not clean) (due db (:model st))
-                           (identical? base from) (due db (:model st) (filterv (comp texts :a) added))
-                           :else (due db (:model st) (written base db))))
+        fresh (remove (comp (:unembeddable st) first)
+                      (cond (not clean) (due db (:model st))
+                            (identical? base from) (due db (:model st) (filterv (comp texts :a) added))
+                            :else (due db (:model st) (written base db))))
+        ;; what an earlier round found due and left for later (:owed, entity ids): read again only as far as this round has room,
+        ;; so catching up on n texts is n/texts rounds of seeks, never a scan of every text each round
+        owed (remove (into #{} (map first) fresh) (when clean (:owed st)))
+        room (max 0 (- (:texts st) (count fresh)))
+        later (when (and (pos? room) (seq owed)) (remove (comp (:unembeddable st) first)
+                                        (due db (:model st) (for [e (take room owed) a (keys texts) d (d/datoms db :eavt e a)] d))))
+        todo (concat fresh later)
         due (take (:texts st) todo)
-        st (assoc st :seen (:commit m))
-        st (assoc st :clean (when (= (count due) (count todo)) (select-keys m [:t :commit])))]
+        left (into (mapv first (drop (:texts st) todo)) (drop room owed))
+        ;; scanned at this commit: what is still due is owed, so the next round starts from here, not from a full scan
+        st (assoc st :seen (:commit m) :clean (select-keys m [:t :commit]) :owed left)]
     (cond
       (seq due)
-      (let [more? (< (count due) (count todo))
+      (let [more? (boolean (seq left))
             [st m] (step/ask st [:vectors :answers] [:embedded [(mapv first due) (mapv peek due) (select-keys m [:t :commit])]]
                              {:op :fx :kind :embed :req (cond-> {:texts (mapv second due)} more? (assoc :more true))})]
         [(assoc st :running true :more more?) [m]])
@@ -550,7 +557,7 @@
        :outs {:to-api "its requests to the api: the :embed effect, the write to main"}
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:running :embedded :written-t]) (assoc :unembeddable (count (:unembeddable st)))))})
-  ([args] {:rid 0 :pending {} :conn (:conn args) :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :clean nil :seen nil})
+  ([args] {:rid 0 :pending {} :conn (:conn args) :model (:model args) :texts (:texts args) :running false :embedded 0 :written-t -1 :unembeddable #{} :owed [] :clean nil :seen nil})
   ([st _] st)
   ([st in m]
    (let [[st outs]
@@ -564,7 +571,7 @@
                                     (if (contract/error? r)
                                       ;; the failure is recorded here (seon.error/asked-tx), closed by the next
                                       ;; vectors written (:seon.vector/model)
-                                      (let [st (cond-> (assoc st :clean nil :seen nil) (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
+                                      (let [st (cond-> (assoc st :clean nil :seen nil :owed []) (= :seon.vector/encode-failed (:seon.error/type r)) (update :unembeddable into es))
                                             ;; the newest main it holds, so the row's count reads what is stored
                                             tx (err/asked-tx (pdb/at-commit (:conn st) (:commit (or (:latest st) asked))) r :seon.vector/model [])]
                                         (if (seq tx)

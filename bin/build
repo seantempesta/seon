@@ -1,10 +1,11 @@
 #!/bin/sh
 # bin/build — the runtime from the pinned sources: Chez (our fork) -> Jolt (our fork)
 # -> target/hello (a binary that requires Datahike and opens an in-memory db), then
-# target/lib/libprobe.dylib (native/probe.c, native/ids.c), target/watch (native/watch.c, root's file events), target/lib/liblmdb.dylib (LMDB, robust locks),
+# target/lib/libprobe.dylib (native/probe.c, native/ids.c), target/lib/liblmdb.dylib (LMDB, robust locks),
 # target/lib/liblz4.dylib and target/lib/libzstd.dylib (the store's compressors), target/lib/libseon-embed.dylib
 # (llama.cpp and native/embed.c, with the embedding model fetched once by its sha256), target/css/app.css (the page's
-# stylesheet, Tailwind over resources/public/css/input.css) and target/seon (the platform, -main seon.main; a check mode loads the driver, test/seon/check.clj, at run time).
+# stylesheet, Tailwind over resources/public/css/input.css) and target/seon (the platform, -main seon.main; a check mode loads the driver, test/seon/check.clj, at run time),
+# with target/seon.program beside it: the program of the tree it was built from, which a root compares with its main at boot.
 #
 #   bin/build            every step; chez, jolt, native, lmdb, lz4, zstd, embed and css are skipped when their stamp matches their pin; hello and seon when it matches the tree and the toolchain's pins
 #   bin/build chez|jolt|hello|native|lmdb|lz4|zstd|embed|css|seon   one step, and each step it needs whose stamp is stale
@@ -133,12 +134,11 @@ build_hello() {
 }
 
 build_native() {
-  pin=$(git -C "$ROOT" hash-object native/probe.c native/ids.c native/vector.c native/watch.c | tr '\n' ' ')
-  if fresh native "$pin" && [ -f "$T/lib/libprobe.dylib" ] && [ -x "$T/watch" ]; then say "native up to date ($pin)"; return; fi
+  pin=$(git -C "$ROOT" hash-object native/probe.c native/ids.c native/vector.c | tr '\n' ' ')
+  if fresh native "$pin" && [ -f "$T/lib/libprobe.dylib" ]; then say "native up to date ($pin)"; return; fi
   mkdir -p "$T/lib"
-  say "native: native/probe.c native/ids.c native/vector.c -> target/lib/libprobe.dylib, native/watch.c -> target/watch"
+  say "native: native/probe.c native/ids.c native/vector.c -> target/lib/libprobe.dylib"
   cc -O2 -shared -o "$T/lib/libprobe.dylib" "$ROOT/native/probe.c" "$ROOT/native/ids.c" "$ROOT/native/vector.c" || die "native build failed"
-  cc -O2 -o "$T/watch" "$ROOT/native/watch.c" -framework CoreServices || die "native build failed (watch)"
   echo "$pin" > "$T/native.stamp"
 }
 
@@ -261,6 +261,17 @@ build_embed() {
   echo "$pin" > "$T/embed.stamp"
 }
 
+# record_program: the program of the tree target/seon was built from, as a seed indexes it into target/seon.index (kept
+# between builds, so a build indexes what the tree changed), and the tree's inputs (seon.root/built-program), into
+# target/seon.program: a root resumes its main reading no source, and compares main's
+# program with this one (docs/source.md#the-binary-records-its-program)
+record_program() {
+  ( cd "$T" && SEON_CHECKOUT=$ROOT HOME=$T/home nice -n 15 ./seon built-program "$T/seon.index" --profile scripted ) > "$T/built-program.log" 2>&1 &&
+    tail -1 "$T/built-program.log" > "$T/seon.program" ||
+    { rm -f "$T/seon.program" "$T/seon.stamp"; tail -5 "$T/built-program.log" >&2; die "recording the program target/seon was built from failed; see target/built-program.log"; }
+  say "seon: recorded the program it was built from (target/seon.program)"
+}
+
 build_seon() {
   # each step decides by its own stamp (its sources' pin), never by its output existing: a sync
   # to a new pin rebuilds what moved; a
@@ -276,12 +287,14 @@ build_seon() {
   # directory it lists, moves the key of every namespace compiled against it
   . "$ROOT/bin/env"
   # the tree this build reads, as git names it (bin/tree). Written beside the binary once it is
-  # built, so a root records its source's inputs for its agents only when its binary is built
-  # from that very tree (seon.root/import-source!), and bin/check runs no binary built from another
+  # built, so bin/check runs no binary built from another
   tree_key; key=$KEY
   tree=${TREE:-}
-  if [ -n "$key" ] && fresh seon "$key" && [ -x "$T/seon" ] && [ "$(cat "$T/seon.tree" 2>/dev/null)" = "$tree" ]; then say "seon up to date (tree $tree)"; return; fi
-  rm -f "$T/seon.tree" "$T/seon.stamp"
+  if [ -n "$key" ] && fresh seon "$key" && [ -x "$T/seon" ] && [ "$(cat "$T/seon.tree" 2>/dev/null)" = "$tree" ]; then
+    [ -s "$T/seon.program" ] || record_program
+    say "seon up to date (tree $tree)"; return
+  fi
+  rm -f "$T/seon.tree" "$T/seon.stamp" "$T/seon.program"
   # the program's main: seon.main serves root and ports, and loads the check driver
   # (seon.check, in test/, outside src) from the checkout's
   # source for every other mode, so the release binary holds only the program
@@ -290,6 +303,7 @@ build_seon() {
     HOME=$T/home JOLT_PWD=$ROOT "$JOLT" build -m seon.main -o "$T/seon" ) > "$T/seon-build.log" 2>&1 ||
     { tail -30 "$T/seon-build.log" >&2; die "seon build failed; see target/seon-build.log"; }
   [ -n "$tree" ] && echo "$tree" > "$T/seon.tree"
+  record_program
   [ -z "$key" ] || echo "$key" > "$T/seon.stamp"
   say "seon: built target/seon (tree ${tree:-unknown})"
   # this binary's compile cache warmed with the test namespaces, here at the build, so no agent compiles them at its first fork (seon.check/warm-tests)

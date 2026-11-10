@@ -16,13 +16,13 @@
  ;; the coarse level: the first :seon.config.vector/coarse-dims dims renormalized, as int8, then
  ;; the float scale that maps them back (seon.vector/pack)
  :seon.vector/coarse bytes?
- ;; the transaction of the text it embeds: a text written since makes it due again; indexed, so the
- ;; newest vector written is one seek (seon.vector/vector-of)
- :seon.vector/text-t [:and {:seon.db/index true} :int]
+ ;; the digest of the text it embeds, as the model reads it (seon.lib/digest): a text that reads otherwise makes it due again,
+ ;; and two branches that embed one text hold one value (owner, 2026-11-09: the transaction that wrote it no longer decides)
+ :seon.vector/text :string
  ;; the text's whole token count; past :seon.config.vector/max-tokens its first were embedded
  :seon.vector/fact [:map {:seon.db/attributes true}
                     [:seon.vector/of :seon.vector/of]
                     [:seon.vector/model :seon.vector/model]
-                    [:seon.vector/text-t :seon.vector/text-t]
+                    [:seon.vector/text :seon.vector/text]
                     [:seon.vector/f16 :seon.vector/f16]
                     [:seon.vector/coarse :seon.vector/coarse]]}

@@ -10,7 +10,7 @@
   bin/test runs each shard in a process of its own, at once. The program the plan reads is kept
   per git tree in a store of its own (program-db)."
   (:require [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
-            [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts]
+            [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts] [seon.agent]
             [seon.edn :as sedn] [seon.error :as error] [seon.lib :as lib] [seon.contract :as contract] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]
             [seon.doc :as doc] [seon.task :as task] [seon.problems :as problems] [my.root]))
 
@@ -164,6 +164,17 @@
                      ;; and the config the graph's rows and flags are read under
                      (pr-str (map #(config/value %) [:seon.config.source/pin-namespaces :seon.config.source/process-vars :seon.config.source/binary-vars])))))
 
+(defn program
+  "The program this process judges, as a db: in a process that holds a branch (an agent's test child, a fork of the
+  agent: seon.agent/state's :db) that branch's db, which holds the program as facts already, so nothing is imported
+  and the test judges the agent's change; otherwise (a bin/test shard) the checkout's tree as the plan kept it
+  (program-db of seon.config/checkout in seon.test-store/kept-program-store). A test that walks the program's forms
+  reads this; only a test of the import itself reads program-db. A test that composed program-db of the checkout
+  itself imported the whole program inside an agent's prove, where no plan had kept the tree: 3.87 G ticks, cut at
+  the test's 4.0 G budget, and it judged root's checkout, never the branch (the stray reds of 2026-11-10). The
+  second arm goes when a session's tree is a branch of the store. docs/merging.md#a-merge-runs-what-the-change-reaches."
+  [] (or (:db @seon.agent/state) (program-db (config/checkout) (ts/kept-program-store))))
+
 (defn reach-graph-of
   "The reach graph of db: the one stored in the program store at store (reach-graph.fasl, jfasl:
   a stored graph decodes in about a sixth of what building one costs, 23M ticks against 146M on
@@ -199,14 +210,21 @@
         db (program-db root store tree)
         in (fx/inputs root config/config (config/checkout) tree)
         g (reach-graph-of db (:data-refs in) store)
+        ;; the process store a process test's root takes is indexed by this tree's code: its key is an input of theirs
+        in (seon.root/with-index-code g in)
         all (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))
         ;; a name of the form ns/test selects that one deftest (bin/test NS/TEST); a bare ns selects its tests
         whole (if (seq names) (set (keep #(when-not (str/includes? % "/") (symbol %)) names)) nss)
         idx (into {} (filter #(or (whole (symbol (namespace (key %)))) (vars (key %)))) all)]
     {:graph g :inputs in
+     ;; whether the binary target/seon is (its build record, target/seon.program) runs this tree's program as a build of it would:
+     ;; nil, or what differs that it bakes (seon.root/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
+     :binary-current (seon.root/binary-current db (seon.root/binary-program) tree g)
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
+     ;; the proofs of this tree that pass by a waiver (an :overrun in the form), counted on the db the plan reads
+     :waived (count (problems/waived-proofs db {}))
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
      :binary (set (keep (fn [[t v]] (when (:binary? v) t)) idx))}))
 
@@ -275,9 +293,8 @@
   :digests {test digest} :tree t}, t the planned tree's id) for bin/test to run, one process each (bin/test
   removes the last run's first), and each measured test's stall bound as out/stall-bounds (\"<test> <ms>\"
   lines, for bin/stalls). Answers the shard count."
-  [out tests digests tree mg jobs]
-  (let [ms (measured-ms tests)
-        sh (proofs/shards tests jobs ms)
+  [out tests digests tree mg jobs ms]
+  (let [sh (proofs/shards tests jobs ms)
         mg-ms (measured-ms (keys mg))
         floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
         dealt (deal-mg sh mg ms mg-ms)]
@@ -368,14 +385,22 @@
   :seon.proofs/unread, when the results could not be read (read-results)."
   [root what all? names store]
   (let [unread (volatile! nil)
-        p (proofs/plan-of (assoc (tests-of root names store) :slow-of fx/slow-tests) what all? names
+        reach (tests-of root names store)
+        p (proofs/plan-of (assoc reach :slow-of fx/slow-tests) what all? names
                   (some->> (fx/base-commit root) (fx/tree-of root))
                   ;; the verdicts cached at the candidates' digests; a read that failed is the plan's
                   ;; :unread (prove! stops on it), never zero greens
                   (fn [cand]
                     (let [r (read-results cand)]
                       (if (contract/error? r) (do (vreset! unread r) {}) r))))]
-    (cond-> p @unread (assoc :unread @unread))))
+    (cond-> (assoc p :binary-current (:binary-current reach) :waived (:waived reach)) @unread (assoc :unread @unread))))
+
+(defn build-text
+  "out/build's text, what bin/test builds target/seon for: when a selected key reaches the binary (bin-keys) and the binary is
+  not current for the tree (binary-current's answer, seon.root/binary-current), that answer; else empty, and nothing is
+  built. docs/source.md#the-binary-records-its-program."
+  [bin-keys binary-current]
+  (if (and (seq bin-keys) binary-current) (str (pr-str binary-current) "\n") ""))
 
 (defn- prove!
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
@@ -390,15 +415,17 @@
     (do (println (str "TEST FAILED: " bad)) 1)
   (let [t0 (profile/now-ns)
         ;; the selection's time is the plan's: program db, reach graph, digests and the results read
-        plan (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
+        plan (plan-of (source-tree) what all? names (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
   (if-let [u (:unread plan)]
     ;; a read that failed is not zero greens: nothing runs, and the run says why
     (do (println (str "TEST FAILED: " (:seon.error/message u)))
         1)
   (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky]} plan
+        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived binary-current]} plan
         ;; a merge runs these last, once all else is green (bin/prove): out/slow, names, one line
+        ;; the proofs of the tree that pass by a waiver (an :overrun in the form: seon.problems/waived-proofs), for bin/prove's last lines
+        _ (write! (str out "/waived") (str waived "\n"))
         _ (write! (str out "/slow") (str (str/join " " (sort (map str (keys slow)))) (when (seq slow) "\n")))
         _ (when (seq slow)
             (println (str "prove: " (count slow) " slow tests left for last (bin/prove runs them once all else is green; run one by name: bin/test NS/TEST, all: bin/test --all): "
@@ -418,19 +445,33 @@
         ;; an incremental run (what a change reaches) is one process while four starts would cost more than the few
         ;; seconds of work they split (the owner, 2026-10-30); past that it shards, as a gate of 206 tests took 751 s on
         ;; one; the full run and a merge's verification shard
+        ;; each test's ms, measured or its class's configured estimate (never 1 ms: an unmeasured run dealt itself one shard)
+        ms (proofs/estimated-ms run-tests (measured-ms run-tests) (into #{} (filter qualified-symbol?) process))  ; process holds the check steps' names too (strings)
+        ;; as many shards as free memory holds, at most the configured jobs (never fewer for the load average: bin/test)
+        avail (long (:available-mb (seon.lib/sysmem)))
+        jobs (proofs/memory-jobs (config/value :seon.config.proofs/jobs) avail
+                                 (config/value :seon.config.proofs/shard-mb) (config/value :seon.config.proofs/free-floor-mb))
+        _ (write! (str out "/jobs") (str jobs))
+        _ (when (< jobs (config/value :seon.config.proofs/jobs))
+            (println (str "prove: " avail " MB free: " jobs " of " (config/value :seon.config.proofs/jobs) " shards at most ("
+                          (config/value :seon.config.proofs/shard-mb) " MB a shard above " (config/value :seon.config.proofs/free-floor-mb) " MB kept free)")))
         n (write-shards! out (if no-test [] run-tests) digests (:tree inputs) (select-keys steps mg-run)
-                         (if all?
-                           (config/value :seon.config.proofs/jobs)
-                           (proofs/worth-shards run-tests (config/value :seon.config.proofs/jobs) (measured-ms run-tests) (config/value :seon.config.proofs/shard-min-ms))))
+                         (if all? jobs (proofs/worth-shards run-tests jobs ms (config/value :seon.config.proofs/shard-min-ms)))
+                         ms)
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
         step-bin (filterv proofs/step-needs-binary? run-steps)
         bin-keys (into (vec (filter binary run-tests)) step-bin)
         _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
+        ;; out/build: what bin/test builds target/seon for, empty when the binary is current for this tree (seon.root/binary-current):
+        ;; a change that reaches nothing root runs from its binary builds nothing (rule (a), docs/source.md#the-binary-records-its-program)
+        _ (write! (str out "/build") (build-text bin-keys binary-current))
+        _ (when (and (seq bin-keys) (not binary-current))
+            (println "prove: target/seon is current for this tree by reach (seon.root/binary-current); built anyway until its tree's readers ask the same rule"))
         ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms)
         _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) "\n"))
         ;; the process tests' store, made here before any shard starts (shards' roots that each made
-        ;; it raced: seon.test-store/process-store), for this schema (seon.test-store/kept-store!)
+        ;; it raced: seon.test-store/process-store), for this schema (seon.db/kept-store!)
         _ (when (seq (filter binary run-tests)) (write! (str out "/process-store") (str (ts/make-process-store! (.getCanonicalPath (io/file (config/checkout)))) "\n")))
         _ (write! (str out "/steps-binary") (str (str/join " " step-bin) (when (seq step-bin) "\n")))
         ;; each candidate test's digest: where its verdict is read (seon.fx/test-results, the merge gate)
@@ -439,8 +480,10 @@
       (println (str "prove: " (count left) " tests and steps that reach a process left out (run them by name:"
                     " bin/test NS, bin/check MODE, or the full run): " (str/join " " (map str left)))))
     (when (= :merge all?)
-      (println (str "prove: a merge's verification: " (count (filter (set process) (concat run-tests run-steps)))
-                    " keys that reach a process run (no green at their digest), 0 left out")))
+      (let [ran (count (filter (set process) (concat run-tests run-steps)))
+            late (count (filter (set process) (keys slow)))]
+        (println (str "prove: a merge's verification: " (+ ran late) " keys that reach a process run (no green at their digest), 0 left out: "
+                      ran " in this plan, " late " the slow ones run last (the process plan after it)"))))
     ;; a key green and red at one digest: red, never run again until a change moves its digest;
     ;; out/flaky names each, and bin/test ends red on it after its shards ran
     (let [flaky (for [[k r] flaky]
@@ -507,9 +550,10 @@
                         [(keyword (str "no-" (name c))) (not-any? #(= c (:class %)) made)]))}))
 
 (defn- tasks-dir
-  "The task files' directory relative to the checkout (:seon.config.root/tasks-dir, which the
-  config holds resolved against it), so it names the same files in a tree extracted elsewhere."
-  [] (str (.relativize (.toPath (io/file (str (config/checkout)))) (.toPath (io/file (config/value :seon.config.root/tasks-dir))))))
+  "Where the tree keeps its task files, relative to it (:seon.config.source/tasks-dir: the tree's layout, never this process's
+  own task dir, :seon.config.root/tasks-dir, which a check run points at its own), so it names the same files in a tree
+  extracted elsewhere."
+  [] (config/value :seon.config.source/tasks-dir))
 
 (defn- with-wiki
   "Program db db with the wiki and the tasks of the checkout at dir, by root's own loaders
@@ -521,7 +565,7 @@
   ;; lacks are added to this value first, as seon.db/install-missing! adds them to a store a root opens
   (let [db (d/db-with db (vec (remove #(contains? (:schema db) (:db/ident %)) pdb/schema)))
         db (d/db-with db (doc/load-dir-tx db dir (config/value :seon.config.root/wiki-dirs) {}))
-        tx (task/load-tx db (my.root/task-files (str dir "/" (tasks-dir))))
+        tx (task/load-tx db (seon.root/task-files (str dir "/" (tasks-dir))))
         _ (when (contract/error? tx) (throw (ex-info (:seon.error/message tx) tx)))]
     (d/db-with db tx)))
 
@@ -538,7 +582,7 @@
         base (fx/base-commit root)]
     (if-not base
       (do (println (str "HEALTH FAILED: no base: " root " has no commit before this one on " (config/value :seon.config.source/main))) 1)
-      (let [store (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest)
+      (let [store (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest)
             head (with-wiki (program-db root store) root)
             ;; the base's tasks and wiki, as git holds them, in a directory of this run's own, removed once read
             dir (str root "/target/tmp/health-base-" base "-" (random-uuid))

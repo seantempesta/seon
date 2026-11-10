@@ -36,7 +36,11 @@
   "What each step's agent does, by task kind (its own work: instructions never flow): its goal,
   when it is done and by what means, short, the standard format's stage descriptions (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
   (seon.doc/system-page), and the help page it reads on demand (seon.ctx.wire/help-page). How a task is worked is the system prompt's, and the wiki section docs/agent.md#working-a-task, which an agent reads when it wants it (the instructions no longer cite it into every context): the instructions say only the goal."
-  {:user "Chat with the user: reply to their latest message. Nothing you define here merges: for work that should reach main, start an agent with `(my.task/launch! \"what's wanted\")`. More when you want it: docs/agent.md#working-for-a-person"
+  {:user (str "A person is asking you for something: what they asked is your task above, and anything they send after it. "
+              "You do not do work here: nothing you define in this session ever reaches main. When they want something made or "
+              "changed, launch an agent for it at once, `(my.task/launch! \"what they want, in their words\")`, and reply naming what "
+              "you launched and where to watch it; ask first only when what they want is unclear. A question you answer yourself. "
+              "More when you want it: docs/agent.md#working-for-a-person")
    :design (str "Your task: turn the request below into the task the implement step works from: its plan, what the "
                 "plan cites and its red proofs. You are done when an agent with only that page could make the change without "
                 "exploring, and its proofs are written, registered and red for the reason the plan gives. How a task is "
@@ -137,12 +141,8 @@
 (defn request-tx
   "The one transaction that writes a request's tasks ds (request's, design-build's or stages') on main,
   released: the reconciler sees the whole set at once and forks its first agent only once it
-  is committed. A task that starts from a request (:design, :whole) holds a search of its request's
-  words (:seon.search/search-fact), which its page draws on the branch's db
-  (seon.render.ui/searched): the place to start, before any citation. The query is the plan as the
-  request wrote it, copied once: the agent owns it after, and changes it with a swap! on ctx (an edit of
-  the plan later leaves it as the agent last set it). An error (seon.task/create-tx's)
-  answers as it is."
+  is committed. Its search of the plan's words is create-tx's, as every task's (seon.task/plan-search-tx).
+  An error (seon.task/create-tx's) answers as it is."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]]
                   [:or [:vector :any] [:map [:seon.error/type [:= :seon.task/refused]] [:seon.error/message :string]]]]}
   [db ds]
@@ -150,12 +150,7 @@
     (if (contract/error? tx)
       tx
       (-> tx
-          (into (task/execution-tx (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds) :running))
-          (into (for [d ds :when (#{:design :whole} (:seon.task/kind d))
-                      :let [id (task/task-id (:seon.task/ns d) (:seon.task/name d))]]
-                  ;; of the task by its tempid, its id, as create-tx's cites name it
-                  {:seon.search/id (str id "/request") :seon.search/of id
-                   :seon.search/query (:seon.task/plan d)}))))))
+          (into (task/execution-tx (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds) :running))))))
 
 (def stall-proofs
   "A stall task's boundary conditions, its proofs (seon.stall-proofs, read from its

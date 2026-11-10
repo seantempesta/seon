@@ -59,12 +59,17 @@
      :growth :log
      :per-n {:ns 150 :bytes 50}
      :fixed {:ns 1000 :bytes 600 :calls 1}
-     :sizes [100 300 1000 10000]
+     :sizes [100 300 1000]
      ;; measured 2026-10-20 (was a Datalog query: 99 us, 108 KB): the seek itself allocates
      ;; 23-32 KB in our Datahike / persistent-sorted-set on Jolt, on the whole process's count.
      ;; Re-measured 2026-10-23 on the proof's own thread (18b0774; Chez 80e4b9f, load 17): 17 ->
-     ;; 21 KB and 18 -> 21 us. The record a ratchet compares with is this measure's
-     :overrun {:task "seon.db/avet-seek-allocates" :measured {:ns 21000.0 :bytes 21400.0}}}))
+     ;; 21 KB and 18 -> 21 us. Taken again 2026-11-10 at 1,000, the largest size (a waiver is judged at its proof's
+     ;; largest, and 10,000 is past the cap): 8.8 KB, 8.0x the bound's bytes. The record a ratchet compares with is this measure's
+     ;; 2026-11-10, with Datahike at the seek fix (a unique attribute's value is one descent, no slice): 2,384 B and
+     ;; 5.2 us at 1,000 (was 8,832 B), 2.2x the bound's bytes. What remains is Jolt's, not the seek's: constructing the
+     ;; bound datom (448 B), the descent's method calls (576), d/datoms' multimethod and varargs (448), protocol dispatch
+     ;; (about 280). So the waiver names the Jolt dispatch task now; it closes with that work, measured again on merged Jolt
+     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :n 1000 :measured {:ns 5166.0 :bytes 2384.0}}}))
 
 (defn ended-db
   "The input of size n: a main db holding n tasks whose agents ended, each with what a judging carries on main: its

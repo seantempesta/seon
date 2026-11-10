@@ -1,7 +1,7 @@
 (ns seon.lib-test
   "The native probes (native/probe.c through seon.lib): what they answer."
   (:require [clojure.test :refer [deftest is]] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm]
-            [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str]))
+            [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str] [clojure.core.async]))
 
 (deftest a-fork-beside-a-running-thread-is-refused-and-says-how-many-run
   ;; lib/fork! is the one spawning skeleton: a second active Chez thread breaks a forked
@@ -105,18 +105,18 @@
   ;; 76 MB after forking a child (measured 2026-10-23), so root, which forks the fork server, read a
   ;; quarter of what it holds. A forked child is charged what it writes, not what it shares.
   (let [{:keys [before held child after] :as r} (fork-case "memory-gauge")]
-    (is (and before held (< 285 (- held before) 330)) (str "a 300 MB block written: " (pr-str r)))
-    (is (= {:exit 0} child) "a forked child is charged the 30 MB it writes")
+    (is (and before held (< 60 (- held before) 80)) (str "a 64 MB block written: " (pr-str r)))
+    (is (= {:exit 0} child) "a forked child is charged the 8 MB it writes")
     (is (and after (< (* 0.95 held) after)) (str "the parent still holds its block after the fork: " (pr-str r))))
   ;; the reading child (case "touch-gauge", task seon.lib/scale-charges-what-the-machine-lost): a
-  ;; parent holds 200 MB it wrote; a child that only reads every page is charged ~200 MB, as the
+  ;; parent holds 40 MB it wrote; a child that only reads every page is charged ~40 MB, as the
   ;; one that writes them is, though only the writer takes memory from the machine. That second
   ;; half is the machine's free plus inactive pages (lib/sysmem), which every process on the
   ;; machine moves (measured 2026-10-29 at load 10: the writer's drop was 0 to 156 MB of its
   ;; 200, the reader's -4 to 15), so it is recorded in the failure message and docs/cost.md, never
   ;; judged: only the ledger's charge (a count of the child's own pages) and a reading that came back are.
   (let [{:keys [read write] :as r} (fork-case "touch-gauge")]
-    (is (and (< 190 (:charged read) 230) (< 190 (:charged write) 230)) (str "both children are charged what they touch: " (pr-str r)))
+    (is (and (< 38 (:charged read) 46) (< 38 (:charged write) 46)) (str "both children are charged what they touch: " (pr-str r)))
     (is (and (= {:exit 0} (:exit read) (:exit write)) (number? (:machine-drop read)) (number? (:machine-drop write)))
         (str "both children ran and read the machine's memory: " (pr-str r)))))
 
@@ -129,3 +129,18 @@
     (is (= {:exit 0} (:go r)) "a go block that parks is resumed in the child")
     (is (= {:exit 0} (:timeout r)) "a timeout fires in the child")
     (is (= {:exit 0} (:store r)) "an in-memory Datahike store is made and written in the child")))
+
+(deftest a-forked-child-is-reset-before-anything-can-preempt-it
+  ;; docs/failure-points.md#physics-who-may-run-threads: fork(2) copies the parent's fibers and its carrier's run queue, and the
+  ;; child drops them (jolt.host/after-fork-child!). Nothing may run between the fork and that reset: with interrupts enabled
+  ;; first, a preemption there switched the child to the scheduler over the parent's queue, which ran a parent's ready fiber in
+  ;; the child (exit 7 here), or, once the reset had marked them, died of "fiber in unexpected state forked" (bin/check scale,
+  ;; 2026-11-10: an agent exited 1 with nothing on its stderr). Forced: the smallest quantum, ready fibers queued behind each fork
+  ;; (seon.check/fork-cases "fork-reset"). The forks are made in a fresh process of the binary, on its main carrier (its fibers on
+  ;; its one thread, as a root's boot and an agent do): forked from a copy of a shard (a 2.9 GB footprint, 4,000 regions) the
+  ;; same 31 forks took 18-164 s against ~1 s alone (the batch's proves, 2026-11-10)
+  (let [{:keys [forks doubles] :as r} (fork-case "fork-reset")]
+    (is (= {{:exit 0} 10} forks)
+        (str "every child of 10 reset itself and ran only its own code (exit 7: one ran a parent's fiber; before the fix all of them, 50 of 50 when it forked 50, did): " (pr-str r)))
+    (is (= {"own" 10} doubles) (str "each of 10 grandchildren of a double fork ran its own code and nothing of the parent's: " (pr-str r)))))
+

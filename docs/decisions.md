@@ -4,11 +4,15 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-10 rulings
 
-The owner's ruling of 2026-11-10, on how the machine's load is judged.
+The owner's rulings of 2026-11-10, on how the machine's load is judged and on what an agent reads.
 
 ### Load is judged by cores and free memory (owner, 2026-11-10)
 
 "I have 18 cores and load is 8". The "load under ~8" number came from the 16 GB target and was holding landings and proves at load 8-11 for nothing. Heavy runs go niced and in parallel while nothing is starved, judged by the machine's cores and its free memory (owner, 2026-11-06: "do dynamic balancing"); the 16 GB MacBook stays the target Seon must fit. Stated in: AGENTS.md section 8, docs/machine.md#builds-and-checks.
+
+### The agent's history is native, and what is looked up goes through the hiccup (owner, 2026-11-10)
+
+"The UI version of the mesesages, tool calls etc, is a repeat. ... If we want to identify the "parts" from the hiccup and then render them differently for the model into the openai-compat format that's fine. But I don't want to fuckup the agents context. ... The agent gets raw info like it's message and eval calls in it's native format and anything that's processed or dunamically looked up should go in the hiccup render (make this intermediate and not HTML so it can render well into each of it's output for the model and for the html)". And the same day: "I want the core openai-compat format to be normal system, user, assistant and tool calls and that to be where the agent understands it's history -- not from the hiccup web render ... just make it a [fn-call args children] style vector that will be expanded in the html version ... remove style info by default ... make sure the agent knows what function was called for each part of the hiccup render so they can edit it to change the page." It stands over the 2026-11-09 reading that a render deposits message values into the hiccup. Stated in: [render](render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup).
 
 ## 2026-11-09 rulings
 
@@ -52,7 +56,7 @@ The owner's ruling, relayed by the Optimization session after two stale reds wer
 
 ### A running system runs off the db; boot resumes from it and reads no file (owner, 2026-11-09)
 
-"Boot's job is to resume the existing system or if it's fresh to index it and get it to the point that everything is running off the db. From that point on we are syncing data TO files not reading from them"; "Of course we can re-index if we want. But I mean as a functioning system concept." A running system runs off the db and writes files from it; a boot resumes from the db and reads no file; indexing from files is an explicit act a person chooses (seeding a fresh store, or re-indexing one on purpose), never something a boot or a running root does by itself. Stated in: docs/source.md#a-boot-imports-main-first (Optimization rewrites it), task seon.root/a-boot-resumes-from-the-db.
+"Boot's job is to resume the existing system or if it's fresh to index it and get it to the point that everything is running off the db. From that point on we are syncing data TO files not reading from them"; "Of course we can re-index if we want. But I mean as a functioning system concept." A running system runs off the db and writes files from it; a boot resumes from the db and reads no file; indexing from files is an explicit act a person chooses (seeding a fresh store, or re-indexing one on purpose), never something a boot or a running root does by itself. Stated in: docs/source.md#a-boot-resumes-from-the-db, docs/source.md#indexing-a-tree.
 
 ### Claude sessions' landings enter the db as data, for now (owner, 2026-11-09)
 
@@ -160,7 +164,7 @@ The owner's rulings of 2026-11-07, on the disk and the db, on what an agent star
 
 ### The db is the source of truth; a disk edit imports only when asked
 
-Owner, 2026-11-07: "the db is the source of truth and we should be syncing to the disk from within seon (this is the focus for the system is seon agents working within seon). However, claude agents are working from the outside so we need a mechanism to index and update the db that you and your agents will manually control." Root's watcher loads the wiki and the task files, never the source; `my.root/import!` is the manual call. Stated in [health](health.md#every-writer-root-loads-what-changed) and [source](source.md#mains-program-follows-the-tree).
+Owner, 2026-11-07: "the db is the source of truth and we should be syncing to the disk from within seon (this is the focus for the system is seon agents working within seon). However, claude agents are working from the outside so we need a mechanism to index and update the db that you and your agents will manually control." A disk edit acts on nothing until a person re-indexes (`my.root/import!`); since 2026-11-09 nothing reads files at all but an index (below). Stated in [health](health.md#every-writer-the-db-is-written-files-follow) and [source](source.md#indexing-a-tree).
 
 ### No magic: maintenance is Clojure data on ctx
 
@@ -472,7 +476,7 @@ Approved after the run removal: a changed part that answers data sends clojure.d
 
 ### A process test's cache gap stays; the full run catches it (owner, 2026-10-30)
 
-An in-agent test's code strings are not in its reach, so its digest may reuse a green across a change it reaches; "leave it", the heavy pre-merge run catches it. Asked next: mark such tests uncacheable, so the heavy stage always reruns them ("Can we just mark tests that we know can't be cached so if they are touched they always rerun?"). Stated in docs/plan.md#now-one-step.
+An in-agent test's code strings are not in its reach, so its digest may reuse a green across a change it reaches; "leave it", the heavy pre-merge run catches it. Asked next: mark such tests uncacheable, so the heavy stage always reruns them ("Can we just mark tests that we know can't be cached so if they are touched they always rerun?"). Stated in docs/plan.md#now.
 
 ### Main keeps recording live data; agents react only when main's program moves (owner, 2026-10-30)
 
@@ -484,7 +488,7 @@ Budgets should be under 90%+ of the time and an overrun mostly a case worth inte
 
 ### Simplify by constraint; the test suite must be trusted (owner, 2026-10-30)
 
-"I'm okay with adding constraints to the system to simplify the solutions"; "I want all correctness issues solved with our test suite. We need to trust it as much as possible." Hangs are removed as a class (one reader of an agent's socket, a mailbox per request id, every taken request answered in a finally, the cap checked once at the top of each turn); tests run as agents run them. Stated in docs/plan.md#now-one-step.
+"I'm okay with adding constraints to the system to simplify the solutions"; "I want all correctness issues solved with our test suite. We need to trust it as much as possible." Hangs are removed as a class (one reader of an agent's socket, a mailbox per request id, every taken request answered in a finally, the cap checked once at the top of each turn); tests run as agents run them. Stated in docs/plan.md#now.
 
 ## 2026-10-29 rulings
 
