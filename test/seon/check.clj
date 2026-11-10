@@ -1224,7 +1224,7 @@
                             (doto (Thread. #(do (Thread/sleep 200) (sock/write-line! w "done"))) (.setDaemon true) (.start))
                             (lib/wait-status pid))}))
    "memory-gauge"
-   ;; the largest block a test allocates (one process, no fan-out: AGENTS section 8); Chez keeps a
+   ;; the largest block a test allocates (one process, no fan-out: docs/machine.md#processes); Chez keeps a
    ;; bytevector this large in place (a large object is never copied by a collection)
    #(let [before (lib/real-mb)
           block (byte-array (* 300 1024 1024))]
