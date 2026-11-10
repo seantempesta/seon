@@ -1175,6 +1175,23 @@
 
 (defn- alive? [pid] (zero? (lib/c-kill pid 0)))
 
+(defn- ps-row
+  "Process pid as ps shows it, {:pid :ppid :stat :command}, or nil when ps finds none: what a check records of a process it found left."
+  [pid]
+  (let [line (clojure.string/trim (:out (clojure.java.shell/sh "ps" "-o" "pid=,ppid=,stat=,command=" "-p" (str pid))))]
+    (when-let [[_ p pp st cmd] (re-matches #"(\d+)\s+(\d+)\s+(\S+)\s+(.*)" line)]
+      {:pid (parse-long p) :ppid (parse-long pp) :stat st :command cmd})))
+
+(defn- still-there
+  "Of pids, the ones still there after a stop, each with its ps row (docs/processes.md#a-stop-reaps-every-child). A zombie (it
+  exited; its parent has not waited for it) counts as ended only when its parent is not this process, the root under test: an
+  orphan the OS reaps. One whose parent is this process is a child root failed to reap, and stays."
+  [pids]
+  (vec (for [p pids :when (alive? p)
+             :let [row (ps-row p)]
+             :when (not (and row (clojure.string/starts-with? (:stat row) "Z") (not= (:ppid row) (lib/c-getpid))))]
+         (or row {:pid p}))))
+
 (defn- cycle-row
   "Cycle i, start! -> 3 agents evaluate -> stop!, in this process: root's threads against what
   it declares (thread-diff, {} when exact) while running and after its stop!, the stop's answer
@@ -1194,7 +1211,7 @@
     ;; kernel's count for a while (164 of 200 trials; macOS removes it after even a
     ;; pthread_join), and nothing can await its removal (docs/processes.md#a-stop-reaps-every-child)
     (let [stopped (thread-diff (declared-threads) (threads))]
-      {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (vec (filter alive? pids))
+      {:cycle i :ok ok? :boot-ms (lib/r2 boot-ms) :stop st :left (still-there pids)
        :health (set health)
        :running running :stopped (dissoc stopped :os) :stopped-os (:os stopped)})))
 
