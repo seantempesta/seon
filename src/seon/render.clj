@@ -158,8 +158,9 @@
       (some-> (when-let [n (some-> (namespace own) symbol find-ns)] (ns-resolve n (symbol (name own)))) deref)
       (when-let [sym (when (nil? own) (declared ix (schema-of ix v hint)))]
         ;; a render that reads the walk's ctx (an entity's page: an agent's, root's) renders the entity a walk is rooted on, not a value
-        ;; an eval answered (a pulled agent): that value prints as the data it is
-        (let [f (requiring-resolve sym)] (when-not (contains? (inputs f) :seon.ctx/ctx) @f))))))
+        ;; an eval answered (a pulled agent, an entity: only a map with its :db/id is asked, so a plain value costs no lookup): that value
+        ;; prints as the data it is
+        (let [f (requiring-resolve sym)] (when-not (and (map? v) (:db/id v) (contains? (inputs f) :seon.ctx/ctx)) @f))))))
 
 (defn declared-var
   "The var of the render schema k declares (its nearest parent's), or nil: a layout the walk draws
@@ -400,7 +401,7 @@
                         ;; an entity's own render for each other output, where no call answers that output for it
                         ;; each in a run of its own at this edge (docs/failure-points.md, a component's render): a model render that throws
                         ;; is that output's defect, never the page's, which the person still reads; its error is data both see: a problem
-                        ;; (health, take-defects!) and, in its place in the output, a message saying what threw
+                        ;; (health, take-defects!) and, in its place in the output, what the error schema's own render for that output answers
                         (doseq [[op of] fs :when (not= op as)]
                           (vswap! outs assoc op
                                   (try (place op env' (of {:seon.db/db ((:db w)) :seon.render/index ix} (or (first args) ev)))
@@ -410,7 +411,11 @@
                                                                       (str (symbol of) " threw: " (or (ex-message e) (str e)))
                                                                       (cond-> {:seon.error/in (symbol of)} (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
                                            (vswap! (:defects w) conj defect)
-                                           [{:role "user" :content (str "<render-error>" (:seon.error/message defect) "</render-error>")}])))))
+                                           ;; the error answers this output by the render its schema names for it (a model render of an error, as
+                                           ;; every model render is a schema's), else nothing beside the problem
+                                           (if-let [ef (some-> (render-for ix :seon.render/component-defect op) requiring-resolve)]
+                                             (place op env' (ef {:seon.db/db ((:db w)) :seon.render/index ix} defect))
+                                             []))))))
                         out)
                       ;; a component that throws draws its error in its place: a call of the error's render on the error as data (what
                       ;; threw, and the thrown error's own data: a contract's problems), so the page writes that render and the model

@@ -1613,6 +1613,18 @@
 
 (declare sessions)
 
+(defn eval-tiles
+  "The tiles of agent pull c's evals whose record says their value has a render (its schema, or a value holding its own), each a
+  component of its own (`eval-tile`), read off the pull with no call; nothing when none has, so it places nothing and agent-parts
+  never reads the evals. See docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
+  [_ c]
+  (when-let [ts (seq (for [e (keys (:seon.eval/_agent c))
+                           :let [x (get-in c [:seon.eval/_agent e]) v (some-> (ratom/realize (:seon.eval/response x)) :value)]
+                           :when (or (ratom/realize (:seon.eval/schema x)) (and (map? v) (contains? v :seon.render/hiccup)))]
+                       [#'eval-tile {:key (ratom/realize (:seon.eval/id x)) :at [:seon.eval/_agent e]}]))]
+    (into [:div] ts)))
+
 (defn agent-parts
   "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists),
   in the order they are placed here: the task, its proofs, what it cites, each search, the references its agent cites, its added
@@ -1640,7 +1652,7 @@
    (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])
    (when (:seon.agent/task c) [#'own-problems {:at [:seon.agent/task]}])
    ;; each eval's rendered value a tile of its own (`eval-tile`), newest first; an eval whose value has no render places nothing
-   (for [e (keys (:seon.eval/_agent c))] [#'eval-tile {:key (ratom/realize (get-in c [:seon.eval/_agent e :seon.eval/id])) :at [:seon.eval/_agent e]}])
+   [#'eval-tiles {} c]
    [#'turn {:at [:seon.agent/ns]}]
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])
 
