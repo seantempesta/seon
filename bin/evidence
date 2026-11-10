@@ -1,7 +1,7 @@
 #!/bin/zsh
 # bin/evidence DIR PID: what PID and the processes under it are doing, into DIR, as a run is stopped: a stuck run ended at its limit
 # otherwise takes its evidence with it. The tree (ps), each process's sample, its files, and last a fiber dump asked of each Jolt
-# process (kill -INFO, on its stderr, as AGENTS.md's "a hang is evidence" asks), since that signal can free a hang. Reads only; ends in about 2 s a process.
+# process (kill -INFO, on its stderr, as docs/machine.md#reading-a-hang asks), since that signal can free a hang. Reads only; ends in about 2 s a process.
 D=$1 ROOTP=$2
 mkdir -p "$D"
 ps -axo pid,ppid,pgid,etime,%cpu,rss,stat,command > "$D/ps.txt"

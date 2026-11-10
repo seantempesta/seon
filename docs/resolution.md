@@ -3,10 +3,11 @@
 A name resolves at run time, or a Var is defined outside its definition form, only where this page names the function and its reason; `bin/laws resolution` lists every such site in `src/`.
 
 Every definition happens once, where it is defined: code names what it calls through its
-namespace's requires, and behaviour varies through the environment or through data
-([AGENTS.md §5](../AGENTS.md)). A name is resolved at run time only where
+namespace's requires, and behaviour varies through the environment or through data. A name is resolved at run time only where
 data names it (a declaration, a schema's render, a cost estimate) or where the compiler's
 facts are read; a Var's root changes only when its contract is armed.
+
+`intern`, `alter-var-root` and `with-redefs` are code smells, not banned (owner, 2026-10-21: "intern isn't banned it's a code smell"). A legitimate use builds vars programmatically in a namespace you own, where no definition form exists (a REPL harness, a test environment), and its docstring says why. A gap in another namespace (a library's, Jolt's stdlib) is filled in that namespace's owner instead, and a stub made by rebinding is replaced by a test environment that holds the stub's definition.
 
 `bin/laws resolution` lists every function in `src/` that calls `requiring-resolve`,
 `ns-resolve`, `resolve` on a quoted symbol, `intern`, `alter-var-root` or `with-redefs`
@@ -49,4 +50,4 @@ The sites that resolve a name held in data to a var by design, each with its rea
 
 The sites that fill a gap in another namespace, each owed a fix in that namespace's owner.
 
-- `my.agent` (its last form): interns `source`, `source-fn`, `pst`, `doc` and `dir` into Jolt's `clojure.repl`, in every process (root, a test child and an agent alike), a namespace it does not own ([AGENTS.md §5](../AGENTS.md): a gap in another namespace is fixed in its owner). Jolt's `clojure.repl` carrying them deletes the intern.
+- `my.agent` (its last form): interns `source`, `source-fn`, `pst`, `doc` and `dir` into Jolt's `clojure.repl`, in every process (root, a test child and an agent alike), a namespace it does not own (a gap in another namespace is fixed in its owner). Jolt's `clojure.repl` carrying them deletes the intern.

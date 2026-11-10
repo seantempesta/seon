@@ -12,15 +12,17 @@
 
 (defn wiki
   "The input of size n: a main db already holding a wiki of n sections (pages of ten, each
-  section one sentence citing a var and linking its page's first section), and those pages."
+  section one sentence citing a var, linking its page's first section and naming the world's docs/calc.md#calc by its address), and those pages."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string [:map-of :string :string]]]}
   [n]
+  ;; the section each section cites by its address is the world's own (docs/calc.md#calc, stored outside dir): a link to no
+  ;; section refuses the load, and a target stored for the test alone would be a section more than the world and n hold
   (let [db (base)
         pages (into {} (for [p (range (max 1 (quot n 10)))]
                          [(str "demo/p" p ".md")
                           (apply str (str "# Page " p "\n\nPage " p " holds ten sections.\n")
                                  (for [s (range 1 (min 10 n))]
-                                   (str "\n## Section " s "\n\nSection " s " parks as `app.m0/f" s "` does, see [the page](#page-" p ") and the cost in docs/references.md#cost.\n")))]))
+                                   (str "\n## Section " s "\n\nSection " s " parks as `app.m0/f" s "` does, see [the page](#page-" p ") and the sums in docs/calc.md#calc.\n")))]))
         tx (doc/load-tx db "demo" pages)]
     [(d/db-with db tx) "demo" pages]))
 
@@ -181,6 +183,8 @@
   "citing-sections' arguments at size n: a wiki of n sections all citing app.m0/f1 (pages of ten), and that var."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :symbol]]}
   [n]
+  ;; the section each section cites by its address is the world's own (docs/calc.md#calc, stored outside dir): a link to no
+  ;; section refuses the load, and a target stored for the test alone would be a section more than the world and n hold
   (let [db (base)
         pages (into {} (for [p (range (max 1 (quot n 10)))]
                          [(str "demo/p" p ".md")

@@ -2,9 +2,33 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-10 rulings
+
+The owner's ruling of 2026-11-10, on how the machine's load is judged.
+
+### Load is judged by cores and free memory (owner, 2026-11-10)
+
+"I have 18 cores and load is 8". The "load under ~8" number came from the 16 GB target and was holding landings and proves at load 8-11 for nothing. Heavy runs go niced and in parallel while nothing is starved, judged by the machine's cores and its free memory (owner, 2026-11-06: "do dynamic balancing"); the 16 GB MacBook stays the target Seon must fit. Stated in: AGENTS.md section 8, docs/machine.md#builds-and-checks.
+
 ## 2026-11-09 rulings
 
 The owner's rulings of 2026-11-09, on one system of agents, rendering from data, the user and root. Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09, staged in docs/users.md#the-stages-agreed-2026-11-09.
+
+### No hacks: adjust the system (owner, 2026-11-09)
+
+"I don't want hacks I want to adjust the system so it works properly" (from session memory, 2026-11-10; unverified wording). A fix removes the cause: never a special case, a retry, a hand-kept list or a moved verdict, and its report tells what was verified from what is inferred. Stated in: AGENTS.md section 3 (the method, step 4).
+
+### Understand before writing (owner, 2026-11-09)
+
+"don't write data until you understand it". While a design is open, its findings stay out of docs and tasks; the wiki is written when it is true, and then in the commit that makes it true. Stated in: AGENTS.md section 7.
+
+### Questions go through the question tool (owner, 2026-11-09)
+
+"ask questions you are awaiting answers for with your questions tool" (from session memory, 2026-11-10; unverified wording); before it, 2026-11-06: "lets do a round of using your questions tool and give me background" (from session memory, 2026-11-10; unverified wording). One round, each question with its background, the session's pick first. Stated in: AGENTS.md section 2, docs/sessions.md#asking-the-owner.
+
+### A red verdict is never deleted or moved (owner, 2026-11-09)
+
+The owner's ruling, relayed by the Optimization session after two stale reds were deleted by hand: a fixed tree gets a new digest, and a red that stays at a digest that cannot move is a gap in the digest. Stated in: AGENTS.md section 3, docs/merging.md#verdicts-are-a-cache.
 
 ### One system of agents, and no new concepts (owner, 2026-11-09)
 
@@ -77,6 +101,22 @@ The owner's rulings of 2026-11-09, on one system of agents, rendering from data,
 ## 2026-11-08 rulings
 
 The owner's rulings of 2026-11-08, on what the model knows, erasing the store, and how a reply's evals run.
+
+### A session knows its whole area; review is never delegated (owner, 2026-11-08)
+
+"We are moving away from monolithic orchestrators who don't know anything and implementation agents who don't know the big picture"; "Well spec'ed tasks can be handed to sonnet, but the opus agents are responsible for reviewing the code"; "I want you to review all core code". A helper commits on its branch and stops; the session reads every line and lands it. Stated in: AGENTS.md section 2, docs/sessions.md#the-session-reviews-every-line.
+
+### The Web session owns servers and demos (owner, 2026-11-08)
+
+"Okay just take over all responsibility for servers and demos for me"; "yes you own web so you are in control of ports for web". The Web session keeps the standing root and any demo root up and on main; other sessions send the standing root only read-only evals unless the owner says yes to a write. Stated in: AGENTS.md section 0, docs/sessions.md#sessions-own-their-areas.
+
+### What a new design replaces goes with it (owner, 2026-11-08)
+
+"I want this shit gone so it doesn't keep coming back" (from session memory, 2026-11-10; unverified wording). The tasks, wiki text, decisions pointers and session notes of what a design replaces leave in the same change. Stated in: AGENTS.md section 3, docs/merging.md#a-landing-message-carries-its-audit.
+
+### An estimate that is exceeded stops the work (owner, 2026-11-08)
+
+"estimates that if we exceed them we stop and fix them". A plan carries its cost line (what n is, its big-O, the number expected) before code is written, and reality ten times over it stops the work. Stated in: AGENTS.md section 3 (the method, step 2).
 
 ### Entity schemas are sets of keys written together, checked on write; one definition each (owner, 2026-11-08)
 
@@ -206,6 +246,10 @@ Owner, 2026-11-07: "I generally want to start with a simple proof like respond t
 
 The owner's rulings of 2026-11-06, on one tree for the model and the page, on data the model can read precisely, and on sessions working with no fixed ceremony; they stand over earlier entries where they differ.
 
+### A well-scoped task is done without asking (owner, 2026-11-06)
+
+"If you have a well scoped task please do it without asking". A clear defect is fixed the same way. Stated in: AGENTS.md section 2, docs/sessions.md#asking-the-owner.
+
 ### Old work retired, not left halfway
 
 Owner, 2026-11-06, on branches stranded since October ("we are merging things and not just abandoning them halfway"): retired, each with its commit: judge second-move tooling and generated `:repl-calls` (`01ea574335`, the live-agent lab does this job); a content-keyed derivation (`a08ef67bf3`, cold first and the test reuse by digest that merged instead); a test digesting the files it read (`9fccfab234`, with Jolt's `jolt/file-reads-are-recorded`); a staged kinds deletion (`252a7fac9c`, written when runs existed; the kinds are still on main). The daily full run stays (`e5b45e24fb`, its deletion, is dropped). Loading init from units outside the boot is dropped on its new numbers (docs/machine.md). The write-time schema check lands with its bound moved from 83 to 101 calls (docs/storage.md#the-write-checks-every-datom). About 80 experiment and superseded branches are deleted; `curated` stays, the only git copy of two example sessions.
@@ -238,7 +282,7 @@ Two ideas, two fields: "theres' sa field for natural language responses to anyth
 
 ### Sessions work together with no fixed ceremony
 
-"I don't want the work done twice. If you do it well merge it. If optimization does it well merge it. If you hand something off to optimization just do it. No more ceremony and mandated fixed policies." "Only give optimization work that it can work on." "Aim to get 90% of the benefit for 10% of the effort." Machine load is balanced by judgment. Stated in AGENTS.md sections 2 and 3.
+"I don't want the work done twice. If you do it well merge it. If optimization does it well merge it. If you hand something off to optimization just do it. No more ceremony and mandated fixed policies." "Only give optimization work that it can work on." "Aim to get 90% of the benefit for 10% of the effort." Machine load is balanced by judgment. Stated in AGENTS.md sections 2, 3 and 8.
 
 ### A slow test runs last in a merge, and is left out of a plain run until it is fast
 
@@ -260,7 +304,7 @@ Owner, 2026-11-06: "I want edits to go into the database (which is the source of
 
 ### No regex or text parsing; function composition
 
-Owner, 2026-11-06: "I don't want anything hacky here. No regex or parsing text. I want function composition." Stated in AGENTS.md §9 (regex over code) and docs/turn.md#an-eval-can-be-run-again.
+Owner, 2026-11-06: "I don't want anything hacky here. No regex or parsing text. I want function composition." Stated in docs/source.md#a-forms-account-is-the-programs-facts, AGENTS.md §9 (regex over code) and docs/turn.md#an-eval-can-be-run-again.
 
 ### An eval run again replaces itself
 
@@ -288,11 +332,11 @@ The owner's rulings of 2026-11-05, on looking before building and on what makes 
 
 ### An agent's entity, pull and renders make most of its context (owner, 2026-11-05)
 
-"Design the agents entity with useful information and make it so the pull pattern and the render functions generate the majority of the agents context. It teaches them about the system, it explain what task they are working on, how messaging works when they get a message, evertyhing. It's all data driven." And: "NO SPECIAL CASE FOR CITING. That's just data and a render function". And: "Definitely got rid of \"runs\" (that concept doesn't exist) agents have turns, evals, max turns, etc." Stated in: [ctx](ctx.md#what-the-model-reads-and-what-the-page-draws).
+"Design the agents entity with useful information and make it so the pull pattern and the render functions generate the majority of the agents context. It teaches them about the system, it explain what task they are working on, how messaging works when they get a message, evertyhing. It's all data driven." And: "NO SPECIAL CASE FOR CITING. That's just data and a render function". And: "Definitely got rid of \"runs\" (that concept doesn't exist) agents have turns, evals, max turns, etc." Stated in: [ctx](ctx.md#what-the-model-reads-and-what-the-page-renders).
 
 ### The debug page draws history with today's renders, and says when that differs (owner, 2026-11-05)
 
-Asked whether the debug page should draw history with today's renders plus a hash that flags any difference: "Yes, and try it". It stands over AGENTS.md §3's "as recorded" for a request. Stated in: [the debug page](render.md#the-debug-page-is-the-wire-request).
+Asked whether the debug page should draw history with today's renders plus a hash that flags any difference: "Yes, and try it". It stands over "as recorded" for a request ([render](render.md#a-render-does-no-work-of-its-own)). Stated in: [the debug page](render.md#the-debug-page-is-the-wire-request).
 
 ### The render is an eval, and what changed is another (owner, 2026-11-05)
 
@@ -309,6 +353,10 @@ Asked whether the debug page should draw history with today's renders plus a has
 ## 2026-11-04 rulings
 
 The owner's rulings of 2026-11-04, on what an agent is and how everything it reads is made. They stand over earlier entries where they differ.
+
+### No parallel systems (owner, 2026-11-04)
+
+"I don't want agents to keep building parallel systems". A second layout, a second cache, a second path to the model, an entity to hold what an attribute or the db's history already holds, a store of printed values: before adding one, look at what already does it, and ask whether the problem is a cause or a consequence of something else being wrong ([a bug is a class](#a-bug-is-a-class-remove-what-allowed-it-owner-2026-11-03)). Stated in: AGENTS.md section 9.
 
 ### Data is stored as data; the one printer is for context (owner, 2026-11-04)
 
@@ -372,7 +420,7 @@ The owner's rulings of 2026-11-01, after the audit of what agents read; they sta
 
 ### Benefits are general; nothing leads an agent to its answer (owner, 2026-11-01)
 
-"We don't mimic repl output with comments it breaks the models. Do not lead the models just to score a win. All benefits should be general." Nothing an agent reads (the help page, its instructions, a cited section, a task's plan) tells a run's story or hints at the change it is asked for. A benchmark is work whose answer is not in the tree: a reverted change whose tests stay behind measures nothing. A red cost proof is never cleared by the changing agent raising its own bound; an overrun is accepted only as [cost](cost.md#an-accepted-overrun-and-its-ratchet) says, filed by a person (AGENTS §3, every change earns its place).
+"We don't mimic repl output with comments it breaks the models. Do not lead the models just to score a win. All benefits should be general." Nothing an agent reads (the help page, its instructions, a cited section, a task's plan) tells a run's story or hints at the change it is asked for. A benchmark is work whose answer is not in the tree: a reverted change whose tests stay behind measures nothing. A red cost proof is never cleared by the changing agent raising its own bound; an overrun is accepted only as [cost](cost.md#an-accepted-overrun-and-its-ratchet) says, filed by a person (docs/merging.md#a-landing-message-carries-its-audit, every change earns its place).
 
 ### An agent's evals on a task are a session; past ones are shown as curated sessions (owner, 2026-11-01)
 
@@ -397,6 +445,14 @@ On batch 58 (swarm red once, green alone at the same tree, the change unable to 
 ## 2026-10-30 rulings
 
 The owner's rulings of 2026-10-30 morning, after the overnight md-scan runs; they stand over earlier entries where they differ.
+
+### Limits fail loudly (owner, 2026-10-30)
+
+"Please don't put any artificially low limits that will bite us in our asses and especially if they won't loudly crash"; "The limits should always fail loudly btw. That budget is useful to catch problems IF we use it right." A bound is removed or derived from measurements, and reaching it is a typed error that names it. Stated in: AGENTS.md section 5, docs/config.md#a-bound-fails-loudly.
+
+### A timed wait means the wrong design (owner, 2026-10-30)
+
+"timeouts just mean we have the wrong design (most of the time)" (from session memory, 2026-11-10; unverified wording). A wait ends on its value or on a typed error from the producer that owed it, never on a clock. Stated in: AGENTS.md section 4, docs/clocks.md.
 
 ### There are no runs: an agent has an env, a branch and its evals (owner, 2026-10-30)
 
@@ -433,6 +489,10 @@ Budgets should be under 90%+ of the time and an overrun mostly a case worth inte
 ## 2026-10-29 rulings
 
 The owner's rulings of 2026-10-29, each with where it is now stated; they stand over earlier entries where they differ.
+
+### A link the owner is given survives a restart (owner, 2026-10-29)
+
+"I can't see the changes. Always give me links or give me a stable way to find links on a stable server". An agent is linked by its branch, and the link names the commit the root was built from. Stated in: docs/sessions.md#stable-links.
 
 ### The page is a friendly chat; what the model was sent is shown whole (owner, 2026-10-29)
 
@@ -472,7 +532,7 @@ The owner's rulings of 2026-10-29, each with where it is now stated; they stand 
 
 ### The agent's record is facts about its work (owner, 2026-10-29)
 
-"The agent's record is facts about its work. Telemetry and derived data live on their own entities, pointing at what they describe: a vector at its eval, a model call at its turn, a process sample at its agent. The agent's pull never reaches them, and the debug view and the ui render them." The agent's pull is `*` plus hand-declared reverse joins (its turns, evals, newest messages) and its task; anything an agent writes on its entity is pulled and rendered by its schema. Stated in: docs/ctx.md#the-record-is-the-agents-work, docs/ctx.md#the-pattern.
+"The agent's record is facts about its work. Telemetry and derived data live on their own entities, pointing at what they describe: a vector at its eval, a model call at its turn, a process sample at its agent. The agent's pull never reaches them, and the debug view and the ui render them." The agent's pull is `*` plus hand-declared reverse joins (its turns, evals, newest messages) and its task; anything an agent writes on its entity is pulled and rendered by its schema. Stated in: docs/ctx.md#the-agents-entity-holds-its-work, docs/ctx.md#the-pattern.
 
 ### The agent is the unit, not the run (owner, 2026-10-29)
 
@@ -512,7 +572,7 @@ Chose V2b of three measured builds over `--opt` (-419 MB, but library stack line
 
 ### Use the machine while nothing is starved (owner, 2026-10-29)
 
-"Load isn't too bad, you can run as long as we aren't starved for anything which just slows down everything." Heavy runs may run in parallel past load 8 while no run is starved (a timing-sensitive step that goes red under load is a defect of that step, not a reason to stop). Stated in: this entry (AGENTS section 2's "load under ~8" is the default when the owner has not said otherwise).
+"Load isn't too bad, you can run as long as we aren't starved for anything which just slows down everything." Heavy runs may run in parallel past load 8 while no run is starved (a timing-sensitive step that goes red under load is a defect of that step, not a reason to stop). Stated in: docs/machine.md#builds-and-checks; the "load under ~8" default is gone ([load is judged by cores and free memory](#load-is-judged-by-cores-and-free-memory-owner-2026-11-10)).
 
 ### No artificial limits or cuts on an agent's context or evals (owner, 2026-10-29)
 
@@ -540,7 +600,7 @@ Chose "root follows main ref": a topic branch checked out in the main tree never
 
 ### Old worktrees' run data is not kept (owner, 2026-10-29)
 
-"No run data is important right now." Untracked runs/ directories and stores in old worktrees went with their worktrees; branch refs are kept. Stated in: this entry (the store-is-a-record rule in AGENTS section 8 is unchanged for the standing store).
+"No run data is important right now." Untracked runs/ directories and stores in old worktrees went with their worktrees; branch refs are kept. Stated in: this entry (the rule that a store is kept, docs/machine.md#disk-stays-bounded, is unchanged for the standing store).
 
 ## 2026-10-28 rulings
 
@@ -560,7 +620,7 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 ### Nothing crashes and nothing hangs; failures are data to the agent (owner, 2026-10-28)
 
-"I want our system to be robust and to have it not crash or hang ever. We can generate errors as data and return them to the agent and they should be able to fix most things or send to root if they need another process to fix it." Every wait ends with its value or a typed error; a failure returns to the requester as an error value; the agent fixes it or messages root. Stated: AGENTS §4.
+"I want our system to be robust and to have it not crash or hang ever. We can generate errors as data and return them to the agent and they should be able to fix most things or send to root if they need another process to fix it." Every wait ends with its value or a typed error; a failure returns to the requester as an error value; the agent fixes it or messages root. Stated: docs/errors.md#nothing-crashes-and-nothing-hangs, AGENTS §4.
 
 ### Every eval's answer says how main differs from the branch (owner, 2026-10-28)
 
@@ -568,11 +628,15 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 ### Derived data may be cached; it is always regenerable from the db at t (owner, 2026-10-28)
 
-"Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T." A derived value (a score, a selection, a render, a diff) may be kept, in memory or in the store, as a cache keyed by its inputs, never by a clock; it may be evicted at any time, and its reader regenerates it from the db as of t. What a turn showed is derived this way: the scores recorded per turn are a cache of the scorer over the db at that turn, never the record. Refines "No derived data in the db or in ctx" (2026-10-26): ctx still holds the db's data only. Stated: AGENTS §5, docs/ctx.md.
+"Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T." A derived value (a score, a selection, a render, a diff) may be kept, in memory or in the store, as a cache keyed by its inputs, never by a clock; it may be evicted at any time, and its reader regenerates it from the db as of t. What a turn showed is derived this way: the scores recorded per turn are a cache of the scorer over the db at that turn, never the record. Refines "No derived data in the db or in ctx" (2026-10-26): ctx still holds the db's data only. Stated: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on, AGENTS §5, docs/ctx.md.
 
-### One session works with the owner; helpers are one-use (owner, 2026-10-28)
+### Focused sessions; no fan-out (owner, 2026-10-28)
 
-"let's stick with just you and me"; "It would be good to have you mostly be working on the details of plans with me so we have less ambiguity too"; "We won't need all these separate worktrees anymore either". The owner and one Claude session work in the main tree; plans are written into task entries; long well-planned work goes to a fresh Sonnet agent, short context-heavy work to a fork, lookups to Haiku. claude_scratch/ and the merge session are retired. Stated: AGENTS §2, §3, §7, §9.
+"This system of launching 10+ agents just burned my tokens and was not productive"; "let's stick with just you and me"; "It would be good to have you mostly be working on the details of plans with me so we have less ambiguity too". A session does its work itself in one conversation, starts no other session unless the owner asks, and uses one helper at a time: long well-planned work to a fresh Sonnet agent, short context-heavy work to a fork, lookups to Haiku. Plans are written into task entries. The one session in the main tree of this ruling became named sessions that each own an area, each in a worktree of its own (2026-11-06, 2026-11-08); the rule against fanning out stands. Stated: AGENTS §2, docs/sessions.md#no-fan-out.
+
+### Build the product, not infrastructure (owner, 2026-10-28)
+
+"we built out a lot of infrastructure thinking it would speed things up and it really hasn't". A merge session, a worktree with its own root per lane, shared test roots, a test service, wake pipes and orders files were all built for parallel work: a one-function prove took 113 s, hangs and orphans came from the tooling itself, and no agent finished a real task. Before building tooling, ask whether it moves an agent finishing a real task; prefer deleting what served parallel work. Stated: AGENTS §9, docs/sessions.md#no-fan-out.
 
 ### Test results are a few facts per test and per function, with no history (owner, 2026-10-28)
 
@@ -580,7 +644,7 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 ### A kept db value is a reference, {:branch :commit :t} (owner, 2026-10-28)
 
-"I don't want us carrying around large values for no reason. At those points we need to change db's into whatever facts we need to re-create that point in time." A db value is used, then let go; whatever keeps it past its moment keeps `{:branch :commit :t}` and re-creates it. Errors keep data, not a Throwable that pins the system. Stated: AGENTS §4.
+"I don't want us carrying around large values for no reason. At those points we need to change db's into whatever facts we need to re-create that point in time." A db value is used, then let go; whatever keeps it past its moment keeps `{:branch :commit :t}` and re-creates it. Errors keep data, not a Throwable that pins the system. Stated: docs/storage.md#a-kept-db-value-is-a-reference, AGENTS §4.
 
 ### No surprises from main (owner, 2026-10-28)
 
@@ -602,6 +666,10 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 The owner's rulings of 2026-10-27, each with where it is now stated; they stand over earlier entries where they differ.
 
+### An inventory before a plan (owner, 2026-10-27)
+
+"a new agent already has a plan? that can't be well thought out" (from session memory, 2026-11-10; unverified wording). A session taking over an area lists what exists (its file and line, its job, keep, extend or delete) before it designs. Stated in: AGENTS.md section 3 (the method, step 1), docs/sessions.md#sessions-own-their-areas.
+
 ### A merge runs the process tests its change reaches, automatically (owner, 2026-10-27)
 
 `bin/prove --merge` runs every test and step the change reaches with no green at its digest, process tests included, so no one names them by hand. Stated: AGENTS §3, docs/merging.md#a-merge-runs-what-the-change-reaches.
@@ -616,7 +684,7 @@ An agent redefines a function in its own REPL with `(in-ns ...)` and `defn`, Clo
 
 ### No lock on main's verification (owner, 2026-10-27: "Remove it")
 
-Supersedes "main first, as a fact" (2026-10-26 night) and "Keep the lock for tests and checks": main's verification rarely runs (a branch that holds main and proved its tip merges with no run), and a hung run on main stalled every worktree for 48 minutes. Stated: docs/merging.md#main-goes-first, AGENTS §2.
+Supersedes "main first, as a fact" (2026-10-26 night) and "Keep the lock for tests and checks": main's verification rarely runs (a branch that holds main and proved its tip merges with no run), and a hung run on main stalled every worktree for 48 minutes. Stated: docs/merging.md#main-goes-first, AGENTS §8.
 
 ### A branch proves its in-process tests; main's batch runs the process tests once (owner, 2026-10-27: "Get rid of the double testing")
 
@@ -632,7 +700,7 @@ Worktrees run plain `bin/prove` and report ready; the merge session merges a bat
 
 ### A lock-free system (owner, 2026-10-27)
 
-"I want a lock free system. This worktrees hack is temporary." No lock orders heavy runs; load stays down by not running the same work twice. Stated: AGENTS §2, docs/merging.md.
+"I want a lock free system. This worktrees hack is temporary." No lock orders heavy runs; load stays down by not running the same work twice. Stated: AGENTS §8, docs/merging.md.
 
 ### The wiki is the one home; every function, schema entry and test cites its section (owner, 2026-10-27)
 
@@ -656,7 +724,7 @@ Worktrees run plain `bin/prove` and report ready; the merge session merges a bat
 
 ### Unused is not dead (owner, 2026-10-27)
 
-"Just because things aren't in use doesn't mean I haven't worked hard on the design" (seon.ratom): a new owner design with no callers yet is not cut for that. Stated: this entry; the audit's cuts check the design's task first.
+"Just because things aren't in use doesn't mean I haven't worked hard on the design" (seon.ratom): a new owner design with no callers yet is not cut for that, and code with no caller is cut only with the owner's go. Stated: AGENTS.md section 3, docs/merging.md#a-landing-message-carries-its-audit, this entry; the audit's cuts check the design's task first.
 
 ## 2026-10-26 night rulings
 
@@ -672,11 +740,11 @@ Asked which default tonight's runs use, the owner chose one whole task over desi
 
 ### Correctness and stability first, then efficiency to a stated bound; no regression without a reason (owner, 2026-10-26 night)
 
-"dig into all rough edges and process issues we have and trace down and prioritize correctness and stability first and efficiency after that to a resonable (it should roughly take this amount of ticks, memory, etc) and don't accept regressions for no reason". A branch's report compares its numbers (ticks, bytes, tokens, the left-out count) with main's before it; a number that got worse is refused unless the report names its reason and who follows it up. Stated in: AGENTS.md §3 (Every change earns its place).
+"dig into all rough edges and process issues we have and trace down and prioritize correctness and stability first and efficiency after that to a resonable (it should roughly take this amount of ticks, memory, etc) and don't accept regressions for no reason". A branch's report compares its numbers (ticks, bytes, tokens, the left-out count) with main's before it; a number that got worse is refused unless the report names its reason and who follows it up. Stated in: AGENTS.md §3 (No regressions), docs/merging.md#a-landing-message-carries-its-audit.
 
 ### The agent's view is the render of ctx; "page" names a wiki page only (owner, 2026-10-26 night)
 
-"Yes it's just a render function for data. The render function for ctx is what is setting the layout and explicitly calling some render functions with args and just pulling data that is allowed to render itself. It's producing minimal hiccup that we can fully show so the agent understand what the user is seeing too. No separate systems right?" render-ctx is the layout: explicit render calls `[f opts & children]`, and every other value drawn by its schema's render, else the printer; the model reads its hiccup whole. The words: the render of ctx (not the agent's page, :page), the system prompt (not system-page), help (not help-page), the task's render (not task-page). Stated in: jolt/render-walk and build 4; AGENTS.md §7a once both merge.
+"Yes it's just a render function for data. The render function for ctx is what is setting the layout and explicitly calling some render functions with args and just pulling data that is allowed to render itself. It's producing minimal hiccup that we can fully show so the agent understand what the user is seeing too. No separate systems right?" render-ctx is the layout: explicit render calls `[f opts & children]`, and every other value drawn by its schema's render, else the printer; the model reads its hiccup whole. The words: the render of ctx (not the agent's page, :page), the system prompt (not system-page), help (not help-page), the task's render (not task-page). Stated in: docs/vocabulary.md#words-we-do-not-use.
 
 ### The render of ctx never repeats what an eval shows (owner, 2026-10-26 night)
 
@@ -834,7 +902,7 @@ Owner, 2026-10-25 night: "$30 overnight. triage and move forward the good ideas 
 
 ### Overnight: all cylinders
 
-Owner, 2026-10-25 evening: "I approved highlight.js. launch all fixes. I'm not playing any games I'm going to bed. You can work on all cylinders overnight." The one-run machine rule is lifted (AGENTS §2: up to three heavy runs while load stays under ~8); every ready fix runs and merges as verified; highlight.js approved in agent view's session. Stated in: this entry.
+Owner, 2026-10-25 evening: "I approved highlight.js. launch all fixes. I'm not playing any games I'm going to bed. You can work on all cylinders overnight." The one-run machine rule is lifted (then: up to three heavy runs while load stayed under ~8; since 2026-11-10 load is judged by cores and free memory); every ready fix runs and merges as verified; highlight.js approved in agent view's session. Stated in: this entry.
 
 ### The value view: highlight.js, agent hiccup unrestricted, built after the printer
 
@@ -898,11 +966,11 @@ Owner, 2026-10-25: "Maybe we should just keep the forks running and just parked.
 
 ### Correctness and performance come before lines of code
 
-Owner, 2026-10-25: "prioritize correctness and perf over lines of code. Lines of code is not my main metric". A change is judged first on whether it is right and on its measured work (ticks, bytes, turns to green); a smaller diff never wins over a correct or faster one. Resistance to growth (2026-10-23) still means reusing and improving the core rather than adding one-offs. Stated in: AGENTS §1 (owed).
+Owner, 2026-10-25: "prioritize correctness and perf over lines of code. Lines of code is not my main metric". A change is judged first on whether it is right and on its measured work (ticks, bytes, turns to green); a smaller diff never wins over a correct or faster one. Resistance to growth (2026-10-23) still means reusing and improving the core rather than adding one-offs. Stated in: (home not found, 2026-11-10).
 
 ### Root is main; everything else is the same system with different config
 
-Owner, 2026-10-25: "Root is main and is in charge with keeping main stable and working well. Agents can explore different ideas safely in their own forked processes ... and then we merge to main via the same task system. If a merge fails root needs a root specific merge task ... other tasks for root to handle like when agents die or health checks fail. All of these I want to run on main CURRENT ... we need to refactor to make this possible not build a separate system for root. It's one system where we use data and flows to have a runtime, db, and agent running against a task. Who and what they are doing on what branch they are is all just config options." Root's own work (a failed merge, a dead agent, a failing health check) is tasks run by agents on main's current commit; root is not a separate code path. Stated in: not yet (owed AGENTS §4 and docs after the one-system audit).
+Owner, 2026-10-25: "Root is main and is in charge with keeping main stable and working well. Agents can explore different ideas safely in their own forked processes ... and then we merge to main via the same task system. If a merge fails root needs a root specific merge task ... other tasks for root to handle like when agents die or health checks fail. All of these I want to run on main CURRENT ... we need to refactor to make this possible not build a separate system for root. It's one system where we use data and flows to have a runtime, db, and agent running against a task. Who and what they are doing on what branch they are is all just config options." Root's own work (a failed merge, a dead agent, a failing health check) is tasks run by agents on main's current commit; root is not a separate code path. Stated in: docs/users.md#the-entities (root is an agent keyed "root", the same schema).
 
 ### Agents restart from their record; the lifecycle is Flow's
 
@@ -930,7 +998,7 @@ Owner, 2026-10-24: "Approve :seon.turn/error." A turn is written with its sent r
 
 ### A turn records what it sent as refs; texts are read as of the turn
 
-Owner, 2026-10-24: "Approve :seon.turn/sent only; refer to the system prompt's wiki section and the task entity as of the turn's t instead of new :seon.text attributes." One new attribute, `:seon.turn/sent`: the ordered refs to what the turn's request carried (its evals, messages, the system prompt's wiki section and the task entity), resolved as of the turn's t (history is kept); no separate text store. Stated in: docs/ctx.md#the-record-is-the-agents-work (since 2026-10-29 the sent refs are the turn's model call's, `:seon.model-call/sent`).
+Owner, 2026-10-24: "Approve :seon.turn/sent only; refer to the system prompt's wiki section and the task entity as of the turn's t instead of new :seon.text attributes." One new attribute, `:seon.turn/sent`: the ordered refs to what the turn's request carried (its evals, messages, the system prompt's wiki section and the task entity), resolved as of the turn's t (history is kept); no separate text store. Stated in: docs/ctx.md#the-agents-entity-holds-its-work (since 2026-10-29 the sent refs are the turn's model call's, `:seon.model-call/sent`).
 
 ### A config key does what it says; a provider's schema refuses a combination it forbids
 
@@ -942,7 +1010,7 @@ Owner, 2026-10-24: "Approve the design as written, including the owner items in 
 
 ### Names tell a story; the printer shows every value well
 
-Owner, 2026-10-24: "Beautiful naming and the render tree should tell a story and not just be full of random words" and "We can adjust the value printer too as we want a general printer which shows all values well". Records and views are named by what they are, in Clojure's, nREPL's, Reagent's or the chat API's words (an agent's conversation of turns, each eval's response, the user's screen); a fix to how a value prints goes in the one printer, for every value. Stated in: docs/render.md "Names" (owed AGENTS §7a when it merges).
+Owner, 2026-10-24: "Beautiful naming and the render tree should tell a story and not just be full of random words" and "We can adjust the value printer too as we want a general printer which shows all values well". Records and views are named by what they are, in Clojure's, nREPL's, Reagent's or the chat API's words (an agent's conversation of turns, each eval's response, the user's screen); a fix to how a value prints goes in the one printer, for every value. Stated in: docs/vocabulary.md, docs/render.md#one-printer.
 
 ### A prove run is keyed by the digest of what it reads
 
@@ -950,7 +1018,7 @@ Owner, 2026-10-24: "okay lets try the digest". The test service's run key (`seon
 
 ### Root merges verified fixes as they come in
 
-Owner, 2026-10-24: "merge fixes as they come in". A fix branch whose report carries its numbers, its self-review rating and a green bin/prove is merged by root without asking (bin/prove and smoke on the merged tree, then bin/update); a branch that adds a namespace, config key, schema attribute, proc or route still needs the owner's gate. Stated in: AGENTS §2, root's working rules (owed).
+Owner, 2026-10-24: "merge fixes as they come in". A fix branch whose report carries its numbers, its self-review rating and a green bin/prove is merged by root without asking (bin/prove and smoke on the merged tree, then bin/update); a branch that adds a namespace, config key, schema attribute, proc or route still needs the owner's gate. Stated in: docs/merging.md#a-branch-lands-with-binland (whoever proves a branch lands it), docs/merging.md#a-landing-message-carries-its-audit (the gate).
 
 ### One render per schema, declared where the schema is registered
 
@@ -970,7 +1038,7 @@ Owner, 2026-10-23: "don't forget to clean up the old work trees once they aren't
 
 ### Reuse every unique, immutable result that is proven the same and expensive to make
 
-Owner, 2026-10-23: "I want reuse of all unique and immutable data we are sure is the same and is expensive to render". A pure computation's result is reused wherever its inputs are the same by content: keyed by the digest of exactly what it reads (content ids, the reach walk's digests), shared across branches, sessions and worktrees, and only for units measured as expensive (AGENTS §5). Anything that reads the clock, the network or a model, or launches a process, is not reused; the reach walk classifies it. One mechanism serves every such result, in `src`, `test` or `bin`, and it replaces the per-case caches it covers. Stated in: not yet (owed AGENTS §5 and the section of the task one-content-keyed-derivation (on ``jolt/one-content-keyed-derivation``, not merged yet)).
+Owner, 2026-10-23: "I want reuse of all unique and immutable data we are sure is the same and is expensive to render". A pure computation's result is reused wherever its inputs are the same by content: keyed by the digest of exactly what it reads (content ids, the reach walk's digests), shared across branches, sessions and worktrees, and only for units measured as expensive (AGENTS §5). Anything that reads the clock, the network or a model, or launches a process, is not reused; the reach walk classifies it. One mechanism serves every such result, in `src`, `test` or `bin`, and it replaces the per-case caches it covers. Stated in: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on.
 
 ### The turn's live state is REPL forms, run fresh each turn: the diff from main and the proofs to pass
 
@@ -1010,7 +1078,7 @@ Owner, 2026-10-23: "I think the current agent context isn't great. I'm not sure 
 
 ### The reuse design is approved: one memo keyed by what the process runs, for the walk's renders first
 
-Owner, 2026-10-23: "Approved: build the revised reuse design, walk node renders only, with its proofs." The design is the reuse design at 17ed5728 (``jolt/one-content-keyed-derivation``), after the independent attack (the scratch paper reuse/attack-2026-10-23.md (git history)): the key is a full SHA-256 of the boot digest (the build plus the config in force), the digest of everything loaded since boot, and the args' canonical EDN; non-EDN and rebound dynamics are refused; eviction is deterministic. Stated in: not yet (owed AGENTS §5 at its merge).
+Owner, 2026-10-23: "Approved: build the revised reuse design, walk node renders only, with its proofs." The design is the reuse design at 17ed5728 (``jolt/one-content-keyed-derivation``), after the independent attack (the scratch paper reuse/attack-2026-10-23.md (git history)): the key is a full SHA-256 of the boot digest (the build plus the config in force), the digest of everything loaded since boot, and the args' canonical EDN; non-EDN and rebound dynamics are refused; eviction is deterministic. Stated in: not built; the branch was retired on 2026-11-06 ([old work retired](#old-work-retired-not-left-halfway)).
 
 ### bin/test branches a kept program db per git tree (option B); each worktree's root is the end state
 
@@ -1018,19 +1086,19 @@ Owner, 2026-10-23: chose option B of docs/source.md. One durable test store per 
 
 ### Reuse is memoization: `(= (f x) (lookup f x))`, so return it
 
-Owner, 2026-10-23: "It's simpler than you think. (= (fn-a x) (cached-lookup `fn-a x)) they are literally the same so just return it". A pure function applied to the same immutable value gives the same result, so the one mechanism is a lookup keyed by the function (its var and the digest of its code and what it reaches) and the value it is given (its content). On a hit it returns the result, and nothing else changes. Owner, same day: "we shouldn't be caching on a key that needs to be updated. So key selection and however we are implementing this needs to be solid". A key is made only of content: a digest of the function's code and what it reaches, and of the argument's immutable value (a db value by its commit's content, never a branch name, a var name alone, a path or a time). So a key never goes stale and nothing is invalidated: a change makes a new key. Proved both ways: every change to the code or the input changes the key, and no other change does. Stated in: not yet (owed AGENTS §5 and the reuse task).
+Owner, 2026-10-23: "It's simpler than you think. (= (fn-a x) (cached-lookup `fn-a x)) they are literally the same so just return it". A pure function applied to the same immutable value gives the same result, so the one mechanism is a lookup keyed by the function (its var and the digest of its code and what it reaches) and the value it is given (its content). On a hit it returns the result, and nothing else changes. Owner, same day: "we shouldn't be caching on a key that needs to be updated. So key selection and however we are implementing this needs to be solid". A key is made only of content: a digest of the function's code and what it reaches, and of the argument's immutable value (a db value by its commit's content, never a branch name, a var name alone, a path or a time). So a key never goes stale and nothing is invalidated: a change makes a new key. Proved both ways: every change to the code or the input changes the key, and no other change does. Stated in: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on.
 
 ### Reuse is transparent and simple: a reused value is shown as it is, never marked
 
-Owner, 2026-10-23: "I wanted transparent and simple caching. The whole reuse thing is making me rethink showing it to the agent. Let's just show it as is if it's cached and don't state whether its generated or cached or not." A reused render, context or result reads exactly like a freshly made one: no reused/computed field in an eval's reply, a turn's record or the context. Its effect shows only in the cost proofs and in work-done facts recorded for the owner's views. Owner, same day, corrected: "the model should get cost numbers in the context. I just want them stable across turns in the run so we don't bust the cache. We want to get them used to seeing how expensive things are and so when they get warnings or limits it's easy to understand where they stand". Each eval's cost (ticks, bytes, calls, time) is shown with it, rendered from its recorded fact, so it never changes after the turn it happened in; what moves (the run's totals against its budget) is shown only in the turn's tail, after the cached prefix. Supersedes the hit recording of "Caching is never an excuse for slow code" below. Stated in: not yet (owed AGENTS §5 and the reuse task).
+Owner, 2026-10-23: "I wanted transparent and simple caching. The whole reuse thing is making me rethink showing it to the agent. Let's just show it as is if it's cached and don't state whether its generated or cached or not." A reused render, context or result reads exactly like a freshly made one: no reused/computed field in an eval's reply, a turn's record or the context. Its effect shows only in the cost proofs and in work-done facts recorded for the owner's views. Owner, same day, corrected: "the model should get cost numbers in the context. I just want them stable across turns in the run so we don't bust the cache. We want to get them used to seeing how expensive things are and so when they get warnings or limits it's easy to understand where they stand". Each eval's cost (ticks, bytes, calls, time) is shown with it, rendered from its recorded fact, so it never changes after the turn it happened in; what moves (the run's totals against its budget) is shown only in the turn's tail, after the cached prefix. Supersedes the hit recording of "Caching is never an excuse for slow code" below. Stated in: (home not found, 2026-11-10).
 
 ### Everything is fast; a render or a context whose inputs have not changed is never made again
 
-Owner, 2026-10-23: "In general I want everything to just be fast, but something are just dumb to not cache like web rendering and even ai context if the underlying data/functions haven't changed". The cold path is fast first (below), and some results are reused even when they are fast, because making them again is pure waste: a web render and the model's context are reused while the data they read (content ids) and the functions that make them (reach digests) are unchanged. Stated in: not yet (owed AGENTS §5 and the task one-content-keyed-derivation (on ``jolt/one-content-keyed-derivation``, not merged yet)).
+Owner, 2026-10-23: "In general I want everything to just be fast, but something are just dumb to not cache like web rendering and even ai context if the underlying data/functions haven't changed". The cold path is fast first (below), and some results are reused even when they are fast, because making them again is pure waste: a web render and the model's context are reused while the data they read (content ids) and the functions that make them (reach digests) are unchanged. Stated in: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on.
 
 ### Caching is never an excuse for slow code: the cold path is fast on its own, and a hit is visible
 
-Owner, 2026-10-23: "caching isn't an excuse for writing shitty code. If the cold version (can we return whether there was a cache hit in repl evals?) is fuckign slow as shit it's still not okay". A reused result's computation carries its own cost proof, measured cold (no reuse), at the work it needs; reuse is added on top, never instead. Owner, same day: "if it's fast enough we don't need caching then don't use caching." Reuse is added only where the fixed cold path is still measured as expensive; a cold path that is fast enough gets none. (Its hit recording, "a REPL eval's result says which results it reused", is superseded by the entry above: reuse is transparent.) Stated in: not yet (owed AGENTS §5, beside "Results are reused by input digest", and the task one-content-keyed-derivation (on ``jolt/one-content-keyed-derivation``, not merged yet)).
+Owner, 2026-10-23: "caching isn't an excuse for writing shitty code. If the cold version (can we return whether there was a cache hit in repl evals?) is fuckign slow as shit it's still not okay". A reused result's computation carries its own cost proof, measured cold (no reuse), at the work it needs; reuse is added on top, never instead. Owner, same day: "if it's fast enough we don't need caching then don't use caching." Reuse is added only where the fixed cold path is still measured as expensive; a cold path that is fast enough gets none. (Its hit recording, "a REPL eval's result says which results it reused", is superseded by the entry above: reuse is transparent.) Stated in: (home not found, 2026-11-10).
 
 ### Push pinned fork commits without asking
 
@@ -1079,7 +1147,7 @@ Owner, 2026-10-23: "no automatic retries, send it to root to decide if it should
 
 ### The standing store is test data: erase it, no migration; history within a store is kept
 
-Owner, 2026-10-23: "why are you migrating 6 facts? isn't it just test data just nuke it and move on". Stated in: AGENTS §9 (the exception to "Runs are kept"); docs/machine.md#disk-stays-bounded; docs/storage.md#history (history kept).
+Owner, 2026-10-23: "why are you migrating 6 facts? isn't it just test data just nuke it and move on". Stated in: AGENTS §9 (dropping a store: the standing store alone is erased); docs/machine.md#disk-stays-bounded; docs/storage.md#history (history kept).
 
 ### Agents share greens: a test green at its digest never runs again
 
@@ -1151,7 +1219,7 @@ Owner, 2026-10-22: "if the context is dog shit and we know it's fucked do not wa
 
 ### One store holds the whole system; branches are experiments at every layer
 
-Owner, 2026-10-22: quote not recorded. Stated in: AGENTS §4 (A value), §5 (One store, many branches); docs/storage.md.
+Owner, 2026-10-22: quote not recorded. Stated in: AGENTS §4 (a value), §5 (one store, many branches); docs/storage.md.
 
 ### Our Datahike is Jolt-first, and storage is tuned for our workload
 
@@ -1163,7 +1231,7 @@ Owner, 2026-10-22: "Agents shouldn't be editing their own source code files dire
 
 ### Tasks are unrestricted; behaviour follows the data; a task's branch, model and config are derived along `:needs`
 
-Owner, 2026-10-22: "tasks shouldn't be restricted in what they can do". Stated in: AGENTS §4 (A task). Proof protection is deferred.
+Owner, 2026-10-22: "tasks shouldn't be restricted in what they can do". Stated in: AGENTS §4 (a task), docs/tasks.md. Proof protection is deferred.
 
 ### A request becomes design, implement, merge; templates are held tasks in the task EDN; one proofs field; every agent gets `(help)` and its task
 
@@ -1191,7 +1259,7 @@ The owner's rulings of 2026-10-21, each with his words and where it is now state
 
 ### No locks, no cap on worktree sessions, no waiting
 
-Owner, 2026-10-21: "get rid of all of it". Stated in: AGENTS §3 (Every ready task runs now).
+Owner, 2026-10-21: "get rid of all of it". Stated in: docs/merging.md#main-goes-first (no lock).
 
 ### Every live run is better than the last; new real tasks, no rerun matrix; DeepSeek works every stage, measured
 
@@ -1203,7 +1271,7 @@ Owner, 2026-10-21: "EDN for offline compiled into program and register at the re
 
 ### Minimal code: extend the existing systems
 
-Owner, 2026-10-21: "If we are building shit we don't need to build and not using the existing systems or extending them for minimal code we are doing the wrong thing." Stated in: AGENTS §3 (Integrate small and often); docs/merging.md#every-merges-src-diff-stat-is-read.
+Owner, 2026-10-21: "If we are building shit we don't need to build and not using the existing systems or extending them for minimal code we are doing the wrong thing." Stated in: AGENTS §3 (Land small and often); docs/merging.md#every-merges-src-diff-stat-is-read.
 
 ### Disk stays bounded; regenerable output is deleted
 
@@ -1231,7 +1299,7 @@ Owner, 2026-10-21: "The recursive code self improvement loop is the goal." (2026
 
 ### Loading code is an effect, typed at the edge
 
-Owner, 2026-10-21: "Make anything like this an effect and we treat it as strongly typed at the edges." Stated in: AGENTS §5 (Effects go through their owner).
+Owner, 2026-10-21: "Make anything like this an effect and we treat it as strongly typed at the edges." Stated in: AGENTS §5 (effects go through their owner), docs/flow.md#effects-one-owner-and-its-workers-per-kind.
 
 ### Every definition happens once, where it is defined
 
@@ -1247,7 +1315,7 @@ Owner, 2026-10-21: "keep it so we have a perfect record frozen in time." Stated 
 
 ### Agents stay forked processes, each named by role, task and checkout
 
-Owner, 2026-10-21: "But fucking name the processes if they really have to be different." Stated in: AGENTS §4 (A process).
+Owner, 2026-10-21: "But fucking name the processes if they really have to be different." Stated in: AGENTS §4 (a process), docs/processes.md#the-agent-process.
 
 ### Work is admitted by its measured workload, through flows
 
@@ -1267,7 +1335,7 @@ Owner, 2026-10-21: "yeah no clocks or timers." Stated in: AGENTS §4; docs/clock
 
 ### A failure goes to whoever can fix it
 
-Owner, 2026-10-21: "An fatal error needs to be addressed a runtime fix that can be applied needs the error to apply the fix." Stated in: AGENTS §4 (An error is data); docs/failure-points.md.
+Owner, 2026-10-21: "An fatal error needs to be addressed a runtime fix that can be applied needs the error to apply the fix." Stated in: AGENTS §4 (an error as data); docs/errors.md, docs/failure-points.md.
 
 ### Only documented config
 
@@ -1283,7 +1351,7 @@ Root, 2026-10-21 (reversible): no owner quote. Stated in: docs/tasks.md#task-con
 
 ### Durability is continuous group commit
 
-Owner, 2026-10-21: "Why have an arbitrary 10ms collection point?" Stated in: AGENTS §5.
+Owner, 2026-10-21: "Why have an arbitrary 10ms collection point?" Stated in: docs/storage.md#durability-is-continuous-group-commit, AGENTS §5.
 
 ## 2026-10-20
 
@@ -1295,7 +1363,7 @@ Owner, 2026-10-20: "How long should something really take." Stated in: AGENTS §
 
 ### Scheduling is reconciliation over task attributes; no chain entity, no separate scheduler
 
-Owner, 2026-10-20: quote not recorded. Stated in: AGENTS §4 (A task).
+Owner, 2026-10-20: quote not recorded. Stated in: AGENTS §4 (a task), docs/tasks.md.
 
 ### Effects go over channels to their owner procs; whoever asked records the outcome
 
@@ -1307,11 +1375,11 @@ Owner, 2026-10-20: "No point in using flow if we are going to use it the wrong w
 
 ### Data-centric, always valid: contracts on every function
 
-Owner, 2026-10-20: "make this the universal thing that we hone and fix." Stated in: AGENTS §5.
+Owner, 2026-10-20: "make this the universal thing that we hone and fix." Stated in: AGENTS §5, docs/checks.md#contracts-armed-at-definition.
 
 ### Each agent writes its own branch, in its own process; root writes only main
 
-Owner, 2026-10-20: "Agents just take care of their own shit if they are in different branches". Stated in: AGENTS §4 (A value); docs/storage.md.
+Owner, 2026-10-20: "Agents just take care of their own shit if they are in different branches". Stated in: AGENTS §4 (a value); docs/storage.md#who-writes-a-branch.
 
 ### It's a REPL into a real session; branches are true branches, merged per definition, never replayed
 
@@ -1327,7 +1395,7 @@ Owner, 2026-10-20: "have everything be spec'ed and have only good tests using ou
 
 ### Everything on Jolt; libraries fixed properly, measured, with no extra caches
 
-Owner, 2026-10-20: "if it's faster to not use the cache why cache at all?" Stated in: AGENTS §5 (no other caches); docs/forks.md.
+Owner, 2026-10-20: "if it's faster to not use the cache why cache at all?" Stated in: docs/forks.md.
 
 ### Renders attach to schemas; the UI and the context are renders, ported not reinvented
 

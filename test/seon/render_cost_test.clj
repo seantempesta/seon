@@ -131,7 +131,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any :any]]}
   [n]
   (let [db0 (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (vec (for [i (range n)] {:seon.task/ns 't :seon.task/name (str "k" i) :seon.task/plan (str "Make " i ".") :seon.task/proofs #{}}))))
-        db0 (-> db0 (d/db-with [{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]) (d/db-with (seon.task/agent-tx :a1 {:status :idle})))
+        db0 (-> db0 (d/db-with (seon.test-store/root-tx {:seon.root/boot "b1" :seon.config.agent/max-running 4})) (d/db-with (seon.task/agent-tx :a1 {:status :idle})))
         st (#'seon.render.proc/main-info {} db0)
         db1 (d/db-with db0 (seon.task/agent-tx :a1 {:status :busy}))]
     [st db1 (vec (apply concat (d/datoms-diff db0 db1 :eavt [])))]))
@@ -291,23 +291,26 @@
         turn (fn [i] (let [id (str "x" i)]
                        (concat
                         [{:seon.agent/key k :seon.agent/turn (inc i)}
-                         {:seon.model-call/id (str k "/" (inc i)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n (inc i) :seon.model-call/origin :model
+                         {:seon.model-call/id (seon.lib/call-id k (inc i)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n (inc i) :seon.model-call/origin :model
                           :seon.model-call/reply (str "Checking step " i ".") :seon.model-call/ms 1}]
                         (seon.repl/record-tx {:seon.agent/key k} id "a1"
                                              {:seon.eval/call-id (str "c-" id) :seon.eval/call (seon.task/call-ref k (inc i)) :seon.eval/code (str "(inc " i ")")
                                               :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
                         (when (zero? (mod i 3))
-                          (update (seon.task/message-tx (str "mm-" i) "owner" [k] (str "How is step " i "?") 1000) 0 assoc
-                                  :seon.message/call (seon.task/call-ref k (inc i)))))))
+                          (seon.task/message-tx (str "mm-" i) "owner" [k] (str "How is step " i "?") 1000)))))
         base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :b})])
-        db (reduce (fn [db i] (d/db-with db (vec (turn i)))) base (range (dec n)))
+        ;; a turn, then its basis at the branch's t as the loop writes it (seon.turn/basis!), which places a message delivered before it
+        with-turn (fn [db i] (let [db (d/db-with db (vec (turn i)))]
+                               (d/db-with db [{:seon.model-call/id (seon.lib/call-id k (inc i))
+                                               :seon.model-call/basis {:commit (random-uuid) :t (:max-tx db) :task "demo/b1" :turn (inc i) :max-turns 9 :origin :model}}])))
+        db (reduce with-turn base (range (dec n)))
         c (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.agent/key k) :b)
         at (volatile! db)
         a (seon.ratom/atom (:tree c))
         w (seon.render/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [(requiring-resolve (seon.render/declared (seon.db/index) :seon.render/render-ctx)) {}])]
     (seon.render/flush! w nil)
     (swap! kept-walks conj w)
-    [{:w w :a a :c c :at at} db (d/db-with db (vec (turn (dec n))))]))
+    [{:w w :a a :c c :at at} db (with-turn db (dec n))]))
 
 (defn step!
   "The kept walk kw (held at db, a branch) moved to later, the branch with one more turn, and back (seon.render.proc/advance-walk!
@@ -516,11 +519,15 @@
     (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "p" n) :seon.task/plan "Make p." :seon.task/proofs #{'demo-test/p-test}}]))
     (d/transact conn [{:seon.agent/key k :seon.agent/turn n :seon.agent/task {:seon.task/id tid}}])
     (doseq [i (range n)]
+      ;; a message is delivered before the turn that reads it, so it comes before that turn's call is made
+      (when (even? i)
+        (d/transact conn (seon.task/message-tx (str "p" n "m" i) "user" [k] (str "note " i) 1000)))
       (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
                          :seon.eval/call (assoc (seon.task/call-ref k (inc i)) :seon.model-call/origin :model :seon.model-call/reply (str "Trying " i "."))
                          :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/intent (str "Step " i ".")}])
-      (when (even? i)
-        (d/transact conn (update (seon.task/message-tx (str "p" n "m" i) "user" [k] (str "note " i) 1000) 0 assoc :seon.message/call (seon.task/call-ref k (inc i))))))
+      ;; the turn's basis, at the branch's t as the loop writes it (seon.turn/basis!): what a message delivered before it is placed by
+      (d/transact conn [{:seon.model-call/id (seon.lib/call-id k (inc i))
+                         :seon.model-call/basis {:commit (random-uuid) :t (:max-tx @conn) :task tid :turn (inc i) :max-turns 9 :origin :model}}]))
     (let [db @conn a (:db/id (d/entity db [:seon.agent/key k]))]
       (into [(:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (d/entity db a)))) seon.ctx/changes db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx)] (some-> *sels* vector)))))
 

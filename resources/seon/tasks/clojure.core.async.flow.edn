@@ -15,7 +15,7 @@
              #{jolt.flow-test/ping-names-the-port-a-proc-waits-on}}
  #:seon.task{:name "no-timeout-in-the-proc-loop",
              :plan
-             "What exists (flow/impl.clj proc): a :compute step is futurized and .get with compute-timeout-ms 5000; past it the step throws TimeoutException to the error chan, its message is lost, and the step keeps running on the pool. finish-outputs! bounds each output put at stop by 1000 ms and drops past it. Both are clocks standing in for a dependency (AGENTS.md §9). Correct: a :compute step is awaited (the loop's fiber parks on the future); a slow step is visible through ping (a park site of {:computing since}) and is a fact if anyone asks, not an exception.",
+             "What exists (flow/impl.clj proc): a :compute step is futurized and .get with compute-timeout-ms 5000; past it the step throws TimeoutException to the error chan, its message is lost, and the step keeps running on the pool. finish-outputs! bounds each output put at stop by 1000 ms and drops past it. Both are clocks standing in for a dependency (docs/clocks.md#if-nothing-has-changed-we-do-nothing). Correct: a :compute step is awaited (the loop's fiber parks on the future); a slow step is visible through ping (a park site of {:computing since}) and is a fact if anyone asks, not an exception.",
              :kind :work,
              :proofs
              #{jolt.flow-test/a-long-compute-step-completes-and-loses-nothing}}

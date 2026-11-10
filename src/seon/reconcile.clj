@@ -773,7 +773,7 @@
     (case op
       :wake (let [ag (:agent act)]
               ;; the parked process's next work: written running, then work! (the :started step); synced
-              ;; first, as a write an outside effect follows is (AGENTS section 5): work!'s first turn
+              ;; first, as a write an outside effect follows is (docs/storage.md#durability-is-continuous-group-commit): work!'s first turn
               ;; reads the messages that woke it from the store (seon.agent/undelivered)
               (one (request (assoc-in st [:flights id :agent] ag) id :started
                             {:op :write :req {:op :tx :branch :db :flush? true

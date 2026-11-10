@@ -689,9 +689,12 @@
         section (fn [anchor] (some (fn [[_ h body]] (when (= anchor (-> h str/lower-case (str/replace #"[^a-z0-9 -]" "") (str/replace " " "-"))) body))
                                    (re-seq #"(?m)^## (.+)\n([\s\S]*?)(?=^## |\z)" page)))
         sent (fn [text] (apply str text (for [[_ a] (re-seq #"```docs/agent\.md#([a-z0-9-]+)```" text)] (str "\n" (section a)))))
-        help-forms (runnable (doc/page-text (my.test/with (my.test/world)
-                                                          ;; the help page alone: the forms it tells an agent to run (the agent under test reads the rest)
-                                                          (my.test/page wire/help-page page))
+        ;; the help page alone, its sections as the one parse reads them (its links reach pages this world does not hold, which a
+        ;; load refuses): the forms it tells an agent to run (the agent under test reads the rest)
+        help-forms (runnable (doc/page-text (seon.db/db-with (my.test/world)
+                                                              (vec (for [sec (doc/page-sections wire/help-page page)]
+                                                                     (cond-> (select-keys sec [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text])
+                                                                       (:seon.ref/parent sec) (assoc :seon.doc/parent [:seon.doc/address (:seon.ref/parent sec)])))))
                                              wire/help-page))
         template-forms (into [] (comp (mapcat (comp runnable sent val)) (distinct)) (sort-by key template/instructions))
         ends #{"(my.turn/wait)"}
@@ -700,8 +703,10 @@
         forms (concat (remove end? all)
                       (filter #(str/starts-with? % "(my.task/fail!") all)
                       (filter ends all))
-        cited "(seon.task/citation-problems (my.db/db) (vec (for [[k v] seon.template/instructions] {:seon.task/ns 'demo :seon.task/name (name k) :seon.task/plan \"\" :seon.task/instructions v})))"
-        cited-help (str "(seon.task/citation-problems (my.db/db) [{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.ctx.wire/help-text (my.db/db))}])")
+        ;; each cite a ref to what it names: a name that names nothing is the write's refusal, naming it (docs/references.md#an-entity-cites)
+        refused (fn [decls] (str "(try (seon.db/with (my.db/db) (seon.task/create-tx (my.db/db) " decls ")) [] (catch clojure.lang.ExceptionInfo e [(:target (ex-data e))]))"))
+        cited (refused "(vec (for [[k v] seon.template/instructions] {:seon.task/ns 'demo :seon.task/name (name k) :seon.task/plan \"\" :seon.task/instructions v}))")
+        cited-help (refused "[{:seon.task/ns 'demo :seon.task/name \"help\" :seon.task/plan (seon.ctx.wire/help-text (my.db/db))}]")
         [problems help-problems & items] (rest (at/in-agent (fn [{:keys [agent]}] (into [{:op :context :agent agent} cited cited-help] forms))))]
     (is (= [] (:value problems)) (str "every name the instructions cite resolves in the program: " (pr-str problems)))
     (is (= [] (:value help-problems)) (str "every name the help page cites resolves in the program: " (pr-str help-problems)))
@@ -794,7 +799,7 @@
                                                          "(my.agent/no-var (seon.agent/db) 'seon.reconcil)"
                                                          "(my.agent/no-var (seon.agent/db) 'clojure.string)"
                                                          "(my.agent/no-var (seon.agent/db) 'seon.reconcile/to-write)"
-                                                         "(my.task/update! :seon.task/plan str \" Add ```seon.reconcile/to-write``` and ```seon.fresh-ns/made```.\")"
+                                                         "(my.task/update! :seon.task/plan str \" Add ``seon.reconcile/to-write`` and ``seon.fresh-ns/made``.\")"
                                                          "(my.agent/no-var (seon.agent/db) 'seon.reconcile/to-write)"
                                                          "(my.agent/no-var (seon.agent/db) 'seon.fresh-ns/made)"])
         msg #(str (:seon.error/message (:value %)))]
@@ -810,12 +815,12 @@
     (is (str/includes? (msg cited) "your task cites it, so write it: (in-ns 'seon.reconcile) (defn to-write ...)") (msg cited))))
 
 (deftest a-broken-parser-is-named-in-a-missing-names-answer
-  ;; the eval-path review (AGENTS.md §9: no swallowed error): my.agent/no-var reads the plan with the one parser;
+  ;; the eval-path review (no swallowed error: docs/errors.md#unknown-is-never-a-default): my.agent/no-var reads the plan with the one parser;
   ;; an agent that broke seon.ref/scan is answered from the task's stored cites, and the answer names the throw,
   ;; so it learns its parser is broken (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map)
   ;; the names as quoted symbols, so the test's reach holds them (a name inside code text is no reference)
   (let [scan 'seon.ref/scan no-var 'my.agent/no-var
-        [_ broken] (at/in-agent ["(my.task/update! :seon.task/plan str \" Add ```seon.reconcile/to-write```.\")"
+        [_ broken] (at/in-agent ["(my.task/update! :seon.task/plan str \" Add ``seon.reconcile/to-write``.\")"
                                  (str "(let [was " scan "]"
                                       " (alter-var-root #'" scan " (constantly (fn [& _] (throw (ex-info \"scan is broken\" {})))))"
                                       " (try (" no-var " (seon.agent/db) 'seon.reconcile/to-write)"
@@ -823,7 +828,9 @@
         msg (str (:seon.error/message (:value broken)))]
     (is (= :my.agent/no-var (:seon.error/type (:value broken))) (pr-str broken))
     (is (str/includes? msg "your plan's parse threw (scan is broken)") (str "the answer names the parser's throw: " msg))
-    (is (str/includes? msg "your task cites it, so write it") (str "and still says what the stored cites say: " msg))))
+    ;; the stored cites hold only what exists: a name the plan will create is a literal in its text (docs/references.md#task-references),
+    ;; so with the parser broken the answer cannot say the task names it
+    (is (not (str/includes? msg "your task cites it")) (str "and claims nothing the stored cites do not hold: " msg))))
 
 (deftest help-answers-a-section
   ;; the help page is read from the wiki's sections main holds (root's boot loads them), at
@@ -837,7 +844,7 @@
     (is (str/includes? (:seon.ref/text (doc/view db "docs/agent.md#done" :code)) "The judge counts exactly") "one section, whole")
     (is (nil? (doc/view db "docs/agent.md#nowhere" :code)) "no such section")
     (is (str/starts-with? (wire/help-text db) "# The agent\n\nYou are a Seon agent") "the page, made from its sections")
-    (is (nil? (doc/page db0 wire/help-page)) "a db without the wiki holds no help page")))
+    (is (< (count (doc/page db0 wire/help-page)) (count toc)) "the seed holds only the sections the templates cite: the load brings the page whole")))
 
 (deftest doc-reads-any-address-and-lists-on-a-miss
   ;; dogfood 2026-10-25: (my.agent/help "references") answered nil, three evals lost. Doc is the
