@@ -90,7 +90,7 @@ Refused, nothing written, with the error that says why (`seon.ctx-test/a-swap-wr
 
 The pull's environment is read-only; everything else is writable, and history keeps what a write retracts.
 
-**The page is the agent's to change.** The page is the render :seon.render/render-ctx declares (```seon.render.ui/render-ctx```, the layout), composed of components keyed by what they show ([render](render.md#components)); an agent overrides the layout or any sub-render by registering its own render on its branch, and its model reads the same output (```seon.repl/render-ctx-hiccup```). The agent's walk holds the layout it was made with, and is made again when the branch declares another (`seon.ctx-test/a-layout-declared-after-the-first-draw-is-the-page`).
+**The page is the agent's to change.** The page is the agent's render (```seon.render.ui/agent```, its entity schema's `:seon.render/hiccup`), composed of components keyed by what they show ([render](render.md#components)); an agent overrides it or any sub-render by registering its own render on its branch, and its model reads the same output (```seon.repl/render-ctx-hiccup```). The agent's walk holds the layout it was made with, and is made again when the branch declares another (`seon.ctx-test/a-layout-declared-after-the-first-draw-is-the-page`).
 
 ## Deleting, compacting and resetting are changes of data
 

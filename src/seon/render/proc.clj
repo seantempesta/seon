@@ -403,12 +403,27 @@
   "St with each user's kept walk advanced to main db, and the views that show one dirty, as root's own is (`root-walk`): the components the move reached are drawn, nothing else. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
   [st db]
-  (let [cell (or (:user-walks st) (volatile! {}))]
+  (let [cell (or (:user-walks st) (volatile! {}))
+        ;; the signed-in user's agents list is every page's (`user-sides`): its change redraws every view
+        signed (some-> db (d/entity [:seon.root/id :root]) :seon.root/signed-in :seon.user/name)
+        side (fn [] (when-let [kw (get @cell signed)] (into {} (for [u (render/placed-units (:w kw)) :when (= "#c-side" (:container u))] [(:id u) (:rev u)]))))
+        before (side)]
     (doseq [[n kw] @cell] (vswap! cell assoc n (advance-walk! kw db :main identity)))
     (cond-> st
+      (not= before (side)) (update :dirty (fnil into #{}) (keys (:views st)))
       (seq @cell) (update :dirty (fnil into #{})
                           (filter (fn [v] (let [x (if (vector? v) (second v) v)]
                                             (when (keyword? x) (when (not= :root x) (some->> (location db x) (d/entity db) :seon.user/name))))) (keys (:views st)))))))
+
+(defn- user-sides
+  "The agents list every page shows: the signed-in user's (root's :seon.root/signed-in), as that user's kept walk drew it (seon.render.ui/user's
+  c-side): root, then what the user started, each with what it started under it. Nothing before main is read or with no one signed in.
+  See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :map [:maybe :seon.host/db]] [:vector :map]]}
+  [st db]
+  (if-let [kw (when-let [u (some-> db (d/entity [:seon.root/id :root]) :seon.root/signed-in)] (user-walk st db u))]
+    (filterv #(= "#c-side" (:container %)) (render/placed-units (:w kw)))
+    []))
 
 (defn- agent-view
   "View's page when it names an agent (entity eid on main db): its components as its process drew
@@ -476,7 +491,8 @@
                       ;; a branch that could not be read: its error, by the error's render
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/hiccup {:seon.render/index (seon.db/index)} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
-        sides (when-not (some #(= "#c-side" (:container %)) units) (filterv #(= "#c-side" (:container %)) (some-> (:root-walk st) :w render/placed-units)))
+        ;; the signed-in user's agents list, the one every page shows (`user-sides`), and the agent's head from its facts on main
+        sides (when-not (some #(= "#c-side" (:container %)) units) (user-sides st db))
         head (cond-> (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
                (not (task/this-boots db e)) (dissoc :processes))
@@ -499,13 +515,12 @@
   "St with root's walk current as of main db: root's ctx (seon.ctx/build of root's entity on main)
   held in a reactive atom its walk draws by the layout root's entity names (:seon.render/root-ctx), built at main's
   first read, then advanced by what each move of main changed (seon.ctx/advance, its datoms
-  flushed): the walk draws the components their change reached, nothing else. Every page whose
-  agents list it shows (root's, each agent's) is dirty when one of its units moved."
+  flushed): the walk draws the components their change reached, nothing else. Root's page is dirty when it moves; the agents
+  list every page shows is the signed-in user's (`user-sides`), not root's."
   {:malli/schema [:=> [:cat :map :seon.host/db [:maybe :seon.host/db]] :map]}
   [st db held]
   (let [root (:db/id (d/entity db [:seon.root/id :root]))
-        rw (:root-walk st)
-        side (fn [w] (into {} (for [u (render/placed-units w) :when (= "#c-side" (:container u))] [(:id u) (:rev u)])))]
+        rw (:root-walk st)]
     (cond
       (nil? root) st
       (nil? rw)
@@ -513,14 +528,11 @@
           (update :dirty (fnil into #{}) (keys (:views st))))
       (nil? held) st
       :else
-      (let [{:keys [w a]} rw
-            before (side w)
+      (let [{:keys [a]} rw
             ;; root's process (process!) is root's own data beside the pull: kept across a move of main
             p (:process @a) h (:health @a)
             rw (advance-walk! rw db :main #(cond-> % p (assoc :process p) h (assoc :health h)))]
-        (cond-> (assoc st :root-walk rw)
-          true (update :dirty (fnil conj #{}) :root)
-          (not= before (side w)) (update :dirty (fnil into #{}) (keys (:views st))))))))
+        (update (assoc st :root-walk rw) :dirty (fnil conj #{}) :root)))))
 
 (defn- process!
   "St with root's process value p (root's ruling on root's process values, option a: the writer's, the fork
@@ -597,7 +609,7 @@
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
   [st]
   (when-let [{:keys [w]} (:root-walk st)]
-    (ui/page-chrome {:units (render/placed-units w) :view (ui/view-param :root) :tab :chat :input {:schema :seon.render/root-input :value {}}} :root)))
+    (ui/page-chrome {:units (into (user-sides st (:main-db st)) (render/placed-units w)) :view (ui/view-param :root) :tab :chat :input {:schema :seon.render/root-input :value {}}} :root)))
 
 (defn- second-of
   "The name inside a view, [:chat v]'s v, else nil."

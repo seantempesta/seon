@@ -1838,8 +1838,8 @@
   "What an entry of the agents list reads of an agent on main: its identity, its process's status, its branch and turns, and its task."
   [:seon.agent/key :seon.agent/started-ms :seon.agent/status :seon.agent/branch :seon.agent/max-turns
    {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure :seon.task/plan {:seon.task/started-by [:seon.user/name]}]}
-   ;; the agents doing the tasks it started (a request's work agents), shown under its tile
-   {:seon.task/_started-by [{:seon.task/agent [:seon.agent/key]}]}])
+   ;; the agents doing the tasks it started (a request's work agents), shown under its tile and its entry
+   {:seon.task/_started-by [{:seon.task/agent [:db/id :seon.agent/key]}]}])
 
 (defn session-address
   "The name of an agent's page: its key (:seon.agent/key, its id's name), the one name of a session that survives a root's restart,
@@ -1870,11 +1870,16 @@
                       (or (some-> (:seon.task/plan t) str/split-lines first) (task-name a t)) ": " (:text stands)]))
        [:p "None yet."])]))
 
+(declare session-order)
+
 (defn agent-side
   "A session of main in the agents list (a component over the db, its agent's entity id: every agent on main, of any boot, a
   process or none): lit while it works, what it works on (its task in words, else its branch; else its id), how its work stands
-  (standing), the whole pill one link to its page by its stable address (session-address), the whole name in its title. See docs/render.md#a-sessions-address-and-the-agents-list."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
+  (standing), the whole pill one link to its page by its stable address (session-address), the whole name in its title; under it,
+  by this same render, the agents doing the tasks it started (a request's work), so the list is the tree of what each started.
+  See docs/render.md#a-sessions-address-and-the-agents-list."
+  {:seon.render/style ".agent-side > .seon-nest { margin-left: 0.75rem; padding-left: 0.5rem; border-left: 1px solid var(--color-base-800); }"
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
   [{db :seon.db/db} eid]
   (let [a (d/pull db session-attrs eid)
         t (:seon.agent/task a)
@@ -1887,7 +1892,9 @@
            [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
            ;; named by what it works on (its task in words), its key in the title: a person tells agents apart by their work
            [:span {:class "min-w-0 truncate font-semibold text-text-100"} (or what (kname id))]
-           (when (:seon.agent/status a) [:span {:class (str "shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)])]]]))
+           (when (:seon.agent/status a) [:span {:class (str "shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)])]]
+     (when-let [kids (seq (distinct (keep #(get-in % [:seon.task/agent :db/id]) (:seon.task/_started-by a))))]
+       [:ul {:class "seon-nest"} (for [k (sort-by #(session-order db %) kids)] [#'agent-side {} k])])]))
 
 (defn- session-order
   "How a boot's sessions sort in the list: by when they started (oldest first)."
@@ -2105,22 +2112,6 @@
    (into [:ul {:class "seon-stack"}] (for [d (d/datoms db :aevt :seon.user/name)] [:li [:a {:href (str "/user/" (:v d))} (:v d)]]))
    [:p [:a {:href "/root"} "Root's page: every session on main"]]])
 
-(defn users-side
-  "The users in the agents list (a component over the db): each a link to its page by its :seon.user/name, then its agents of earlier boots, which the list's own boot leaves out, so a restart doesn't hide them. See docs/users.md#whats-on-screen."
-  {:seon.render/style ".users-side { display: contents; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
-  [{db :seon.db/db}]
-  (when-let [names (seq (map :v (d/datoms db :aevt :seon.user/name)))]
-    (let [now (task/boot-of db)
-          earlier (fn [n] (->> (:seon.agent/agents (d/entity db [:seon.user/name n]))
-                               (remove #(= now (:seon.agent/boot %)))
-                               (sort-by (fn [a] (- (or (:seon.agent/started-ms a) 0))))
-                               (map :seon.agent/key)))]
-      [:li {:class "contents"} [:ul {:class "contents"}
-       (for [n names]
-         (list [:li [:a {:href (str "/user/" n) :class pill-link :title (str "user: " n)}
-                     [:span {:class "flex items-baseline gap-2"} [:span {:class "text-signal"} "◆"] [:span {:class "font-semibold text-text-100"} n]]]]
-               (for [k (earlier n)] [#'agent-side {} (:db/id (d/entity db [:seon.agent/key k]))])))]])))
-
 (defn started-side
   "The agents this user started in its agents list (a component over ctx, by the pull's :seon.agent/agents join): each `agent-side`. See docs/users.md#whats-on-screen."
   {:seon.render/style ".started-side { display: contents; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
@@ -2149,21 +2140,23 @@
 (defn root
   "Root's page, the render of root's pull (the declared html render of :seon.root/root-fact, which a
   branch overrides like any render), drawn by the walk as components in its lists: its agents list
-  (c-side: root, then this boot's sessions with a task, then the earlier ones folded, `sessions-by-boot`), its head (p-head),
-  its work and the evals sent to it (c-rows: `work-list`, `root-evals`) and its tiles (p-tiles: root's process, then main's
-  problems). An agent's page shows the same agents list (seon.render.proc's agent page). See docs/render.md#the-page."
+  (none of its own: every page's agents list is the signed-in user's), its head (p-head), its work, every session on main (this boot's,
+  then the earlier ones folded, `sessions-by-boot`) and the evals sent to it (c-rows) and its tiles (p-tiles: root's process, then
+  main's problems). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :any] :any]}
   [{db :seon.db/db} _]
   [:div {:id "root-ctx"}
-   ;; every session on main, of any boot: root's ctx holds this boot's agents alone (a new boot unlinks the earlier ones from root)
+   ;; no agents list of its own: every page's is the signed-in user's (seon.render.ui/user, placed by seon.render.proc)
+   [:div {:id "p-head"} [#'root-head {}]]
+   ;; every session on main, of any boot, root's own view of the system: root's ctx holds this boot's agents alone (a new boot unlinks
+   ;; the earlier ones from root)
    (let [now (task/boot-of db)
          boots (map first (sessions-by-boot db))
          earlier (vec (remove #{now} boots))]
-     [:ol {:id "c-side"} [#'root-side {}] [#'users-side {}]
+     [:ol {:id "c-rows"} [#'work-list {}]
       (when (some #{now} boots) [#'boot-side {} now])
-      (when (seq earlier) [#'earlier-sessions {} earlier])])
-   [:div {:id "p-head"} [#'root-head {}]]
-   [:ol {:id "c-rows"} [#'work-list {}] [#'root-evals {}]]
+      (when (seq earlier) [#'earlier-sessions {} earlier])
+      [#'root-evals {}]])
    [#'rules-list {}]
    [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}]]])
 

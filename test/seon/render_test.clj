@@ -402,6 +402,14 @@
 
 ;; ---- the page: every page is the walk of one entity ----
 
+(defn- signed-in
+  "Main db with a signed-in user, \"user\", who started the agents eids: the agents list every page shows is that user's
+  (seon.render.proc/user-sides)."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :int]] :seon.host/db]}
+  [db eids]
+  (d/db-with db [{:db/id "u" :seon.agent/key "user" :seon.user/name "user" :seon.agent/agents (vec eids)}
+                 {:seon.root/id :root :seon.root/signed-in "u"}]))
+
 (defn- paged-dbs
   "Main and a3's branch as production writes them: main holds root, the task, the agent (forked
   idle, busy since), its run and a message to the run; the branch, forked from main before the
@@ -444,7 +452,7 @@
   "The render proc's state as it holds a read of main and of a3's branch: root's view (a3 busy;
   root's boot, b1, is its entity's on main), main's open problems."
   [main branch]
-  {:rid 1 :pending {} :watch #{:root [:chat :a3]} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :branches {:a3 {:db branch :branch :task-demo-f} [:chat :a3] {:db branch :branch :task-demo-f}}
+  {:rid 1 :pending {} :watch #{:root [:chat :a3]} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :user-walks (volatile! {}) :branches {:a3 {:db branch :branch :task-demo-f} [:chat :a3] {:db branch :branch :task-demo-f}}
    ;; the one read of a3's branch every view of it shows (seon.render.proc/ask-branches)
    :branch-reads {:task-demo-f {:db branch}}
    :merges 0 :main-db main :view {:agents {:a3 {:status :busy :branch :task-demo-f}}}})
@@ -609,6 +617,7 @@
 
 (deftest root-and-an-agent-are-one-chrome
   (let [[main branch eid] (paged-dbs)
+        main (signed-in main [eid])
         st (root-state (proc-state main branch) main)
         root (#'p/page-value st :root)
         agent (#'p/page-value st [:chat :a3])
@@ -618,9 +627,9 @@
       (is (= #{nil "#c-side" "#p-head" "#c-rows" "#p-rules" "#p-tiles"} (set (map :container (:seon.render/units root)))) "root's lists: its agents' cards")
       (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (:seon.render/units agent))))
           "an agent's: its task's list above its conversation; no eval of the fixture has a render of its own, so no tiles")
-      (is (= 2 (count (in root "#c-rows"))) "root's list: its work, then its evals, folded")
-      (is (str/includes? (:html (second (in root "#c-rows"))) "sent to root")))
-    (testing "root's agents list is the same on every page: root first, then its agents"
+      (is (= 3 (count (in root "#c-rows"))) "root's list: its work, every session of this boot, then its evals, folded")
+      (is (str/includes? (:html (last (in root "#c-rows"))) "sent to root")))
+    (testing "the agents list is the signed-in user's, the same on every page: root first, then what the user started"
       (is (= 2 (count (in root "#c-side")) (count (in agent "#c-side"))))
       (is (= (map :html (in root "#c-side")) (map :html (in agent "#c-side"))))
       (is (str/includes? (:html (first (in root "#c-side"))) "href=\"/root\"") "root's line links to its page")
@@ -928,23 +937,25 @@
     (testing "a pass with nothing touched renders nothing"
       (is (= (made st2) (made (first (pass-view st2 [:chat :a3]))))))))
 
-(deftest the-sidebar-is-roots-agents
-  ;; the agents list is root's ctx, drawn by root's walk: root, then root's agents, each its own component,
-  ;; the same on every page
-  (let [[main branch _] (paged-dbs)
+(deftest the-sidebar-is-the-users-agents
+  ;; docs/users.md#whats-on-screen: the agents list is the signed-in user's, drawn by the user's walk: root, then what the user started,
+  ;; each its own component, the same on every page
+  (let [[main branch eid] (paged-dbs)
+        main (signed-in main [eid])
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st [:chat :a3])
         side (fn [st] (filter #(= "#c-side" (:container %)) (vals (get-in st [:views [:chat :a3] :units]))))]
-    (is (= 2 (count (side st1))) "root, and the boot's sessions, one component")
+    (is (= 2 (count (side st1))) "root, and what the user started, one component")
     (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/root\"") "root's line links to its page")
     (is (str/includes? (p/view-html st1 [:chat :a3]) "href=\"/agent/a3\"") "a link to its page, by its key: the name that survives a restart")
-    (testing "a new agent of root's is a new line in the sidebar, its component; the others stay"
-      (let [main' (d/db-with (:main-db st1) (into (seon.task/agent-tx :a4 {:status :busy}) [{:seon.agent/key "a4" :seon.agent/boot "b1" :seon.agent/max-turns 40 :seon.agent/branch :task-a4}]))
+    (testing "a new agent the user started is a new line in the sidebar, its component; the others stay"
+      (let [main' (d/db-with (:main-db st1) (into (seon.task/agent-tx :a4 {:status :busy}) [{:seon.agent/key "a4" :seon.agent/boot "b1" :seon.agent/max-turns 40 :seon.agent/branch :task-a4}
+                                                                                         {:seon.agent/key "user" :seon.agent/agents [[:seon.agent/key "a4"]]}]))
             st2 (#'p/advance-main st1 main')
             [st3 patch] (pass-view st2 [:chat :a3])
             a3 (re-find #"id=\"agent-side-\d+\"><a [^>]*href=\"/agent/a3\".*?</li>" (p/view-html st1 [:chat :a3]))]
-        (is (= 2 (count (side st3))) "the boot's sessions are one component")
-        (is (some #(str/includes? (second %) "href=\"/agent/a4\"") (:frags patch)) "its line is sent, in its boot's unit")
+        (is (= 2 (count (side st3))) "what the user started is one component")
+        (is (some #(str/includes? (second %) "href=\"/agent/a4\"") (:frags patch)) "its line is sent, in that unit")
         (is (and a3 (some #(str/includes? (second %) a3) (:frags patch))) "the unit holds the other session's pill as it was: one unit, so sent again, unchanged")))
     (r/dispose-walk! (get-in st [:root-walk :w]))))
 
@@ -2184,12 +2195,16 @@
     (is (= (:db/id sean) (#'p/session-of db "sean")) "its name finds it, as an address")
     (is (= [#'ui/session-card] (distinct (map first cards))) "each drawn by the one card's render")
     (is (= ["b2/a1" "b2/a2"] (sort (map last cards))) "a card for each it started, and not another's")
-    (is (= "/user/sean" (first (hrefs-in-order (h/html (ui/users-side {:seon.db/db db}))))) "it is listed by its name")
-    (let [later (d/db-with db [{:seon.root/id :root :seon.root/boot "b3"}])]
-      (is (= ["b2/a1" "b2/a2"] (sort (map #(:seon.agent/key (d/entity later (last %))) (filter #(and (vector? %) (= #'ui/agent-side (first %))) (tree-seq coll? seq (ui/users-side {:seon.db/db later}))))))
-          "its agents of an earlier boot under it, so a restart doesn't hide them")
-      (is (empty? (filter #(and (vector? %) (= #'ui/agent-side (first %))) (tree-seq coll? seq (ui/users-side {:seon.db/db db})))) "this boot's are in the list already"))
-    (is (nil? (ui/users-side {:seon.db/db (d/db-with db [[:db/retract (:db/id sean) :seon.user/name "sean"]])})) "no name, no user")))
+    (let [entries (fn [db hc] (map #(:seon.agent/key (d/entity db (last %))) (filter #(and (vector? %) (= #'ui/agent-side (first %))) (tree-seq coll? seq hc))))]
+      (is (= ["b2/a1" "b2/a2"] (sort (entries db (ui/started-side {:seon.ctx/ctx c :seon.db/db db}))))
+          "the agents list every page shows: what the user started, each by the one entry render")
+      ;; docs/render.md#a-sessions-address-and-the-agents-list: an entry holds, by the same render, the agents of the tasks it started
+      (let [a1 (d/entity db [:seon.agent/key "b2/a1"])
+            a3 (d/entity db [:seon.agent/key "b2/a3"])
+            ;; as my.task/launch! writes it: the task names who started it, and the agent made for it (seon.task/agent)
+            work (d/db-with db [{:db/id (:db/id (:seon.agent/task a3)) :seon.task/started-by (:db/id a1) :seon.task/agent (:db/id a3)}])]
+        (is (= ["b2/a3"] (entries work (ui/agent-side {:seon.db/db work} (:db/id a1)))) "a request's entry holds its work agent's")
+        (is (empty? (entries db (ui/agent-side {:seon.db/db db} (:db/id a1)))) "and nothing when it started none")))))
 
 (deftest a-tile-shows-the-last-exchange
   ;; docs/users.md#whats-on-screen: a tile is titled by what the person typed and shows their newest message and its answer, never
@@ -2570,9 +2585,9 @@
                               ["b0/a1" :a1 :dead "seon.x/oldest" :cap :task-oldest]])
         groups (#'ui/sessions-by-boot db)
         keys-of (fn [eids] (set (map #(:seon.agent/key (d/pull db [:seon.agent/key] %)) eids)))
-        ;; root's page as its walk draws it: the agents list's units, each one composed with its components
+        ;; root's page as its walk draws it: its list of every session, its units each composed with its components
         st (root-state (proc-state db db) db)
-        side (fn [st] (apply str (map :html (filter #(= "#c-side" (:container %)) (:seon.render/units (#'p/page-value st :root))))))
+        side (fn [st] (apply str (map :html (filter #(re-find #"^(boot-side|earlier-sessions)" (str (:id %))) (:seon.render/units (#'p/page-value st :root))))))
         html (side st)]
     (is (= ["b2" "b1" "b0"] (mapv first groups)) "this boot's first, then the others, newest first")
     (is (= [#{"b2/a1"} #{"b1/a1" "b1/a2"} #{"b0/a1"}] (mapv (comp keys-of second) groups)) "a boot with anything to open, every agent of it")

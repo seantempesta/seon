@@ -75,7 +75,7 @@ Proof: a cost proof of the system message's size, and the curated tasks' turns t
   :seon.task/kind :work
   :seon.task/proofs #{seon.ctx-test/system-message-holds-docs-prompt-md-section-curated}}
  {:seon.task/name "a-components-change-sends-what-moved-inside-it"
-  :seon.task/plan "What exists: a turn's page message holds editscript edits between the page parts at two bases (`seon.ctx.wire/diffs-through` over `seon.render/page-edits`; since 2026-11-06 a change is editscript edits by name, `seon.render/component-edits`, which resends a whole part only when that is shorter: docs/render.md#a-change-is-edits-by-name). In the T3 rerun (on main's page evals, before stage 2b) the agent's own edits to seon.render.ui/process-tile resent the tile whole three times, about 3k chars each.
+  :seon.task/plan "What exists: a turn's page message holds editscript edits between the page parts at two bases (``seon.ctx.wire/diffs-through`` over `seon.render/page-edits`; since 2026-11-06 a change is editscript edits by name, `seon.render/component-edits`, which resends a whole part only when that is shorter: docs/render.md#a-change-is-edits-by-name). In the T3 rerun (on main's page evals, before stage 2b) the agent's own edits to seon.render.ui/process-tile resent the tile whole three times, about 3k chars each.
 
 What is left: measure on 2b's page message, for a cited function edited at the REPL, the bytes its turn's page message carries against the bytes that changed in its source (no test states it; seon.render-test/a-change-speaks-in-names covers the edits' shape); where the whole part is still resent for a small change, find why `component-edits` chose it, the owner's rule (2026-11-10): what changed is shown in full, a removal is one line.
 
