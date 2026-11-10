@@ -4,7 +4,7 @@
   serialized in one pass, linear in its nodes (owner, 2026-10-23: renders as functions and results;
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html] [seon.db]
+  (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html] [seon.db :as pdb]
             [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.ctx] [seon.ctx] [seon.ratom] [seon.program] [seon.ctx.wire]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
@@ -436,6 +436,26 @@
      :fixed {:calls 1285 :bytes 11250000}
      :sizes [10 40 160 640]})))
 
+;; On disk, the one-store rule's last resort (docs/cost.md#how-we-measure): a page advanced from one turn's basis to the next
+;; takes the datoms between the two commits (seon.ctx/moved, d/datoms-diff), which skips the subtrees they share by address; the
+;; in-memory test store gives its nodes no address, so there the diff walks the whole index each advance (4 MB a turn measured)
+(def ^:private disk
+  (delay (let [{:keys [conn]} (pdb/open! :lmdb (str (seon.config/checkout) "/target/render-cost-" (random-uuid)) 2000 :db)]
+           ;; seeded as the test store is (seon.test-store/store): what agents and templates cite, and a stub of the system prompt
+           (d/transact conn {:tx-data (ts/standing-targets-tx)})
+           (d/transact conn {:tx-data (seon.doc/load-tx @conn "docs" {seon.doc/system-page "# A stub of the system prompt\n\nBe brief."})})
+           (pdb/store-cfg :lmdb (get-in @conn [:config :store :path])))))
+
+(defn- disk-branch!
+  "(f conn) on a fresh branch of the on-disk store (`disk`), deleted when f returns or throws, as seon.test-store/test-branch! does."
+  {:malli/schema [:=> [:cat :seon.host/fn] :any]}
+  [f]
+  (let [b (keyword (str "test-" (random-uuid)))
+        [conn _] (pdb/open-main! @disk b)
+        seed (pdb/connect @disk)]
+    (try (f conn)
+         (finally (d/release conn) (pdb/delete-main! seed b) (d/release seed)))))
+
 (def ^:dynamic *conn*
   "The branch's connection these proofs read and write: the status's its base, main and branch, the draw's its parts (bound by each deftest)."
   nil)
@@ -542,8 +562,8 @@
   ;; docs/render.md#a-layout-places-its-lists: a request with no live walk (a replay at a turn's commit, a judge's first move) draws the tree the model reads,
   ;; its conversation among it, and nothing for the page alone: no tile, no eval's cost or structured value
   (binding [*conn* nil]
-    (ts/test-branch!
-      (fn [_ conn]
+    (disk-branch!
+      (fn [conn]
         (binding [*conn* conn]
           (cost/proof {:of 'seon.render/draw :input 'seon.render-cost-test/page-of
                        :n "evals of the agent (and a message for every other)"
@@ -577,8 +597,8 @@
 (deftest a-turns-page-edits-cost-the-same-at-any-length
   ;; task seon.render/a-model-render-draws-each-turns-diff: a turn's diff renders the page parts at its two bases (each pulled by
   ;; what the parts render reads, never the agent's conversation), so the newest pair costs the same at 4 turns as at 64
-  (ts/test-branch!
-    (fn [_ conn]
+  (disk-branch!
+    (fn [conn]
       (binding [*conn* conn]
         (cost/proof
           {:of 'seon.ctx.wire/page-edits-between :input 'seon.render-cost-test/newest-pair-of
