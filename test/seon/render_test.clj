@@ -1802,7 +1802,7 @@
 
 (deftest an-agents-chat-places-what-its-model-reads-beside-it
   ;; owner, 2026-11-08: "What happened to the sidebar on the right with all the rendered context parts? Docs that get pulled in,
-  ;; the task, etc?": the task's list (seon.render.ui/task-list), which the model reads as parts, has its place on the chat page,
+  ;; the task, etc?": the task's list (seon.render.ui/agent-parts), which the model reads as parts, has its place on the chat page,
   ;; the same components, so a person sees what the agent was told
   (let [[main branch _] (paged-dbs)
         [st _] (#'p/pass-view (proc-state main branch) [:chat :a3])
@@ -3486,4 +3486,4 @@
           "a root call answers the model output itself, placing the pull's entities each by its own model render"))
     (let [h (walk #{:seon.render/hiccup}) _ (r/flush! h nil)]
       (is (= [] (r/openai-compat h)) "a walk asked for the page alone runs no model render")
-      (is (not-any? :wired (vals @(:cache h)))))))
+      (is (not-any? :outs (vals @(:cache h)))))))

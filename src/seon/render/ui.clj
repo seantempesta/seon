@@ -1001,8 +1001,8 @@
                [:li (or (:seon.doc/heading sec) (str x)) ": " (:seon.doc/lead sec) " " [:code (help-form x)]]))])))
 
 (defn searched
-  "One search the agent's context holds (a component over ctx and the db), drawn as one compact hiccup that the
-  page shows and the model is sent as it is: the search fact at ctx path :at, its query searched on the branch's
+  "Search s (the declared html render of :seon.search/search-fact, a component over the db), drawn as one compact hiccup that the
+  page shows and the model is sent as it is: its query searched on the branch's
   db by seon.ctx.search/search (exact words, meaning once its query has a vector, and the names it holds;
   functions, wiki sections and schema keys, no relevance cut), its :seon.search/k hits (else
   :seon.config.render/search's), each a line: its name (its first sentence added nothing a model used, at
@@ -1011,9 +1011,9 @@
   redraws this part alone, and the model is sent what changed of it
   (docs/render.md#the-render-is-an-eval). What it finds for a request is measured in
   docs/vector.md#what-the-work-is-likely-to-need-as-an-eval."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db at :at}]
-  (when-let [s (some-> (get-in c at) ratom/realize)]
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
+  [{db :seon.db/db} s0]
+  (when-let [s (some-> s0 ratom/realize)]
     (let [q (:seon.search/query s)
           ;; the search fact's own vector, once the pipeline has embedded its query (seon.vector's due texts)
           e (pdb/eid db :seon.search/id (:seon.search/id s))]
@@ -1025,7 +1025,7 @@
               hits (remove #(= :more (:kind %))
                            (search/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) e))]
           ;; the task's own request is on the page already: the heading names it rather than repeating it
-          [:section [:h3 (if (= q (get-in c [:seon.agent/task :seon.task/plan])) "search: this task's request" (str "search: " q))]
+          [:section [:h3 (if (= q (:seon.task/plan (:seon.search/of (d/pull db [{:seon.search/of [:seon.task/plan]}] e)))) "search: this task's request" (str "search: " q))]
            (into [:ol] (for [{:keys [name]} hits] [:li [:code (str name)]]))])))))
 
 (defn- held-whole
@@ -1591,28 +1591,34 @@
   (when-let [ks (seq (session/session-examples db c))]
     (into [:div] (for [k ks] [#'example-session {:key k}]))))
 
-(declare task-list conversation-list tiles)
+(declare agent-parts conversation-list tiles)
 
 (defn render-ctx
   "The render of an agent's ctx, the one tree the model and the person read (the declared html
   render of :seon.render/render-ctx, which an agent overrides on its branch like any render): components placed in its
-  lists, each keyed by what it shows, each holding what the agent's pull holds, so a smaller pattern is a smaller tree. The task's list (p-task, `task-list`), which the model reads as
+  lists, each keyed by what it shows, each holding what the agent's pull holds, so a smaller pattern is a smaller tree. The agent's page parts (p-task, `agent-parts`, given the pull), which the model reads as
   parts; and the conversation (c-rows, `conversation-list`), which it reads as messages. Each
   list is a component of its own, and the layout reads nothing, so a change of one list's members reruns that list alone: an eval
   added never reruns the task's. See docs/render.md#the-page and docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_]
-  [:div {:id "render-ctx"} [#'task-list {}] [#'conversation-list {}]
+  [{c :seon.ctx/ctx}]
+  [:div {:id "render-ctx"} [#'agent-parts {} c] [#'conversation-list {}]
    [#'rules-list {}]])
 
 (declare sessions)
 
-(defn task-list
-  "The task's list of an agent's page (p-task, read by the model as parts: seon.render/page-lists), in the order
-  they are placed here: the task, its proofs, what it cites, each search, the references its agent cites, its added keys, and
-  last its own problems, its turn and its state. A piece is here when the agent's pull holds what it shows. See docs/render.md#the-page."
-  {:seon.render/list "p-task" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
+(defn agent-parts
+  "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists),
+  in the order they are placed here: the task, its proofs, what it cites, each search, the references its agent cites, its added
+  keys, and last its own problems, its turn and its state; what a turn's diff compares. A piece is here when the pull holds what it
+  shows; :seon.ctx/pattern is what it reads of the agent, so a past point's parts are pulled by that alone (its added keys are
+  the agent's own pattern's, which a point's pull by this one leaves out). See docs/render.md#the-page."
+  {:seon.render/list "p-task"
+   :seon.ctx/pattern [:seon.agent/key :seon.agent/status :seon.agent/outcome :seon.agent/reason :seon.agent/turn :seon.agent/max-turns
+                      :seon.agent/ended-turn :seon.agent/ns {:seon.agent/task :seon.task/task-fact} {:seon.cite/_of :seon.cite/cite-fact}
+                      {:seon.search/_of :seon.search/search-fact}]
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
+  [_ c]
   [:div {:id "p-task"}
    ;; root's sessions, when this record's pull holds root (root's session's pattern does: docs/users.md#roots-session)
    (when (:root c) [#'sessions {:at [:root]}])
@@ -1622,7 +1628,7 @@
            ;; each search its task and the agent hold, a part each, drawn on the branch's db
            (for [p (concat (for [e (keys (get-in c [:seon.agent/task :seon.search/_of]))] [:seon.agent/task :seon.search/_of e])
                            (for [e (keys (get c :seon.search/_of))] [:seon.search/_of e]))]
-             [#'searched {:key (get-in c (conj p :seon.search/id)) :at p}])))
+             (get-in c p))))
    (when (seq (:seon.cite/_of c)) [#'references {:at [:seon.cite/_of]}])
    (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])
    (when (:seon.agent/task c) [#'own-problems {:at [:seon.agent/task]}])
