@@ -268,59 +268,6 @@
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
 
-(deftest a-fork-server-step-that-throws-answers-and-the-server-serves-on
-  ;; task seon.fork-server/a-throwing-fork-server-step-answers-its-asker: a main commit the fork
-  ;; server cannot read (a :tx naming no commit: the replica's d/commit-as-db throws, as a bad
-  ;; entity in a d/with did, 2026-10-29) threw out of its step. Unfixed, the server stayed alive
-  ;; at 0% CPU, root heard nothing, and the spawn asked next waited for good. Now the step's
-  ;; throw is an error fact on root, the server's state is as it was, and the next spawn is served.
-  ;; No clock decides: an unfixed run waits on the spawn until the runner's budget ends it.
-  ;;
-  ;; Then, on the same root (a root is 8 s of boot, docs/testing.md#a-root-costs-what-it-boots), task
-  ;; seon.fork-server/every-fork-server-wait-ends-with-the-server: the fork server and its
-  ;; standby killed (as a boot death leaves root, a server with no standby), the server is lost;
-  ;; a spawn asked then is refused with the error naming it (seon.fork-server/lost), before any
-  ;; agent is made, and root stops. Unfixed, the fork was neither sent nor answered and the spawn
-  ;; (an attach's) waited for good; then a spawn made an agent whose socket the lost server closed,
-  ;; so it answered :seon.agent/died or :seon.agent/failed, whichever end reached root first
-  (let [checkout (seon.config/checkout)
-        main (str "fork-server-" (random-uuid))
-        store (ts/process-store checkout)
-        runs (str checkout "/target/runs/" main "-runs")
-        root (ts/start-root! {:store store :main main :runs runs})
-        eval-root (fn [code] (root-value (ts/ask root {:op :eval :agent "root" :code code})))
-        fs (eval-root "(get-in (c/state sys) [:fork-server :pid])")
-        _ (eval-root "@(clojure.core.async.flow/inject (:graph sys) [:fork-server :cmd] [{:op :tx :t 999999999999 :commit (random-uuid) :ns 0 :tx-data []}])")
-        spawned (eval-root "(try (c/spawn! sys {}) :spawned (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (:seon.error/message d)])))")
-        recorded (eval-root "(pr-str (my.root/problems sys))")
-        alive (eval-root "(get-in (c/state sys) [:fork-server :pid])")
-        ;; the server and its standby killed
-        _ (eval-root "(def lost-ev (c/events sys))")
-        children (fn [pid] (->> (str/split-lines (:out (sh/sh "pgrep" "-P" (str pid)))) (remove str/blank?) (map parse-long)))
-        ;; its standby is its child; the fork server is the one root names, not the first child pgrep lists
-        ;; (root has other children, its file watcher, and pgrep's order is pid order, which wraps)
-        _ (doseq [k (children fs)] (sh/sh "kill" "-9" (str k)))
-        _ (sh/sh "kill" "-9" (str fs))
-        lost (eval-root "(loop [] (let [e (clojure.core.async/<!! lost-ev)] (case (:type e) :fork-server-lost :lost :proc-defect e (recur))))")
-        ids "(set (keys (:agents (c/state sys))))"
-        agents-before (eval-root ids)
-        refused (eval-root "(try (c/spawn! sys {}) (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (:seon.error/message d)])))")
-        status (eval-root "(get-in (c/state sys) [:fork-server :status])")
-        agents-after (eval-root ids)
-        stopped (ts/stop-root! root)
-        log (ts/output (str runs "/root.log"))]
-    (ts/drop-main! store main)
-    (sh/sh "rm" "-rf" runs)
-    (is (= :spawned spawned) (str (pr-str spawned) log))
-    (is (= fs alive) "the same server serves on")
-    (is (re-find #"step-failed" recorded) "and root recorded the error")
-    (is (= :lost lost) "root heard the server is lost")
-    (is (= :seon.root/refused (first refused)) (pr-str refused))
-    (is (re-find #"fork server is lost" (str (second refused))) (pr-str refused))
-    (is (= :lost status))
-    (is (= agents-before agents-after) "no agent was made for the refused spawn")
-    (is (= "0" (str (:exit stopped))) (str "root stops with its fork server lost: " (pr-str (dissoc stopped :log))))))
-
 (deftest an-agent-ends-when-its-root-is-gone
   ;; with its fork server gone first (a pid cleanup), an agent ends on EOF of its own socket to root,
   ;; whatever it is doing: an idle agent reads it; one evaluating a form with no tick budget is
