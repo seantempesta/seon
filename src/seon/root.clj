@@ -1367,16 +1367,20 @@
   never a mismatch), the binary's inputs with the config in force (config-input, seon.fx/config-input), which agents key their
   test results by (seon.agent/test-inputs), and :program the binary's, the program those inputs describe; otherwise :program is
   main's at boot (main-digest, seon.program/program-digest) and no inputs. Another tree is seon.problems/stale-binary's row
-  and refuses spawns: stale, stale-binary's answer at this boot, is held as :stale-binary for the row. Never imported. See docs/source.md#a-boot-resumes-from-the-db."
-  {:malli/schema [:=> [:cat :map :string [:maybe :map] :string :map [:maybe :map]] :map]}
-  [held boot built main-digest config-input stale]
-  (let [one? (and (get-in built [:inputs :tree]) (= (get-in built [:inputs :tree]) (:tree held)))]
+  and refuses spawns: stale, stale-binary's answer at this boot, is held as :stale-binary for the row. A binary built from
+  another tree and current for held's by reach (stale nil: what differs reaches nothing root runs, seon.root/binary-current)
+  hands agents current-inputs, the inputs of held's tree (seon.fx/inputs of it), never its own: a binary current for
+  another tree must not key verdicts by its own tree. Never imported. See docs/source.md#a-boot-resumes-from-the-db."
+  {:malli/schema [:=> [:cat :map :string [:maybe :map] :string :map [:maybe :map] [:maybe :map]] :map]}
+  [held boot built main-digest config-input stale current-inputs]
+  (let [one? (and (get-in built [:inputs :tree]) (= (get-in built [:inputs :tree]) (:tree held)))
+        inputs (if one? (:inputs built) (when-not stale current-inputs))]
     (cond-> (-> held (dissoc :inputs :binary :binary-tree :stale-binary) (assoc :boot boot :program (if one? (:program built) main-digest)))
       (:program built) (assoc :binary (:program built))
       (get-in built [:inputs :tree]) (assoc :binary-tree (get-in built [:inputs :tree]))
       ;; stale-binary's answer at this boot: what the :stale-binary row shows (seon.problems/stale-binary)
       stale (assoc :stale-binary stale)
-      (and one? (:inputs built)) (assoc :inputs (update (:inputs built) :config merge config-input)))))
+      inputs (assoc :inputs (update inputs :config merge config-input)))))
 
 (defn- build-input?
   "Is changed path p (with its git modes) something the binary bakes and no load of the db brings: a pin (a gitlink),
@@ -1625,7 +1629,10 @@
                                                                                   (into (root-session-refresh-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
-                                                                         held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (binary-program) digest (fx/config-input cfg/config (cfg/checkout)) stale)})
+                                                                         held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (binary-program) digest (fx/config-input cfg/config (cfg/checkout)) stale
+                                                                                                    ;; a binary current for main's tree by reach, built from another: main's tree's inputs
+                                                                                                    (when (and (not stale) (:tree held) (not= (:tree held) (get-in (binary-program) [:inputs :tree])))
+                                                                                                      (fx/inputs (str (cfg/checkout)) cfg/config (cfg/checkout) (:tree held))))})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))

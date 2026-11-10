@@ -483,7 +483,7 @@
         ;; a change that reaches nothing root runs from its binary builds nothing (rule (a), docs/source.md#the-binary-records-its-program)
         _ (write! (str out "/build") (build-text bin-keys binary-current))
         _ (when (and (seq bin-keys) (not binary-current))
-            (println "prove: target/seon is current for this tree by reach (seon.root/binary-current); built anyway until its tree's readers ask the same rule"))
+            (println "prove: target/seon is current for this tree by reach (seon.root/binary-current): no build"))
         ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms)
         _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) "\n"))
         ;; the process tests' store, made here before any shard starts (shards' roots that each made
