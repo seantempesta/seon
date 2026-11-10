@@ -33,7 +33,7 @@
   finding, not red), unmeasured (a stated dimension with nothing measured)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.profile :as profile] [seon.config :as config] [seon.lib :as lib]
-            [clojure.test :as t] [clojure.string :as str] [seon.print :as print] [seon.proofs :as proofs]
+            [clojure.test :as t] [clojure.string :as str] [seon.print :as print] [seon.proofs :as proofs] [seon.task :as task]
             [malli.core :as m] [malli.generator :as mg] [clojure.test.check.generators :as gen]))
 
 ;; ---- the judge (pure) -----------------------------------------------------------------
@@ -175,6 +175,27 @@
       (fit :increments (for [r incs] [(:n r) (- (m r) (m r0))]) (for [r incs] [(:n r) (- (w r) (w r0))]))
       :else (bounded))))
 
+(defn open-tasks
+  "The ids (ns/name) of the tasks the checkout's task files declare (resources/seon/tasks, read by the one
+  reader of task files, seon.task/file-declarations): the tasks an :overrun may name. docs/cost.md#an-accepted-overrun-and-its-ratchet."
+  {:malli/schema [:=> [:cat] [:set :string]]}
+  []
+  (set (for [[n text] (lib/dir-texts (str (config/checkout) "/resources/seon/tasks") ".edn")
+             :let [ns-sym (symbol (subs n 0 (- (count n) 4)))]
+             d (let [r (task/file-declarations ns-sym text)] (when (vector? r) r))]
+         (task/task-id ns-sym (:seon.task/name d)))))
+
+(defn waiver-fault
+  "Why an :overrun is not a waiver, or nil: its task is in no task file (:no-task), it states no size it was
+  taken at (:no-size), or that size is not largest, the one the proof's ratchet judges at (:wrong-size). Read
+  only for a proof that carries one. docs/cost.md#an-accepted-overrun-and-its-ratchet."
+  {:malli/schema [:=> [:cat [:maybe :seon.cost/overrun] [:maybe pos-int?]] [:maybe :map]]}
+  [{:keys [task n] :as overrun} largest]
+  (when overrun
+    (cond (not (contains? (open-tasks) task)) {:fault :no-task :task task}
+          (nil? n) {:fault :no-size :task task :largest largest}
+          (not= n largest) {:fault :wrong-size :task task :n n :largest largest})))
+
 (defn judge
   "The verdict on rows (ascending sizes, each measured and expected) under estimate e."
   {:malli/schema [:=> [:cat :seon.cost/estimate [:vector {:gen/max 4} :seon.cost/row]] :seon.cost/verdict]}
@@ -209,15 +230,17 @@
                          :let [l (largest-in d) q (when l (ratio l d))] :when (and q (< q loose))]
                      {:dim d :n (:n l) :ratio q}))
         unmeasured (vec (for [d dimensions :when (and (dims d) (seq rows) (every? #(nil? (get-in % [:measured d])) rows))] d))
-        held? (when-let [{:keys [measured]} (:overrun e)]
+        fault (waiver-fault (:overrun e) (:n largest))
+        held? (when-let [{:keys [measured]} (and (not fault) (:overrun e))]
                 (and largest (every? (fn [[d m]] (or (not (exact d)) (<= (get-in largest [:measured d] 0.0) (* ratchet m)))) measured)))
         red? (fn [fs] (some (comp exact :dim) fs))
         ;; a verdict needs a counted dimension both estimated and measured: one judged on time
         ;; alone could never be red (time is shown, never red)
         uncounted? (not-any? #(and (exact %) (dims %) (not (some #{%} unmeasured))) dimensions)]
-    (cond-> {:ok? (and (not uncounted?) (or (not (or (red? over) (red? steeper))) (boolean held?)))
+    (cond-> {:ok? (and (not uncounted?) (not fault) (or (not (or (red? over) (red? steeper))) (boolean held?)))
              :over over :steeper steeper :under under :unmeasured unmeasured}
       uncounted? (assoc :uncounted true)
+      fault (assoc :waiver-fault fault)
       (and held? (or (red? over) (red? steeper)))
       (assoc :accepted {:task (:task (:overrun e)) :over over :steeper steeper}))))
 
@@ -383,7 +406,7 @@
   estimate e, a regression past the recorded overrun. The one wording of a verdict: the
   agent's text (`explain`) and the page's verdict box (seon.render.ui/verdict-box)."
   {:malli/schema [:=> [:cat :seon.cost/verdict [:maybe :seon.cost/estimate]] [:sequential [:tuple :string :string]]]}
-  [{:keys [ok? over steeper under unmeasured accepted] :as v} e]
+  [{:keys [ok? over steeper under unmeasured accepted waiver-fault] :as v} e]
   (concat [[(if ok? "ok" "bad") (if ok? "within estimate" "OVER ESTIMATE")]]
           (for [{:keys [dim n ratio]} over]
             [(if (exact dim) "bad" "muted") (str (if (exact dim) "OVER: " "TIME OVER (measured, not red): ") (name dim) " at n=" n " is " (format "%.2f" ratio) "x its estimate (allowed " (slack dim) "x).")])
@@ -394,6 +417,11 @@
           (for [d unmeasured] ["muted" (str "NOT MEASURED: " (name d) ".")])
           (when (:uncounted v)
             [["bad" "NO COUNTED DIMENSION: the estimate states no bytes, calls or ticks that were measured; time alone is never red, so the proof could not fail."]])
+          (when-let [{:keys [fault task n largest]} waiver-fault]
+            [["bad" (str "BROKEN WAIVER: " (case fault
+                                             :no-task (str "its :overrun names task " task ", which no file under resources/seon/tasks declares: file the task, or delete the :overrun.")
+                                             :no-size (str "its :overrun for task " task " states no :n, the size its :measured was taken at (its largest, " largest ").")
+                                             :wrong-size (str "its :overrun for task " task " was taken at :n " n ", not at the largest size, " largest ", that it is judged at: measure it again at " largest ".")))]])
           (when-let [{:keys [task]} accepted]
             [["muted" (str "OVERRUN accepted while task " task " is open (within " ratchet "x of "
                            (if-let [m (:measured (:overrun e))] (print/text m (:part print/budgets)) "the overrun its task recorded") "): it is that task's work.")]])

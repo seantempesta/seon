@@ -67,8 +67,9 @@
      ;; (18b0774: per-thread bytes, thread CPU time; release runtime, Chez 80e4b9f, load 17, as
      ;; bin/prove runs): 161 -> 183 KB, the same in every run (six AVET seeks, ~21 KB each as
      ;; seon.task-cost-test's one seek, and the entity reads), and 192 -> 213 us, which machine
-     ;; load moves ~1.3x (158 us at load 10). The record a ratchet compares with is this measure's
-     :overrun {:task "seon.db/avet-seek-allocates" :measured {:ns 213400.0 :bytes 183100.0}}}))
+     ;; load moves ~1.3x (158 us at load 10). Taken again 2026-11-10 at 300, the largest size: 90 KB, 8.6x the bound's
+     ;; bytes, and 20 contracted calls against its 12. The record a ratchet compares with is this measure's
+     :overrun {:task "seon.db/avet-seek-allocates" :n 300 :measured {:ns 127791.0 :bytes 90256.0 :calls 20.0}}}))
 
 (defn program-of
   "load-order's argument: the n live forms of app.pc (the test store's example program is

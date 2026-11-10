@@ -514,8 +514,9 @@
                :growth :linear
                :ops {:db/pull 7 :db/pull-attr 38 :edn/read-char 500}
                :sizes [2 6 18]
-               ;; measured on Jolt 00a3b321 (pulls got cheaper with J3's try; the read did not as much)
-               :overrun {:task "seon.problems/report-beyond-its-pulls" :measured {:ns 218794000.0 :bytes 227801600.0}}}))
+               ;; its waiver (task seon.problems/report-beyond-its-pulls, never filed) closed 2026-11-10: with it deleted the proof
+               ;; is green, 0.95x the ticks and 0.91x the bytes of its bound at 18
+               }))
 
 (defn clean-input
   "The flatness proof's input at k: 4 problems of each class over k clean tasks, each done."

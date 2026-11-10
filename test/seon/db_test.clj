@@ -863,10 +863,9 @@
      :work "per value: its insert into :eavt and :aevt, each descent comparing up to the value, the datom, its place in the tx-data"
      :growth :linear
      :per-n {:ticks 7000 :bytes 10500}
-     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :measured {:ticks 12969032.0 :bytes 17008064.0}}
-     ;; the overrun's :measured is the proof's at 1,000 when it was recorded; it is now judged at 300, the largest size
-     ;; (the ratchet only reds a size over 1.5x its record, so this is the looser of the two); measured
-     ;; at 10,000 too, 17.7 KB a datom against 17.0 at 1,000: near-flat, the log n of a descent
+     ;; the overrun's :measured is the proof's at 300, its largest size, taken 2026-11-10: 1.63x the ticks and 1.35x the bytes
+     ;; of its bound (before, a record at 1,000 of 12.97 M ticks and 17.0 MB, 3.8x what 300 measures, so no regression showed)
+     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :n 300 :measured {:ticks 3416299.0 :bytes 4259728.0}}
      :sizes [30 100 300]}))
 
 (deftest an-identity-costs-its-seek
@@ -881,9 +880,9 @@
      :work "per datom: its inserts (:avet too for the identity), one descent for a card-one value, one :avet seek per identity"
      :growth :linear
      :per-n {:ticks 10000 :bytes 15000}
-     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :measured {:ticks 11543218.0 :bytes 34428528.0}}
-     ;; the overrun's :measured is the proof's at 1,000 when it was recorded; it is now judged at 100, the largest size
-     ;; (the ratchet only reds a size over 1.5x its record, so this is the looser of the two)
+     ;; the overruns' :measured are the proofs' at 100, their largest size, taken 2026-11-10: :db/unique 1.28x the bytes of its
+     ;; bound (8.3k ticks and 19 KB a datom), a content id 2.68x (12.9k ticks and 43 KB)
+     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :n 100 :measured {:ticks 834866.0 :bytes 1916704.0}}
      :sizes [10 30 100]})
   (cost/proof
     {:of 'datahike.api/db-with :input 'seon.db-test/content-id-datoms
@@ -891,7 +890,7 @@
      :work "per datom: as a :db/unique identity's, and the identity's [attribute value] hashed once to its entity id"
      :growth :linear
      :per-n {:ticks 11000 :bytes 16000}
-     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :measured {:ticks 16945178.0 :bytes 64847328.0}}
+     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :n 100 :measured {:ticks 1289618.0 :bytes 4288032.0}}
      :sizes [10 30 100]}))
 
 (defn newest-evals
