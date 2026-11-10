@@ -753,7 +753,7 @@
                 ds)))))
 
 (defn- held-tasks
-  "What load-tx judges of the tasks on db, id -> {:seon.task/ns :seon.task/execution :seon.task/needs (ids)}: four
+  "What load-tx judges of the tasks on db, id -> {:seon.task/ns :seon.task/execution :seon.task/needs (ids) :searched?}: five
   :aevt scans (~2.5 MB for 452 tasks), where `tasks` pulled every member of every task (46 MB) for these four."
   {:malli/schema [:=> [:cat :seon.host/db] [:map-of :seon.task/id :map]]}
   [db]
@@ -761,9 +761,12 @@
         ids (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/id))
         ns-of (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/ns))
         ex-of (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/execution))
-        needs (scan :seon.task/needs)]
+        needs (scan :seon.task/needs)
+        ;; the tasks that hold a search of their plan (plan-search-tx)
+        searched (into #{} (map :v) (d/datoms db :aevt :seon.search/of))]
     (into {} (for [[e id] ids]
                [id (cond-> {:seon.task/needs (into #{} (map ids) (needs e))}
+                     (searched e) (assoc :searched? true)
                      (ns-of e) (assoc :seon.task/ns (ns-of e))
                      (ex-of e) (assoc :seon.task/execution (ex-of e)))]))))
 
@@ -794,9 +797,8 @@
         (vec (concat
                created
                (for [d new] (declared (task-id (:seon.task/ns d) (:seon.task/name d)) d))
-               ;; a task already held whose plan has no search (made before every task got one: plan-search-tx), one seek each
-               (for [[id d] decls :let [e (pdb/eid db :seon.task/id id)]
-                     :when (and e (empty? (d/datoms db :avet :seon.search/of e)))
+               ;; a task already held whose plan has no search (made before every task got one: plan-search-tx), read in held-tasks' scan
+               (for [[id d] decls :when (and (all id) (not (:searched? (all id))))
                      :let [s (plan-search-tx [:seon.task/id id] (:seon.task/plan d))] :when s]
                  s)
                (mapcat (fn [[id d]]
