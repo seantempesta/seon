@@ -122,4 +122,7 @@ Proofs: test/seon/recorded_requests.edn with each change named (the page message
   :seon.task/kind :work
   :seon.task/needs #{"seon.render/a-model-render-draws-each-turns-diff"}
   :seon.task/proofs #{seon.render-test/turn-s-page-message-holds-conversation-entity-unexpanded}}
-]
+ {:seon.task/name "the-root-tile-counts-the-program-it-loaded"
+  :seon.task/plan "What exists: seon.render.ui/process-tile draws (:program (:boot view)) {:loaded :ms} (an agent's merge, 2deabfe859: \"N forms loaded in M ms\", or \"program load not measured\"), and seon.render.proc carries :boot. Missing (Web's review, 2026-11-10): nothing writes :program into root's view :boot (seon.root builds :boot with gc, seed, digest and contracts only); the program load is the fork server's, `(program/load-all! db0)` in seon.fork-server, which keeps only its :errors, so on a real root the tile always says not measured. The change: the fork server's boot load-all! answer, {:loaded n} and its ms measured there, reaches root's view :boot :program through the reply root already reads at the fork server's start. Boot code, Optimization's. Proof: a fresh root's tile shows N forms loaded."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.render-test/the-root-tile-shows-the-defs-boot-loaded}}]
