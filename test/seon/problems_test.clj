@@ -1182,7 +1182,7 @@
     (is (= [(v 1) (v 4) (v 7)] (rows [1 2 3 4 5 6 7])) "a documented public var citing nothing and an undocumented one, and one defined by a namespaced defn; a cited one, a private one and a test are not")
     (is (= [] (problems/uncited-vars db {} #{})) "no changed var, nothing read")
     (is (= [] (problems/uncited-vars db {} #{'app.nowhere/x})) "a name no var has")
-    (testing "attention: a branch that adds an uncited public var is told, never refused (AGENTS section 4), and a var the base already left uncited is not its problem"
+    (testing "attention: a branch that adds an uncited public var is told, never refused (docs/processes.md#an-agent-is-never-gated), and a var the base already left uncited is not its problem"
       (let [base (var-forms (world) 1 (fn [_] {:src "(defn f [])" :doc "Does a thing."}))
             head (var-forms (world) 2 (fn [i] {:src "(defn f [])" :doc "Does a thing."}))
             split (problems/caused-split base head)]
@@ -1228,7 +1228,7 @@
       (let [base (var-forms (world) 1 (fn [_] {:src long-src}))
             head (var-forms (world) 2 (fn [_] {:src long-src}))
             split (problems/caused-split base head)]
-        ;; attention, never a reason to refuse done (AGENTS: get out of an agent's way): its task shrinks it
+        ;; attention, never a reason to refuse done (get out of an agent's way: docs/processes.md#an-agent-is-never-gated): its task shrinks it
         (is (some #(re-find #"/v2 is \d+ tokens" %) (map str (:attention split))))
         (is (not-any? #(re-find #"/v2 is \d+ tokens" %) (map str (:caused split))) "never refused")
         (is (not-any? #(re-find #"/v1 is \d+ tokens" %) (map str (:attention split))))))

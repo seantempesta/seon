@@ -52,7 +52,7 @@
 (defn- error-kept
   "The exception *e keeps after an eval threw e: a new one holding the error as data (agent/error-map),
   with the original's message and no cause or frames, so *e never pins what the throw captured
-  (AGENTS 4: an error keeps data; docs/machine.md#roots-heap). ex-message,
+  (an error keeps data: docs/errors.md#an-error-keeps-data; docs/machine.md#roots-heap). ex-message,
   ex-data and my.agent/pst read it as they read any exception."
   {:malli/schema [:=> [:cat :seon.host/throwable] :seon.host/throwable]}
   [e]
@@ -340,7 +340,7 @@
   "The error map of an eval's exception e (seon.agent/error-map, with its position in the form's
   terms: `located`; :phase :read for a read error), made where the reply is made, so the reply
   carries error data and never the Throwable, whose frames and ex-data would pin the system for as
-  long as the reply is held (AGENTS 4, a kept value is a reference; docs/errors.md#an-error-keeps-data)."
+  long as the reply is held (a kept value is a reference: docs/storage.md#a-kept-db-value-is-a-reference; docs/errors.md#an-error-keeps-data)."
   {:malli/schema [:=> [:cat :seon.host/throwable :map] :map]}
   [e m]
   (let [em (cond-> (agent/error-map e) (:repl/phase m) (assoc :phase :read))

@@ -110,7 +110,7 @@
     (is (= [] (vec (remove #(get-in seon.config/schema-forms [% 1 :seon.config/at-load]) read-at-load))))))
 
 (deftest a-bound-is-a-config-key
-  ;; task seon.config/a-bound-is-a-config-key (AGENTS §5, only documented config): every limit,
+  ;; task seon.config/a-bound-is-a-config-key (docs/config.md#constants, only documented config): every limit,
   ;; bound or default is a config key. Read from the compiler's facts (each src form's recorded
   ;; source, as data): a top-level def of a number, and a literal count over 2 given to take,
   ;; take-last, drop or drop-last, is a site; each site is named in docs/config.md#constants

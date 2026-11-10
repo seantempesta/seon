@@ -77,7 +77,11 @@ The same holds for `@ctx`: read the path you need, since walking ``(:seon.eval/_
 
 Everything here builds on what is already there, so a change costs what changed, and a cost that grows with the size of the session is a defect in the design, never a thing to optimize later. A transaction says which datoms moved, so one member joining a collection costs that member (```seon.ctx/window-moves```), and a render draws only what those datoms touch. If you are about to re-read, re-sort or re-print something whole because one piece of it changed, stop: there is a shape where you do not need to. A component reads what it draws and nothing around it; a function that rebuilds a whole list inside each of its members is quadratic however fast it looks at small sizes.
 
-So derive nothing you can read, and store nothing you can derive: a value computed from the db at t is drawn by a render and kept by the walk's cache, which anything may evict (AGENTS §5). Never store a printed value: a value is stored as data, and only the [one printer](render.md#one-printer) makes text of it, for context.
+So derive nothing you can read, and store nothing you can derive: a value computed from the db at t is drawn by a render and kept by the walk's cache, which anything may evict ([derived data](#derived-data-is-a-cache-never-relied-on)). Never store a printed value: a value is stored as data, and only the [one printer](render.md#one-printer) makes text of it, for context.
+
+## Derived data is a cache, never relied on
+
+A value derived from the db (a score, a selection, a render, a diff, a test's verdict) may be kept as a cache, keyed by its inputs (a digest, a db's t) and never by a clock; anything may evict it at any time, and its reader then regenerates it from the db as of t (owner, 2026-10-28: "Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T."). A derived value that cannot be regenerated from the db at t is not a cache: it is a fact that belongs in the db, or a defect. Results are reused the same way, by the digest of their inputs: a test's by everything it reaches, a check step's by its build's source, a build's by its sources, so unchanged inputs are never computed again ([merging](merging.md#verdicts-are-a-cache)).
 
 ## Before you add something
 

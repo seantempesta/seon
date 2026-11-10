@@ -458,7 +458,7 @@
 (deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
   ;; root's boot loads the wiki in a transaction of its own after its boot fact (seon.root/wiki-boot!): a link to no section
   ;; is that write's refusal (:seon.db/no-target, docs/references.md#the-wiki-in-the-store), recorded as a :platform error
-  ;; open until the page is fixed, and the root listens (AGENTS: nothing crashes). On broken-boot's boot, whose wiki is one
+  ;; open until the page is fixed, and the root listens (docs/errors.md#nothing-crashes-and-nothing-hangs). On broken-boot's boot, whose wiki is one
   ;; page linking to no section
   (let [[_ two] @broken-boot
         page (str (:tree two) "/docs/zz-broken.md")]

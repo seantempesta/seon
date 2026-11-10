@@ -4,7 +4,7 @@ Time is measured and recorded, and decides only at the owner's three exceptions;
 
 Work runs because it arrived and parks when there is none; a missing answer is a recorded
 fact (blocked, stalled, dead), never a timer's guess. The exceptions are the cron proc, a
-message's delayed insert, and the kernel's TCP keepalive ([AGENTS.md §4](../AGENTS.md)).
+message's delayed insert, and the kernel's TCP keepalive ([below](#time-decides-the-owners-exceptions)).
 
 `bin/laws clocks` lists every function in `src/` whose code (strings and comments left
 out) sleeps, takes a timeout, holds a deadline or names a `*-MS` constant, and fails on one
@@ -19,13 +19,17 @@ site whose mark is gone must leave the page in the same commit (no check catches
 health problem classes, ``jolt/health``). Catches are judged the same
 way in [failure points](failure-points.md).
 
+## If nothing has changed, we do nothing
+
+An idle system does no work: no proc steps, renders, pings, flushes or polls happen unless a message arrived. Work runs because it arrived, is admitted by its measured workload ([below](#time-orders-a-queue-measured-workload)) and parks when there is none. A proc reports its own problems as facts and its changes as events, so health is the absence of open problem facts ([errors](errors.md#problems)) and nothing is polled to learn it; the `idle` check step holds it, an idle root with a tab open stepping nothing ([checks](checks.md#modes)). A clock, timer, sleep, poll, deadline, ping or fixed slot standing in for a dependency or a workload is the mistake this rules out (owner, 2026-10-30: "timeouts just mean we have the wrong design (most of the time)"): a wait ends on its value or on its producer's typed error ([errors](errors.md#nothing-crashes-and-nothing-hangs)).
+
 ## Time decides (the owner's exceptions)
 
 The sites where time decides because the owner allowed it, the provider's delayed retry among them.
 
 - `seon.fx/wake-later`: the delayed insert, with its helpers `seon.fx/refill`, `seon.fx/admit`, `seon.fx/dispatch` and `seon.fx/owner-proc`. The provider's rate is a token bucket (halved by a rate-limit outcome, raised by a twentieth toward the configured rate by every other, and a request is admitted only while a worker is free and the bucket holds its estimate); a request the bucket cannot cover yet is put back on the owner's `:tick` port once it refills, by `seon.step/put-after!`.
 - `seon.step/put-after!`: the one timer: a go block parks on a core.async `timeout`, then puts the message. The delayed insert, the cron's tick and root's stall check (`seon.root/api-proc`, below) all arm through it. Measured on the current Jolt pin, 25 and 1000 pending timers hold the same thread count (21) for this form and for the callback `take!` it replaced, so the saving is one mechanism, not threads (`seon.step-test/timer-threads`).
-- `seon.cron/cron-proc`, with `seon.cron/next-fire-ms` and `seon.cron/epoch-ms`: the cron proc, the owner's one allowed schedule (AGENTS section 4). At the time of day `:seon.config.proofs/full-run-at` names (UTC), `seon.step/put-after!` puts a `:tick` on its port, and the proc puts one full-run request for main on the test service's queue, then arms the next day's: it decides nothing but when the message is put. `epoch-ms` is its one clock read, to find that time. A root started after the time waits for the next day's.
+- `seon.cron/cron-proc`, with `seon.cron/next-fire-ms` and `seon.cron/epoch-ms`: the cron proc, the owner's one allowed schedule. At the time of day `:seon.config.proofs/full-run-at` names (UTC), `seon.step/put-after!` puts a `:tick` on its port, and the proc puts one full-run request for main on the test service's queue, then arms the next day's: it decides nothing but when the message is put. `epoch-ms` is its one clock read, to find that time. A root started after the time waits for the next day's.
 
 ## Time decides (a check's measurement, and a check's ping)
 
@@ -70,7 +74,7 @@ Names that look like clock reads but are quoted as data, so no time decides at t
 
 ## Time orders a queue (measured workload)
 
-A measured time chooses which work goes first, never whether a result is green (AGENTS.md section 4: work is admitted by its measured workload).
+A measured time chooses which work goes first, never whether a result is green (work is admitted by its measured workload).
 - `seon.fx/slow-tests`: a test measured at `:seon.config.proofs/slow-test-ms` or over is left out of a run until it is fast ([merging](merging.md#a-slow-test-runs-last)): what is scheduled, never a verdict.
 - `seon.proofs/shards`: bin/test's shards are dealt by each test's typical measured ms (the median of its newest cached results', ```seon.fx/typical-ms```), so they end together; a test never measured counts as the mean.
 - bin/check's queue: a full run's steps start longest first by the wall seconds of the last full run (its `STEP.time` files); a step not measured yet starts first.
