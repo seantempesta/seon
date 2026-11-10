@@ -1426,3 +1426,28 @@
       (is (nil? (pdb/invalid-datom db [{:seon.eval/id "x" :seon.eval/call [:seon.model-call/id "c"]} [:db/retract 1 :seon.task/execution :held] [:db.fn/retractAttribute 1 :seon.task/execution]])) "a ref's lookup, a retraction, a function")
       (is (nil? (pdb/invalid-datom db [{:lab.own/thing (Object.)}])) "an attribute no schema declares: the store's to judge"))))
 
+
+(deftest the-datom-check-costs-a-validator-call-a-datom
+  ;; docs/storage.md#the-write-checks-every-datom: each datom's value is asked of its attribute's schema, whose validator is
+  ;; found once a transaction from the schema the registry in effect holds (seon.contract/held). The check made a new
+  ;; reference to the schema for every datom ((m/schema a) of a name) and so a new validator for every value: 1,105 ticks
+  ;; and 5.3 KB a datom on every write through a connection (measured 2026-11-10, 1,000 plain datoms: 1.105 M ticks, 5.33 MB)
+  (cost/proof
+    {:of 'seon.db/invalid-datom :input 'seon.db-test/plain-datoms
+     :n "datoms of two declared attributes, every one valid"
+     :work "per datom: its attribute's schema entry, the validator already found, one call of it"
+     :growth :linear
+     ;; measured 2026-11-10: 7.1k / 19.6k / 63.2k ticks and 12.2 / 31.4 / 98.6 KB at 100 / 300 / 1,000: 63 ticks and 96 B a datom
+     :per-n {:ticks 80 :bytes 120}
+     :fixed {:ticks 2000 :bytes 4000 :calls 4}
+     :sizes [100 300 1000]}))
+
+(deftest a-datom-is-held-to-the-schema-in-effect-at-its-write
+  ;; docs/storage.md#the-write-checks-every-datom: nothing of the check is kept from one write to the next, so a branch that
+  ;; changes what an attribute's schema accepts is held to the new one at once (red if a validator were kept by the name)
+  (let [db (ts/test-db)
+        own (fn [form] {:forms {:app.dc/n form} :registry (contract/registry-of (assoc contract/forms :app.dc/n form))})
+        tx [[:db/add 1 :app.dc/n "seven"]]]
+    (is (= :seon.db/invalid-datom (:seon.error/type (pdb/invalid-datom db tx (own :int)))) "an int refuses the string")
+    (is (nil? (pdb/invalid-datom db tx (own :string))) "and the same name, now a string, accepts it")
+    (is (= :seon.db/invalid-datom (:seon.error/type (pdb/invalid-datom db tx (own :int)))) "and is refused again when it is an int again")))
