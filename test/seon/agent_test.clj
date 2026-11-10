@@ -2194,6 +2194,27 @@
   (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.root/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]
     (is (= :seon.writer/refused (:value r)) (pr-str r))))
 
+(deftest a-gate-that-cannot-run-is-the-proves-answer
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a gate that cannot run the candidate (its runner made no plan: on 2026-11-10 a checkout
+  ;; that took another tree's binary) answers its typed error, and the agent's prove answers that error, never a verdict that reads as nothing to
+  ;; judge; a gate whose run reached no test is a verdict that is not green. The gate answered at its seam (seon.agent/ask-gate)
+  (let [t 'seon.repl-test/a-proof-no-gate-could-run
+        _ '[seon.agent/judge! seon.agent/ask-gate seon.proofs/gate-tx]
+        log (str (System/getProperty "java.io.tmpdir") "/gate-" (random-uuid) ".log")
+        _ (spit log "prove: run\nSHARD 0 tests\n")
+        seam (str "(do (in-ns 'user) (def gate-reply (atom nil))"
+                  " (alter-var-root #'seon.agent/ask-gate (constantly (fn [tests _] (@gate-reply tests)))) :ok)")
+        prove "(let [r (my.agent/prove)] (if (seon.contract/error? r) [:error (:seon.error/type r)] [:verdict (:proofs r)]))"
+        [_ _ _ refused _ unreached]
+        (in-agent (fn [_] [seam (process-proof "a-proof-no-gate-could-run" 2)
+                           "(reset! user/gate-reply (fn [_] (seon.contract/error :seon.fx/io-error 'seon.fx/run-on-checkout \"the test runner made no plan\" {:no-plan true})))"
+                           prove
+                           (str "(reset! user/gate-reply (fn [tests] {:value {:results (zipmap tests (repeat :error)) :digests (zipmap tests (repeat \"gate\")) :log " (pr-str log) "}}))")
+                           prove])
+                  {:proofs #{t}})]
+    (is (= [:error :seon.fx/io-error] (:value refused)) (pr-str refused))
+    (is (= [:verdict {t :error}] (:value unreached)) (pr-str unreached))))
+
 (deftest a-hand-back-with-a-red-process-test-is-no-green-end
   ;; the same class through seon_done: an outside agent that hands back an unjudged process test ends on its verdict. The hand-back itself, in the agent, the gate
   ;; answered at its seam: :done goes on to the judge, whose own gate is a real one (no test runs one now: task seon.agent/a-real-gate-is-proved-in-seconds)
