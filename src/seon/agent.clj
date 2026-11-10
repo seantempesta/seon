@@ -27,7 +27,6 @@
 ;; :base-graph (test-plan's reach graph of its base, keyed by the base's point (seon.db/point: commit and t, never the db), from the fork server's :graph of main: base-graph)
 ;; :branch-graph (the reach graph of the branch's db, keyed by its point, updated from the base's: branch-graph)
 ;; :branch-changes (what the branch changed since its base, seon.merge/delta-changes, keyed by the two points: branch-changes)
-;; :branch-program (the branch's seon.program/program-digest, keyed by its point: branch-program)
 ;; :main-changes (what main changed since the base, seon.merge/delta-changes, keyed by the two commits: main-changes)
 ;; :index (seon.agent/reconcile-index: the reconciler's index and the commit it was observed for (the fork hands the db once), advanced each turn by what differs; at fork, main's from the fork server)
 ;; :schema-registry (seon.repl: the branch's schema registry, by its schema changes)
@@ -816,36 +815,18 @@
                   (swap! state assoc :branch-changes {:base (pdb/point base) :point (pdb/point db) :changes ch})
                   ch))))
 
-(defn- branch-program
-  "seon.program/program-digest of branch db, held while db is the newest asked (as branch-changes is), so a turn's plans read
-  its program once. See docs/merging.md#verdicts-are-a-cache."
-  {:malli/schema [:=> [:cat :seon.host/db] :string]}
-  [db]
-  (let [{at :point p :digest} (:branch-program @state)
-        now (pdb/point db)]
-    (if (and p (= at now))
-      p
-      (let [p (program/program-digest db)]
-        (swap! state assoc :branch-program {:point now :digest p})
-        p))))
-
 (defn- branch-inputs
   "Inputs in, a root's boot's, as branch db's tests read them: the schema class moved by the entries db holds beyond the binary's, which a
   branch can register (program/schema-changes), and, for the files a branch changed since base (:file/text, a script), each one's class and the tree a
-  test reading files takes; the program class (:seon.env/src, what a test reading the program as data takes: test-runner/program answers
-  this branch's db) moved by db's program digest when it is not the program root booted on (its source fact's :program), so a law test over
-  every form reruns on the branch's form edits and is never reused over them; and held, the config this process's branch states, key by key, when it differs from what the process loaded with, so a branch's edit of a key moves the tests reading that key and no other. A digest no gate's checkout shares only runs more. See docs/merging.md#verdicts-are-a-cache."
+  test reading files takes; and held, the config this process's branch states, key by key, when it differs from what the process loaded with, so a branch's edit of a key moves the tests reading that key and no other. A digest no gate's checkout shares only runs more. See docs/merging.md#verdicts-are-a-cache."
   {:malli/schema [:=> [:cat :seon.program/inputs :seon.host/db [:maybe :seon.host/db] :map] :seon.program/inputs]}
   [in db base held]
   (let [changes (program/schema-changes db)
         moved (when base (mapcat identity (d/datoms-diff base db :aevt [:file/text])))
         files (into (sorted-map) (for [dt moved :let [p (:file/path (d/entity db (:e dt)))] :when p] [p (:file/text (d/entity db (:e dt)))]))
-        booted (:program (:seon.root/source (d/entity db [:seon.root/id :root])))
-        program (branch-program db)
         mix (fn [old x] (lib/digest (str old (sedn/encode x))))]
     (cond-> in
       (not= held cfg/config) (update :config merge (fx/config-input held (cfg/checkout)))
-      (not= program booted) (update-in [:config :seon.env/src] mix program)
       (seq changes) (update-in [:config :seon.env/schemas] mix (vec (sort-by key changes)))
       (seq files) (update :tree mix (vec files))
       (seq files) (update :config (fn [c] (reduce-kv (fn [c p text] (if-let [k (fx/env-class p)] (update c k mix [p text]) c)) c files))))))
