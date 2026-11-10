@@ -1878,7 +1878,7 @@
   (standing), the whole pill one link to its page by its stable address (session-address), the whole name in its title; under it,
   by this same render, the agents doing the tasks it started (a request's work), so the list is the tree of what each started.
   See docs/render.md#a-sessions-address-and-the-agents-list."
-  {:seon.render/style ".agent-side > .seon-nest { margin-left: 0.75rem; padding-left: 0.5rem; border-left: 1px solid var(--color-base-800); }"
+  {:seon.render/style ".agent-side:has(> .seon-nest) { flex-direction: column; align-items: stretch; } .agent-side > .seon-nest { margin-left: 0.75rem; padding-left: 0.5rem; border-left: 1px solid var(--color-base-800); }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
   [{db :seon.db/db} eid]
   (let [a (d/pull db session-attrs eid)
