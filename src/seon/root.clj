@@ -1425,7 +1425,9 @@
                  src (for [[p] changed :when (and (str/starts-with? p "src/") (str/ends-with? p ".clj"))] p)
                  ;; what runs from the checkout or from main, never the binary: tests, the wiki, task files, bin/'s scripts
                  elsewhere? (fn [p] (or (str/starts-with? p "test/") (str/ends-with? p ".md") (str/starts-with? p "resources/seon/tasks/")
-                                        (and (str/starts-with? p "bin/") (not= p "bin/build"))))
+                                        (and (str/starts-with? p "bin/") (not= p "bin/build"))
+                                        ;; a path the tree's id leaves out (:seon.config.source/tree-excludes): no build reads it
+                                        (some #(or (= p %) (str/starts-with? p (str % "/"))) (cfg/value :seon.config.source/tree-excludes))))
                  ;; a changed path the rule cannot place (the web assets the build compiles, anything else) is not current
                  unplaced (vec (for [[p om nm] changed :when (not (or (build-input? p om nm) (some #{p} src) (elsewhere? p)))] p))
                  g (or g (program/reach-graph db (fx/declared-refs system/built-text)))

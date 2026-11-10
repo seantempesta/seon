@@ -230,6 +230,8 @@
     (let [r (current (built-with "src/seon/render/ui.clj" (tweak "(defn script")))]
       (is (some #{'seon.render.ui/script} (:reaches r)) (str "a render a schema names, which no call of root's reaches, is root's: not current " (pr-str r))))
     (is (= ["zz-unplaced.txt"] (:reaches (current (built-with "zz-unplaced.txt" (constantly "x"))))) "a path no rule places: not current")
+    (is (nil? (current (built-with "claude_scratch/notes.md" (constantly "x"))))
+        "a path the tree's id leaves out (:seon.config.source/tree-excludes, which no build reads) never makes a binary stale")
     (is (= :binary-tree (:missing (root/binary-current db {} tree g))) "a binary that recorded no tree, against a main that holds one: unknown, never current")
     (is (nil? (root/binary-current db {:inputs {:tree tree}} nil g)) "a main with no source fact: nothing known differs")))
 

@@ -6,6 +6,8 @@
 # same in Clojure. Top-level paths :seon.config.source/tree-excludes names (claude_scratch/: no read and no
 # build reads them) are left out, read from the shipped resources/seon/config/default.edn.
 # Prints nothing and exits 1 when git cannot name it.
+# git reads the repository's own config and no other: a tree's id never depends on whose HOME runs it (seon.fx/git-run's rule)
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 ROOT=${1:-$(cd "$(dirname "$0")/.." && pwd)}
 CFG=$(dirname "$0")/../resources/seon/config/default.edn
 EX=(); [[ -f $CFG ]] && EX=($(sed -nE 's#^ :seon\.config\.source/tree-excludes \[(.*)\].*#\1#p' "$CFG" | tr -d '"'))

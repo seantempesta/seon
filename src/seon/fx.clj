@@ -61,10 +61,14 @@
 (defn- git-run
   "git in dir with args, under the environment variables env adds ({name value}), fed in when given:
   its sh result. The one place src runs git (seon.main-test/git-is-read-through-fx); git! and
-  git-try are its two readings."
+  git-try are its two readings. git reads the repository's own config and no other (GIT_CONFIG_GLOBAL /dev/null,
+  GIT_CONFIG_NOSYSTEM): what a tree id names, an ignored file among it, is a function of the tree and the repository,
+  never of whose HOME runs it (one tree had two ids when the owner's global ignore file was read by bin/tree in a session
+  and not by a root, whose HOME is its target/home). See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat [:map-of :string :string] :string [:sequential :string] [:maybe :string]] :map]}
   [env dir args in]
-  (let [cmd (concat (when (seq env) (cons "env" (for [[k v] (sort env)] (str k "=" v)))) ["git" "-C" dir] args)]
+  (let [env (merge {"GIT_CONFIG_GLOBAL" "/dev/null" "GIT_CONFIG_NOSYSTEM" "1"} env)
+        cmd (concat (cons "env" (for [[k v] (sort env)] (str k "=" v))) ["git" "-C" dir] args)]
     (if in (apply sh/sh (concat cmd [:in in])) (apply sh/sh cmd))))
 
 (defn- git-failed
