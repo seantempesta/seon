@@ -590,10 +590,10 @@
    :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.message/keys [from body]}]
   (if (= :inline (:as opts))
-    [:span (str (task/sender-name (ratom/realize from)) ": ") (plain body (cell) {:one-line? true})]
+    [:span (str (task/sender-name from) ": ") (plain body (cell) {:one-line? true})]
     [:section {}
      ;; its sender by name (seon.task/sender-name of the entity its pull joins)
-     [:p {:class "seon-note"} (str (task/sender-name (ratom/realize from)))]
+     [:p {:class "seon-note"} (str (task/sender-name from))]
      [:div {} [#'markdown (str body) {:inline? true}]]]))
 
 (declare standing)

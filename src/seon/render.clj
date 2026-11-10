@@ -104,10 +104,14 @@
   validation). A nested map holding a render symbol under :seon.render/hiccup is data, printed as it
   is: it is what a schema's properties look like inside a printed schema form, and drawing it by
   that render called the render with the properties (an agent's registered :lab.ctx/steps form,
-  its lab.ui/steps called with {:seon.render/hiccup lab.ui/steps}, killed the agent drawing it)."
+  its lab.ui/steps called with {:seon.render/hiccup lab.ui/steps}, killed the agent drawing it). A reference is data too: a
+  map of identity attributes alone (a ref as a pull joins it, a message's sender {:seon.agent/key k}) names an entity the value
+  that holds it shows by its own render, so the printer leaves it to that render and never draws it again inside the value's line."
   {:malli/schema [:=> [:cat :map :any] [:maybe [:map [:text :string] [:html :any]]]]}
   [ix v]
-  (when-let [h (when-not (symbol? (own-key v :seon.render/hiccup)) (render-of ix v nil))]
+  (when-let [h (when-not (or (symbol? (own-key v :seon.render/hiccup))
+                             (and (map? v) (seq v) (every? #(or (= :db/id %) (contains? (:identity-schemas ix) %)) (keys v))))
+                 (render-of ix v nil))]
     {:text (print/line v (config/value :seon.config.render/line-budget)) :html [h {:as :inline :seon.render/index ix} v]}))
 
 (defn- nested-hiccup
