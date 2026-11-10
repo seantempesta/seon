@@ -557,7 +557,7 @@
 (deftest a-stale-binary-is-on-the-problems-tile-with-its-acts
   ;; docs/source.md#files-and-the-db-two-directions: a mismatch is never silent to a person. The :stale-binary row health derives
   ;; (seon.problems/stale-binary) is drawn on root's problems tile, never folded under upkeep, its message naming the acts
-  (let [db (seon.db/db-with (my.test/world {:history? true}) [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :boot "b" :binary "p0" :program "p1"}}])
+  (let [db (seon.db/db-with (my.test/world {:history? true}) [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :boot "b" :binary "p0" :binary-tree "t0" :tree "t1" :program "p1"}}])
         h (seon.problems/health db)
         html (h/html (ui/problems-tile {:seon.render/index (seon.db/index) :seon.ctx/ctx {:health h}}))]
     (is (= 1 (get-in h [:classes :stale-binary :n])) "health holds the row")
