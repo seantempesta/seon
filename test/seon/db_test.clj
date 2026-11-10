@@ -1110,7 +1110,7 @@
   ;; writes compressed ones beside them, and reads both after another open.
   (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
         cfg-of pdb/store-cfg
-        notes (fn [conn] (set (map :v (d/datoms @conn :avet :note/text))))
+        notes (fn [conn] (set (map :v (d/datoms @conn :aevt :note/text))))
         write! (fn [conn from] (d/transact conn {:tx-data (vec (for [i (range from (+ from 50))] {:note/text (str "note " i) :note/agent :t})) :tx-meta (pdb/tx-meta :db)}))
         codec (fn [conn] (get-in (:store @conn) [:config :compressor :type]))
         all (fn [n] (set (map #(str "note " %) (range n))))]
