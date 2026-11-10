@@ -1,5 +1,9 @@
 [{:seon.task/name "the-page-says-regression"
-  :seon.task/plan "What exists: a cost report carries its verdict and entries but not its estimate's recorded overrun, so `seon.cost/verdict-lines` has no estimate there and the page's verdict box cannot say REGRESSION. Correct: the verdict carries the regression (`seon.cost/judge`), and both faces (the text and the page) read it."
+  :seon.task/plan "What exists: seon.cost/judge answers a cost proof's verdict, a closed map of schema :seon.cost/verdict (a new key must be added to it), and seon.cost/verdict-lines prints it; the page's verdict box draws those lines. An estimate's recorded overrun (an accepted regression, as seon.cost-test/an-open-overrun-is-accepted-until-it-regresses sets one up) stays on the estimate, so verdict-lines, which reads the verdict, cannot say REGRESSION.
+
+The change: seon.cost/judge puts the regression on the verdict (a key of :seon.cost/verdict) when an estimate's overrun is exceeded, and seon.cost/verdict-lines reads it from the verdict, so the text and the page say REGRESSION from one value. A changed docstring stales the wiki sections that cite the var; a section still true is marked reviewed with my.doc/reviewed!.
+
+Proof: seon.cost-test/a-regression-is-in-the-verdict (the verdict of an exceeded overrun carries the regression; verdict-lines says REGRESSION from the verdict alone; an accepted overrun carries none)."
   :seon.task/kind :work
   :seon.task/proofs #{seon.cost-test/a-regression-is-in-the-verdict}}
  {:seon.task/name "cost-tolerances-are-derived"

@@ -455,7 +455,9 @@
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    (is (<= (:calls m) 74) "the contracted calls of one health read (74 on the world: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the fold of the counted classes is one, fold-counted)")))
+    ;; Sean, 2026-11-10: 74 -> 86: seon.problems/uncited-tasks judges every ready task (it judged only :implement, which no task
+    ;; was), and its placeholder check reads each ready task's proofs (seon.db/eid per proof): 12 calls that never ran before
+    (is (<= (:calls m) 86) "the contracted calls of one health read (86 on the world, 12 of them the ready tasks' proofs read by uncited-tasks; before that 74: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the fold of the counted classes is one, fold-counted)")))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -1120,19 +1122,21 @@
                                 {:seon.task/id (str "app/" n) :seon.task/outcome done})))))
 
 (defn uncited-input
-  "The cost proof's input at n: n design steps (a finished task, a plan citing a var) and an
-  implement step each, all ready and fine."
+  "The cost proof's input at n tasks: n/2 design steps (a finished task, a plan citing a var) and an
+  implement step each, the implement steps ready and fine."
   [n] (let [v 'app.calc/inc2]
-        [(uncited-fixture (for [i (range n)] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
+        [(uncited-fixture (for [i (range (quot n 2))] [(str "t" i) (str "It changes `" v "`.")]) #{}) {}]))
 
-(deftest uncited-tasks-follow-the-ready-implement-steps
+(deftest uncited-tasks-cost-the-tasks-they-examine
+  ;; Sean, 2026-11-10: n restated as tasks examined (it was design/implement pairs): every task now gets its ready check, so
+  ;; the class's work is per task; 68 calls measured at 20 tasks against 85 (per-n 4, fixed 5, unchanged)
   (cost/proof {:of 'seon.problems/uncited-tasks :input 'seon.problems-test/uncited-input
-               :n "ready implement steps, each citing"
+               :n "tasks examined: finished design steps and the ready implement steps that need them, each citing"
                :work "the kind and task datoms once, then each implement step's needs walked once; the program's vars among the cites asked of the program once (seon.program/program-names, read from the cites at read time where :seon.task/references stored it at write: 43 calls before, 45 since)"
                :growth :linear
-               :per-n {:ns 100000 :bytes 130000 :calls 4}
+               :per-n {:ns 50000 :bytes 65000 :calls 4}
                :fixed {:ns 500000 :bytes 500000 :calls 5}
-               :sizes [10 30 100]}))
+               :sizes [20 60 200]}))
 
 (deftest a-ready-implement-task-that-cites-nothing-is-a-problem
   ;; the context is only as good as the plan it is built from: an implement step whose accumulated
@@ -1146,13 +1150,22 @@
                ["waits" "Text, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]
         db (uncited-fixture pairs #{"waits"})
         rows #(into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health %) [:classes :uncited-task :rows]))]
-    (is (= #{["app/text-impl" :no-references] ["app/stubbed-impl" :placeholder-proof] ["app/bare-impl" :no-proofs]} (rows db))
-        "an implement step citing nothing, one whose proof is the stub, one with no proof; design steps' text plans and an implement step whose design is not done are not judged; a real proof is fine")
+    (is (= #{["app/text-impl" :no-references] ["app/stubbed-impl" :placeholder-proof] ["app/bare-impl" :no-proofs] ["app/waits" :no-references]} (rows db))
+        "a step citing nothing, one whose proof is the stub, one with no proof, and a ready step whose plan is text, whatever its kind; a finished step and one whose needs are not done are not judged; a real proof is fine")
     (testing "each closes with nothing written to close it"
       (let [fixed [["cites" cited] ["text" (str "Show `" v "` somewhere.")] ["stubbed" cited :seon.task/proofs #{'app-test/real}]
                    ["bare" cited :seon.task/proofs #{'app-test/real}] ["waits" "Text, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]]
-        (is (= #{} (rows (uncited-fixture fixed #{"waits"}))))))
+        (is (= #{["app/waits" :no-references]} (rows (uncited-fixture fixed #{"waits"}))) "only the ready step still citing nothing")))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))
+
+(deftest a-ready-task-of-any-kind-that-cites-nothing-is-a-problem
+  ;; the class judged only :implement tasks, and no task on the store had that kind (all :whole, 2026-11-10): a check keyed on a
+  ;; kind matched nothing and never fired. A ready task is judged by its plan, whatever its kind
+  (let [db (world)
+        db (d/db-with db (seon.task/create-tx db [{:seon.task/ns 'app :seon.task/name "tile" :seon.task/kind :whole :seon.task/proofs #{'app-test/real}
+                                                   :seon.task/plan "The root tile shows what boot loaded."}]))
+        rows (into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health db) [:classes :uncited-task :rows]))]
+    (is (contains? rows ["app/tile" :no-references]) "a ready :whole task whose plan names nothing the context can pull")))
 
 (defn- var-forms
   "db0 with the vars app.cite/v0..: each in a src namespace, its form src, docstring and kind as given
