@@ -33,6 +33,7 @@
 # (docs/merging.md); the worktree never edits the main tree.
 set -eu
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
+BIN=${0:A:h}   # this checkout's bin/ (its remove-tree)
 die() { print -u2 "worktree: $*"; exit 1; }
 # the main tree (git's common dir), whichever checkout this runs from: the worktrees and the port
 # registry (bin/ports) live inside it, so the root folder holds everything and can be moved whole
@@ -92,7 +93,7 @@ setup() {
     done
     # the plan's kept program store, regenerable and keyed by its importer and tree, so a new checkout's first plan reads what changed, not every form (22 s against 3 s)
     for e in "$MAIN"/target/program-store-*(N/); do cp -cR "$e" "$WT/target/"; done
-    for n in lib watch lmdb-kill lmdb-sem tailwind src; do
+    for n in lib watch lmdb-kill lmdb-sem remove-tree semsets tailwind src; do
       if [[ -e $MAIN/target/$n ]]; then cp -cR "$MAIN/target/$n" "$WT/target/"; fi
     done
     for e in "$MAIN"/target/home/*(ND); do
@@ -110,6 +111,10 @@ unsub() {
     [[ -e $1/$sub/.git ]] && git -C "$MAIN/$sub" worktree remove --force "$1/$sub" 2>/dev/null || true
   done
 }
+# stores WT: delete WT's target/ and runs/, where its stores are, through bin/remove-tree, before git removes
+# the rest: a store whose last user exited without closing it would otherwise leave its semaphore set for good
+# (docs/failure-points.md#lmdb-robust-locks)
+stores() { "$BIN/remove-tree" "$1/target" "$1/runs" }
 
 if [[ ${1:-} == --at ]]; then
   WT=${2:-} SHA=${3:-} REPO=${4:-$MAIN}
@@ -135,6 +140,7 @@ fi
 if [[ ${1:-} == --remove-at ]]; then
   WT=${2:-}; [[ -d $WT ]] || die "usage: bin/worktree --remove-at DIR (no worktree at '$WT')"
   unsub "$WT"
+  stores "$WT"
   C=$(git -C "$WT" rev-parse --path-format=absolute --git-common-dir)
   git --git-dir="$C" worktree remove --force "$WT"
   # its port block (bin/ports), if it took one (--setup) is free again
@@ -168,6 +174,7 @@ if [[ ${1:-} == --remove ]]; then
   WT=$(wt_path "$NAME")
   [[ -d $WT ]] || die "no worktree at $WT"
   unsub "$WT"
+  stores "$WT"
   git -C "$MAIN" worktree remove --force "$WT"
   # its port block (bin/ports) is free again
   REG=$MAIN_TREE/config/worktree-ports

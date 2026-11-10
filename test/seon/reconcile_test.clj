@@ -2,7 +2,7 @@
   "(actions-for db), index then actions, answers exactly the expected actions for a table of task graphs: needs
   DAGs, max-running, held and cancelled tasks, environment changes, a previous root's
   work, the end of an agent's work judged once by the done rule (`judgment`) and stored on its task, dead agents."
-  (:require [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is are testing]]
+  (:require [seon.lib] [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is are testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.task :as task]
@@ -798,7 +798,7 @@
   gigabyte under the quadratic schema transaction), and its nodes are at addresses, which is why these proofs
   are not on the in-memory test store. Removed when the process ends."
   (delay (let [path (str (seon.config/checkout) "/target/tmp/observed-" (random-uuid))]
-           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (sh/sh "rm" "-rf" path))))
+           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (seon.lib/remove-tree! path))))
            path)))
 
 (defn- disk-main

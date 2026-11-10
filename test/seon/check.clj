@@ -1689,7 +1689,7 @@
                           (select-keys @(c/run-tests! sys a) [:pass :fail :error]))
            :file-text (slurp (str dir "/b.txt"))}
         echo-ping (ping sys :fx/echo)]
-      (seon.fx/remove-tree! dir)
+      (seon.lib/remove-tree! dir)
       {:report (assoc r :owner-ping echo-ping :load (clojure.string/trim (:out (clojure.java.shell/sh "uptime"))))
        ;; the effect answered, its unknown kind is a typed error, and inside the test fork a
        ;; call is refused unless stubbed (both assertions ran and passed)
@@ -1757,7 +1757,7 @@
         got (:got (await-event ev #(and (= :probe (:type %)) (= "one" (:tag %)) (= 3 (:got %)))))
         r3 @(c/apply! sys (write! "remove" (assoc-in decl [:procs :probe] (probe "one"))))
         after (pids)]
-      (seon.fx/remove-tree! dir)
+      (seon.lib/remove-tree! dir)
       {:report {:no-answer (vec (remove booted expect)) :extra (vec (remove expect booted))
                 :add (dissoc r1 :kept) :add2 (dissoc r2 :kept) :queued-kept got :remove (dissoc r3 :kept)}
        :checks {:boot-set (= expect booted)
@@ -2053,7 +2053,7 @@
   only appends, so a store seeded once and used for every run grew without bound, and the file and the roster were each run's to carry. See docs/checks.md#modes."
   [path max-bytes]
   (let [big? (> (.length (java.io.File. (str path "/data.mdb"))) max-bytes)]
-    (when big? (seon.fx/remove-tree! path))
+    (when big? (seon.lib/remove-tree! path))
     big?))
 
 (defn seed
@@ -2103,7 +2103,7 @@
             gone (vec (mapcat #(seon.db/delete-main! conn (keyword %)) mains))]
         (seon.db/sync! cfg)
         (d/release conn)
-        (doseq [m mains] (seon.fx/remove-tree! (seon.db/agents-dir (assoc cfg :branch (keyword m)))))
+        (doseq [m mains] (seon.lib/remove-tree! (seon.db/agents-dir (assoc cfg :branch (keyword m)))))
         ;; the store's agents directory goes when the last main's has (rmdir leaves a non-empty one)
         (clojure.java.shell/sh "rmdir" (str path "-agents"))
         (out! "deleted " (count gone) " branches of " (count mains) " mains"))

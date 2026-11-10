@@ -85,7 +85,7 @@
     (let [files (if paths
                   (into {} (for [p paths :let [f (io/file dir p)]] [p (when (.isFile f) (slurp f))]))
                   (into {} (filter #(program-file? (key %))) (:value (fx/read-source {:req {:root dir :dirs (config/value :seon.config.source/dirs)}}))))]
-      (run! fx/remove-tree! [dir tar])
+      (seon.lib/remove-tree! dir tar)
       files)))
 
 (defn keep-tree!
@@ -163,7 +163,7 @@
         {:keys [conn cfg]} (let [o (open)]
                              (if (or (nil? max-bytes) (pdb/branch? (:conn o) b) (<= (.length (io/file store "data.mdb")) max-bytes))
                                o
-                               (do (d/release (:conn o)) (fx/remove-tree! store) (open))))]
+                               (do (d/release (:conn o)) (seon.lib/remove-tree! store) (open))))]
     (when-not (pdb/branch? conn b)
       (keep-tree! conn cfg root tree b (d/branches conn)))
     (d/release conn)
@@ -645,7 +645,7 @@
             dir (str root "/target/tmp/health-base-" base "-" (random-uuid))
             based (try (with-wiki (program-db root store (fx/tree-of root base))
                                   (fx/checkout-at root base ["docs" (tasks-dir) "*.md"] dir))
-                       (finally (fx/remove-tree! dir)))
+                       (finally (seon.lib/remove-tree! dir)))
             refused (first (filter contract/error? [head based]))
             _ (when refused
                 (println (str "HEALTH FAILED: the " (if (contract/error? head) "tree's" (str "base " base "'s")) " wiki and tasks were refused by their write: "

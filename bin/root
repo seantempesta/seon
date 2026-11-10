@@ -130,7 +130,7 @@ case ${1:-start} in
       # the full outside-in: this checkout's store erased and a root started on it, so main seeds from the tree
       if running; then read T R < "$PIDS"; print -u2 "a root of this checkout is running (pid $R): bin/root stop first"; exit 1; fi
       S=${SEON_STORE:-$SEON_RUNS/store}
-      rm -rf "$S" "$S-agents"; print "erased $S: the root seeds it from $SEON_SOURCE_ROOT"
+      "$ROOT/bin/remove-tree" "$S" "$S-agents"; print "erased $S: the root seeds it from $SEON_SOURCE_ROOT"
       launch "$ROOT" "${@:3}"; exit $?
     fi
     if running; then "$0" status; exit 0; fi

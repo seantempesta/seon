@@ -103,7 +103,7 @@
         ;; (cancelled) and their branches
         end! (fn []
                (let [agent @made]
-                 (sh/sh "rm" "-rf" tasks)
+                 (seon.lib/remove-tree! tasks)
                  (cond (:port root) (eval-root (str "(let [ev (c/events sys) a " (when agent (str ":" agent)) "]"
                                                     " (when-let [v (resolve 'ready-ev)] (clojure.core.async/untap (:events-mult sys) @v))"
                                                     " (when (and a (not (:ended-ms (get (:agents (c/state sys)) a))))"
@@ -232,7 +232,7 @@
           log (ts/output (str runs "/root.log"))]
       (doseq [p left] (sh/sh "kill" "-9" (str p)))
       (ts/drop-main! store main)
-      (sh/sh "rm" "-rf" runs)
+      (seon.lib/remove-tree! runs)
       {:ids ids :agents agents :out log :left (if drained left (conj left :not-drained))})))
 
 (deftest a-tests-request-is-answered-while-an-eval-blocks
@@ -546,7 +546,7 @@
         [_ _ _ _ two] (in-agent (conj (mapv ns-form (range 4)) (run)))
         v #(some-> (:value %) clojure.edn/read-string)
         counts (mapv #(parse-long (ts/output (str dir "/" %))) (range 4))]
-    (sh/sh "rm" "-rf" dir)
+    (seon.lib/remove-tree! dir)
     (is (every? pos-int? counts) (str "every child counted: " (pr-str counts) " " (pr-str two)))
     (is (apply = counts) (str "the children hold the same descriptors: " (pr-str counts)))
     (is (<= 2 (:children (v two))) "at least two children forked (a death forks a new one for what its child had left)")
@@ -1381,6 +1381,40 @@
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))
              "so the agent's divergence carries none of main's changes")
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest a-merge-of-a-main-moved-only-by-records-reads-no-content
+  ;; docs/storage.md#mains-content-mark: main moves on every request by records (an agent's status, embeddings); when its
+  ;; content mark is still the base's, the agent's merge of main and what main changed since the base answer from the mark,
+  ;; with no diff (today ~3 M ticks a request). Red before: merge-main! and main-changes diffed each content attribute.
+  ;; In this process, on a branch of the test store, with a socketpair standing for root
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [mark! #(d/transact conn [{:seon.root/id :root :seon.root/content-t (inc (:max-tx @conn))}])
+           _ (mark!)
+           ab (pdb/on-main (:branch cfg) :agent-base)
+           _ (d/branch! conn (:branch cfg) ab)
+           forked @conn
+           _ (d/transact conn [{:seon.agent/key "test/a1" :seon.agent/status :busy}])
+           store-conn (pdb/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state old-link @agent/link
+           calls (fn [f] (profile/begin!) (let [r (f)] [r (into {} (map (juxt :var :calls)) (profile/touched))]))]
+       (try
+         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
+         (let [[r n] (calls #(agent/merge-main! #{}))]
+           (is (= [] (:applied r)) "only records moved main: nothing merges")
+           (is (nil? (n 'seon.merge/content-datoms)) "and no content is diffed")
+           (is (nil? (n 'seon.db/branch-base)) "nor the commit graph walked"))
+         (let [[r n] (calls #(agent/main-changes forked (agent/heard-main)))]
+           (is (= {} r) "main changed nothing of the program since the base")
+           (is (nil? (n 'seon.merge/content-datoms)) "read from the mark"))
+         (let [[v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)]
+           (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                              :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
+                             [:db/add v :var/form "f1'"]])
+           (mark!))
+         (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "a definition and its mark: main's change merges in")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest a-pull-after-its-own-merge-starts-from-what-it-merged

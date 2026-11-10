@@ -20,6 +20,15 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 JOLT=$ROOT/target/jolt/jolt
 [[ -x $JOLT ]] || { echo "test: no target/jolt/jolt; run bin/build jolt first" >&2; exit 1 }
 . "$ROOT/bin/env"
+# the libraries the runner's own process loads (target/lib: libprobe, lmdb, lz4, zstd) are this tree's before anything
+# reads them: the plan, health and a gate's checkout run on target/jolt/jolt, before and without bin/build seon, and a
+# target/ cloned from another tree (bin/worktree) or a merge that moved native/ left the old library, whose missing
+# symbol killed the plan with a trace (seon_ids_trusted, 2026-11-10). A stamp compare each when nothing moved. Not for
+# a run's own children (--shard, --store-steps): their run asked already, and two of them would build at once.
+case ${1:-} in
+  --shard|--store-steps) ;;
+  *) "$ROOT/bin/build" libs > "$ROOT/target/libs-build.log" 2>&1 || { tail -5 "$ROOT/target/libs-build.log" >&2; echo "TEST FAILED (bin/build libs: target/libs-build.log)"; exit 1 } ;;
+esac
 cd "$ROOT"
 # a root a test boots listens on no dashboard port
 export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
@@ -142,5 +151,5 @@ if [[ "$*" == "--all" && -n ${SEON_RESULTS_DIR:-} ]]; then
     mv "$SEON_RESULTS_DIR/.full-run.edn.$$" "$SEON_RESULTS_DIR/full-run.edn"
 fi
 # a green run's logs are read by no one: the directory a plain run made is reclaimed with it (a red run's stays)
-if (( st == 0 )); then echo "TEST OK"; (( OWN )) && rm -rf "$OUT"; else echo "TEST FAILED (logs: $OUT)"; fi
+if (( st == 0 )); then echo "TEST OK"; (( OWN )) && "$ROOT/bin/remove-tree" "$OUT"; else echo "TEST FAILED (logs: $OUT)"; fi
 exit $st
