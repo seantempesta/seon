@@ -433,10 +433,7 @@
     (get-in st [:view :boot :stale-binary])
     (refused 'seon.root/spawn!
              (str "this root's binary was built from another program than the one its store's main holds, so no agent is "
-                  "forked: it would run the two mixed. Bring them into agreement, then restart root: erase the store "
-                  "(bin/root stop; rm -rf runs/store; bin/root start), or reindex main from disk at root "
-                  "((my.root/import! sys), (my.root/load-docs! sys), (my.root/load-tasks! sys); then bin/root stop and bin/root start), "
-                  "or start the binary main's program was built from (bin/root next)")
+                  "forked: it would run the two mixed. " problems/stale-binary-acts)
              (get-in st [:view :boot :stale-binary]))
     (> n (cfg/value :seon.config.root/max-agents)) (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)})))
 

@@ -189,19 +189,26 @@
              (derived-row ans s 'seon.doc (str a " states " path " pinned at " sha ", its gitlink is " (or g "none"))
                           {:kind :stale-pin :section a :path path :stated sha :recorded g} {:section a :path path :stated sha :recorded g}))))))
 
+(def stale-binary-acts
+  "What brings a root's binary and its main into agreement, each then a restart of root: what the :stale-binary row, root's
+  refused spawn and the last line of bin/root start and bin/update say. See docs/source.md#files-and-the-db-two-directions."
+  (str "Bring them into agreement, then restart root: erase the store and seed it from the tree (bin/root stop; bin/root start --reindex, "
+       "which is rm -rf runs/store and bin/root start), or reindex main from disk at root ((my.root/import! sys), (my.root/load-docs! sys), "
+       "(my.root/load-tasks! sys); then bin/root stop and bin/root start), or start the binary main's program was built from (bin/root next)"))
+
 (defn stale-binary
   "A :stale-binary row while root's binary was built from another program than the main it booted on: root's
   :seon.root/source fact as its boot wrote it (seon.root/booted-source), the binary's program (:binary, none when its
   build recorded none) beside main's (:program). None on a boot whose binary is main's program, or with no source fact;
-  gone at the next boot on a matching binary. Derived, never stored, no clock, and never an import: the binary is rebuilt
-  (bin/update). Cost: one pull. See docs/health.md#a-stale-binary."
+  gone at the next boot on a matching binary. Derived, never stored, no clock; its message names the acts
+  (`stale-binary-acts`). Cost: one pull. See docs/health.md#a-stale-binary."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
   (let [{:keys [boot binary program]} (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source)]
     (if (and program (not= binary program))
       [(derived-row ans (str "stale-binary " boot) 'seon.root
                     (str "root's binary was built from " (if binary (str "program " binary) "a program its build did not record")
-                         ", and main's program is " program ": agents fork main's code over another image and share no verdicts until bin/update rebuilds it")
+                         ", and main's program is " program ": root forks no agent, which would run the two mixed. " stale-binary-acts)
                     {:kind :stale-binary :binary binary :program program} {:binary binary :program program})]
       [])))
 

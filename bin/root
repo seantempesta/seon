@@ -59,9 +59,10 @@ read PORT WEB <<< "$("$ROOT/bin/ports")"
 running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
 # launch CHECKOUT [ARGS]: `run` detached (double fork), until its listening line or its death
 launch() {
-  # a binary older than this tree runs its own code under this tree's program: say so, as nothing else does (bin/check refuses it; a root goes on)
   # whether target/seon is main's program is root's boot's fact (:seon.root/source :binary beside :program,
-  # seon.problems/stale-binary), not a tree read here at every start (0.3 s a root, every process test's)
+  # seon.problems/stale-binary), not a tree read here at every start (0.3 s a root, every process test's); when they
+  # differ the root prints ROOT STALE BINARY (the acts that bring them into agreement) before listening, and start's
+  # last line is that line (docs/source.md#files-and-the-db-two-directions)
   : > "$LOG"
   rm -f "$PIDS" "$PORTF" "$READY" "$DONE"; mkfifo "$READY" "$DONE"
   # the one holder (bin/held, detached) owns the root's stdin and output and waits on it: it
@@ -76,6 +77,8 @@ launch() {
   read -r T R P < "$READY"
   rm -f "$READY"
   if [[ -n ${P:-} ]]; then print $P > "$PORTF"; "$ROOT/bin/root" status
+    # a binary of another program than main's: the root said so before listening, and start ends on it (its last line)
+    s=$(grep -m1 '^ROOT STALE BINARY' "$LOG"); [[ -z $s ]] || print -r -- "$s"
   else print -u2 "root failed to start; its log:"; tail -20 "$LOG" >&2; exit 1; fi
 }
 # stop: TERM to the holder (the root's stdin closes, it stops cleanly), answered at the holder's end

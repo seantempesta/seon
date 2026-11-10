@@ -66,7 +66,7 @@
 (defn- root-answers
   "The output of a built root on the store at path and main (seon.test-store/start-root!: both
   named, never inherited), asked each request in turn on its server: one answer line per
-  request, then EXIT and its log. opts: :args more root arguments, :env more variables."
+  request, then STARTED and bin/root start's last line, then EXIT and its log. opts: :args more root arguments, :env more variables."
   ([path main requests] (root-answers path main requests {}))
   ([path main requests {:keys [args env]}]
    ;; runs: this main's own, beside the store (every root-answers call on the one test store
@@ -77,7 +77,7 @@
          stopped (ts/stop-root! root)]
      (sh/sh "rm" "-rf" runs)
      ;; each answer as the data it is (an error value among them), one per line
-     (str (str/join "\n" (map pr-str answers)) (when (seq answers) "\n") "EXIT " (or (:exit stopped) (pr-str stopped)) "\n" (:log stopped)))))
+     (str (str/join "\n" (map pr-str answers)) (when (seq answers) "\n") "STARTED " (:started root) "\n" "EXIT " (or (:exit stopped) (pr-str stopped)) "\n" (:log stopped)))))
 
 (def ^:private bare
   "Root arguments for a root whose subject is its store, not the program or the wiki: it imports no source and
@@ -309,7 +309,8 @@
                      v (read-line probe)]
                  (sh/sh "rm" "-f" (str store "-in"))
                  (if (map? v)
-                   (assoc v :also (mapv read-line (take (count also) more)) :listening? (str/includes? out "ROOT LISTENING") :tree rel)
+                   (assoc v :also (mapv read-line (take (count also) more)) :listening? (str/includes? out "ROOT LISTENING") :tree rel
+                          :started (some #(when (str/starts-with? % "STARTED ") (subs % 8)) more))
                    out))))
        (finally (sh/sh "rm" "-rf" tree store (str store "-agents") (str store "-in") (str store ".log")))))))
 
@@ -362,8 +363,11 @@
     (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
     (is (= :seon.root/refused type) (str "the spawn is refused: " (pr-str (first (:also two)))))
     (is stale? "naming the two programs")
-    (doseq [act ["rm -rf runs/store" "my.root/import!" "bin/root next"]]
-      (is (str/includes? (str message) act) (str "its message names " act)))
+    (doseq [act ["rm -rf runs/store" "bin/root start --reindex" "my.root/import!" "bin/root next"]]
+      (is (str/includes? (str message) act) (str "its message names " act))
+      ;; docs/source.md#files-and-the-db-two-directions: a mismatch is never silent to a person
+      (is (str/includes? (str (:started two)) act) (str "and bin/root start's last line names it too: " (:started two))))
+    (is (str/starts-with? (str (:started two)) "ROOT STALE BINARY") (str "bin/root start ends on the mismatch: " (:started two)))
     (is (true? (:schema-changed? two)) "main's entry differs from the binary's")
     (is (= (:seed-t two) (:program-t two)) "and the boot wrote no program fact")))
 
