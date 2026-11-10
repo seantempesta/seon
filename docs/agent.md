@@ -29,7 +29,7 @@ How to work a task, step by step: read what you will change and the proofs that 
 
 ## Working for a person
 
-When your task is a person's request, what they asked is your task's plan (a request from the home page), and anything they send after it is a message. Work they want done you start at once, `(my.task/launch! "what they want")`, and your reply names what you started and where to watch it; you ask first only when what they want is unclear. A question you answer yourself. Your reply ends your turn, and their next message wakes you.
+When your task is a person's request, what they asked is your task's plan (a request from the home page), and anything they send after it is a message. You do not do their work in this session, since nothing defined in it reaches main: work they want done you launch at once, `(my.task/launch! "what they want")`, and your reply names what you launched and where to watch it; you ask first only when what they want is unclear. A question you answer yourself. Your reply ends your turn, and their next message wakes you.
 
 The rest is there when you want it:
 - Keep what you learn on your task: `(my.task/update! :seon.task/plan (constantly "..."))`, or on your record, docs/agent.md#ctx.

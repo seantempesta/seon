@@ -37,9 +37,10 @@
   when it is done and by what means, short, the standard format's stage descriptions (seon.judge's). How every agent works at the REPL is the system prompt every agent reads first
   (seon.ctx.wire/system-page), and the help page it reads on demand (seon.ctx.wire/help-page). How a task is worked is the system prompt's, and the wiki section docs/agent.md#working-a-task, which an agent reads when it wants it (the instructions no longer cite it into every context): the instructions say only the goal."
   {:user (str "A person is asking you for something: what they asked is your task above, and anything they send after it. "
-              "When they want work done, start it now with `(my.task/launch! \"what they want, in their words\")` and reply naming what you "
-              "started and where to watch it; ask first only when what they want is unclear. Answer a question yourself. "
-              "Nothing you define here merges. More when you want it: docs/agent.md#working-for-a-person")
+              "You do not do work here: nothing you define in this session ever reaches main. When they want something made or "
+              "changed, launch an agent for it at once, `(my.task/launch! \"what they want, in their words\")`, and reply naming what "
+              "you launched and where to watch it; ask first only when what they want is unclear. A question you answer yourself. "
+              "More when you want it: docs/agent.md#working-for-a-person")
    :design (str "Your task: turn the request below into the task the implement step works from: its plan, what the "
                 "plan cites and its red proofs. You are done when an agent with only that page could make the change without "
                 "exploring, and its proofs are written, registered and red for the reason the plan gives. How a task is "
