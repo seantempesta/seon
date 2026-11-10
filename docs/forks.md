@@ -279,4 +279,4 @@ The submodules we use as upstream has them, each with its pin and how it is buil
 
 ## Unmodified, pinned in `deps.edn`
 
-ring-chez-adapter `fa0674e3`, multipart `ca51dd47`, time `a28ab100`, data.json 2.5.1, edamame 1.4.32, rewrite-clj 1.2.51, tools.reader 1.5.2, aero 1.1.6, fipp 0.6.29, core.cache 1.0.225, editscript 0.8.0.
+ring-chez-adapter `9b6fae80` (upstream's #56: `send-all` copies with the typed `ffi/write-array`, whose old 4-argument form raises on Jolt 0.8.25), multipart `ca51dd47`, time `80e5fc22`, data.json 2.5.1, edamame 1.4.32, rewrite-clj 1.2.51, tools.reader 1.5.2, aero 1.1.6, fipp 0.6.29, core.cache 1.0.225, editscript 0.8.0.
