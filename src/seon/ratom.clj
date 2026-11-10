@@ -63,7 +63,8 @@
 
 (defmacro ^:private captured!
   "derefed recorded as a source of the reaction in progress, inline: what a view's every read does, so a read costs no
-  contracted call of its own (a placed component reads ~30 fields: 2026-11-10 profile, 2-3 contracted calls a read)."
+  contracted call of its own (a placed component reads ~30 fields, each read once two or three contracted calls). See
+  docs/render.md#reactive-renders."
   [derefed]
   `(when-some [r# *ratom-context*]
      (-set! r# :captured (conj (or (-get r# :captured) []) ~derefed))))
@@ -134,7 +135,7 @@
 (declare view sorted-view)
 
 (defmacro ^:private view?*
-  "`view?`, inline where the ratom asks it of every value it walks (unwrap, untracked, realize)."
+  "`view?`, inline where the ratom asks it of every value it walks (unwrap, untracked, realize). See docs/render.md#reactive-renders."
   [x] `(let [x# ~x] (or (instance? seon.ratom.View x#) (instance? seon.ratom.SortedView x#))))
 
 (defn view?
@@ -187,7 +188,8 @@
         :else x))
 
 (defmacro ^:private wrapped
-  "`wrap`, inline in a view's lookups: value v at path p of src, a view of it when it is a map, else v, read as kind."
+  "`wrap`, inline in a view's lookups: value v at path p of src, a view of it when it is a map, else v, read as kind. See
+  docs/render.md#reactive-renders."
   [src v p kind]
   `(let [v# ~v p# ~p]
      (if (map? v#)
