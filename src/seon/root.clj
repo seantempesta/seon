@@ -237,7 +237,10 @@
   [sys]
   (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
         state #(::flow/state (get states %))]
-    {:root (select-keys (state :api) [::stall-due ::busy ::lost])
+    {:root (let [api (state :api)]
+             ;; the stall check's armed flag: ::stall-due, or once seon.step/timer holds it, ::stall-timer's value (a volatile)
+             (cond-> (select-keys api [::stall-due ::busy ::lost])
+               (contains? api ::stall-timer) (assoc ::stall-armed (some-> (::stall-timer api) deref))))
      :agents (into (sorted-map)
                    (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms]) :inflight (update-vals (:inflight s) :kind))]))

@@ -60,7 +60,7 @@
   (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
         r (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code "(seon.root/stall-state sys)"})))]
     (is (map? (:root r)) (pr-str r))
-    (is (every? #{:seon.root/stall-due :seon.root/busy :seon.root/lost} (keys (:root r))) "root's stall check, nothing else of its state")
+    (is (every? #{:seon.root/stall-due :seon.root/stall-armed :seon.root/busy :seon.root/lost} (keys (:root r))) "root's stall check, nothing else of its state")
     (is (map? (:agents r)) "each agent proc's, by pid")
     (is (some #{:api} (:answered r)) "and the procs that answered, root's api among them")))
 
