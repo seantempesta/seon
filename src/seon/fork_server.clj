@@ -392,17 +392,23 @@
     (sock/close! (:fd sb))))
 
 (defn- release!
-  "Release what init opened: its standbys killed; the server's socket closed for writing,
-  so the server reads EOF, kills and reaps every child (server-step's stop) and exits; its
-  exit awaited when it is root's child (the boot server; a promoted one is not); then the
-  event reader joined, whose EOF follows. nil."
-  {:malli/schema [:=> [:cat :map] :nil]}
+  "Release what init opened: its standbys killed; the server's socket closed for writing, and the boot server's
+  process group (it and every child it forked) ended at once, so no stop waits for a server still warming to read its
+  EOF (a promoted server, which leads no group, reads the EOF, kills and reaps its children and exits); its exit
+  awaited when it is root's child; then the event reader joined, whose EOF follows. Answers how the server ended:
+  :group-ended (the boot server's group, ended here) or :eof (a promoted server, left to read its EOF)."
+  {:malli/schema [:=> [:cat :map] [:enum :group-ended :eof]]}
   [{:keys [pid fd reader] :as st}]
   (drop-standby (:standby st)) (drop-standby (:standby-pending st))
   (some-> fd (lib/c-shutdown 1)) ; SHUT_WR; a lost server's socket is closed already
-  (some-> pid (lib/c-waitpid (ffi/alloc 4) 0))
-  (some-> ^Thread reader (.join 5000))
-  nil)
+  ;; root's boot server leads its own group (main's setpgid): the group ended at once, so a stop never waits for the server
+  ;; to read its EOF, which a server still warming (preload!, its tests' load: ~35 s) did not do until it was done (every
+  ;; stop of a root under ~35 s old took 26-32 s). It writes nothing to the store, and at a stop its agents have ended.
+  ;; A promoted server leads no group: kill answers false, and it exits on the EOF as before
+  (let [ended (if (and pid (lib/kill! (- pid) 9)) :group-ended :eof)]
+    (some-> pid (lib/c-waitpid (ffi/alloc 4) 0))
+    (some-> ^Thread reader (.join 5000))
+    ended))
 
 (defn lost
   "The answer to every request a lost fork server is asked (one that died with no standby
@@ -474,9 +480,9 @@
                          (= :tx (:op m)) (update :log conj m))]
                 [(if (>= (count (:log st)) (cfg/value :seon.config.root/standby-every)) (request-standby st) st) nil])))
      :ext (if (= :shutdown (:op m))
-            (do (release! st)
+            (let [ended (release! st)]
                 (some-> (:fd st) sock/close!)
-                [(assoc st :stopping true :standby nil :standby-pending nil) {:to-api [{:op :fs-down :pid (:pid st)}]}])
+                [(assoc st :stopping true :standby nil :standby-pending nil) {:to-api [{:op :fs-down :pid (:pid st) :ended ended}]}])
             (if (:lost st)
               [st {:to-api [{:dest {:rid (:rid m)} :r (lost)}]}]
               (let [req (dissoc m :rid)]

@@ -135,3 +135,21 @@
     (is (not= (digest base) (digest (conj base (decl :var/zzz)))) "a var's too")
     (is (= ts/kept-program-digest (digest base)) "this process's")
     (is (re-matches #"[0-9a-f]{8}" ts/kept-program-digest))))
+
+(deftest an-ask-is-one-line-each-way-on-a-socket-of-its-own
+  ;; docs/testing.md#a-root-costs-what-it-boots: ask opens its socket in-process (bin/ask was a perl process a
+  ;; request, ~17 ms of a cheap one's ~20 under load); its answers are bin/ask's: the reply as data, :eof, :refused
+  (let [serve (fn [reply] (let [ss (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))]
+                            [ss (future (with-open [c (.accept ss)]
+                                          (let [line (.readLine (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream c) "UTF-8")))]
+                                            (when reply
+                                              (doto (java.io.OutputStreamWriter. (.getOutputStream c) "UTF-8") (.write (str (reply line) "\n")) (.flush))))))]))]
+    (let [[ss f] (serve (fn [line] (pr-str {:echo (clojure.edn/read-string line) :tag (tagged-literal 'x 1)})))]
+      (is (= {:echo {:op :agents} :tag (tagged-literal 'x 1)} (ts/ask {:port (.getLocalPort ss)} {:op :agents}))
+          "the reply line read as data, a tagged literal kept")
+      @f (.close ss))
+    (let [[ss f] (serve nil)]
+      (is (= {:error :eof} (ts/ask {:port (.getLocalPort ss)} {:op :agents})) "closed with no reply")
+      @f (.close ss))
+    (let [port (let [ss (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1")) p (.getLocalPort ss)] (.close ss) p)]
+      (is (= {:error :refused} (ts/ask {:port port} {:op :agents})) "no one listening"))))

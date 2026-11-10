@@ -12,6 +12,31 @@ A named session owns one area of Seon and knows all of it: Context (what an agen
 - **Taking over an area starts with a list of what exists** (owner, 2026-10-27: "a new agent already has a plan? that can't be well thought out"): each piece with its file and line, its job, and keep, extend or delete, before any design.
 - **A session and the owner spend their time on plans** (owner, 2026-10-28: "It would be good to have you mostly be working on the details of plans with me so we have less ambiguity too"): what to change, where, what it replaces, the proofs and what done means, written into the task entry ([tasks](tasks.md)).
 
+## The managing session
+
+One session manages the others; it owns no area of the code (owner, 2026-11-10: it runs point for the area sessions, agrees the strategy with him, distributes the work, audits and lands).
+
+- **It keeps the schedule:** one page, rewritten whole when it drifts, holding what is on main, the next batch's members, each session's items in order, the rulings it made while the owner was away and the decisions waiting on him. Every recommendation becomes an item with an owner the same turn (owner, 2026-11-10: "Don't just make recommendations to me and then let them slide away").
+- **It lands in batches** ([merging](merging.md#the-managing-session-lands-a-batch)), and each landing note says what was taken out and why.
+- **It rules what is its to rule and asks the owner the rest,** one question at a time with the question tool, its pick first: a design rule, a dependency choice, a cost bound, the standing store. While he is away it decides and lists each ruling for him to reverse.
+- **It verifies before it repeats.** A session's claim is checked by one command before it reaches the owner, and what was not checked is called a report or an inference. The owner's sentence is quoted, never paraphrased into a design, and the code is read before his sentence becomes a request to build: on 2026-11-10 "tracked reads" was sent out as work when both mechanisms existed ([render](render.md#reactive-renders)).
+- **An absurd number is the finding.** It asks what the thing should cost before it chooses among options framed inside the number (owner, 2026-11-10: "Please ask wtf more often and don't let crazy shit slide"), and it asks the same of every plan: n, the big-O, the number expected.
+- **It gives the simple version first.** When the owner says a design is too much, the data model is usually what is wrong, not his understanding (2026-11-10: a place declared on each join, against "render functions that recognize a top level render").
+- **It watches the clock on what it started:** a prove's expected end is written down when it starts, a run far past it is a hang to capture, and waits run in the background while other work goes on.
+- **A review goes to the session that owns the area** (owner, 2026-11-10: "reviewed by a competent agent in their speciality"): a task a Seon agent finished, a helper's diff in another session's namespace, a claim about another session's code.
+
+## The way improves
+
+The standard is the best way known, written down, until a better one replaces it ([AGENTS.md §1](../AGENTS.md)). What turned a pain into a part of the way on 2026-11-10, as the pattern to follow:
+
+- every session proving each small change alone (a machine flooded, 25-minute proves) became one batch proved once ([merging](merging.md#the-managing-session-lands-a-batch));
+- "erase your store after an edit from outside" became a root that catches up with its checkout at start ([source](source.md#a-boot-catches-up-with-its-checkout));
+- agents' finished work lost at each erase became an `:unsynced` problem and a reviewed sync ([source](source.md#a-merged-task-reaches-mains-files));
+- a root that forked no agent after every landing became one definition of a tree's id ([merging](merging.md#a-branch-lands-with-binland));
+- three branches red on a law they had not run became the pre-tip checks, and those are becoming one script (task `seon.fx/process-tests-run-from-inside` and the plan it belongs to).
+
+How to do it: name the cost with its number; find what allowed it; change the script, the check or the wiki section so the better thing is the default; delete the old way in the same change; tell every session what to stop doing. A lesson kept only in a session's memory is lost at its next compaction.
+
 ## No fan-out
 
 A session does its work itself, in one conversation, and starts no other session unless the owner asks (owner, 2026-10-28: "This system of launching 10+ agents just burned my tokens and was not productive"; and "let's stick with just you and me and any subtasks you do are one use agents that are sonnet and haiku and mostly just to find info for you to read and you can preprocess and run longer tests on well spec'ed ideas (especially repl interactive building) with sonnet").

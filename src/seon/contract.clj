@@ -17,7 +17,17 @@
     armed when it is defined, and main's program when it loads.
   - `:seon.config.contract/instrument :off` (the config, read once at load) installs no
     wrapper and no recording transaction: the same binary measured with instrumentation off;
-    `:contracts` arms the wrappers without the recording transaction."
+    `:contracts` arms the wrappers without the recording transaction.
+  - A private function's contract (`defn-`, a var with `:private`) is checked on each call only in a
+    process that checks private contracts (`private-checked?`; the owner's ruling \"Private helpers:
+    tests only\"); a public function's is checked on every call in every process. A test process checks
+    them: bin/test's shards and a root started under `--profile scripted` (a test's root, its agents,
+    bin/check's binaries: `:seon.config.contract/private-checked?` true there), and an agent's test child
+    (`check-private!` at its fork, whatever its agent's setting). Root and its agents under any other
+    profile (the standing root) do not: an agent's own REPL evals of its own `defn-` run unchecked, and
+    its proofs, in its test child, checked. Either way the contract is held at the definition (the
+    wrapper is in place, the `contracts` and `mg-check` steps read it), so a test child turns the checks
+    on with no re-arming. See docs/checks.md#contracts-armed-at-definition."
   (:refer-clojure :exclude [defn defn-])
   (:require [malli.core :as m] [malli.registry :as mr]
             [clojure.string :as str] [seon.profile :as profile] [seon.print :as print]
@@ -28,6 +38,12 @@
   wrapper and no recording; :contracts: wrappers, no recording transaction (for measuring
   the two apart); :on: both."
   (not= :off (config/value :seon.config.contract/instrument)))
+
+(def ^:private private-checks
+  "Does this process check a private function's contract on each call? A volatile, read by every private
+  contracted function per call (switched), set from :seon.config.contract/private-checked? at load and by
+  check-private!. See docs/checks.md#contracts-armed-at-definition."
+  (volatile! (boolean (config/value :seon.config.contract/private-checked?))))
 
 (def record?
   "Does each eval request write its recording transaction (:seon.config.contract/instrument :on)?"
@@ -295,22 +311,56 @@
 ;; every caller, direct-linked or not, calls the checked function. Platform namespaces
 ;; use this namespace's defn, defn- and defchecked in place of clojure.core's.
 
+(clojure.core/defn private-checked?
+  "Does this process check private functions' contracts on each call? See docs/checks.md#contracts-armed-at-definition."
+  {:malli/schema [:=> [:cat] :boolean]}
+  [] @private-checks)
+
+(clojure.core/defn check-private!
+  "Check private functions' contracts on each call in this process from now on (on true), or not:
+  an agent's test child turns them on at its fork (seon.agent's test-child). Answers on. See
+  docs/checks.md#contracts-armed-at-definition."
+  {:malli/schema [:=> [:cat :boolean] :boolean]}
+  [on] (vreset! private-checks on))
+
+(clojure.core/defn- switched
+  "A private function's root: checked (its wrapper) while this process checks private contracts
+  (private-checks, read per call), raw otherwise. A plain function of each arity, so a call
+  unchecked costs a read and a call. See docs/checks.md#contracts-armed-at-definition."
+  {:malli/schema [:=> [:cat :seon.host/fn :seon.host/fn] :seon.host/fn]}
+  [checked raw]
+  (let [p private-checks]
+    (fn
+      ([] (if @p (checked) (raw)))
+      ([a] (if @p (checked a) (raw a)))
+      ([a b] (if @p (checked a b) (raw a b)))
+      ([a b c] (if @p (checked a b c) (raw a b c)))
+      ([a b c d] (if @p (checked a b c d) (raw a b c d)))
+      ([a b c d e] (if @p (checked a b c d e) (raw a b c d e)))
+      ([a b c d e f] (if @p (checked a b c d e f) (raw a b c d e f)))
+      ([a b c d e f & more] (if @p (apply checked a b c d e f more) (apply raw a b c d e f more))))))
+
 (clojure.core/defn checked
   "f checked by contract form c (compiled once, here: seon.contract/wrap), errors
-  named fn-sym; f itself when instrumentation is off. Not inlined (:redef): every
+  named fn-sym (a public function's, without private?); for a private function (private?) checked only while this process checks
+  private contracts (switched); f itself when instrumentation is off. Not inlined (:redef): every
   contracted definition calls it once, at its definition, and a spliced copy of its
   body (wrap, schema, seon.profile/counted) at each of the 1,500 definitions was 5 MB of
   code that runs once (docs/machine.md#roots-heap)."
-  {:malli/schema [:=> [:cat :qualified-symbol :any :seon.host/fn] :seon.host/fn] :redef true}
-  [fn-sym c f]
-  (if on? (wrap fn-sym (schema c) f) f))
+  {:malli/schema [:function [:=> [:cat :qualified-symbol :any :seon.host/fn] :seon.host/fn]
+                  [:=> [:cat :qualified-symbol :any :seon.host/fn :boolean] :seon.host/fn]] :redef true}
+  ([fn-sym c f] (checked fn-sym c f false))
+  ([fn-sym c f private?]
+   (if on?
+     (let [w (wrap fn-sym (schema c) f)] (if private? (switched w f) w))
+     f)))
 
 (clojure.core/defn- contracted-def
   "The forms of a def whose value is checked from its definition on."
   {:malli/schema [:=> [:cat :symbol :any :any] :any]}
   [name c init]
   (let [q (symbol (str *ns*) (str name))]
-    `(do (def ~(vary-meta name assoc :malli/schema (list 'quote c)) (checked '~q '~c ~init))
+    `(do (def ~(vary-meta name assoc :malli/schema (list 'quote c)) (checked '~q '~c ~init ~(boolean (:private (meta name)))))
          (when on? (alter-meta! (var ~name) assoc ::wrapper @(var ~name) ::checked-at :definition))
          (var ~name))))
 
@@ -436,7 +486,7 @@
     (if (instance? Throwable s)
       (error :seon.contract/invalid by (str (symbol v) ": its contract does not compile: " (ex-message s))
              {:seon.contract/var (symbol v)})
-      (let [w (wrap (symbol v) s raw)]
+      (let [w (cond-> (wrap (symbol v) s raw) (:private (meta v)) (switched raw))]
         (alter-var-root v (constantly w))
         (alter-meta! v assoc ::wrapper w ::raw raw)
         :armed))))
