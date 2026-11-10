@@ -2308,6 +2308,35 @@
     ;; being "root" too (seen live on a demo root, 2026-11-08)
     (is (map? (seon.ctx.status/status db (seon.ctx/agent-ctx (seon.db/index) db (:db/id (d/entity db [:seon.agent/key "root"]))) {})) "and how its work stands")))
 
+(deftest roots-session-holds-every-agent-with-its-status-and-task
+  ;; docs/users.md#roots-session: root's session's own pattern reaches every agent through root's entity, each with its status and task
+  (let [db0 (booted)
+        mk (fn [i] [{:seon.task/id (str "request/t" i) :seon.task/ns 'request :seon.task/name (str "t" i) :seon.task/plan "Plan." :seon.task/kind :user
+                     :seon.task/branch (keyword (str "task-request-t" i)) :seon.task/outcome :parked}
+                    {:seon.agent/key (str "b1/a" i) :seon.agent/root [:seon.root/id :root] :seon.agent/status :running :seon.agent/task [:seon.task/id (str "request/t" i)]}])
+        db (d/db-with db0 (mapcat mk [1 2 3]))
+        tree (seon.ctx/agent-ctx (seon.db/index) db (seon.db/eid db :seon.agent/key "root"))
+        agents (vals (get-in tree [:seon.agent/root :seon.agent/_root]))
+        by-key (into {} (map (juxt :seon.agent/key identity)) agents)]
+    (is (every? by-key ["b1/a1" "b1/a2" "b1/a3"]) (pr-str (keys by-key)))
+    (is (= [:running :running :running] (mapv #(:seon.agent/status (by-key %)) ["b1/a1" "b1/a2" "b1/a3"])))
+    (is (= "request/t2" (get-in by-key ["b1/a2" :seon.agent/task :seon.task/id])) "and its task")
+    (is (= :parked (get-in by-key ["b1/a2" :seon.agent/task :seon.task/outcome])))
+    (is (not-any? #{:root} (keys tree)) "no :as name: keyed by attributes")))
+
+(deftest a-users-ctx-holds-its-focus-and-agents-with-status
+  ;; docs/users.md#whats-on-screen: the user schema declares its own pattern: the focus and the agents it started, each with its status
+  (let [db0 (d/db-with (my.test/world) (seon.task/boot-tx "b1" "sean"))
+        db (d/db-with db0 [{:seon.agent/key "b1/a1" :seon.agent/status :running}
+                           {:seon.agent/key "b1/a2" :seon.agent/status :idle}
+                           {:seon.agent/key "sean" :seon.agent/agents [[:seon.agent/key "b1/a1"] [:seon.agent/key "b1/a2"]]
+                            :seon.user/focus [:seon.agent/key "b1/a1"]}])
+        tree (seon.ctx/agent-ctx (seon.db/index) db (seon.db/eid db :seon.user/name "sean"))]
+    (is (= {:seon.agent/key "b1/a1" :seon.agent/status :running} (select-keys (:seon.user/focus tree) [:seon.agent/key :seon.agent/status])))
+    ;; an entity the record holds once (a1, as the focus) is a bare id in the join
+    (is (= #{(seon.db/eid db :seon.agent/key "b1/a1") (seon.db/eid db :seon.agent/key "b1/a2")} (set (keys (:seon.agent/agents tree)))))
+    (is (= [:idle] (keep :seon.agent/status (vals (:seon.agent/agents tree)))))))
+
 (deftest roots-session-sees-sessions-started-after-it-forked
   ;; docs/users.md#roots-session: a branch takes main's program, not its data, so a session started on main after root's session forked is
   ;; on main alone; root's session reads main as its last turn heard it (:seon.agent/main-commit), and so lists it (Context's review; seen

@@ -1629,7 +1629,7 @@
   [_ c]
   [:div {:id "p-task"}
    ;; root's sessions, when this record's pull holds root (root's session's pattern does: docs/users.md#roots-session)
-   (when (:root c) [#'sessions {:at [:root]}])
+   (when (:seon.agent/root c) [#'sessions {:at [:seon.agent/root]}])
    (when (:seon.agent/task c)
      (list [#'task {:at [:seon.agent/task]}] [#'status {:at [:seon.agent/task :proved]}] [#'citations {:at [:seon.agent/task :seon.cite/_of]}]
            (seq (cite-parts c))
@@ -1852,7 +1852,7 @@
   [a] (:seon.agent/key a))
 
 (defn sessions
-  "Root's sessions as its session reads them (a component over the db, drawn when its record holds root, :root, as root's
+  "Root's sessions as its session reads them (a component over the db, drawn when its record holds root, :seon.agent/root, as root's
   session's pattern does): every session on main with a task, as of the main its last turn heard (:seon.agent/main-commit), newest first, as root's own work list reads them (`work-list`), each
   by its address, what it works on and how it stands, so root's session knows what is already being done before it starts more;
   itself left out. The newest :seon.config.ctx/window of them; the heading says once how to read the rest, with no count, which

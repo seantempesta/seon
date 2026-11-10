@@ -475,6 +475,24 @@
        (let [[_ outs] (ask {:op :message :id :a1 :body "hi"})]
          (is (some #(and (map? %) (= "sean" (:seon.message/from %))) (txs outs)) "from the signed-in user"))))))
 
+(deftest root-moves-the-signed-in-users-focus-and-refuses-an-unknown-agent-or-no-user
+  ;; docs/users.md#whats-on-screen: root's focus! request writes the signed-in user's :seon.user/focus to the agent named by key
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [api #(#'root/api-proc {:boot "b1" :conn conn :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                                  :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+           ask (fn [m] (let [p (promise) [_ outs] (step #'root/api-proc (api) :ext (assoc m :p p))] [p outs]))
+           req (fn [k] (root/request 'focus! nil {:key k} nil))]
+       (is (= {:op :focus :key "a1"} (req "a1")) "the request table maps focus! to the op")
+       (d/transact conn {:tx-data [{:seon.agent/key "a1"}]})
+       (let [[p _] (ask (req "a1"))]
+         (is (re-find #"no user is signed in" (str (:seon.error/message @p))) "no user: refused"))
+       (d/transact conn {:tx-data [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"} {:seon.root/id :root :seon.root/signed-in "u"}]})
+       (let [[p _] (ask (req "nobody"))]
+         (is (re-find #"no agent nobody" (str (:seon.error/message @p))) "no such agent: refused"))
+       (let [[_ outs] (ask (req "a1"))]
+         (is (= [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.agent/key "a1"]]] (vec (mapcat :tx-data (:to-writer outs)))) "the signed-in user's focus moves to the agent"))))))
+
 (deftest an-end-closed-on-a-live-pid-ends-the-agent-and-answers-its-waiter
   ;; an agent whose end closed can never answer root again: root ends it at once (the kill its :kill
   ;; makes), and its exit, which comes, answers the requests it held through ::dying. No bound is

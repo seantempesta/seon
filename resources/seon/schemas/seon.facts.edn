@@ -295,7 +295,7 @@
                             :seon.db/agent-fact [:map [:seon.agent/boot :seon.agent/boot] [:seon.agent/started-ms :seon.agent/started-ms]]]
  ;; the agent whose page the person last opened: home is this page (docs/users.md#whats-on-screen); absent means root
  :seon.user/focus [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]
- :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/layout :seon.render/user-ctx} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
+ :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/layout :seon.render/user-ctx :seon.ctx/pattern [:seon.agent/key :seon.user/name {:seon.user/focus [:seon.agent/key :seon.agent/status]} {:seon.agent/agents [:seon.agent/key :seon.agent/status]} {:seon.message/_to [:seon.message/id :seon.message/from :seon.message/body]}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
  ;; :seon.agent/key) and its target's (seon.ref/target-value: an address, a name, an id, a key or a path)

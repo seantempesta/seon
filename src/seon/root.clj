@@ -27,7 +27,7 @@
             [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
-            [seon.turn] [my.fx] [my.task] [my.turn] [my.render] [my.branch] [my.doc] [my.test] [clojure.core.async.flow :as flow] [clojure.test]
+            [seon.turn] [my.fx] [my.task] [my.user] [my.turn] [my.render] [my.branch] [my.doc] [my.test] [clojure.core.async.flow :as flow] [clojure.test]
             [taoensso.trove :as trove]))
 
 
@@ -519,6 +519,15 @@
                    (let [[st rid] (pend st p :tx nil)]
                      (step/out! o :to-writer {:op :tx :branch :db :tx-data (conj (vec tx) [:db/add [:seon.task/id id] :seon.task/started-by [:seon.agent/key by]]) :dest {:asked id :rid rid}})
                      (update st :writes (fnil conj #{}) rid))))))
+      ;; root's session (or any agent) moves the person's view: the signed-in user's focus to the agent named by key (docs/users.md#whats-on-screen)
+      :focus (let [db @(:conn st)
+                   by (signed-in-key db 'seon.root/focus!)]
+               (cond
+                 (contract/error? by) (reply! st o p by)
+                 (not (pdb/eid db :seon.agent/key (:key m))) (reply! st o p (gone (keyword (:key m)) (str "no agent " (:key m) " on main")))
+                 :else (let [[st rid] (pend st p :tx nil)]
+                         (step/out! o :to-writer {:op :tx :branch :db :tx-data [[:db/add [:seon.user/name by] :seon.user/focus [:seon.agent/key (:key m)]]] :dest {:rid rid}})
+                         (update st :writes (fnil conj #{}) rid))))
       :clone (let [parent (:parent m)]
                (cond
                  (nil? (get-in st [:agents parent])) (reply! st o p (absent (get-in st [:view :agents parent]) parent))
@@ -1049,10 +1058,11 @@
   "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look for a session already on it and tell them its address; otherwise start one with (my.task/launch! \"what they want\") and tell them it started. More: docs/users.md#roots-session")
 
 (defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and root, which makes its task list draw root's sessions
-  (seon.render.ui/sessions). See docs/users.md#roots-session."
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through root's entity to every agent with its status and task,
+  which makes its task list draw root's sessions (seon.render.ui/sessions). See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat] [:vector :any]]}
-  [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern) {[:seon.agent/root :as :root] [:seon.root/id]}))
+  [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
+           {:seon.agent/root [{:seon.agent/_root [:seon.agent/key :seon.agent/status {:seon.agent/task [:seon.task/id :seon.task/outcome]}]}]}))
 
 (defn root-session-tx
   "Root's session, made by the first message to root (the api's :message), an ordinary agent made the ordinary way: an agent entity keyed
@@ -1633,7 +1643,7 @@
 
 (defn request
   "The op (named as its fn below: spawn! clone! submit! again! back! ask! run-tests! kill!
-  merge-main! message! release! opened!) on agent id with args, as the api request it is: one table for these fns
+  merge-main! message! release! opened! focus!) on agent id with args, as the api request it is: one table for these fns
   and the dashboard's calls (seon.web). a: the agent's entry in root's view, which
   merge-main! reads; an op the agent cannot take answers its error. A branch reaches main
   only through a merge task (seon.reconcile's octopus merge)."
@@ -1662,6 +1672,7 @@
       ;; a reader opened an eval of agent key's page: the fact on the agent's entity on main (opened!), named by a lookup ref:
       ;; it adds to an agent that exists, and an unknown key is refused, never an agent made of the one fact (an upsert map made one)
       opened! {:op :write :req {:op :tx :branch :db :tx-data [[:db/add [:seon.agent/key (:key args)] :seon.agent/opened (:eval args)]]}}
+      focus! {:op :focus :key (:key args)}
       merge-main! (if live?
                     {:op :merge-main :id id :data-attrs data-attrs}
                     (absent a id))
@@ -1891,6 +1902,11 @@
   "Ask for what a sentence says (args {:task text :template name}): one released task on its own branch from that template (seon.template/templates, by default the one that works for a person), which the reconciler gives an agent. A promise of {:task id}, or the refusal. See docs/tasks.md."
   {:malli/schema [:=> [:cat :seon.root/sys [:map [:task :string] [:template {:optional true} :keyword]]] :seon.host/promise]}
   [sys args] (request! sys 'ask! nil args))
+
+(defn focus!
+  "Move the signed-in user's view to the page of the agent with key k (args {:key k}): their :seon.user/focus on main. A promise of the writer's answer, or the refusal when no user is signed in or no agent has the key. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :seon.root/sys [:map [:key :string]]] :seon.host/promise]}
+  [sys args] (request! sys 'focus! nil args))
 
 (defn back!
   "Take agent id's session back to just after its eval (args {:eval id}): a new branch from that eval's commit, the old branch kept as it is, this process ended and one started on the new branch under the same key, its task parked on it. Answers the new agent's id, or the refusal. See docs/turn.md#an-agent-goes-back-to-an-eval."
