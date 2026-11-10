@@ -425,7 +425,16 @@
         (is (= [9] (map :pid (:to-api outs))))))
     (testing "EOF of an older server is ignored"
       (let [[st2 outs] (step #'server/fork-server-proc st :ev {:ev :eof :pid 2})]
-        (is (= st st2)) (is (nil? outs))))))
+        (is (= st st2)) (is (nil? outs))))
+    ;; docs/processes.md#a-stop-reaps-every-child: root's side keeps each forked pid until the server reaps it (its :exit), the pids
+    ;; a stop kills and awaits (seon.fork-server/release!), so no agent outlives a stop that killed its server's group. Red before:
+    ;; no pid was kept, and a killed agent was left to launchd (batch 21's lifecycle step, :left)
+    (testing "a forked pid is kept until the server reaps it"
+      (let [[st _] (step #'server/fork-server-proc st :ev {:ev :forked :agent :a1 :slot 0 :pid 41})
+            [st _] (step #'server/fork-server-proc st :ev {:ev :forked :agent :a2 :slot 1 :pid 42})
+            [st outs] (step #'server/fork-server-proc st :ev {:ev :exit :pid 41 :status {:exit 0}})]
+        (is (= #{42} (:forked st)) "the one not reaped is the stop's to end")
+        (is (= [41] (map :pid (:to-api outs))) "and the exit goes on to the api")))))
 
 (deftest a-lost-fork-server-answers-every-waiter
   ;; the server died with no standby to take its place (it died at boot, before its first
