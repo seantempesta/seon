@@ -95,6 +95,7 @@ Every component of Seon is a step-fn proc declared as data (`resources/seon/syst
 - procs run on fibers, and a blocking foreign call gets a declared thread; no thread, future or atom lives outside procs, except an edge reader for a blocking read;
 - a proc reports its own problems as facts and its changes as events, and steps only when a message arrived;
 - the work is done when the count of messages reaches zero: each one promised is counted, each one taken is taken off, and zero is quiet ([below](#idioms-for-seon)).
+- a proc never binds an out-port to its own in-port's channel: Flow names each channel by its port (one map of channel to port id), so the out-port took the in-port's name, and when that in-port closed at a stop Flow dropped the wrong port and the proc read the closed channel forever (seon.writer, 2026-11-10: a root's stop spun at 99% CPU). A proc that must ask itself for a later step asks another proc that answers on its in-port, as the writer asks the flusher for its :commit.
 
 ## Idioms for Seon
 

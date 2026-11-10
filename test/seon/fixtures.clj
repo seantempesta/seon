@@ -266,6 +266,14 @@
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [_] (calls "Add one and one." "(+ 1 1)"))
 
+(defn three-calls
+  "The scripted model of a reply of three calls that all run (seon.agent-test): what one model turn's evals commit as,
+  each as it lands (docs/turn.md#the-turn-is-a-number)."
+  {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
+  [_] {:calls [{:intent "Define a." :code "(def a 1)"}
+               {:intent "Define b." :code "(def b 2)"}
+               {:intent "Add them." :code "(+ a b)"}]})
+
 (defn two-calls
   "The scripted model that proves a turn's rhythm (seon.agent-test): its first call evaluates
   (+ 20 21); each later call adds one to the value the last call's response showed, so its
