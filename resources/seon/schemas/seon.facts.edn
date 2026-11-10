@@ -159,7 +159,7 @@
  ;; its id the handle's name (e43); who evaluated it (the agent's id, "user", "outside", "context")
  :seon.eval/id [:and {:seon.db/identity true} :string]
  :seon.eval/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]
- :seon.eval/by [:and {:seon.db/index true} :string]
+ :seon.eval/by [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact]} :seon.db/ref]
  ;; opened by a reader of the agent's page: true once, never retracted; root writes it on main as the
  ;; agent's :seon.agent/opened (an eval's id names it only within its agent), its turn on its branch
  :seon.eval/opened :boolean
@@ -271,7 +271,7 @@
                      [:seon.eval/response :seon.eval/response] [:seon.eval/result {:optional true} :seon.eval/result] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.agent/branch :seon.agent/status :seon.agent/description :seon.agent/max-turns :seon.agent/turn :seon.agent/test-error :seon.agent/outcome :seon.agent/reason :seon.agent/ended-turn :seon.ctx/pattern :seon.agent/main-commit :seon.agent/main-program :seon.agent/base-commit :seon.agent/ns {:seon.agent/agents [:db/id]} {:seon.agent/task :seon.task/task-fact} {:seon.agent/system [:db/id]} {:seon.model-call/_agent [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {:seon.eval/_call [:db/id]}]} {:seon.eval/_agent [:seon.eval/id :seon.eval/agent :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/page :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]} {:seon.message/_to [:seon.message/id :seon.message/from :seon.message/to :seon.message/body]} {:seon.cite/_of :seon.cite/cite-fact} {:seon.search/_of :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent :seon.render/openai-compat seon.ctx.wire/agent-msgs}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.agent/branch :seon.agent/status :seon.agent/description :seon.agent/max-turns :seon.agent/turn :seon.agent/test-error :seon.agent/outcome :seon.agent/reason :seon.agent/ended-turn :seon.ctx/pattern :seon.agent/main-commit :seon.agent/main-program :seon.agent/base-commit :seon.agent/ns {:seon.agent/agents [:db/id]} {:seon.agent/task :seon.task/task-fact} {:seon.agent/system [:db/id]} {:seon.model-call/_agent [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {:seon.eval/_call [:db/id]}]} {:seon.eval/_agent [:seon.eval/id :seon.eval/agent {:seon.eval/by [:seon.agent/key :seon.root/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/page :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]} {:seon.message/_to [:seon.message/id {:seon.message/from [:seon.agent/key :seon.root/id]} :seon.message/to :seon.message/body]} {:seon.cite/_of :seon.cite/cite-fact} {:seon.search/_of :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent :seon.render/openai-compat seon.ctx.wire/agent-msgs}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/agents {:optional true} :seon.agent/agents] [:seon.agent/system {:optional true} :seon.agent/system]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]
@@ -296,7 +296,7 @@
  ;; the agent whose page the person last opened: home is this page (docs/users.md#whats-on-screen); absent means root
  ;; or a task: an agent focuses the person on work it just launched (my.task/launch! answers the task), its agent made a moment later
  :seon.user/focus [:and {:seon.db/to [:seon.db/agent-fact :seon.task/task-fact]} :seon.db/ref]
- :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/hiccup seon.render.ui/user :seon.ctx/pattern [:seon.agent/key :seon.user/name {:seon.user/focus [:seon.agent/key :seon.agent/status :seon.task/id]} {:seon.agent/agents [:seon.agent/key :seon.agent/status]} {:seon.message/_to [:seon.message/id :seon.message/from :seon.message/body]}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
+ :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/hiccup seon.render.ui/user :seon.ctx/pattern [:seon.agent/key :seon.user/name {:seon.user/focus [:seon.agent/key :seon.agent/status :seon.task/id]} {:seon.agent/agents [:seon.agent/key :seon.agent/status]} {:seon.message/_to [:seon.message/id {:seon.message/from [:seon.agent/key :seon.root/id]} :seon.message/body]}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
  ;; :seon.agent/key) and its target's (seon.ref/target-value: an address, a name, an id, a key or a path)
@@ -388,7 +388,7 @@
  :seon.task/declared :string
  ;; a task may hold config keys as its overrides, by their own names; each key is defined once, by its own schema
  ;; (seon.config.agent.edn, seon.config.merge.edn), never listed here (an attribute is named by one entity schema)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:seon.task/id :seon.task/ns :seon.task/plan :seon.task/execution :seon.task/kind :seon.task/instructions :seon.task/evidence :seon.task/failure :seon.task/cause :seon.task/outcome :seon.task/reason :seon.task/started-by {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {:seon.task/needs [:seon.task/id :seon.task/ns :seon.task/plan :seon.task/execution :seon.task/kind :seon.task/instructions :seon.task/evidence :seon.task/failure :seon.task/cause :seon.task/outcome :seon.task/reason :seon.task/started-by {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {:seon.cite/_of :seon.cite/cite-fact}]} {:seon.cite/_of :seon.cite/cite-fact} {:seon.search/_of :seon.search/search-fact} {:seon.task/examples [:seon.agent/key :seon.agent/description {:seon.eval/_agent [:seon.eval/id :seon.eval/agent :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/page :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}]}] :seon.render/hiccup seon.render.ui/task-view}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:seon.task/id :seon.task/ns :seon.task/plan :seon.task/execution :seon.task/kind :seon.task/instructions :seon.task/evidence :seon.task/failure :seon.task/cause :seon.task/outcome :seon.task/reason :seon.task/started-by {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {:seon.task/needs [:seon.task/id :seon.task/ns :seon.task/plan :seon.task/execution :seon.task/kind :seon.task/instructions :seon.task/evidence :seon.task/failure :seon.task/cause :seon.task/outcome :seon.task/reason :seon.task/started-by {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {:seon.cite/_of :seon.cite/cite-fact}]} {:seon.cite/_of :seon.cite/cite-fact} {:seon.search/_of :seon.search/search-fact} {:seon.task/examples [:seon.agent/key :seon.agent/description {:seon.eval/_agent [:seon.eval/id :seon.eval/agent {:seon.eval/by [:seon.agent/key :seon.root/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/page :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}]}] :seon.render/hiccup seon.render.ui/task-view}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
@@ -495,7 +495,8 @@
  ;; live): how many keys it swept, how long it took, the branches it saw (a later collection
  ;; runs only once one of them is gone) and how many were gone since the one before
  :seon.root/retained [:map [:swept :int] [:ms number?] [:generation :int]]
- :seon.root/collected [:map [:swept :int] [:ms number?] [:branches [:set :keyword]] [:gone :int]]
+ ;; no history: only the last collection is read (seon.db/collect!), and its history cost 4 nodes a write
+ :seon.root/collected [:and {:seon.db/no-history? true} [:map [:swept :int] [:ms number?] [:branches [:set :keyword]] [:gone :int]]]
  ;; main's content mark: a t past every t main held before the commit that last moved main's content (a datom of an
  ;; attribute a program key's content reads, or carried task content: seon.merge/moves-content?); the writer moves it in that
  ;; same commit, and at its start, so two commits of main with one mark hold the same content (docs/storage.md#mains-content-mark)
@@ -532,8 +533,10 @@
  ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)
  :seon.tx/runtime :string
  ;; the branch the transaction was written on: it travels with a merged datom, so the union
- ;; of every branch's history names who wrote what (seon.union)
- :seon.tx/branch [:and {:seon.db/index true} :keyword]
+ ;; of every branch's history names who wrote what (seon.union). Not indexed by value: it is read off the
+ ;; transaction entity (seon.ctx/made-by), never sought by value, and the index cost 5 nodes a write
+ ;; (docs/storage.md#what-a-datom-costs-to-add)
+ :seon.tx/branch :keyword
  ;; the eval whose code made it (its :seon.eval/id on the branch, "e<its eid>"): an agent's write during
  ;; an eval, its record's included (seon.agent/transact!); none outside an eval
  :seon.tx/eval [:string {:min 1}]
@@ -549,7 +552,7 @@
  ;; key, "root" or "owner"; to names its recipients by agent entity, a ref each, and a recipient's branch holds its own ref
  ;; only: removing the message from a ctx retracts that ref (the entity stays, so it is not delivered again)
  :seon.message/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
- :seon.message/from [:and {:seon.db/index true} :string]
+ :seon.message/from [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact] :seon.db/index true} :seon.db/ref]
  :seon.message/to [:set {:seon.db/to [:seon.db/agent-fact] :seon.db/index true} :seon.db/ref]
  ;; when root's writer recorded it (ms): it orders and decides nothing (docs/clocks.md)
  :seon.message/sent-ms :int

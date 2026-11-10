@@ -72,13 +72,24 @@
   (cond-> m
     (:seon.eval/call-id m) (update :seon.eval/call-id #(in-example ek %))))
 
+(defn- who
+  "The agent key a sender or evaluator x names, as a record holds it: the joined entity's :seon.agent/key; a string, as a session
+  recorded before senders were refs holds it (a store kept from then: an example exported from it), the key it is, but \"root\" and
+  \"seon\", which were the system's names; nil for the system. See docs/tasks.md#a-task-names-example-sessions."
+  {:malli/schema [:=> [:cat :any] [:maybe :string]]}
+  [x] (cond (string? x) (when-not (#{"root" "seon"} x) x) (map? x) (:seon.agent/key x) :else nil))
+
 (defn- example-rekey
   "Record m of one of `session-kinds` (its id, agent and model call attributes id-k, agent-k and call-k) as example ek keeps it: its db
   attributes dropped, its id the example's (`in-example`; a model call's seon.lib/call-id of ek and its turn), its agent ek's, its model call ek's of its turn, an eval as `example-record` has it. See
-  docs/tasks.md#a-task-names-example-sessions."
-  {:malli/schema [:=> [:cat :string :map [:tuple :qualified-keyword :qualified-keyword [:maybe :qualified-keyword]]] :map]}
-  [ek m [id-k agent-k call-k]]
+  docs/tasks.md#a-task-names-example-sessions. Its sender or evaluator (:seon.message/from, :seon.eval/by, as its pull joins them) is that entity by its identity (seon.task/sender, an upsert, so it resolves where the example is loaded): the
+  original agent itself, orig, is ek; another agent (a user) keeps its key; the system stays the system; a string, from a session recorded before
+  senders were refs, is read by `who`."
+  {:malli/schema [:=> [:cat :string :string :map [:tuple :qualified-keyword :qualified-keyword [:maybe :qualified-keyword]]] :map]}
+  [ek orig m [id-k agent-k call-k]]
   (-> (apply dissoc m :turn (filter #(= "db" (namespace %)) (keys m)))
+      (cond-> (:seon.message/from m) (update :seon.message/from #(task/sender (let [k (who %)] (if (= orig k) ek k))))
+              (:seon.eval/by m) (update :seon.eval/by #(task/sender (let [k (who %)] (if (= orig k) ek k)))))
       (cond-> call-k (assoc call-k (task/call-ref ek (:turn m 0))))
       ;; a model call is `<agent key>/<n>` (docs/turn.md#the-turn-is-a-number), the example's too: the page finds it by that
       (as-> m (if-let [n (:seon.model-call/n m)] (assoc m id-k (lib/call-id ek n)) (update m id-k #(in-example ek %))))
@@ -143,5 +154,5 @@
           :else (into [[{:seon.agent/key ek :seon.agent/status :ended :seon.agent/description request
                          :seon.agent/turn (reduce max 0 (map (fn [[v]] (or (:turn v) (:seon.model-call/n v) 0)) rs))}]]
                       (for [[v k] rs]
-                        [(example-rekey ek v (session-kinds k))])))))
+                        [(example-rekey ek key v (session-kinds k))])))))
 

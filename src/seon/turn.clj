@@ -157,7 +157,7 @@
   (let [k (:key @agent/state)
         body (print/text (vary-meta {:seon-threw what :error em} assoc :seon.print/full true))]
     ;; written after this turn's basis, so the next turn reads it, after everything this turn wrote
-    (agent/transact! (agent/own-message-tx (str k "/turn-error/" (random-uuid)) "seon" body (System/currentTimeMillis)))
+    (agent/transact! (agent/own-message-tx (str k "/turn-error/" (random-uuid)) task/system-sender body (System/currentTimeMillis)))
     (agent/commit!)
     nil))
 

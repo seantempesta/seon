@@ -12,7 +12,7 @@
   [i]
   (let [id (str "e" i)]
     [[:eval id]
-     {:seon.eval/id id :seon.eval/by "a1"
+     {:seon.eval/id id :seon.eval/by {:seon.agent/key "a1"}
       :seon.eval/code (str "(rows " i ")") :seon.eval/call-id (str "c-" i) :seon.eval/intent (str "Read the rows of part " i ".") :seon.eval/response {:handle (symbol "result" id) :value (vec (for [j (range 6)] {:part i :row j :name (str "row-" i "-" j)}))
                                     :ms 0.5 :ticks 1000 :bytes 4096}}
      :seon.db/eval-fact (inc i)]))
@@ -36,7 +36,7 @@
   [i]
   (let [t (inc i) call #(seon.task/call-ref "b/a1" t)]
     (cond-> [{:seon.eval/id (str "e" i) :seon.eval/call (assoc (call) :seon.model-call/origin :model :seon.model-call/reply (str "Reading the rows of part " i "."))}]
-      (even? i) (conj {:seon.message/id (str "m" i) :seon.message/to [{:seon.agent/key "b/a1"}] :seon.message/from "owner" :seon.message/body (str "How is part " i "?")}))))
+      (even? i) (conj {:seon.message/id (str "m" i) :seon.message/to [{:seon.agent/key "b/a1"}] :seon.message/from {:seon.agent/key "owner"} :seon.message/body (str "How is part " i "?")}))))
 
 (defn records-of
   "The input at n of seon.ctx.wire/request: the agent's ctx value over session-of's db, as a request reads it, each turn production-shaped (`turn-tx`)."

@@ -55,6 +55,17 @@
   {:malli/schema [:=> [:cat [:maybe :qualified-keyword]] :boolean]}
   [k] (boolean (and k (:seon.print/full (contract/properties k)))))
 
+(defn- reference-value
+  "The identity value v stands for when v is a reference, else nil: a map of one identity attribute (the entity index ix's
+  :identity-schemas) and at most its :db/id, so two keys at most, which a caller checks before it asks (a message, three keys or more,
+  costs no call), as a pull joins a ref (a message's sender {:seon.agent/key \"user\"}). The printer's one
+  rule for it, read by both its hooks (`model` for text, `nested` for the page): a reference prints as its identity value, so what is
+  read of a message's sender is the name it was before senders were refs, and the data stays a ref. See docs/render.md#a-render-is-a-value-printed-once."
+  {:malli/schema [:=> [:cat :map :any] :any]}
+  [ix v]
+  (when (and (map? v) (<= 1 (count v) 2) (every? #(or (= :db/id %) (contains? (:identity-schemas ix) %)) (keys v)))
+    (some (fn [[k x]] (when (not= :db/id k) x)) v)))
+
 (defn model
   "What the printer shows in place of value v (seon.print/print-value's :render): {:value m} when v's schema (its metadata
   :seon.render/schema) declares a model render (`model-declared`), which makes a value
@@ -65,14 +76,20 @@
   ([ix v] (model ix v {}))
   ([ix v opts]
    (let [k (:seon.render/schema (meta v)) sym (model-declared ix k) full? (full-declared? k)]
+     (if-some [r (when (and (nil? k) (map? v) (<= (count v) 2)) (reference-value ix v))]
+       ;; a reference prints as its identity value (`reference-value`)
+       {:value r}
      (when (or sym full?)
        ;; a schema that declares no render shows the value itself, no longer named by it (the printer would draw it by this again)
-       (cond-> {:value (if sym ((requiring-resolve sym) opts v) (vary-meta v dissoc :seon.render/schema))} full? (assoc :full true))))))
+       (cond-> {:value (if sym ((requiring-resolve sym) opts v) (vary-meta v dissoc :seon.render/schema))} full? (assoc :full true)))))))
 
 (defn stored-model
   "`model` of a stored value, an eval's record: nil when it no longer fits the schema it kept, so an old record prints as the data it is. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :any] [:maybe [:map [:value :any]]]]}
-  [ix v] (when (some-> (:seon.render/schema (meta v)) (contract/fits? v)) (model ix v)))
+  [ix v] (if (and (map? v) (<= (count v) 2) (nil? (:seon.render/schema (meta v))))
+           ;; a reference prints as its identity value (`reference-value`), in an eval's text as on the page
+           (model ix v)
+           (when (some-> (:seon.render/schema (meta v)) (contract/fits? v)) (model ix v))))
 
 (def ^:private error-keys
   "The keys :seon.error/base requires, read once from its form at load: what schema-of asks of a
@@ -104,11 +121,19 @@
   validation). A nested map holding a render symbol under :seon.render/hiccup is data, printed as it
   is: it is what a schema's properties look like inside a printed schema form, and drawing it by
   that render called the render with the properties (an agent's registered :lab.ctx/steps form,
-  its lab.ui/steps called with {:seon.render/hiccup lab.ui/steps}, killed the agent drawing it)."
+  its lab.ui/steps called with {:seon.render/hiccup lab.ui/steps}, killed the agent drawing it). A reference
+  (`reference-value`: a map of identity attributes alone, a ref as a pull joins it) prints as its identity value, in the
+  line of the value holding it and alone, never drawn by its schema's render: what is read of a message's sender is the
+  name it was before senders were refs (:from \"user\"), and the data stays a ref."
   {:malli/schema [:=> [:cat :map :any] [:maybe [:map [:text :string] [:html :any]]]]}
   [ix v]
-  (when-let [h (when-not (symbol? (own-key v :seon.render/hiccup)) (render-of ix v nil))]
-    {:text (print/line v (config/value :seon.config.render/line-budget)) :html [h {:as :inline :seon.render/index ix} v]}))
+  ;; a reference prints as its identity value (`reference-value`, the printer's one rule), asked only of a map
+  (if-some [r (when (and (map? v) (<= (count v) 2)) (reference-value ix v))]
+    {:text (print/line r (config/value :seon.config.render/line-budget)) :html (str r)}
+    (when-let [h (when-not (symbol? (own-key v :seon.render/hiccup)) (render-of ix v nil))]
+      {:text (print/line (if (map? v) (into {} (map (fn [[k x]] [k (if-some [r (when (and (map? x) (<= (count x) 2)) (reference-value ix x))] r x)])) v) v)
+                         (config/value :seon.config.render/line-budget))
+       :html [h {:as :inline :seon.render/index ix} v]})))
 
 (defn- nested-hiccup
   "The hiccup printer's :render: nested's, and a value whose own :seon.render/hiccup key holds hiccup

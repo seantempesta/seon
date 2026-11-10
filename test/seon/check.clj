@@ -1787,10 +1787,11 @@
 (defn- eval-records
   "The eval records on db of whom the evals are on, by its identity (seon.repl/record-tx): an
   agent's [:seon.agent/key key], or root's [:seon.root/id :root], each its code and who
-  evaluated it (:by, :seon.eval/by): [{:code :by}]."
+  evaluated it (:by, :seon.eval/by, a ref since step 2: the identity of the entity it names,
+  {:seon.agent/key k} or {:seon.root/id :root}): [{:code :by}]."
   [db [attr id]]
   (vec (for [[code by] (d/q '[:find ?c ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/code ?c] [?e :seon.eval/by ?by]] db attr id)]
-         {:code code :by by})))
+         {:code code :by (not-empty (into {} (remove (comp nil? val)) (d/pull db [:seon.agent/key :seon.root/id] by)))})))
 
 (defn await-records
   "What (read) answers once (enough? it) holds, read again at each :commit event of agent a
@@ -1802,8 +1803,8 @@
 (defn mcp-proof
   "The MCP phase's proof: an outside client (a separate process: bin/mcp PORT, the stdio
   relay, fed JSON-RPC on stdin) lists agents, evaluates in a running agent and as root, and
-  both evaluations are recorded by \"outside\" (the agent's on its branch, root's on
-  main). The relay's peak footprint stays within :seon.config.machine/relay-mb, so a relay
+  both evaluations are recorded, each by who ran it (an outside eval in an agent is the agent's own, seon.repl's
+  by; one as root is the user's the session acts for, seon.server's root eval), the agent's on its branch, root's on main. The relay's peak footprint stays within :seon.config.machine/relay-mb, so a relay
   that boots Seon again is red; one against a port nobody listens on answers each request
   the JSON-RPC error, and exits."
   []
@@ -1838,10 +1839,10 @@
         ;; the agent's record is on its branch at its commit (await-records); answers its one
         ;; eval when recorded, else waits on the next commit (the eval failed: its text check says so)
         mine (if (clojure.string/includes? (str (text 4)) "42")
-               (await-records ev a #(filter (fn [r] (= "outside" (:by r))) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/key (name a)])) #(= 1 (count %)))
+               (await-records ev a #(filter (fn [r] (clojure.string/includes? (:code r) "outside-x")) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/key (name a)])) #(= 1 (count %)))
                [])
         _ (a/untap (:events-mult sys) ev)
-        roots (filter #(= "outside" (:by %)) (eval-records @(:conn sys) [:seon.root/id :root]))
+        roots (filter #(= "(count (:agents (c/state sys)))" (:code %)) (eval-records @(:conn sys) [:seon.root/id :root]))
         bound (seon.config/value :seon.config.machine/relay-mb)]
       {:report {:tools (count (get-in answers [2 "result" "tools"]))
                 :agents-text (text 3) :agent-eval (text 4) :root-eval (text 5)
@@ -1852,7 +1853,11 @@
                 :root-down (mapv #(get-in % ["error" "message"]) (lines down)) :root-down-exit (:exit down)}
        :checks {:tools-are-the-ops (= (set (map #(str "seon_" (name %)) (keys seon.server/ops))) (set (map #(get % "name") (get-in answers [2 "result" "tools"]))))
                 :notification-unanswered (= #{1 2 3 4 5} (set (keys answers)))
-                :both-recorded-outside (and (= 1 (count mine)) (= 1 (count roots)))
+                :both-recorded (and (= 1 (count mine)) (= 1 (count roots)))
+                ;; who ran each (step 2: :seon.eval/by a ref): the eval in an agent by the agent itself, the one as root by the user
+                ;; the outside session acts for (:seon.config.root/user-name); the system entity runs only root's inserted and Seon's own
+                :each-by-who-ran-it (and (= [{:seon.agent/key (name a)}] (mapv :by mine))
+                                         (= [{:seon.agent/key (seon.config/value :seon.config.root/user-name)}] (mapv :by roots)))
                 :agent-eval (clojure.string/includes? (str (text 4)) "42") :root-eval (clojure.string/includes? (str (text 5)) "1")
                 :relay-within-bound (boolean (some-> (peak-mb r) (<= bound)))
                 :root-down-answers-every-request (and (zero? (:exit down)) (= [1 2 3 4 5] (mapv #(get % "id") (lines down)))
