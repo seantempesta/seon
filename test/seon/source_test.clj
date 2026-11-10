@@ -179,7 +179,22 @@
     (testing "a refresh that removes a file and changes the config"
       (let [refresh (source/tx-of db1 {"src/seon/ref.clj" nil config/shipped-file (str/replace (files config/shipped-file) #"(?m)^ :seon.config.root/view-window .*$" "")} true)]
         (is (some #(and (vector? %) (= :db/retractEntity (first %))) refresh) "it retracts")
-        (same? db1 refresh)))))
+        (same? db1 refresh)))
+    (testing "an import that registers a schema entry and a config entry it refuses: the cut keeps the schema the check reads"
+      (let [schema-file "resources/seon/schemas/seon.config.zz.edn"
+            schema-text "{:seon.config.zz/k [:int {:min 1 :description \"A key an import registers.\"}]}\n"
+            conf (str/replace-first (files config/shipped-file) "{" "{:seon.config.zz/k 0\n ")
+            ;; the config map's schema names the key too, as a key added on a branch does (docs/config.md)
+            cs "resources/seon/schemas/seon.config.edn"
+            files (update files cs str/replace "[:seon.config.source/root {:optional true} :seon.config.source/root]"
+                          "[:seon.config.source/root {:optional true} :seon.config.source/root] [:seon.config.zz/k {:optional true} :seon.config.zz/k]")
+            tx (source/tx-of db0 (assoc files schema-file schema-text config/shipped-file conf) false)]
+        (same? db0 tx)
+        (is (contains? (program/schema-changes (pdb/speculate-db db0 (pdb/project-tx tx #(#{"config" "schema"} (namespace %))))) :seon.config.zz/k)
+            "the schema the import registers is in the cut")
+        (is (:seon.error/type (program/config-refused db0 tx)) "the entry it refuses is refused, read through the cut")
+        (is (nil? (program/config-refused db0 (source/tx-of db0 (assoc files schema-file schema-text config/shipped-file (str/replace-first conf ":seon.config.zz/k 0" ":seon.config.zz/k 5")) false)))
+            "and one valid only under the schema the same import registers is not")))))
 
 (deftest a-config-entry-writes-back-only-its-own-bytes
   ;; docs/source.md#a-program-file: the config file is one entity per entry, each form its exact text with its tags unread, and a write-back changes only what an entry changed
