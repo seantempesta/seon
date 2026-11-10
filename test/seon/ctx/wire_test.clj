@@ -1829,6 +1829,18 @@
     (is (= ["(e1)"] (keep #(get-in % [:tool-calls 0 :code]) (without-page sent))) "what it pulled, its eval, is")
     (is (< (count (pr-str sent)) (count (pr-str full))) "smaller")))
 
+(deftest a-model-render-that-threw-is-a-message-saying-so
+  ;; a component whose model render threw answers, in its messages' place, the render :seon.render/component-defect declares
+  ;; (seon.ctx.wire/defect-msgs): the model is told a part is missing and what threw, never left reading around a gap
+  (let [ix (seon.db/index)
+        e (seon.contract/error :seon.render/component-defect 'seon.render/render! "seon.render.ui/task threw: boom" {:seon.error/in 'seon.render.ui/task})
+        sym (render/render-for ix :seon.render/component-defect :seon.render/openai-compat)
+        ms (@(requiring-resolve sym) {:seon.db/db (ts/test-db) :seon.render/index ix} e)]
+    (is (= 'seon.ctx.wire/defect-msgs sym) "the schema names it")
+    (is (= ["user"] (mapv :role ms)) "one user message")
+    (is (str/includes? (:content (first ms)) "seon.render.ui/task") "naming the render that threw")
+    (is (str/includes? (:content (first ms)) "boom") "and what it said")))
+
 (deftest a-request-with-no-system-message-is-refused
   ;; an error is data, and a request does not silently lose its system message: a db without the prompt is refused, typed, as seon.ctx.wire/system-text's contract did
   (let [db0 (ts/test-db)

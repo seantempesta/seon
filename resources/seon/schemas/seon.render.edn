@@ -63,7 +63,7 @@
  :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
  ;; a component whose render threw (seon.render/render!, a failure point: renders are code, and agents write
  ;; them), a call of its render in the component's place: :seon.error/in the render, and the thrown error's own data
- :seon.render/component-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/component-defect]] [:seon.error/in {:optional true} :symbol]
+ :seon.render/component-defect [:and {:seon.render/openai-compat seon.ctx.wire/defect-msgs} :seon.error/base [:map [:seon.error/type [:= :seon.render/component-defect]] [:seon.error/in {:optional true} :symbol]
                                                       [:seon.render/threw {:optional true} :map]]]
  ;; a view whose render threw (seon.render.proc/view-pass, a failure point: renders are code, and agents
  ;; write them): its page is this error, recorded as a platform problem; :seon.error/in the function it threw in
