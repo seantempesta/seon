@@ -207,9 +207,14 @@
   (let [e (get fx/scenarios k)]
     (select-keys (if model? (merge e (:model e)) e) [:check :expect])))
 
+(defn- work-summaries
+  "server/task-summaries of d less root's own session's task (its session is the agent keyed \"root\", seon.root/root-session-boot-tx: made at
+  every boot, parked until a message, never done): the work a scenario released."
+  [d] (into {} (remove (fn [[id _]] (= "root" (task/session-key d id)))) (server/task-summaries d)))
+
 (defn- all-done
   "Every task done on d; what is not, by id."
-  [d] (let [not-done (into {} (remove (comp :done val)) (server/task-summaries d))] {:ok (empty? not-done) :not-done not-done}))
+  [d] (let [not-done (into {} (remove (comp :done val)) (work-summaries d))] {:ok (empty? not-done) :not-done not-done}))
 
 (defn- run-scenario
   "Work one row: boot root on (merge {:datoms 300} :boot), release :specs (release!), run
@@ -297,7 +302,7 @@
     {:ok (and (every? (fn [[id word]] (let [{x :seon.task/execution f :seon.task/failure} (rows id)]
                                         (and (= :held x) (str/includes? (str (:reason f)) word))))
                       ids)
-              (every? :done (vals (apply dissoc (server/task-summaries d) (keys ids)))))
+              (every? :done (vals (apply dissoc (work-summaries d) (keys ids)))))
      :held rows}))
 
 (defn- scenario
