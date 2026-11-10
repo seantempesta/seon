@@ -1350,9 +1350,9 @@
           (d/transact br [{:note/agent :t :note/text "the branch's own"}])
           (let [[own total] (private)]
             (is (:crypto-hash? (:config @br)) "the store's nodes are addressed by their content")
-            ;; its own: the one write's path, a leaf and the branches over it to the root (4 of 157 measured, 2026-11-09);
-            ;; with random addresses 76 of 157, what the 20 merges rewrote
-            (is (<= own 8) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
+            ;; the branch's own nodes are its one write's path, under a tenth of the tree; random addresses kept 76 of 157 (48%) after the
+            ;; same 20 merges, content addresses 4-9 (lab 6-9% after 100 merges, docs/sharing.md#what-a-branchs-nodes-are)
+            (is (<= own (quot total 10)) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
           (finally (d/release br) (d/release main) (clojure.java.shell/sh "rm" "-rf" path))))))
 
 (deftest a-branchs-own-entity-schema-is-the-one-its-writes-are-held-to
