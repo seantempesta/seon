@@ -406,11 +406,14 @@
   ;; otherwise. Two shards' logs each say a test started, and each shard waits on a FIFO the test
   ;; releases only once one is named: the test whose bound is 200 ms is named, once; the one whose
   ;; bound is 600 s is not (a healthy slow test), nor is one whose test ended (the shard quiet after
-  ;; it); both go on and end, and the watcher with them
+  ;; it); both go on and end, and the watcher with them. The logs' quiet is set by their mtime, not
+  ;; waited out (bin/stalls reads it in whole seconds): 10 s for the 200 ms bound and 200 s for the 600 s
+  ;; one, each on the other side of the 100 s floor from its own bound, so a watcher that reads the floor is red
   (let [root (seon.config/checkout)
         d (str root "/target/stalls-test-" (random-uuid))
         _ (.mkdirs (java.io.File. d))
         script (str "cd " d "; printf 'started seon.x-test/hangs\\n' > a.log; printf 'started seon.x-test/slow\\n' > b.log; printf 'started seon.x-test/done\\nended seon.x-test/done\\n' > c.log\n"
+                    "touch -t $(date -v-10S +%Y%m%d%H%M.%S) a.log c.log; touch -t $(date -v-200S +%Y%m%d%H%M.%S) b.log\n"
                     "printf 'seon.x-test/hangs 200\\nseon.x-test/slow 600000\\nseon.x-test/done 200\\n' > bounds; mkfifo ra rb out\n"
                     "(read x < ra) & pa=$!; (read x < rb) & pb=$!\n"
                     root "/bin/stalls 100000 bounds a.log:$pa b.log:$pb c.log:$pb > out & s=$!\n"
