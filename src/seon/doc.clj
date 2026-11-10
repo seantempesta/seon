@@ -559,7 +559,7 @@
 (defn text-index
   "The index (seon.sqlite/fts-open) of every text attribute's texts on db (`text-attrs`), {:h :state}: a
   Porter-stemmed table for bm25 and a trigram table for substrings, so \"watching\" finds `watch!` and \"it\" is no
-  part of \"edit\". Derived data (AGENTS section 5): built once for a db value (its :hash and :max-tx say it is
+  part of \"edit\". Derived data (docs/data-modeling.md#derived-data-is-a-cache-never-relied-on): built once for a db value (its :hash and :max-tx say it is
   the same value: a db value is read again at every deref, so its identity says nothing), reused until a move
   writes a text, regenerated from db whenever it is gone, never relied on. The index it replaces is retired
   (closed once no reader uses it: `with-index`). A race of two readers only builds one twice. See docs/vector.md#search."

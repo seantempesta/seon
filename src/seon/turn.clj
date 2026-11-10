@@ -81,7 +81,7 @@
 (defn- status-now
   "How the work stands now, the data a turn decides from: what the page's status component kept (seon.render/kept-of), one reaction for both, so a status nothing moved costs nothing; with none (it threw, or a layout places none) seon.ctx.status/status of the branch and @ctx. The branch may have changed
   what status calls, so a status that throws is its error, the turn's to give the agent (docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map), never an
-  empty status: no reason is not done (AGENTS 9, unknown is not {})."
+  empty status: no reason is not done (unknown is not {}: docs/errors.md#unknown-is-never-a-default)."
   {:malli/schema [:=> [:cat] [:or :map :seon.error/base]]}
   [] (try (or (render/kept-of (repl/page-walk) '[seon.render.ui/status])
               (status/status (agent/db) @ctx/ctx {}))

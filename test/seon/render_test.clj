@@ -476,7 +476,7 @@
         st1 (#'p/pass (update st :watch conj [:debug :root]) (volatile! {}))
         ctx (:context st1)
         budget (seon.config/value :seon.config.render/root-context-budget)]
-    (testing "printed only for a reader (a tab on /root/debug, or a :context request): a pass nobody reads it in prints nothing (derived data, AGENTS section 5)"
+    (testing "printed only for a reader (a tab on /root/debug, or a :context request): a pass nobody reads it in prints nothing (derived data: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on)"
       (is (nil? (:context (#'p/pass st (volatile! {})))) "no tab: nothing printed, no health read")
       (is (nil? (:health-at (#'p/pass st (volatile! {})))))
       (is (= ctx (:context (#'p/with-context (#'p/health! st)))) "the :context request's print is the page's")
@@ -683,7 +683,7 @@
     (r/dispose-walk! (get-in st [:root-walk :w]))))))
 
 (deftest a-wanted-keyframe-is-answered-when-its-read-fails
-  ;; docs/render.md#the-page: every wait ends, with its value or a typed error (AGENTS 4): a keyframe a tab asked for while the view could not
+  ;; docs/render.md#the-page: every wait ends, with its value or a typed error (docs/errors.md#nothing-crashes-and-nothing-hangs): a keyframe a tab asked for while the view could not
   ;; be drawn yet is answered when the read it waits on answers an error, by that error drawn, so the tab turns fresh and a later
   ;; read redraws it (task seon.web/a-tabs-first-keyframe-settles-on-its-own: bin/check idle waited ~30 min for a keyframe)
   (let [[main branch _] (paged-dbs)

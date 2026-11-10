@@ -3,7 +3,7 @@
   writer, a Claude session, a Seon agent, the owner's editor or git, changes files, and the
   OS reports it. target/watch (native/watch.c, FSEvents) is an OS child printing one record
   per change, its kind letter then the absolute path, ended by NUL; this namespace starts it
-  and reads it on one edge thread (the blocking read AGENTS §5 allows), handing each batch,
+  and reads it on one edge thread (the blocking read docs/flow.md#the-step-fn-contract-every-proc-follows allows), handing each batch,
   what the stream holds when a read returns, to its caller (my.root/watch!). No clock
   decides and nothing polls: a batch is what arrived."
   (:refer-clojure :exclude [defn defn-])
