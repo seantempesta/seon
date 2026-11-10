@@ -1219,21 +1219,29 @@
   server, an agent): a fork beside live runtime threads is refused whenever one is active at
   that instant. Each answers the data its test asserts."
   {"line-parks"
-   ;; on the child's own fiber: the reader's wait must be that fiber's park, not a thread's. The line
-   ;; comes from a thread of the parent, 200 ms on (no fiber of the child could write it while its
-   ;; carrier is held): it was a future in the child, and a thread started in a forked child made
-   ;; collections that copied ever larger continuations (35 GB, minutes at 99% CPU, the reader's main
-   ;; thread waiting on the collector; Jolt's, filed). The verdict is which happened first, never how long.
-   #(let [[r w] (sock/socketpair)]
+   ;; on the child's own fiber: the reader's wait must be that fiber's park, not a thread's. A fiber
+   ;; queued before the wait says "ran" to the parent, and a thread of the parent answers "done" only
+   ;; then: the reader's line is caused by the fiber having run, so the reader was parked when it came,
+   ;; however slow the machine (the line came 200 ms after the fork before, and a loaded machine had
+   ;; it there before the child's first read: nothing parked, the fiber had not run, red). A reader
+   ;; that holds its carrier lets no fiber run, so "ran" never comes; a second thread of the parent
+   ;; ends that wait at in-child-bounded's 5 s with the same line, and the child answers 1. The line
+   ;; is the parent's to write (no fiber of the child could while its carrier is held; a thread
+   ;; started in a forked child made collections that copied ever larger continuations: 35 GB, Jolt's, filed).
+   #(let [[r w] (sock/socketpair) [r2 w2] (sock/socketpair)
+          daemon (fn [f] (doto (Thread. f) (.setDaemon true) (.start)))]
       (lib/fork! {:child (fn []
                            (let [ran (volatile! false)
-                                 _ (a/go (vreset! ran true))
+                                 _ (a/go (vreset! ran true) (sock/write-line! w2 "ran"))
                                  rd (sock/line-reader r)
                                  lines (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))]
                              (lib/c-exit (if (and (= ["done"] lines) @ran) 0 1))))
                   :refused (fn [n] {:refused n})
                   :parent (fn [pid]
-                            (doto (Thread. #(do (Thread/sleep 200) (sock/write-line! w "done"))) (.setDaemon true) (.start))
+                            (daemon #(let [rd (sock/line-reader r2)]
+                                       (loop [] (when (= [] (rd)) (recur)))
+                                       (sock/write-line! w "done")))
+                            (daemon #(do (Thread/sleep 5000) (sock/write-line! w "done")))
                             (lib/wait-status pid))}))
    "memory-gauge"
    ;; the largest block a test allocates (one process, no fan-out: docs/machine.md#processes); Chez keeps a
