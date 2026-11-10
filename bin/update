@@ -5,7 +5,7 @@
 #   2. bring the write-back tree to main and move both trees' submodules to main's pins (bin/worktree --sync for it);
 #   3. build (bin/build: each step skips what is up to date);
 #   4. restart the standing root on its store (bin/root stop, start): it boots on main's build and resumes its
-#      main, reading no file (docs/source.md#a-boot-resumes-from-the-db).
+#      main, catching up the files its checkout changed since main last indexed it (docs/source.md#a-boot-catches-up-with-its-checkout).
 # ARGS go to the restarted root (bin/root start ARGS): the standing root's profile is one of them
 #   (bin/update --profile deepseek), as it is on every root's command line (docs/config.md#layers).
 # bin/land runs it after it moves main (docs/merging.md#a-branch-lands-with-binland); the owner runs it by hand too.

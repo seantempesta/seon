@@ -1231,6 +1231,47 @@
       held (conj {:seon.root/id :root
                   :seon.root/source (assoc held :tree tree :commit commit :digest (source-digest {:tree tree :pins (:pins held)} (:dirs held [])))}))))
 
+(defn catch-up
+  "What brings db's index of its checkout up to date with the files at root as they are now (docs/source.md#a-boot-catches-up-with-its-checkout):
+  the files that differ from the tree db last indexed (its :seon.root/source :tree; seon.fx/changed-since) indexed as a landing is
+  (landed-tx: code, pages and task files, the source fact moved to the tree now), less those left out and named under :skipped,
+  which keep the fact at the tree it held, so the next catch-up reads them again: a file that does not read as its reader reads it
+  (seon.fx/unreadable), a task file the changed task files are refused with (seon.task/load-tx), and a file a merged task main
+  holds unsynced also changed (seon.problems/unsynced?: the checkout's text would replace the merge's). Answers {:tx :paths
+  :skipped}, {:paths []} when nothing differs, nil when db holds no tree, or the read's error. Its caller writes :tx on the branch
+  it brings up to date (boot!: main). opts: :tree, the tree to read what differs from (default db's held one), and :fact? false,
+  which moves no source fact (changed-tx alone): a session's files written as a branch of the store, never main."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:maybe :map]]
+                  [:=> [:cat :seon.host/db :string [:map [:tree {:optional true} :string] [:fact? {:optional true} :boolean]]] [:maybe :map]]]}
+  ([db root] (catch-up db root {}))
+  ([db root {:keys [fact?] :or {fact? true} :as opts}]
+  (when-let [tree (or (:tree opts) (:tree (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))))]
+    (let [r (fx/changed-since root tree)
+          tasks-dir (cfg/value :seon.config.source/tasks-dir)]
+      (cond
+        (contract/error? r) r
+        (empty? (:value r)) {:paths []}
+        :else
+        (let [unsynced (into {} (for [{:keys [e]} (d/datoms db :aevt :seon.task/declared) :when (problems/unsynced? db e)
+                                      p (problems/changed-paths db e)]
+                                  [p (:v (first (d/datoms db :eavt e :seon.task/id)))]))
+              task? #(and (str/ends-with? % ".edn") (str/starts-with? % (str tasks-dir "/")))
+              task-texts (into {} (for [[p t] (:value r) :when (task? p)] [(subs p (inc (count tasks-dir))) (or t "[]")]))
+              refused (when (seq task-texts) (let [x (task/load-tx db (tasks-of task-texts))] (when (contract/error? x) (:seon.error/message x))))
+              skipped (vec (for [[p t] (:value r)
+                                 :let [why (cond (unsynced p) (str "merged task " (unsynced p) " changed it and main holds it unsynced: (my.root/sync! sys [\"" (unsynced p) "\"]), then start again")
+                                                 (and t (fx/unreadable p t)) (fx/unreadable p t)
+                                                 (and refused (task? p)) (str "the task files are refused: " refused))]
+                                 :when why]
+                             {:path p :reason why}))
+              out (set (map :path skipped))
+              changed (into {} (remove (comp out key)) (:value r))
+              modes (into {} (remove (comp out key)) (:modes r))]
+          {:paths (vec (keys changed)) :skipped skipped
+           :tx (if (or (seq out) (not fact?))
+                 (changed-tx db changed modes tasks-dir)
+                 (landed-tx db changed modes (:tree r) (:commit r)))}))))))
+
 (defn index-code
   "The code that indexes a tree, as db's program states it, under inputs: the reach digest of roots
   (seon.program/graph-index over db's seon.program/reach-graph, as a check step's root is digested), its components and
@@ -1420,7 +1461,9 @@
                  src (for [[p] changed :when (and (str/starts-with? p "src/") (str/ends-with? p ".clj"))] p)
                  ;; what runs from the checkout or from main, never the binary: tests, the wiki, task files, bin/'s scripts
                  elsewhere? (fn [p] (or (str/starts-with? p "test/") (str/ends-with? p ".md") (str/starts-with? p "resources/seon/tasks/")
-                                        (and (str/starts-with? p "bin/") (not= p "bin/build"))))
+                                        (and (str/starts-with? p "bin/") (not= p "bin/build"))
+                                        ;; a path the tree's id leaves out (:seon.config.source/tree-excludes): no build reads it
+                                        (some #(or (= p %) (str/starts-with? p (str % "/"))) (cfg/value :seon.config.source/tree-excludes))))
                  ;; a changed path the rule cannot place (the web assets the build compiles, anything else) is not current
                  unplaced (vec (for [[p om nm] changed :when (not (or (build-input? p om nm) (some #{p} src) (elsewhere? p)))] p))
                  g (or g (program/reach-graph db (fx/declared-refs system/built-text)))
@@ -1449,7 +1492,8 @@
   "Root's boot up to its first thread, on the main carrier (jolt.host/main-carrier-run!: one OS
   thread drives every fiber, so a go block a library starts is a fiber; a future is an OS thread of its
   own, and must have ended before the fork, which seon.lib/fork! refuses beside another thread): main opened on the
-  store at path and resumed as it is, reading no file and no git, or, when nothing was ever indexed into it nor a root
+  store at path and resumed, caught up with the files of its source tree that changed since main last indexed it (catch-up; none
+  read when nothing changed, and nothing for a root given no source tree), or, when nothing was ever indexed into it nor a root
   booted on it, the checkout indexed into it first (seed!); main's config held, its program digested (seon.program/program-digest), the
   contracts instrumented, the warm paths run and the heap made static, then the fork server forked from it (which preloads
   main's indexes for its agents: seon.fork-server/main), sharing all of that copy-on-write while this is the one thread
@@ -1479,6 +1523,11 @@
             ;; a main nothing was ever indexed into or booted on is indexed now, once; every other boot resumes it
             seeded (when (every? nil? (vals (d/pull @conn [:seon.root/source :seon.root/boot] [:seon.root/id :root])))
                      (seed! conn source t1))
+            ;; every other boot of a root with a source tree catches main up with the files that changed since main last indexed it
+            ;; (docs/source.md#a-boot-catches-up-with-its-checkout); a root given no source (a test's) resumes as it was
+            caught (when (and source (not seeded) (cfg/value :seon.config.root/catch-up-on-boot))
+                     (let [c (catch-up @conn (:root source))]
+                       (if (seq (:tx c)) (-> c (dissoc :tx) (assoc :t (:max-tx (:db-after (d/transact conn {:tx-data (:tx c)}))))) c)))
             seed-ms (profile/ms-since t1)
             t2 (profile/now-ns)
             ;; main's own config, before anything below reads one and before the fork server inherits it
@@ -1492,7 +1541,7 @@
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
                  {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained
-                  :seeded seeded :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts}))))))
+                  :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts}))))))
 
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
@@ -1536,7 +1585,7 @@
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
-        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded seed-ms config-errors digest digest-ms contracts pid fd compacted retained]}
+        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors digest digest-ms contracts pid fd compacted retained]}
         (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
@@ -1570,7 +1619,7 @@
               :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
-              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :seeded seeded :seed-ms (lib/r2 seed-ms)
+              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :seeded seeded :caught-up caught-up :seed-ms (lib/r2 seed-ms)
                      :config-errors config-errors :digest digest :digest-ms (lib/r2 digest-ms)
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)
                      :stale-binary stale}}
