@@ -69,6 +69,23 @@
     (testing "the stop transition releases the branch connections"
       (is (map? (#'writer/writer-proc st ::flow/stop))))))))
 
+(deftest a-refused-op-after-a-run-ahead-write-keeps-the-writer-and-datahike-together
+  ;; docs/storage.md#durability-is-continuous-group-commit: an op other than :tx stores what ran ahead first; an op that
+  ;; then throws (an interop edge) is answered as its error, and the writer keeps the state after that store. Red before:
+  ;; the one catch around both handed back the state from before the commit, so the write stayed held ahead with nothing
+  ;; pending in Datahike, and the next :commit recorded :writer-refused (batch 12: bin/check e2e calc, swarm, resume)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        _ (a/>!! in {:op :clone-branch :from :no-such-branch :branch (pdb/on-main (:branch cfg) :x1) :dest {:rid 2}})
+        [st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})
+        answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
+    (is (:ok (answers 1)) "the write is answered at its apply")
+    (is (seon.contract/error? (answers 2)) "the op that throws is answered as its error")
+    (is (some? (d/commit-id @conn)) "what ran ahead was stored before the op")
+    (is (empty? (:ahead st)) "and the writer holds nothing ahead")
+    (let [[_ outs] (step #'writer/writer-proc st :in {:op :commit})]
+      (is (not-any? #(= :writer-refused (:op %)) (:to-api outs)) "so its next commit finds nothing amiss"))))))
+
 (deftest the-writers-transactions-name-their-runtime
   ;; main's transactions through the writer's group
   ;; commit carry the runtime that made them, and so does the stored commit the fork server's replica reads

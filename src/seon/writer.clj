@@ -403,25 +403,27 @@
 (defn- writer-one
   "One request into the batch: root's :tx on main runs ahead (applied: answered at its apply, stored by the
   :commit after it), a :flush? one joins the batch; any other op first commits what ran ahead and the batch (it
-  reads committed heads), then runs."
+  reads committed heads), then runs. Only the op itself is caught (an interop edge, Datahike, refused: its
+  answer is the error, as data): the commits before it are outside the catch, as at the step's end, so a refused
+  op never hands back a state from before a commit Datahike made (which left a write held ahead with nothing
+  pending: the writer and Datahike apart)."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
   [st o {:keys [op] :as m}]
-  (try
-    (cond
-      ;; root's write: run ahead, answered at its apply (applied); checked there (seon.db/transact-checked), a refusal
-      ;; answered to its requester alone
-      (and (= op :tx) (not (:flush? m))) (applied st o m)
-      ;; a write an outside effect follows: stored and synced before its answer, after what ran ahead
-      (= op :tx) (update (commit-ahead st o) :pend (fnil conj []) m)
-      ;; the commit this writer asked of itself after running ahead
-      (= op :commit) (commit-ahead (dissoc st :commit-asked) o)
-      ;; every other op reads committed heads: what ran ahead and the batch are committed first
-      :else (other-op (commit-batch (commit-ahead st o) o) o m))
-    (catch Throwable e
-      ;; an interop edge (Datahike) refused: the request's answer is the error, as data
-      ;; with the store's map use: a full map (MDB_MAP_FULL) shows itself against its size
-      (answer o (:dest m) (refused (step/error-msg e) (cond-> {} (pdb/map-use (:cfg st)) (assoc :store (pdb/map-use (:cfg st))))))
-      (dissoc st :pend))))
+  (cond
+    ;; root's write: run ahead, answered at its apply (applied); checked there (seon.db/transact-checked), a refusal
+    ;; answered to its requester alone
+    (and (= op :tx) (not (:flush? m))) (applied st o m)
+    ;; a write an outside effect follows: stored and synced before its answer, after what ran ahead
+    (= op :tx) (update (commit-ahead st o) :pend (fnil conj []) m)
+    ;; the commit this writer asked of itself after running ahead
+    (= op :commit) (commit-ahead (dissoc st :commit-asked) o)
+    ;; every other op reads committed heads: what ran ahead and the batch are committed first
+    :else (let [st (commit-batch (commit-ahead st o) o)]
+            (try (other-op st o m)
+                 (catch Throwable e
+                   ;; with the store's map use: a full map (MDB_MAP_FULL) shows itself against its size
+                   (answer o (:dest m) (refused (step/error-msg e) (cond-> {} (pdb/map-use (:cfg st)) (assoc :store (pdb/map-use (:cfg st))))))
+                   (dissoc st :pend))))))
 
 (defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}
   [ch m]
