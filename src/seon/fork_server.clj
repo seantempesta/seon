@@ -492,7 +492,8 @@
                             (some-> (:sent pend) sock/close!)
                             [(assoc st :standby (-> pend (dissoc :sent) (assoc :pid (:pid m) :t (:t m))) :standby-pending nil
                                     :log (filterv #(> (:t %) (:t m)) (:log st)))
-                             nil])
+                             ;; root's view says the server has a standby again (after a :standby-failed)
+                             {:to-api [{:ev :standby :gen (:gen m) :pid (:pid m)}]}])
                         [st nil]))
            :standby-failed (do (drop-standby (:standby-pending st)) [(assoc st :standby-pending nil) {:to-api [m]}])
            ;; EOF of the current server's events: promote its standby, unless root is stopping

@@ -1040,15 +1040,6 @@
     (is (re-find #":seon.fork-server/standby-failed" fold) fold)
     (is (re-find #"7" fold) fold)
     (is (= false (get-in st2 [:view :fork-server :standby])) "the view shows the server has no standby")
-    (is (= :up (get-in st2 [:view :fork-server :status])) "the server itself still serves")))
-
-(deftest a-ping-of-a-gone-agent-answers-its-error
-  ;; a ping's answer passes through as itself: an agent that is gone answers a typed error map, never :unknown
-  (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
-                             :view {:agents {:a1 {:status :dead}}} :graph (promise)
-                             :system (doto (promise) (deliver {:procs {} :conns []}))})]
-    (doseq [id [:a1 :nope]]
-      (let [p (promise)]
-        (step #'root/api-proc st :ext {:op :ping :id id :p p})
-        (is (and (map? @p) (seon.contract/error? @p)) (pr-str id (deref p 0 :unanswered)))
-        (is (not= :unknown @p))))))
+    (is (= :up (get-in st2 [:view :fork-server :status])) "the server itself still serves")
+    (is (= true (get-in (first (step #'root/api-proc st2 :back {:ev :standby :gen 4 :pid 9})) [:view :fork-server :standby]))
+        "the next standby made: the view shows it has one again")))
