@@ -585,9 +585,14 @@
  ;; child start, exit); a child saves its cost only past twice that on each side, so 100 (docs/merging.md#a-merge-runs-what-the-change-reaches).
  ;; At the bound: a run of less work than this runs in one child.
  :seon.config.proofs/child-min-ms 100
- ;; Unit: ms. What a test counts for in that division when none of the run's tests was ever measured (the mean of those
- ;; measured, when some were). Provenance: the median typical ms of the main tests, 2026-10-29 (a verdict cache read).
- :seon.config.proofs/unmeasured-ms 16
+ ;; Unit: ms. What a test never measured counts for in a deal of tests into shards or children (seon.proofs/estimated-ms):
+ ;; never 1 ms, which dealt a run of 234 unmeasured process tests into one shard. Provenance: the mean typical ms (fx/typical-ms)
+ ;; of the verdict cache's in-process tests, 2026-11-10: 172 over 1,381 measured of 1,385 (median 10). The mean, since a deal
+ ;; sums work.
+ :seon.config.proofs/unmeasured-ms 172
+ ;; Unit: ms. The same for a process test (one that reaches a process of its own: seon.program/graph-index's :process?).
+ ;; Provenance: the mean typical ms of the verdict cache's process tests, 2026-11-10: 3,027 over 228 of 228 (median 1,220).
+ :seon.config.proofs/unmeasured-process-ms 3027
  ;; Unit: boolean. Whether each commit that moves main's program starts a run of main's tests
  ;; (seon.prove: a prove agent forked from main, results as facts every agent forked after reuses).
  ;; Provenance: task seon.proofs/main-is-proved-in-a-fork. Off: the run of all of main's
