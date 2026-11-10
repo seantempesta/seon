@@ -13,7 +13,7 @@
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt] [seon.stage :as stage] [seon.root :as root] [seon.doc]))
+            [seon.program-test :as pt] [seon.stage :as stage] [seon.root :as root] [seon.doc] [seon.system] [test-runner]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -152,6 +152,86 @@
           [whole errs] (#'program/required! db lf lf)]
       (is (= [] errs))
       (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from"))))
+
+(deftest a-speculation-of-what-it-reads-reads-what-the-whole-would
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches: seon.db/project-tx cuts a transaction to the attributes a speculation reads
+  ;; after it (program/config-refused's config and schema entries, root/import-of's counts), so a full import is applied once, by its
+  ;; write, not three times (the checkout's: 2.7 G ticks and 4.7 GB a speculation, 2026-11-10). What is read after the cut is what is
+  ;; read after the whole, on an import of real files and on a refresh that removes one (its retractions)
+  (let [files (into {} (for [p ["src/seon/lib.clj" "src/seon/ref.clj" "resources/seon/schemas/seon.config.edn" config/shipped-file]]
+                         [p (slurp (str here "/" p))]))
+        counted #{:form/id :ns/name :ns/file :schema/key :schema/file}
+        read-after (fn [db] {:entries (seon.config/entries db) :schemas (program/schema-changes db)
+                             :forms (count (d/datoms db :aevt :form/id)) :ns-files (count (d/datoms db :aevt :ns/file))
+                             :schema-files (count (d/datoms db :aevt :schema/file))})
+        same? (fn [db tx]
+                (let [whole (read-after (pdb/speculate-db db tx))
+                      config-cut (pdb/speculate-db db (pdb/project-tx tx #(#{"config" "schema"} (namespace %))))
+                      count-cut (pdb/speculate-db db (pdb/project-tx tx counted))]
+                  (is (seq (:entries whole)) "the import states config entries")
+                  (is (= (select-keys whole [:entries :schemas]) (select-keys (read-after config-cut) [:entries :schemas])) "the config check's cut")
+                  (is (= (select-keys whole [:forms :ns-files :schema-files]) (select-keys (read-after count-cut) [:forms :ns-files :schema-files])) "the counts' cut")
+                  (is (< (count (pdb/project-tx tx counted)) (count tx)) "and the cut is smaller than the whole")))
+        db0 (empty-db)
+        tx (source/tx-of db0 files false)
+        db1 (d/db-with db0 tx)]
+    (same? db0 tx)
+    (testing "a refresh that removes a file and changes the config"
+      (let [refresh (source/tx-of db1 {"src/seon/ref.clj" nil config/shipped-file (str/replace (files config/shipped-file) #"(?m)^ :seon.config.root/view-window .*$" "")} true)]
+        (is (some #(and (vector? %) (= :db/retractEntity (first %))) refresh) "it retracts")
+        (same? db1 refresh)))
+    (testing "an import that registers a schema entry and a config entry it refuses: the cut keeps the schema the check reads"
+      (let [schema-file "resources/seon/schemas/seon.config.zz.edn"
+            schema-text "{:seon.config.zz/k [:int {:min 1 :description \"A key an import registers.\"}]}\n"
+            conf (str/replace-first (files config/shipped-file) "{" "{:seon.config.zz/k 0\n ")
+            ;; the config map's schema names the key too, as a key added on a branch does (docs/config.md)
+            cs "resources/seon/schemas/seon.config.edn"
+            files (update files cs str/replace "[:seon.config.source/root {:optional true} :seon.config.source/root]"
+                          "[:seon.config.source/root {:optional true} :seon.config.source/root] [:seon.config.zz/k {:optional true} :seon.config.zz/k]")
+            tx (source/tx-of db0 (assoc files schema-file schema-text config/shipped-file conf) false)]
+        (same? db0 tx)
+        (is (contains? (program/schema-changes (pdb/speculate-db db0 (pdb/project-tx tx #(#{"config" "schema"} (namespace %))))) :seon.config.zz/k)
+            "the schema the import registers is in the cut")
+        (is (:seon.error/type (program/config-refused db0 tx)) "the entry it refuses is refused, read through the cut")
+        (is (nil? (program/config-refused db0 (source/tx-of db0 (assoc files schema-file schema-text config/shipped-file (str/replace-first conf ":seon.config.zz/k 0" ":seon.config.zz/k 5")) false)))
+            "and one valid only under the schema the same import registers is not")))))
+
+(deftest a-binary-is-current-for-a-tree-unless-what-differs-reaches-root
+  ;; docs/source.md#the-binary-records-its-program: the one rule (Point, 2026-11-10) the gate's build, the spawn refusal and the
+  ;; stale-binary row ask. db is the checkout's program, so tree is its working tree; each case is the binary's tree made from it
+  ;; with one change (a git index of its own: the repository is not touched)
+  (let [db (test-runner/program)
+        tree (fx/tree-id here)
+        g (program/reach-graph db (fx/declared-refs seon.system/built-text))
+        git (fn [env & args] (:out (apply sh/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
+        built-with (fn [path f]
+                     ;; tree with path's text replaced by (f text), or its gitlink moved when f is :pin
+                     (let [idx (str here "/target/tmp/binary-current-" (random-uuid) ".index") env {"GIT_INDEX_FILE" idx}]
+                       (git env "read-tree" tree)
+                       (if (= :pin f)
+                         (git env "update-index" "--cacheinfo" (str "160000," (apply str (repeat 40 "1")) "," path))
+                         (let [blob (str/trim (:out (sh/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (f (let [fl (java.io.File. (str here "/" path))] (if (.isFile fl) (slurp fl) ""))))))]
+                           (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
+                       (let [t (str/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
+        current (fn [from] (root/binary-current db {:inputs {:tree from}} tree g))
+        tweak (fn [marker] (fn [text] (str/replace-first text marker (str marker " "))))]
+    (is (nil? (current tree)) "the same tree")
+    (is (nil? (current (built-with "test/seon/required_whole.clj" #(str % "\n;; a test changed\n")))) "a test's change: a process loads it from main")
+    (is (nil? (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form's change: the agent loads it from main")
+    (let [r (current (built-with "src/seon/writer.clj" (tweak "(defn writer-proc")))]
+      (is (some #{'seon.writer/writer-proc} (:reaches r)) (str "a root proc's step is root's own code: not current " (pr-str r)))
+      ;; rule (a), as bin/test reads it (the plan's out/build): a process test selected, and a build only for a binary not current
+      (testing "bin/test builds target/seon for a root-side change and for nothing else"
+        (is (seq (test-runner/build-text ['seon.agent-test/in-agent-sample] r)) "the root-side change builds")
+        (is (= "" (test-runner/build-text ['seon.agent-test/in-agent-sample] (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))))
+            "an agent-only change builds nothing")
+        (is (= "" (test-runner/build-text [] r)) "and no process test selected builds nothing")))
+    (is (= ["reference-code/lmdb"] (:reaches (current (built-with "reference-code/lmdb" :pin)))) "a pin: not current")
+    (let [r (current (built-with "src/seon/render/ui.clj" (tweak "(defn script")))]
+      (is (some #{'seon.render.ui/script} (:reaches r)) (str "a render a schema names, which no call of root's reaches, is root's: not current " (pr-str r))))
+    (is (= ["zz-unplaced.txt"] (:reaches (current (built-with "zz-unplaced.txt" (constantly "x"))))) "a path no rule places: not current")
+    (is (= :binary-tree (:missing (root/binary-current db {} tree g))) "a binary that recorded no tree, against a main that holds one: unknown, never current")
+    (is (nil? (root/binary-current db {:inputs {:tree tree}} nil g)) "a main with no source fact: nothing known differs")))
 
 (deftest a-config-entry-writes-back-only-its-own-bytes
   ;; docs/source.md#a-program-file: the config file is one entity per entry, each form its exact text with its tags unread, and a write-back changes only what an entry changed

@@ -1004,7 +1004,8 @@
           {:digest digest :fact (assoc (fact-on db (count files)) :error (:seon.error/message bad)) :error bad}
           (let [tx (into (vec tx) (source/modes-tx db (:modes r)))]
             {:digest digest :tx tx
-             :fact (assoc (fact-on (pdb/speculate-db db tx) (count files))
+             ;; the counts read three attributes after tx: only their part of it is applied (seon.db/project-tx), never the whole import
+             :fact (assoc (fact-on (pdb/speculate-db db (pdb/project-tx tx #{:form/id :ns/name :ns/file :schema/key :schema/file})) (count files))
                           :digest digest :retracted (count (filter #(and (vector? %) (= :db/retractEntity (first %))) tx)))}))))))
 
 (defn baseline-of
@@ -1289,6 +1290,104 @@
   (cond-> (-> held (dissoc :inputs :binary) (assoc :boot boot :program main-digest))
     (:program built) (assoc :binary (:program built))
     (and (:inputs built) (= (:program built) main-digest)) (assoc :inputs (update (:inputs built) :config merge config-input))))
+
+(def root-entries
+  "Where the binary's own code starts, the roots of root-reach: its one entry (its modes, root's boot and procs among
+  them: system.edn's procs are edges of seon.system/read-decl, the reach graph's :data-refs). See
+  docs/source.md#the-binary-records-its-program."
+  '[seon.main/-main])
+
+(def agent-body
+  "Where a forked child stops running the binary's code and becomes an agent, which loads main's program from the db: the
+  body the fork server's :fork hands it, and the agent's process entries (:seon.config.source/process-entry's agent side),
+  which the reach graph links from every form that starts a process (seon.lib/fork!'s callers, the fork server's among
+  them). root-reach enters none of them. Sound because an agent runs main's code, not its binary's: the fork server loads
+  main's program over the binary's image at its start and at every commit (seon.program/load-all!, load-changes!), so every
+  agent it forks inherits main's forms, and a resumed agent loads its branch's difference (seon.program/load-diff!). See
+  docs/source.md#the-binary-records-its-program."
+  '[seon.repl/run! seon.repl/serve! seon.turn/work!])
+
+(defn root-roots
+  "Every name root's binary runs code from, as the data that names it says: root-entries, system.edn's procs and effects
+  (g's :data-refs, seon.fx/declared-refs), the renders schema entries name (a schema row's :refs: :seon.render/hiccup,
+  :model and their kin) and the qualified symbols the config in force holds (cfg), less any in a test namespace (a
+  scripted model's fixture is the agent's, loaded from main). requiring-resolve's run-time names are these: seon.system's
+  procs, seon.render's renders, seon.model's script; seon.cost's are a cost proof's own (a test's), seon.main's
+  seon.check/-main a test driver. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :map :map] [:vector :qualified-symbol]]}
+  [{:keys [data-refs rows test-nss]} cfg]
+  (vec (distinct (for [s (concat root-entries (mapcat val data-refs) (mapcat :refs (filter :schema (vals rows)))
+                                 (for [v (vals cfg) x (if (coll? v) v [v]) :when (qualified-symbol? x)] x))
+                       :when (and (qualified-symbol? s) (not (contains? test-nss (symbol (namespace s))))) ] s))))
+
+(defn root-reach
+  "The vars of reach graph g that root's process runs from its binary: the closure of root-roots (cfg the config in
+  force) over g's edges, never entering agent-body. A change to one of them is judged only by a binary built with it
+  (binary-current). See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :map :map] [:set :qualified-symbol]]}
+  [{:keys [defs adj rows] :as g} cfg]
+  (let [cut (set (mapcat #(get defs %) agent-body))
+        start (vec (remove cut (mapcat #(get defs %) (root-roots g cfg))))
+        forms (into (set start) (program/closure start #(remove cut (get adj %))))]
+    (into #{} (for [f forms [k s] (:defines (rows f)) :when (= :var k)] s))))
+
+(defn- build-input?
+  "Is changed path p (with its git modes) something the binary bakes and no load of the db brings: a pin (a gitlink),
+  native code, deps.edn, bin/build, .gitmodules, or a class of resource the build compiles in (seon.fx/env-class: the
+  schemas, system.edn) or the shipped config. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string :string :string] :boolean]}
+  [p old-mode new-mode]
+  (boolean (or (= "160000" old-mode) (= "160000" new-mode)
+               (str/starts-with? p "native/") (#{"deps.edn" "bin/build" ".gitmodules"} p)
+               (str/starts-with? p "resources/seon/config/")
+               (#{:seon.env/schemas :seon.env/system :seon.env/deps} (fx/env-class p)))))
+
+(defn binary-current
+  "Whether a binary built from built's tree (binary-program's record, its :inputs :tree) runs tree's program as tree
+  would have it built: nil when it does, else {:binary its tree :tree tree :reaches [what differs that it bakes]}. Equal
+  trees are nil, and so is no tree (main holds no source fact: nothing known differs); a binary that recorded no tree
+  against a main that holds one is unknown, never current ({:missing :binary-tree}). What differs is git's changed paths between the two trees: a build
+  input (build-input?) is not current; a source file under src/ is not current when a var defined by one of its forms
+  that changed (its text on db, main holding tree's program, is not in the file as the binary's tree has it) is in
+  root-reach of db's reach graph, or when db holds no namespace of it (added or gone: what it held is unknown); a path
+  of none of these that does not run from the checkout or main (tests, the wiki, task files, bin/'s scripts) is not current. Anything else (tests, the wiki, task files, agent-side code) is current: a process
+  loads it from main's db. The one rule a spawn refusal, the stale-binary row and the gate's build all ask (Point,
+  2026-11-10). Cost: one git diff, one reach graph of db (or g, when the caller holds one), O(changed files' forms).
+  See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string]] [:maybe :map]]
+                  [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string] [:maybe :map]] [:maybe :map]]]}
+  ([db built tree] (binary-current db built tree nil))
+  ([db built tree g]
+   (let [from (get-in built [:inputs :tree])]
+     (cond
+       ;; no source fact: main was never brought to a tree, so nothing is known to differ
+       (nil? tree) nil
+       ;; a binary that recorded no tree, against a main that holds one, is unknown: never current
+       (nil? from) {:binary nil :tree tree :reaches [] :missing :binary-tree}
+       (= from tree) nil
+       :else
+       (let [changed (fx/tree-diff (cfg/checkout) from tree)]
+         (if (contract/error? changed)
+           ;; a diff git cannot make is no answer of current: the error, which a caller reads as not current
+           changed
+           (let [inputs (vec (for [[p om nm] changed :when (build-input? p om nm)] p))
+                 src (for [[p] changed :when (and (str/starts-with? p "src/") (str/ends-with? p ".clj"))] p)
+                 ;; what runs from the checkout or from main, never the binary: tests, the wiki, task files, bin/'s scripts
+                 elsewhere? (fn [p] (or (str/starts-with? p "test/") (str/ends-with? p ".md") (str/starts-with? p "resources/seon/tasks/")
+                                        (and (str/starts-with? p "bin/") (not= p "bin/build"))))
+                 ;; a changed path the rule cannot place (the web assets the build compiles, anything else) is not current
+                 unplaced (vec (for [[p om nm] changed :when (not (or (build-input? p om nm) (some #{p} src) (elsewhere? p)))] p))
+                 g (or g (program/reach-graph db (fx/declared-refs system/built-text)))
+                 reach (root-reach g cfg/config)
+                 ns-of (fn [p] (d/q '[:find ?n . :in $ ?p :where [?e :ns/file ?p] [?e :ns/name ?n]] db p))
+                 ;; a form changed when its text on db is not in the file as the binary's tree has it (required!'s test)
+                 changed-vars (fn [n p] (let [old (fx/tree-file (cfg/checkout) from p)]
+                                          (for [[id src] (d/q '[:find ?id ?src :in $ ?n :where [?ns :ns/name ?n] [?f :form/ns ?ns] [?f :form/id ?id] [?f :form/src ?src]] db n)
+                                                :when (not (and old (str/includes? old src)))
+                                                [k s] (:defines (get (:rows g) id)) :when (= :var k)] s)))
+                 hits (vec (for [p src :let [n (ns-of p)] v (if n (filter reach (changed-vars n p)) [(symbol p)])] v))
+                 reaches (-> inputs (into unplaced) (into hits))]
+             (when (seq reaches) {:binary from :tree tree :reaches reaches}))))))))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote

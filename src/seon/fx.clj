@@ -257,6 +257,27 @@
     {'seon.system/read-decl (set (filter qualified-symbol? (tree-seq #(or (coll? %) (tagged-literal? %))
                                                                      #(if (tagged-literal? %) [(:form %)] (seq %)) decl)))}))
 
+(defn tree-diff
+  "What changed between git trees from and to of the repository at root: [[path old-mode new-mode] ...] (git diff --raw, no
+  renames: a mode 160000 is a pin), or :seon.fx/io-error with git's words when git cannot diff them (a tree it does not
+  hold). See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string :string :string] [:or [:vector [:tuple :string :string :string]] :seon.error/base]]}
+  [root from to]
+  (let [r (git-run {} root ["diff" "--raw" "--no-renames" from to] nil)]
+    (if (zero? (:exit r))
+      (vec (for [l (str/split-lines (:out r)) :when (not (str/blank? l))
+                 :let [[meta p] (str/split l #"\t" 2) [om nm] (str/split (subs meta 1) #" ")]]
+             [p om nm]))
+      (error #'seon.fx/tree-diff :seon.fx/io-error (str "git diff " from " " to ": " (str/trim (str (:err r)))) {:path root}))))
+
+(defn tree-file
+  "The text of path in git tree tree of the repository at root (git show TREE:PATH), or nil when the tree holds no such
+  file. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string :string :string] [:maybe :string]]}
+  [root tree path]
+  (let [r (git-run {} root ["show" (str tree ":" path)] nil)]
+    (when (zero? (:exit r)) (:out r))))
+
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit) with every
   changed and untracked unignored file added, in an index of its own (the repository's untouched), less
@@ -927,8 +948,30 @@
               ;; or the next day's reuses it, measured at 45 s against 2 s. One slot, the last tree built
               _ (when (and (empty? files) (.isFile (java.io.File. (str slot "/seon"))))
                   (doseq [n kept-build] (sh/sh "cp" "-c" (str slot "/" n) (str dir "/target/" n))))
-              b (apply sh/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir]))
-              _ (when (and (empty? files) (zero? (:exit b)))
+              ;; the binary root runs, with its build record, over the clone bin/worktree --at took of the main tree's: what a gate's
+              ;; runner judges current for the candidate's tree (seon.root/binary-current) is the binary that is running
+              _ (when-not all?
+                  (doseq [n ["seon" "seon.stamp" "seon.tree" "seon.program"]
+                          :let [f (java.io.File. (str (cfg/checkout) "/target/" n))] :when (.isFile f)]
+                    (sh/sh "cp" "-cf" (.getPath f) (str dir "/target/" n)))
+                  ;; and root's kept stores, so the candidate's plan and seed import only what it changed: the plan's program
+                  ;; store (a branch per tree, keyed by the importer: seon.test-store/kept-program-store) and the process
+                  ;; tests' store (its source fact keyed by the indexing code, seon.root/kept-index!: a clone whose code moved
+                  ;; is indexed again from nothing, so the clone decides the cost, never the answer); a store's data file
+                  ;; (as seon.test-store/clone-process-store! takes it) and the plan's kept reach graph, keyed by its builder
+                  (doseq [^java.io.File d (concat (.listFiles (java.io.File. (str (cfg/checkout) "/target")))
+                                                  (.listFiles (java.io.File. (str (cfg/checkout) "/target/runs"))))
+                          :let [n (.getName d) rel (if (= "runs" (.getName (.getParentFile d))) (str "runs/" n) n)]
+                          :when (and (.isDirectory d) (re-matches #"(program-store|test-store)-[0-9a-f]+" n)
+                                     (.isFile (java.io.File. d "data.mdb")))]
+                    (let [to (str dir "/target/" rel)]
+                      (sh/sh "rm" "-rf" to) (sh/sh "mkdir" "-p" to)
+                      (doseq [n ["data.mdb" "reach-graph.fasl"] :when (.isFile (java.io.File. d n))]
+                        (sh/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))))
+              ;; a gate's run builds only through its runner, when the binary is not current for the candidate's tree
+              ;; (bin/test's plan: seon.root/binary-current, rule (a)); the full run builds main's tree here, into its kept slot
+              b (if all? (apply sh/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])) {:exit 0})
+              _ (when (and all? (empty? files) (zero? (:exit b)))
                   (.mkdirs (java.io.File. ^String slot))
                   (doseq [n kept-build] (sh/sh "cp" "-cf" (str dir "/target/" n) (str slot "/" n))))]
           (if (not (zero? (:exit b)))
