@@ -463,9 +463,10 @@
                  :leadless-section #(problems/leadless-sections db ans) :uncited-task #(problems/uncited-tasks db ans)
                  :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
                  :stale-plan #(problems/stale-plans db ans)
-                 ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it), and the folds
-                 :fixed #(let [a (problems/answers db)]
-                           (#'problems/health-with db a (:classes (#'problems/report-with db a {} nil)) {}))}
+                 ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it, over the derived rows as health hands them), and the folds
+                 :fixed (let [derived (#'problems/other-derived db ans)]
+                          #(let [a (problems/answers db)]
+                             (#'problems/health-with db a (:classes (#'problems/report-with db a {} nil)) derived)))}
         measured (update-vals classes calls-of)
         ;; 74 -> 86 -> 88 -> 89 on 2026-11-10, one total; per class since. Each bound is the contracted calls measured on this world.
         bounds {:stalled 1             ; the processes holding a stall fact, one range
@@ -477,14 +478,15 @@
                 :unnamed-site 9        ; the catch sites of the program's forms (live? and form-of per form, the namespaces once)
                 :stale-section 2       ; the read datoms and the vars' forms, one scan each
                 :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
-                :fixed 48              ; answers, report-with (every recorded class), health-with (problem-unlinked over all of them)
-                :wrappers 4}]         ; health's and other-derived's own contracts (2), and 2 the rows above do not attribute
+                :fixed 50              ; answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
+                :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
     (doseq [[c bound] (dissoc bounds :wrappers)]
       (is (<= (measured c) bound) (str c " reads " (measured c) " contracted calls, bound " bound)))
-    (is (<= (:calls m) (apply + (vals bounds))) (str "one health read makes " (:calls m) " contracted calls, the classes' bounds sum to " (apply + (vals bounds))))))
+    ;; task-reads is in both uncited-task's row and stale-plan's (each measured alone makes it), and health makes it once (other-derived)
+    (is (<= (:calls m) (dec (apply + (vals bounds)))) (str "one health read makes " (:calls m) " contracted calls: the classes' bounds sum to " (apply + (vals bounds)) ", less task-reads counted twice"))))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -588,7 +590,10 @@
                :work "no pull and no contracted call per finished task: the move's datoms (given, the render proc's) name the touched task and its agent's task, the derived classes are carried and read where the two dbs differ; the program's changes come from the moved datoms (seon.merge/delta-changes given them), and the per-task part is the cold index nodes the task scans touch"
                :growth :linear
                :per-n {:ticks 1700 :bytes 10500 :calls 0}
-               :fixed {:ticks 650000 :bytes 3000000 :calls 54}
+               ;; fixed calls, once a read whatever n, summed by what makes them: Point, 2026-11-10 (in Sean's absence, reported to him): 54 -> 56
+               :fixed {:ticks 650000 :bytes 3000000 :calls (+ 54   ; the read before 2026-11-10
+                                                              1    ; seon.problems/task-reads: the tasks' readiness and cites, once
+                                                              1)}  ; seon.problems/stale-plans' own contract
                :sizes [10 30 100]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
