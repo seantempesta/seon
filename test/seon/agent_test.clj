@@ -44,9 +44,7 @@
   :dirs and :sets (and :group, another root of the same arguments); :config, the tasks' own settings (their :seon.task/config: a test's scripted
   model, :seon.config.ai/script, rides the task, so the root's arguments stay alike and the shard's
   tests share one root: docs/config.md#the-resolver); :decls, more task declarations in the task's file beside t (a function of
-  {:ns :task}, or a vector); :own-root?, a root of its own for this test (its main dropped with
-  it): a test whose agent merges into main, which would move the program every later test runs;
-  :client, the client its attach names (seon.server: then only that client's requests, or ones
+  {:ns :task}, or a vector); :client, the client its attach names (seon.server: then only that client's requests, or ones
   naming the task, act on the agent)."
   ([forms] (in-agent forms {}))
   ([forms opts]
@@ -83,7 +81,7 @@
   :root}, once the agent is ready, and its answer is with-agent's. A test whose steps wait on its own process
   (a fifo, a pid) uses this instead of a root of its own; opts are in-agent's (and :group, a name for a root of its own among
   the tests that name it: :pristine, for tests that need a main nothing merged into, :merge, for tests whose agent merges)."
-  [{:keys [dirs proofs sets config decls own-root? client group] :or {proofs '#{demo-test/t}}} f]
+  [{:keys [dirs proofs sets config decls client group] :or {proofs '#{demo-test/t}}} f]
   (let [checkout (seon.config/checkout)
         tns (seon.lib/unique-id)
         names {:ns tns :task (str tns "/t")}
@@ -97,21 +95,16 @@
         args (into (cond-> ["--set" (str ":seon.config.source/root=" (pr-str checkout))]
                      dirs (into ["--set" (str ":seon.config.source/dirs=" (pr-str dirs))]))
                    (mapcat (fn [x] ["--set" x])) sets)
-        ;; its store and main named (seon.test-store/start-root!), never inherited
-        root (if own-root?
-               (let [main (str "in-agent-" (random-uuid))]
-                 (ts/start-root! {:store (ts/process-store checkout) :main main :runs (str checkout "/target/runs/" main "-runs") :args args}))
-               (ts/shared-root! args))
+        root (ts/shared-root! args)
         ask (fn [m] (ts/ask root m))
         eval-root (fn [code] (ask {:op :eval :agent "root" :code code}))
         made (volatile! nil)
-        ;; what the test made goes with it, however it ended: on its own root, the root and its
-        ;; main; on the shared one, its agent (killed, its end awaited), its tasks (cancelled) and their branches
+        ;; what the test made goes with it, however it ended: its agent (killed, its end awaited), its tasks
+        ;; (cancelled) and their branches
         end! (fn []
                (let [agent @made]
                  (sh/sh "rm" "-rf" tasks)
-                 (cond own-root? (let [s (ts/stop-root! root)] (ts/drop-main! (:store root) (:main root)) (sh/sh "rm" "-rf" (:runs root)) s)
-                       (:port root) (eval-root (str "(let [ev (c/events sys) a " (when agent (str ":" agent)) "]"
+                 (cond (:port root) (eval-root (str "(let [ev (c/events sys) a " (when agent (str ":" agent)) "]"
                                                     " (when-let [v (resolve 'ready-ev)] (clojure.core.async/untap (:events-mult sys) @v))"
                                                     " (when (and a (not (:ended-ms (get (:agents (c/state sys)) a))))"
                                                     "   (c/kill! sys a)"
@@ -145,7 +138,7 @@
                          (f {:names names :ask ask :eval-root eval-root :root root}))))
           (finally (vreset! stopped (end!))))]
     (when-let [a (and (map? out) (::attach-made-no-agent out))]
-      (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a) (when own-root? (str "\nroot's log:\n" (:log @stopped))))
+      (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a))
                       {:attach a})))
     (when-let [e (and (map? out) (::no-root out))] (throw (ex-info (str "with-agent: the root did not listen: " (pr-str e)) e)))
     out))
@@ -168,25 +161,18 @@
   [a]
   (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ended :dead :killed} (:type e)) (= :" a " (:agent e))) :gone (recur))))"))
 
-(def ^:private tuned
-  "in-agent's options for the tests that need a root set up (test children, a heap bound, a small node cache): one
-  root among them (a root is 8 s of boot, docs/testing.md#a-root-costs-what-it-boots), two children at most, and a
-  child for any work."
-  {:sets [":seon.config.proofs/jobs=2" ":seon.config.proofs/child-min-ms=1"
-          ;; an agent past 256 MB of heap is out of memory (an-oom-carries-its-heap), and a small node cache
-          ;; is full at the history an-agents-start-costs-the-same-however-long-its-root-has-run grows
-          ":seon.config.agent/heap-extra-bytes=268435456" ":seon.config.store/node-cache-bytes=8388608"]})
-
 (def ^:private merge-cache
   "The verdict cache directory of the root the merging tests share (a delay: one per test process)."
   (delay (str (seon.config/checkout) "/target/tmp/verdicts-merge-" (random-uuid))))
 
 (defn merging
-  "in-agent's options for a test whose agent merges into main (which moves the program every later test runs):
-  a root for the tests that merge, all alike, each on test names of its own, and a verdict cache the tests may
-  read and write (merge-cache)."
+  "in-agent's options for a test whose agent merges into main (which moves the program every later test runs), or
+  grows main's history (an-agents-start-costs-the-same-however-long-its-root-has-run): a root for them, all alike,
+  each on test names of its own, with a node cache small enough to be full at that history (an agent past it
+  rereads what the fork server holds; no test root's cache is tuned otherwise: this key is a root's, read where the
+  store opens, so it cannot ride a task) and a verdict cache the tests may read and write (merge-cache)."
   []
-  (-> tuned (update :sets conj (str ":seon.config.proofs/results-dir=" (pr-str @merge-cache))) (assoc :group :merge)))
+  {:sets [":seon.config.store/node-cache-bytes=8388608" (str ":seon.config.proofs/results-dir=" (pr-str @merge-cache))] :group :merge})
 
 (defn- spawn-kept-code
   "Root-REPL code: spawn an agent onto the kept branch kept (made by pre, code run with m, root's main connection, and
@@ -553,7 +539,7 @@
 (deftest a-test-run-is-dealt-across-children-and-loses-none
   ;; task seon.agent/a-test-run-streams-its-reports (the deal): the selected tests are dealt by seon.proofs/shards into
   ;; :seon.config.proofs/jobs test children, each its own fork; every test reports once, and a death in one child costs
-  ;; only the test it ran. Eight tests of four namespaces and one that dies, jobs 2.
+  ;; only the test it ran. Sixteen tests of four namespaces and one that dies: at the default :seon.config.proofs/child-min-ms they are worth two children or more (a-handful-of-tests-runs-in-one-child is the bound's other side).
   ;; And a child forked after a sibling holds no copy of the sibling's pipe,
   ;; whose end a child must never keep (the agent's death would not reach the sibling by SIGIO while any copy is open). Each
   ;; namespace's first test counts the descriptors open in its child (fcntl F_GETFD) and writes the count to a file: a child
@@ -561,20 +547,19 @@
   (let [dir (str (seon.config/checkout) "/target/runs/fds-" (random-uuid))
         _ (.mkdirs (java.io.File. ^String dir))
         ns-form (fn [n] (str "(ns app.par" n "-test (:require [clojure.test :refer [deftest is]])) (deftest a (spit " (pr-str (str dir "/" n))
-                             " (count (filter #(not (neg? (seon.sock/c-fcntl % 1 0))) (range 256)))) (is (= 1 1))) (deftest b (is (= 2 2)))"
+                             " (count (filter #(not (neg? (seon.sock/c-fcntl % 1 0))) (range 256)))) (is (= 1 1))) (deftest b (is (= 2 2))) (deftest c (is (= 3 3))) (deftest d (is (= 4 4)))"
                              (when (= n 3) " (deftest dies (seon.lib/c-exit 7))")))
         run #(str "(let [pids (atom []) r (seon.agent/run-tests-forked 100000000 #{} :main (fn [p] (swap! pids conj p)) '#{app.par0-test app.par1-test app.par2-test app.par3-test})]"
                   " (pr-str {:children (count (distinct @pids)) :pass (:pass r) :error (:error r) :died (vec (map :var (filter :exit (:reports r))))"
                   "          :ran (vec (sort (map :var (filter #(= :pass (:type %)) (:reports r)))))}))")
-        [_ _ _ _ two] (in-agent (conj (mapv ns-form (range 4)) (run))
-                                      tuned)
+        [_ _ _ _ two] (in-agent (conj (mapv ns-form (range 4)) (run)))
         v #(some-> (:value %) clojure.edn/read-string)
         counts (mapv #(parse-long (ts/output (str dir "/" %))) (range 4))]
     (sh/sh "rm" "-rf" dir)
     (is (every? pos-int? counts) (str "every child counted: " (pr-str counts) " " (pr-str two)))
     (is (apply = counts) (str "the children hold the same descriptors: " (pr-str counts)))
     (is (<= 2 (:children (v two))) "at least two children forked (a death forks a new one for what its child had left)")
-    (is (= [8 1 ["#'app.par3-test/dies"]] ((juxt (comp count :ran) :error :died) (v two))) "all eight passed once, and the death cost only the test it ran")))
+    (is (= [16 1 ["#'app.par3-test/dies"]] ((juxt (comp count :ran) :error :died) (v two))) "all sixteen passed once, and the death cost only the test it ran")))
 
 (deftest a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
   ;; task seon.agent/an-agent-has-one-wait: prove! waits for root's answer on the same wait as
@@ -853,7 +838,7 @@
            :work "the agent's own start: no read of main's history" :growth :constant :sizes sizes
            :fixed {:bytes 6.0e6}}
         measure "(- (seon.profile/alloc-bytes) (nth (last (:marks @seon.agent/state)) 2))"
-        opts tuned
+        opts (merging)
         ;; history as it grows: commits of 10 agents each (each rewrites the leaves it touches, as a root's starts do)
         grow (fn [{:keys [task]} from n] {:op :eval :agent "root" :code (str "(doseq [i (range " from " " (+ from n) " 10)] @(seon.root/transact-main! sys (seon.agent-test/history-tx " (pr-str task) " i 10)))")})
         ;; each agent measures, then grows main to the next size; the next agent forks after it
@@ -914,8 +899,8 @@
                             {:op :eval :agent "root" :code "@(seon.root/transact-main! sys (vec ((my.test/code 'app.idx \"(ns app.idx (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))\\n(defn f \\\"A var.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\\n\") @(:conn sys))))"}
                             "(seon.agent/merge-main! #{})"
                             current]
-                           ;; a root of its own: the slot is one per process, and a shard's shared root has searched before
-                           {:group :pristine})
+                           ;; its merge moves main's program: the root the merging tests share
+                           (merging))
         held (nth results 4) merged (nth results 6) after-merge (nth results 7)
         {:keys [rows current-before current-after same-index held?]} (:value held)]
     (is held? "the agent inherited an index")
@@ -1094,7 +1079,8 @@
   ;; docs/machine.md#how-to-read-an-out-of-memory-error: an agent past its heap bound (:seon.config.agent/heap-extra-bytes)
   ;; gets OutOfMemoryError, and its error map keeps the heap by type (Jolt's :jolt/heap) as data
   (let [[oom after] (in-agent ["(loop [held ()] (recur (conj held (byte-array 1000000))))" "(+ 1 2)"]
-                              tuned)
+                              ;; an agent past 256 MB of heap is out of memory: its task's own bound (docs/config.md#the-resolver)
+                              {:config {:seon.config.agent/heap-extra-bytes 268435456}})
         heap (get-in oom [:ex :jolt/heap])]
     (is (str/includes? (str (get-in oom [:ex :seon.error/message])) "heap ceiling") (pr-str (:ex oom)))
     (is (map? heap) (str "the error map keeps :jolt/heap: " (pr-str (:ex oom))))
