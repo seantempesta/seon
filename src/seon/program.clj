@@ -201,8 +201,8 @@
   host statics (Class/member) it references (:refs, with each var a literal name passed to
   resolve, ns-resolve or requiring-resolve looks up; in a macro, also the names its template
   quotes, which its expansion calls), the qualified names its quoted data holds (:quoted:
-  quoted-names, data, not references; a string that opens a form is code sent to a REPL, read
-  as one), the ops of the requests it builds (:ops: a map's constant keyword under :op), the qualified keywords its constants name (:keywords: the attributes, config keys
+  quoted-names, data, not references; a string holding a slash is read as code sent to a REPL: reader/forgive
+  turns text that opens no form into a comment, so a bare name in a sentence is no name), the ops of the requests it builds (:ops: a map's constant keyword under :op), the qualified keywords its constants name (:keywords: the attributes, config keys
   and schema entries its code reads or writes), the banned vars it references,
   its catch clauses
   (:catches, each {:class :answers}), the classes it constructs (:news, as the analyzer names them, which
@@ -237,13 +237,14 @@
                                                                                  (and (map? v) (keyword? (:op v))) (update a :ops conj (:op v))
                                                                                  :else a))
                                                                 (update % :quoted into (quoted-names x)) (tree-seq coll? seq x)))
-                                 ;; a string that opens a form is code sent to a REPL (an agent's eval, a
-                                 ;; root's): read by the one reader, its delimiters repaired (a str of
-                                 ;; fragments), its names are data as a quoted form's are
-                                 (and (string? x) (str/starts-with? x "("))
+                                 ;; a string is code sent to a REPL (an agent's eval, a root's): read by the one
+                                 ;; reader, its delimiters repaired (a str of fragments), its names are data as a
+                                 ;; quoted form's are. A qualified name has a slash, so a string without one is not
+                                 ;; read. forgive makes a line that opens no form a comment ("app.x/f is not code" names nothing; "app.x/f" alone does). Its keywords only when it opens a form: a message naming a config key is no read of it
+                                 (and (string? x) (str/includes? x "/"))
                                  (let [fs (reader/read-text (:text (reader/forgive x)) 'user)]
-                                   (vswap! acc #(-> % (update :quoted into (quoted-names fs))
-                                                    (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq fs)))))))
+                                   (vswap! acc #(cond-> (update % :quoted into (quoted-names fs))
+                                                  (str/starts-with? x "(") (update :keywords into (filter qualified-keyword?) (tree-seq coll? seq fs)))))))
          ;; a map built at run time names its op when its :op is a constant keyword ({:op :eval :code (str ...)})
          :map (when-some [k (some (fn [[kn vn]] (when (and (= :const (:op kn)) (= :op (:val kn))) (let [v (datum vn)] (when (keyword? v) v)))) (:pairs n))]
                 (vswap! acc update :ops conj k))
