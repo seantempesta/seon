@@ -57,8 +57,12 @@
 (defn- status {:malli/schema [:=> [:cat :map :map] :map]}
   [st m] {:op :status :agent (:id st) :set m})
 
-(defn- busy {:malli/schema [:=> [:cat :map] [:enum :busy :idle]]}
-  [st] (if (seq (:inflight st)) :busy :idle))
+(defn- busy
+  "The agent's status as root records it: :busy while a request that is work is in flight; a read (a :context read,
+  an eval of origin :context) is in flight without making it busy, so a read writes nothing to main (owner, 2026-11-10:
+  a read never writes; docs/server.md#ops)."
+  {:malli/schema [:=> [:cat :map] [:enum :busy :idle]]}
+  [st] (if (some (complement :read?) (vals (:inflight st))) :busy :idle))
 
 (defn- await-dead
   "Wait on the end's :in for its close: the process is gone, its socket's last holder with it.
@@ -94,19 +98,22 @@
     ;; the render proc's)
     nil [(cond-> (to-proc! st {:op :reply :k (:tag m) :result (:r m)})
            (contains? (:gates st) (:tag m)) (-> (update :gates disj (:tag m)) (update :fx-out (fnil dec 1)))) nil]
-    :req (let [{:keys [rid msg kind]} m]
+    :req (let [{:keys [rid msg kind]} m
+               read? (= :context (:origin msg))]
            (let [st (cond-> (to-proc! st (assoc msg (if (= kind :clone) :k :id) rid))
                       ;; a clone's socket follows in its own frame once the agent asks
                       (= kind :clone) (assoc :holding rid)
-                      true (update :inflight assoc rid (cond-> (select-keys m [:kind :branch :new :pass-fd])
+                      true (update :inflight assoc rid (cond-> (assoc (select-keys m [:kind :branch :new :pass-fd]) :read? read?)
                                                          ;; an eval's text, for its :started event
                                                          (string? (:forms msg)) (assoc :form (:forms msg))))
                       ;; what root last asked of it, for a stall or a death (seon.agent/last-op)
                       true (assoc :last-op (cond-> {:kind kind :since-ms (System/currentTimeMillis)}
                                              (string? (:forms msg)) (assoc :form (:forms msg)))))]
-             [st {:to-api [(status st (cond-> {:status :busy}
-                                        (= kind :eval) (assoc :running {:form (:forms msg)
-                                                                        :since-ms (System/currentTimeMillis)})))]}]))
+             ;; a read is in flight without making the agent busy: root records nothing of it
+             [st (if read? nil
+                   {:to-api [(status st (cond-> {:status :busy}
+                                          (= kind :eval) (assoc :running {:form (:forms msg)
+                                                                          :since-ms (System/currentTimeMillis)})))]})]))
     :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
     ;; root's stall check (seon.root's timer): a request in flight, no frame from the agent
     ;; for longer than the stall bound and no effect of its outstanding is a stall, observed once
