@@ -1941,13 +1941,24 @@
   (into #{} (for [f (root-forms g cfg) [k s] (:defines (rows f)) :when (= :var k)] s)))
 
 (defn root-digest
-  "The digest of what root runs (root-forms), by the Merkle digests of their components in g (:cd): it moves when a form
-  root runs changes or its reach does. Every test that starts a root or runs the binary takes it (index-answer): the owner's
-  ruling reversing \"a root's boot is no entry\" (docs/decisions.md) (a change to root's writer reused 226 of 233 process
-  tests' greens). Cost: one closure of root-roots (~1,500 forms) and one digest. See docs/source.md#tests-run-by-reach."
-  {:malli/schema [:=> [:cat :map :map] :string]}
-  [{:keys [comp-of cd] :as g} cfg]
-  (lib/digest (str/join " " (sort (map cd (distinct (keep comp-of (root-forms g cfg))))))))
+  "The digest of what root runs: the Merkle digests (:cd) of the components of root-roots' forms in g. A component's
+  digest is of everything it reaches, so this moves when any form root runs changes, or its reach does (and with the
+  agent's side, which every test that starts a root reaches already through the process entries). Every test that starts
+  a root or runs the binary takes it (index-answer): the owner's ruling reversing \"a root's boot is no entry\" (a
+  change to root's writer reused 226 of 233 process tests' greens; docs/decisions.md). Cost: one lookup a root, the
+  roots read once per schema and config value (roots, kept by the caller). See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map [:sequential :qualified-symbol]] :string]}
+  [{:keys [defs comp-of cd]} roots]
+  (lib/digest (str/join " " (sort (distinct (keep #(some-> (comp-of %) cd) (mapcat #(get defs %) roots)))))))
+
+(defn- roots-of
+  "root-roots of g under the config in force, kept on g's index while its schemas, data-refs and config are the same values
+  (root-roots reads every schema row and every config value: the index would pay them at each update)."
+  [g index]
+  (let [k [(:schemas g) (:data-refs g) cfg/config]]
+    (if (and (= (count k) (count (:roots-key index))) (every? true? (map identical? k (:roots-key index))))
+      [(:roots index) (:roots-key index)]
+      [(root-roots g cfg/config) k])))
 
 (defn- index-answer
   "The function of a key and its starting forms' ids that answers {:digest :process? :binary?} (graph-index)
@@ -1956,7 +1967,7 @@
   [{:keys [rows plain comp-of cd flags] :as g} {:keys [env tree code config]} roots?]
   (let [line (into {} (for [[ck v] config] [ck (str "\n" ck " " v)]))
         ;; what root runs, taken by every test that starts a root or runs the binary (root-digest): made once, when one asks
-        root (delay (root-digest g cfg/config))
+        root (delay (root-digest g (first (roots-of g (:index g)))))
         ;; :seon.env/src is a direct reader's (kept-program-store): a process test runs a program it names
         env-keys (filterv #(and (= "seon.env" (namespace %)) (not= % :seon.env/src)) (keys config))]
     (fn [k ids]
@@ -2004,26 +2015,30 @@
   "Graph g holding the tests' index under inputs (graph-index's, with no roots): the answers it
   held still (reach-step drops those a change can move and names them :stale, so a graph updated
   from one holding an index answers only for what moved, never for the program), the rest
-  computed, all of them when it holds none or holds one under other inputs. The index is
+  computed, all of them when it holds none or holds one under other inputs; and, when what root runs moved (root-digest),
+  the answers of the tests that took it (:rooted). The index is
   derived data, a function of the graph and inputs: regenerated whenever it is not held
   (docs/data-modeling.md#derived-data-is-a-cache-never-relied-on). Read it with index-of. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map :seon.program/inputs] :map]}
   [{:keys [defs tests] :as g} inputs]
-  (let [{held :in} (:index g)
-        fresh? (or (identical? inputs held) (= inputs held))
-        ;; a change to what root runs moves every test that starts a root, whatever it reaches (root-digest)
-        ;; kept with the index while the graph's component digests are the same value (a graph unchanged costs nothing)
-        root (if (identical? (:cd g) (:root-cd (:index g))) (:root (:index g)) (root-digest g cfg/config))]
-    (if (and fresh? (empty? (:stale g)) (= (:root (:index g)) root))
-      (if (identical? (:cd g) (:root-cd (:index g))) g (assoc-in g [:index :root-cd] (:cd g)))
+  (let [index (:index g)
+        fresh? (or (identical? inputs (:in index)) (= inputs (:in index)))
+        ;; the tests whose answer took what root runs (root-digest): a change to it moves them all, whatever they reach.
+        ;; The digest is asked only when one is held, and kept while the graph's component digests are the same value
+        rooted (if fresh? (:rooted index #{}) #{})
+        root-now (delay (let [[roots k] (roots-of g index)]
+                          {:root (if (identical? (:cd g) (:root-cd index)) (:root index) (root-digest g roots)) :roots roots :roots-key k}))
+        moved? (and (seq rooted) (not= (:root @root-now) (:root index)))
+        keep-root (fn [ix] (if (realized? root-now) (merge ix @root-now {:root-cd (:cd g)}) ix))]
+    (if (and fresh? (empty? (:stale g)) (not moved?))
+      (if (realized? root-now) (update g :index keep-root) g)
       (let [var-form #(peek (get defs %))
             answer (index-answer g inputs false)
-            held (when fresh? (:answers (:index g)))
-            rerooted (when (and held (not= root (:root (:index g))))
-                       (for [[t a] held :when (or (:process? a) (:binary? a))] t))
-            answers (into (or held {})
-                          (for [t (if fresh? (into (set (:stale g)) rerooted) tests) :let [id (var-form t)] :when id] [t (answer t [id])]))]
-        (assoc g :index {:in inputs :answers answers :root root :root-cd (:cd g)} :stale #{}
+            new (for [t (if fresh? (into (set (:stale g)) (when moved? rooted)) tests) :let [id (var-form t)] :when id] [t (answer t [id])])
+            answers (into (if fresh? (:answers index) {}) new)
+            rooted (reduce (fn [r [t a]] (if (or (:process? a) (:binary? a)) (conj r t) (disj r t))) rooted new)]
+        (when (seq rooted) @root-now)
+        (assoc g :index (keep-root {:in inputs :answers answers :rooted rooted}) :stale #{}
                :tests-by-ns (or (:tests-by-ns g) (group-by (comp symbol namespace) tests)))))))
 
 (defn index-of

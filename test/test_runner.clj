@@ -137,12 +137,15 @@
   seon.proofs/a-failed-import-leaves-no-branch: one selected 0 tests and said OK). Every text is
   read from the tree's git objects (tree-files). Two runs on one new tree both import it and the first to
   finish keeps the branch (keep-tree!). A store past
-  :seon.config.proofs/program-store-max-bytes on disk (an LMDB file never shrinks; max-bytes, else that key) is removed
-  when a tree must be imported into it, and starts again from that tree; a tree it keeps is read whatever its size. The branch's connection stays open for
+  max-bytes on disk (an LMDB file never shrinks) is removed when a tree must be imported into it, and starts again from
+  that tree; a tree it keeps is read whatever its size. Only the plan passes a bound (tests-of:
+  :seon.config.proofs/program-store-max-bytes), before anything of its run reads the store: the health step importing
+  the base tree beside the shards removed the store, and the head's branch the plan had kept with it, so every shard's
+  first program reader imported the program inside its own budget. Any other caller (nil) imports beside what is kept. The branch's connection stays open for
   the process (the db value reads the store); the store's main connection is released. tree: the
   checkout's tree-id when the caller holds it (the plan computes it once)."
   ([root store] (program-db root store (fx/tree-id root)))
-  ([root store tree] (program-db root store tree (config/value :seon.config.proofs/program-store-max-bytes)))
+  ([root store tree] (program-db root store tree nil))
   ([root store tree max-bytes]
   (let [b (tree-branch tree)
         open #(pdb/open! :lmdb store 0 :db)
@@ -152,7 +155,7 @@
         ;; the tree's branch asked for alone (seon.db/branch?, one read); the store's branches listed only for a tree to
         ;; import (keep-tree! picks the nearest kept tree), since d/branches reads every roster entry (35k ticks, 102 KB a branch)
         {:keys [conn cfg]} (let [o (open)]
-                             (if (or (pdb/branch? (:conn o) b) (<= (.length (io/file store "data.mdb")) max-bytes))
+                             (if (or (nil? max-bytes) (pdb/branch? (:conn o) b) (<= (.length (io/file store "data.mdb")) max-bytes))
                                o
                                (do (d/release (:conn o)) (fx/remove-tree! store) (open))))]
     (when-not (pdb/branch? conn b)
@@ -214,7 +217,8 @@
   (let [vars (set (keep #(when (str/includes? % "/") (symbol %)) names))
         nss (set (if (seq names) (map #(symbol (first (str/split % #"/"))) names) (test-namespaces root)))
         tree (fx/tree-id root)
-        db (program-db root store tree)
+        ;; the plan alone bounds the store, at its own import, before anything of this run reads it
+        db (program-db root store tree (config/value :seon.config.proofs/program-store-max-bytes))
         in (fx/inputs root config/config (config/checkout) tree)
         g (reach-graph-of db (:data-refs in) store)
         ;; the process store a process test's root takes is indexed by this tree's code: its key is an input of theirs

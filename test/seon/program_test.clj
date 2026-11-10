@@ -1488,10 +1488,14 @@
         _ (spit marker "kept")]
     (runner/program-db d store tree 1)
     (is (.isFile marker) "a tree the store keeps is read from it, the store past its bound: nothing removed, nothing imported")
+    (spit (str d "/src/app/ks3.clj") "(ns app.ks3)\n")
+    (sh/sh "git" "-C" d "add" ".")
+    (runner/program-db d store (fx/tree-id d))
+    (is (.isFile marker) "a caller with no bound (a test, the health step's base tree beside the shards) imports beside what is kept, never removing it")
     (spit (str d "/src/app/ks2.clj") "(ns app.ks2)\n")
     (sh/sh "git" "-C" d "add" ".")
     (runner/program-db d store (fx/tree-id d) 1)
-    (is (not (.isFile marker)) "a new tree past the bound starts the store again")))
+    (is (not (.isFile marker)) "the plan's bound, at a new tree, starts the store again")))
 
 (deftest a-change-to-what-root-runs-moves-every-test-that-starts-a-root
   ;; owner, 2026-11-10, reversing 2026-10-27's "a root's boot is no entry": a change to root's writer reused the greens of
