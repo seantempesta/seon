@@ -2133,7 +2133,9 @@
     (is (str/includes? card "href=\"/agent/b2/a3\"") "its page")))
 
 ;; docs/users.md#whats-on-screen: a request and its work read as one tree: an agent's tile holds, under it, the tile of each agent doing a
-;; task it started (the task's :seon.task/started-by, reversed in the tile's pull)
+;; task it started (the task's :seon.task/started-by, reversed in the tile's pull). Cost: n = the agents under one tile (what that agent
+;; started); the reverse join is one VAET seek on the tile's own entity and a pull of each child, so a tile costs its own children, never
+;; the store's agents, and each child tile is its own component, reused by its key
 (deftest a-tile-holds-the-agents-its-agent-started
   (let [db (sessions-db "b2" [["b2/a2" :a2 :running "seon.print/a-long-string" :parked :task-a]
                               ["b2/a3" :a3 :running "seon.print/b-short-string" :running :task-b]])
