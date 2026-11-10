@@ -1243,6 +1243,40 @@
            (catch Throwable e (contract/error :seon.agent/unrecorded #'record-results! (str "the branch refused the run's results: " (ex-message e)) {})))
       0)))))
 
+(defn- run-plan
+  "What a run of this branch selects and runs (run-tests-forked's, and the test service's :plan of it, seon.prove): the
+  plan (test-plan, with the tests of the namespaces named as proofs), the tests it selects for mode (:turn: the proofs and
+  what the branch changed; else the plan's), those deferred to the gate (process tests), those reused at their digest with
+  the reports they read as, and run, the rest, with each one's digest; or {:unread error} when the cache could not be read.
+  See docs/merging.md#the-test-service."
+  [proofs mode names]
+  ;; the tests of the namespaces a request names are selected as proofs are: named, they run whatever the branch changed
+  (let [named (when (seq names) (named-tests (db) names))
+        proofs (cond-> proofs (seq names) (into named))
+        plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))
+        ;; a test named is asked now: a red held at its digest runs again, so a red whose cause no digest sees (a rebuilt binary, a repaired checkout) can be asked
+        plan (cond-> plan (seq named) (update :reused (fn [held] (into {} (remove (fn [[t r]] (and (named t) (not (proofs/green? r))))) held))))]
+  (if-let [unread (:unread plan)]
+    {:unread unread}
+  (let [{judge :selected deferred :skipped} (run-selection plan names proofs)
+        selected (if (and (= :turn mode) (not (seq names)))
+                   ;; the proofs as the plan selects them (one with no form on the branch is not), and the tests the branch changed
+                   (vec (sort-by str (filter (set judge) (-> (set (filter proofs (:selected plan)))
+                                                             (into (filter (:digests plan) (pm/changed-vars (branch-changes (:base @state) (db)))))
+                                                             (into (keys (:removed plan)))))))
+                   judge)
+        {:keys [reused digests]} plan
+        run (filterv #(not (reused %)) selected)
+        ;; a red reused reports the failures its run recorded, so it judges as it did
+        reused-reports (vec (for [t selected :let [r (reused t)] :when r
+                                  f (or (seq (:failures r))
+                                        [(cond-> {:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}
+                                           (not (proofs/green? r)) (assoc :message "red at this digest, with no failure kept"))])]
+                              (cond-> (assoc f :var (str "#'" t) :reused true)
+                                ;; a cost proof's rows, as its fresh run reported them (seon.proofs/costs)
+                                (and (:cost r) (identical? f (first (:failures r)))) (assoc :cost (:cost r)))))]
+    {:plan plan :judge judge :deferred deferred :selected selected :run run :reused reused :digests digests :reused-reports reused-reports}))))
+
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
   green held at their digest), each test within ticks engine ticks of work of its own, writing
@@ -1276,31 +1310,10 @@
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
   ([ticks proofs mode forked names]
-  ;; the tests of the namespaces a request names are selected as proofs are: named, they run whatever the branch changed
-  (let [named (when (seq names) (named-tests (db) names))
-        proofs (cond-> proofs (seq names) (into named))
-        plan (test-plan (db) (when-not (= :main mode) (:base @state)) proofs (heard-main))
-        ;; a test named is asked now: a red held at its digest runs again, so a red whose cause no digest sees (a rebuilt binary, a repaired checkout) can be asked
-        plan (cond-> plan (seq named) (update :reused (fn [held] (into {} (remove (fn [[t r]] (and (named t) (not (proofs/green? r))))) held))))]
-  (if-let [unread (:unread plan)]
+  (let [{:keys [unread] :as sel} (run-plan proofs mode names)]
+  (if unread
     unread
-  (let [{judge :selected deferred :skipped} (run-selection plan names proofs)
-        selected (if (and (= :turn mode) (not (seq names)))
-                   ;; the proofs as the plan selects them (one with no form on the branch is not), and the tests the branch changed
-                   (vec (sort-by str (filter (set judge) (-> (set (filter proofs (:selected plan)))
-                                                             (into (filter (:digests plan) (pm/changed-vars (branch-changes (:base @state) (db)))))
-                                                             (into (keys (:removed plan)))))))
-                   judge)
-        {:keys [reused digests]} plan
-        run (filterv #(not (reused %)) selected)
-        ;; a red reused reports the failures its run recorded, so it judges as it did
-        reused-reports (vec (for [t selected :let [r (reused t)] :when r
-                                  f (or (seq (:failures r))
-                                        [(cond-> {:type (if (proofs/green? r) :pass (if (pos? (:error r)) :error :fail))}
-                                           (not (proofs/green? r)) (assoc :message "red at this digest, with no failure kept"))])]
-                              (cond-> (assoc f :var (str "#'" t) :reused true)
-                                ;; a cost proof's rows, as its fresh run reported them (seon.proofs/costs)
-                                (and (:cost r) (identical? f (first (:failures r)))) (assoc :cost (:cost r)))))
+  (let [{:keys [plan judge deferred selected run reused digests reused-reports]} sel
         ;; each test's budget from its own green history, read once for the run (seon.fx/test-budgets)
         budgets (fx/test-budgets (cfg/value :seon.config.proofs/results-dir) run ticks (cfg/value :seon.config.agent/test-ticks-floor) (cfg/value :seon.config.agent/test-ticks-factor))
         t0 (profile/now-ns)
