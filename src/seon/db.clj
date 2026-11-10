@@ -327,9 +327,20 @@
                  (catch clojure.lang.ExceptionInfo x
                    (let [{:keys [error entity-id]} (ex-data x)]
                      (if (and (= :entity-id/missing error) (vector? entity-id) (= 2 (count entity-id)) (qualified-keyword? (first entity-id)))
-                       (refuse! (contract/error :seon.db/no-target #'checked (str "nothing on this branch is the lookup in :target: a cite or a link names what exists, or "
-                                                                                  "what the same write made before it; a name that does not exist yet is written in two backticks, ``ns/name``")
-                                                {:target entity-id}))
+                       ;; who names it: the entity of this write holding that lookup (a value of it, or one of a set of them: a
+                       ;; section's links); a cite's is what it is of, a lookup ref or the tempid of an entity the same write makes
+                       ;; (a task, a section), each read as its identity value (its task id, its address)
+                       (let [holds? (fn [m] (some (fn [v] (or (= v entity-id) (and (coll? v) (some #{entity-id} v)))) (vals m)))
+                             m (some #(when (and (map? %) (holds? %)) %) tx-data)
+                             named (fn [x] (or (:seon.task/id x) (:seon.doc/address x)))
+                             of (:seon.cite/of m)
+                             by (cond (vector? of) (second of)
+                                      (some? of) (some #(when (and (map? %) (= of (:db/id %))) (named %)) tx-data)
+                                      :else (some-> m named))]
+                         (refuse! (contract/error :seon.db/no-target #'checked (str (if by (str by " cites ") "a cite or a link names ") (second entity-id)
+                                                                                    ", which nothing on this branch is: a cite or a link names what exists, or "
+                                                                                    "what the same write made before it; a name that does not exist yet is written in two backticks, ``ns/name``")
+                                                  (cond-> {:target entity-id} by (assoc :by by)))))
                        (throw x)))))]
       (when-let [e (invalid-entity r ix)] (refuse! e))
       r)))
