@@ -40,15 +40,11 @@ The change: what an agent reads is data on its entity, or on entities it refs, r
 
 Deletes: session-open and the example tags' fixed words where a render can say them; page-cites, agent-cites-tx, :seon.config.agent/cites, my.agent/cite! and uncite!; help-text's copy of what the wiki holds.
 
-Proofs: two agents with different data read different context with no code changed; the system message's words come from the entity's refs. Judged by real agents' turns to green (seon.ctx/context-makes-agents-better)."
-  :seon.task/kind :work
-  :seon.task/proofs #{}}
- {:seon.task/name "context-makes-agents-better"
-  :seon.task/plan "Done means agents do better, not that the code moved (strategy agreed with the owner, 2026-11-10): Sonnet subagents work real ready tasks through the seon MCP tools only (bin/mcp call), on a worktree's own root, never the standing root; each run records turns to green, tokens, and what the agent lacked; each lack becomes a context fix or a task. The session reviews every line a helper writes. Measured against the previous set on the same tasks, with what got worse named and followed up."
+Proofs: two agents with different data read different context with no code changed; the system message's words come from the entity's refs. Judged by real agents' turns to green."
   :seon.task/kind :work
   :seon.task/proofs #{}}
  {:seon.task/name "the-models-readers-follow-the-re-models"
-  :seon.task/plan "Context's readers that move when Optimization's re-models land (docs/users.md#the-stages-agreed-2026-11-09), each in the same branch as its schema change or right after it:
+  :seon.task/plan "Not ready: item 1 waits on Optimization's re-model 1 (run measures as entities, jolt/sync), item 3 needs a schema-property design, and item 2 has landed; Optimization lands re-model 1, then Context splits what is left into a task with a proof. Context's readers that move when Optimization's re-models land (docs/users.md#the-stages-agreed-2026-11-09), each in the same branch as its schema change or right after it:
 1. A run's measures are entities of their own, a ref to what they measured, summed when read (re-model 1, Optimization, on jolt/sync): seon.ctx.status's readers of :seon.test/ticks, :seon.test/bytes and :seon.fn/stats (status, task-of's :proved, the var pattern's :seon.test/* attributes) read the measures by their ref.
 2. Landed (jolt/cite-ref, 2026-11-09): a cite's target is a ref to an entity that exists, and `seon.ctx-test/a-pattern-joins-refs-by-their-attribute` holds every pattern's joins keyed by their attribute.
 3. seon.ctx's write! refuses an edit of a var through swap! by checking :var/name in code; instead a property on the var's and form's entity schemas says the entity is changed by its definition, and the edit walk reads it."
