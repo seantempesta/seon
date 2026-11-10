@@ -3422,3 +3422,18 @@
       (is (str/includes? tile "class=\"said\"") "in the tile's own text"))
     (is (not-any? #(= "user-messages" %) (map #(when (var? %) (name (symbol %))) (tree-seq coll? seq (ui/user-ctx {:seon.ctx/ctx {}}))))
         "and the page has no feed of every message")))
+
+;; seon.web/a-tabs-first-keyframe-settles-on-its-own (the 2026-11-10 occurrence): a tab on root's view, walked and quiet, then an
+;; agent spawned: its event and root's view with the new agent reach the render proc, and the tab is sent what moved
+(deftest a-spawn-reaches-a-quiet-root-tab
+  (let [[main branch _] (paged-dbs)
+        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
+        o (volatile! {})
+        st0 (#'p/pass (#'p/advance-main (assoc (proc-state main branch) :watch #{:root} :main-db nil) main) (volatile! {}))
+        _ (#'p/pass st0 (volatile! {}))
+        st1 (#'p/on-event st0 {:type :spawn :agent :a9 :at-ms 1})
+        view (assoc-in (:view st0) [:agents :a9] {:status :spawning :branch :task-demo-g})
+        st2 (#'p/answered (assoc-in st1 [:pending 9] :state) o :state view)
+        to-root (filter #(and (#{:patch :keyframe} (:op %)) (= :root (:view %))) (:to-web @o))]
+    (is (seq to-root) (str "the spawn reaches root's tab: " (pr-str (map :op (:to-web @o)))))
+    (is (some? st2))))
