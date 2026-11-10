@@ -277,7 +277,9 @@
          store (str tree "-store")
          git (fn [& args] (apply sh/sh "git" "-C" tree "-c" "user.name=t" "-c" "user.email=t@localhost" args))
          args ["--set" (str ":seon.config.source/root=" (pr-str tree)) "--set" ":seon.config.source/dirs=[\"resources/seon\"]"
-               "--set" (str ":seon.config.root/wiki-dirs=" (pr-str (if wiki [(str rel "/docs")] [])))]
+               "--set" (str ":seon.config.root/wiki-dirs=" (pr-str (if wiki [(str rel "/docs")] [])))
+               ;; the tree's own task files (none): the checkout's cite the whole program, which this tree's is not
+               "--set" (str ":seon.config.root/tasks-dir=" (pr-str (str tree "/resources/seon/tasks")))]
          ;; an answer's value, or the line as it is when it holds none (an error)
          read-line (fn [l] (let [v (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil))))] (if (some? v) v l)))]
      (.mkdirs (.getParentFile (java.io.File. (str tree "/" path))))
