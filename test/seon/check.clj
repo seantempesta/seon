@@ -1047,7 +1047,7 @@
         _ @(c/transact-main! sys [] {:flush? true})
         st (c/state sys {:datoms true})
         md (main-data-datoms sys)
-        expect {:main-datoms (count md) :by-attr (by-attr md) :main-t (get-in st [:main :t]) :user (System/getProperty "user.name")}]
+        expect {:main-datoms (count md) :by-attr (by-attr md) :main-t (get-in st [:main :t]) :user (seon.config/value :seon.config.root/user-name)}]
       (spit (str path ".expect.edn") (sedn/encode expect))
       {:report {:store (:store st) :a ra :merge (dissoc m :ops) :b rb :clone [(:id cl) rc] :expect expect :store-bytes (dir-bytes (:store-path sys))}
        :checks {:merged (:merged? m)} :then :kill}))))
@@ -1094,7 +1094,7 @@
                 :merge-b [(select-keys mmb [:ok :applied]) (dissoc mb :ops)] :after-merging-b r-n2}
        :checks {:main-recovered (and (= (:main-datoms expect) md) (:recovered? (:store st)))
                 ;; what main-data-datoms leaves out, asserted: the boot retracted phase 1's links
-                :earlier-agents-are-not-this-roots (= [(System/getProperty "user.name")] linked)
+                :earlier-agents-are-not-this-roots (= [(seon.config/value :seon.config.root/user-name)] linked)
                 ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
                 ;; main-data-datoms leaves the user out: it is still main's
                 :phase-1s-user-recovered (some? (seon.db/eid @(:conn sys) :seon.agent/key (:user expect)))
