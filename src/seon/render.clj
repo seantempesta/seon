@@ -91,7 +91,7 @@
           (if (contains? contract/forms t) t :seon.error/base)
           ;; what the map is, as the write check reads it (the best match of the attributes it holds); one that names no one
           ;; schema with a render is drawn as the data it is. One owning schema, the common case, is a lookup a key and no call
-          (let [ss (into #{} (keep (:entity-schemas ix)) (keys v))
+          (let [ss (set (vals (pdb/owners ix (keys v))))
                 s (if (next ss) (most-specific ix v) (first ss))]
             (when (contains? (:drawn-schemas ix) s) s))))))
 
@@ -365,7 +365,7 @@
             ;; hit; a call answers o), kept as its marker, so the parent orders and each child's answer stays its own
             place (fn [o env' xs] (mapv (fn [x] (if-let [[ef eo] (entity-render ix x)]
                                                   (render! w ef eo [x] env')
-                                                  (if (and (vector? x) (or (var? (first x)) (fn? (first x))) (not (keyword? (first x))))
+                                                  (if (and (vector? x) (or (var? (first x)) (fn? (first x))))
                                                     (render! w (first x) (assoc (or (second x) {}) :seon.render/as o) (vec (nnext x)) env')
                                                     x)))
                                         xs))
@@ -1015,7 +1015,7 @@
   {:malli/schema [:=> [:cat :map :map [:maybe :keyword]] [:maybe :qualified-keyword]]}
   [ix e via]
   (let [s (most-specific ix e)]
-    (cond (nil? s) (get (:entity-schemas ix) via)
+    (cond (nil? s) (get (pdb/owners ix [via]) via)
           (keyword? s) s
           :else (throw (ex-info (str "no one entity schema names this entity: " (:ambiguous s) " extend none of each other")
                                 (contract/error :seon.render/no-one-schema #'entity-schema "its identity attributes name entity schemas that extend none of each other"

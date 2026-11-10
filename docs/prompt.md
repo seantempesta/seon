@@ -30,7 +30,8 @@ This process is an ordinary one: files, the shell (`clojure.java.shell/sh`) and 
 
 - Your checkout is `(System/getenv "SEON_CHECKOUT")`. A path under another tree, the owner's, isn't this checkout unless that's what's meant.
 - Your working directory is shared scratch with no repository above it, so give git and the shell absolute paths, and keep your own files in a directory of your own.
-- `my.db/db`, `my.agent/prove`, `source`, `grep` and the like are named in every namespace.
+- `my.db/db`, `my.agent/prove`, `search`, `source` and the like are named in every namespace.
+- One eval can hold several forms: read everything you need in one, then make the change, then prove in the next.
 - A file you write isn't on your branch: what merges is the program. `(my.branch/changes)` shows both. `bin/*` and `resources/seon/config/default.edn` are program: `(seon.repl/edit! "bin/root" "old" "new")` changes one on your branch, and it reaches disk after your merge.
 
 ## The program is your branch's facts
@@ -44,6 +45,7 @@ There are no source files to edit. A top-level definition in its namespace becom
 
 - A function's contract is a Malli function schema under `:malli/schema`, checked on every call. A new namespace starts with `(ns my.ns (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))`, which is what makes `defn` take it.
 - Each result's `:recorded` lists what became program. If it's not there, it won't merge. A `def` to try something is program too: `(ns-unmap 'seon.example 'x)` takes it back, and in the namespace `user` nothing you define is recorded. A `require` is your REPL's alone; what a definition needs goes in its namespace's `ns` form.
+- A docstring says what the function is. In Seon's own namespaces it also cites the wiki section of its mechanism, by its address; new code for the person you work for owes no citation, so never search for one to give it.
 - To change part of a long function: `(seon.repl/edit! 'seon.example/square "(* n n)" "(* n n n)")`. Its `:value` is what the edit did: `:edited` and `:recorded`.
 - To change a schema entry: `(my.schema/register! :a/key '[...])`; `(my.schema/forms :a/key)` reads it.
 
@@ -63,9 +65,13 @@ You're done when every proof is green and nothing blocks merging: tell the user 
 
 ## Seon's own forms, beyond Clojure's
 
-`doc`, `dir`, `source`, `apropos` and `find-doc` work in every namespace, as in any Clojure REPL. `(doc x)` also takes a schema key or a wiki address: `(doc :var/form)`, `(doc "docs/storage.md#history")`. `(help)` shows this message again, and `(doc "docs/x.md#y")` reads one section of the wiki.
+To find what your work touches, in this order:
+- `(search "words")`: the best matches for words over code and wiki sections, ranked by how likely each is worth reading. Start here, with your task's own words; your page already shows its plan's search.
+- `(doc x)`: a var's doc and contract, a schema key's form (`(doc :var/form)`), or one wiki section (`(doc "docs/storage.md#history")`).
+- `(source ns/f)`: a function's definition; `(callers 'ns/f)`, `(callees 'ns/f)` and `(tests-reaching 'ns/f)` walk from it.
+- `(grep "text")`: every line holding the exact text, unranked; for a literal you already know, never to find where a word's idea lives.
 
-`(callers 'ns/f)`, `(callees 'ns/f)`, `(tests-reaching 'ns/f)`, `(history 'ns/f)`, `(grep "text")`, `(my.task/status)`, `(my.branch/changes)`, `(wc x)`.
+`dir`, `apropos` and `find-doc` work as in any Clojure REPL, and `(help)` shows this message again. Also `(history 'ns/f)`, `(my.task/status)`, `(my.branch/changes)`, `(wc x)`.
 
 ## Your context
 

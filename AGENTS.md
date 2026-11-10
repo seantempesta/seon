@@ -15,7 +15,7 @@ You are in `next/`, **Seon on Jolt, built to replace Seon** (`~/src/seon`, the J
 4. `docs/decisions.md`, for a ruling's own words;
 5. the header comment of a `bin/` script, which is that command's manual.
 
-**The running system:** `bin/root status` (the owner's main tree: server port 7888, dashboard http://127.0.0.1:7777/). The standing root's store (`runs/store`) is evidence: never experiment on it, and send that root only read-only evals unless the owner says yes to the write. The Web session owns servers and demos. Experiments use a worktree's own root and stores (`bin/worktree NAME`).
+**The running system:** `bin/root status` (the owner's main tree: server port 7888, dashboard http://127.0.0.1:7777/). The standing root's store (`runs/store`) is evidence: never experiment on it, and send that root only read-only evals unless the owner says yes to the write. The Web session owns servers and demos. Experiments use a worktree's own root and stores (`bin/worktree NAME`). Once a root is up its store is the source of truth: a boot resumes it and reads no file, and files reach it only by a landing, a re-index or `bin/root start --reindex` ([files and the db](docs/source.md#files-and-the-db-two-directions)).
 
 ## 1. What Seon is for, and what moving forward means
 
@@ -37,7 +37,7 @@ Who decides, who owns which area, and what a helper may do.
 - **The owner (Sean)** sets direction and makes the rulings. Bring him one decision at a time with its evidence, through the question tool, your pick first; a well-scoped task or a clear defect needs no asking.
 - **Named sessions each own an area** (Context, Web, Optimization), and one managing session keeps the landing order (`docs/plan.md`). A session knows its whole area and never answers for code it has not read (owner, 2026-11-08: "We are moving away from monolithic orchestrators who don't know anything and implementation agents who don't know the big picture").
 - **Sessions work together, with no fixed ceremony** (owner, 2026-11-06: "I don't want the work done twice. If you do it well merge it... No more ceremony and mandated fixed policies"): each says by message what it is taking.
-- **No fan-out** (owner, 2026-10-28: "This system of launching 10+ agents just burned my tokens and was not productive"). A session starts no other session unless the owner asks, and uses one helper at a time.
+- **No fan-out** (owner, 2026-10-28: "This system of launching 10+ agents just burned my tokens and was not productive"). A session starts no other session unless the owner asks. It uses as many helpers as its work needs (owner, 2026-11-10: "allocate whatever resources we need"), each on its own well-specified piece with its own files, and reviews every line each one writes.
 - **A helper is hands for a well-specified piece.** It works in a worktree of its own, branched from the session's branch, commits there and stops: no `bin/land`, no push.
 - **The session reviews every line a helper writes, and lands it itself; review is never delegated** (owner, 2026-11-08: "Well spec'ed tasks can be handed to sonnet, but the opus agents are responsible for reviewing the code").
 - **Seon agents** work tasks through the server (§6). What a session finds missing from their context is a task for Seon.
@@ -74,7 +74,7 @@ What a session does from its first command to its last.
 
 - **Combine your own ready branches,** prove once and land once. **Never wait on a landing:** start the next change in a new worktree branched from the landing branch, and never touch a worktree while its `bin/land` runs.
 - **A merge that completes a task** removes the task's entry and says `Completes: ns/name` ([merging](docs/merging.md#a-merge-says-what-it-completes)).
-- **No regressions** (owner, 2026-10-26: "don't accept regressions for no reason"): a number that got worse is refused unless the message names its reason and who follows it up. A cost bound moves only with the owner's yes.
+- **No regressions** (owner, 2026-10-26: "don't accept regressions for no reason"): a number that got worse is refused unless the message names its reason and who follows it up. A cost bound moves only with the owner's yes, and a new `:overrun` on a cost proof is added only with his yes.
 - **What a new design replaces goes with it** (tasks, wiki text, pointers); code with no caller is cut only with the owner's go.
 
 **Testing: compute only what is needed.**
@@ -97,7 +97,7 @@ The principles a design is held to; each links the section that states it in ful
   - a Flow proc and its channels ([flow](docs/flow.md#the-step-fn-contract-every-proc-follows));
   - a task: desired state on attributes, observed state as facts, one reconciler ([tasks](docs/tasks.md)); an OS child is an effect, and its exit is a fact;
   - a process: an agent is a forked OS process with a real REPL, on its own branch, named by role, task and checkout ([processes](docs/processes.md#the-agent-process));
-  - a render declared on the entity's schema, `:seon.render/hiccup` for html and `:seon.render/model` for the model's messages ([render](docs/render.md));
+  - a render declared on the entity's schema: `:seon.render/hiccup` for html, `:seon.render/openai-compat` for an entity's messages to the model (`:seon.render/model` is how the printer prints a value for the model) ([render](docs/render.md));
   - an error as data, flowing to whoever can fix it ([errors](docs/errors.md)).
 - **Nothing crashes and nothing hangs** (owner, 2026-10-28: "I want our system to be robust and to have it not crash or hang ever."): every wait ends, with its value or a typed error saying why it never will, and the agent fixes a failure or messages root when it needs another process ([errors](docs/errors.md#nothing-crashes-and-nothing-hangs)).
 - **Never pass or keep a db value:** a kept db value is a reference, `{:branch :commit :t}` ([storage](docs/storage.md#a-kept-db-value-is-a-reference)).
@@ -130,6 +130,8 @@ Each checkout runs its own standing root: `bin/root start | status | stop | next
 Reach it through the `seon` MCP server (`bin/mcp`, a stdio relay): every op of `seon.server/ops` is a tool ``seon_<op>`` ([server](docs/server.md#ops)). `seon_context` is what the model reads now; `seon_eval` evaluates in an agent's own REPL or in `root`; `seon_attach` and `seon_done` work a task as a Seon agent.
 
 **A helper in a worktree uses its own root, never the session's:** `bin/mcp call OP KEY=VALUE` is the same tool on this checkout's root ([working a task from a worktree](docs/server.md#working-a-task-from-a-worktree)). Without MCP, one request line: ``printf '{:op :agents}\n' | bin/ask PORT``.
+
+A root whose binary is another program than its main's forks no agent and says so (its problems tile, the last line of `bin/root start` and `bin/update`), naming the acts that bring them into agreement ([files and the db](docs/source.md#files-and-the-db-two-directions)).
 
 ## 7. The wiki is the one home for how the system works
 

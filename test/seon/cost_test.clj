@@ -378,6 +378,12 @@
                   :f (fn [db es] (reduce (fn [a e] (d/pull db [:note/text :note/agent] e) a) 0 es))
                   :minus :db/pull}})
 
+(defn unit-n
+  "The n unit k is measured at, where its row is steady: 2k units, but 10k for the rows whose unit differs below it
+  (:vec/conj!, :pr-str/char: 34 against 43 B, 56 against 43 ticks per char at 2k; :map/assoc and :sorted/assoc: 2k), 1k
+  for the rest, and 30 for the two pull rows, whose ticks and bytes are the same at 30, 300 and 1k."
+  [k] (cond (#{:db/pull :db/pull-attr} k) 30 (#{:vec/conj! :pr-str/char} k) 10000 (#{:map/assoc :sorted/assoc} k) 2000 :else 1000))
+
 (defn measure-unit
   "Unit k measured at n units: {:ticks :ns :bytes} per unit. A unit stated as the difference from
   another (:minus) measures both on the one input, the second right after the first, so the db,
@@ -388,48 +394,98 @@
         args (setup n)
         units (cond per-char (double (count (if (string? (first args)) (first args) (pr-str (first args)))))
                     per (cost/work per n) :else (double n))
+        ;; a warm call: each measured function run once on the input first, unmeasured, so the row is the call itself, not
+        ;; what is cold in a fresh process (a pull pattern's parse, a call site's first dispatch)
+        _ (apply f args)
+        _ (when minus (apply (:f (unit-benches minus)) args))
         m (cost/measure f args)
         b (when minus (cost/measure (:f (unit-benches minus)) args))]
     {:ticks (/ (- (:ticks m) (:ticks b 0.0)) units) :ns (/ (- (:ns m) (:ns b 0.0)) units) :bytes (/ (- (:bytes m) (:bytes b 0.0)) units)}))
 
+(defn- fresh-rows
+  "Unit k's rows (all units when k is nil), reps of each, each measured in a process that ran nothing before it
+  (seon.check/units: a child forked per measurement from a fresh binary's main carrier): {k [row ...]}. A row measured in
+  a shard moved with what the shard ran before it (:db/pull-attr 1870, 2590 and 2774 ticks, 7488 and 8560 B, 2026-11-10)."
+  [k reps]
+  (let [{:keys [exit out err]} (ts/binary-sh "./seon" "units" (if k (str k) "all") (str reps) "--profile" (name (seon.config/profile)) :dir "target")]
+    (when-not (zero? exit) (throw (ex-info (str "./seon units exited " exit ": " err) {:exit exit})))
+    (reduce (fn [acc l] (let [[k row] (edn/read-string (subs l 5))] (update acc k (fnil conj []) row)))
+            {} (filter #(str/starts-with? % "UNIT ") (str/split-lines out)))))
+
 (deftest the-unit-table-is-current
-  ;; every row of the table measured again, at the n where its row is steady: 2k units, but 10k for
-  ;; the rows whose unit differs below it (:vec/conj!, :pr-str/char: 34 against 43 B, 56 against 43 ticks
-  ;; per char at 2k; :map/assoc and :sorted/assoc: 2k), 1k for the rest, and 30 for the two pull rows, whose
-  ;; ticks and bytes are the same at 30, 300 and 1k (5.4k ticks a pull): its bytes within 1.25x
-  ;; (counted, the same at any load); its ticks too, the work done; a drifted row means the estimates
-  ;; priced by it are stale. Its ns (CPU time) no verdict decides on (seon.cost/exact): measured,
-  ;; not asserted (pure-tests 2026-10-23: within 3x of a table measured under another day's load
-  ;; was no function of the digest). Measured at 10k (pulls 1k) the test cost 5.3 G ticks, at these n 0.15 G.
-  (doseq [[k {:keys [ticks bytes]}] cost/units
-          :let [m (measure-unit k (cond (#{:db/pull :db/pull-attr} k) 30 (#{:vec/conj! :pr-str/char} k) 10000 (#{:map/assoc :sorted/assoc} k) 2000 :else 1000)) row (assoc m :what (:what (unit-benches k)))]]
-    (is (<= (/ ticks 1.25) (:ticks m) (* ticks 1.25)) (str k " ticks: table " ticks ", measured " (:ticks m) "; the row now: " row))
-    (is (<= (- (/ bytes 1.25) 1.0) (:bytes m) (+ (* bytes 1.25) 1.0)) (str k " bytes: table " bytes ", measured " (:bytes m) "; the row now: " row))))
+  ;; every row of the table measured again (unit-n: where its row is steady), each in a process that ran nothing before it
+  ;; (fresh-rows), a warm call: its bytes within 1.25x (counted, the same at any load); its ticks too, the work done; a
+  ;; drifted row means the estimates priced by it are stale. Its ns (CPU time) no verdict decides on (seon.cost/exact):
+  ;; measured, not asserted (pure-tests 2026-10-23: within 3x of a table measured under another day's load was no function
+  ;; of the digest). Measured at 10k (pulls 1k) the test cost 5.3 G ticks, at these n 0.15 G.
+  (let [rows (fresh-rows nil 1)]
+    (doseq [[k {:keys [ticks bytes]}] cost/units
+            :let [m (first (rows k)) row (assoc m :what (:what (unit-benches k)))]]
+      (is (<= (/ ticks 1.25) (:ticks m) (* ticks 1.25)) (str k " ticks: table " ticks ", measured " (:ticks m) "; the row now: " row))
+      (is (<= (- (/ bytes 1.25) 1.0) (:bytes m) (+ (* bytes 1.25) 1.0)) (str k " bytes: table " bytes ", measured " (:bytes m) "; the row now: " row)))))
 
 (deftest a-unit-measures-the-same-across-runs
-  ;; :db/pull-attr read 11.6 KB on one run and 8.9 KB on the next two (a warm or cold Datahike
-  ;; cache at its start); each measurement here builds its own db, and the counted dimensions
-  ;; agree to 1%, so the row does not depend on the cache's state when it began
-  (let [ms (vec (repeatedly 3 #(measure-unit :db/pull-attr 30)))
+  ;; a row is a function of its input, not of the process: three measurements of :db/pull-attr, each in a process that ran
+  ;; nothing before it, agree to 1% in the counted dimensions (in a shard the same row read 1870 to 2774 ticks with what
+  ;; ran before it: docs/cost.md#what-is-measured)
+  (let [ms ((fresh-rows :db/pull-attr 3) :db/pull-attr)
         near (fn [d] (let [vs (map d ms)] (<= (apply max vs) (* 1.01 (apply min vs)))))]
+    (is (= 3 (count ms)) (pr-str ms))
     (is (near :bytes) (str "bytes differ across runs: " (mapv :bytes ms)))
     (is (near :ticks) (str "ticks differ across runs: " (mapv :ticks ms)))))
 
+(defn- with-demo-task
+  "f judged with the one task file entry the demo waiver names (the shipped files' tasks come and go as they complete)."
+  [f] (with-redefs [cost/open-tasks (fn [] #{"seon.cost/demo-overrun"})] (f)))
+
+(deftest the-task-files-declare-tasks-an-overrun-may-name
+  (let [ids (cost/open-tasks)]
+    (is (every? #(re-matches #"[^/\s]+/[^/\s]+" %) ids))
+    (is (contains? ids "seon.cost/cost-tolerances-are-derived"))))
+
 (deftest an-open-overrun-is-accepted-until-it-regresses
-  ;; 200 bytes per integer against a 50 byte estimate: 4x, over the 1.25x slack (2e6 bytes at n=10000)
-  (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :calls (+ 1.0 n)})]
+  ;; 200 bytes per integer against a 50 byte estimate: 4x, over the 1.25x slack (2e6 bytes at n=10000).
+  ;; The waiver names a task a task file declares and the largest size it was taken at (:n)
+  (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :calls (+ 1.0 n)})
+        task "seon.cost/demo-overrun"
+        n (peek (:sizes linear))]
     (testing "within the ratchet (1.5x) of what was measured when its task was filed: green, still reported"
-      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:bytes 1500000.0}})
-            v (cost/judge e (rows e m))]
+      (let [e (assoc linear :overrun {:task task :n n :measured {:bytes 1500000.0}})
+            v (with-demo-task #(cost/judge e (rows e m)))]
         (is (:ok? v))
-        (is (= "seon.cost/demo-overrun" (get-in v [:accepted :task])))
+        (is (= task (get-in v [:accepted :task])))
         (is (seq (get-in v [:accepted :over])))
-        (is (re-find #"OVERRUN accepted while task seon.cost/demo-overrun" (cost/explain e (rows e m) v)))))
+        (is (re-find (re-pattern (str "OVERRUN accepted while task " task)) (cost/explain e (rows e m) v)))))
     (testing "past the ratchet: a regression, red"
-      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:bytes 1000000.0}})
-            v (cost/judge e (rows e m))]
+      (let [e (assoc linear :overrun {:task task :n n :measured {:bytes 1000000.0}})
+            v (with-demo-task #(cost/judge e (rows e m)))]
         (is (not (:ok? v)))
         (is (re-find #"REGRESSION" (cost/explain e (rows e m) v)))))))
+
+(deftest a-broken-waiver-is-red
+  ;; a waiver within the ratchet is red when its task is in no task file, when it states no size it was
+  ;; taken at, or when that size is not the proof's largest: each says which in its failure line
+  (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :calls (+ 1.0 n)})
+        task "seon.cost/demo-overrun"
+        n (peek (:sizes linear))
+        broken (fn [overrun] (let [e (assoc linear :overrun overrun) v (with-demo-task #(cost/judge e (rows e m)))] [v (cost/explain e (rows e m) v)]))]
+    (testing "the sound waiver is the control: green"
+      (is (:ok? (first (broken {:task task :n n :measured {:bytes 1500000.0}})))))
+    (testing "a task no file declares"
+      (let [[v text] (broken {:task "seon.cost/no-such-task" :n n :measured {:bytes 1500000.0}})]
+        (is (not (:ok? v)))
+        (is (= :no-task (get-in v [:waiver-fault :fault])))
+        (is (re-find #"BROKEN WAIVER: its :overrun names task seon.cost/no-such-task, which no file" text))))
+    (testing "no size"
+      (let [[v text] (broken {:task task :measured {:bytes 1500000.0}})]
+        (is (not (:ok? v)))
+        (is (= :no-size (get-in v [:waiver-fault :fault])))
+        (is (re-find #"BROKEN WAIVER: .* states no :n" text))))
+    (testing "a size that is not the largest"
+      (let [[v text] (broken {:task task :n (first (:sizes linear)) :measured {:bytes 1500000.0}})]
+        (is (not (:ok? v)))
+        (is (= :wrong-size (get-in v [:waiver-fault :fault])))
+        (is (re-find (re-pattern (str "BROKEN WAIVER: .* not at the largest size, " n)) text))))))
 
 (deftest a-proof-the-cap-leaves-too-few-sizes-is-refused
   ;; root, after [10 1000 2000] measured two points at the cap and said green as if three: a

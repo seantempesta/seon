@@ -17,7 +17,7 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.ref :as ref] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [seon.system :as system] [clojure.repl]
             [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -284,6 +284,13 @@
   [text template]
   (let [k (:tx-seq (swap! state update :tx-seq inc))]
     (:result (await-reply k {:op :launch :k k :text text :template template}))))
+
+(defn focus!
+  "Ask root to move the signed-in user's view to the page of the agent with key k: root's answer, or its refusal (no user signed in, no such agent). See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :string] :any]}
+  [k]
+  (let [n (:tx-seq (swap! state update :tx-seq inc))]
+    (:result (await-reply n {:op :focus :k n :key k}))))
 
 (defn note-costs!
   "fns (seon.profile/touched of an eval) added to what this agent has measured since its last end (write-end! writes it); nothing in a process that is no agent's. See docs/sharing.md#a-functions-cost-is-a-fact."
@@ -758,14 +765,15 @@
 
 (defn test-inputs
   "The reach inputs of db's tests: [shared in], shared the :inputs root's binary was built with
-  (:seon.root/source, its boot's), or nil; in those, else none of the tree's ({:env \"\" :tree \"\" :config {}} and
-  system.edn's declared refs)."
+  (:seon.root/source, its boot's: seon.root/booted-source, present only when the binary is main's program), or nil; in
+  those, else none of the tree's ({:env \"\" :tree \"\" :config {}} and the binary's system.edn's declared refs).
+  See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :seon.host/db] [:tuple [:maybe :map] :seon.program/inputs]]}
   [db]
   (let [root (d/entity db [:seon.root/id :root])
         source (:seon.root/source root)
         shared (when (= (:boot source) (:seon.root/boot root)) (:inputs source))]
-    [shared (or shared {:env "" :tree "" :config {} :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})]))
+    [shared (or shared {:env "" :tree "" :config {} :data-refs (fx/declared-refs system/built-text)})]))
 
 (defn branch-graph
   "The reach graph of branch db under in, the one test-plan selects by: base's graph (base-graph)
@@ -834,8 +842,8 @@
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/graph-index) against base's (main at its merge base), the greens stored at
   those digests (the verdict cache, greens and reds, whoever ran them: seon.fx/stored-results) and proofs. The digests' inputs with no program facts are this boot's
-  :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
-  binary is built from its source tree), so an agent's results are kept by digest in the one
+  :inputs on root's :seon.root/source fact (seon.root/booted-source: present only when root's
+  binary was built from main's program), so an agent's results are kept by digest in the one
   verdict cache (seon.fx/write-verdicts!;
   DECISIONS, Agents share greens: a test green at its digest never runs again, \"especially
   when freshly branched\"; every eval is a recorded form, so the digest covers what ran); a
@@ -899,7 +907,7 @@
       (cond-> (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (if unread {} found) proofs)
                   (update :selected into (keys removed))
                   (update :run into (keys removed))
-                  (assoc :digests cd :graph g :removed removed
+                  (assoc :digests cd :base-digests (some-> b :index (update-vals :digest)) :graph g :removed removed
                          :process (into (program/process-tests idx) removed-process)))
         unread (assoc :unread unread))))))
 
@@ -1311,10 +1319,8 @@
         run-all (fn [say]
             (if (empty? run)
               {:pass 0 :fail 0 :error 0 :test 0 :reports [] :ms 0}
-              (let [typical (fx/typical-ms run)
-                    ;; a test never measured counts as the mean of those measured, else the default
-                    mean (if (seq typical) (quot (reduce + (vals typical)) (count typical)) (cfg/value :seon.config.proofs/unmeasured-ms))
-                    ms (into {} (map (fn [t] [t (get typical t mean)])) run)
+              (let [;; each test's measured ms, or its class's configured estimate (seon.proofs/estimated-ms)
+                    ms (proofs/estimated-ms run (fx/typical-ms run) (:process plan))
                     ;; no more children than the work needs: each is worth at least what a fork and a child's start cost
                     n (-> (quot (reduce + (vals ms)) (cfg/value :seon.config.proofs/child-min-ms)) (max 1) (min (cfg/value :seon.config.proofs/jobs)))
                     fds (atom #{})
@@ -1351,6 +1357,10 @@
         (update :reports into reused-reports)
         (as-> r (merge-with + r (select-keys (frequencies (map :type reused-reports)) [:pass :fail :error])))
         (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
+        (as-> r (let [reds (proofs/results r) bd (:base-digests plan)
+                      stored (when (seq bd) (fx/stored-results (into {} (keep (fn [[t s]] (when (and (#{:fail :error} s) (bd t)) [t (bd t)]))) reds)))]
+                  ;; a cache that cannot be read excuses nothing: the red stays the branch's
+                  (assoc r :main-red (proofs/main-red reds digests bd (if (or (nil? stored) (contract/error? stored)) {} stored)))))
         (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
                :selected selected :deferred deferred :at-judge (count judge))
         ;; why each was left out: the process it reaches and the calls to it (seon.program/process-path)
@@ -1664,8 +1674,10 @@
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
-  ;; the config this process was forked holding (root read it; an agent reads no environment)
-  (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
+  ;; the config this process was forked holding (root read it; an agent reads no environment), the heap bound as its task
+  ;; states it (docs/config.md#the-resolver): a task's own :seon.config.agent/heap-extra-bytes bounds its agent
+  (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes {:task (when task (d/pull db0 (cfg/keys-declared) [:seon.task/id task]))}))
+                 (cfg/value :seon.config.agent/trip-bytes))
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   (mark! :setup)
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)

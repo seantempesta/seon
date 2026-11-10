@@ -131,16 +131,16 @@
         _ (d/create-database cfg)
         c0 (pdb/connect cfg)
         ;; and one attribute installed before it was indexed
-        _ (d/transact c0 {:tx-data (mapv #(if (= :seon.vector/text-t (:db/ident %)) (dissoc % :db/index) %) (butlast pdb/schema))})
+        _ (d/transact c0 {:tx-data (mapv #(if (= :seon.message/from (:db/ident %)) (dissoc % :db/index) %) (butlast pdb/schema))})
         ;; a datom written before the index: an AVET read of an unindexed attribute answers empty, with no error
-        _ (d/transact c0 {:tx-data [{:db/id "f" :form/id "v/1" :form/src "(def v 1)" :form/ns {:ns/name (quote v)} :form/order 0} (seon.vector/fact "f" 42 [0.5 0.25] "m")]})
-        _ (is (empty? (d/datoms @c0 :avet :seon.vector/text-t)) "unindexed, an AVET read finds nothing")
+        _ (d/transact c0 {:tx-data [{:db/id "f" :form/id "v/1" :form/src "(def v 1)" :form/ns {:ns/name (quote v)} :form/order 0} {:seon.message/id "m-42" :seon.message/from "x42" :seon.message/body "b"}]})
+        _ (is (empty? (d/datoms @c0 :avet :seon.message/from)) "unindexed, an AVET read finds nothing")
         _ (d/release c0)
         {:keys [conn]} (pdb/open! :lmdb path 0 :db)]
     (try
       (is (= lacking (:db/ident (get (d/schema @conn) lacking))) "the attribute the store lacked is installed")
-      (is (true? (get-in (d/schema @conn) [:seon.vector/text-t :db/index])) "and the index an attribute lacked")
-      (is (= [42] (mapv :v (d/datoms @conn :avet :seon.vector/text-t))) "and the datoms it already held read through that index")
+      (is (true? (get-in (d/schema @conn) [:seon.message/from :db/index])) "and the index an attribute lacked")
+      (is (= ["x42"] (mapv :v (d/datoms @conn :avet :seon.message/from))) "and the datoms it already held read through that index")
       (let [t (:max-tx @conn)
             _ (d/release conn)
             {c2 :conn} (pdb/open! :lmdb path 0 :db)]
@@ -695,7 +695,7 @@
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-commit-costs-what-it-writes
-  ;; task seon.db/the-store-grows-with-what-it-keeps. Estimate, from what a commit must
+  ;; docs/storage.md#the-proof-what-a-commit-costs. Estimate, from what a commit must
   ;; write: its own datoms (each value twice, in :eavt and :aevt) and the root-to-leaf path
   ;; it touched in each index, whose nodes hold small datoms: at branching factor 64 about 11
   ;; keys of ~1.5-3 KB (a 1-datom commit measured 16.8-27.7 KB at 5k-225k datoms),
@@ -863,10 +863,11 @@
      :work "per value: its insert into :eavt and :aevt, each descent comparing up to the value, the datom, its place in the tx-data"
      :growth :linear
      :per-n {:ticks 7000 :bytes 10500}
-     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :measured {:ticks 12969032.0 :bytes 17008064.0}}
-     ;; the overrun's :measured is the proof's at 1,000 when it was recorded; it is now judged at 300, the largest size
-     ;; (the ratchet only reds a size over 1.5x its record, so this is the looser of the two); measured
-     ;; at 10,000 too, 17.7 KB a datom against 17.0 at 1,000: near-flat, the log n of a descent
+     ;; the overrun's :measured is the proof's at 300, its largest size, taken 2026-11-10: 1.63x the ticks and 1.35x the bytes
+     ;; of its bound (before, a record at 1,000 of 12.97 M ticks and 17.0 MB, 3.8x what 300 measures, so no regression showed)
+     ;; re-taken 2026-11-10 on the sorted set's upstream fixes and geometric leaf growth: 3,373,602 ticks and 3,527,280 B at
+     ;; 300 (was 3,416,299 and 4,259,728): 1.61x the bound's ticks, 1.12x its bytes
+     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :n 300 :measured {:ticks 3373602.0 :bytes 3527280.0}}
      :sizes [30 100 300]}))
 
 (deftest an-identity-costs-its-seek
@@ -881,9 +882,9 @@
      :work "per datom: its inserts (:avet too for the identity), one descent for a card-one value, one :avet seek per identity"
      :growth :linear
      :per-n {:ticks 10000 :bytes 15000}
-     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :measured {:ticks 11543218.0 :bytes 34428528.0}}
-     ;; the overrun's :measured is the proof's at 1,000 when it was recorded; it is now judged at 100, the largest size
-     ;; (the ratchet only reds a size over 1.5x its record, so this is the looser of the two)
+     ;; the overruns' :measured are the proofs' at 100, their largest size, taken 2026-11-10: :db/unique 1.28x the bytes of its
+     ;; bound (8.3k ticks and 19 KB a datom), a content id 2.68x (12.9k ticks and 43 KB)
+     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :n 100 :measured {:ticks 834866.0 :bytes 1916704.0}}
      :sizes [10 30 100]})
   (cost/proof
     {:of 'datahike.api/db-with :input 'seon.db-test/content-id-datoms
@@ -891,7 +892,7 @@
      :work "per datom: as a :db/unique identity's, and the identity's [attribute value] hashed once to its entity id"
      :growth :linear
      :per-n {:ticks 11000 :bytes 16000}
-     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :measured {:ticks 16945178.0 :bytes 64847328.0}}
+     :overrun {:task "datahike.transaction/an-identity-costs-its-seek" :n 100 :measured {:ticks 1289618.0 :bytes 4288032.0}}
      :sizes [10 30 100]}))
 
 (defn newest-evals
@@ -1080,6 +1081,52 @@
         (let [s (m #(doseq [v values] (stream v))) o (m #(doseq [v values] (direct v)))
               encoded (reduce + (map #(alength (konserve.jolt.fasl-store/serialize %)) values))]
           (is (<= (* 2 encoded) (- s o)) (str "serialized once: " o " bytes against the streams' " s ", " encoded " bytes encoded")))
+        (d/release conn true))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-store-names-its-encoding-where-konserve-reads-it
+  ;; docs/storage.md#compression: seon.db/store-cfg names the serializer and the compressor under :config :encoding,
+  ;; the one place konserve reads them (konserve.impl.defaults/normalize-store-config). An older spelling still
+  ;; worked and made every open log a deprecation, which a script reading a process's output once took for the
+  ;; store's path (bin/check, batch 3). Either backend: no old spelling is handed over, the serializer is ours,
+  ;; and the compressor the config names is the store's (the :file backend's config map once replaced it).
+  (doseq [backend [:lmdb :file]]
+    (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+          seen (atom [])]
+      (try
+        (with-redefs [konserve.impl.defaults/deprecated! (fn [from _] (swap! seen conj from))]
+          (let [{:keys [conn]} (pdb/open! backend path 0 :db)
+                store (:store @conn)]
+            (is (= [] @seen) (str backend ": no deprecated spelling"))
+            (is (= :FaslSerializer (:default-serializer store)) (str backend))
+            (is (= (seon.config/value :seon.config.store/compressor) (get-in store [:config :compressor :type])) (str backend))
+            (d/release conn true)))
+        (finally (clojure.java.shell/sh "rm" "-rf" path))))))
+
+(deftest a-file-store-reads-what-it-wrote-before-it-compressed
+  ;; docs/storage.md#compression: a value's header names its codec, so a store holds values of either kind. A file
+  ;; store's config once dropped its compressor (store-cfg's :file branch replaced :config), so file stores made
+  ;; before hold uncompressed values: such a store, opened by the config that compresses, reads the old values,
+  ;; writes compressed ones beside them, and reads both after another open.
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+        cfg-of pdb/store-cfg
+        notes (fn [conn] (set (map :v (d/datoms @conn :aevt :note/text))))
+        write! (fn [conn from] (d/transact conn {:tx-data (vec (for [i (range from (+ from 50))] {:note/text (str "note " i) :note/agent :t})) :tx-meta (pdb/tx-meta :db)}))
+        codec (fn [conn] (get-in (:store @conn) [:config :compressor :type]))
+        all (fn [n] (set (map #(str "note " %) (range n))))]
+    (try
+      (with-redefs [pdb/store-cfg (fn [backend p] (update-in (cfg-of backend p) [:store :config :encoding] dissoc :compressor))]
+        (let [{:keys [conn]} (pdb/open! :file path 0 :db)]
+          (is (nil? (codec conn)) "made as before: no compressor")
+          (write! conn 0)
+          (d/release conn true)))
+      (let [{:keys [conn]} (pdb/open! :file path 0 :db)]
+        (is (= :zstd (codec conn)) "opened by the config that compresses")
+        (is (= (all 50) (notes conn)) "the uncompressed values read")
+        (write! conn 50)
+        (d/release conn true))
+      (let [{:keys [conn]} (pdb/open! :file path 0 :db)]
+        (is (= (all 100) (notes conn)) "old and new read from one store")
         (d/release conn true))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
@@ -1352,9 +1399,11 @@
           (d/transact br [{:note/agent :t :note/text "the branch's own"}])
           (let [[own total] (private)]
             (is (:crypto-hash? (:config @br)) "the store's nodes are addressed by their content")
-            ;; its own: the one write's path, a leaf and the branches over it to the root (4 of 157 measured, 2026-11-09);
-            ;; with random addresses 76 of 157, what the 20 merges rewrote
-            (is (<= own 8) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
+            ;; the branch's own nodes are its one write's path and a few leaves, under a tenth of the tree (Sean, 2026-11-10; measured 9 of
+            ;; 156): persistent-sorted-set is a plain B-tree whose leaf cut depends on insertion order, and seon.merge/merge-tx inserts
+            ;; main's datoms in another order than main did, so a branch can own leaves holding only main's datoms (the literal 8 passed
+            ;; by luck). Random addresses kept 76 of 157 (48%) after the same 20 merges, red here; docs/sharing.md#what-a-branchs-nodes-are
+            (is (<= own (quot total 10)) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
           (finally (d/release br) (d/release main) (clojure.java.shell/sh "rm" "-rf" path))))))
 
 (deftest a-branchs-own-entity-schema-is-the-one-its-writes-are-held-to
@@ -1380,7 +1429,7 @@
   (ts/test-branch!
     (fn [_ conn]
       (d/transact conn [{:form/id "f/1" :form/src "(defn f [])" :form/ns [:ns/name 'app.m0] :form/order 0}])
-      (d/transact conn [(seon.vector/fact [:form/id "f/1"] 1 [0.5 0.25 0.125] "m")])
+      (d/transact conn [(seon.vector/fact [:form/id "f/1"] "1" [0.5 0.25 0.125] "m")])
       (let [ve (pdb/eid @conn :seon.vector/of (pdb/eid @conn :form/id "f/1"))]
         (is (some? ve) "the form has its vector")
         (is (map? (d/transact conn [[:db.fn/retractEntity [:form/id "f/1"]]])) "retracting the form is not refused")
@@ -1424,3 +1473,57 @@
       (is (nil? (pdb/invalid-datom db [{:seon.eval/id "x" :seon.eval/call [:seon.model-call/id "c"]} [:db/retract 1 :seon.task/execution :held] [:db.fn/retractAttribute 1 :seon.task/execution]])) "a ref's lookup, a retraction, a function")
       (is (nil? (pdb/invalid-datom db [{:lab.own/thing (Object.)}])) "an attribute no schema declares: the store's to judge"))))
 
+
+(deftest the-datom-check-costs-a-validator-call-a-datom
+  ;; docs/storage.md#the-write-checks-every-datom: each datom's value is asked of its attribute's schema, whose validator is
+  ;; found once a transaction from the schema the registry in effect holds (seon.contract/held). The check made a new
+  ;; reference to the schema for every datom ((m/schema a) of a name) and so a new validator for every value: 1,105 ticks
+  ;; and 5.3 KB a datom on every write through a connection (measured 2026-11-10, 1,000 plain datoms: 1.105 M ticks, 5.33 MB)
+  (cost/proof
+    {:of 'seon.db/invalid-datom :input 'seon.db-test/plain-datoms
+     :n "datoms of two declared attributes, every one valid"
+     :work "per datom: its attribute's schema entry, the validator already found, one call of it"
+     :growth :linear
+     ;; measured 2026-11-10: 7.1k / 19.6k / 63.2k ticks and 12.2 / 31.4 / 98.6 KB at 100 / 300 / 1,000: 63 ticks and 96 B a datom
+     :per-n {:ticks 80 :bytes 120}
+     :fixed {:ticks 2000 :bytes 4000 :calls 4}
+     :sizes [100 300 1000]}))
+
+(deftest a-datom-is-held-to-the-schema-in-effect-at-its-write
+  ;; docs/storage.md#the-write-checks-every-datom: nothing of the check is kept from one write to the next, so a branch that
+  ;; changes what an attribute's schema accepts is held to the new one at once (red if a validator were kept by the name)
+  (let [db (ts/test-db)
+        own (fn [form] {:forms {:app.dc/n form} :registry (contract/registry-of (assoc contract/forms :app.dc/n form))})
+        tx [[:db/add 1 :app.dc/n "seven"]]]
+    (is (= :seon.db/invalid-datom (:seon.error/type (pdb/invalid-datom db tx (own :int)))) "an int refuses the string")
+    (is (nil? (pdb/invalid-datom db tx (own :string))) "and the same name, now a string, accepts it")
+    (is (= :seon.db/invalid-datom (:seon.error/type (pdb/invalid-datom db tx (own :int)))) "and is refused again when it is an int again")))
+
+(defn preloaded
+  "preload!'s argument: the world with n plain datoms added."
+  [n]
+  (let [[db tx] (plain-datoms n)] [(d/db-with db tx)]))
+
+(deftest preload-counts-each-index-leaf-by-leaf
+  ;; docs/machine.md#roots-heap: the fork server reads every node of main's indexes once so its agents inherit them
+  ;; decoded. The read is each index's own reduce (a leaf's datoms stepped over, nothing made), and it answers what the
+  ;; three indexes hold. Counting (d/datoms db index) made a lazy cell a datom: 1.2 s of a root's first fork
+  (let [[db tx] (plain-datoms 300)
+        db (d/db-with db tx)]
+    (is (= (+ (count (d/datoms db :aevt)) (count (d/datoms db :avet)) (count (d/datoms db :eavt))) (pdb/preload! db))
+        "the datoms of the three indexes"))
+  (cost/proof
+    {:of 'seon.db/preload! :input 'seon.db-test/preloaded
+     :n "datoms added to the world, each in two or three indexes"
+     :work "per datom per index: one step of the sorted set's reduce"
+     :growth :linear
+     ;; measured 2026-11-10 (seon.cost/measure, the world + n datoms, nodes in memory): 7,579 ticks and 4.5 KB at 100,
+     ;; 23,683 and 14.0 KB at 1,000: 18 ticks and 10 B a datom added. Counting (d/datoms db index) three times on the same
+     ;; dbs: 65,399 ticks and 387 KB at 100, 205,556 ticks and 1.23 MB at 1,000 (78 ticks and 470 B a datom in an index)
+     ;; On Seon's own program db, read from its store in a fresh process (609,913 datoms in the three indexes, measured the
+     ;; same day, one run each): 504 M ticks and 1,836 ms counting d/datoms, 462 M ticks and 1,774 ms by this reduce: 8 percent.
+     ;; The rest is not the walk: it is decoding the leaves, about 750 ticks a datom, paid again on a second pass in that
+     ;; process (495 M ticks), so its node cache did not hold them. This proof bounds the walk; the decode is another row
+     :per-n {:ticks 22 :bytes 13}
+     :fixed {:ticks 7000 :bytes 4500 :calls 1}
+     :sizes [100 300 1000]}))

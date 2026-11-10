@@ -1,10 +1,11 @@
 #!/bin/zsh
 # bin/forks [UNIT ...] — the forks' own suites on Jolt (bin/check's forks step): each unit test/forks/baseline.edn
-# names (a Datahike test namespace, a konserve test file) runs in a process of its own
-# (test/forks/run.jolt), niced, its temp files under a directory of this run's own, and its counts
+# names (a Datahike test namespace, a konserve test file) runs in one of a few processes (test/forks/run.jolt: the
+# units dealt into the run's jobs), niced, its temp files under a directory of its process's own, and its counts
 # are compared with the ones the baseline records. Named UNITs run alone (a name the baseline does not
 # hold is FORKS FAILED naming it); no arguments runs every unit. A unit whose counts differ, or that printed none
-# (it failed to load, or died), is FAILED; the run ends on FORKS OK or FORKS FAILED.
+# (it failed to load, or died), is run again alone and judged by that (a unit right alone and wrong beside others is a
+# leak between units, FAILED); the run ends on FORKS OK or FORKS FAILED.
 #
 # Its key is the pins (seon.proofs/check-steps "forks" :pins: the checkout's :env (bin/, test/forks/,
 # the config files) and every submodule's :seon.pin class), so a bump of datahike, konserve,
@@ -23,16 +24,60 @@ nice -n 15 "$ROOT/bin/build" jolt > "$TMP/build-jolt.log" 2>&1 || { cat "$TMP/bu
 for u in "$@"; do
   grep -q "^$u " "$ROOT/test/forks/baseline.edn" || { echo "FORKS FAILED (no unit $u in test/forks/baseline.edn)"; exit 1 }
 done
-bad=0 n=0
-while read -r unit want; do
+# the units in a few processes at once (as many as the run's jobs: SEON_PROOF_JOBS, which bin/test and bin/check pass; 2
+# alone): a process loads Jolt, Datahike and konserve once for its units, where a process a unit paid that load each time
+# (88 units, ~4.2 s each, 367 s; 2026-11-10). Dealt longest first, each to the process with the least work so far, by the
+# last run's walls (target/forks.ms, as bin/check orders its units by the last full run's: what orders the deal, never what
+# a unit proves; a unit not measured yet goes first). A unit with no line from its process (the process died in it or after
+# it) runs again alone and is judged by that; a unit whose counts differ beside others but match alone is a leak between
+# units, named and red, never taken as green
+typeset -A want ms
+units=()
+while read -r unit w; do
   [[ -z $unit || $unit == \;* ]] && continue
-  (( $# )) && (( ${@[(Ie)$unit]} )) || { (( $# )) && continue }
-  n=$((n + 1))
-  mkdir -p "$TMP/$n"
-  got=$(cd "$ROOT" && TMPDIR=$TMP/$n/ nice -n 15 target/jolt/jolt -A:dhtest run test/forks/run.jolt "$unit" < /dev/null 2>&1 | tee "$TMP/$n.log" | sed -n 's/^FORK [^ ]* //p' | tail -1)
-  if [[ $got == "$want" ]]; then echo "FORK $unit $got"
-  else bad=$((bad + 1)); echo "FORK $unit FAILED: ${got:-no counts} (baseline $want)"; tail -20 "$TMP/$n.log"; fi
+  (( $# )) && ! (( ${@[(Ie)$unit]} )) && continue
+  units+=($unit); want[$unit]=$w
 done < "$ROOT/test/forks/baseline.edn"
+n=${#units}
 (( n > 0 )) || { echo "FORKS FAILED (no units in test/forks/baseline.edn)"; exit 1 }
+[[ -f $ROOT/target/forks.ms ]] && while read -r u m; do ms[$u]=$m; done < "$ROOT/target/forks.ms"
+J=${SEON_PROOF_JOBS:-2}; (( J > n )) && J=$n
+typeset -A load group where
+# an unmeasured unit weighs the mean of the measured ones (1 when none is), so a first run still spreads its units
+mean=1; if (( ${#ms} )); then sum=0; for m in ${(v)ms}; do sum=$(( sum + m )); done; mean=$(( sum / ${#ms} )); fi
+for (( j = 1; j <= J; j++ )); do load[$j]=0; group[$j]=""; done
+for unit in ${(f)"$(for u in $units; do print "${ms[$u]:-999999999} $u"; done | sort -k1,1 -n -r -s | awk '{print $2}')"}; do
+  best=1; for (( j = 2; j <= J; j++ )); do (( load[$j] < load[$best] )) && best=$j; done
+  group[$best]="${group[$best]} $unit"; load[$best]=$(( load[$best] + ${ms[$unit]:-$mean} ))
+  where[$unit]=$best
+done
+run-units() { local d=$1; shift; mkdir -p "$d"; (cd "$ROOT" && TMPDIR=$d/ nice -n 15 target/jolt/jolt -A:dhtest run test/forks/run.jolt "$@" < /dev/null > "$d.log" 2>&1) }
+P=() typeset -A PJ GST
+for (( j = 1; j <= J; j++ )); do
+  [[ -n ${group[$j]} ]] && { run-units "$TMP/g$j" ${=group[$j]} & P+=($!); PJ[$!]=$j }
+done
+for p in $P; do wait $p; GST[${PJ[$p]}]=$?; done
+# a process that ended before all its units answered: its log is the only evidence of a crash or a kill, so it is kept
+# outside the run's temp directory (target/forks-died/), with its exit status, and its path printed
+kept() { local j=$1 d=$ROOT/target/forks-died; mkdir -p "$d"; local f="$d/${TMP:t}-g$j.log"
+  [[ -e $f ]] || { { echo "exit ${GST[$j]}"; cat "$TMP/g$j.log" } > "$f"; echo "forks: process $j ended early (exit ${GST[$j]}); its log: $f" }; }
+got-of() { grep -F -- "FORK $1 " $2 | tail -1 | sed 's/^FORK [^ ]* //' }
+bad=0
+for (( i = 1; i <= n; i++ )); do
+  unit=${units[$i]} j=${where[$unit]}
+  got=$(got-of $unit "$TMP/g$j.log")
+  if [[ -z $got || $got != "${want[$unit]}" ]]; then
+    # alone: a death in its group, or counts that depend on what ran before it in the same process
+    run-units "$TMP/alone-$i" $unit; alone=$(got-of $unit "$TMP/alone-$i.log")
+    if [[ -n $got && $alone == "${want[$unit]}" ]]; then
+      bad=$((bad + 1)); echo "FORK $unit FAILED: $got beside others, $alone alone (baseline ${want[$unit]}): a leak between units"
+    elif [[ $alone == "${want[$unit]}" ]]; then [[ -z $got ]] && kept $j; echo "FORK $unit $alone (alone: its process ended before it answered)"
+    else [[ -z $got ]] && kept $j; bad=$((bad + 1)); echo "FORK $unit FAILED: ${alone:-no counts} (baseline ${want[$unit]})"; tail -20 "$TMP/alone-$i.log"; fi
+  else echo "FORK $unit $got"; fi
+done
+# the units' own walls kept for the next run's deal (only a full run's: a named run's are a few), and the slowest shown
+(( $# )) || cat $TMP/g*.log(N) | grep -h '^FORK-MS ' | awk '{print $2, $3}' > "$ROOT/target/forks.ms"
+# the units' own walls, the slowest first: shown, never judged
+echo "slowest: $(cat $TMP/g*.log | grep -h '^FORK-MS ' | sort -k3 -n -r | head -8 | awk '{printf "%s %s ms; ", $2, $3}')"
 if (( bad )); then echo "FORKS FAILED ($bad of $n units differ from test/forks/baseline.edn)"; exit 1; fi
 echo "FORKS OK ($n units)"

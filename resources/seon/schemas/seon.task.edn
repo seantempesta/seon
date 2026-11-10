@@ -20,6 +20,8 @@
                     [:seon.config.ai/script {:optional true} :seon.config.ai/script]
                     ;; what a first-move pass may spend before it scores this task (my.root/first-moves!)
                     [:seon.config.ai/judge-pass-usd {:optional true} :seon.config.ai/judge-pass-usd]
+                    ;; how far its agent's heap may grow (seon.agent/init!): a test of an agent past its heap rides its task
+                    [:seon.config.agent/heap-extra-bytes {:optional true} :seon.config.agent/heap-extra-bytes]
                     [:seon.config.merge/max-conflicts {:optional true} nat-int?]
                     [:seon.config.merge/max-merge-turns {:optional true} nat-int?]
                     ;; the relevance at which a search shows an item (seon.ctx.search/search)
@@ -126,7 +128,9 @@
                              ;; a :design task's accumulated plan now and as its branch began (its merge base's)
                              [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]
                              ;; the process tests the work left to root's gate (neither red nor unknown)
-                             [:deferred {:optional true} [:set :qualified-symbol]]]
+                             [:deferred {:optional true} [:set :qualified-symbol]]
+                             ;; the red tests that are main's, not this branch's change (red as base holds them): never a stray red
+                             [:main-red {:optional true} [:set :qualified-symbol]]]
  :seon.reconcile/not-done [:map {:closed true}
                           [:reason [:enum :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind]]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]

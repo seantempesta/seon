@@ -73,7 +73,7 @@
  ;; every one; present only while not green, printed by the one printer where shown);
  ;; and running sums over the runs at this digest (a new digest resets them): mean = sum / runs, computed on read
  :seon.test/digest [:and {:seon.db/no-history? true} :string]
- :seon.test/status [:and {:seon.db/no-history? true} [:enum :green :red :flaky :deferred]]
+ :seon.test/status [:and {:seon.db/no-history? true :seon.db/index true} [:enum :green :red :flaky :deferred]]
  :seon.test/failures [:and {:seon.db/no-history? true} [:vector :seon.problems/assertion]]
  :seon.test/ticks [:and {:seon.db/no-history? true} :int]
  :seon.test/bytes [:and {:seon.db/no-history? true} :int]
@@ -293,7 +293,10 @@
  ;; turn budget it also writes alone on its own branch (seon.turn), so they stay the agent's, optional
  :seon.db/agent-start-fact [:and {:seon.db/attributes true :description "An agent a root started: the boot of that root, and when."}
                             :seon.db/agent-fact [:map [:seon.agent/boot :seon.agent/boot] [:seon.agent/started-ms :seon.agent/started-ms]]]
- :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/hiccup seon.render.ui/user} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name]]]
+ ;; the agent whose page the person last opened: home is this page (docs/users.md#whats-on-screen); absent means root
+ ;; or a task: an agent focuses the person on work it just launched (my.task/launch! answers the task), its agent made a moment later
+ :seon.user/focus [:and {:seon.db/to [:seon.db/agent-fact :seon.task/task-fact]} :seon.db/ref]
+ :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/hiccup seon.render.ui/user :seon.ctx/pattern [:seon.agent/key :seon.user/name {:seon.user/focus [:seon.agent/key :seon.agent/status :seon.task/id]} {:seon.agent/agents [:seon.agent/key :seon.agent/status]} {:seon.message/_to [:seon.message/id :seon.message/from :seon.message/body]}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
  ;; :seon.agent/key) and its target's (seon.ref/target-value: an address, a name, an id, a key or a path)
@@ -377,6 +380,7 @@
                                  [:api {:optional true} :map]]]
                    [:what {:optional true} :string] [:evidence {:optional true} :map]
                    [:bug? {:optional true} :boolean] [:defect {:optional true} :seon.task/id]]
+ :seon.task/gone [:and {:description "What the task's text cites whose cites ended with their targets (each target's identity value), written by the write that ended them and cleared when the text is written again. See docs/references.md#task-references."} [:vector :any] :seon.db/plain]
  :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:agent {:optional true} :string] [:turn {:optional true} :int]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
@@ -392,7 +396,7 @@
                           [:seon.task/model {:optional true} :seon.task/model]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
                           [:seon.task/gate? {:optional true} :seon.task/gate?]
-                          [:seon.task/failure {:optional true} :seon.task/failure]
+                          [:seon.task/failure {:optional true} :seon.task/failure] [:seon.task/gone {:optional true} :seon.task/gone]
                           [:seon.task/cause {:optional true} :seon.task/cause]
                           [:seon.task/agent {:optional true} :seon.task/agent] [:seon.task/outcome {:optional true} :seon.task/outcome]
                           [:seon.task/started-by {:optional true} :seon.task/started-by] [:seon.task/reason {:optional true} :seon.task/reason] [:seon.task/reasons {:optional true} :seon.task/reasons]
@@ -453,28 +457,33 @@
  :seon.root/config [:and {:seon.db/to [:seon.config/config-fact]} :seon.db/ref]
  ;; who is signed in: the user / is the page of (docs/users.md#whats-on-screen); until there is a login, boot signs in the OS account running root
  :seon.root/signed-in [:and {:seon.db/to [:seon.db/user-fact]} :seon.db/ref]
- ;; the digest of what the wiki load read (seon.root/wiki-digest): a boot that computes the same writes no wiki
- :seon.root/wiki [:string {:description "The digest of what the wiki load of the boot that wrote it read: the pages of the wiki dirs, the program and the task ids of main before the boot. A boot that computes the same loads nothing (seon.root/wiki-digest, docs/root.md#boot)."}]
  :seon.root/started-by [:string {:description "The test whose process started this boot (ns/name, seon.test-store/start-root! from clojure.test/*testing-vars*, given to the root as --started-by): the merge gate leaves it out of a merge's deferred process tests, since a test cannot be its own gate. Absent: no test started it, and every deferred test is gated. See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
  ;; the reconciler's positive report of quiescence: at main's t nothing runs, nothing is to
  ;; judge, nothing is ready; :root-causes names each released task not done, with its root cause and
  ;; what it blocks (seon.reconcile/root-causes)
  :seon.root/quiescent [:map [:t :int] [:root-causes [:vector :seon.reconcile/root-cause]]]
- ;; Seon's own source imported at boot as main's program (seon.source), one fact per boot: the tree, its HEAD
- ;; commit (none when it is no repository), the revision it pins each reference-code submodule
- ;; at (its gitlink), the digest of
- ;; the files and pins read (a boot whose tree
- ;; reads the same imports nothing), its files and forms, the program entities the import
- ;; retracted, how long reading, analysing and transacting took, or why it was refused
+ ;; Seon's own source as last indexed into main's program (seon.source: a seed, seon.root/import-tree!, or a re-index,
+ ;; my.root/import!): the tree, its HEAD commit (none when it is no repository), the revision it pins each reference-code
+ ;; submodule at (its gitlink), the digest of the files and pins read (an index of a tree that reads the same writes
+ ;; nothing), its files and forms, the program entities the index retracted, how long reading, analysing and transacting
+ ;; took, or why it was refused
  :seon.root/source [:map [:root :string] [:commit {:optional true} :string] [:tree {:optional true} :string] [:dirs {:optional true} [:vector :string]]
                     [:pins {:optional true} [:map-of :string :string]] [:digest {:optional true} :string]
                     [:files :int] [:forms :int] [:retracted {:optional true} :int] [:ms number?]
                     [:error {:optional true} :string]
-                    ;; this boot's, and the tree's inputs with no program facts (seon.fx/inputs) when the running
-                    ;; binary is built from this very tree: what its agents key their test results by;
-                    ;; otherwise why not (:unshared)
-                    [:boot {:optional true} :string] [:inputs {:optional true} :seon.program/inputs]
-                    [:unshared {:optional true} :string]]
+                    ;; as the last boot states it (seon.root/booted-source): its id, the git tree its binary was built from
+                    ;; (:binary-tree) and that tree's program (:binary); only when that tree is :tree, the one main was last
+                    ;; brought to from outside (an import or a landing; what agents merged since is main's own), the binary's
+                    ;; inputs with no program facts (seon.fx/inputs), what its agents key their test results by, and :program the
+                    ;; binary's, else main's at boot (seon.program/program-digest); two trees are seon.problems/stale-binary's row
+                    [:boot {:optional true} :string] [:binary {:optional true} :string] [:binary-tree {:optional true} :string]
+                    [:program {:optional true} :string]
+                    ;; seon.root/stale-binary's answer at the boot: why the binary is not current for main ({:binary :tree :reaches}, or what is
+                    ;; missing), absent when current; what the :stale-binary row shows
+                    [:stale-binary {:optional true} :map]
+                    ;; the build's index only: the code that made it (seon.root/index-code)
+                    [:indexed-by {:optional true} :string]
+                    [:inputs {:optional true} :seon.program/inputs]]
  ;; the next generation (docs/source.md#the-next-generation): the merges commit the :build effect
  ;; built (seon.fx/build), its worktree and binary and how long the build took, or why it was
  ;; refused; recorded by its asker, the reconciler; bin/root next starts the binary on this store
@@ -490,17 +499,6 @@
  ;; no stop fact at all: SIGKILL or a crash, found by the next boot) and when
  :seon.root/end [:map [:boot :string] [:cause :keyword] [:at-ms :int]]
  ;; written by seon.root/stop! before anything stops, durable
- ;; root's file watcher (seon.watch, my.root/watch!): the roots it watches, this boot's; the
- ;; batches and paths it read; the rescans FSEvents asked for (events under a subtree it
- ;; coalesced or dropped, or a watched root moved: every kind loaded again), counted, the
- ;; newest with its path; or why it is not watching
- :seon.root/watch [:map [:roots [:vector :string]] [:boot :string]
-                   [:batches nat-int?] [:paths nat-int?] [:rescans nat-int?]
-                   [:last-rescan {:optional true} [:map [:path :string] [:kind [:enum :rescan :root]]]]
-                   [:last-opened {:optional true} [:vector :string]]
-                   ;; the last batch that loaded: each kind with the first record that made it
-                   [:last-load {:optional true} [:map-of [:enum :docs :tasks :source] [:tuple [:enum :path :rescan :root] :string]]]
-                   [:error {:optional true} :string]]
  ;; the outcome of root's last read of the task files (my.root/load-tasks!): how many files read, or
  ;; the refused read's message. A refused read's error names it as its subject
  ;; and is written in the same transaction, so it stays open until a good read writes another value
@@ -515,12 +513,10 @@
                           [:seon.root/boot {:optional true} :seon.root/boot] [:seon.root/signed-in {:optional true} :seon.root/signed-in]
                           [:seon.root/config {:optional true} :seon.root/config]
                           [:seon.root/started-by {:optional true} :seon.root/started-by]
-                          [:seon.root/wiki {:optional true} :seon.root/wiki]
                           [:seon.root/stopped {:optional true} :seon.root/stopped]
                           [:seon.root/previous-end {:optional true} :seon.root/previous-end]
                           [:seon.root/quiescent {:optional true} :seon.root/quiescent]
                           [:seon.root/source {:optional true} :seon.root/source]
-                          [:seon.root/watch {:optional true} :seon.root/watch]
                           [:seon.root/tasks {:optional true} :seon.root/tasks]
                           [:seon.root/generation {:optional true} :seon.root/generation]
                           [:seon.root/collected {:optional true} :seon.root/collected] [:seon.root/retained {:optional true} :seon.root/retained]]

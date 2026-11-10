@@ -13,7 +13,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.reconcile :as r] [seon.agent :as agent] [jolt.io-poller :as poller] [seon.task :as task] [seon.ctx :as ctx] [seon.doc :as doc] [datahike.db.interface :as dbi]))
+            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.system :as system] [seon.reconcile :as r] [seon.agent :as agent] [jolt.io-poller :as poller] [seon.task :as task] [seon.ctx :as ctx] [seon.doc :as doc] [datahike.db.interface :as dbi]))
 
 (defn- reaped
   "Child pid, whose exit arrived (jolt.io-poller/exit-chan): waited for exactly, so the wait is the
@@ -244,7 +244,7 @@
     :load-errors load-errors
     ;; the first fork freezes the heap: nothing is static yet (seon.fork-server/static-due?)
     :static-due true
-    :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs (cfg/value :seon.config.root/system-path)))
+    :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs system/built-text))
                                             (second (agent/test-inputs db))))
     ;; listed here when the server boots; a standby inherits its server's
     :index (or index {:commit (d/commit-id db) :index (r/index db)})})
@@ -267,17 +267,27 @@
             (some-> @open lib/c-close)
             [st {:ev [(step-failed m e)]}])))))
 
+(defmacro ^:private baked-deps-text
+  "The checkout's deps.edn as this namespace compiles, as seon.config/built-text reads the shipped config. See
+  docs/source.md#a-boot-resumes-from-the-db."
+  [] (slurp (str (cfg/checkout) "/deps.edn")))
+
+(def ^:private built-deps
+  "The deps.edn this binary was built with: the dependency roots its agents resolve a library's files from, whatever
+  the file on disk says now. See docs/source.md#a-boot-resumes-from-the-db."
+  (baked-deps-text))
+
 (defn- dev-classpath!
-  "The source root's deps.edn roots added to the loader (jolt.deps/add-deps, the twin of
+  "The binary's deps.edn roots (built-deps) added to the loader (jolt.deps/add-deps, the twin of
   clojure.repl.deps/add-libs), so every agent forked from here resolves a library's files as a
   REPL started in that project does: io/resource, clojure.repl/source, requiring an uncompiled
   namespace. A built binary carries no dependency roots of its own (Jolt #1232). Its
-  :local/root paths are made absolute (add-deps resolves them against the cwd, and an agent
-  works elsewhere). Once, before the first fork."
+  :local/root paths are made absolute against the checkout (add-deps resolves them against the cwd, and an agent
+  works elsewhere). Once, before the first fork; it reads no file."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (when-let [root (get cfg/config :seon.config.source/root)]
-    (jolt.deps/add-deps (update (edn/read-string (slurp (str root "/deps.edn"))) :deps update-vals
+  (let [root (cfg/checkout)]
+    (jolt.deps/add-deps (update (edn/read-string built-deps) :deps update-vals
                                 #(cond-> % (:local/root %) (update :local/root (partial str root "/")))))))
 
 (defn main
@@ -482,7 +492,8 @@
                             (some-> (:sent pend) sock/close!)
                             [(assoc st :standby (-> pend (dissoc :sent) (assoc :pid (:pid m) :t (:t m))) :standby-pending nil
                                     :log (filterv #(> (:t %) (:t m)) (:log st)))
-                             nil])
+                             ;; root's view says the server has a standby again (after a :standby-failed)
+                             {:to-api [{:ev :standby :gen (:gen m) :pid (:pid m)}]}])
                         [st nil]))
            :standby-failed (do (drop-standby (:standby-pending st)) [(assoc st :standby-pending nil) {:to-api [m]}])
            ;; EOF of the current server's events: promote its standby, unless root is stopping

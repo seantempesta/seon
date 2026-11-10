@@ -16,3 +16,7 @@ runs/
 
 # Claude sessions scratch and root orders (never tracked)
 claude_scratch/
+
+# a session's local permissions, rewritten by its app as it runs: never part of the tree (bin/tree named another tree by
+# whether HOME's own git ignore file listed it, and root forked no agent: 2026-11-10)
+.claude/settings.local.json

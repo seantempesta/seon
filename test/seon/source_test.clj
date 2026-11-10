@@ -13,7 +13,7 @@
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt] [seon.stage :as stage]))
+            [seon.program-test :as pt] [seon.stage :as stage] [seon.root :as root] [seon.doc] [seon.system] [test-runner]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -135,6 +135,104 @@
       (is (= [] (:errors (program/load-all! db))))
       (is (true? (bound? 'x.rnt-thing-test/helper))))))
 
+(deftest a-test-namespace-loads-whole-from-the-tree-main-was-imported-from
+  ;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: a test namespace whose forms are all its file's is loaded whole
+  ;; by require (compiled once through Jolt's AOT cache), its file found under the tree main's program was imported from, as main
+  ;; states it on root's :seon.root/source fact. Read from the process's config instead, a root given its source as start!'s
+  ;; options (every bin/check mode, boot-twice, a cycle) held none, and its fork server loaded all 77 test namespaces form by
+  ;; form: 12.2 s of its first fork against 1.06 s whole (2026-11-10). bin/test, like those roots, sets no source root.
+  (let [path "test/seon/required_whole.clj"
+        files {path (slurp (str here "/" path))}
+        db (d/db-with (empty-db) (source/import-tx (empty-db) files))
+        db (d/db-with db [{:seon.root/id :root :seon.root/source {:root here :files 1 :forms 2 :ms 0}}])]
+    (is (nil? (get config/config :seon.config.source/root)) "this process names no source root, as a check mode's root does")
+    ;; a shard loads test/'s namespaces as it plans: this one is taken out first, as a fork server holds none of them
+    (remove-ns 'seon.required-whole)
+    (let [lf (program/live-forms db)
+          [whole errs] (#'program/required! db lf lf)]
+      (is (= [] errs))
+      (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from"))))
+
+(deftest a-speculation-of-what-it-reads-reads-what-the-whole-would
+  ;; docs/storage.md#the-write-checks-every-entity-it-touches: seon.db/project-tx cuts a transaction to the attributes a speculation reads
+  ;; after it (program/config-refused's config and schema entries, root/import-of's counts), so a full import is applied once, by its
+  ;; write, not three times (the checkout's: 2.7 G ticks and 4.7 GB a speculation, 2026-11-10). What is read after the cut is what is
+  ;; read after the whole, on an import of real files and on a refresh that removes one (its retractions)
+  (let [files (into {} (for [p ["src/seon/lib.clj" "src/seon/ref.clj" "resources/seon/schemas/seon.config.edn" config/shipped-file]]
+                         [p (slurp (str here "/" p))]))
+        counted #{:form/id :ns/name :ns/file :schema/key :schema/file}
+        read-after (fn [db] {:entries (seon.config/entries db) :schemas (program/schema-changes db)
+                             :forms (count (d/datoms db :aevt :form/id)) :ns-files (count (d/datoms db :aevt :ns/file))
+                             :schema-files (count (d/datoms db :aevt :schema/file))})
+        same? (fn [db tx]
+                (let [whole (read-after (pdb/speculate-db db tx))
+                      config-cut (pdb/speculate-db db (pdb/project-tx tx #(#{"config" "schema"} (namespace %))))
+                      count-cut (pdb/speculate-db db (pdb/project-tx tx counted))]
+                  (is (seq (:entries whole)) "the import states config entries")
+                  (is (= (select-keys whole [:entries :schemas]) (select-keys (read-after config-cut) [:entries :schemas])) "the config check's cut")
+                  (is (= (select-keys whole [:forms :ns-files :schema-files]) (select-keys (read-after count-cut) [:forms :ns-files :schema-files])) "the counts' cut")
+                  (is (< (count (pdb/project-tx tx counted)) (count tx)) "and the cut is smaller than the whole")))
+        db0 (empty-db)
+        tx (source/tx-of db0 files false)
+        db1 (d/db-with db0 tx)]
+    (same? db0 tx)
+    (testing "a refresh that removes a file and changes the config"
+      (let [refresh (source/tx-of db1 {"src/seon/ref.clj" nil config/shipped-file (str/replace (files config/shipped-file) #"(?m)^ :seon.config.root/view-window .*$" "")} true)]
+        (is (some #(and (vector? %) (= :db/retractEntity (first %))) refresh) "it retracts")
+        (same? db1 refresh)))
+    (testing "an import that registers a schema entry and a config entry it refuses: the cut keeps the schema the check reads"
+      (let [schema-file "resources/seon/schemas/seon.config.zz.edn"
+            schema-text "{:seon.config.zz/k [:int {:min 1 :description \"A key an import registers.\"}]}\n"
+            conf (str/replace-first (files config/shipped-file) "{" "{:seon.config.zz/k 0\n ")
+            ;; the config map's schema names the key too, as a key added on a branch does (docs/config.md)
+            cs "resources/seon/schemas/seon.config.edn"
+            files (update files cs str/replace "[:seon.config.source/root {:optional true} :seon.config.source/root]"
+                          "[:seon.config.source/root {:optional true} :seon.config.source/root] [:seon.config.zz/k {:optional true} :seon.config.zz/k]")
+            tx (source/tx-of db0 (assoc files schema-file schema-text config/shipped-file conf) false)]
+        (same? db0 tx)
+        (is (contains? (program/schema-changes (pdb/speculate-db db0 (pdb/project-tx tx #(#{"config" "schema"} (namespace %))))) :seon.config.zz/k)
+            "the schema the import registers is in the cut")
+        (is (:seon.error/type (program/config-refused db0 tx)) "the entry it refuses is refused, read through the cut")
+        (is (nil? (program/config-refused db0 (source/tx-of db0 (assoc files schema-file schema-text config/shipped-file (str/replace-first conf ":seon.config.zz/k 0" ":seon.config.zz/k 5")) false)))
+            "and one valid only under the schema the same import registers is not")))))
+
+(deftest a-binary-is-current-for-a-tree-unless-what-differs-reaches-root
+  ;; docs/source.md#the-binary-records-its-program: the one rule (Point, 2026-11-10) the gate's build, the spawn refusal and the
+  ;; stale-binary row ask. db is the checkout's program, so tree is its working tree; each case is the binary's tree made from it
+  ;; with one change (a git index of its own: the repository is not touched)
+  (let [db (test-runner/program)
+        tree (fx/tree-id here)
+        g (program/reach-graph db (fx/declared-refs seon.system/built-text))
+        git (fn [env & args] (:out (apply sh/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
+        built-with (fn [path f]
+                     ;; tree with path's text replaced by (f text), or its gitlink moved when f is :pin
+                     (let [idx (str here "/target/tmp/binary-current-" (random-uuid) ".index") env {"GIT_INDEX_FILE" idx}]
+                       (git env "read-tree" tree)
+                       (if (= :pin f)
+                         (git env "update-index" "--cacheinfo" (str "160000," (apply str (repeat 40 "1")) "," path))
+                         (let [blob (str/trim (:out (sh/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (f (let [fl (java.io.File. (str here "/" path))] (if (.isFile fl) (slurp fl) ""))))))]
+                           (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
+                       (let [t (str/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
+        current (fn [from] (root/binary-current db {:inputs {:tree from}} tree g))
+        tweak (fn [marker] (fn [text] (str/replace-first text marker (str marker " "))))]
+    (is (nil? (current tree)) "the same tree")
+    (is (nil? (current (built-with "test/seon/required_whole.clj" #(str % "\n;; a test changed\n")))) "a test's change: a process loads it from main")
+    (is (nil? (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form's change: the agent loads it from main")
+    (let [r (current (built-with "src/seon/writer.clj" (tweak "(defn writer-proc")))]
+      (is (some #{'seon.writer/writer-proc} (:reaches r)) (str "a root proc's step is root's own code: not current " (pr-str r)))
+      ;; rule (a), as bin/test reads it (the plan's out/build): a process test selected, and a build only for a binary not current
+      (testing "bin/test builds target/seon for a root-side change and for nothing else"
+        (is (seq (test-runner/build-text ['seon.agent-test/in-agent-sample] r)) "the root-side change builds")
+        (is (= "" (test-runner/build-text ['seon.agent-test/in-agent-sample] (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))))
+            "an agent-only change builds nothing")
+        (is (= "" (test-runner/build-text [] r)) "and no process test selected builds nothing")))
+    (is (= ["reference-code/lmdb"] (:reaches (current (built-with "reference-code/lmdb" :pin)))) "a pin: not current")
+    (let [r (current (built-with "src/seon/render/ui.clj" (tweak "(defn script")))]
+      (is (some #{'seon.render.ui/script} (:reaches r)) (str "a render a schema names, which no call of root's reaches, is root's: not current " (pr-str r))))
+    (is (= ["zz-unplaced.txt"] (:reaches (current (built-with "zz-unplaced.txt" (constantly "x"))))) "a path no rule places: not current")
+    (is (= :binary-tree (:missing (root/binary-current db {} tree g))) "a binary that recorded no tree, against a main that holds one: unknown, never current")
+    (is (nil? (root/binary-current db {:inputs {:tree tree}} nil g)) "a main with no source fact: nothing known differs")))
+
 (deftest a-config-entry-writes-back-only-its-own-bytes
   ;; docs/source.md#a-program-file: the config file is one entity per entry, each form its exact text with its tags unread, and a write-back changes only what an entry changed
   (let [p config/shipped-file
@@ -151,7 +249,7 @@
       (is (= [:x/a :x/c] (sort (keys (forms gone)))) "an edit that takes a key out retracts its entry"))))
 
 (defn- config-root!
-  "A root on a clone of this checkout, its three tasks its own, and how a test speaks to it: :at-root, :in (an agent's REPL), :ask, :restart!. See docs/config.md#a-process-holds-its-branchs-config."
+  "A root on a clone of this checkout, its three tasks its own (loaded once it listens), and how a test speaks to it: :at-root, :in (an agent's REPL), :ask, :restart!. See docs/config.md#a-process-holds-its-branchs-config."
   []
   (let [dir (scratch-dir "config")
         tree (str dir "/tree")
@@ -162,7 +260,9 @@
         options {:store (ts/clone-process-store! (str runs "/store")) :main "main" :runs runs
                  :args ["--set" (str ":seon.config.source/root=" (pr-str tree))]}
         root (atom (ts/start-root! options))
-        ask (fn [m] (ts/ask @root m))]
+        ask (fn [m] (ts/ask @root m))
+        ;; a boot resumes main and reads no task file: its tasks are a load a person asks for (docs/source.md#indexing-a-tree)
+        _ (ask {:op :eval :agent "root" :code "(my.root/load-tasks! sys)"})]
     {:tree tree :cloned cloned :root root :ask ask
      :restart! (fn [] (ts/stop-root! @root) (reset! root (ts/start-root! options)))
      :at-root (fn [code] (ts/value-of (:response (ask {:op :eval :agent "root" :code code}))))
@@ -180,7 +280,7 @@
 
 (deftest a-branchs-config-is-its-own-and-reaches-the-next-process
   ;; docs/config.md#a-process-holds-its-branchs-config, reproducing 2026-11-07: one agent's unmerged spit of a key with no schema into the config file reached a second agent's live test
-  ;; and stopped a new process. Here it acts on nothing, the boot that meets it says which file and which commit, and a key a branch adds merges, writes back byte-preserved and reads at the next process.
+  ;; and stopped a new process. Here it acts on nothing, a boot reads no file and a re-index that meets it says which file and which commit, and a key a branch adds merges, writes back byte-preserved and reads at the next process.
   (let [{:keys [tree cloned root ask restart! at-root in]} (config-root!)
         k a-branchs-key
         file (str tree "/" config/shipped-file)
@@ -208,11 +308,12 @@
           (is (= 7 (at-root (str "(get-in (datahike.api/pull @(:conn sys) [{:seon.root/config [" k "]}] [:seon.root/id :root]) [:seon.root/config " k "])"))) "and main's config in force, the entity root's :seon.root/config names, says so")
           (is (= (let [end (str/last-index-of held "}")] (str (subs held 0 end) "\n " k " 7" (subs held end)))
                  (at-root "(get (seon.source/files @(:conn sys) [seon.config/shipped-file]) seon.config/shipped-file)")))))
-      (testing "a boot on a file that doesn't load comes up, says which file and which commit, and keeps main's"
+      (testing "a boot on a file that doesn't load comes up and keeps main's, reading no file; a re-index says which file and which commit"
         (spit file bad)
         (restart!)
         (is (:port @root) (:log @root))
-        (let [err (str (at-root "(:error (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))"))]
+        (is (nil? (at-root "(:error (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))")) "the boot read no file")
+        (let [err (str (at-root "(:seon.error/message (my.root/import! sys))"))]
           (is (str/includes? err config/shipped-file) err)
           (is (str/includes? err "seon.config.nope/key") err)
           ;; the commit it names held a file that loads: a seed may name an earlier commit of the same content, so it's read, not compared with HEAD
@@ -244,6 +345,119 @@
                (fx/write-file {:req {:path (str copy "/" path) :text text}}))))
       (let [r (sh/sh "diff" "-r" (str orig "/src") (str copy "/src"))]
         (is (= [0 ""] [(:exit r) (:out r)]))))))
+
+;; docs/source.md#the-binary-records-its-program: the build's record was the whole tree indexed into an empty db at every
+;; build (1.23 G ticks and 5.4 GB of analysis, 2.34 G and 4.9 GB of checked transaction, 10.7 s at load 2); it is now the
+;; seed's own incremental index on a store the build keeps, so a build pays for what its tree changed. Its digest is the
+;; one a fresh index of the same tree holds. A scratch repository of two files, two stores of the test's own, removed
+(deftest the-code-that-indexes-is-keyed-by-its-reach
+  ;; docs/source.md#the-binary-records-its-program: a kept index is a cache of what the indexing code made of the files,
+  ;; so its key holds that code (seon.root/index-code: the reach digest of its roots), and a change the code does not reach
+  ;; keeps it. On the world: roots app.ix/make, which calls app.ix/rule; app.other is reached by nothing
+  (let [db (my.test/with (my.test/world)
+                         (my.test/code 'app.ix "(ns app.ix)\n\n(defn rule [x] (str x))\n\n(defn make [x] (rule x))\n")
+                         (my.test/code 'app.other "(ns app.other)\n\n(defn other [] 1)\n"))
+        in {:env "e" :tree "t" :code "c" :config {}}
+        code #(root/index-code % in '[app.ix/make])
+        k (code db)]
+    (is (string? k))
+    (is (= k (code (my.test/with db (my.test/code 'app.other "(ns app.other)\n\n(defn other [] 2)\n")))) "a change it does not reach keeps it")
+    (is (= k (root/index-code db (assoc in :tree "t2" :code "c2") '[app.ix/make])) "the tree and the source it reads are the files', not its key")
+    (is (not= k (code (my.test/with db (my.test/code 'app.ix "(ns app.ix)\n\n(defn rule [x] (str x :v2))\n\n(defn make [x] (rule x))\n")))) "a change to a form it reaches moves it")
+    (is (not= k (root/index-code db (assoc in :env "e2") '[app.ix/make])) "and so does the runtime it runs on")
+    (is (nil? (root/index-code db in '[app.none/x])) "roots the program does not define: no key, made again")))
+
+(deftest a-builds-kept-index-holds-the-program-a-fresh-index-holds
+  ;; and it is made again from nothing when a change reaches the code that indexes (seon.root/index-code; here
+  ;; the roots app.bp/make, which calls app.bp/rule), and only then
+  (let [dir (scratch-dir "built")
+        tree (str dir "/tree")
+        git (fn [& args] (apply sh/sh "git" "-C" tree "-c" "user.name=t" "-c" "user.email=t@t" args))
+        put! (fn [p t] (.mkdirs (.getParentFile (java.io.File. (str tree "/" p)))) (spit (str tree "/" p) t))
+        commit! #(do (git "add" "-A") (git "commit" "-q" "-m" "t"))
+        roots '[app.bp/make]
+        kept (str dir "/kept") fresh (str dir "/fresh")
+        index #(:program (root/built-program tree % roots))
+        ;; a datom of the test's own in the kept index: a store indexed again from nothing holds none
+        at-kept (fn [f] (let [p (str (first (filter (fn [d] (.startsWith (.getName d) "kept-")) (.listFiles (java.io.File. ^String dir)))) "/index")
+                              {:keys [cfg conn]} (pdb/open! :lmdb p 0 :db)]
+                          (try (f conn) (finally (pdb/sync! cfg) (d/release conn)))))
+        mark! #(at-kept (fn [c] (d/transact c {:tx-data [{:note/text "kept" :note/agent :kept-index}]})))
+        marked? #(at-kept (fn [c] (boolean (some #(= "kept" (:v %)) (d/datoms @c :aevt :note/text)))))]
+    (try
+      (sh/sh "git" "init" "-q" tree)
+      ;; an index another schema or layout made (seon.db/schema-digest names it) is dropped, never opened
+      (.mkdirs (java.io.File. (str dir "/kept-00000000/index")))
+      (put! "src/app/bp.clj" "(ns app.bp)\n\n(defn rule [x] (str x))\n\n(defn make [x] (rule x))\n")
+      (put! "src/app/other.clj" "(ns app.other)\n\n(defn other [] 1)\n")
+      (commit!)
+      (let [a (index kept)
+            _ (mark!)
+            _ (is (marked?) "the mark is there")
+            _ (is (not (.exists (java.io.File. (str dir "/kept-00000000")))) "the index of another schema or layout was dropped")]
+        (put! "src/app/other.clj" "(ns app.other)\n\n(defn other [] 2)\n")
+        (put! "src/app/bq.clj" "(ns app.bq)\n\n(defn two [] 2)\n")
+        (commit!)
+        (let [b (index kept)]
+          (is (and (string? a) (not= a b)) "the kept index moved with the tree")
+          (is (marked?) "in the same store: the change reaches none of the code that indexes")
+          (is (= b (index fresh)) "and holds the program a fresh index of the same tree holds"))
+        (put! "src/app/bp.clj" "(ns app.bp)\n\n(defn rule [x] (str x :v2))\n\n(defn make [x] (rule x))\n")
+        (commit!)
+        (let [c (index kept)]
+          (is (not (marked?)) "a change to a form the indexing code reaches makes the index again from nothing")
+          (is (= c (index (str dir "/fresh2"))) "and it holds what a fresh index holds")))
+      (finally (sh/sh "rm" "-rf" dir)))))
+
+(deftest a-landing-moves-roots-source-fact-to-the-landed-tree
+  ;; docs/source.md#a-landing-enters-main-as-data: what the bridge writes (seon.root/landed-tx) moves root's source fact to
+  ;; the landed tree, so the next re-index reads what differs from it, not every file landed since the last import
+  (let [db0 (pdb/empty-db false)
+        held {:root "/r" :dirs ["src"] :tree "t0" :commit "c0" :digest "d0" :files 1 :forms 0 :ms 1.0}
+        db (:db-after (pdb/with db0 [{:seon.root/id :root :seon.root/source held}]))
+        db1 (:db-after (pdb/with db (root/landed-tx db {"src/app/landed.clj" "(ns app.landed)\n(defn f [] 1)\n"} {} "t1" "c1")))
+        fact (:seon.root/source (d/pull db1 [:seon.root/source] [:seon.root/id :root]))]
+    (is (= ["t1" "c1"] [(:tree fact) (:commit fact)]) "the landed tree and commit")
+    (is (not= "d0" (:digest fact)) "its digest is the landed tree's")
+    (is (= ["/r" ["src"]] [(:root fact) (:dirs fact)]) "what the import read from stays")
+    (is (some? (d/entity db1 [:var/name 'app.landed/f])) "and the landed file's facts are main's")))
+
+(deftest a-landing-through-the-bridge-is-a-zero-diff
+  ;; task seon.root/a-boot-resumes-from-the-db: a Claude session's landing enters main as data, the changed files' facts
+  ;; (seon.root/changed-tx, what bin/land's bridge has root write on main).
+  ;; Main indexed so from tree A, then from what A -> B changed (a form changed, a namespace added, a script's text and
+  ;; mode, a page changed and one removed, a task file added), holds B: the program a seed of B holds (its program
+  ;; digest, so a binary built from B is no stale binary), written back byte for byte (seon.doc/files), so the main
+  ;; tree's git status stays clean after the write-back merges, with B's pages and tasks. In memory, no root
+  (let [a (assoc (src-files)
+                 "bin/zz-land" "#!/bin/sh\necho a\n"
+                 "docs/zz-land.md" "# Land\n\nA page.\n\n## Kept\n\nIt stays.\n"
+                 "docs/zz-gone.md" "# Gone\n\nA page the landing removes.\n")
+        b (-> a
+              (assoc "src/app/imp.clj" (str/replace imp-text "(* s s)" "(* s s s)")
+                     "src/app/land.clj" "(ns app.land)\n\n(defn landed [] 1)\n"
+                     "bin/zz-land" "#!/bin/sh\necho b\n"
+                     "docs/zz-land.md" "# Land\n\nA page, changed.\n\n## Kept\n\nIt stays.\n"
+                     "resources/seon/tasks/zz-land.edn" (pr-str [{:seon.task/name "t" :seon.task/plan "Landed." :seon.task/kind :work}]))
+              (dissoc "docs/zz-gone.md"))
+        ;; as bin/land's bridge passes them: every changed text file's mode, a namespace's and a page's too
+        modes (assoc (zipmap (keys b) (repeat "100644")) "bin/zz-land" "100755")
+        changed (into {} (for [p (into (set (keys a)) (keys b)) :when (not= (a p) (b p))] [p (b p)]))
+        _ (doseq [[path text] a :when (.exists (java.io.File. (str here "/" path)))] (require (source/file-ns text)))
+        db0 (pdb/empty-db false)
+        ;; through the write check every write takes (seon.db/with), as the agent's transact! does
+        main-a (:db-after (pdb/with db0 (root/changed-tx db0 a modes "resources/seon/tasks")))
+        main-b (:db-after (pdb/with main-a (root/changed-tx main-a changed modes "resources/seon/tasks")))
+        program-paths (filter #(or (str/starts-with? % "src/") (str/starts-with? % "bin/")) (keys b))
+        seeded-b (let [db (pdb/empty-db false)] (d/db-with db (source/tx-of db (select-keys b program-paths) false)))]
+    (is (= (set (keys changed)) #{"src/app/imp.clj" "src/app/land.clj" "bin/zz-land" "docs/zz-land.md" "docs/zz-gone.md" "resources/seon/tasks/zz-land.edn"}))
+    (is (= (select-keys b (conj program-paths "docs/zz-land.md")) (seon.doc/files main-b (conj (vec program-paths) "docs/zz-land.md")))
+        "every program file and page written back as B holds it, byte for byte")
+    (is (= "100755" (:file/mode (d/entity main-b [:file/path "bin/zz-land"]))) "the script's mode")
+    (is (nil? (d/entity main-b [:seon.doc/address "docs/zz-gone.md#gone"])) "the removed page's sections are gone")
+    (is (some? (d/entity main-b [:seon.task/id "zz-land/t"])) "the added task file's task is main's")
+    (is (= (program/program-digest seeded-b) (program/program-digest main-b))
+        "the program main holds is the one a seed of B holds: one program digest")))
 
 (def ^:private pt-text
   "(ns app.pt-src\n  \"A fixture file.\")\n\n;; adds\n(defn add [a b] (+ a b))\n\n(defn twice\n  [x]\n  (add x x))\n\n(def limit 3)\n")
@@ -465,6 +679,17 @@
 
 (def ^:private facts-path "resources/seon/schemas/seon.facts.edn")
 
+(deftest a-task-file-loses-only-the-entries-named
+  ;; docs/source.md#a-merged-task-reaches-mains-files: a reviewed sync removes a task's entry with its lead (the whitespace and
+  ;; comments before it), the file's first with the whitespace after it; every other byte, a namespaced map's too, is kept
+  (let [text "[#:seon.task{:name \"a\",\n             :plan \"one\"}\n ;; b is next\n {:seon.task/name \"b\" :seon.task/plan \"two\" :seon.task/proofs #{x/y}}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"]
+    (is (= "[;; b is next\n {:seon.task/name \"b\" :seon.task/plan \"two\" :seon.task/proofs #{x/y}}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"
+           (source/task-file-text text #{"a"})))
+    (is (= "[#:seon.task{:name \"a\",\n             :plan \"one\"}\n {:seon.task/name \"c\" :seon.task/plan \"three\"}]\n"
+           (source/task-file-text text #{"b"})) "with the comment that leads it")
+    (is (= "[]\n" (source/task-file-text text #{"a" "b" "c"})) "every entry gone")
+    (is (= text (source/task-file-text text #{"z"})) "a name no entry has changes nothing")))
+
 (deftest a-changed-schema-entry-rewrites-only-itself
   ;; task seon.source/schemas-are-part-of-the-program: write-back rewrites only the changed
   ;; entries of a schema resource (v1's schema-file-text over rewrite-clj), every other byte
@@ -575,7 +800,7 @@
 
 ;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: agents forked before an import ran the previous main's tests against the new program,
 ;; red with nothing to see: their records said the new text, their vars the old
-;; docs/source.md#mains-program-follows-the-tree: a changed test file in a root that loaded no test namespace: its require looked on disk, the import failed whole and main stayed old
+;; docs/source.md#indexing-a-tree: a changed test file in a root that loaded no test namespace: its require looked on disk, the import failed whole and main stayed old
 (deftest a-refresh-reads-what-a-changed-file-requires-and-this-process-has-not-loaded
   ;; a macro from a namespace this process hasn't loaded expands as it should, because db's text set the namespace up first: without it the form's references lose what the macro expands to, and a test's reach with them.
   ;; An import loads what it reads, so this process forgets them (a root has loaded no test namespace)
@@ -942,153 +1167,58 @@
           (is (= "" (str/trim (:out (sync!)))))))
       (finally (sh/sh "rm" "-rf" tmp)))))
 
-(deftest the-source-tree-follows-main
-  ;; task seon.fx/the-source-tree-follows-main: the write-back tree (a worktree on its own branch)
-  ;; is brought to the main checkout's branch by the :source read itself. Behind main: fast-forwarded,
-  ;; and the read holds main's new file. Holding a commit main lacks: read as it is, and the answer
-  ;; is a :seon.fx/io-error naming both shas and both counts that still carries the read.
-  (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-follow-" (random-uuid))) (.mkdirs)))
-        co (str tmp "/main") wb (str tmp "/merges")
-        git (fn [dir & args] (let [r (apply sh/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
-                               (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
-        commit! (fn [dir f text] (spit (str dir "/src/" f) text) (git dir "add" ".") (git dir "commit" "-q" "-m" f) (git dir "rev-parse" "HEAD"))
-        read #(fx/read-source {:req {:root wb :dirs ["src"] :follow co}})]
-    (try
-      (.mkdirs (java.io.File. (str co "/src")))
-      (git co "init" "-q" "-b" "main")
-      (commit! co "a.clj" "(ns a)")
-      (git co "worktree" "add" "-q" "-b" "merges" wb)
-      (testing "at main: nothing to follow"
-        (is (= ["src/a.clj"] (keys (:value (read)))))
-        (is (not (contract/error? (read)))))
-      (testing "behind main: fast-forwarded, main's file is read"
-        (let [main (commit! co "b.clj" "(ns b)") r (read)]
-          (is (not (contract/error? r)) (pr-str r))
-          (is (= ["src/a.clj" "src/b.clj"] (keys (:value r))))
-          (is (= main (git wb "rev-parse" "HEAD")) "the write-back branch stands at main")))
-      (testing "a fast-forward git refuses (a dirty tree): imported as it is, git's words recorded"
-        (let [main (commit! co "a.clj" "(ns a2)") _ (spit (str wb "/src/a.clj") "(ns dirty)") r (read)]
-          (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
-          (is (re-find (re-pattern (str "could not follow main \\(at " main)) (:seon.error/message r)) (:seon.error/message r))
-          (is (= "(ns dirty)" (get-in r [:value "src/a.clj"])) "the read goes on, as the tree is")
-          (git wb "checkout" "--" "src/a.clj")
-          (is (not= main (git wb "rev-parse" "HEAD")) "unmoved")
-          (is (not (contract/error? (read))))
-          (is (= main (git wb "rev-parse" "HEAD")) "the clean tree follows")))
-      (testing "a read of named paths, behind main: the fast-forward moved other files, so the tree is read whole"
-        (commit! co "e.clj" "(ns e)")
-        (let [r (fx/read-source {:req {:root wb :dirs ["src"] :follow co :paths #{"src/a.clj"}}})]
-          (is (contains? (:value r) "src/e.clj") (pr-str (keys (:value r))))
-          (is (nil? (:paths r)) "and answers no :paths: root refreshes nothing by names")))
-      (testing "at main, the named paths are read by name"
-        (let [r (fx/read-source {:req {:root wb :dirs ["src"] :follow co :paths #{"src/a.clj"}}})]
-          (is (= ["src/a.clj"] (keys (:value r))))
-          (is (= #{"src/a.clj"} (:paths r)))))
-      (testing "a commit main lacks: imported as it is, the gap recorded with both shas and counts"
-        (let [theirs (commit! wb "c.clj" "(ns c)") main (commit! co "d.clj" "(ns d)") r (read)]
-          (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
-          (is (= ["src/a.clj" "src/b.clj" "src/c.clj" "src/e.clj"] (keys (:value r))) "the read goes on")
-          (is (= [theirs main 1 1] ((juxt :source :main :ahead :behind) r)))
-          (is (= theirs (git wb "rev-parse" "HEAD")) "not moved")))
-      (finally (sh/sh "rm" "-rf" tmp)))))
-
-;; task seon.fx/the-standing-root-follows-main-not-the-checkouts-head: the source tree follows the ref
-;; of the branch main, so a topic branch checked out in the main tree changes nothing root reads.
-(deftest the-standing-root-follows-main-not-the-checkouts-head
-  (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-follow-ref-" (random-uuid))) (.mkdirs)))
-        co (str tmp "/main") wb (str tmp "/merges")
-        git (fn [dir & args] (let [r (apply sh/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
-                               (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
-        commit! (fn [dir f text] (spit (str dir "/src/" f) text) (git dir "add" ".") (git dir "commit" "-q" "-m" f) (git dir "rev-parse" "HEAD"))
-        read #(fx/read-source {:req {:root wb :dirs ["src"] :follow co}})]
-    (try
-      (.mkdirs (java.io.File. (str co "/src")))
-      (git co "init" "-q" "-b" "main")
-      (let [m0 (commit! co "a.clj" "(ns a)")]
-        (git co "worktree" "add" "-q" "-b" "merges" wb)
-        (git co "checkout" "-q" "-b" "topic")
-        (let [topic (commit! co "topic.clj" "(ns topic)") r (read)]
-          (is (not= m0 topic))
-          (is (not (contract/error? r)) (pr-str r))
-          (is (= ["src/a.clj"] (keys (:value r))) "the topic branch's file is not read")
-          (is (= m0 (git wb "rev-parse" "HEAD")) "the write-back branch stays at main"))
-        (git co "checkout" "-q" "main")
-        (let [m1 (commit! co "b.clj" "(ns b)")]
-          (git co "checkout" "-q" "topic")
-          (is (= ["src/a.clj" "src/b.clj"] (keys (:value (read)))) "main's own commit is followed from a topic checkout")
-          (is (= m1 (git wb "rev-parse" "HEAD")))))
-      (finally (sh/sh "rm" "-rf" tmp)))))
-
-(deftest main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart
-  ;; task seon.fx/the-source-tree-follows-main, end to end through bin/root: a root whose checkout is
-  ;; a scratch repository (main) and whose source root is a worktree of it on its own
-  ;; branch (the write-back tree). A commit to main that defines a var reaches main's
-  ;; program through the :source load's own function (seon.root/import-source!, which my.root/import!
-  ;; calls; the watcher no longer does: seon.watch-test), with no step of the
-  ;; owner's between: the write-back branch is fast-forwarded and the var's entity is there. A root
-  ;; killed and started again on the same store holds it too (the boot's import), and a commit the
-  ;; write-back tree holds that main lacks is a recorded :effect problem naming both shas.
-  ;; The checkout is a scratch repository of one file and one page on a store of its own, empty: a clone
-  ;; of this checkout on a clone of the seeded store analysed the whole tree at each import (81 s), which
-  ;; none of the claims reads (as seon.root-test/main-follows-its-source-tree-across-restarts)
-  (let [dir (scratch-dir "follow")
-        main (str dir "/main") wb (str dir "/wb")
+;; a scratch repository of one file on a store of its own, empty: the seed is one of the claims, and none reads more
+;; than one namespace (the checkout's tree analysed at each boot was 81 s)
+(deftest a-boot-resumes-main-and-reads-no-file
+  ;; task seon.root/a-boot-resumes-from-the-db (owner, 2026-11-09: "Boot's job is to resume the existing system or if
+  ;; it's fresh to index it and get it to the point that everything is running off the db. From that point on we are
+  ;; syncing data TO files not reading from them"), end to end through bin/root: a fresh store is indexed once, at its
+  ;; first boot (seon.root/seed!); a file written under the running root changes nothing on main; a commit made while
+  ;; root is down changes nothing at the next boot either, which resumes main with its source tree moved away; only
+  ;; my.root/import!, a person's re-index, reads the tree. Red before: the boot imported the commit (import-tree!)
+  (let [dir (scratch-dir "resume")
+        co (str dir "/co") away (str dir "/co-away")
         git (fn [d & args] (let [r (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)]
                              (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
-        probe! (fn [d n] (let [f (str d "/src/seon/follow_probe_" n ".clj")]
-                           (spit f (str "(ns seon.follow-probe-" n ")\n\n(defn probe [] " n ")\n"))
-                           (git d "add" "src") (git d "commit" "-q" "-m" (str "probe " n)) (git d "rev-parse" "HEAD")))
-        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs")
-               :env {"SEON_RUN_CHECKOUT" main "SEON_RESULTS_PORT" "0"}}
-        args ["--set" (str ":seon.config.source/root=" (pr-str wb))
-              "--set" ":seon.config.source/dirs=[\"src\"]"]
+        probe! (fn [n] (spit (str co "/src/seon/resume_probe_" n ".clj") (str "(ns seon.resume-probe-" n ")\n\n(defn probe [] " n ")\n")))
+        commit! (fn [] (git co "add" "src") (git co "commit" "-q" "-m" "probe") (git co "rev-parse" "HEAD"))
+        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs") :env {"SEON_RESULTS_PORT" "0"}
+               :args ["--set" (str ":seon.config.source/root=" (pr-str co)) "--set" ":seon.config.source/dirs=[\"src\"]"
+                      "--set" ":seon.config.root/wiki-dirs=[]"]}
         root (atom nil)
+        start! #(do (reset! root (ts/start-root! root0))
+                    (is (some? (:port @root)) (str "the root started: " (ts/output (str dir "/runs/root.log")))))
         ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
                          (if (:error a) a (ts/value-of (:response a)))))
-        has-var? (fn [n] (ask (str "(some? (seon.db/eid @(:conn sys) :var/name 'seon.follow-probe-" n "/probe))")))
-        import "(select-keys (seon.root/import-source! sys (get-in sys [:bindings :source])) [:commit :error])"]
+        has-var? (fn [n] (ask (str "(some? (seon.db/eid @(:conn sys) :var/name 'seon.resume-probe-" n "/probe))")))
+        state "[(seon.program/program-digest @(:conn sys)) (:commit (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))]"]
     (try
-      (.mkdirs (java.io.File. (str main "/src/seon")))
-      (.mkdirs (java.io.File. (str main "/docs")))
-      (spit (str main "/docs/follow.md") "# Follow\n\nA scratch checkout's one page.\n")
-      (git main "init" "-q" "-b" "main")
-      (probe! main 0)
-      (git main "worktree" "add" "-q" "-b" "write-back" wb)
-      ;; the rest of either tree is this checkout's, linked and untracked (system.edn, deps.edn, the pins, bin/): the
-      ;; built libraries, probe library and binary are this checkout's target/; git leaves the links out (info/exclude)
-      (let [linked (for [f (.listFiles (java.io.File. ^String here)) :let [n (.getName f)] :when (not (or (str/starts-with? n ".") (#{"src" "docs" "test" "runs"} n)))] f)]
-        (spit (str main "/.git/info/exclude") (str/join "\n" (map #(str "/" (.getName %)) linked)) :append true)
-        (doseq [d [main wb] f linked] (is (zero? (:exit (sh/sh "ln" "-s" (.getPath f) (str d "/" (.getName f))))))))
-      (reset! root (ts/start-root! (assoc root0 :args args)))
-      (is (some? (:port @root)) (str "the root started: " (ts/output (str dir "/runs/root.log"))))
-      (is (false? (has-var? 1)) "before the commit main's program lacks the probe")
-      (let [c1 (probe! main 1) r (ask import)]
-        (is (= c1 (git wb "rev-parse" "HEAD")) "the write-back branch was fast-forwarded to main by the read")
-        (is (= {:commit c1} r) (pr-str r))
-        (is (true? (has-var? 1)) "main's program holds the var, while root runs"))
-      (ts/kill-root! @root)
-      (let [c2 (probe! main 2)]
-        (reset! root (ts/start-root! (assoc root0 :args args)))
-        (is (some? (:port @root)) (str "restarted: " (ts/output (str dir "/runs/root.log"))))
-        (is (= c2 (git wb "rev-parse" "HEAD")) "the boot's import fast-forwarded it")
-        (is (true? (has-var? 2)) "and main's program holds the var committed while root was down"))
-      (let [theirs (probe! wb 3) ours (probe! main 4) r (ask import)]
-        (is (= theirs (git wb "rev-parse" "HEAD")) "a tree holding a commit main lacks is not moved")
-        (is (re-find (re-pattern (str theirs ".*" ours)) (str (:error r))) (str "the gap names both shas: " (pr-str r)))
-        (is (true? (has-var? 3)) "and is imported as it is"))
-      ;; a disk edit acts on nothing until someone imports (my.root/import!, owner 2026-11-07): a form
-      ;; written under the source tree, then a wiki page whose load is observed (the watcher reads
-      ;; FSEvents in order, so the page loaded means the form's batch has been read); main's program
-      ;; lacks the form until import! is called
-      (testing "a disk write under the source tree loads nothing; import! brings it onto main"
-        (spit (str wb "/src/seon/follow_probe_5.clj") "(ns seon.follow-probe-5)\n\n(defn probe [] 5)\n")
-        (spit (str main "/docs/follow-marker.md") "# Follow marker\n\nA batch the watcher reads.\n")
-        ;; asked again until the page is there (an eval that blocks on it would hold the api the watcher loads through)
-        (is (loop [] (or (ask "(some? (datahike.api/entity @(:conn sys) [:seon.doc/address \"docs/follow-marker.md#follow-marker\"]))") (recur)))
-            "the marker page loaded: the watcher has read the batches before it")
-        (is (false? (has-var? 5)) "the edit is on disk, and main's program lacks it")
-        (is (string? (ask "(:commit (my.root/import! sys))")) "import! answers what the import answered (the commit it read; the gap of the step above is its :error)")
-        (is (true? (has-var? 5)) "after import! main's program holds it"))
+      (.mkdirs (java.io.File. (str co "/src/seon")))
+      ;; a tree's own deps, which the binary was not built with
+      (spit (str co "/deps.edn") "{:deps {}}")
+      (git co "init" "-q" "-b" "main")
+      (probe! 0)
+      (let [c0 (commit!)]
+        (start!)
+        (is (true? (has-var? 0)) "a fresh store is indexed at its first boot")
+        (let [[d0 seeded] (ask state)]
+          (is (= c0 seeded) "from the tree's commit")
+          (probe! 1)
+          (is (false? (has-var? 1)) "a file written under the running root changes nothing on main")
+          (ts/stop-root! @root)
+          (commit!)
+          (probe! 2)
+          (commit!)
+          (is (zero? (:exit (sh/sh "mv" co away))))
+          (start!)
+          (is (= [false false [d0 c0]] [(has-var? 1) (has-var? 2) (ask state)])
+              "the next boot resumed main as it was: it read neither the commits made while it was down nor the tree, which is gone")
+          (ts/stop-root! @root)
+          (is (zero? (:exit (sh/sh "mv" away co))))
+          (start!)
+          (is (= [false false] [(has-var? 1) (has-var? 2)]) "nor with the tree back")
+          (is (string? (ask "(:commit (my.root/import! sys))")) "import!, a person's re-index, reads the tree")
+          (is (= [true true] [(has-var? 1) (has-var? 2)]) "and brings what it changed onto main")))
       (finally
         (when @root (ts/stop-root! @root))
         (sh/sh "rm" "-rf" dir)))))

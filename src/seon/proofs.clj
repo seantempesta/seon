@@ -453,6 +453,19 @@
   [ks process asked? proofs]
   (if asked? #{} (into #{} (filter #(and (contains? process %) (not (contains? proofs %)))) ks)))
 
+(defn main-red
+  "The red tests of results ({test status}) that are main's, not the branch's change: red as its base holds them, the
+  digest the branch has base's own (nothing it changed reaches the test) or base's verdict at base's digest red (base's
+  digests, base-found {digest result}: seon.fx/stored-results of the red tests' base digests). A test with no base digest
+  is new on the branch, so its red is the branch's. The done rule never closes a task on one (docs/tasks.md#the-done-rule).
+  Cost: one lookup per red test."
+  {:malli/schema [:=> [:cat :seon.proof/results [:map-of :qualified-symbol :string] [:maybe [:map-of :qualified-symbol :string]] [:map-of :string :map]] [:set :qualified-symbol]]}
+  [results cand base base-found]
+  (into #{} (filter (fn [t] (let [b (get base t)]
+                              (and b (#{:fail :error} (get results t))
+                                   (or (= b (get cand t)) (red? (get base-found b)))))))
+        (keys results)))
+
 (defn plan
   "What a change runs: of cand ({key digest}, the candidate's), base (the base's {key digest},
   nil: none), found ({digest result}, the verdicts cached at cand's digests: seon.fx/stored-results) and proofs
@@ -657,6 +670,25 @@
                          _ (when (or thrown (some #(not (green? (result %))) ts)) (note! {:seon.test/output (str out) :ns n}))]
                    tst ts]
                [tst (result tst)])))))
+
+(defn estimated-ms
+  "{test ms} for every one of tests: its measured ms (measured, {test ms}: seon.fx/typical-ms), else the configured estimate of
+  its class, :seon.config.proofs/unmeasured-process-ms for one of process (the tests that reach a process of their own),
+  :seon.config.proofs/unmeasured-ms for the rest: an unknown is an estimate, never 1 ms (a run of 234 unmeasured process tests
+  was dealt one shard). What `worth-shards` and `shards` deal by. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol :int] [:set :qualified-symbol]] [:map-of :qualified-symbol :int]]}
+  [tests measured process]
+  (let [p (cfg/value :seon.config.proofs/unmeasured-process-ms) i (cfg/value :seon.config.proofs/unmeasured-ms)]
+    (into {} (map (fn [t] [t (or (get measured t) (if (process t) p i))])) tests)))
+
+(defn memory-jobs
+  "How many shards a run may take: jobs (the configured ceiling) or fewer, as many as available-mb holds above floor-mb at
+  shard-mb a shard (the machine's free plus inactive memory, seon.lib/sysmem), at least one: a heavy run is judged by cores
+  and free memory, never by the load average, which counts other sessions' niced work (AGENTS.md §8). See
+  docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat pos-int? :int pos-int? :int] pos-int?]}
+  [jobs available-mb shard-mb floor-mb]
+  (-> (quot (- available-mb floor-mb) shard-mb) (max 1) (min jobs)))
 
 (defn worth-shards
   "How many shards tests' work is worth, at most jobs: one for each min-ms of it ({test ms}; a test never measured counts as the mean of those measured,

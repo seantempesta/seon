@@ -12,9 +12,9 @@
 (defn- empty-db [] (ts/test-db))
 
 (defn- shipped-task-files
-  "The task files the checkout ships (root/task-files of its resources/seon/tasks), never the running
+  "The task files the checkout ships (seon.root/task-files of its resources/seon/tasks), never the running
   root's :seon.config.root/tasks-dir, which a root may point elsewhere."
-  [] (root/task-files (str (config/checkout) "/resources/seon/tasks")))
+  [] (seon.root/task-files (str (config/checkout) "/resources/seon/tasks")))
 
 (def ^:private file-a
   "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}
@@ -117,7 +117,7 @@
   ;; this tree), loads by the checked write with no refusal: the wiki first, then the tasks that cite it. A task file is
   ;; no input of the digest: an edit to one is found by the full run (bin/test --all)
   (let [co (config/checkout)
-        db0 (runner/program-db co (ts/kept-program-store))
+        db0 (runner/program)
         db0 (d/db-with db0 (vec (remove #(contains? (:schema db0) (:db/ident %)) pdb/schema)))
         ps (into (sorted-map) (mapcat #(doc/pages co %)) (config/value :seon.config.root/wiki-dirs))
         [db wiki-refused] (refusal db0 (seon.root/wiki-tx db0 co))
@@ -157,12 +157,12 @@
   ;; need on another file's task is a need on it
   (let [dir (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-task-files-" (random-uuid))) (.mkdirs))
         _ (spit (java.io.File. dir "demo.edn") file-a)
-        load! (fn [db] (d/db-with db (task/load-tx db (root/task-files (str dir)))))
+        load! (fn [db] (d/db-with db (task/load-tx db (seon.root/task-files (str dir)))))
         db (load! (empty-db))]
     (is (= :whole (:seon.task/kind (task/task db "demo/parse"))) "parse works and merges itself")
     (is (nil? (task/task db "demo/parse-merge")) "and has no merge task")
     (is (= #{"demo/parse"} (:seon.task/needs (task/task db "demo/index"))) "a need stays on the task")
-    (is (= [] (task/load-tx db (root/task-files (str dir)))) "an unchanged file writes nothing")
+    (is (= [] (task/load-tx db (seon.root/task-files (str dir)))) "an unchanged file writes nothing")
     (spit (java.io.File. dir "demo.edn") "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}]")
     (is (= :cancelled (:seon.task/execution (task/task (load! db) "demo/index"))) "a removed task cancels")))
 
@@ -248,3 +248,18 @@
         (is (str/includes? (nth unreadable 2) "not readable EDN"))
         (is (str/includes? (nth bad 2) "not a non-empty vector of transactions")))
       (finally (clojure.java.shell/sh "rm" "-rf" runs)))))
+
+;; See docs/tasks.md#a-request-is-one-transaction
+(deftest a-task-from-a-file-holds-its-plans-search-as-a-requested-one-does
+  ;; a task made from a request held a search of its plan's words, the first context's ranked matches over code and wiki; a task
+  ;; declared in a file held none (0 searches on a root of 331 file tasks, 2026-11-10), so its agent found the code by grep. Every
+  ;; task is made by seon.task/create-tx, so the search is made there, once, the same for both
+  (let [db (load-text (empty-db) file-a)
+        search-of (fn [db id] (d/pull db [:seon.search/query] [:seon.search/id (str id "/request")]))]
+    (is (= "Parse the rows." (:seon.search/query (search-of db "demo/parse"))) "a file task holds its plan's search")
+    (is (= "Index the rows." (:seon.search/query (search-of db "demo/index"))))
+    (testing "a task held before every task got one gains it on the next load, once"
+      (let [old (d/db-with db [[:db/retractEntity [:seon.search/id "demo/parse/request"]]])
+            again (load-text old file-a)]
+        (is (= "Parse the rows." (:seon.search/query (search-of again "demo/parse"))))
+        (is (= [] (task/load-tx again {'demo (task/file-declarations 'demo file-a)})) "and a load with nothing new writes nothing")))))

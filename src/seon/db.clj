@@ -5,8 +5,8 @@
   (konserve.jolt.fasl-store, FaslSerializer), and the JVM-written-store reader stays behind
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.print :as print] [clojure.string :as str] [malli.core :as m] [seon.schema.datahike :as sd] [seon.config :as cfg]
-            [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
+  (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.print :as print] [clojure.string :as str] [malli.core :as m] [malli.registry] [seon.schema.datahike :as sd] [seon.config :as cfg]
+            [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [org.replikativ.persistent-sorted-set :as pss] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core] [datahike.db.transaction]))
 
 (def schema
@@ -23,7 +23,7 @@
 
 (def schema-digest
   "The digest of the schema and the store's `layout`, 8 hex digits of its hasch uuid: a kept store of regenerable output is
-  named by it (seon.test-store/kept-store!), so a changed schema or layout makes a new store rather than one that refuses
+  named by it (`kept-store!`), so a changed schema or layout makes a new store rather than one that refuses
   to open (:seon.db/types-differ), keeps the old layout, or is migrated."
   (subs (clojure.string/replace (str (hasch/uuid [schema layout])) "-" "") 0 8))
 
@@ -39,9 +39,14 @@
   ([db tx-data {:keys [forms registry]}]
   (let [schema (:schema db)
         known? (fn [a] (or (contains? contract/forms a) (contains? forms a)))
-        schema-of (fn [a] (if (contains? forms a) (m/schema a {:registry registry}) (contract/schema a)))]
+        schema-of (fn [a] (or (if (contains? forms a) (malli.registry/schema registry a) (contract/held a))
+                                 ;; a name the registry holds no instance of (a form given in place of a registered name)
+                                 (if (contains? forms a) (m/schema a {:registry registry}) (contract/schema a))))
+        ;; an attribute's validator is found once a transaction: a transaction writes many datoms of few attributes
+        seen (volatile! {})
+        valid-of (fn [a] (or (get @seen a) (let [f (m/validator (schema-of a))] (vswap! seen assoc a f) f)))]
     (letfn [(refused [a v]
-              (when-not (m/validate (schema-of a) v)
+              (when-not ((valid-of a) v)
                 (let [ps (contract/problems (schema-of a) v)]
                   (contract/error :seon.db/invalid-datom #'invalid-datom (let [{:keys [in value]} (first ps)] (str a " refuses this value at " in ": " (:seon.print/code value)))
                                   {:attribute a :seon.error/problems ps}))))
@@ -109,7 +114,7 @@
   entity schemas ({:seon.db/to}); :drawn-schemas, the entity schemas that declare a render (:seon.render/hiccup), theirs or a parent's; and :forms, the forms it was built from}. It is the one value every reader of what an entity
   is takes first (ix): a branch's own entity schema is recognized by its own index, never the binary's.
   See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :map] [:map [:forms :map] [:entity-schemas :map] [:identity-schemas :map] [:schema-identities :map] [:drawn-schemas [:set :any]] [:required-keys :map] [:own-required :map] [:targets :map]]]}
+  {:malli/schema [:=> [:cat :map] [:map [:forms :map] [:entity-schemas :map] [:identity-schemas :map] [:schema-identities :map] [:drawn-schemas [:set :any]] [:required-keys :map] [:own-required :map] [:targets :map] [:required-refs [:vector :qualified-keyword]]]]}
   [forms]
   (let [entity? #(:seon.db/attributes (form-props forms %))
         required (fn [form] (for [e (own-entries form) :let [p (second e)] :when (not (and (map? p) (:optional p)))] (first e)))
@@ -125,7 +130,9 @@
                                [k (vec (distinct (mapcat #(required (get forms %)) (filter entity? (tree-seq (constantly true) #(parents-in forms %) k)))))]))
      :own-required (into {} (for [k (distinct (vals es))] [k (vec (required (get forms k)))]))
      ;; each ref attribute's target entity schemas, as its own schema states them ({:seon.db/to [...]}), once
-     :targets (into {} (for [[a _] es :let [to (:seon.db/to (form-props forms a))] :when to] [a to]))}))
+     :targets (into {} (for [[a _] es :let [to (:seon.db/to (form-props forms a))] :when to] [a to]))
+     ;; the ref attributes some entity schema requires: what the write check's cascade follows from a retracted entity, once
+     :required-refs (vec (sort (distinct (for [k (distinct (vals es)) a (required (get forms k)) :when (:seon.db/to (form-props forms a))] a))))}))
 
 (def ^:private binary-index
   "The binary's `entity-index`, derived once from its registry. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
@@ -153,6 +160,13 @@
 
 (defn- reverse-attr {:malli/schema [:=> [:cat :qualified-keyword] :qualified-keyword]} [a] (keyword (namespace a) (str "_" (name a))))
 
+(defn owners
+  "Each of attributes as with the entity schema that owns it, {attribute schema}, as the entity index ix says (its :entity-schemas):
+  the one reading of which entity schemas attributes belong to, for the write check (each schema a write touched) and for a render
+  (the one schema that names a map). An attribute no entity schema owns is left out. See docs/data-modeling.md#a-thing-is-its-attributes."
+  {:malli/schema [:=> [:cat :map :any] :map]}
+  [ix as] (let [es (:entity-schemas ix)] (into {} (keep (fn [a] (when-let [s (es a)] [a s]))) as)))
+
 (defn implied-pattern
   "The pull entity schema s implies: its own attributes, each ref it names followed to its first target and each ref
   that reaches it followed back to the schema that owns it, a schema already walked not followed again (Malli's
@@ -164,7 +178,7 @@
    (let [w (conj walked s) as (attributes-of ix s) targets (:targets ix)]
      (vec (concat (remove targets as)
                   (for [a as :when (targets a) :let [t (first (remove w (targets a)))] :when t] {a (implied-pattern ix t w)})
-                  (for [a (reaching ix s) :let [o ((:entity-schemas ix) a)] :when (and o (not (w o)))] {(reverse-attr a) (implied-pattern ix o w)}))))))
+                  (for [a (reaching ix s) :let [o (get (owners ix [a]) a)] :when (and o (not (w o)))] {(reverse-attr a) (implied-pattern ix o w)}))))))
 
 (defn extends?
   "Does schema a extend schema b, itself or through the schemas it extends (`parents`, in the entity index ix)? See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
@@ -172,13 +186,14 @@
   [ix a b] (boolean (or (= a b) (some #(extends? ix % b) (parents ix a)))))
 
 (defn most-specific
-  "What map e is, as the write check reads it (the entity index ix's :entity-schemas, the schema that owns each attribute): of
+  "What one entity schema map e is, for a render, which needs one: of the schemas owning its attributes (`owners`, the reading the write
+  check makes too, which holds the entity to each of them and names none as the one), the best match by attributes held: of
   the schemas owning the attributes e holds, the best match, the one with the most of its attributes present, those it
   inherits (`parents`) counted, so a schema beats the one it extends; nil for none, {:ambiguous [s ...]} for a tie. One lookup a key, then a sum a candidate
   over its parents. The order of e's keys never decides. See docs/data-modeling.md#a-thing-is-its-attributes."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [ix e]
-  (let [own (frequencies (keep (:entity-schemas ix) (keys e)))]
+  (let [own (frequencies (vals (owners ix (keys e))))]
     (when (seq own)
       (let [score (fn score [s] (+ (get own s 0) (reduce + 0 (map score (parents ix s)))))
             ranked (sort-by (comp - second) (map (juxt identity score) (keys own)))
@@ -202,7 +217,7 @@
   {:malli/schema [:=> [:cat [:maybe :map]] :map]}
   [schemas]
   (let [forms (:forms schemas)]
-    (if (some (fn [k] (or (contains? (:entity-schemas binary-index) k) (contains? (:required-keys binary-index) k)
+    (if (some (fn [k] (or (contains? (owners binary-index [k]) k) (contains? (:required-keys binary-index) k)
                           (:seon.db/attributes (form-props forms k))))
               (keys forms))
       (index-of schemas)
@@ -218,16 +233,17 @@
   being that thing. Presence is one seek
   per (entity, key), so a write costs its touched entities' required keys, never an entity's size or the store's; values
   are each datom's own check (`invalid-datom`). The first refusal by entity id, then schema, and every entity it broke in
-  :entities (a deleted var's cites, each a task and the name its text cites). See
+  :entities (each by its identity). See
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :map] [:maybe :seon.error/base]] [:=> [:cat :map :map] [:maybe :seon.error/base]]]}
   ([r] (invalid-entity r binary-index))
-  ([{:keys [db-before db-after tx-data]} {:keys [entity-schemas identity-schemas required-keys own-required]}]
+  ([{:keys [db-before db-after tx-data]} {:keys [identity-schemas required-keys own-required] :as ix}]
    (let [has? (fn [db e a] (boolean (first (d/datoms db :eavt e a))))
          ;; {[e schema] {attribute added?}}: what the write did to each touched entity's attributes of each schema; a key
          ;; it only added is held after with no seek (a write that creates an entity seeks nothing after)
+         own (owners ix (distinct (map :a tx-data)))
          touched (reduce (fn [m {:keys [e a tx added]}]
-                           (if-let [k (when (not= e tx) (entity-schemas a))]
+                           (if-let [k (when (not= e tx) (own a))]
                              (update-in m [[e k] a] #(if (nil? %) (boolean added) (and % added)))
                              m))
                          {} tx-data)
@@ -247,7 +263,7 @@
              text #(print/text (ident %) (:part print/budgets))
              all (sort-by :at broken)
              {:keys [k broke] :as b} (first all)]
-         ;; every entity the write broke is named (a var deleted under its cites: each cite, "<task> <name>", one turn's fix)
+         ;; every entity the write broke is named, so one turn fixes them all
          (contract/error :seon.db/invalid-entity #'invalid-entity
                          (str (text b) " holds attributes of " k ", which requires "
                               (str/join ", " broke) ": a write that leaves them out breaks it"
@@ -262,30 +278,47 @@
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
   datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, a lookup ref to nothing
-  (:seon.db/no-target), each entity it touched (`invalid-entity`, by the branch's `write-index`) after; an entity retracted whole takes the entities named by it with it.
+  (:seon.db/no-target), each entity it touched (`invalid-entity`, by the branch's `write-index`) after; an entity retracted whole takes the entities that require a ref to it with it.
   A refusal throws its typed error, and the value is as it was. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
   [db tx-data schemas apply-fn]
   (let [ix (write-index schemas)
-        ;; ends-with: tx-data with each entity retracted whole followed by the entities whose identity is a ref to it (a
-        ;; vector, :seon.vector/of): such an entity is named by its target and has no identity without it, so it ends with
-        ;; it, as Datahike ends a component with its parent; derived from the schema (an identity attribute that is a ref),
-        ;; so no writer retracts it by hand. One AVET seek per identity ref a retraction names (no attribute is a component, so
-        ;; none of Datahike's own cascade is followed)
+        ;; ends-with: tx-data with each entity retracted whole followed by the entities that require a ref to it (a vector's
+        ;; identity, :seon.vector/of; a cite's :seon.cite/target; a form's :form/ns): such an entity has no meaning without its
+        ;; target, and the entity check would refuse it left without a key its schema requires, so it ends with it, as Datahike
+        ;; ends a component with its parent; derived from the schema (a ref attribute an entity schema requires), so no writer
+        ;; retracts it by hand. One AVET seek per required ref a retraction names (no attribute is a component, so none of
+        ;; Datahike's own cascade is followed). A cite it ends leaves its task :seon.task/gone, its target's identity value
+        ;; added, in the same write (docs/references.md#task-references): the text that still names it is the task's problem
+        gone-tx (fn [ended cites]
+                  (let [ids (keys (:identity-schemas ix))
+                        by (reduce (fn [m [x e]]
+                                     (let [of (:v (first (d/datoms db :eavt x :seon.cite/of)))
+                                           v (some #(:v (first (d/datoms db :eavt e %))) ids)]
+                                       (if (and of (not (ended of)) (seq (d/datoms db :eavt of :seon.task/id)) (some? v))
+                                         (update m of (fnil conj []) v)
+                                         m)))
+                                   {} cites)]
+                    (for [[t vs] by]
+                      [:db/add t :seon.task/gone (vec (distinct (into (vec (:v (first (d/datoms db :eavt t :seon.task/gone)))) vs)))])))
         ends-with (fn [tx-data]
                     (let [whole? (fn [op] (and (vector? op) (#{:db.fn/retractEntity :db/retractEntity} (first op))))]
                       (if-not (some whole? tx-data)
                         tx-data
                         (let [schema (:schema db)
-                              refs (filterv #(= :db.type/ref (get-in schema [% :db/valueType])) (keys (:identity-schemas ix)))]
-                          (loop [todo (keep #(when (whole? %) (:db/id (d/entity db (second %)))) tx-data) seen #{} out (vec tx-data)]
+                              ;; the refs some entity schema requires, read once with the index (:required-refs), not walked each write
+                              refs (filterv #(= :db.type/ref (get-in schema [% :db/valueType])) (:required-refs ix))]
+                          (loop [todo (keep #(when (whole? %) (:db/id (d/entity db (second %)))) tx-data) seen #{} cites [] out (vec tx-data)]
                             (if-let [e (first todo)]
                               (if (seen e)
-                                (recur (rest todo) seen out)
-                                (let [dependents (for [a refs d (d/datoms db :avet a e)] (:e d))]
+                                (recur (rest todo) seen cites out)
+                                (let [found (for [a refs d (d/datoms db :avet a e)] [a (:e d)])
+                                      dependents (map second found)]
                                   (recur (concat (rest todo) dependents) (conj seen e)
+                                         ;; the cites among them, from the same seek
+                                         (into cites (for [[a x] found :when (= a :seon.cite/target)] [x e]))
                                          (into out (for [x dependents :when (not (seen x))] [:db.fn/retractEntity x])))))
-                              out))))))
+                              (into out (gone-tx seen cites))))))))
         tx-data (ends-with tx-data)]
     (when-let [e (invalid-datom db tx-data schemas)] (refuse! e))
     ;; Datahike refuses a lookup ref that names no entity (a cite's target, a wiki link: its :entity-id/missing): made the
@@ -331,6 +364,21 @@
   "The db after the hypothetical tx-data (`speculate`'s :db-after). See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :any] :any]}
   [db tx-data] (:db-after (speculate db tx-data)))
+
+(defn project-tx
+  "tx-data cut to the attributes attr? keeps (a set of them, or a predicate), so a speculation that reads only those attributes after it (a config check,
+  a count) applies what it reads and not the rest: each map keeps its :db/id and those attributes (one left with none goes),
+  each :db/add and :db/retract of such an attribute stays, and every :db/retractEntity stays, in order. Tempids join the maps
+  that kept them as before. The full import of the checkout speculated whole cost 2.7 G ticks and 4.7 GB a call.
+  See docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:=> [:cat :any [:or [:set :keyword] :seon.host/fn]] [:vector :any]]}
+  [tx-data attr?]
+  (into [] (keep (fn [x] (cond (map? x) (let [m (into {} (filter (fn [[k _]] (or (= :db/id k) (attr? k)))) x)]
+                                         (when (seq (dissoc m :db/id)) m))
+                               (= :db/retractEntity (first x)) x
+                               (#{:db/add :db/retract} (first x)) (when (attr? (nth x 2)) x)
+                               :else x)))
+        tx-data))
 
 (defn db-with
   "The db after tx-data (`with`'s :db-after). See docs/storage.md#the-write-checks-every-entity-it-touches."
@@ -457,11 +505,12 @@
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string] :seon.db/cfg]}
   [backend path]
   (let [cfg {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
-                             :default-serializer :FaslSerializer}
+                             ;; how a value becomes bytes, where konserve reads it (konserve.impl.defaults/normalize-store-config)
+                             :config {:encoding {:serializer :FaslSerializer}}}
                       (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
                       ;; konserve's per-value compressor (its header names it, so stored values of either kind read)
-                      (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :compressor] {:type (cfg/value :seon.config.store/compressor)})
-                      (= backend :file) (assoc :config {:defer-immutable-sync? true}))
+                      (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :encoding :compressor] {:type (cfg/value :seon.config.store/compressor)})
+                      (= backend :file) (assoc-in [:config :defer-immutable-sync?] true))
              :schema-flexibility :write
              :store-cache-bytes (cfg/value :seon.config.store/node-cache-bytes)
              :writer writer-cfg
@@ -621,6 +670,13 @@
   {:malli/schema [:=> [:cat :seon.db/cfg] [:maybe :string]]}
   [cfg] (when-let [p (get-in cfg [:store :path])] (str p "-agents/" (name (main-branch cfg)))))
 
+(defn empty-db
+  "An empty db value with Seon's schema (`schema`), in memory, keeping history when history?: a test's world
+  (my.test/world) and a tree indexed with no store (seon.root/built-program). See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat :boolean] :seon.host/db]}
+  [history?] (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) schema)
+                                     {:keep-history? history? :schema-flexibility :write}))
+
 (defn delete-main!
   "Delete main and every branch held under it (of-main) from the store of conn, a connection
   to :db (datahike.api/delete-branch!; a branch's connections are released first): what a
@@ -638,11 +694,14 @@
   "Read every node of db's indexes into this process's node cache, so the children it forks
   (the fork server's agents) inherit them decoded and read the store less at a spawn. The fork
   server calls it once, through its own store, after its fork (docs/machine.md#roots-heap).
-  Answers the datom count."
+  Answers the datoms its three indexes hold, counted leaf by leaf: each index is one reduce over
+  the sorted set's own slice, which restores every node on its way and makes nothing a datom
+  (counting (d/datoms db index) walked each index through Datahike's lazy seq, a cell a datom: a small part of the 1.2 s
+  a root's first fork spends here; the rest is decoding leaves)."
   {:malli/schema [:=> [:cat :seon.host/db] :int]}
   [db]
-  (count (d/datoms db :aevt)) (count (d/datoms db :avet))
-  (count (d/datoms db :eavt)))
+  (reduce (fn [n index] (reduce (fn [k _] (inc k)) n (pss/slice (get db index) nil nil)))
+          0 [:aevt :avet :eavt]))
 
 (lib/defc c-ids-open "seon_ids_open" [:string] :pointer {:capture-native-error true})
 (lib/defc c-ids-take "seon_ids_take" [:pointer :int] :uint64)
@@ -741,6 +800,25 @@
   "Remove directory dir and what it holds, when it is there. nil."
   {:malli/schema [:=> [:cat :string] :nil]}
   [dir] (run! #(.delete ^java.io.File %) (reverse (file-seq (java.io.File. ^String dir)))) nil)
+
+(defn kept-store!
+  "The path of the kept store of regenerable output at base for a schema's digest (the whole schema's, `schema-digest`,
+  unless given), base-<digest>; a store at base made with another digest (base itself, or base-<8 hex digits> but this
+  one) is removed: it is output, made again from its inputs, never a record, so a changed schema or layout makes a new
+  store, nothing migrated or refused (task seon.test-store/a-kept-store-is-keyed-by-its-schema). Nothing is made here;
+  the caller opens it. The test runner's program store, the process tests' store and the build's index take it. See
+  docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:function [:=> [:cat :string] :string] [:=> [:cat :string :string] :string]]}
+  ([base] (kept-store! base schema-digest))
+  ([base digest]
+   (let [f (java.io.File. ^String base)
+         dir (.getParentFile f)
+         stem (.getName f)
+         keyed (str stem "-" digest)
+         old (re-pattern (str "\\Q" stem "\\E(-[0-9a-f]{8})?"))]
+     (doseq [n (some-> dir .list seq) :when (and (re-matches old n) (not= n keyed))]
+       (remove-dir! (str dir "/" n)))
+     (str dir "/" keyed))))
 
 (defn- compact-marker
   "The file in the store at path that says a sweep freed pages since its last compaction (compact-if-due!)."

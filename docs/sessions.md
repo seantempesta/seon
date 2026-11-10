@@ -4,7 +4,7 @@ How the Claude sessions that build Seon share the work: who owns what, how the o
 
 ## Sessions own their areas
 
-A named session owns one area of Seon and knows all of it: Context (what an agent reads), Web (what a person sees, and the servers), Optimization (cost, storage and the proofs; it reads the cost line of other sessions' plans), and one managing session that keeps the landing order and reads each landing's audit ([merging](merging.md#a-landing-message-carries-its-audit)). What each has in flight is in [plan](plan.md).
+A named session owns one area of Seon and knows all of it: Context (what an agent reads), Web (what a person sees, and the servers), Optimization (the running system's cost and correctness in Seon's own code: an agent's turn, boot, fork and the store, the data model, merges and write-back; it reads the cost line of other sessions' plans), Tests (the test system: selection, digests, the verdict cache, the runners, the full run, slow tests), Deep fixes (performance and correctness inside the dependencies: Jolt, Datahike, konserve; the edge with Optimization is where a cost bottoms out), and one managing session that keeps the landing order and reads each landing's audit ([merging](merging.md#a-landing-message-carries-its-audit)). What each has in flight is in [plan](plan.md).
 
 - **A session holds its area's design, code and state in its own head** (owner, 2026-11-08: "We are moving away from monolithic orchestrators who don't know anything and implementation agents who don't know the big picture"). It reads the code a helper changes, takes the measurements that decide a design itself, and never answers for code it has not read.
 - **No fixed ceremony** (owner, 2026-11-06: "I don't want the work done twice. If you do it well merge it. If optimization does it well merge it. If you hand something off to optimization just do it. No more ceremony and mandated fixed policies."). Whoever proves a change lands it. Each session says by message what it is taking, and hands another session only work that session can do. Agents doing the wrong thing is a bug for whoever owns the cause. Coordination files and wake pipes are not used.
@@ -18,7 +18,7 @@ A session does its work itself, in one conversation, and starts no other session
 
 The night of 2026-10-27 ran sixteen sessions and a merge session, with wake pipes and orders files, each re-deriving context and reworking the others' branches. About a fifth of a week's tokens went on churn (109 merges, 6 Jolt pin bumps, 591 GB of worktrees), and the machine reached a memory limit at load 35. The tooling built to serve that parallel work is the second lesson of the night ([decisions](decisions.md#build-the-product-not-infrastructure-owner-2026-10-28)).
 
-One helper at a time on a step, briefed from a plan the session understands; steer it with a message before launching another.
+A session uses as many helpers as its work needs (owner, 2026-11-10: "What I never said one helper? Yeah allocate whatever resources we need"): each is briefed from a plan the session understands, owns its own files so no two write the same ones, and has every line reviewed by the session. What the night above got wrong was sessions nobody steered reworking each other, not the number of hands; the machine still bounds it ([machine](machine.md#processes)).
 
 ## Asking the owner
 

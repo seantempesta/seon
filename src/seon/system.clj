@@ -1,5 +1,5 @@
 (ns seon.system
-  "Root's system procs as a declaration (resources/seon/system.edn, read with aero), built
+  "Root's system procs as a declaration (resources/seon/system.edn, baked into the binary and read with aero), built
   into a flow config with the values root's boot step holds (DECISIONS, Flow is the one
   model: every component is a step-fn proc, declared in one file): the definition lives in a
   file and starting is explicit: seon.root/start! builds the graph from it at once,
@@ -7,13 +7,25 @@
   its declaration is equal, so update! (which keeps procs whose :proc, :args and :chan-opts
   are unchanged, with their queued messages) leaves it running."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [aero.core :as aero] [clojure.walk :as walk]
+  (:require [seon.contract :refer [defn defn-]] [aero.core :as aero] [clojure.walk :as walk] [seon.config]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [seon.fx :as fx]))
 
+(defmacro ^:private baked-decl-text
+  "The system declaration's text (:seon.config.root/system-path), read when this namespace compiles, as
+  seon.config/built-text reads the shipped config. See docs/source.md#a-boot-resumes-from-the-db."
+  [] (slurp (seon.config/value :seon.config.root/system-path)))
+
+(def built-text
+  "The system declaration as this binary was built: what root's boot builds its graph from, whatever the file on disk
+  says now. See docs/source.md#a-boot-resumes-from-the-db."
+  (baked-decl-text))
+
 (defn read-decl
-  "The declaration {:procs :fx :conns}, read with aero from the file at p."
-  {:malli/schema [:=> [:cat :string] :seon.system/decl]}
-  [p] (aero/read-config p))
+  "The declaration {:procs :fx :conns}, read with aero: the binary's own (built-text), or the file at p (seon.root/apply!,
+  a person's re-read). See docs/source.md#a-boot-resumes-from-the-db."
+  {:malli/schema [:function [:=> [:cat] :seon.system/decl] [:=> [:cat :string] :seon.system/decl]]}
+  ([] (aero/read-config (java.io.StringReader. built-text)))
+  ([p] (aero/read-config p)))
 
 (defn- bind
   "Decl with every :bind/<name> keyword replaced by its value in bindings; a name bindings

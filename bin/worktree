@@ -85,7 +85,8 @@ setup() {
     # and delete while this copies (a directory deleted under cp failed the copy: seon.source-test's
     # bin/worktree --at went red in full proves, never alone)
     for e in "$MAIN"/target/*.stamp(N); do
-      for p in $e ${e%.stamp} ${e%.stamp}.build ${e%.stamp}.tree; do
+      # and NAME.program, the program the binary was built from (seon.root/binary-current reads it: without it a gate's binary is unknown, and builds)
+      for p in $e ${e%.stamp} ${e%.stamp}.build ${e%.stamp}.tree ${e%.stamp}.program; do
         if [[ -e $p ]]; then cp -cR "$p" "$WT/target/"; fi
       done
     done

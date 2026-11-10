@@ -254,6 +254,9 @@
       ;; the agent launches a task of its own (my.task/launch!): root makes it, as a person's sentence
       :launch (do (step/out! o :to-api {:op :request :req (cond-> {:op :ask :text (:text m) :agent id} (:template m) (assoc :template (:template m))) :route [id :in] :tag (:k m)})
                   st)
+      ;; the agent moves the person's view (my.user/focus!): root writes the signed-in user's focus
+      :focus (do (step/out! o :to-api {:op :request :req {:op :focus :key (:key m)} :route [id :in] :tag (:k m)})
+                 st)
       ;; the agent asks its branch's merge gate run (seon.agent/judge!): quiet for as long as an effect it awaits, so no stall
       :gate (do (step/out! o :to-api {:op :request :req {:op :gate :branch (:branch st) :tests (:tests m) :prio (:prio m 0)} :route [id :in] :tag (:k m)})
                 (-> st (update :gates (fnil conj #{}) (:k m)) (update :fx-out (fnil inc 0))))

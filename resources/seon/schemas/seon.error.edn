@@ -11,7 +11,7 @@
                       [:path vector?] [:in vector?] [:expected :any] [:value [:map [:seon.print/code :string]]]]
  :seon.error/problems [:vector :seon.error/problem]
  ;; what the error is about, when it names one: a var (symbol), a section address (string) or an
- ;; attribute (keyword: a proc's own fact, e.g. root's :seon.root/watch). Once its subject changes
+ ;; attribute (keyword: a proc's own fact, e.g. root's :seon.root/tasks). Once its subject changes
  ;; after the error last happened, the error is closed (seon.problems), by a read
  :seon.error/subject [:or :string :symbol :qualified-keyword]
  :seon.error/base [:and {:seon.render/hiccup seon.render.ui/error-box :description "Every error: its variant (a registered schema key), the operation that raised it, a short message; plain data, all of it (seon.contract/error makes it so)."}

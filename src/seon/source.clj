@@ -565,7 +565,7 @@
 
 (defn required-files
   "Files ({relative path text}) with the files db holds of what they require, and so on, for each namespace loaded? says this process hasn't: analyzing a file runs its ns form, and a
-  namespace no source root reaches (test/'s, in a root) is set up only by reading it first, as a whole tree's read does. Their text is db's, so reading them writes nothing. See docs/source.md#mains-program-follows-the-tree."
+  namespace no source root reaches (test/'s, in a root) is set up only by reading it first, as a whole tree's read does. Their text is db's, so reading them writes nothing. See docs/source.md#indexing-a-tree."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] ifn?] [:map-of :string :string]]}
   [db files loaded?]
   (let [libs (fn [f] (for [c (rest f) :when (and (seq? c) (= :require (first c))) x (rest c)] (if (sequential? x) (first x) x)))]
@@ -718,6 +718,20 @@
   "EDN text read as the file holds it: a tag aero resolves stays a tagged literal, so two texts compare as written. See docs/source.md#a-program-file."
   {:malli/schema [:=> [:cat :string] :any]}
   [text] (edn/read-string {:default tagged-literal} text))
+
+(defn task-file-text
+  "text, a task file (a vector of task entries, docs/tasks.md#task-files), with each entry whose :seon.task/name is in names
+  removed with its lead, the whitespace and comments before it (the file's first, with the whitespace after it); every other node keeps its text, as
+  schema-file-text keeps it. What a reviewed sync writes, so its landing completes the tasks. See
+  docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :string [:set :string]] :string]}
+  [text names]
+  (let [v (z/find (z/of-string text) z/right #(= :vector (z/tag %)))
+        cs (node/children (z/node v))
+        space? #(contains? #{:whitespace :newline :comma} (node/tag %))
+        gone? #(and (not (node/whitespace-or-comment? %)) (contains? names (:seon.task/name (read-raw (node/string %)))))
+        kept (reduce (fn [acc n] (if (gone? n) (vec (reverse (drop-while node/whitespace-or-comment? (reverse acc)))) (conj acc n))) [] cs)]
+    (z/root-string (z/replace v (node/replace-children (z/node v) (if (space? (first cs)) kept (drop-while space? kept)))))))
 
 (defn- entries-file-text
   "The file of entries at path as db holds it, its entries named by key-attr, form-attr and file-attr: its imported text (an empty map for a new
