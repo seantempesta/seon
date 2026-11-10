@@ -131,6 +131,7 @@
   .seon-stack { @apply flex flex-col gap-1; }
   .seon-stack-2 { @apply flex flex-col gap-2; }
   .seon-row { @apply flex gap-2; }
+  .seon-row > :first-child { flex-shrink: 0; } /* a row's label keeps its width beside a long value */
 }
 @media (min-width: 64rem) {
   .seon-page { height: 100dvh; overflow: hidden; }
