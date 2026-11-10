@@ -122,7 +122,7 @@
        :growth :constant
        :fixed {:ticks 400000 :bytes 2000000}
        :sizes [1 10 100]})
-    (finally (run! #(clojure.java.shell/sh "rm" "-rf" %) @stores-made) (reset! stores-made []))))
+    (finally (run! seon.lib/remove-tree! @stores-made) (reset! stores-made []))))
 
 (defn- heads-read
   "[f's value, how many times f folded a store's roster]: the roster fold (konserve's reduce-log) is
@@ -185,7 +185,7 @@
         (is (= 3 (d/q '[:find (count ?n) . :where [?n :note/text]] (pdb/head (:conn o) :killed-b)))
             "the killed writer's commits are in the store")
         (is (issues-past-heads o) "the page and the next transaction are past every head's ids"))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-copied-or-new-page-is-moved-past-the-heads
   ;; docs/storage.md#ids: a page made apart from its store is behind it, and its stamp says so: a store
@@ -224,7 +224,7 @@
         (let [[o folds] (opened path)]
           (is (= 0 folds))
           (is (issues-past-heads o))))
-      (finally (clojure.java.shell/sh "rm" "-rf" base)))))
+      (finally (seon.lib/remove-tree! base)))))
 
 (deftest a-page-from-another-boot-is-moved-past-the-heads
   ;; docs/storage.md#ids: after the OS boots again the page may have lost what it was past (power lost,
@@ -245,7 +245,7 @@
           (is (issues-past-heads o)))
         (is (= boot (ffi/read p :uint64 16)) "and stamped this boot")
         (let [[o folds] (opened path)] (d/release (:conn o)) (is (= 0 folds) "the next open trusts it")))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-page-beside-a-replaced-data-file-is-moved-past-the-heads
   ;; docs/storage.md#ids: the stamp names the store's data file too, so a data.mdb renamed in under a
@@ -274,7 +274,7 @@
         (let [[o folds] (opened path)]
           (is (= 1 folds) "the open read the heads")
           (is (issues-past-heads o) "and issues past them")))
-      (finally (clojure.java.shell/sh "rm" "-rf" base)))))
+      (finally (seon.lib/remove-tree! base)))))
 
 (deftest the-store-reports-its-map-use
   ;; a store on disk of this test's own, the last resort: what is proved is how an LMDB
