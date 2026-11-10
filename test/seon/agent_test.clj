@@ -95,7 +95,13 @@
         "a branch holding the program root booted on keys every test as the checkout does: its greens are shared")
     (is (not= (at-boot 'app.law-test/law) ((digests broken) 'app.law-test/law)) "a form the branch adds moves the program's reader: its green is not reused")
     (is (not= ((digests broken) 'app.law-test/law) ((digests fixed) 'app.law-test/law)) "the fix moves it again: the red is not reused")
-    (is (= (at-boot 'app.other-test/other) ((digests broken) 'app.other-test/other)) "a test not reading the program keeps its key")))
+    (is (= (at-boot 'app.other-test/other) ((digests broken) 'app.other-test/other)) "a test not reading the program keeps its key")
+    ;; the done rule (docs/tasks.md#the-done-rule): base's digests are under the boot's inputs, so a law red on a branch that
+    ;; changed the program is the branch's, and on one that changed nothing it is main's (seon.proofs/main-red's first arm)
+    (let [base (update-vals (program/graph-index (program/reach-graph w0 nil) in nil) :digest)
+          red {'app.law-test/law :fail}]
+      (is (= #{} (proofs/main-red red (digests broken) base {})) "a branch that breaks the law is not excused its red")
+      (is (= #{'app.law-test/law} (proofs/main-red red at-boot base {})) "a branch changing nothing has the stray red excused"))))
 
 (defn with-agent
   "in-agent's setup and teardown around a body of the test's own: f is called with {:names {:ns :task :agent}
