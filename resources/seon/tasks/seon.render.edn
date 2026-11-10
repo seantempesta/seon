@@ -1,12 +1,4 @@
-[{:seon.task/name "the-root-tile-counts-the-program-it-loaded"
-  :seon.task/plan "What exists: root's boot measures what it loaded and keeps it in root's view, :boot {:program {:loaded n :ms m} ...} (seon.root/start!; n from seon.program/load-all!, the forms the image did not already hold, so 0 when the binary was built from main's program). Nothing shows it: root's process tile, seon.render.ui/process-tile, renders seon.render.proc/process-value (schema :seon.render/process), which reads the view's writer, fork server and store numbers (seon.root/view-numbers) and not :boot.
-
-The change: seon.render.proc/process-value carries the view's :boot (its :seon.render/process schema gains it, optional), and seon.render.ui/process-tile shows the forms boot loaded and its ms, or that none were loaded because the image held main's program. Nothing new is measured.
-
-Proof: seon.render-test/the-root-tile-shows-the-defs-boot-loaded (a process value with :boot {:program {:loaded 1233}} shows 1233 forms loaded; with 0, says the image held them; with none, says not measured)."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.render-test/the-root-tile-shows-the-defs-boot-loaded}}
- {:seon.task/name "a-merge-conflict-shows-on-the-page"
+[{:seon.task/name "a-merge-conflict-shows-on-the-page"
   :seon.task/plan "What exists: the agent's status part (`seon.render.ui/status-hiccup`) draws each unmerged entry with its key, yours and main's text and the forms that settle it; a task's merge conflicts (:seon.task/conflicts: key, kind, base, ours, theirs) are drawn nowhere with their base, and the run entry (`seon.render.ui` line showing N conflicts) and the problems banner show only a count. Correct: a declared html render of :seon.merge/conflict with its three sides, shown from the run entry and the task's page as well as the agent's status."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/a-merge-conflict-shows-its-three-sides}}
