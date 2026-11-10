@@ -147,8 +147,12 @@
 (deftest every-name-a-form-uses-is-a-var
   (let [db (runner/program)
         ;; the program's own: a test names what's gone to say it's gone
-        acct {:refs (set (d/q '[:find [?r ...] :where [?f :form/refs ?r] [?f :form/ns ?ns] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db))}]
-    (run! #(require (symbol (namespace %))) (filter #(and (namespace %) (re-find #"^(seon|my)\." (namespace %))) (:refs acct)))
+        ;; one scan of each attribute's index, joined by set membership (a d/q join over the 113k :form/refs
+        ;; datoms cost 600M ticks); most of what is left is decoding that index's nodes on its first read
+        src-nss (into #{} (comp (filter #(clojure.string/starts-with? (:v %) "src/")) (map :e)) (d/datoms db :aevt :ns/file))
+        forms (into #{} (comp (filter #(contains? src-nss (:v %))) (map :e)) (d/datoms db :aevt :form/ns))
+        acct {:refs (into #{} (comp (filter #(contains? forms (:e %))) (map :v)) (d/datoms db :aevt :form/refs))}]
+    (run! #(require (symbol %)) (into #{} (comp (keep namespace) (filter #(re-find #"^(seon|my)\." %))) (:refs acct)))
     (is (= [] (seon.program/unknown-refs acct)))))
 
 (deftest an-edge-asks-one-way
