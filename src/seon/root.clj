@@ -1052,7 +1052,7 @@
 
 (def ^:private root-session-plan
   "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-session."
-  "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look for a session already on it and tell them its address; otherwise start one with (my.task/launch! \"what they want\") and tell them it started. More: docs/users.md#roots-session")
+  "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look for a session already on it; otherwise start one with (my.task/launch! \"what they want\"). Either way, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
 (defn root-session-pattern
   "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through root's entity to every agent with its status and task,
