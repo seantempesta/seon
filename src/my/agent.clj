@@ -4,7 +4,7 @@
     ($ handle)                an earlier eval's response, its live value under :value (also result/a3f9c1d2)
     (whoami)                  {:id :branch :pid}
     (messages)                the messages sent to you and not yet delivered, delivered; they stay in @ctx until you remove one
-    (problem "signature")     one open problem of this agent's run whole, as its problems part names it
+    (problem \"signature\")     one open problem of this agent's run whole, as its problems part names it
     (send-message tos body)   body to the agents tos (ids), one message to all of them, which wakes each that waits
     (callers 'ns/f)           the program vars whose recorded definition names ns/f
     (callers :ns/key)         the functions whose code or contract names the key (an attribute, config, schema)
@@ -12,16 +12,16 @@
     (callees 'ns/f)           the vars ns/f's recorded definition names
     (callees 'a.ns)           the namespaces a.ns requires
     (history x)               what x's attributes have been, oldest first: x a var (qualified symbol), an entity id or a lookup ref
-    (search "text")           the best matches for text over code, docs, tasks and schemas, fusing its exact
+    (search \"text\")           the best matches for text over code, docs, tasks and schemas, fusing its exact
                               text, its meaning and its references: [{:kind :name :score :by :line} ...]
-    (search "text" {:kinds #{:section}}) only those kinds; :by #{:text :meaning :refs}, :ns "seon.merge", :k 20
-    (grep "text")             like grep: every line holding it, over functions, tests, docs, tasks and schemas,
-                              as rows [{:at "ns/f:3" :kind :text}]; {:in #{:var :test} :ns "seon.ref"} narrows it
-    (ls 'a.ns) (ls "docs/x.md") like ls: a namespace's definitions or a page's sections, a row each
-    (lines 'ns/f 10 40)        like sed -n: x's lines (a var, a namespace, a section "docs/x.md#a", a page, a task), numbered
+    (search \"text\" {:kinds #{:section}}) only those kinds; :by #{:text :meaning :refs}, :ns \"seon.merge\", :k 20
+    (grep \"text\")             like grep: every line holding it, over functions, tests, docs, tasks and schemas,
+                              as rows [{:at \"ns/f:3\" :kind :text}]; {:in #{:var :test} :ns \"seon.ref\"} narrows it
+    (ls 'a.ns) (ls \"docs/x.md\") like ls: a namespace's definitions or a page's sections, a row each
+    (lines 'ns/f 10 40)        like sed -n: x's lines (a var, a namespace, a section \"docs/x.md#a\", a page, a task), numbered
     (wc x)                    like wc, in tokens: what x costs printed; rows are data: take, filter, count them
     (similar 'ns/f)           what is nearest ns/f's definition by meaning: vars, wiki sections, tasks
-    (similar "text")          what is nearest the text by meaning (seon.vector/near)
+    (similar \"text\")          what is nearest the text by meaning (seon.vector/near)
     (prove)                   run what judges this branch: the task's proofs and the tests reaching
                               what it changed since main, each one with a result at its digest reused
     (process-test? 'ns/t-test) why test t reaches a process (nil: it does not): it runs at the judge
@@ -30,11 +30,11 @@
                               from any namespace)
     (swap! ctx assoc-in p v)  a change to it, as to any atom (assoc-in, update-in, dissoc): one checked
                               transaction on the branch, or refused with why; the next turn tells it
-    (cite! "docs/x.md?full#y") read a section (a page whole with no anchor, or a name) beside the task,
-                              at its ?depth (summary, lead, full); (uncite! "docs/x.md#y") stops reading it
+    (cite! \"docs/x.md?full#y\") read a section (a page whole with no anchor, or a name) beside the task,
+                              at its ?depth (summary, lead, full); (uncite! \"docs/x.md#y\") stops reading it
     (doc 'ns.name)            a namespace: its doc, then every definition, privates included, a line each in file order
-    (doc "done")              the help page's section (docs/agent.md) whole; (doc "docs/vector.md#the-model") any
-                              section, (doc "docs/vector.md") a page's sections; (doc :var/form) a schema key
+    (doc \"done\")              the help page's section (docs/agent.md) whole; (doc \"docs/vector.md#the-model\") any
+                              section, (doc \"docs/vector.md\") a page's sections; (doc :var/form) a schema key
     (help)                    the system prompt as sent, then this map
     clojure.repl as at any Clojure REPL (source, doc, dir, apropos, find-doc, pst), with *1 *2 *3 *e:
     source reads this branch's own definitions first, then a library's file"

@@ -184,6 +184,36 @@
   (when-not (str/blank? plan)
     {:seon.search/id (str (if (vector? t) (second t) t) "/request") :seon.search/of t :seon.search/query plan}))
 
+(defn- made-db
+  "db with tasks ids made as a text's cites read them, their :seon.task/id alone, so a cite of a task the same write makes
+  resolves. A speculation applies what it reads: speculated whole, the shipped task files' load paid 22 M ticks and 47 MB a
+  speculation for 300 tasks, and paid it twice (create-tx's, then load-tx's). See docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/id]] :seon.host/db]}
+  [db ids] (pdb/speculate-db db (mapv (fn [id] {:seon.task/id id}) ids)))
+
+(defn- created-tx
+  "The transaction writing decls (their needs already judged) as held tasks, ids their ids, their cites read on db', the db
+  that holds every task the write makes (made-db): create-tx's and load-tx's, so a write speculates its tasks once. See
+  docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/id] [:vector :map]] [:vector :map]]}
+  [db' ids decls]
+  (let [graph (zipmap ids (map #(set (:seon.task/needs %)) decls))
+        tasks (mapv (fn [id {:seon.task/keys [config needs evidence] :as decl}]
+                      (cond-> (-> decl (dissoc :seon.task/config :seon.task/needs :seon.task/evidence)
+                                  (assoc :db/id id :seon.task/id id :seon.task/execution :held)
+                                  (update :seon.task/branch #(or % (default-branch id)))
+                                  ;; a declaration that names no kind is work: the task holds it (:seon.task/task-fact requires it)
+                                  (update :seon.task/kind #(or % :work)))
+                        (seq needs) (assoc :seon.task/needs (mapv #(if (graph %) % [:seon.task/id %]) needs))
+                        evidence (assoc :seon.task/evidence evidence)
+                        (seq config) (merge config)))
+                    ids decls)]
+    ;; what each text cites, read on the db the tasks make (a task this write declares is a task it may
+    ;; cite), its cite entities naming the task by its tempid
+    (-> tasks
+        (into (mapcat (fn [id decl] (cites-tx db' id id (text-citations db' decl))) ids decls))
+        (into (keep (fn [[id decl]] (plan-search-tx id (:seon.task/plan decl)))) (map vector ids decls)))))
+
 (defn create-tx
   "The transaction writing decls (task declarations) as held tasks: each gets its id and
   its branch; needs refer by id, to a task of this write or one already on db. A cycle
@@ -195,22 +225,7 @@
         graph (zipmap ids (map #(set (:seon.task/needs %)) decls))]
     (if-let [p (needs-problem graph #(or (graph %) (pdb/eid db :seon.task/id %)))]
       (invalid #'seon.task/create-tx p)
-      (let [tasks (mapv (fn [id {:seon.task/keys [config needs evidence] :as decl}]
-                    (cond-> (-> decl (dissoc :seon.task/config :seon.task/needs :seon.task/evidence)
-                                (assoc :db/id id :seon.task/id id :seon.task/execution :held)
-                                (update :seon.task/branch #(or % (default-branch id)))
-                                ;; a declaration that names no kind is work: the task holds it (:seon.task/task-fact requires it)
-                                (update :seon.task/kind #(or % :work)))
-                      (seq needs) (assoc :seon.task/needs (mapv #(if (graph %) % [:seon.task/id %]) needs))
-                      evidence (assoc :seon.task/evidence evidence)
-                      (seq config) (merge config)))
-                  ids decls)
-            ;; what each text cites, read on the db the tasks make (a task this write declares is a task it may
-            ;; cite), its cite entities naming the task by its tempid
-            db' (:db-after (pdb/speculate db tasks))]
-        (-> tasks
-            (into (mapcat (fn [id decl] (cites-tx db' id id (text-citations db' decl))) ids decls))
-            (into (keep (fn [[id decl]] (plan-search-tx id (:seon.task/plan decl)))) (map vector ids decls)))))))
+      (created-tx (made-db db ids) ids decls))))
 
 (defn execution-tx
   "Set the desired execution of tasks ids (:running is root's release, run!)."
@@ -792,10 +807,11 @@
           declared (fn [id d] {:seon.task/id id :seon.task/declared (sedn/encode d)})]
       (if-let [p (needs-problem graph graph)]
         (file-refused (first owners) p)
-        (let [created (when (seq new) (create-tx db new))
-              ;; a changed task's text may cite a task this write makes: its cites are read on the db the new tasks make,
-              ;; written after them, so the lookup resolves in the write
-              db' (if (seq new) (:db-after (pdb/speculate db (filterv #(and (map? %) (:seon.task/id %)) created))) db)]
+        (let [new-ids (mapv #(task-id (:seon.task/ns %) (:seon.task/name %)) new)
+              ;; every text's cites, a new task's or a changed one's, are read on the db the new tasks make (made-db, once),
+              ;; written after them, so a cite of a task this write makes resolves in the write
+              db' (if (seq new) (made-db db new-ids) db)
+              created (when (seq new) (created-tx db' new-ids new))]
         (vec (concat
                created
                (for [d new] (declared (task-id (:seon.task/ns d) (:seon.task/name d)) d))
