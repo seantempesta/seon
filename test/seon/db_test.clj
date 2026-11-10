@@ -1448,6 +1448,10 @@
      ;; measured 2026-11-10 (seon.cost/measure, the world + n datoms, nodes in memory): 7,579 ticks and 4.5 KB at 100,
      ;; 23,683 and 14.0 KB at 1,000: 18 ticks and 10 B a datom added. Counting (d/datoms db index) three times on the same
      ;; dbs: 65,399 ticks and 387 KB at 100, 205,556 ticks and 1.23 MB at 1,000 (78 ticks and 470 B a datom in an index)
+     ;; On Seon's own program db, read from its store in a fresh process (609,913 datoms in the three indexes, measured the
+     ;; same day, one run each): 504 M ticks and 1,836 ms counting d/datoms, 462 M ticks and 1,774 ms by this reduce: 8 percent.
+     ;; The rest is not the walk: it is decoding the leaves, about 750 ticks a datom, paid again on a second pass in that
+     ;; process (495 M ticks), so its node cache did not hold them. This proof bounds the walk; the decode is another row
      :per-n {:ticks 22 :bytes 13}
      :fixed {:ticks 7000 :bytes 4500 :calls 1}
      :sizes [100 300 1000]}))
