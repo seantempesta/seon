@@ -323,6 +323,8 @@
   (doseq [rk read-keys] (vswap! (:readers w) update rk disj k)))
 
 
+(declare entity-schema)
+
 (defn render!
   "Component [f opts & children] drawn in walk w: its marker [::child key], its output kept in w's
   cache. Skipped when its children are = to last time's (views by source and path) and nothing it
@@ -350,7 +352,9 @@
             ;; a bridge until 2b with 7c roots the agent's walk on [#'seon.render.ui/agent {} view], which deletes this case (docs/render.md)
             ev (when (seq others) (or (first children) (when (or (nil? @(:out w)) (= k @(:out w))) (ratom/ref-view (:ref (:src w)) (:changes (:src w))))))
             e0 (some-> ev ratom/untracked)
-            s0 (when (and (map? e0) (:db/id e0)) (schema-of ix e0 nil))
+            ;; an entity's schema by its identity attributes, never a value's metadata: an agent's @ctx carries :seon.ctx/ctx's, which
+            ;; names no model render, so the agent's own went unasked
+            s0 (when (and (map? e0) (:db/id e0)) (entity-schema ix e0 nil))
             fs (when s0 (into {} (keep (fn [o] (some->> (render-for ix s0 o) requiring-resolve (vector o)))) others))
             ;; output o's answer: its values, and each entity or call it places run as a component (the one the hiccup placed is a
             ;; hit; a call answers o), kept as its marker, so the parent orders and each child's answer stays its own
