@@ -41,7 +41,7 @@
   work stands; the branch is deleted when f returns."
   [n max-running f]
   (ts/test-branch! (fn [_ conn] (let [ds (decls n)]
-    (d/transact conn {:tx-data (task/boot-tx boot max-running "sean")})
+    (d/transact conn {:tx-data (into (task/boot-tx boot "sean") (seon.task/config-tx {:seon.config.agent/max-running max-running} {}))})
     (doseq [part (partition-all 400 ds)]
       (d/transact conn {:tx-data (task/create-tx @conn (vec part))}))
     (doseq [part (partition-all 400 (map #(task/task-id 'r3 (:seon.task/name %)) ds))]

@@ -131,7 +131,7 @@
     cache-miss-tokens (assoc :seon.model-call/cache-miss-tokens cache-miss-tokens)))
 
 (defn- deliver!
-  "Deliver what was sent since the last turn onto this branch as turn n's (the turn that reads it: the next one,
+  "Deliver what was sent since the last turn onto this branch (the turn that reads it is derived, seon.ctx/turn-members,
   docs/turn.md#the-turn-is-a-number), before the turn's request is made, so
   each sits in the conversation before the page that shows what came after it: the messages main holds
   to this agent (a person's, root's at a stage boundary or a refused verdict, another agent's:
@@ -140,11 +140,11 @@
   messages read it (seon.ctx/turn-members); nothing is held for the turn's basis. An effect's outcome
   (:from :fx, in the inbox) is no message: the eval that asked holds its answer. A read that is not the
   run's turn (take? false: an observer's read of an agent its model drives) delivers nothing."
-  {:malli/schema [:=> [:cat :boolean nat-int?] :nil]}
-  [take? n]
+  {:malli/schema [:=> [:cat :boolean] :nil]}
+  [take?]
   (when take?
     (let [fx (count (agent/inbox))]
-      (agent/deliver! n)
+      (agent/deliver!)
       ;; the outcomes seen are let go
       (agent/taken! fx)))
   nil)
@@ -156,8 +156,8 @@
   [em what]
   (let [k (:key @agent/state)
         body (print/text (vary-meta {:seon-threw what :error em} assoc :seon.print/full true))]
-    ;; the next turn's: the turn that reads it, so it sits after everything this turn wrote
-    (agent/transact! (agent/own-message-tx (str k "/turn-error/" (random-uuid)) "seon" body (System/currentTimeMillis) (inc (agent/turn-now))))
+    ;; written after this turn's basis, so the next turn reads it, after everything this turn wrote
+    (agent/transact! (agent/own-message-tx (str k "/turn-error/" (random-uuid)) "seon" body (System/currentTimeMillis)))
     (agent/commit!)
     nil))
 
@@ -254,7 +254,7 @@
   {:malli/schema [:=> [:cat :seon.task/id :int [:maybe :int] :boolean [:maybe :string]] [:tuple :string :map [:vector :map]]]}
   [task n max-turns merge? model-name]
   (let [k (:key @agent/state) id (lib/call-id k n)]
-    (deliver! true n)
+    (deliver! true)
     (let [shown (show-page!)]
       (agent/transact! (into [{:seon.agent/key k :seon.agent/turn n}
                               {:seon.model-call/id id :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n :seon.model-call/origin :model}]
@@ -334,7 +334,7 @@
         (cond-> (-> (assoc st :turn (inc turn))
                     ;; what this turn's parts showed, by producer, and what it evaluated (waste)
                     (update :log (fnil conj []) {:n turn
-                                                 :shown {'seon.render.ui/cited (set (keep :seon.cite/name (task/task-cites db (:seon.task/id t))))
+                                                 :shown {'seon.render.ui/cited (set (keep task/cited-name (task/task-cites db (:seon.task/id t))))
                                                          'seon.ctx.status/status (set (map :test (:proofs s)))}
                                                  :items (mapv (fn [{:keys [code response]}] {:form code :error (:ex response)}) calls)}))
           ;; a merge turn: each turn of a merge task; a whole task's own work comes first, so
@@ -361,7 +361,7 @@
                     0))
          turn (inc (agent/turn-now))
          ;; an observer's read records nothing on the branch beyond the read and leaves the print cache
-         _ (deliver! take? turn)
+         _ (deliver! take?)
          ;; the main and merge base the read heard, decided as a model turn's are, before its request is drawn
          _ (when take? (when-let [tx (not-empty (main-base-tx))] (agent/transact! tx) (agent/commit!)))
          _ (when take? (show-page!))
@@ -510,7 +510,7 @@
                              hairy (when (and merge? (not (contract/error? s)))
                                      (r/hairy (merge merge-cfg {:conflicts (vec (:unmerged s)) :merge-turns (:merge-turns st)
                                                                 :refs (into (set (:proofs (:seon.task/accumulated (:task obs))))
-                                                                            (comp (keep :seon.cite/name) (filter qualified-symbol?))
+                                                                            (keep #(get-in % [:seon.cite/target :var/name]))
                                                                             (task/task-cites (agent/db) task))})))]
                          (cond
                            ;; git's CI after the merge: green on the combined program; merge main again until
