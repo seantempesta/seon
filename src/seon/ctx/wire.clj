@@ -99,15 +99,15 @@
   "The ref and turn of message m the agent's model output holds, from src, the component whose own answer held it
   (seon.render/answer-sources: {:f :args}): an eval [:eval id] in its reply's turn, a message [:message id] in its call's, a
   reply [:reply id] in its own, a turn's page message [:page n] in turn n, an example session [:example key], and the agent's
-  own: its system message [:section addresses], what opens its session [:session key]. What the debug page labels each
-  message by. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :seon.host/db :map :map] [:tuple [:vector :any] [:maybe :int]]]}
-  [db {:keys [f args]} m]
+  own: its system message [:section addresses], what opens its session [:session key]; turn-of, each message id to the turn that
+  read it (seon.ctx/placed-messages). What the debug page labels each message by. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  {:malli/schema [:=> [:cat :seon.host/db :map :map :map] [:tuple [:vector :any] [:maybe :int]]]}
+  [db turn-of {:keys [f args]} m]
   (let [x (some-> (first args) ratom/realize)]
     (cond (= f #'page-diff-msgs) [[:page (nth args 3)] (nth args 3)]
           (= f #'example-msgs) [[:example (first args)] nil]
           (:seon.eval/id x) [[:eval (:seon.eval/id x)] (reply-of db x)]
-          (:seon.message/id x) [[:message (:seon.message/id x)] (some->> (:seon.message/call x) :db/id (d/entity db) :seon.model-call/n)]
+          (:seon.message/id x) [[:message (:seon.message/id x)] (turn-of (:seon.message/id x))]
           (:seon.model-call/id x) [[:reply (:seon.model-call/id x)] (:seon.model-call/n x)]
           (= "system" (:role m)) [[:section (vec (sort (keys (:seon.agent/system x))))] nil]
           :else [[:session (:seon.agent/key x)] nil])))
@@ -121,8 +121,10 @@
   {:malli/schema [:=> [:cat :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]}
   [w]
   (let [db ((:db w))
+        c @(:ref (:src w))
+        turn-of (into {} (for [[n ms] (when (:db/id c) (ctx/placed-messages db c)) :when (int? n) [_ id] ms] [id n]))
         ps (reduce (fn [acc [m src]]
-                     (let [[ref n] (part-ref db src m) [r0 ms n0] (peek acc)]
+                     (let [[ref n] (part-ref db turn-of src m) [r0 ms n0] (peek acc)]
                        (if (and (seq acc) (= ref r0)) (conj (pop acc) [r0 (conj ms m) n0]) (conj acc [ref [m] n]))))
                    [] (render/answer-sources w :seon.render/openai-compat))
         ms (into [] (mapcat second) ps)]
@@ -291,7 +293,7 @@
   docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :seon.model/message]]}
   [{db :seon.db/db} {:seon.model-call/keys [n origin reply reasoning truncated] :as c}]
-  (let [called? (boolean (some #(:seon.eval/call-id (d/entity db %)) (keys (:seon.eval/_call c))))
+  (let [called? (boolean (some #(let [e (d/entity db %)] (and (:seon.eval/call-id e) (:seon.eval/agent e))) (keys (:seon.eval/_call c))))
         spoke? (not (str/blank? reply))
         sent? (and (= :model origin) (or called? (and (not truncated) spoke?)) (or spoke? (some? reasoning)))]
     (if sent?
@@ -301,21 +303,28 @@
       [])))
 
 (defn- turn-entities
-  "Agent record c's turns as the entities the model reads, ordered from its pull with no seek a turn: its model calls by
-  number, each call's messages as they were taken (seon.ctx/first-delivered), its page message between the basis of the call
-  before that holds one and its own (`page-diff-msgs`, a placed call), the call, the call's evals of the model's, then
-  those of other hands; a member c no longer holds (unlinked by a swap!) is none. See docs/turn.md#the-turn-is-a-number."
+  "Agent record c's turns as the entities the model reads, ordered from its pull: its model calls by number, each turn's
+  messages as it read them (seon.ctx/placed-messages: those delivered by its basis, so one delivered mid-turn reads at the next
+  turn), its page message between the basis of the call before that holds one and its own (`page-diff-msgs`, a placed call),
+  the call, the call's evals of the model's, then those of other hands; a member c no longer holds (unlinked by a swap!) is
+  none. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
   [db c]
-  (let [evals (:seon.eval/_agent c) msgs (:seon.message/_to c)]
-    (vec (for [[prev call] (let [cs (map val (sort-by (comp :seon.model-call/n val) (filter (comp :seon.model-call/n val) (:seon.model-call/_agent c))))]
-                             (map vector (reductions (fn [b x] (or (:seon.model-call/basis x) b)) nil cs) cs))
-               :let [ms (filter #(contains? msgs %) (keys (:seon.message/_call call)))
-                     ms (if (next ms) (sort-by #(ctx/first-delivered [db (:db/id c) %]) ms) ms)
+  (let [evals (:seon.eval/_agent c) msgs (:seon.message/_to c)
+        placed (ctx/placed-messages db c)]
+        ;; the newest call's basis is written after the commit it names (seon.turn/open-turn!), so read at that commit it holds none:
+        ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message
+        here (when-let [id (d/commit-id db)] {:commit id :t (:max-tx db)})
+        cs (map val (sort-by (comp :seon.model-call/n val) (filter (comp :seon.model-call/n val) (:seon.model-call/_agent c))))
+        newest (:seon.model-call/n (last cs))
+        basis-of (fn [x] (or (:seon.model-call/basis x) (when (= newest (:seon.model-call/n x)) here)))]
+    (vec (for [[prev call] (map vector (reductions (fn [b x] (or (basis-of x) b)) nil cs) cs)
+               :let [n (:seon.model-call/n call)
+                     ms (keep (fn [[m _]] (get msgs m)) (get placed n))
                      es (sort (filter #(contains? evals %) (keys (:seon.eval/_call call))))
                      model? #(:seon.eval/call-id (get evals %))]
-               x (concat (map msgs ms)
-                         (when-let [b (:seon.model-call/basis call)] [[#'page-diff-msgs {} (:db/id c) prev b (:seon.model-call/n call)]])
+               x (concat ms
+                         (when-let [b (basis-of call)] [[#'page-diff-msgs {} (:db/id c) prev b n]])
                          [call] (map evals (filter model? es)) (map evals (remove model? es)))]
            x))))
 
