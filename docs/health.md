@@ -50,7 +50,7 @@ An `:implement` task that is ready (not done, every task it needs done) is an `:
 
 ## A plan that went stale
 
-A ready task whose own plan cites a var whose form was written after the plan is a `:stale-plan` (`seon.problems/stale-plans`): the plan was written before the var took its present form, so what it says of it (a function it calls missing, code it describes) may no longer be true, and an agent spends evals finding out. It compares the transaction of the task's current `:seon.task/plan` datom with that of each cited var's `:var/form` datom; the task's needs' plans are not judged. The problem closes when the plan is written again (a new plan datom), after reading the var. Cost: the ready tasks, then two datom reads a cite.
+A ready task whose own plan cites a var whose form was written after the plan is a `:stale-plan` (`seon.problems/stale-plans`): the plan was written before the var took its present form, so what it says of it (a function it calls missing, code it describes) may no longer be true, and an agent spends evals finding out. It compares the transaction of the task's current `:seon.task/plan` datom with that of each cited var's `:var/form` datom; the task's needs' plans are not judged. The problem closes when the plan is written again (a new plan datom), after reading the var: what no longer holds rewritten, or, when it all holds, a line `Checked <date> against <var>: holds.` added, since writing the same text again is no new datom and closes nothing. Cost: the ready tasks, then two datom reads a cite.
 
 ## A function that cites no section
 

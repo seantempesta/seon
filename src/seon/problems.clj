@@ -605,7 +605,8 @@
                :when (and ve (> (or (:tx (first (d/datoms db :eavt ve :var/form))) 0) plan-tx))]
            (derived-row ans (str "stale-plan " v " " var) 'seon.task
                         (str v " cites " var ", which changed after the plan was written, so what the plan says of it may no longer hold. To close it: read "
-                             var " against the plan, then write the plan again, as it was if it still holds")
+                             var " against the plan and rewrite what no longer holds, or, if it all holds, add the line \"Checked <date> against "
+                             var ": holds.\" (a plan written again with the same text is no change, so it closes nothing)")
                         {:kind :stale-plan :task v :var var} {:task v :var var})))))
 
 ;; ---- tasks held for root -----------------------------------------------------------------
