@@ -379,8 +379,10 @@
         (commit! "docs/x.md")
         (is (not= t0 (seon.fx/tree-id dir)) "a doc is in the tree")
         (write! "src/a.clj")
-        (is (not= (seon.fx/tree-id dir) (do (commit! "src/a.clj") (seon.fx/tree-id dir))) "and so is a source file")
-        (is (not= (seon.fx/tree-id dir []) (seon.fx/tree-id dir)) "with no exclusions the note is in it")
+        (let [before (seon.fx/tree-id dir) after (do (commit! "src/a.clj") (seon.fx/tree-id dir))]
+          (is (not= before after) "and so is a source file")
+          ;; each tree-id is about seven git children: the tree just read is not read again
+          (is (not= (seon.fx/tree-id dir []) after) "with no exclusions the note is in it"))
         (testing "bin/tree reads the same exclusions from the shipped config (its sed against cfg/value)"
           (let [me (seon.config/checkout)]
             (.mkdirs (java.io.File. (str dir "/bin"))) (.mkdirs (java.io.File. (str dir "/resources/seon/config")))
