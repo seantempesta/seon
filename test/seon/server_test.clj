@@ -570,3 +570,20 @@
     (is (and (string? (:value key1)) (= (:value key1) (:value key2))) (str "the session's agent continues (its key), as a retry after a death is: " (pr-str [key1 key2])))
     (is (and (int? (:value pid1)) (int? (:value pid2)) (not= (:value pid1) (:value pid2))) (str "in a new process, never the dead one: " (pr-str [pid1 pid2])))
     (is (not (:shared second-a)) "its own start, not the dead agent's")))
+
+(deftest a-context-read-that-only-looks-writes-nothing
+  ;; owner, 2026-11-10: "A read never writes". An observer's read of an agent (take? false: anyone's but its outside model's) commits
+  ;; nothing and records nothing: the branch's t and commit are the same after it; and no :context read, an outside model's own
+  ;; included, leaves an eval of its print form on the branch (the outside model's read is its turn: a model call, never an eval)
+  (let [[looked _ evals] (at/in-agent (fn [{:keys [agent task]}]
+                                        [(str "(let [db0 (seon.agent/db) _ (seon.turn/context-block " (pr-str task) " false) db1 (seon.agent/db)]"
+                                              " {:t [(:max-tx db0) (:max-tx db1)] :commit [(datahike.api/commit-id db0) (datahike.api/commit-id db1)]})")
+                                         {:op :context :agent agent}
+                                         {:op :eval :agent "root"
+                                          :code (str "(let [db (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))]"
+                                                     " (datahike.api/q '[:find [?c ...] :where [?e :seon.eval/code ?c] [(clojure.string/starts-with? ?c \"(print (seon.turn/context-block\")]] db))")}]))
+        {:keys [t commit]} (:value looked)]
+    (is (some? t) (pr-str looked))
+    (is (apply = t) "the branch's t is the same after an observer's read")
+    (is (apply = commit) "and nothing was committed for it")
+    (is (empty? (:value evals)) "no read left an eval of its print form")))
