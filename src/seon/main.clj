@@ -7,7 +7,7 @@
   (:require [seon.contract :refer [defn defn-]] [seon.root :as c] [seon.lib :as lib] [seon.print :as print]
             [seon.config] [seon.server] [my.root] [clojure.edn] [jolt.deps]
             ;; the e2e loop's subject: the binary built from a merge answers its new value
-            [seon.generation] [seon.vector]
+            [seon.generation] [seon.vector] [seon.problems :as problems]
             ;; the procs system.edn names, resolved by name at boot (seon.system/proc-var)
             [seon.fork-server] [seon.prove] [seon.reconcile] [seon.render.proc] [seon.web] [seon.writer]))
 
@@ -45,7 +45,8 @@
   file (docs/source.md#a-boot-resumes-from-the-db). Its end is a fact on main
   naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
   serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
-  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand.
+  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand; a ROOT STALE BINARY line
+  before it when the binary is another program than main's (seon.root/stale-binary), which bin/root start ends on.
   args: the mode's own, `--started-by ns/test` naming the test that started it (its boot's
   :seon.root/started-by)."
   {:malli/schema [:=> [:cat [:sequential :string]] :any]}
@@ -74,6 +75,11 @@
       ;; the fork server (a thread before it would refuse the fork); the fork server and agents end with root
       (let [p (seon.config/value :seon.config.root/end-with)] (when (pos? p) (lib/end-with! p false)))
       (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))]
+        ;; a binary of another program than main's is never silent: said before the listening line, so bin/root start and
+        ;; bin/update end on it (docs/source.md#files-and-the-db-two-directions)
+        ;; the boot view's :stale-binary printed as it is (what it compares is seon.root/stale-binary's to say)
+        (when-let [sb (get-in @(c/call! sys {:op :state}) [:boot :stale-binary])]
+          (out! "ROOT STALE BINARY " (pr-str sb) ": its binary is not main's, so root forks no agent. " problems/stale-binary-acts))
         (out! "ROOT LISTENING " bound))
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))
