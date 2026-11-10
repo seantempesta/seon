@@ -246,7 +246,7 @@
   (into #{} (comp (filter (fn [[_ f]] (str/starts-with? f "src/"))) (map first))
         (d/q '[:find ?n ?f :where [?e :ns/name ?n] [?e :ns/file ?f]] db)))
 
-(deftest ^{:seon.test/reads #{:program}} a-render-reaches-no-process
+(deftest a-render-reaches-no-process
   ;; root, 2026-10-25: after jolt/agent-conversation merged, bin/prove planned 29 keys of 686 tests:
   ;; every test reaches every schema's declared render (contract/checked, the registry, the schema
   ;; forms), and seon.render.ui/did named my.agent/prove as a quoted symbol, which the reach walk
@@ -269,7 +269,7 @@
                         [k sym] (:defines f) :when (#{:var :method} k)]
                     sym))))
 
-(deftest ^{:seon.test/reads #{:program}} one-printer-and-no-cut-before-it
+(deftest one-printer-and-no-cut-before-it
   ;; owner, 2026-10-22: "Do not create more than one value printer and no clipping happens
   ;; before then". Every var of src that prints beside seon.print, and every var of a
   ;; display namespace that cuts, is named in docs/render.md#one-printer with its reason
@@ -353,7 +353,7 @@
                        (holds-map? r #(str/starts-with? (str (if (keyword? %) (name %) (if (seq? %) (second %) ""))) "data-on")))
              v (named-by r)] v)))
 
-(deftest ^{:seon.test/reads #{:program}} one-path-to-the-model
+(deftest one-path-to-the-model
   (let [db (src-program) nss (src-nss db)]
     (is (= #{} (outside-the-path db nss)) "everything a model is sent is read from the tree")
     (testing "a second path is red: a function that writes messages and asks for them itself"
@@ -364,7 +364,7 @@
                                           "(defn sends \"Messages asked for beside the tree.\" [ms] {:messages ms :turn 1})")))]
         (is (= '#{app.second/ask app.second/told app.second/sends} (outside-the-path w #{'app.second})))))))
 
-(deftest ^{:seon.test/reads #{:program}} an-action-on-the-page-is-the-models-too
+(deftest an-action-on-the-page-is-the-models-too
   ;; owner, 2026-11-06: "actions are in the data, never only in a look". Each render holding an action is named in docs/render.md#one-path-to-the-model, with what the model has for it
   (let [db (src-program) nss (src-nss db)
         doc (let [t (slurp (str (seon.config/checkout) "/docs/render.md"))] (subs t (str/index-of t "## One path to the model") (or (str/index-of t "\n## " (+ 3 (str/index-of t "## One path to the model"))) (count t))))

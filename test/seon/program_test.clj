@@ -259,7 +259,7 @@
     (is (= (refs whole 'app.pt-qa/f) (refs alone 'app.pt-qa/f)) "the same facts whether the named namespace was analyzed or not")
     (is (= (refs whole 'app.pt-qa/m) (refs alone 'app.pt-qa/m)) "for a macro's template too")))
 
-(deftest ^{:seon.test/reads #{:program}} a-name-a-test-hands-over-quoted-is-what-it-reaches
+(deftest a-name-a-test-hands-over-quoted-is-what-it-reaches
   ;; root, 2026-10-27: (cost/proof {:of 'seon.program/reach-update ...}) did not reach reach-update,
   ;; so its digest stayed when reach-update changed and a stored green hid a red (17 calls against
   ;; 16). A name quoted in a test's namespace is one the test hands to what runs it by name: a reach
@@ -721,6 +721,11 @@
         "and a class of its own, for a reach that reads the whole program's text (a docstring)")
     (spit (str b "/deps.edn") "{:paths []}")
     (is (= (:env in-a) (:env (fx/inputs b))) "deps.edn is a class of its own too")
+    ;; a hotfix landing of .gitignore and one task file reused 14 of 1,891 keys: .gitignore was in :env
+    (spit (str b "/.gitignore") "target/")
+    (is (= (:env in-a) (:env (fx/inputs b))) "a file at the checkout's root (git's, the tools') is no input of every test")
+    (is (not= (get-in in-a [:config :seon.env/bin]) (get-in (fx/inputs b) [:config :seon.env/bin]))
+        "it is the bin class, which a test running git or a script takes")
     (.mkdirs (java.io.File. (str b "/native")))
     (spit (str b "/native/x.c") "int x;")
     (is (not= (:env in-a) (:env (fx/inputs b))) "native/, the pins and the fixtures are every test's")))))
@@ -764,9 +769,15 @@
                         (set (for [[t d] a :when (not= d (b t))] (symbol (name t))))))
         bin (moved :seon.env/bin) web (moved :seon.env/web) system (moved :seon.env/system) deps (moved :seon.env/deps)
         schemas (moved :seon.env/schemas) src (moved :seon.env/src)]
-    (is (src 'reads-program) "a test reading the checkout's whole program takes the src class")
-    (is (not (src 'pure)) "a pure test takes no src class")
-    (is (not (src 'starts-a-process)) "nor does a test that only starts processes")
+    ;; a test reading the checkout's whole program takes its text from the graph (index-answer), not the src class's
+    ;; files: an agent's branch is its own program, never root's tree
+    (let [elsewhere (set (for [[t d] (update-vals (program/graph-index (program/reach-graph (mt/with db (form 'app.fc "elsewhere" :fn #{})) nil) in nil) :digest)
+                               :when (not= d (a t))]
+                           (symbol (name t))))]
+      (is (= #{} src) "the src class's files are no input of a test: the program's text is")
+      (is (elsewhere 'reads-program) "a test reading the whole program takes its text: a form it does not reach moves it")
+      (is (not (elsewhere 'pure)) "a pure test takes no program text")
+      (is (not (elsewhere 'starts-a-process)) "nor does a test that only starts processes"))
     ;; bin/check contracts judges every var of src (seon.contract/uncontracted): batch 18 added one uncontracted with
     ;; the step green at its digest, which only its own code made (2026-10-30)
     (let [step (fn [in] (:digest (get (program/graph-index g in {"contracts" '[app.fc/contracts-step]}) "contracts")))]
@@ -864,7 +875,7 @@
           (let [st (for [id fr w (adj id) :when (not (contains? from w))] [w id])]
             (recur (vec (distinct (map first st))) (reduce (fn [m [w id]] (if (contains? m w) m (assoc m w id))) from st))))))))
 
-(deftest ^{:seon.test/reads #{:program}} a-test-that-starts-a-process-reaches-the-program-it-runs
+(deftest a-test-that-starts-a-process-reaches-the-program-it-runs
   ;; ctx-atom, 2026-10-27: seon.server-test's in-agent tests kept one reach digest across two fixes to
   ;; code their agent runs (seon.turn/observe, seon.merge/changed-vars), so a stored red and a later
   ;; green shared it and bin/test listed them flaky. The agent's code is reached over a socket and as
@@ -1178,7 +1189,7 @@
        (record-ran! rconn (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
        (is (= [] (:run (run-plan a rconn))) "with each green root's run stored, bin/test's plan of the tree runs nothing")))))
 
-(deftest ^{:seon.test/reads #{:program}} a-test-digest-takes-only-the-config-keys-it-reads
+(deftest a-test-digest-takes-only-the-config-keys-it-reads
   ;; every digest took the whole config in force (seon.fx/config-input), so a key no test reads
   ;; (an agent's max-running a root was --set with) moved all 917 and none was reused: a test's
   ;; digest takes the values of the keys its reach names (seon.program/config-reads)
@@ -1206,7 +1217,7 @@
     (is (false? (#'program/computed-config-reader? '{:ns seon.config :refs #{seon.config/resolve} :keywords #{}})) "seon.config's own readers name none")
     (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader, found by its facts")))
 
-(deftest ^{:seon.test/reads #{:program}} no-test-takes-the-tree-in-its-digest
+(deftest no-test-takes-the-tree-in-its-digest
   ;; owner, 2026-10-27: "no tests should include all of src". A test that reads files (a test of the
   ;; docs, of the task files) or runs the binary was digested by the whole tree, so any edit reran its
   ;; 286; it is digested by what it reaches, like any other test, and a file or a binary outside its
@@ -1347,7 +1358,7 @@
   ;; owner, 2026-11-06: "make sure test reuse is working": a form's own digest was its text's, so a reflowed body or a
   ;; comment reran every test reaching the form. It is the read text less comments and whitespace runs
   ;; (seon.program/form-ids). A docstring is left out too (owner, 2026-11-10: a test's digest takes code, not docstrings):
-  ;; a test that reads docs or the program says so on the test, ^{:seon.test/reads #{:docs}}, and takes the program's
+  ;; a test that reads docs says so on the test, ^{:seon.test/reads #{:docs}}, and takes the program's
   ;; text (docs/source.md#what-a-test-takes-of-a-forms-text)
   (let [src "(defn add \"Adds.\" [a b] (+ a b))"
         db (apply record (empty-db) (concat (take 2 calc-srcs)
