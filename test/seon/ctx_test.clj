@@ -827,18 +827,27 @@
                                 (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
           rec (as-agent #(seon.repl/record-details "@ctx" {:handle 'result/e9 :value c} {}))
           drawn (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
-          ;; the keys it added, one component (ctx-keys) holding each key's own
-          steps (some #(when (= "ctx-keys" (:id %)) %) (:units drawn))]
+          ;; the keys it added, one component (ctx-keys) holding each key's own, each a unit of its own inside it
+          unit (fn [r id] (some #(when (= id (:id %)) %) (:units r)))
+          steps (unit drawn "ctx-key-lab_2Ectx_2Fsteps")]
       (is (= ["read the plan" "write the test" "read the plan"] (:lab.ctx/steps c)) "the vector comes back in its order, duplicates kept")
       (is (= {:seon.eval/schema :seon.ctx/ctx :seon.eval/basis {:t (:t tree) :branch :b}} (select-keys rec [:seon.eval/schema :seon.eval/basis])) "the record names the value's basis")
       (is (not (contains? (:seon.eval/response rec) :value)) "and holds no copy of the record")
       (is (str/includes? (:html steps) "<ol><li>read the plan</li><li>write the test</li><li>read the plan</li></ol>")
           "the agent draws its key, a component of its page, by the render its branch names, recording nothing")
+      (is (= "ctx-keys" (:parent steps)) "a unit inside the keys' component, which holds its slot")
+      (is (str/includes? (:html (unit drawn "ctx-keys")) "<!--s:ctx-key-lab_2Ectx_2Fsteps-->"))
       (testing "the page the model reads (seon.repl/render-ctx-hiccup, the screen) is the page the user sees (seon.repl/render-ctx), hiccup for html"
         (let [[parts page] (try (enter-agent! {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)]
                                 (finally (end-agent!)))
-              shown (:units parts)]
-          (is (= (remove #{"agent-state" "chat-ask" "chat-end" "page-rules"} (map :id shown)) (keys page)) "every component, the conversation's too, in order: nothing left out but what is the person's alone, which the model is sent none of")
+              shown (:units parts)
+              top (remove :parent shown)
+              by (into {} (map (juxt :id identity)) shown)
+              root-of (fn root-of [u] (if-let [p (by (:parent u))] (root-of p) u))]
+          (is (= (remove #{"agent-state" "chat-ask" "chat-end" "page-rules"} (map :id top)) (keys page)) "every component placed in a list, the conversation's too, in order: nothing left out but what is the person's alone, which the model is sent none of")
+          (doseq [u shown :when (:parent u) :let [r (second (re-find #"data-render=\"([^\"]+)\"" (:html u)))]]
+            (is (some #(and (vector? %) (= (symbol r) (first %))) (tree-seq coll? seq (get page (:id (root-of u)))))
+                (str (:id u) ": a unit nested in another is a part nested in its list's part, by its render")))
           ;; the one difference: the page's html adds each root's render's style after its name (seon.render/styled)
           (let [;; every element class in the page's hiccup that names a render of seon.render.ui, nested components' too
                 classes (into #{} (comp (filter string?)) (keep #(when (map? %) (:class %)) (tree-seq coll? seq (vec (vals page)))))
@@ -865,9 +874,9 @@
         (let [db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/boom '[:vector {:seon.render/hiccup seon.ctx-test/boom} :any] false))))
               db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/boom []}]))
               r (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent! {:expects #{"seon.render.ui/ctx-key threw: cannot draw this"}})))
-              keys-html (:html (some #(when (= "ctx-keys" (:id %)) %) (:units r)))]
-          (is (re-find #"cannot draw this" keys-html) "the render's throw, as its error's render in its component's place")
-          (is (re-find #"<ol><li>read the plan" keys-html) "and every other component drawn"))))))
+              html (fn [id] (:html (some #(when (= id (:id %)) %) (:units r))))]
+          (is (re-find #"cannot draw this" (html "ctx-key-lab_2Ectx_2Fboom")) "the render's throw, as its error's render in its component's place")
+          (is (re-find #"<ol><li>read the plan" (html "ctx-key-lab_2Ectx_2Fsteps")) "and every other component drawn"))))))
 
 (defn boom
   "A render that throws, as an agent's unmerged one may."

@@ -667,11 +667,11 @@
   part: its output is its list, the components in it placed there; a component that drew nothing (with-id) is
   placed nowhere. With sels, the element ids of some lists, those lists' alone, in sels' order. The one prewalk of
   the root that placed-units and placed-hiccup read. nested? true: each placed component's own components too, each in the element of
-its parent that holds it, at any depth (the page's units); false: the lists' own components (the model's parts, which nest their children
-themselves). See docs/render.md#a-layout-places-its-lists."
+its parent that holds it, at any depth (the page's units), each [sel k parent-k] (parent-k nil in a root list); false: the lists' own
+components (the model's parts, which nest their children themselves). See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:function [:=> [:cat :map] [:vector [:tuple :string [:vector :any]]]]
                   [:=> [:cat :map [:maybe [:sequential :string]]] [:vector [:tuple :string [:vector :any]]]]
-                  [:=> [:cat :map [:maybe [:sequential :string]] :boolean] [:vector [:tuple :string [:vector :any]]]]]}
+                  [:=> [:cat :map [:maybe [:sequential :string]] :boolean] [:vector [:or [:tuple :string [:vector :any]] [:tuple :string [:vector :any] [:maybe [:vector :any]]]]]]]}
   ([w] (placed w nil false))
   ([w sels] (placed w sels false))
   ([w sels nested?]
@@ -680,24 +680,25 @@ themselves). See docs/render.md#a-layout-places-its-lists."
         list (fn [k] (let [f (:f (get @(:cache w) k))] (when (var? f) (:seon.render/list (meta f)))))
         ;; x walked with sel, the selector of the nearest element above it with an id: a component's marker is placed there (a list
         ;; component is no part: its output is walked as the list's own)
-        walk (fn walk [x sel]
+        ;; parent, the placed component whose output x is in (nil in the root's)
+        walk (fn walk [x sel parent]
                (cond (and (vector? x) (= ::child (first x)))
                      (let [k (second x) c (get @(:cache w) k)]
                        (when (some? (:out c))
                          (if-let [l (list k)]
                            ;; a list a reader of some lists did not ask for is not walked
-                           (when (or (nil? want) (want (str "#" l))) (walk (:out c) sel))
+                           (when (or (nil? want) (want (str "#" l))) (walk (:out c) sel parent))
                            (when sel
-                             (vswap! found conj [sel k])
+                             (vswap! found conj (if nested? [sel k parent] [sel k]))
                              ;; nested?: the components inside it, each in the element of its own that holds it, at any depth
-                             (when nested? (walk (:out c) nil))))))
+                             (when nested? (walk (:out c) nil k))))))
                      (and (vector? x) (keyword? (first x)))
                      (let [attrs (when (map? (second x)) (second x))
                            sel (if-let [id (:id attrs)] (str "#" id) sel)]
-                       (doseq [y (if attrs (drop 2 x) (rest x))] (walk y sel)))
-                     (sequential? x) (doseq [y x] (walk y sel))
+                       (doseq [y (if attrs (drop 2 x) (rest x))] (walk y sel parent)))
+                     (sequential? x) (doseq [y x] (walk y sel parent))
                      :else nil))]
-    (walk (:out (get @(:cache w) @(:out w))) nil)
+    (walk (:out (get @(:cache w) @(:out w))) nil nil)
     (if sels (vec (mapcat (group-by first @found) sels)) @found))))
 
 (defn placed-units
@@ -708,8 +709,7 @@ themselves). See docs/render.md#a-layout-places-its-lists."
   child's unit). A change costs the component that moved, at any depth. See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :map] [:vector [:map [:id :string] [:container :string] [:parent [:maybe :string]] [:rev :int] [:html :string]]]]}
   [w]
-  (let [ids (into {} (for [[_ k] (placed w nil true)] [(str "#" (:id (get @(:cache w) k))) (:id (get @(:cache w) k))]))]
-    (vec (for [[sel k] (placed w nil true) :let [c (get @(:cache w) k)]]
+  (vec (for [[sel k parent] (placed w nil true) :let [c (get @(:cache w) k)]]
            (let [r (:rev c)
                  ;; its html written once a revision: kept on its cache entry, by its revision
                  html (if (= r (:unit-rev c)) (:unit-html c)
@@ -721,7 +721,7 @@ themselves). See docs/render.md#a-layout-places-its-lists."
                                          (styled (:out c) (:f c)))
                                 h (h/html slotted)]
                             (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
-             {:id (:id c) :container sel :parent (get ids sel) :rev r :html html})))))
+             {:id (:id c) :container sel :parent (when parent (:id (get @(:cache w) parent))) :rev r :html html}))))
 
 (defn- strip-attrs
   "An element's attributes as a reader of its hiccup reads them: its presentation (class, style) is the page's and its marks (:wire/*) the reading's; an id names it, so the model need not guess it."

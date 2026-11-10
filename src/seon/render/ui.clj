@@ -2081,7 +2081,8 @@
   {:malli/schema [:=> [:cat :map :any] [:map [:seon.render/hiccup :any] [:seon.render/units [:vector :map]]]]}
   [{:keys [units view input caption tab]} id]
   (let [in (fn [sel] (filterv #(= sel (:container %)) units))
-        unit (fn [u] {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)})
+        unit (fn [u] (cond-> {:id (:id u) :input (cond-> {:rev (:rev u)} (:own? u) (assoc :own? true)) :html (:html u) :container (:container u)}
+                       (:parent u) (assoc :parent (:parent u))))
         side? (and (not= :debug tab) (boolean (some #(#{"#p-task" "#p-tiles"} (:container %)) units)))]
     {:seon.render/hiccup
      [:div {:id "app" :class "seon-page" :data-view view}

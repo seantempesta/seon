@@ -407,6 +407,14 @@
             (vswap! cell assoc n kw)
             kw)))))
 
+(defn- list-units
+  "The units of list sel among units (seon.render/placed-units, a parent before its children): those placed in it and every unit
+  nested in one of them, at any depth. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat [:sequential :map] :string] [:vector :map]]}
+  [units sel]
+  (first (reduce (fn [[out ids] u] (if (or (= sel (:container u)) (contains? ids (:parent u))) [(conj out u) (conj ids (:id u))] [out ids]))
+                 [[] #{}] units)))
+
 (defn- user-walks
   "St with each user's kept walk advanced to main db, and the views that show one dirty, as root's own is (`root-walk`): the components the move reached are drawn, nothing else. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
@@ -414,7 +422,7 @@
   (let [cell (or (:user-walks st) (volatile! {}))
         ;; the signed-in user's agents list is every page's (`user-sides`): its change redraws every view
         signed (some-> db (d/entity [:seon.root/id :root]) :seon.root/signed-in :seon.user/name)
-        side (fn [] (when-let [kw (get @cell signed)] (into {} (for [u (render/placed-units (:w kw)) :when (= "#c-side" (:container u))] [(:id u) (:rev u)]))))
+        side (fn [] (when-let [kw (get @cell signed)] (into {} (for [u (list-units (render/placed-units (:w kw)) "#c-side")] [(:id u) (:rev u)]))))
         before (side)]
     (doseq [[n kw] @cell] (vswap! cell assoc n (advance-walk! kw db :main identity)))
     (cond-> st
@@ -430,7 +438,7 @@
   {:malli/schema [:=> [:cat :map [:maybe :seon.host/db]] [:vector :map]]}
   [st db]
   (if-let [kw (when-let [u (some-> db (d/entity [:seon.root/id :root]) :seon.root/signed-in)] (user-walk st db u))]
-    (filterv #(= "#c-side" (:container %)) (render/placed-units (:w kw)))
+    (list-units (render/placed-units (:w kw)) "#c-side")
     []))
 
 (defn- agent-view
@@ -475,12 +483,17 @@
         ;; the part texts the tab opened (/open: a long one is drawn closed, ui/ctx-parts)
         opened-parts (into #{} (filter #(str/starts-with? % "d-part-")) (get-in st [:tab view :open] #{}))
         pairs (fn [w] (let [all (render/placed-units w)
+                            by (into {} (map (juxt :id identity)) all)
                             lists (render/page-lists w)
-                            us (filterv #((set lists) (:container %)) all)
+                            ;; each list's units, the ones nested in them too: a nested one's change is the pair's
+                            us (vec (mapcat #(list-units all %) lists))
                             ;; the page's rules come with the parts they style
-                            rules (filterv #(= "#p-rules" (:container %)) all)]
+                            rules (list-units all "#p-rules")
+                            ;; a part's unit as the page shows it, its nested units composed into it
+                            html #(compose (:html %) by)]
                         {:id "d-parts" :container "#c-rows" :rev (hash [(mapv (juxt :id :rev) (concat us rules)) opened-parts])
-                         :html (h/html (ui/ctx-parts (render/placed-hiccup w lists) (into {} (map (juxt :id :html)) us) opened-parts (apply str (map :html rules))))}))
+                         :html (h/html (ui/ctx-parts (render/placed-hiccup w lists) (into {} (map (juxt :id html)) (remove :parent us)) opened-parts
+                                                     (apply str (map html (remove :parent rules)))))}))
         ;; the debug view: @ctx, its part pairs and the agent's record as data by the one printer (its :seon.ctx/ctx render)
         ctx-units (fn [] (let [kw (walked)
                                t (if kw (:tree (:c kw)) (cold-tree))

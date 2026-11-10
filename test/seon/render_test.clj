@@ -524,7 +524,7 @@
   "a3's page's units as its process draws them (seon.repl/render-ctx), drawn here from branch: what the
   render proc's {:op :render} ask is answered with."
   [branch]
-  (let [w (a3-walk branch)] (try {:t (:max-tx branch) :units (seon.fixtures/page-units w)} (finally (r/dispose-walk! w)))))
+  (let [w (a3-walk branch)] (try {:t (:max-tx branch) :units (r/placed-units w)} (finally (r/dispose-walk! w)))))
 
 (defn- component-html
   "The html of the component whose element id is id in a3's page drawn from branch, however deep it sits (an eval is a
@@ -621,12 +621,19 @@
         st (root-state (proc-state main branch) main)
         root (#'p/page-value st :root)
         agent (#'p/page-value st [:chat :a3])
-        in (fn [l c] (filter #(= c (:container %)) (:seon.render/units l)))
+        ;; a list's units, each composed with the units nested in it (what the page shows of it)
+        in (fn [l c] (filter #(= c (:container %)) (seon.fixtures/composed (:seon.render/units l))))
+        top (fn [l] (remove :parent (:seon.render/units l)))
         input (fn [l] (first (filter #(= "p-input" (:id %)) (:seon.render/units l))))]
     (testing "root is an agent: its page and an agent's are each its lists in one chrome (seon.render.ui/page-chrome)"
-      (is (= #{nil "#c-side" "#p-head" "#c-rows" "#p-rules" "#p-tiles"} (set (map :container (:seon.render/units root)))) "root's lists: its agents' cards")
-      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (:seon.render/units agent))))
+      (is (= #{nil "#c-side" "#p-head" "#c-rows" "#p-rules" "#p-tiles"} (set (map :container (top root)))) "root's lists: its agents' cards")
+      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (top agent))))
           "an agent's: its task's list above its conversation; no eval of the fixture has a render of its own, so no tiles")
+      (doseq [l [root agent] :let [by (into {} (map (juxt :id identity)) (:seon.render/units l))]
+              u (:seon.render/units l) :when (:parent u) :let [p (by (:parent u))]]
+        (is (some? p) (str (:id u) ": a nested unit's parent is a unit of the page"))
+        (is (str/includes? (:html p) (str "id=\"" (subs (:container u) 1) "\"")) (str (:id u) ": its container is an element of its parent"))
+        (is (str/includes? (:html p) (str "<!--s:" (:id u) "-->")) (str (:id u) ": its parent holds its slot")))
       (is (= 3 (count (in root "#c-rows"))) "root's list: its work, every session of this boot, then its evals, folded")
       (is (str/includes? (:html (last (in root "#c-rows"))) "sent to root")))
     (testing "the agents list is the signed-in user's, the same on every page: root first, then what the user started"
@@ -776,7 +783,7 @@
         e (d/entity main [:seon.agent/key k])
         cold (let [w (draw (:tree (seon.ctx/build (seon.db/index) branch' (seon.db/eid branch' :seon.agent/key k) (:seon.agent/branch e))) seon.ctx/changes branch'
                              #'seon.render.ui/agent)]
-               (try (mapv (juxt :id :html) (seon.fixtures/page-units w)) (finally (r/dispose-walk! w))))]
+               (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))))]
     (is (some? (:w @cell)) "the branch's read holds its walk")
     (is (= cold (mapv (juxt :id :html) (r/placed-units (:w @cell)))) "after the move, what a cold draw at the head draws")
     (let [w (:w @cell) [st3 _] (pass-view st2 :a3)
@@ -791,7 +798,7 @@
       (let [st5 (#'p/answered st2 o [:branch :task-demo-f] {:db branch})
             back (let [w (draw (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key k) (:seon.agent/branch e))) seon.ctx/changes branch
                                  #'seon.render.ui/agent)]
-                   (try (mapv (juxt :id :html) (seon.fixtures/page-units w)) (finally (r/dispose-walk! w))))]
+                   (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))))]
         (is (= back (mapv (juxt :id :html) (r/placed-units (:w @(get-in st5 [:branch-reads :task-demo-f :walk]))))))))
     (testing "the branch's read let go: its walk is disposed"
       (let [[st4 _] (p/render-proc st2 :from-web {:op :views :views #{} :tabs 0})]
@@ -837,7 +844,7 @@
   (let [k "a3"
         c (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.agent/key k) :task-demo-f)
         w (draw (:tree c) seon.ctx/changes db #'seon.render.ui/agent)]
-    [(try (mapv (juxt :id :html) (seon.fixtures/page-units w)) (finally (r/dispose-walk! w))) (dissoc (:tree c) :t :commit)]))
+    [(try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))) (dissoc (:tree c) :t :commit)]))
 
 (deftest a-kept-walk-steps-any-way
   ;; docs/render.md#a-page-is-a-kept-walk: a kept walk moved to any value of its branch, forward, back and across several turns (the
@@ -955,6 +962,8 @@
             [st3 patch] (pass-view st2 [:chat :a3])
             a3 (re-find #"id=\"agent-side-\d+\"><a [^>]*href=\"/agent/a3\".*?</li>" (p/view-html st1 [:chat :a3]))]
         (is (= 2 (count (side st3))) "what the user started is one component")
+        (is (= ["started-side"] (map first (:frags patch))) (str "the list of what the user started gained a slot: it alone is sent " (map first (:frags patch))))
+        (is (empty? (concat (:appends patch) (:afters patch) (:prepends patch))) "the new line comes inside it, never sent apart")
         (is (some #(str/includes? (second %) "href=\"/agent/a4\"") (:frags patch)) "its line is sent, in that unit")
         (is (and a3 (some #(str/includes? (second %) a3) (:frags patch))) "the unit holds the other session's pill as it was: one unit, so sent again, unchanged")))
     (r/dispose-walk! (get-in st [:root-walk :w]))))
@@ -1801,18 +1810,22 @@
       (finally (alter-var-root #'lab-said (constantly was))))))
 
 (deftest a-change-below-a-unit-moves-its-revision
-  ;; a component placed in a list is a unit; one nested in it (a key the agent added, under ctx-keys)
-  ;; changing moves the unit's revision with it, so the render proc sends the unit
+  ;; docs/render.md#a-layout-places-its-lists: every component is a unit, at any depth; one nested in another (a key the agent
+  ;; added, under ctx-keys) changing moves its own revision alone, so the render proc sends that unit and not its parent
   (let [[w a _] (live-walk)
-        unit #(some (fn [u] (when (= "ctx-keys" (:id u)) u)) (seon.fixtures/page-units w))]
+        unit (fn [id] (some (fn [u] (when (= id (:id u)) u)) (r/placed-units w)))
+        k "ctx-key-lab_2Ex_2Fk"]
     (swap! a assoc :lab.x/k "one")
     (flush! w nil)
-    (let [u0 (unit)]
+    (let [p0 (unit "ctx-keys") k0 (unit k)]
+      (is (= "ctx-keys" (:parent k0)) "the key is a unit of its own, inside ctx-keys")
+      (is (str/includes? (:html p0) (str "<!--s:" k "-->")) "ctx-keys holds the key's slot, not its html")
       (swap! a assoc :lab.x/k "two")
       (flush! w nil)
-      (let [u1 (unit)]
-        (is (str/includes? (:html u1) "two") "the new value drawn")
-        (is (not= (:rev u0) (:rev u1)) "and the unit's revision moved, its own output unchanged")))
+      (let [p1 (unit "ctx-keys") k1 (unit k)]
+        (is (str/includes? (:html k1) "two") "the new value drawn, in the key's unit")
+        (is (not= (:rev k0) (:rev k1)) "the key's revision moved")
+        (is (= (:rev p0) (:rev p1)) "and ctx-keys' did not: its own output is unchanged")))
     (r/dispose-walk! w)))
 
 (deftest a-key-is-its-id-one-to-one
@@ -1828,8 +1841,8 @@
         k "a3"
         main (d/db-with main [{:seon.agent/key k :seon.agent/opened #{"e3"}}])
         [st _] (pass-view (assoc (proc-state main branch) :view {:agents {}}) [:chat :a3])
-        ;; e3 is an eval of another hand, the turn's own: it sits in its turn's unit, in a details of its handle's anchor
-        html (get-in st [:views [:chat :a3] :units "conversation-turn-1" :html])
+        ;; e3 is an eval of another hand, the turn's own: a unit of its own inside its turn's, a details of its handle's anchor
+        html (get-in st [:views [:chat :a3] :units "evaluation-e3" :html])
         tag (re-find #"<details[^>]*id=\"eval-e3\"[^>]*>" html)]
     (is (re-find #" open" tag) (str "drawn open: " tag))))
 
@@ -2587,7 +2600,8 @@
         keys-of (fn [eids] (set (map #(:seon.agent/key (d/pull db [:seon.agent/key] %)) eids)))
         ;; root's page as its walk draws it: its list of every session, its units each composed with its components
         st (root-state (proc-state db db) db)
-        side (fn [st] (apply str (map :html (filter #(re-find #"^(boot-side|earlier-sessions)" (str (:id %))) (:seon.render/units (#'p/page-value st :root))))))
+        side (fn [st] (apply str (map :html (filter #(and (nil? (:parent %)) (re-find #"^(boot-side|earlier-sessions)" (str (:id %))))
+                                                     (seon.fixtures/composed (:seon.render/units (#'p/page-value st :root)))))))
         html (side st)]
     (is (= ["b2" "b1" "b0"] (mapv first groups)) "this boot's first, then the others, newest first")
     (is (= [#{"b2/a1"} #{"b1/a1" "b1/a2"} #{"b0/a1"}] (mapv (comp keys-of second) groups)) "a boot with anything to open, every agent of it")
@@ -2721,7 +2735,7 @@
     (is (seq (in "#p-rules")) "the page draws its rules")
     (is (= model shown) "each part's hiccup the model reads is the hiccup the page's unit of that id is written from")
     (doseq [u (in "#p-task")] (is (str/includes? (:html u) (str "id=\"" (:id u) "\"")) "and the unit is that part"))
-    (let [conv (apply str (map :html (in "#c-rows")))]
+    (let [conv (apply str (map :html (filter #(= "#c-rows" (:container %)) (seon.fixtures/composed units))))]
       (is (str/includes? conv "it doubles") "the chat holds the model's reply")
       (is (str/includes? conv "(f 2)") "and an eval's line")
       (is (str/includes? conv "check g") "and a message"))
@@ -2916,12 +2930,12 @@
 ;; section's text, as the wiki holds it, not its address alone (a cite resolved at summary would show its heading)
 (defn- cite-text
   "The cites on agent aid's page drawn by a walk over db, {target text}: each cite the walk places (seon.render.ui/tiles), by its own
-  render (seon.render.ui/cite), as the model reads it."
+  render (seon.render.ui/cite), as the model reads it; a cite that draws nothing (its owner's proof test) maps to nil."
   [db tree aid]
   (let [w (draw tree seon.ctx/changes db #'seon.render.ui/agent)]
     ;; a cite's component is keyed by the cite: its owner, a space, what it names (seon.render.ui/cite's identity)
     (try (into {} (for [[k _] @(:cache w) :when (= 'seon.render.ui/cite (first k))]
-                    [(last (str/split (str (second k)) #" " 2)) (r/part-text (r/part-form w k))]))
+                    [(last (str/split (str (second k)) #" " 2)) (some-> (r/part-form w k) r/part-text)]))
          (finally (r/dispose-walk! w)))))
 
 (deftest a-work-task-is-sent-how-a-task-is-worked
@@ -2944,8 +2958,10 @@
 (deftest a-cited-thing-is-drawn-by-what-it-is
   (let [[db aid] (cited-world)
         tree (:tree (seon.ctx/build (seon.db/index) db aid :b))
-        drawn (cite-text db tree aid)]
-    (is (every? (set (keys drawn)) ["demo/g" "docs/x.md#the-x"]) "a tile per cite of the task (its proof's left to the status), each target once")
+        all (cite-text db tree aid)
+        drawn (into {} (filter val) all)]
+    (is (every? (set (keys drawn)) ["demo/g" "docs/x.md#the-x"]) "a tile per cite of the task, each target once")
+    (is (and (contains? all "demo-test/g-test") (nil? (all "demo-test/g-test"))) "its proof's cite draws nothing: the task's proofs show it (Context's rule)")
     (is (contains? (set (keys drawn)) "docs/agent.md#working-a-task") "and per cite of the agent's own (its config's), by the same render")
     (is (not (contains? (set (keys drawn)) "")) "every cite names what it cites")
     (is (every? #(re-find #"\[:h3 \"" %) (vals drawn)) "every cite is headed")
@@ -3028,7 +3044,8 @@
     (is (str/includes? (pr-str (:source p)) "deftest g-test") "its source, the pulled form's")))
 
 ;; docs/render.md#a-component-answers-hiccup: the task part is the pulled task: its heading, its plan accumulated over its joined needs and its
-;; kind's instructions, from what @ctx holds; its render reads no db
+;; kind's instructions, from what @ctx holds; its render reads no db. What it places that reads one (a cite, by its contract) is a
+;; component of its own, and the walk hands the db to those alone
 (deftest the-task-part-reads-only-what-ctx-holds
   (let [[db _] (cited-world)
         db (d/db-with db (seon.task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n" :seon.task/plan "First the need." :seon.task/proofs #{'demo-test/n-test}}]))
@@ -3039,12 +3056,17 @@
         tree (:tree (seon.ctx/build (seon.db/index) db aid :b))
         ;; the task drawn by its schema's render over the task's pull, as the agent's page walk places it (seon.render.ui/tiles)
         r0 (seon.ratom/atom (:seon.agent/task tree))
+        reads (volatile! 0)
         w (r/walker {:ref r0 :changes seon.ctx/changes}
-                    (fn [] (throw (ex-info "the task's part read the db" {})))
+                    (fn [] (vswap! reads inc) db)
                     [#'ui/task-view {} (seon.ratom/ref-view r0 seon.ctx/changes)] (seon.db/index))
-        [text html] (try (flush! w nil)
-                         [(r/part-text (r/part-form w @(:out w))) (h/html (r/resolved w @(:out w) true))]
-                         (finally (r/dispose-walk! w)))]
+        [text html db-parts] (try (flush! w nil)
+                                  [(r/part-text (r/part-form w @(:out w))) (h/html (r/resolved w @(:out w) true))
+                                   (count (for [[_ c] @(:cache w) :when (and (var? (:f c)) (contains? (r/inputs (:f c)) :seon.db/db))] c))]
+                                  (finally (r/dispose-walk! w)))]
+    (is (not (contains? (r/inputs #'ui/task-view) :seon.db/db)) "the task's render takes no db")
+    (is (pos? db-parts) "it places what reads one (its cites)")
+    (is (= db-parts @reads) "and the walk read the db once for each of those, none for the task")
     (is (nil? (:data (get @(:cache w) @(:out w)))) "hiccup, not a map of keys")
     (is (re-find #"Task: demo/m" text) (str "the agent's task, named: " text))
     (is (< (str/index-of text "First the need.") (str/index-of text "Then make")) "its plan accumulated over its need, the need's first")
@@ -3067,7 +3089,8 @@
       (d/transact conn [{:seon.agent/key "b/find" :seon.agent/task [:seon.task/id "demo/find"]}])
       (let [a (:db/id (d/entity @conn [:seon.agent/key "b/find"]))
             draw #(seon.fixtures/drawn-parts @conn (seon.ctx/build (seon.db/index) @conn a (:seon.agent/branch (d/entity @conn a))))
-            search-part (fn [parts] (some (fn [[id v]] (when (str/includes? (str id) "searched") v)) parts))
+            ;; the search is the request's task's: a part nested in the task's part, as the pull nests it (seon.render.ui/task-view)
+            search-part (fn [parts] (some #(when (and (vector? %) (= 'seon.render.ui/searched (first %))) %) (tree-seq coll? seq (vals parts))))
             s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))
             unembedded (search-part (draw))
             ;; its query's vector, as main's vectors proc writes it (seon.vector/tx-data)
