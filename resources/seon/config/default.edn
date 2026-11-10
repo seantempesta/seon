@@ -224,6 +224,13 @@
  ;; proc. At the bound: the proc is recorded {:blocked pid :ping-ms ..} in the check's report
  ;; and the check that read it fails, naming it.
  :seon.config.check/ping-ms 10000
+ ;; Unit: times. A bin/check step that runs this many times its median measured run (its greens' :ms, seon.fx/typical-ms),
+ ;; floored at :seon.config.agent/stall-ms, is ended: bin/evidence captures it first (its process tree, samples, fiber
+ ;; dumps, and its root's stall state), and it is red with the typed reason STEP-OVERRAN, never retried (the owner's
+ ;; fourth clock exception, 2026-11-10: docs/clocks.md#time-decides-the-owners-exceptions). Provenance: of 6,239 green
+ ;; runs in the verdict cache of tests whose median is 2 s or more, 161 ran past 5 times it and 30 (0.5%) past 10, most
+ ;; at load 30-40 before proves took slots; past 10 is a hang more often than a slow machine.
+ :seon.config.check/step-end-factor 10
  ;; Unit: ms over which a check measures that something does not happen: a paused agent's
  ;; request unanswered (lifecycle), a paused proc's flood not taken and a paused writer's
  ;; commits held (backpressure). Provenance: the windows it replaced were 300, 400 and 500 ms.

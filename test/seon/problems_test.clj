@@ -146,7 +146,7 @@
     (is (= [] (writes o3)) "the answered write is followed by nothing: 500 repeats of a written signature are counted in the fold")))
 
 (deftest an-agent-death-is-recorded-with-its-cause
-  (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (profile/now-ns))
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/d2-death-" (random-uuid))
         _ (.mkdirs (java.io.File. (str dir "-agents")))
         _ (spit (str dir "-agents/a1.err") (str (apply str (repeat 3000 "x")) "\nChez: out of memory\n"))
         p (promise)

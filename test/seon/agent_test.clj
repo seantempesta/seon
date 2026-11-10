@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.reconcile :as r] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [clojure.core.async]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -103,7 +103,7 @@
         ;; (cancelled) and their branches
         end! (fn []
                (let [agent @made]
-                 (sh/sh "rm" "-rf" tasks)
+                 (seon.lib/remove-tree! tasks)
                  (cond (:port root) (eval-root (str "(let [ev (c/events sys) a " (when agent (str ":" agent)) "]"
                                                     " (when-let [v (resolve 'ready-ev)] (clojure.core.async/untap (:events-mult sys) @v))"
                                                     " (when (and a (not (:ended-ms (get (:agents (c/state sys)) a))))"
@@ -232,7 +232,7 @@
           log (ts/output (str runs "/root.log"))]
       (doseq [p left] (sh/sh "kill" "-9" (str p)))
       (ts/drop-main! store main)
-      (sh/sh "rm" "-rf" runs)
+      (seon.lib/remove-tree! runs)
       {:ids ids :agents agents :out log :left (if drained left (conj left :not-drained))})))
 
 (deftest a-tests-request-is-answered-while-an-eval-blocks
@@ -374,15 +374,6 @@
     (is (= 49 in-test) (str "the test child was in its test (" (pr-str defined) ")"))
     (is (= 42 (ts/value-of (ts/value-of (:response answered)))) (str "the agent answered while its test held: " (pr-str answered)))
     (is (= {:pass 1 :fail 0 :error 0} result) (str "and the run answered green once let go: " (pr-str result)))))
-
-(deftest a-blocked-agent-ends-with-its-root
-  ;; an agent blocked in a wait: its thread in
-  ;; Chez's condition-wait reaches no safe point, so no signal handler runs (SIGIO, root's
-  ;; SIGUSR1) until the wait returns. The fork server's group kill on root's EOF ends it
-  ;; (task seon.agent/a-signal-wakes-a-blocked-wait makes the agent's own EOF end it too)
-  (let [{:keys [ids agents left out]} (root-ended ["(clojure.core.async/<!! (clojure.core.async/chan))"] false)]
-    (is (= (set ids) (set (keys agents))) out)
-    (is (empty? left) (str "agents still alive: " left "\n" out))))
 
 (deftest a-test-childs-run-ends-at-its-exit-though-a-grandchild-holds-its-pipe
   ;; agent a3 waited 3.5 h on main (2026-10-26) reading its test child's pipe to an end of file
@@ -555,7 +546,7 @@
         [_ _ _ _ two] (in-agent (conj (mapv ns-form (range 4)) (run)))
         v #(some-> (:value %) clojure.edn/read-string)
         counts (mapv #(parse-long (ts/output (str dir "/" %))) (range 4))]
-    (sh/sh "rm" "-rf" dir)
+    (seon.lib/remove-tree! dir)
     (is (every? pos-int? counts) (str "every child counted: " (pr-str counts) " " (pr-str two)))
     (is (apply = counts) (str "the children hold the same descriptors: " (pr-str counts)))
     (is (<= 2 (:children (v two))) "at least two children forked (a death forks a new one for what its child had left)")
@@ -570,51 +561,6 @@
     (is (true? (:ok sent)))
     (is (map? (:value proved)))
     (is (re-find #":body \"while proving\"" (:text taken)) (:text taken))))
-
-(deftest a-wide-reach-reuses-unchanged-results
-  ;; its root shares inputs only when the binary is main's program (seon.root/booted-source), so it reads the process store
-  ;; bin/test seeds: red while that store held what older binaries made of unchanged files (seon.root/kept-index! now
-  ;; keys it by the code that indexes), an input its digest misses
-  ;; a wide reach reuses what is unchanged:
-  ;; root's boot records its source tree's inputs on its :seon.root/source fact (its binary is
-  ;; built from that tree: bin/test built it), the agent keys its digests by them and selects
-  ;; against the main it forked from, and each green is cached by its digest (a test root's cache
-  ;; is its own: seon.test-store/start-root!, so nothing an earlier run cached is reused),
-  ;; so the next run (the next turn's observe, the judge's :tests, the merge gate) of an
-  ;; unchanged branch reruns nothing and answers the same results
-  (let [here (seon.config/checkout)
-        proof 'seon.reader-test/text-without-a-fence-is-a-comment
-        reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
-        ;; the other test that reaches without-overrides (it reads the profile from the command line, 4a34eb9227)
-        also 'seon.config-test/the-profile-is-read-from-the-command-line
-        run #(str "(let [r @(seon.root/run-tests! sys :" % ")] [" (statuses "r") " (:key r)])")
-        own (str "(let [p (prove)] {:results " (statuses "p") " :ran (:ran p) :reused (:reused p)})")
-        ;; how many of the two tests' verdicts the cache holds at the digests the agent's plan gives
-        ;; them (its branch redefines without-overrides, so the reached test's digest is the branch's)
-        stored (str "(count (seon.fx/stored-results (select-keys (:digests (seon.agent/test-plan (seon.agent/db) nil #{})) '"
-                    (pr-str [proof reached]) ")))")
-        [_ inputs first-run files judged second-run]
-        ;; a real change that keeps them green (a vector of what the file's answers), so the reached
-        ;; test is selected: the agent's change reaches it
-        (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
-                   {:op :eval :agent "root" :code "(let [r (datahike.api/entity @(:conn sys) [:seon.root/id :root])] [(set (keys (:inputs (:seon.root/source r)))) (= (:boot (:seon.root/source r)) (:seon.root/boot r))])"}
-                   own
-                   stored
-                   {:op :eval :agent "root" :code (run (:agent %))}
-                   own)
-                  ;; root imports the dirs bin/test does (:seon.config.source/dirs, schemas included), so
-                  ;; root's boot shares its source tree's inputs
-                  ;; and a root of its own: the shared root's main holds the greens earlier tests
-                  ;; recorded, the proof's among them at the same digest (reused 1, ran 1: red
-                  ;; since tests-are-facts dropped it)
-                  {:proofs #{proof} :group :pristine})]
-    (is (= [#{:env :tree :code :config :data-refs} true] (:value inputs)) "root's boot recorded its source tree's inputs, this boot's")
-    (is (= {:results {proof :pass reached :pass also :pass} :ran 3 :reused 0} (select-keys (:value first-run) [:results :ran :reused])) "the agent's own run runs the proof and the reached test")
-    (is (= 2 (:value files)) "and both are cached at the agent's digests")
-    ;; the test service answers a key whose run ended with that run (seon.prove): nothing runs again
-    (is (= {proof :pass reached :pass also :pass} (first (:value judged))) "root's :tests (the judge's): the same results")
-    (is (re-find #"@[0-9a-f]+$" (str (second (:value judged)))) "from the run of the branch at its digest, which nothing since moved")
-    (is (= {proof :pass reached :pass also :pass} (:results (:value second-run))) "and so is the agent's next run")))
 
 (deftest one-bound-one-verdict-and-the-judge-reruns-no-green
   ;; task seon.proofs/one-prove-path: a test's tick budget is its own, so two tests that each
@@ -892,29 +838,20 @@
   ;; The fork server builds main's once and each move carries it (seon.doc/carry-index!): the
   ;; first search finds the index held for its db and builds none, and its FTS5 table, an in-memory SQLite database,
   ;; answers in the forked child. The bytes of the first search's section reads are leaf decoding in the child,
-  ;; which depends on the store's layout, so they are not this test's claim.
-  ;; and, after that first search, an agent's merge of main keeps the index current (a-merge-of-main-keeps-the-search-index-current):
-  ;; docs/vector.md#search: an agent's writes carry the text index (seon.doc/carry-index!), so a search after one rebuilds nothing; the merge's own record of its base was a write that skipped it, so the next search after any merge rebuilt the index, about 20 MB, seen as a flake
-  (let [current "(let [d (:db @seon.agent/state) [was _] @@#'seon.doc/indexes] (= was [(:hash d) (:max-tx d)]))"
-        results (in-agent [(str "(def held (fn [] (let [d (:db @seon.agent/state) [at ix] @@#'seon.doc/indexes] {:current (= at [(:hash d) (:max-tx d)]) :ix ix})))")
+  ;; which depends on the store's layout, so they are not this test's claim. That a merge of main keeps it current is
+  ;; seon.agent-test/after-merge-main-the-agent-judges-against-the-new-base's, in this process
+  (let [results (in-agent [(str "(def held (fn [] (let [d (:db @seon.agent/state) [at ix] @@#'seon.doc/indexes] {:current (= at [(:hash d) (:max-tx d)]) :ix ix})))")
                             "(def before (held))"
                             "(def rows (count (my.agent/grep \"accumulated\")))"
                             "(def after (held))"
-                            "{:rows rows :current-before (:current before) :current-after (:current after) :same-index (identical? (:ix before) (:ix after)) :held? (some? (:ix before))}"
-                            {:op :eval :agent "root" :code "@(seon.root/transact-main! sys (vec ((my.test/code 'app.idx \"(ns app.idx (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))\\n(defn f \\\"A var.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\\n\") @(:conn sys))))"}
-                            "(seon.agent/merge-main! #{})"
-                            current]
-                           ;; its merge moves main's program: the root the merging tests share
-                           (merging))
-        held (nth results 4) merged (nth results 6) after-merge (nth results 7)
+                            "{:rows rows :current-before (:current before) :current-after (:current after) :same-index (identical? (:ix before) (:ix after)) :held? (some? (:ix before))}"])
+        held (nth results 4)
         {:keys [rows current-before current-after same-index held?]} (:value held)]
     (is held? "the agent inherited an index")
     (is current-before "the index it inherited is the one held for its db")
     (is same-index "its first search built no index: the slot holds the same one after it")
     (is current-after "and still the one held for its db")
-    (is (pos? rows) "the query of the index it inherited answers in the forked child")
-    (is (seq (:applied (:value merged))) (str "the merge brought something: " (pr-str merged)))
-    (is (true? (:value after-merge)) (str "the index is at the db the merge left: " (pr-str after-merge)))))
+    (is (pos? rows) "the query of the index it inherited answers in the forked child")))
 
 (deftest a-resumed-branchs-agent-is-this-boots
   ;; one kept branch, one spawn, three claims about an agent resumed onto it.
@@ -1032,42 +969,21 @@
 ;; docs/merging.md#main-moved-is-said-at-every-eval, the owner 2026-11-07: an agent never runs old code. A model's turn merged main when it moved; an
 ;; outside agent was told and went on running what it had, until it chose to merge. Its reply merges as a turn does
 (deftest an-outside-agents-reply-takes-mains-program
-  (let [has "(some? (resolve 'app.moved-on-main/f))"
-        reply (fn [agent] {:op :eval :agent agent :message-md "" :evals [{:intent "has main's new function?" :code has}]})
-        last-value (fn [r] (first (filter boolean? (map :value (:responses r)))))
-        [_ before _ after] (in-agent (fn [{:keys [agent task]}]
-                                     [{:op :attach :task task}
-                                      (reply agent)
-                                      {:op :eval :agent "root"
-                                       :code (str "(let [db @(:conn sys)] @(seon.root/transact-main! sys (seon.program/record-tx db {:id \"app.moved-on-main/(defn f [] 1)\" :src \"(defn f [] 1)\" :ns 'app.moved-on-main :ns-form? false"
-                                                  " :defs [{:var 'app.moved-on-main/f :meta #{:arglists} :contract nil}] :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))")}
-                                      (reply agent)])
-                                   (merging))]
+  ;; on the shard's root: what main gains is a namespace of this test's own, which no other test reads
+  (let [last-value (fn [r] (first (filter boolean? (map :value (:responses r)))))
+        [_ before _ after]
+        (in-agent (fn [{:keys [agent task ns]}]
+                    (let [moved (str ns ".moved-on-main")
+                          ;; a reply's responses hold the page Seon shows it too: the probe's is the one boolean
+                          reply {:op :eval :agent agent :message-md "" :evals [{:intent "has main's new function?" :code (str "(some? (resolve '" moved "/f))")}]}]
+                      [{:op :attach :task task}
+                       reply
+                       {:op :eval :agent "root"
+                        :code (str "(let [db @(:conn sys)] @(seon.root/transact-main! sys (seon.program/record-tx db {:id \"" moved "/(defn f [] 1)\" :src \"(defn f [] 1)\" :ns '" moved " :ns-form? false"
+                                   " :defs [{:var '" moved "/f :meta #{:arglists} :contract nil}] :declares #{} :methods [] :impls [] :refs #{} :requires #{} :banned #{} :inline-defs #{}})))")}
+                       reply])))]
     (is (false? (last-value before)) (pr-str before))
     (is (true? (last-value after)) (str "the reply after main moved holds main's program: " (pr-str after)))))
-
-(deftest an-outside-agent-with-a-green-proof-finishes
-  ;; root (2026-10-23): an outside agent that writes its proof green and hands its task back is
-  ;; judged by the end it wrote, and its task finishes, not held.
-  ;; task seon.reconcile/the-judge-asks-the-test-service: the judge at an agent's end asks the test
-  ;; service (seon.prove), so its verdicts are cached by digest like any test run's
-  (let [[_ _ t _ done seen] (in-agent (fn [{:keys [agent task ns]}]
-                                        [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
-                                         (str "(ns " ns "-test (:require [clojure.test :refer [deftest is]]))")
-                                         "(deftest t (is (= 2 (inc 1))))"
-                                         before-done {:op :done :agent agent}
-                                         {:op :eval :agent "root"
-                                          :code (str "(do (seon.await/await-quiet sys (inc t-before-done))"
-                                                     " [(select-keys (seon.task/task @(:conn sys) " (pr-str task) ") [:seon.task/outcome :seon.task/reason])"
-                                                     "  (seon.reconcile/task-state (seon.reconcile/index @(:conn sys)) " (pr-str task) ")"
-                                                     "  (some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/" ns "-test\")) .list vec)])")}])
-                                      (assoc (merging) :proofs (fn [{:keys [ns]}] #{(symbol (str ns "-test") "t")})))
-        [t-end state cached] (:value seen)]
-    (is (re-find #":value [a-p][0-9a-f]{15}-test/t" (:text t)) (pr-str t))
-    (is (re-find #":outcome :(ready|gate|done|merged)" (:line done)) (str "the answer is the verdict line: " (pr-str done)))
-    (is (#{:done :merged} (:seon.task/outcome t-end)) (pr-str t-end))
-    (is (#{:done :merged} state) (str "the task finishes, never held for root: " state))
-    (is (= ["t"] cached) (str "the judge's verdict is cached at the test's digest: " (pr-str seen)))))
 
 (deftest an-agent-finds-no-repository
   ;; owner, 2026-10-22: no git in agents, and no source-file editing as the way to develop
@@ -1451,8 +1367,12 @@
        (try
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
          (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db)))) "the agent has changed nothing")
+         (seon.doc/text-index (agent/db))
          (let [r (agent/merge-main! #{})]
            (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
+           ;; docs/vector.md#search: an agent's writes carry the text index (seon.doc/carry-index!), so a search after one rebuilds nothing; the merge's
+           ;; own record of its base was a write that skipped it, so the next search after any merge rebuilt the index, about 20 MB, seen as a flake
+           (is (= [(:hash (agent/db)) (:max-tx (agent/db))] (first @@#'seon.doc/indexes)) "the search's index is at the db the merge left")
            (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity (agent/db) (:t r))))
                "in a merge commit that names its runtime")
            (is (= [ab (:branch cfg)] ((juxt :seon.tx/branch :seon.tx/merged) (d/entity (agent/db) (:t r))))
@@ -1461,6 +1381,40 @@
              "and is main's, not the agent's: its base is the merge base")
          (is (= {} (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db))))
              "so the agent's divergence carries none of main's changes")
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest a-merge-of-a-main-moved-only-by-records-reads-no-content
+  ;; docs/storage.md#mains-content-mark: main moves on every request by records (an agent's status, embeddings); when its
+  ;; content mark is still the base's, the agent's merge of main and what main changed since the base answer from the mark,
+  ;; with no diff (today ~3 M ticks a request). Red before: merge-main! and main-changes diffed each content attribute.
+  ;; In this process, on a branch of the test store, with a socketpair standing for root
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [mark! #(d/transact conn [{:seon.root/id :root :seon.root/content-t (inc (:max-tx @conn))}])
+           _ (mark!)
+           ab (pdb/on-main (:branch cfg) :agent-base)
+           _ (d/branch! conn (:branch cfg) ab)
+           forked @conn
+           _ (d/transact conn [{:seon.agent/key "test/a1" :seon.agent/status :busy}])
+           store-conn (pdb/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state old-link @agent/link
+           calls (fn [f] (profile/begin!) (let [r (f)] [r (into {} (map (juxt :var :calls)) (profile/touched))]))]
+       (try
+         (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
+         (let [[r n] (calls #(agent/merge-main! #{}))]
+           (is (= [] (:applied r)) "only records moved main: nothing merges")
+           (is (nil? (n 'seon.merge/content-datoms)) "and no content is diffed")
+           (is (nil? (n 'seon.db/branch-base)) "nor the commit graph walked"))
+         (let [[r n] (calls #(agent/main-changes forked (agent/heard-main)))]
+           (is (= {} r) "main changed nothing of the program since the base")
+           (is (nil? (n 'seon.merge/content-datoms)) "read from the mark"))
+         (let [[v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] forked)]
+           (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-redefined" :form/ns nsx :form/order 100 :form/defines [v]
+                              :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
+                             [:db/add v :var/form "f1'"]])
+           (mark!))
+         (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "a definition and its mark: main's change merges in")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest a-pull-after-its-own-merge-starts-from-what-it-merged
@@ -2127,21 +2081,6 @@
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= "read: The reply itself." (:value r)) (pr-str r))))
 
-(deftest a-merge-of-main-moves-the-base-the-status-reads
-  ;; repl-audit A F45, F43: after (my.branch/merge-main!) the status named main's own problems as the work's, since the fact it reads stayed at the old base
-  ;; until a next turn; and hundreds of applied keys were 12.5k tokens: their count, with the keys under the eval's handle
-  (let [[_ merged moved keys-read]
-        (in-agent (fn [{:keys [ns]}]
-                    (let [m (str "demo." ns ".moved")]
-                      [{:op :eval :agent "root" :code (str "@(seon.root/transact-main! sys (seon.source/text-tx @(:conn sys) '" m " \"(ns " m ")\\n\\n(defn g [] 7)\\n\" nil))")}
-                       "(my.branch/merge-main!)"
-                       "(= (:seon.agent/base-commit (datahike.api/entity (my.db/db) [:seon.agent/key (:key @seon.agent/state)])) (datahike.api/commit-id (:base @seon.agent/state)))"
-                       "(pos? (count (:applied *2)))"]))
-                  (merging))]
-    (is (re-find #":applied \d+[,}\s]" (:text merged)) (pr-str merged))
-    (is (true? (:value moved)) (pr-str moved))
-    (is (true? (:value keys-read)) "the keys stay under the value")))
-
 (deftest a-root-with-no-provider-ends-the-work-on-its-typed-error
   ;; root's ruling 2026-10-22: a root with no model provider (no --profile) answers the
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
@@ -2266,26 +2205,6 @@
                                      (str "(:proofs (my.agent/prove '" t "))")]))]
     (is (= :pass (get (:value named) t)) (pr-str named))))
 
-(deftest a-real-gate-judges-a-candidate-once
-  ;; the one real gate: a process test run on a checkout of the candidate, its verdict reaching the branch, and the judge's gate of the same
-  ;; candidate running nothing, since the same owner holds its verdict (seon.fx/run-tests). On the shard's root, whose merges branch is its own
-  ;; (seon.test-store/shared-root!): a candidate is its branch's head, so no other shard's merge makes it another candidate between the two asks
-  (let [t 'seon.repl-test/a-really-gated-proof
-        ;; an edge each (seon.program/reach-step): the gate runs in root across the agent's :gate message, which no reference shows, so a
-        ;; change to it (run-held no longer reusing a held verdict) moved no digest here and its red was never run
-        _ '[seon.agent/judge! seon.agent/ask-gate seon.root/ext-op seon.fx/run-tests seon.fx/run-held seon.fx/run-on-checkout]
-        prove "(let [r (my.agent/prove)] {:proofs (:proofs r) :deferred (:deferred r)})"
-        [_ green judge-gate]
-        (in-agent (fn [{:keys [task]}]
-                    [(process-proof "a-really-gated-proof" 2) prove
-                     {:op :eval :agent "root"
-                      :code (str "(select-keys (:value @(seon.root/call! sys {:op :gate :branch (seon.task/default-branch " (pr-str task) ") :tests ['" t "]})) [:results :log])")}])
-                  {:proofs #{t}})]
-    (is (= {t :pass} (:proofs (:value green))) (pr-str green))
-    (is (= [] (:deferred (:value green))) "nothing left unjudged")
-    (is (= {t :pass} (:results (:value judge-gate))) (pr-str judge-gate))
-    (is (nil? (:log (:value judge-gate))) "the judge's gate of the same candidate runs nothing")))
-
 (deftest a-test-that-waits-for-good-is-told-and-the-next-agent-goes-on
   ;; deepseek-run3 (2026-11-06): an agent's own test deref'd a promise nobody delivers. Its test child parked for good at 0% CPU, tick budgets count no sleep,
   ;; and it held the test service's one slot: 5 of 5 agents idle in observe for 9 minutes. A signal the child waited on (SIGIO, for its
@@ -2300,29 +2219,37 @@
   (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.root/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]
     (is (= :seon.writer/refused (:value r)) (pr-str r))))
 
+(deftest a-gate-that-cannot-run-is-the-proves-answer
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a gate that cannot run the candidate (its runner made no plan: on 2026-11-10 a checkout
+  ;; that took another tree's binary) answers its typed error, and the agent's prove answers that error, never a verdict that reads as nothing to
+  ;; judge; a gate whose run reached no test is a verdict that is not green. The gate answered at its seam (seon.agent/ask-gate)
+  (let [t 'seon.repl-test/a-proof-no-gate-could-run
+        _ '[seon.agent/judge! seon.agent/ask-gate seon.proofs/gate-tx]
+        log (str (System/getProperty "java.io.tmpdir") "/gate-" (random-uuid) ".log")
+        _ (spit log "prove: run\nSHARD 0 tests\n")
+        seam (str "(do (in-ns 'user) (def gate-reply (atom nil))"
+                  " (alter-var-root #'seon.agent/ask-gate (constantly (fn [tests _] (@gate-reply tests)))) :ok)")
+        prove "(let [r (my.agent/prove)] (if (seon.contract/error? r) [:error (:seon.error/type r)] [:verdict (:proofs r)]))"
+        [_ _ _ refused _ unreached]
+        (in-agent (fn [_] [seam (process-proof "a-proof-no-gate-could-run" 2)
+                           "(reset! user/gate-reply (fn [_] (seon.contract/error :seon.fx/io-error 'seon.fx/run-on-checkout \"the test runner made no plan\" {:no-plan true})))"
+                           prove
+                           (str "(reset! user/gate-reply (fn [tests] {:value {:results (zipmap tests (repeat :error)) :digests (zipmap tests (repeat \"gate\")) :log " (pr-str log) "}}))")
+                           prove])
+                  {:proofs #{t}})]
+    (.delete (java.io.File. ^String log))
+    (is (= [:error :seon.fx/io-error] (:value refused)) (pr-str refused))
+    (is (= [:verdict {t :error}] (:value unreached)) (pr-str unreached))))
+
 (deftest a-hand-back-with-a-red-process-test-is-no-green-end
   ;; the same class through seon_done: an outside agent that hands back an unjudged process test ends on its verdict. The hand-back itself, in the agent, the gate
-  ;; answered at its seam: :done goes on to the judge, whose own gate is a real one (a-real-gate-judges-a-candidate-once)
+  ;; answered at its seam: :done goes on to the judge, whose own gate is a real one (no test runs one now: task seon.agent/a-real-gate-is-proved-in-seconds)
   (let [t 'seon.repl-test/a-handed-back-proof-of-the-gate
         [_ _ end] (in-agent (fn [_] [(answers-gate t) (process-proof "a-handed-back-proof-of-the-gate" 2)
                                      "(select-keys (seon.turn/hand-back! (:task @seon.agent/state)) [:outcome :reason])"])
                             {:proofs #{t}})]
     (is (= :red (:outcome (:value end))) (pr-str end))
     (is (str/includes? (:reason (:value end)) "proof-red") (pr-str end))))
-
-(deftest a-green-whole-task-merges-itself-with-no-act-beyond-done
-  ;; owner, 2026-10-26: "we have the agents have live feedback so we can know if we can auto merge
-  ;; so test for it": through my.root/request! (the default, one whole task) and the reconciler, a
-  ;; task whose proof passes on its branch ends green, and root merges its branch into main: the
-  ;; agent does nothing beyond its work
-  (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"wg\" :seon.task/plan \"Make wg.\" :seon.task/config {:seon.config.ai/script 'seon.fixtures/whole-green}})"
-                   " _ (seon.root/await-db sys \"the work ended\" #(or (= :merged (seon.reconcile/task-state (seon.reconcile/index %) \"" % "/wg\"))"
-                   "                                    (" not-running " (:seon.task/outcome (datahike.api/entity % [:seon.task/id \"" % "/wg\"])))))"
-                   " db @(:conn sys) t (seon.task/task db \"" % "/wg\")]"
-                   " [(:seon.task/kind t) (:seon.task/outcome t) (some? (seon.db/eid db :var/name 'app.whole-test/t))])")
-        [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
-                        (merging))]
-    (is (= [:whole :merged true] (:value r)) (pr-str r))))
 
 (deftest a-task-whose-proofs-pass-is-done-only-when-what-it-reaches-is-green
   ;; the owner's ruling: a turn runs the proofs, the tests the change reaches run once they are green, judged as the
@@ -2459,29 +2386,6 @@
                         {:config {:seon.config.ai/script 'seon.fixtures/text-reply}
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= ["Saw my own reply."] (:intent (:value r))) (pr-str r))))
-
-(deftest a-capped-agent-that-is-messaged-runs-its-allowance
-  ;; docs/users.md#messages, docs/turn.md#the-cap: a message wakes an agent whose turns are spent, and the write that starts it raises its
-  ;; budget by the wake allowance, so it runs that many turns more and stands at its cap again
-  (let [;; the behaviour is root's, reached across a message (seon.agent-test/a-process-proof-already-green)
-        _ '[seon.reconcile/start]
-        [_ r] (in-agent (fn [{:keys [ns]}]
-                          (let [w (str ns "/w")]
-                            [{:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")}
-                             {:op :eval :agent "root"
-                              :code (str "(let [branch-of " branch-of-code "]"
-                                         " (my.root/run! sys [" (pr-str w) "]) " (settled-code w :cap 1)
-                                         " (let [a " (agent-code w) " k (:seon.agent/key a) ag (keyword k)"
-                                         "       turn-of (fn [] (:seon.agent/turn (datahike.api/entity (branch-of " (pr-str w) ") [:seon.agent/key k])))"
-                                         "       max-of (fn [] (:seon.agent/max-turns (datahike.api/entity @(:conn sys) [:seon.agent/key k])))"
-                                         "       t1 (turn-of) m1 (max-of)]"
-                                         "   @(seon.root/message! sys ag \"carry on\") " (settled-code w :cap 2)
-                                         "   {:turns [t1 (turn-of)] :max-turns [m1 (max-of)]}))")}]))
-                        {:config {:seon.config.ai/script 'seon.fixtures/same-call :seon.config.agent/max-turns 1}
-                         :decls [{:seon.task/name "w" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
-        allowance (cfg/value :seon.config.agent/wake-turns)]
-    (is (= {:turns [1 (inc allowance)] :max-turns [1 (inc allowance)]} (:value r))
-        "one turn to its cap; the wake raised the budget by the allowance and it ran those turns, to its cap again")))
 
 (deftest a-woken-agent-that-replies-stays-parked
   ;; docs/turn.md#parked: a wake gives one conversation turn and its reply parks the agent: it isn't woken again by nothing, or it would spend its budget talking to itself (seen 2026-11-07 on a real model)

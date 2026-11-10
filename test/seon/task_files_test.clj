@@ -3,7 +3,7 @@
   into main. A new entry is created held; an unchanged one costs nothing and keeps what main
   learned (the improved plan); a changed one updates what it states; a removed one is
   cancelled, never deleted."
-  (:require [seon.test-store :as ts] [seon.agent-test :as at] [clojure.test :refer [deftest is testing]]
+  (:require [seon.lib] [seon.test-store :as ts] [seon.agent-test :as at] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.task :as task] [my.root :as root] [clojure.string :as str] [clojure.java.shell :as sh] [seon.config :as config]
@@ -199,7 +199,7 @@
                                   (loop [] (let [s (str (.getState t))] (if (#{\"BLOCKED\" \"TERMINATED\"} s) (deliver state s) (do (Thread/yield) (recur)))))
                                   (case @state \"BLOCKED\" :blocked :ran-past-the-lock))))")}])]
         (is (= :blocked (:value r)) "a load started while the lock is held waits on it"))
-      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest a-stale-task-load-never-creates-a-task-it-did-not-declare
   ;; found on the standing root 2026-10-28: 199 invalid-input errors of seon.task/task-value, a task whose
@@ -250,7 +250,7 @@
         (is (str/includes? message "not found"))
         (is (str/includes? (nth unreadable 2) "not readable EDN"))
         (is (str/includes? (nth bad 2) "not a non-empty vector of transactions")))
-      (finally (clojure.java.shell/sh "rm" "-rf" runs)))))
+      (finally (seon.lib/remove-tree! runs)))))
 
 ;; See docs/tasks.md#a-request-is-one-transaction
 (deftest a-task-from-a-file-holds-its-plans-search-as-a-requested-one-does

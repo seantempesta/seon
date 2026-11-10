@@ -4,7 +4,7 @@
   reaches it (through macros, schemas and the inputs with no program facts), a bin/check step
   is keyed like a test by what its functions reach, and the run is shards whose greens are
   stored."
-  (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
+  (:require [seon.lib] [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
             [seon.test-store :as ts] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
             [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner] [konserve.jolt.lmdb :as klmdb]))
 
@@ -35,7 +35,7 @@
   "f called with a fresh verdict cache directory under this checkout's target/tmp, removed after."
   [f]
   (let [dir (str (seon.config/checkout) "/target/tmp/verdicts-" (random-uuid))]
-    (try (f dir) (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+    (try (f dir) (finally (seon.lib/remove-tree! dir)))))
 
 (defn- stored
   "The verdicts the cache at dir holds for cand ({key digest}): what bin/test reads."
@@ -352,7 +352,7 @@
          (is (= {'app.pv-slow-test/hung-once 17000 'app.pv-slow-test/once 4000}
                 (fx/typical-ms dir '[app.pv-slow-test/hung-once app.pv-slow-test/once app.pv-slow-test/never-run]))
              "the median of its verdicts, whatever their digests; a test with none is left out")
-         (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+         (finally (seon.lib/remove-tree! dir)))))
 
 (defn plan-input
   "The input of size n: n keys with stored greens, one in a hundred moved since."
@@ -544,7 +544,7 @@
      ;; 24.0k ticks and 70.2 KB a branch (Deep fixes' 35.4k and 102 KB before program-db stopped listing them) on 1.19M and 4.7 MB
      :fixed {:ticks 1200000.0 :bytes 4700000.0}
      :per-n {:ticks 24000.0 :bytes 70000.0}
-     :sizes [10 30 100]}))
+     :sizes [3 10 30]}))
 
 ;; ---- every verdict is kept: a digest green and red is flaky (red, never reused as green, never run)
 

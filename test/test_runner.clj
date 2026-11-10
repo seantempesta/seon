@@ -85,7 +85,7 @@
     (let [files (if paths
                   (into {} (for [p paths :let [f (io/file dir p)]] [p (when (.isFile f) (slurp f))]))
                   (into {} (filter #(program-file? (key %))) (:value (fx/read-source {:req {:root dir :dirs (config/value :seon.config.source/dirs)}}))))]
-      (run! fx/remove-tree! [dir tar])
+      (seon.lib/remove-tree! dir tar)
       files)))
 
 (defn keep-tree!
@@ -163,7 +163,7 @@
         {:keys [conn cfg]} (let [o (open)]
                              (if (or (nil? max-bytes) (pdb/branch? (:conn o) b) (<= (.length (io/file store "data.mdb")) max-bytes))
                                o
-                               (do (d/release (:conn o)) (fx/remove-tree! store) (open))))]
+                               (do (d/release (:conn o)) (seon.lib/remove-tree! store) (open))))]
     (when-not (pdb/branch? conn b)
       (keep-tree! conn cfg root tree b (d/branches conn)))
     (d/release conn)
@@ -537,6 +537,12 @@
     (when checks?
       (write! (str out "/steps") (str (str/join " " run-steps) (when (seq run-steps) "\n")))
       (write! (str out "/steps.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys steps run-steps)}))
+      ;; each measured step's bound, past which bin/check captures its evidence and ends it red (STEP-OVERRAN): the step-end
+      ;; factor times its median measured run, floored at the stall bound; a step never measured has none (the owner's fourth
+      ;; clock exception, docs/clocks.md#time-decides-the-owners-exceptions)
+      (let [k (config/value :seon.config.check/step-end-factor) floor (config/value :seon.config.agent/stall-ms)]
+        (write! (str out "/step-bounds") (apply str (for [[st m] (sort-by key (measured-ms (remove proofs/mg-key? run-steps)))]
+                                                      (str st " " (max floor (* k m)) "\n")))))
       (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)
                                      ))
       (when (seq missing)
@@ -562,10 +568,15 @@
         ;; a step that runs a seon.check mode ran on target/seon: kept only if built from the plan's tree;
         ;; laws, lmdb-kill and lmdb-sem ran no mode, so no binary's tree is theirs to compare
         keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
+        ;; each step's wall ms as bin/check measured it (out/step-ms, "<step> <ms>" a line; a kill/reopen pair's two phases
+        ;; summed under their step), kept on its verdict: its bound's measure (out/step-bounds) and the deal's
+        step-ms (let [f (io/file out "step-ms")]
+                  (reduce (fn [m [nm ms]] (update m (str/replace nm #"-(write|read)$" "") (fnil + 0) (parse-long ms))) {}
+                          (when (.isFile f) (keep #(next (re-matches #"(\S+) (\d+)" %)) (str/split-lines (slurp f))))))
         unstored (do (when (and (not= tree built) (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)))
                        (println "prove: the binary was built from another tree than the plan's: no step that ran on it stored"))
                      (record-run! {:id (str "bin/prove steps " tree " " (random-uuid)) :tree tree}
-                                  (into {} (for [[k dg] digests :when (keep? k)] [k {:step k :digest dg :pass 1 :fail 0 :error 0}])) {}))]
+                                  (into {} (for [[k dg] digests :when (keep? k)] [k (cond-> {:step k :digest dg :pass 1 :fail 0 :error 0} (step-ms k) (assoc :ms (step-ms k)))])) {}))]
     (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
     (println (str "prove: " (count (filter green (keys digests))) " check steps green, " (count red) " red"
                   (when (seq red) (str ": " (str/join " " red)))))
@@ -634,7 +645,7 @@
             dir (str root "/target/tmp/health-base-" base "-" (random-uuid))
             based (try (with-wiki (program-db root store (fx/tree-of root base))
                                   (fx/checkout-at root base ["docs" (tasks-dir) "*.md"] dir))
-                       (finally (fx/remove-tree! dir)))
+                       (finally (seon.lib/remove-tree! dir)))
             refused (first (filter contract/error? [head based]))
             _ (when refused
                 (println (str "HEALTH FAILED: the " (if (contract/error? head) "tree's" (str "base " base "'s")) " wiki and tasks were refused by their write: "

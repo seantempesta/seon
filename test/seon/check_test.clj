@@ -19,6 +19,24 @@
     (is (= 0 (:exit r)) (pr-str r))
     (is (= "0" (clojure.string/trim (:out left))) "nothing it left is running")))
 
+;; docs/clocks.md#time-decides-the-owners-exceptions: a step that runs past its bound (the plan's step-bounds) is ended after its
+;; evidence is captured, and is red with its typed reason, never run again by the run. laws at a bound of 1 ms: ended at once
+(deftest a-step-past-its-bound-is-ended-red-with-its-evidence
+  (let [sel (str (System/getProperty "java.io.tmpdir") "/step-bound-" (random-uuid))
+        _ (clojure.java.shell/sh "mkdir" "-p" sel)
+        _ (doseq [[f t] {"steps" "laws\n" "steps-binary" "" "step-bounds" "laws 1\n"}] (spit (str sel "/" f) t))
+        r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/check") "--steps" sel)
+        ev (second (re-find #"evidence in (\S+)" (:out r)))
+        out (second (re-find #"(?m)^outputs: (\S+)" (:out r)))
+        ms (slurp (str sel "/step-ms"))]
+    (clojure.java.shell/sh "rm" "-rf" sel)
+    (is (= 1 (:exit r)) (pr-str r))
+    (is (re-find #"FAILED laws: STEP-OVERRAN, ran past its bound of 1 ms" (:out r)) (:out r))
+    (is (and ev (.isFile (java.io.File. (str ev "/ps.txt")))) "its process tree was captured before it was ended")
+    (is (not (re-find #"(?m)^laws OK" (:out r))) "and it did not run on to its own end")
+    (is (re-find #"^laws \d+\n$" ms) "its time is kept for its verdict, as a green step's is")
+    (some->> out (clojure.java.shell/sh "rm" "-rf"))))
+
 (deftest steps-are-branches-of-one-store
   ;; a store on disk of this test's own, the last resort: what is proved is how bin/check
   ;; opens its LMDB store from separate roots and reopens it after a kill; removed at the end
@@ -60,7 +78,7 @@
           (is (= #{"smoke's"} (notes @(:conn r))))
           (d/release (:conn r))))
       (finally
-        (clojure.java.shell/sh "rm" "-rf" path)))))
+        (seon.lib/remove-tree! path)))))
 
 (defn- entries "The names in directory p (none when it does not exist)." [p]
   (set (map #(.getName %) (or (.listFiles (java.io.File. p)) []))))
@@ -93,7 +111,7 @@
           (is (in1 b1) "the branch exists while the test runs")
           (is (not (in2 b1)) "a later test sees no branch the earlier one made")
           (is (= (disj in1 b1) (disj in2 b2)) "and nothing else changed")))
-      (finally (clojure.java.shell/sh "rm" "-rf" path (str path "-agents") runs)))))
+      (finally (seon.lib/remove-tree! path (str path "-agents") runs)))))
 
 (deftest records-are-read-at-the-agents-commit
   ;; the branch is read again at
@@ -162,7 +180,7 @@
       (is (not (exists? dead-test)) "a gone test runner's fifo is reclaimed")
       (is (exists? live) "a live starter's fifo stays")
       (is (exists? other) "a file not named for a starter stays")
-      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest a-stop-ends-on-its-holders-end-and-a-gone-holder-answers-at-once
   ;; the first bin/update hung for 10 minutes in `bin/root stop`: it read a fifo it held open
@@ -197,7 +215,7 @@
         (spit f "")
         (is (= 2 (:exit (sh (str (seon.config/checkout) "/bin/held") "--end" "TERM" "1" f "1"))) "a path that is no fifo is refused at once"))
       ;; the holders this test started end with it, by their own pids, whatever an assertion threw
-      (finally (doseq [p @started] (sh "kill" "-9" p)) (sh "rm" "-rf" dir)))))
+      (finally (doseq [p @started] (sh "kill" "-9" p)) (seon.lib/remove-tree! dir)))))
 
 ;; ---- task seon.check/health-is-what-a-branch-caused ------------------------------------------
 
@@ -216,7 +234,7 @@
       (is (= "CONFIG FAILED (seed)" (last lines)) (:out run))
       (is (< 1 (count lines)) "the seed's own output says why")
       (is (= "not a store" (slurp path)) "and the store the caller named is never removed or seeded over")
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-stale-binary-is-refused
   ;; bin/check runs no binary built from another tree: run from a checkout of its own (this one's
@@ -233,7 +251,7 @@
         (is (not= 0 (:exit run)))
         (is (str/includes? out "target/seon was built from tree not-this-tree; this checkout is tree ") out)
         (is (= "CONFIG FAILED (stale binary)" (last (str/split-lines out))) out))
-      (finally (clojure.java.shell/sh "rm" "-rf" tmp)))))
+      (finally (seon.lib/remove-tree! tmp)))))
 
 (defn- catch-db
   "The test store's seed with n live forms in a src namespace, each defining one var and carrying a catch the law page
@@ -327,7 +345,7 @@
           (is (= a (seon.fx/base-commit dir)) "main, clean: the previous main")
           (spit (str dir "/d") "d")
           (is (= c (seon.fx/base-commit dir)) "main with an uncommitted change: main itself")))
-      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest the-tree-id-reads-what-changed-and-is-the-tree-hashed-whole
   ;; task seon.fx/inputs-hash-only-what-changed: tree-id starts from the checkout's own index, whose stat cache
@@ -372,7 +390,7 @@
           (is (= (fresh) (seon.fx/tree-id dir)) "a forced-added ignored file"))
         (is (not= idx0 (index-bytes)) "(the test's own git commands moved the index)")
         (let [before (index-bytes)] (seon.fx/tree-id dir) (is (= before (index-bytes)) "tree-id leaves the repository's index as it was")))
-      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest a-commit-to-notes-moves-no-tree-id-and-one-to-src-does
   ;; task seon.fx/the-tree-id-is-what-is-read: claude_scratch/ is no input (every merge appends its log line
@@ -407,7 +425,7 @@
               (is (same) "agree")
               (write! "claude_scratch/more.md")
               (is (same) "and agree with a note written")))))
-      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest bin-tree-names-the-tree-tree-id-names
   ;; bin/check compares the binary's record (bin/build writes it through bin/tree) with bin/tree;
@@ -462,7 +480,7 @@
         (is (zero? (:exit r)))
         (is (str/includes? (str line) "MERGE OK") (:out r)))
       (is (not (.exists (java.io.File. (str dir "/merge-log.md")))) "nothing is written beside the run")
-      (finally (clojure.java.shell/sh "rm" "-rf" dir)))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 ;; docs/checks.md#modes: the checks' seeded store is remade past its bound, as nothing in it is kept and its file and roster only grow
 (deftest a-seeded-store-past-its-bound-is-removed
@@ -475,7 +493,7 @@
       (is (true? (seon.check/remove-store-past! dir 9)) "past it, it goes")
       (is (not (.exists (java.io.File. dir))))
       (is (false? (seon.check/remove-store-past! dir 9)) "a store not there is nothing to remove")
-      (finally (seon.fx/remove-tree! dir)))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 
 (deftest a-feed-that-ends-unsettled-ends-the-wait-that-names-it

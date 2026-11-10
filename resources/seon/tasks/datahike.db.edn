@@ -1,1 +1,6 @@
-[]
+[
+ {:seon.task/name "a-warm-seek-costs-its-descent"
+  :seon.task/plan "Measured 2026-11-10 on a warm LMDB store of 28k datoms (1,000 distinct keys, an empty loop subtracted; the same on the Jolt at upstream's head within 3% in ticks and 10% fewer bytes): the first datom of an entity by `:eavt` 2,085 ticks and 6.0 KB; a unique-value lookup by `:avet` 2,167 ticks and 3.0 KB; `seon.db/eid` 2,249 ticks and 3.0 KB. Should cost: at most about 500 ticks and 200 B: about four cached levels, a binary search of 64 keys each (6 comparisons a level), no allocation but the answer. Not yet split: where the 2k ticks go (the comparator per key, the slice or iterator object built for one datom, the context and time-predicate wrappers of `contextual-datoms`, read recording). First step: a per-function profile of 1,000 seeks. Related: task seon.db/avet-seek-allocates and the waived proof that names it. Proof when built: a seek's cost at store sizes to 1,000 entities, flat, with the stated number."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+]

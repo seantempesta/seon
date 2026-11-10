@@ -6,6 +6,10 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
 
+### A run far past its measured time is ended, after its evidence (owner, 2026-11-10)
+
+The fourth clock exception, relayed by the managing session at 20:35: a script may end a run that goes far past its measured time, after capturing the evidence (sample, logs, process list and the Seon state: root's stall check, each agent proc's), reported red with a typed reason, never retried; the cause still gets its task. Before it, a stuck step ran until someone noticed. Stated in [clocks](clocks.md#time-decides-the-owners-exceptions): `bin/check` ends a step past `:seon.config.check/step-end-factor` times its median measured run (STEP-OVERRAN), after `bin/evidence`.
+
 ### A write to main is answered after the store holds it (owner, 2026-11-10)
 
 Asked with the question tool (relayed by Point, 2026-11-10 ~19:40) between answering root's write at its apply, with root's api storing what ran ahead before any request reaches an agent, and answering after the store commit; the owner chose the second (in Point's relay: "answered means every process can read it"), one rule, no gate at root, no class of missed reads. Stated in [storage](storage.md#durability-is-continuous-group-commit).
@@ -29,6 +33,10 @@ Asked with the question tool (relayed by Point, 2026-11-10 ~19:40) between answe
 ### Pages are built from data by one walk (owner, 2026-11-10)
 
 "No more hand drawn lists and custom shit. If I come up with a new agent type and I attach a bunch of data to it's entity and there are render functions it should just work everywhere. ... Root, the user, and normal agents should be different based on their data and their connections, not separate special code." "Why can't we write render functions that recognize 'this is a top level render it's not a leaf so it's not going to be rendered as a tile'"; "don't flatten, the location in the pull pattern has meaning"; on the chat's order, "Sort them by time?". One walk over the pull, nested like the pull; each entity drawn by its own schema's render, which knows only whether it is on top or nested; the chat is its entities in the order they were made; no declared places, no kinds, no read mark. With it, the same day: root's agent is made at boot (reversing 2026-11-08's "made by the first message"); an example session is sent to the model as real user, assistant and tool messages and drawn by the same renders ("not learn a text exampled but see exactly how to structure the tool calls"); a mechanical message's sender is the system entity, not an agent ("Why do we need a full agent for this?"). In flight on branch jolt/pages; the task is seon.render/a-model-render-draws-each-turns-diff until its own are landed.
+
+### The forks follow upstream: theirs when almost as good, ours written to be offered (owner, 2026-11-10)
+
+Owner, 2026-11-10: "Make sure deep fixes is merging all the fixes from all upstream dependencies"; "If there are two solutions and theirs is almost as good as ours choose theirs"; for Datahike, "start with the latest datahike and just overlay only the ones we need over it"; "I don't want to open upstream patches until we are sure what we did was correct and the solutions are proper high quality implementations"; "make sure all the code is well written and matches their style and coding guidelines for both datahike and jolt. I highly respect all the developers working on these projects and I don't want to waste their time or have them complain that I submitted a low effort pull request that is a nightmare to review and understand." Stated in: docs/forks.md#following-upstream.
 
 ### Every session proves its branch before handing it over (owner, 2026-11-10)
 
