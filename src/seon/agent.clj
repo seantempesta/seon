@@ -1166,6 +1166,9 @@
                ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's
                ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
                (intr/forked!)
+               ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
+               ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
+               (contract/check-private! true)
                ;; nor the agent's walk: a fork holds its reactions on @ctx, which would run at a test's every write of a
                ;; record of its own (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
                (some-> (:walk @state) render/dispose-walk!)
