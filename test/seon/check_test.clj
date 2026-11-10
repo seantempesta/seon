@@ -268,7 +268,8 @@
         r (#'test-runner/with-wiki (ts/test-db) dir)]
     (clojure.java.shell/sh "rm" "-rf" dir)
     (is (seon.contract/error? r) "an answer, not a throw")
-    (is (= {:seon.error/type :seon.db/no-target :target [:schema/key :no.such/key]} (select-keys r [:seon.error/type :target])) (pr-str r))))
+    (is (= {:seon.error/type :seon.db/no-target :target [:schema/key :no.such/key] :by "zz/t"} (select-keys r [:seon.error/type :target :by])) (pr-str r))
+    (is (str/includes? (str (:seon.error/message r)) "two backticks") "its message says what to write for a name that is no citation")))
 
 (deftest a-problem-the-base-had-is-not-the-branchs
   (let [[base] (catch-db (ts/test-db) 1)
