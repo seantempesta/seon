@@ -157,7 +157,7 @@
   "Each of attributes as with the entity schema that owns it, {attribute schema}, as the entity index ix says (its :entity-schemas):
   the one reading of which entity schemas attributes belong to, for the write check (each schema a write touched) and for a render
   (the one schema that names a map). An attribute no entity schema owns is left out. See docs/data-modeling.md#a-thing-is-its-attributes."
-  {:malli/schema [:=> [:cat :map [:maybe [:sequential :any]]] [:map-of :keyword :qualified-keyword]]}
+  {:malli/schema [:=> [:cat :map :any] :map]}
   [ix as] (let [es (:entity-schemas ix)] (into {} (keep (fn [a] (when-let [s (es a)] [a s]))) as)))
 
 (defn implied-pattern
