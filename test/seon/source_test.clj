@@ -167,8 +167,8 @@
                        (git env "read-tree" tree)
                        (if (= :pin f)
                          (git env "update-index" "--cacheinfo" (str "160000," (apply str (repeat 40 "1")) "," path))
-                         (let [blob (str/trim (:out (sh/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (f (slurp (str here "/" path))))))]
-                           (git env "update-index" "--cacheinfo" (str "100644," blob "," path))))
+                         (let [blob (str/trim (:out (sh/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (f (let [fl (java.io.File. (str here "/" path))] (if (.isFile fl) (slurp fl) ""))))))]
+                           (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
                        (let [t (str/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
         current (fn [from] (root/binary-current db {:inputs {:tree from}} tree g))
         tweak (fn [marker] (fn [text] (str/replace-first text marker (str marker " "))))]
@@ -177,7 +177,12 @@
     (is (nil? (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form's change: the agent loads it from main")
     (let [r (current (built-with "src/seon/writer.clj" (tweak "(defn writer-proc")))]
       (is (some #{'seon.writer/writer-proc} (:reaches r)) (str "a root proc's step is root's own code: not current " (pr-str r))))
-    (is (= ["reference-code/lmdb"] (:reaches (current (built-with "reference-code/lmdb" :pin)))) "a pin: not current")))
+    (is (= ["reference-code/lmdb"] (:reaches (current (built-with "reference-code/lmdb" :pin)))) "a pin: not current")
+    (let [r (current (built-with "src/seon/render/ui.clj" (tweak "(defn script")))]
+      (is (some #{'seon.render.ui/script} (:reaches r)) (str "a render a schema names, which no call of root's reaches, is root's: not current " (pr-str r))))
+    (is (= ["zz-unplaced.txt"] (:reaches (current (built-with "zz-unplaced.txt" (constantly "x"))))) "a path no rule places: not current")
+    (is (= :binary-tree (:missing (root/binary-current db {} tree g))) "a binary that recorded no tree, against a main that holds one: unknown, never current")
+    (is (nil? (root/binary-current db {:inputs {:tree tree}} nil g)) "a main with no source fact: nothing known differs")))
 
 (deftest a-config-entry-writes-back-only-its-own-bytes
   ;; docs/source.md#a-program-file: the config file is one entity per entry, each form its exact text with its tags unread, and a write-back changes only what an entry changed
