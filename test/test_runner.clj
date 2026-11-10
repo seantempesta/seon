@@ -10,7 +10,7 @@
   bin/test runs each shard in a process of its own, at once. The program the plan reads is kept
   per git tree in a store of its own (program-db)."
   (:require [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
-            [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts]
+            [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts] [seon.agent]
             [seon.edn :as sedn] [seon.error :as error] [seon.lib :as lib] [seon.contract :as contract] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]
             [seon.doc :as doc] [seon.task :as task] [seon.problems :as problems] [my.root]))
 
@@ -163,6 +163,17 @@
                                            (:form/id f))))
                      ;; and the config the graph's rows and flags are read under
                      (pr-str (map #(config/value %) [:seon.config.source/pin-namespaces :seon.config.source/process-vars :seon.config.source/binary-vars])))))
+
+(defn program
+  "The program this process judges, as a db: in a process that holds a branch (an agent's test child, a fork of the
+  agent: seon.agent/state's :db) that branch's db, which holds the program as facts already, so nothing is imported
+  and the test judges the agent's change; otherwise (a bin/test shard) the checkout's tree as the plan kept it
+  (program-db of seon.config/checkout in seon.test-store/kept-program-store). A test that walks the program's forms
+  reads this; only a test of the import itself reads program-db. A test that composed program-db of the checkout
+  itself imported the whole program inside an agent's prove, where no plan had kept the tree: 3.87 G ticks, cut at
+  the test's 4.0 G budget, and it judged root's checkout, never the branch (the stray reds of 2026-11-10). The
+  second arm goes when a session's tree is a branch of the store. docs/merging.md#a-merge-runs-what-the-change-reaches."
+  [] (or (:db @seon.agent/state) (program-db (config/checkout) (ts/kept-program-store))))
 
 (defn reach-graph-of
   "The reach graph of db: the one stored in the program store at store (reach-graph.fasl, jfasl:

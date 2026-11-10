@@ -279,7 +279,7 @@
                 ((ts/reach-digests f2 {:env "e" :tree "t" :config {}}) 'app.pt-hq-test/by-name))
           "the quoted var changed: the test's digest moved"))
     (is (some #{'seon.program-cost-test/a-change-re-folds-only-what-reaches-it}
-              (program/tests-reaching (program/reach-graph (runner/program-db (seon.config/checkout) (ts/kept-program-store)) nil) 'seon.program/reach-update))
+              (program/tests-reaching (program/reach-graph (runner/program) nil) 'seon.program/reach-update))
         "Seon's own cost proof reaches the function it names")))
 
 (deftest a-namespace-gaining-its-first-test-is-updated-not-rebuilt
@@ -468,7 +468,7 @@
   "The reach graph of the checkout's own program, as bin/test's plan keeps it (test-runner/reach-graph-of over the kept
   program store): decoded and brought to date, a sixth of what building it costs (docs/source.md#tests-run-by-reach)."
   [here]
-  (runner/reach-graph-of (runner/program-db here (ts/kept-program-store)) (:data-refs (fx/inputs here)) (ts/kept-program-store)))
+  (runner/reach-graph-of (runner/program) (:data-refs (fx/inputs here)) (ts/kept-program-store)))
 
 (defn- sampled-repo
   "A new git repository (its path) holding every nth file of the checkout's src, test and schemas as

@@ -39,7 +39,7 @@
   ;; the compiler's facts of the checkout (src and test imported as program facts): the
   ;; release binary compiles what src requires, so no src namespace requires one whose file is
   ;; in test/ (the check driver, the e2e runner, the scripted model's fixtures); a scripted root loads its fixture from the checkout by name
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+  (let [db (runner/program)
         file (into {} (d/q '[:find ?n ?f :where [?e :ns/name ?n] [?e :ns/file ?f]] db))
         in? (fn [dir n] (some-> (file n) (clojure.string/starts-with? dir)))
         reqs (d/q '[:find ?n ?r :where [?e :ns/name ?n] [?e :ns/form ?f] [?f :form/requires ?r]] db)]
@@ -51,7 +51,7 @@
 (defn- src-docstrings
   "Every docstring of src as [name doc], read from the compiler's facts: a var's :var/doc and a namespace's :ns/doc."
   []
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))]
+  (let [db (runner/program)]
     (concat (d/q '[:find ?n ?doc :where [?v :var/name ?n] [?v :var/doc ?doc] [?v :var/form ?f] [?f :form/ns ?ns] [?ns :ns/file ?file]
                    [(clojure.string/starts-with? ?file "src/")]] db)
             (d/q '[:find ?n ?doc :where [?ns :ns/name ?n] [?ns :ns/doc ?doc] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db))))
@@ -71,7 +71,7 @@
   ;; task seon.profile/a-call-is-measured-one-way: a call is measured one way, so no src form but
   ;; seon.profile/measure! reads the engine's tick counter (jolt.host/ticks-of or jolt.host/ticks):
   ;; a measurement built beside it is red here. Read from the compiler's facts
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+  (let [db (runner/program)
         callers (d/q '[:find [?n ...] :in $ [?r ...] :where [?f :form/refs ?r] [?f :form/defines ?v] [?v :var/name ?n]
                        [?f :form/ns ?ns] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]]
                      db ['jolt.host/ticks-of 'jolt.host/ticks])]
@@ -82,7 +82,7 @@
   ;; :seon.task/outcome's schema, and read once, by seon.task (finished, judged, failed), which every
   ;; view and judge requires; a second reader is red here. Each src form's recorded source read as
   ;; data (the compiler's facts: :form/src), never a text search
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+  (let [db (runner/program)
         forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
                      [(clojure.string/starts-with? ?file "src/")]] db)
         ;; read in the form's own namespace, so its alias keywords (::flow/in-ports) resolve, and its
@@ -97,7 +97,7 @@
 
 (deftest a-key-read-at-load-says-so
   ;; docs/config.md#what-waits-for-a-rebuild: a top-level def of src that reads a config key keeps the value it loaded with whatever a branch states, so its key carries :seon.config/at-load, and seon.config/waiting can say so
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+  (let [db (runner/program)
         forms (d/q '[:find ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/file ?file]
                      [(clojure.string/starts-with? ?file "src/")]] db)
         read-at-load (into (sorted-set)
@@ -116,7 +116,7 @@
   ;; take-last, drop or drop-last, is a site; each site is named in docs/config.md#constants
   ;; with its reason, and a name there whose site is gone is red too. A foreign interface's
   ;; constant, named in upper case as its header names it, is the interface's, not a bound
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+  (let [db (runner/program)
         forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
                      [(clojure.string/starts-with? ?file "src/")]] db)
         read-in (fn [nsn src] (require nsn)
@@ -145,7 +145,7 @@
 
 ;; docs/resolution.md: Jolt compiles a qualified name with no var and fails only when the line runs, so a path no test runs ships it
 (deftest every-name-a-form-uses-is-a-var
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+  (let [db (runner/program)
         ;; the program's own: a test names what's gone to say it's gone
         acct {:refs (set (d/q '[:find [?r ...] :where [?f :form/refs ?r] [?f :form/ns ?ns] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db))}]
     (run! #(require (symbol (namespace %))) (filter #(and (namespace %) (re-find #"^(seon|my)\." (namespace %))) (:refs acct)))
@@ -155,7 +155,7 @@
   ;; task seon.step/an-edge-asks-one-way: an edge asks a proc one way, seon.step/ask-edge, which
   ;; answers a closed channel at once; no src form outside seon.step puts a request carrying its
   ;; promise (:p) on a channel itself. src's forms read as data from the compiler's facts
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+  (let [db (runner/program)
         forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
                      [(clojure.string/starts-with? ?file "src/")]] db)
         read-in (fn [nsn src] (require nsn)
@@ -176,7 +176,7 @@
   ;; seon.step/error-msg; no src form outside seon.step writes (or (ex-message e) (str (type e)))
   ;; again. src's forms read as data from the compiler's facts. Not covered: the same read written
   ;; another way ((.getMessage e), (str (class e)), the two in the other order)
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+  (let [db (runner/program)
         forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
                      [(clojure.string/starts-with? ?file "src/")]] db)
         read-in (fn [nsn src] (require nsn)
@@ -207,7 +207,7 @@
   ;; 'seon.render.value/show, a namespace renamed away, and the runs searched for it. An error names
   ;; its raiser by its var (#'ns/f, the function it is built in), so the compile refuses one that is
   ;; gone; no src form names one as a quoted symbol. src's forms read as data from the compiler's facts
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+  (let [db (runner/program)
         forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
                      [(clojure.string/starts-with? ?file "src/")]] db)
         read-in (fn [nsn src] (require nsn)
@@ -224,7 +224,7 @@
   ;; a failure throws its words, and git-try: git's no is nil), and a checkout is told by its .git
   ;; through checked-out?; no other src form names the git command or a repository's own files (".git").
   ;; src's forms read as data from the compiler's facts
-  (let [db (runner/program-db (seon.config/checkout) (ts/kept-program-store))
+  (let [db (runner/program)
         forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
                      [(clojure.string/starts-with? ?file "src/")]] db)
         read-in (fn [nsn src] (require nsn)
