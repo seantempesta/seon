@@ -146,6 +146,20 @@
         (is (= at (get-in problem [:error :commit])))
         (remote/close! end) (sock/close! a'))))))
 
+(deftest an-agent-that-reads-nothing-is-seen-as-a-stall
+  ;; docs/processes.md#a-stalled-agent: root's frames to an agent never block its proc. An agent that stopped reading its
+  ;; socket (an eval held in a blocking open(2)) left the proc's blocking put parked in its step, so it never took root's
+  ;; :stall? and no stall was recorded (batch 16's problems step, 8.5 min). Here nothing ever takes from the end's :out:
+  ;; each step returns, the frames wait in order, and the stall check answers. No load, no clock: red before, the first
+  ;; step never returned (shown once under a bound outside this test).
+  (let [out (a/chan)
+        st (#'ap/agent-proc {:id :a1 :end {:out out :in (a/chan)} :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        [st _] (step #'ap/agent-proc st :in {:op :req :rid 5 :kind :eval :msg {:op :eval :forms "(open-a-fifo)"}})
+        [st _] (step #'ap/agent-proc st :in {:op :req :rid 6 :kind :eval :msg {:op :eval :forms "(+ 1 2)"}})
+        [_ outs] (step #'ap/agent-proc (assoc st :last-frame-ms 0) :in {:op :stall? :now-ms 10000 :stall-ms 1000})]
+    (is (= [:stalled] (map :op (:to-api outs))) "the proc takes :stall? and answers the stall")
+    (is (= [5 6] [(:id (a/poll! out)) (:id (a/poll! out))]) "and its frames wait for the agent, in order")))
+
 (deftest a-reply-the-wire-cannot-encode-answers-its-asker-and-the-end-serves-on
   ;; task jolt.async/a-value-a-remote-end-cannot-encode-answers-its-asker: root's end sent an agent
   ;; a reply holding a sorted map (no stable encoding), and the writer pump closed the end, which
