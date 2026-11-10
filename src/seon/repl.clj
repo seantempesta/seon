@@ -30,7 +30,7 @@
   messages, writes) are {:op k} values, handled by `agent-step`."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn- defchecked]] [hasch.core :as hasch] [seon.error :as err] [jolt.nrepl :as nrepl] [seon.intr :as intr] [seon.reader :as reader] [seon.doc :as doc] [seon.fx :as fx] [seon.source :as source] [seon.agent :as agent] [seon.task :as task] [seon.contract :as contract] [my.db] [my.agent] [my.schema] [malli.registry :as mr]
-            [seon.source :as source] [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.ctx.search :as search] [seon.ctx.wire :as wire] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
+            [seon.source :as source] [seon.program :as program] [jolt.analyzer] [seon.lib :as lib] [seon.print :as print] [seon.print.select :as select] [seon.render :as render] [seon.ratom :as ratom] [seon.ctx.search :as search] [seon.ctx.wire :as wire] [seon.ctx :as ctx] [seon.web.html :as h] [seon.profile :as profile] [seon.sock :as sock] [seon.step :as step] [clojure.core.async :as a] [clojure.core.async.flow :as flow]
             [jolt.ffi :as ffi] [seon.config :as cfg] [clojure.test] [datahike.api :as d] [seon.db :as pdb] [seon.edn :as sedn]))
 
 (def ^:private budgeted
@@ -720,7 +720,11 @@
         [kv drawn?] (when (and (contains? resp :value) (not basis))
                       (if (:forms resp) [(mapv kept-form v) false] (kept v)))
         ;; a value its model render has already drawn prints as it is
-        schema (when (and (contains? resp :value) (not drawn?)) (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k)))]
+        schema (when (and (contains? resp :value) (not drawn?))
+                 (or (when-let [k (:seon.render/schema (meta v))] (when (or ctx? (not= :seon.ctx/ctx k)) k))
+                     ;; a value that holds its own render (an SVG chart under :seon.render/hiccup) is named by the schema of such
+                     ;; values, so its eval is a tile as one a schema draws (docs/render.md#a-value-draws-itself)
+                     (when (some? (or (when (map? v) (get v :seon.render/hiccup)) (get (meta v) :seon.render/hiccup))) :seon.render/drawn)))]
     (cond-> (let [kept-resp (cond basis (dissoc resp :value) (contains? resp :value) (assoc resp :value kv) :else resp)
                   id (:eval-id req)
                   ;; an answer not kept as it is (a host object, a value past the bound, a ctx, several forms) is named by its eval, so its handle is its own
@@ -1181,11 +1185,11 @@
       [])))
 
 (defn- layout
-  "The layout this branch renders its ctx with: the one its entity names (seon.render/layout-of: an agent's
-  :seon.render/render-ctx, root's :seon.render/root-ctx), its own var when its branch defines one; its key names it
-  before its branch holds its entity. See docs/render.md#the-page."
+  "The render this branch renders its ctx with: its entity's own (seon.render/render-var-of: an agent's seon.render.ui/agent, root's
+  seon.render.ui/root), its own var when its branch defines one; its key names it before its branch holds its entity. See
+  docs/render.md#the-page."
   {:malli/schema [:=> [:cat] :any]}
-  [] (render/layout-of (agent/branch-index) (merge {:seon.agent/key (:key @agent/state)} @ctx/ctx)))
+  [] (render/render-var-of (agent/branch-index) (merge {:seon.agent/key (:key @agent/state)} @ctx/ctx)))
 
 (defn- the-walk
   "This agent's walk of its render of ctx (seon.render/walker over @ctx, its diff seon.ctx/changes, and the
@@ -1197,11 +1201,11 @@
   (let [held (:walk @agent/state) l (layout)]
     (if (and held (= l (first (:root held))))
       held
-      (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes
-                              :points (fn [] (wire/points-of (agent/db) (:db/id @ctx/ctx) (:branch @agent/state)))
-                              :diffs-through (fn [chain] (wire/diffs-through (agent/db) (:db/id @ctx/ctx) chain))}
-                             agent/db [l {}] (agent/branch-index))
-                (or (nil? held) (:model-only held)) (assoc :model-only true))]
+      (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes}
+                             agent/db [l {} (ratom/ref-view ctx/ctx ctx/changes)] (agent/branch-index))
+                (or (nil? held) (:model-only held)) (assoc :model-only true)
+                ;; its model output too: each entity's model render, read as the request (seon.ctx.wire/request)
+                true (assoc :outputs #{:seon.render/hiccup :seon.render/openai-compat}))]
         (some-> held render/dispose-walk!)
         (swap! agent/state assoc :walk w)
         w))))
