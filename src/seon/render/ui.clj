@@ -596,6 +596,8 @@
 
 (declare standing)
 
+(declare own-tiles)
+
 (defn task-view
   "A task (the declared html render of :seon.task/task-fact) as a person reads it, wherever the pattern joined one: inline its
   id, kind and execution; whole, its name as a title, its namespace and how its work stands above it (the task's outcome
@@ -606,6 +608,7 @@
 .task-view h3 { font-size: 0.75rem; color: var(--color-text-300); }"
    :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.task/keys [id kind execution instructions] :as t}]
+  ;; what the task joins (its cites, searches, needs), each by its own render inside it, nested like the pull
   (if (= :inline (:as opts))
     [:span (str "task " id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
     (let [{:keys [plan]} (task/pulled-accumulated t)]
@@ -618,7 +621,8 @@
        (when instructions [:details [:summary "how the agent works it"] [:p {:class "seon-text"} instructions]])
        (when plan (markdown plan))
        ;; its id, which an agent names its task by (my.task/*)
-       [:p {:class "seon-note"} (str "Task: " id)]])))
+       [:p {:class "seon-note"} (str "Task: " id)]
+       (seq (own-tiles (:seon.render/index opts) t))])))
 
 (defn- toggle
   "A <details>' attrs that tell the render proc it opened or closed (/open), for the conversation's
@@ -945,8 +949,10 @@
         reach (into #{} (for [[_ v] (:proved of) r (get-in v [:var/form :form/refs])] r))
         sym (:var/name t)
         id (:seon.task/id of)]
-    (cite-hiccup db c {:lookups (cond-> [] id (conj [:seon.task/id id]) sym (conj [:var/name sym]))
-                       :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))})))
+    ;; a test its owner task proves by is drawn by the task's proofs (seon.render.ui/status), not again as a cite (Context)
+    (when-not (and sym (some #(= sym (:var/name %)) (vals (:proved of))))
+     (cite-hiccup db c {:lookups (cond-> [] id (conj [:seon.task/id id]) sym (conj [:var/name sym]))
+                       :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))}))))
 
 
 (defn searched
@@ -1503,23 +1509,19 @@
           :else [])))
 
 (defn tiles
-  "The tiles of pulled entity c, read by pattern p: each entity its joins hold that is a tile (`tile?`), in the pattern's order, each
-  followed by its own tiles (its schema's pattern), depth first; each entity once, at its first place (the pull holds an entity at
-  every path that reaches it: a task its agent joins and a cite's :seon.cite/of; the cite's render reads its owner there, the page
-  draws the task once), so a pattern that reaches back is no cycle; the views themselves, so the walk draws each by its schema's
-  render (seon.render/entity-render) and the model reads the same hiccup stripped. No part is named here. See docs/render.md#the-page."
+  "The tiles entity c's pull joins, read by pattern p: each entity its joins hold that is a tile (`tile?`), in the pattern's order, as
+  views, so the walk draws each by its schema's render (seon.render/entity-render). One level: a tile's own render places what IT joins
+  inside itself by this same function over its own pull (the task its cites, searches and needs), nested like the pull; data a render
+  reads for itself (a cite's owner task) is no part unless that render places it. No part is named here. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :any [:sequential :any]] [:vector :any]]}
   [ix c p]
-  (let [seen (volatile! #{})
-        go (fn go [c p]
-             (mapcat (fn [[k sub]]
-                       (mapcat (fn [m] (let [e (ratom/untracked m)]
-                                         (when (and (tile? ix e) (not (contains? @seen (:db/id e))))
-                                           (vswap! seen conj (:db/id e))
-                                           (cons m (go m (if (keyword? sub) (or (render/schema-property ix sub :seon.ctx/pattern) []) sub))))))
-                               (members (get c k))))
-                     (pattern-joins p)))]
-    (vec (go c p))))
+  (vec (for [[k _] (pattern-joins p) m (members (get c k)) :when (tile? ix (ratom/untracked m))] m)))
+
+(defn- own-tiles
+  "Entity view e's own tiles: `tiles` by its own pattern less its conversation (seon.render/page-pattern of seon.render/entity-pattern),
+  the one call a page's top and a tile's inside make; nothing outside a walk (no entity index in opts)."
+  {:malli/schema [:=> [:cat [:maybe :map] :any] [:vector :any]]}
+  [ix e] (if ix (tiles ix e (render/page-pattern ix (or (render/entity-pattern ix (ratom/untracked e)) []))) []))
 
 (defn agent-parts
   "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists): the
@@ -1533,7 +1535,7 @@
   [{ix :seon.render/index} c]
   [:div {:id "p-task"}
    ;; what its pull joins, each by its own render, in the pull's order: its task first, as the agent's pattern joins it first
-   (seq (tiles ix c (render/page-pattern ix (or (render/entity-pattern ix (ratom/untracked c)) []))))
+   (seq (own-tiles ix c))
    [#'eval-tiles {} c]
    ;; until root's page is root's agent drawn by this render (step 3): root's session reads every agent here
    (when (:seon.agent/root c) [#'sessions {:at [:seon.agent/root]}])
