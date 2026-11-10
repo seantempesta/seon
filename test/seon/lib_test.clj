@@ -151,4 +151,23 @@
                                      (lib/fork! {:child #(lib/c-exit 0) :parent lib/wait-status :refused (fn [n] {:refused n})})))]
                     (lib/c-exit (if (= {{:exit 0} 50} (frequencies exits)) 0 9))))))]
     (is (= {:exit 0} (lib/fork! {:child run :parent lib/wait-status :refused (fn [n] {:refused n})}))
-        "every child of 50 reset itself and ran only its own code (9: one did not; before the fix all 50 ran a parent's fiber)")))
+        "every child of 50 reset itself and ran only its own code (9: one did not; before the fix all 50 ran a parent's fiber)")
+    ;; the same through fork!'s double fork (a clone: the middle is reaped, the grandchild is nobody's child, so each says
+    ;; what ran in it by a line in a file): the grandchild keeps the reset its middle made, and nothing of the parent's runs
+    (let [f (str (config/checkout) "/target/tmp/fork-reset-" (random-uuid))
+          say (fn [w] (spit f (str w "\n") :append true))
+          run2 (fn []
+                 (jolt.host/main-carrier-run!
+                   (fn []
+                     (jolt.host/fiber-preempt-ticks-set! 100)
+                     (jolt.host/fiber-yield)
+                     (let [me (lib/c-getpid)]
+                       (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when (not= me (lib/c-getpid)) (say "parent") (lib/c-exit 7)) (jolt.host/fiber-yield) (recur)))))
+                       (dotimes [_ 50] (lib/fork! {:double? true :child #(do (say "own") (lib/c-exit 0)) :parent identity :refused (fn [n] (say (str "refused " n)))}))
+                       ;; the grandchildren end on their own: wait for their 50 lines, a bounded number of looks
+                       (loop [n 0] (when (and (< n 400) (< (count (re-seq #"\n" (try (slurp f) (catch Exception _ "")))) 50)) (Thread/sleep 10) (recur (inc n))))
+                       (lib/c-exit 0)))))]
+      (.mkdirs (.getParentFile (java.io.File. f)))
+      (is (= {:exit 0} (lib/fork! {:child run2 :parent lib/wait-status :refused (fn [n] {:refused n})})))
+      (is (= {"own" 50} (frequencies (str/split-lines (try (slurp f) (catch Exception _ ""))))) "each of 50 grandchildren ran its own code and nothing of the parent's")
+      (.delete (java.io.File. f)))))
