@@ -161,7 +161,11 @@ step() {
 
 if (( NEEDS )); then
 echo "== seed (the one store every step branches from: made when missing)"; step seed "" run seed 2000
-read -r STORE KB0 BR0 <<< "$(run store)"
+# the store's path, size and branches: `seon store`'s own line, from stdout alone (a log line on stderr once read as the
+# path: konserve's deprecation warning, 2026-11-10, and every unit then seeded a store of its own instead of copying)
+store-line() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon store --profile scripted 2>/dev/null 7>&- 3>&-) | tail -1 }
+read -r STORE KB0 BR0 <<< "$(store-line)"
+[[ -f $STORE/data.mdb ]] || { failed "seed (no seeded store at '$STORE': seon store answered no path holding data.mdb)"; print "FAILED seed: no seeded store at '$STORE'" }
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
 STEPS=(seed fx config system mcp agent-tests threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
        orphan durable window ids vectors e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-held resume scale)
@@ -292,7 +296,8 @@ unit() {
   # a unit this run does not select takes no store and shows nothing
   [[ -n $SEL && " $ONLY " != *" $1 "* ]] && return 0
   export SEON_STORE=$OUT/stores/$1
-  (( NEEDS )) && { mkdir -p "$SEON_STORE" && cp -c "$STORE/data.mdb" "$SEON_STORE/data.mdb" }
+  # a unit that cannot take its copy of the seeded store fails here, loudly: it never runs on a store its own root seeded
+  (( NEEDS )) && { mkdir -p "$SEON_STORE" && cp -c "$STORE/data.mdb" "$SEON_STORE/data.mdb" || { failed "$1 (no copy of the seeded store $STORE)"; print "FAILED $1: no copy of the seeded store $STORE"; return 1 } }
   { u-$1 } > "$OUT/$1.shown" 2>&1
   grep -q "^$1[ -]" "$OUT/failed" || rm -rf "$SEON_STORE"
   cat "$OUT/$1.shown"
@@ -314,7 +319,7 @@ exec 3>&-
 GREEN=(${(f)"$(<$OUT/green)"})
 (( NEEDS )) && { run drop $GREEN > "$OUT/drop-after.log" 2>&1 || failed "drop-after ($OUT/drop-after.log)" }
 FAILED=(${(f)"$(<$OUT/failed)"})
-(( NEEDS )) && read -r _ KB1 BR1 <<< "$(run store)"
+(( NEEDS )) && read -r _ KB1 BR1 <<< "$(store-line)"
 [[ -n $SEL ]] && print -r -- "${GREEN[@]}" > "$SEL/green"
 echo
 (( NEEDS )) && echo "store $STORE: ${KB0} KB and ${BR0} branches before the run, ${KB1} KB and ${BR1} after; run directory $(du -sk "$OUT" | cut -f1) KB"

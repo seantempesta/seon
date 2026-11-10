@@ -6,7 +6,7 @@
   (BAGGAGE.md)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.print :as print] [clojure.string :as str] [malli.core :as m] [malli.registry] [seon.schema.datahike :as sd] [seon.config :as cfg]
-            [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
+            [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [org.replikativ.persistent-sorted-set :as pss] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
             [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core] [datahike.db.transaction]))
 
 (def schema
@@ -350,8 +350,8 @@
   "tx-data cut to the attributes attr? keeps (a set of them, or a predicate), so a speculation that reads only those attributes after it (a config check,
   a count) applies what it reads and not the rest: each map keeps its :db/id and those attributes (one left with none goes),
   each :db/add and :db/retract of such an attribute stays, and every :db/retractEntity stays, in order. Tempids join the maps
-  that kept them as before. The full import of the checkout speculated whole cost 2.7 G ticks and 4.7 GB a call
-  (2026-11-10). See docs/storage.md#the-write-checks-every-entity-it-touches."
+  that kept them as before. The full import of the checkout speculated whole cost 2.7 G ticks and 4.7 GB a call.
+  See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any [:or [:set :keyword] :seon.host/fn]] [:vector :any]]}
   [tx-data attr?]
   (into [] (keep (fn [x] (cond (map? x) (let [m (into {} (filter (fn [[k _]] (or (= :db/id k) (attr? k)))) x)]
@@ -674,11 +674,14 @@
   "Read every node of db's indexes into this process's node cache, so the children it forks
   (the fork server's agents) inherit them decoded and read the store less at a spawn. The fork
   server calls it once, through its own store, after its fork (docs/machine.md#roots-heap).
-  Answers the datom count."
+  Answers the datoms its three indexes hold, counted leaf by leaf: each index is one reduce over
+  the sorted set's own slice, which restores every node on its way and makes nothing a datom
+  (counting (d/datoms db index) walked each index through Datahike's lazy seq, a cell a datom: a small part of the 1.2 s
+  a root's first fork spends here; the rest is decoding leaves)."
   {:malli/schema [:=> [:cat :seon.host/db] :int]}
   [db]
-  (count (d/datoms db :aevt)) (count (d/datoms db :avet))
-  (count (d/datoms db :eavt)))
+  (reduce (fn [n index] (reduce (fn [k _] (inc k)) n (pss/slice (get db index) nil nil)))
+          0 [:aevt :avet :eavt]))
 
 (lib/defc c-ids-open "seon_ids_open" [:string] :pointer {:capture-native-error true})
 (lib/defc c-ids-take "seon_ids_take" [:pointer :int] :uint64)

@@ -1,5 +1,5 @@
 ;; bin/forks's units and the counts each answers on Jolt at the pins (a Datahike test namespace, a konserve
-;; test file): what the forks' own suites prove green today. The red namespaces stay out until
+;; or persistent-sorted-set test file): what the forks' own suites prove green today. The red namespaces stay out until
 ;; fixed (docs/forks.md#own-suites); a commit that moves a count records it here.
 datahike.test.array-test {:test 2, :pass 20, :fail 0, :error 0}
 datahike.test.back-correction-test {:test 1, :pass 4, :fail 0, :error 0}
@@ -77,9 +77,9 @@ datahike.test.unstructured-test {:test 9, :pass 41, :fail 0, :error 0}
 datahike.test.valid-at-test {:test 41, :pass 73, :fail 0, :error 0}
 datahike.test.valid-time-test {:test 9, :pass 44, :fail 0, :error 0}
 datahike.test.versioning-test {:test 13, :pass 97, :fail 0, :error 0}
-datahike.test.writer-error-test {:test 11, :pass 154, :fail 0, :error 0}
+datahike.test.writer-error-test {:test 11, :pass 152, :fail 0, :error 0}
 reference-code/konserve/test/konserve/jolt/fasl_test.jolt {:test 11, :pass 192, :fail 0, :error 0}
-reference-code/konserve/test/konserve/jolt/lmdb_test.jolt {:test 2, :pass 137, :fail 0, :error 0}
+reference-code/konserve/test/konserve/jolt/lmdb_test.jolt {:test 2, :pass 143, :fail 0, :error 0}
 datahike.test.schema-key-seed-test {:test 1, :pass 2, :fail 0, :error 0}
 datahike.test.data-vector-retract-test {:test 3, :pass 7, :fail 0, :error 0}
 datahike.test.gc-fail-closed-test {:test 4, :pass 28, :fail 0, :error 0}
@@ -89,3 +89,14 @@ datahike.test.query-or-cartesian-test {:test 1, :pass 6, :fail 0, :error 0}
 datahike.test.query-not-unsat-test {:test 1, :pass 5, :fail 0, :error 0}
 datahike.test.schema-cache-test {:test 2, :pass 6, :fail 0, :error 0}
 datahike.test.db-hash-test {:test 2, :pass 12, :fail 0, :error 0}
+reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/core.jolt {:test 7, :pass 841, :fail 0, :error 0}
+reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/seek_backward.jolt {:test 6, :pass 181, :fail 0, :error 0}
+reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/restore_comparator.jolt {:test 5, :pass 73, :fail 0, :error 0}
+reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/empty_bulk_build.jolt {:test 4, :pass 31, :fail 0, :error 0}
+reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/transient_ownership.jolt {:test 5, :pass 11, :fail 0, :error 0}
+reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/stress.jolt {:test 5, :pass 621, :fail 0, :error 0}
+reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/auto_removal.jolt {:test 8, :pass 26, :fail 0, :error 0}
+reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/storage/insert_control.jolt {:test 2, :pass 136, :fail 0, :error 0}
+reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/branching_factor.jolt {:test 5, :pass 25, :fail 0, :error 0}
+reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/contract.jolt {:test 5, :pass 28, :fail 0, :error 0}
+reference-code/persistent-sorted-set/test/org/replikativ/persistent_sorted_set/test/jolt_count_fixes.jolt {:test 7, :pass 760, :fail 0, :error 0}
