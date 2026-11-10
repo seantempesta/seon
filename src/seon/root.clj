@@ -698,6 +698,13 @@
                    (view! assoc-in [:fork-server :mismatch] (:mismatch m)))
       ;; a throw in a fork server step: an error fact on root, the server serving on (seon.fork-server/server-step)
       :step-failed (problem st (err/occurrence (:error m) :platform {} (System/currentTimeMillis)))
+      ;; the server made no standby (docs/processes.md#a-step-that-throws): a recorded platform problem, and the view shows it has none
+      :standby-failed (-> st
+                          (view! assoc-in [:fork-server :standby] false)
+                          (problem (err/occurrence (contract/error :seon.fork-server/standby-failed #'back-op
+                                                                   (str "the fork server made no standby: " (:active-threads m) " active threads")
+                                                                   {:active-threads (:active-threads m) :gen (:gen m)})
+                                                   :platform {} (System/currentTimeMillis))))
       :load-errors (view! st update-in [:fork-server :load-errors] (fnil into []) (:errors m))
       ;; fork requests the dead server never served fail; agents live on
       ;; the dead server's children are orphans: no server reaps them, so a death waiting
