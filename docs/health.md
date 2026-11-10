@@ -1,6 +1,6 @@
 # Health
 
-Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:leadless-section`, `:uncited-task`, `:stale-plan`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
+Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:leadless-section`, `:uncited-task`, `:stale-plan`, `:waived-proof`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
 
 ## Two kinds of problem
 
@@ -59,6 +59,10 @@ A public function, macro or def of Seon's own source whose docstring cites no `d
 ## A form too long
 
 A live form of the program, in source or in a test, whose text (`:form/src`) is longer than `:seon.config.shrink/form-tokens` tokens, as the model reads it (the printer's estimate, `seon.print.emit/chars-tokens`), is a `:long-form` (`seon.problems/long-forms`): a form that long does several things, and splitting it by what it does makes each part reusable and testable ([measured](../resources/seon/config/default.edn) over this program: 83 of 2,082 source forms and 76 of 2,052 test forms were over 1,000 tokens). It is read only for the vars a branch changed (`seon.problems/caused-split`, as `:uncited-var` is), so a branch that adds one is shown it as attention (never refused: get out of an agent's way), and the forms long before it are not its problem. The problem carries the var, its tokens and the bound, and closes when the form is split under the bound; each becomes a held task from its template (```seon.template/finding```: split it by what it does, its behaviour and its tests unchanged, its cost per call no worse), written once a var by ```my.root/file-findings!``` for root or the owner to release. Cost: one seek per named var and its form's text length.
+
+## A proof that passes by waiver
+
+A cost proof whose estimate carries an `:overrun` ([cost](cost.md#an-accepted-overrun-and-its-ratchet)) is green because of it, so it is a `:waived-proof` (`seon.problems/waived-proofs`): the row holds the test, the task the `:overrun` names, the size it was taken at, the numbers it recorded and the multiple of the proof's own bound that record is at that size, in its worst counted dimension (`seon.cost/expected` and `seon.cost/row-ratio`, the arithmetic of a verdict, so nothing is measured). The proofs are found by the test forms that reference `seon.cost/proof` (one `:form/refs` seek) and the `:overrun` map is read out of the form by the reader, never from verdict files. It is a listing, not a refusal: no branch is judged on it (it is not among `seon.problems/caused-classes`), and it closes when the proof's `:overrun` is deleted, which is the fix of its task. `bin/prove` ends its output with `prove: N proofs pass by waiver`, counted by the same function on the tree it proved. Cost: the forms that call `seon.cost/proof`, each read once.
 
 ## A problem with no page
 

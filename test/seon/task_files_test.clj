@@ -248,3 +248,18 @@
         (is (str/includes? (nth unreadable 2) "not readable EDN"))
         (is (str/includes? (nth bad 2) "not a non-empty vector of transactions")))
       (finally (clojure.java.shell/sh "rm" "-rf" runs)))))
+
+;; See docs/tasks.md#a-request-is-one-transaction
+(deftest a-task-from-a-file-holds-its-plans-search-as-a-requested-one-does
+  ;; a task made from a request held a search of its plan's words, the first context's ranked matches over code and wiki; a task
+  ;; declared in a file held none (0 searches on a root of 331 file tasks, 2026-11-10), so its agent found the code by grep. Every
+  ;; task is made by seon.task/create-tx, so the search is made there, once, the same for both
+  (let [db (load-text (empty-db) file-a)
+        search-of (fn [db id] (d/pull db [:seon.search/query] [:seon.search/id (str id "/request")]))]
+    (is (= "Parse the rows." (:seon.search/query (search-of db "demo/parse"))) "a file task holds its plan's search")
+    (is (= "Index the rows." (:seon.search/query (search-of db "demo/index"))))
+    (testing "a task held before every task got one gains it on the next load, once"
+      (let [old (d/db-with db [[:db/retractEntity [:seon.search/id "demo/parse/request"]]])
+            again (load-text old file-a)]
+        (is (= "Parse the rows." (:seon.search/query (search-of again "demo/parse"))))
+        (is (= [] (task/load-tx again {'demo (task/file-declarations 'demo file-a)})) "and a load with nothing new writes nothing")))))

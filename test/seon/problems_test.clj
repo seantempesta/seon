@@ -462,13 +462,13 @@
                  :stale-binary #(problems/stale-binary db ans) :orphan-page #(problems/orphan-pages db ans)
                  :leadless-section #(problems/leadless-sections db ans) :uncited-task #(problems/uncited-tasks db ans)
                  :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
-                 :stale-plan #(problems/stale-plans db ans)
+                 :stale-plan #(problems/stale-plans db ans) :waived-proof #(problems/waived-proofs db ans)
                  ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it, over the derived rows as health hands them), and the folds
                  :fixed (let [derived (#'problems/other-derived db ans)]
                           #(let [a (problems/answers db)]
                              (#'problems/health-with db a (:classes (#'problems/report-with db a {} nil)) derived)))}
         measured (update-vals classes calls-of)
-        ;; 74 -> 86 -> 88 -> 89 on 2026-11-10, one total; per class since. Each bound is the contracted calls measured on this world.
+        ;; 74 -> 86 -> 88 -> 89 on 2026-11-10 (uncited-tasks every ready task, stale-binary, waived-proof), one total; per class since. Each bound is the contracted calls measured on this world.
         bounds {:stalled 1             ; the processes holding a stall fact, one range
                 :stale-pin 2           ; the pins of the branch scheme
                 :stale-binary 2        ; root's source fact: one seon.db/eid and one pull
@@ -478,6 +478,7 @@
                 :unnamed-site 9        ; the catch sites of the program's forms (live? and form-of per form, the namespaces once)
                 :stale-section 2       ; the read datoms and the vars' forms, one scan each
                 :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
+                :waived-proof 1        ; the test forms' cost proofs passing by :overrun, one scan (Deep fixes' class)
                 :fixed 50              ; answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
                 :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
@@ -541,8 +542,9 @@
                :growth :linear
                :ops {:db/pull 7 :db/pull-attr 38 :edn/read-char 500}
                :sizes [2 6 18]
-               ;; measured on Jolt 00a3b321 (pulls got cheaper with J3's try; the read did not as much)
-               :overrun {:task "seon.problems/report-beyond-its-pulls" :measured {:ns 218794000.0 :bytes 227801600.0}}}))
+               ;; its waiver (task seon.problems/report-beyond-its-pulls, never filed) closed 2026-11-10: with it deleted the proof
+               ;; is green, 0.95x the ticks and 0.91x the bytes of its bound at 18
+               }))
 
 (defn clean-input
   "The flatness proof's input at k: 4 problems of each class over k clean tasks, each done."
@@ -591,9 +593,10 @@
                :growth :linear
                :per-n {:ticks 1700 :bytes 10500 :calls 0}
                ;; fixed calls, once a read whatever n, summed by what makes them: Point, 2026-11-10 (in Sean's absence, reported to him): 54 -> 56
-               :fixed {:ticks 650000 :bytes 3000000 :calls (+ 54   ; the read before 2026-11-10
+               :fixed {:ticks 650000 :bytes 3000000 :calls (+ 54   ; the read before 2026-11-10 (with :waived-proof's one)
                                                               1    ; seon.problems/task-reads: the tasks' readiness and cites, once
-                                                              1)}  ; seon.problems/stale-plans' own contract
+                                                              1    ; seon.problems/stale-plans' own contract
+                                                              1)}  ; and its seon.db/eid of the var the world's ready task cites
                :sizes [10 30 100]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
@@ -1112,7 +1115,8 @@
                ;; 47: the :stalled class (seon.problems/stalled-agents) is one more class to look up;
                ;; 49: :flaky (seon.proofs/flaky) one more
                ;; 52: :long-form one more class to look up
-               :fixed {:ns 3000000 :bytes 4000000 :calls 52}
+               ;; 54: :stale-plan one more (its seon.db/eid and derived-row), 2026-11-10
+               :fixed {:ns 3000000 :bytes 4000000 :calls 54}
                :sizes [10 30 100]}))
 
 (deftest attention-survives-a-store-write
@@ -1221,8 +1225,9 @@
   (let [ns-e (:db/id (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))
         nsym (:ns/name (d/entity db0 ns-e))]
     (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/cite.clj"]]
-                         (mapcat (fn [i] (let [{:keys [src doc meta]} (spec i)]
-                                           [{:db/id (- (inc (* 2 i))) :form/id (str "cite-form-" i) :form/ns ns-e :form/order i :form/src src :form/defines [(- (* 2 i))]}
+                         (mapcat (fn [i] (let [{:keys [src doc meta refs]} (spec i)]
+                                           [(cond-> {:db/id (- (inc (* 2 i))) :form/id (str "cite-form-" i) :form/ns ns-e :form/order i :form/src src :form/defines [(- (* 2 i))]}
+                                              refs (assoc :form/refs refs))
                                             (cond-> {:db/id (- (* 2 i)) :var/name (symbol (str nsym) (str "v" i)) :var/ns ns-e :var/form (- (inc (* 2 i))) :var/meta (or meta #{:arglists})}
                                               doc (assoc :var/doc doc))]))
                                  (range 1 (inc n)))))))
@@ -1312,3 +1317,39 @@
                :per-n {:ticks 13000 :bytes 39500 :calls 3}
                :fixed {:ticks 10000 :bytes 30000 :calls 5}
                :sizes [10 30 100]}))
+
+;; See docs/health.md#a-proof-that-passes-by-waiver
+(deftest a-proof-whose-form-carries-an-overrun-is-a-waived-proof-until-it-is-deleted
+  (let [proof (fn [overrun] (str "(deftest p [] (cost/proof {:of 'a/b :input 'a/c :n \"x\" :work (str \"w\") :growth :linear"
+                                 " :per-n {:ticks 1000 :bytes 100} :sizes [10 30 100]" overrun "}))"))
+        world-of (fn [overrun] (var-forms (world) 2 (fn [i] (case (int i)
+                                                              1 {:src (proof overrun) :meta #{:test} :refs #{'seon.cost/proof}}
+                                                              2 {:src "(defn f [] 1)"}))))
+        waiver " :overrun {:task \"a/task\" :n 100 :measured {:ticks 300000.0 :bytes 20000.0 :ns 1.0}}"
+        rows #(mapv (juxt :test :task :n :multiple) (problems/waived-proofs % {}))
+        db (world-of waiver)
+        t (symbol (cite-ns db) "v1")]
+    (is (= [[t "a/task" 100 3.0]] (rows db)) "one row: the test, its task, the size, the worst counted dimension's multiple of the bound at that size (ticks 300000 over 1000 x 100)")
+    (is (= [[t "a/task" 100 3.0]] (mapv (juxt :test :task :n :multiple) (get-in (problems/health db) [:classes :waived-proof :rows]))) "health shows it")
+    (is (= [] (rows (world-of ""))) "deleting the :overrun removes the row")
+    (is (= [] (rows (var-forms (world) 1 (fn [_] {:src (proof waiver) :meta #{:test}})))) "a form that does not call seon.cost/proof is not read")
+    (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :waived-proof))))
+
+;; See docs/health.md#a-proof-that-passes-by-waiver
+(deftest a-branch-that-adds-an-overrun-is-not-caused-the-waived-proof
+  ;; measured, 2026-11-10: seon.problems/caused-split reads only `caused-classes` (:unnamed-site :stale-section :uncited-var
+  ;; :long-form), so a branch that adds an :overrun to a proof is shown no :waived-proof row, as caused or as attention, and
+  ;; one that deletes one closes nothing: the class is listed by `health`, never judged on a branch
+  (let [proof (fn [overrun] (str "(deftest p [] (cost/proof {:of 'a/b :input 'a/c :n \"x\" :work (str \"w\") :growth :linear"
+                                 " :per-n {:ticks 1000 :bytes 100} :sizes [10 30 100]" overrun "}))"))
+        world-of (fn [overrun] (var-forms (world) 1 (fn [_] {:src (proof overrun) :meta #{:test} :refs #{'seon.cost/proof}})))
+        waiver " :overrun {:task \"a/task\" :n 100 :measured {:ticks 300000.0 :bytes 20000.0}}"
+        without (world-of "") with (world-of waiver)
+        waived? (fn [db] (boolean (seq (get-in (problems/health db) [:classes :waived-proof :rows]))))
+        mentions? (fn [split] (some #(re-find #"waiver" (str %)) (concat (:caused split) (:attention split) (map :message (:rows split)) (map :message (:closed split)))))]
+    (is (and (waived? with) (not (waived? without))) "the world has the row exactly when the proof carries the :overrun")
+    (testing "adding an :overrun"
+      (is (not (mentions? (problems/caused-split without with))) "is neither caused nor attention"))
+    (testing "deleting one"
+      (is (not (mentions? (problems/caused-split with without))) "causes nothing and closes nothing"))
+    (is (not (contains? seon.problems/caused-classes :waived-proof)))))

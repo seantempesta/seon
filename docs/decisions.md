@@ -4,11 +4,15 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-10 rulings
 
-The owner's ruling of 2026-11-10, on how the machine's load is judged.
+The owner's rulings of 2026-11-10, on how the machine's load is judged and on what an agent reads.
 
 ### Load is judged by cores and free memory (owner, 2026-11-10)
 
 "I have 18 cores and load is 8". The "load under ~8" number came from the 16 GB target and was holding landings and proves at load 8-11 for nothing. Heavy runs go niced and in parallel while nothing is starved, judged by the machine's cores and its free memory (owner, 2026-11-06: "do dynamic balancing"); the 16 GB MacBook stays the target Seon must fit. Stated in: AGENTS.md section 8, docs/machine.md#builds-and-checks.
+
+### The agent's history is native, and what is looked up goes through the hiccup (owner, 2026-11-10)
+
+"The UI version of the mesesages, tool calls etc, is a repeat. ... If we want to identify the "parts" from the hiccup and then render them differently for the model into the openai-compat format that's fine. But I don't want to fuckup the agents context. ... The agent gets raw info like it's message and eval calls in it's native format and anything that's processed or dunamically looked up should go in the hiccup render (make this intermediate and not HTML so it can render well into each of it's output for the model and for the html)". And the same day: "I want the core openai-compat format to be normal system, user, assistant and tool calls and that to be where the agent understands it's history -- not from the hiccup web render ... just make it a [fn-call args children] style vector that will be expanded in the html version ... remove style info by default ... make sure the agent knows what function was called for each part of the hiccup render so they can edit it to change the page." It stands over the 2026-11-09 reading that a render deposits message values into the hiccup. Stated in: [render](render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup).
 
 ## 2026-11-09 rulings
 
