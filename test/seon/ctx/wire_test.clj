@@ -1420,9 +1420,10 @@
             _ (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body "note taken in turn 1"}])
             r1 (ask! 1)]
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "request 2 starts with request 1 whole, its page the first request's")
-        (is (= ["system" "user" "user" "user" "assistant" "tool" "user"] (mapv :role (:messages r1)))
-            "turn 1's message (before turn 1's page, as a turn's messages come before its page), its eval and its result, then the page's change: the status says a message came after the plan")
-        (is (str/includes? (:content (nth (:messages r1) 2)) "note taken in turn 1"))
+        (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "user" "assistant" "tool"] (mapv :role (:messages r1)))
+            "the page, turn 1's eval and its result, then the message taken in turn 1 (a turn's messages come before its page's change), then the change as a generated eval: the status says a message came after the plan")
+        (is (str/includes? (:content (nth (:messages r1) 6)) "note taken in turn 1"))
+        (is (str/starts-with? (page-code (:messages r1)) "(my.render/diff ") "the change is the call (my.render/diff p0 p1)")
         (is (str/includes? (:content (last (:messages r1))) "came after your plan last changed") "the change is that one step")))))
 
 (deftest a-record-takes-the-agents-turn-in-force

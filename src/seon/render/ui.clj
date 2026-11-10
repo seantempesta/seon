@@ -1624,7 +1624,7 @@
   {:seon.render/list "p-task"
    :seon.ctx/pattern [:seon.agent/key :seon.agent/status :seon.agent/outcome :seon.agent/reason :seon.agent/turn :seon.agent/max-turns
                       :seon.agent/ended-turn :seon.agent/ns {:seon.agent/task :seon.task/task-fact} {:seon.cite/_of :seon.cite/cite-fact}
-                      {:seon.search/_of :seon.search/search-fact}]
+                      {:seon.search/_of :seon.search/search-fact} {:seon.message/_to [:seon.message/id :seon.message/from]}]
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
   [_ c]
   [:div {:id "p-task"}

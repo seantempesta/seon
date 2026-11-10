@@ -340,12 +340,17 @@
   (let [evals (:seon.eval/_agent c) msgs (:seon.message/_to c)
         placed (ctx/placed-messages db c)
         ;; the newest call's basis is written after the commit it names (seon.turn/open-turn!), so read at that commit it holds none:
-        ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message
+        ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message; a pull
+        ;; that leaves bases out (a smaller pattern) shows no page
         here (when-let [id (d/commit-id db)] {:commit id :t (:max-tx db)})
         cs (map val (sort-by (comp :seon.model-call/n val) (filter (comp :seon.model-call/n val) (:seon.model-call/_agent c))))
         newest (:seon.model-call/n (last cs))
-        basis-of (fn [x] (or (:seon.model-call/basis x) (when (= newest (:seon.model-call/n x)) here)))]
-    (vec (for [[prev call] (map vector (reductions (fn [b x] (or (basis-of x) b)) nil cs) cs)
+        ;; a call whose basis the db holds but the pull left out has none here: the pull says what the agent reads
+        basis-of (fn [x] (or (:seon.model-call/basis x)
+                             (when (and (= newest (:seon.model-call/n x))
+                                        (nil? (some->> (:seon.model-call/id x) (pdb/eid db :seon.model-call/id) (d/entity db) :seon.model-call/basis)))
+                               here)))]
+    (into (vec (for [[prev call] (map vector (reductions (fn [b x] (or (basis-of x) b)) nil cs) cs)
                :let [n (:seon.model-call/n call)
                      ms (keep (fn [[m _]] (get msgs m)) (get placed n))
                      es (sort (filter #(contains? evals %) (keys (:seon.eval/_call call))))
@@ -355,7 +360,9 @@
                          ;; a reply with no words whose calls c no longer holds (each unlinked by a swap!) says nothing: none of it stays
                          (when (or (some model? es) (not (str/blank? (:seon.model-call/reply call)))) [call])
                          (map evals (filter model? es)) (map evals (remove model? es)))]
-           x))))
+           x))
+          ;; those delivered after the last turn's edge, which the turn now opening takes (:pending): never lost before that turn's call exists
+          (keep (fn [[m _]] (get msgs m)) (get placed :pending)))))
 
 (defn example-session-msgs
   "An example session's agent (its root view in a render-pull of it) as the model reads it, a model output's call: the message
