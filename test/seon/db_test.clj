@@ -865,7 +865,9 @@
      :per-n {:ticks 7000 :bytes 10500}
      ;; the overrun's :measured is the proof's at 300, its largest size, taken 2026-11-10: 1.63x the ticks and 1.35x the bytes
      ;; of its bound (before, a record at 1,000 of 12.97 M ticks and 17.0 MB, 3.8x what 300 measures, so no regression showed)
-     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :n 300 :measured {:ticks 3416299.0 :bytes 4259728.0}}
+     ;; re-taken 2026-11-10 on the sorted set's upstream fixes and geometric leaf growth: 3,373,602 ticks and 3,527,280 B at
+     ;; 300 (was 3,416,299 and 4,259,728): 1.61x the bound's ticks, 1.12x its bytes
+     :overrun {:task "jolt.backend/a-deftype-method-call-takes-a-site-cache" :n 300 :measured {:ticks 3373602.0 :bytes 3527280.0}}
      :sizes [30 100 300]}))
 
 (deftest an-identity-costs-its-seek
