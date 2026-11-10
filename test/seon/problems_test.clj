@@ -1266,7 +1266,7 @@
   [db0 n spec]
   (let [ns-e (:db/id (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))
         nsym (:ns/name (d/entity db0 ns-e))]
-    (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/cite.clj"]]
+    (d/db-with db0 (into [[:db/add ns-e :ns/file "src/app/cite.clj"] [:db/add ns-e :ns/doc "What the cite namespace does. See docs/health.md#a-function-that-cites-no-section."]]
                          (mapcat (fn [i] (let [{:keys [src doc meta refs]} (spec i)]
                                            [(cond-> {:db/id (- (inc (* 2 i))) :form/id (str "cite-form-" i) :form/ns ns-e :form/order i :form/src src :form/defines [(- (* 2 i))]}
                                               refs (assoc :form/refs refs))
@@ -1306,6 +1306,17 @@
         (is (empty? (:caused split)) "and it refuses nothing")
         (is (not-any? #(re-find #"/v1 is public" %) (:attention split)))))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-var))))
+
+(deftest a-persons-code-owes-no-wiki-citation
+  ;; the request measurement, 2026-11-10: an agent adding demo.math/triple for a person spent its turns finding a section to cite,
+  ;; because the write-back gave demo.math a file under src/ and the class judged it as the program's. The wiki describes Seon's own
+  ;; namespaces, each docstring citing its section; a person's namespace cites none, and its code owes none
+  (let [db0 (var-forms (world) 1 (fn [_] {:src "(defn f [])" :doc "Does a thing."}))
+        ns-e (:db/id (:var/ns (d/entity db0 [:var/name 'app.calc/inc2])))
+        v (symbol (cite-ns db0) "v1")
+        persons (d/db-with db0 [[:db/retract ns-e :ns/doc (:ns/doc (d/entity db0 ns-e))]])]
+    (is (= [v] (mapv (comp :var :evidence) (problems/uncited-vars db0 {} #{v}))) "a namespace the wiki describes: its uncited var is a row")
+    (is (= [] (problems/uncited-vars persons {} #{v})) "the same var in a namespace whose docstring cites no section, a person's: no row")))
 
 ;; See docs/health.md#a-function-that-cites-no-section
 (deftest uncited-vars-follow-the-vars-asked-for

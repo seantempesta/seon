@@ -397,19 +397,23 @@
 
 (defn uncited-vars
   "Each of the named vars (a set of symbols, the vars a branch changed) that is public in a
-  namespace of the program's own source and has a docstring citing no docs/ section, or none, as
+  namespace of the program's own source that the wiki describes (its ns docstring cites a docs/ section: a person's
+  namespace, written back under src/ too, cites none and is not judged) and has a docstring citing no docs/ section, or none, as
   an :uncited-var row: a function states its mechanism by citing the wiki section that describes
   it (docs/references.md#the-delimiter-picks-the-depth), and does not restate it. A private var
   (defn-) and a test are not judged. Closed by citing a section in the docstring.
-  Cost: one seek per named var, and its form's text for a var with no citation."
+  Cost: one seek per named var, its namespace's docstring, and its form's text for a var with no citation."
   {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
   [db ans names]
-  (let [program (delay (program/program-nss db))]
+  (let [program (delay (program/program-nss db))
+        ;; a namespace the wiki describes: its own docstring cites a docs/ section, as every one of Seon's does (AGENTS.md section 7);
+        ;; one made for a person's work, written back under src/ as the program's are, cites none, and its code owes no citation
+        described? (fn [nsym] (some-> (d/entity db [:ns/name nsym]) :ns/doc (str/includes? "docs/")))]
     (vec (for [v (sort names)
                :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e))
                      doc (:var/doc ent) nsym (some-> (namespace v) symbol)]
                :when (and ent (not (contains? (set (:var/meta ent)) :test)) (not (and doc (str/includes? doc "docs/")))
-                          (contains? @program nsym)
+                          (contains? @program nsym) (described? nsym)
                           (contains? #{"defn" "defmacro" "def" "defmulti"} (some->> ent :var/form :form/src (source/first-head nsym))))
                :let [s (str "uncited-var " v)]]
            (derived-row ans s nsym (str v " is public and its docstring cites no docs/ section: cite the one that describes it")

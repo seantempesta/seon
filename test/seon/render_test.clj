@@ -3576,3 +3576,11 @@
     (is (not (str/includes? person "spawn 10")) "no spawn on a person's page")
     (is (not (str/includes? person "all=&gt;")) "no eval-every-agent form")
     (is (str/includes? debug "spawn 10") "root's debug page holds them")))
+
+(clojure.test/deftest the-root-tile-shows-the-defs-boot-loaded
+  ;; docs/render.md#tiles-are-data-the-context-reads-the-pages-derivations: boot's program count is root's process data, drawn by the tile
+  (let [tile (fn [view] (pr-str (seon.render.ui/process-tile {:seon.ctx/ctx {:process (seon.render.proc/process-value {:view view})}})))]
+    (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "1233 forms loaded"))
+    (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "40"))
+    (is (str/includes? (tile {:boot {:program {:loaded 0 :ms 5}}}) "image held main's program"))
+    (is (str/includes? (tile {}) "program load not measured"))))

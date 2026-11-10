@@ -140,5 +140,4 @@
  ;; contracts (seon.contract, from G1)
  :seon.contract/arm-result [:enum :armed :unchanged :off :uncontracted]
  :seon.contract/invalid [:and :seon.error/base [:map [:seon.error/type [:enum :seon.contract/invalid]] [:seon.contract/var :qualified-symbol]]]
- :seon.contract/report [:map [:invalid [:vector :seon.contract/invalid]] [:uncontracted [:vector :qualified-symbol]] [:ms number?]]
- :seon.fork-server/standby-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/standby-failed]] [:active-threads {:optional true} [:maybe :int]] [:gen {:optional true} [:maybe :int]]]]}
+ :seon.contract/report [:map [:invalid [:vector :seon.contract/invalid]] [:uncontracted [:vector :qualified-symbol]] [:ms number?]]}

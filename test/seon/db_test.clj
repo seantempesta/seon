@@ -695,7 +695,7 @@
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-commit-costs-what-it-writes
-  ;; task seon.db/the-store-grows-with-what-it-keeps. Estimate, from what a commit must
+  ;; docs/storage.md#the-proof-what-a-commit-costs. Estimate, from what a commit must
   ;; write: its own datoms (each value twice, in :eavt and :aevt) and the root-to-leaf path
   ;; it touched in each index, whose nodes hold small datoms: at branching factor 64 about 11
   ;; keys of ~1.5-3 KB (a 1-datom commit measured 16.8-27.7 KB at 5k-225k datoms),
