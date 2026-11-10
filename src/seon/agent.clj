@@ -431,10 +431,11 @@
 (defn messages
   "The messages to this agent not yet delivered, delivered (deliver!, as a turn delivers them: the entities on
   main to it, another agent's sends included), then the effect outcomes of the inbox. Delivered, a message stays in `@ctx` until the agent
-  removes it (`(swap! ctx update :seon.message/_to dissoc e)`), and is not delivered again. See docs/users.md#messages."
+  removes it (`(swap! ctx update :seon.message/_to dissoc e)`), and is not delivered again. Each delivered one's :from is its sender's name
+  (seon.task/sender-name: an agent's key, \"seon\" for the system), what the agent reads of who sent it; the entity is the ref. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [es (deliver!)]
+  (let [es (mapv #(update % :from task/sender-name) (deliver!))]
     (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
 (def ^:dynamic *fx-stub*
