@@ -58,10 +58,10 @@
     (str n " " n " " t)))
 
 (defn- section-names
-  "Each var name the wiki's sections name, to those sections: {name #{e}}, one read of
-  :seon.doc/names (unindexed), so `neighbours` finds a var's sections by a lookup."
-  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :qualified-symbol [:set :int]]]}
-  [db] (reduce (fn [m {:keys [e v]}] (update m v (fnil conj #{}) e)) {} (d/datoms db :aevt :seon.doc/names)))
+  "Each var name to the wiki's sections that name it, as a function of the name: one seek of :seon.doc/names (indexed) for
+  the name asked, so `neighbours` and `degree` cost the names they read, never the wiki's."
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.host/fn]}
+  [db] (fn [nm] (map :e (d/datoms db :avet :seon.doc/names nm))))
 
 (defn- neighbours
   "Entity e's neighbours in the reference graph on db, a set of entities: a form's are the forms of
@@ -70,7 +70,7 @@
   vars it names, the sections it references or is referenced by, its parent and its children; a
   schema entry's the forms naming its key. Each read of who names it takes at most cap datoms, so a
   var every form names (seon.contract/checked) costs cap, not its hundreds of callers."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :qualified-symbol [:set :int]] :int pos-int?] [:set :int]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/fn :int pos-int?] [:set :int]]}
   [db names e cap]
   (let [x (d/entity db e)
         form-of #(some-> (d/entity db [:var/name %]) :var/form :db/id)]
@@ -94,7 +94,7 @@
   its vars' callers and the sections naming them; a section's names, links, linkers and children;
   a key's readers.
   Each read stops at cap, so a var every form names costs cap datoms."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :qualified-symbol [:set :int]] :int pos-int?] nat-int?]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/fn :int pos-int?] nat-int?]}
   [db names e cap]
   (let [n #(bounded-count cap (d/datoms db %1 %2 %3))
         k (fn [a] (n :eavt e a))]
@@ -102,7 +102,7 @@
          (cond (seq (d/datoms db :eavt e :form/id))
                (+ (k :form/refs) (k :form/quoted) (k :form/keywords)
                   (reduce + 0 (for [v (d/datoms db :avet :var/form e) :let [nm (:v (first (d/datoms db :eavt (:e v) :var/name)))]]
-                                (+ (count (names nm)) (n :avet :form/refs nm) (n :avet :form/quoted nm)))))
+                                (+ (bounded-count cap (names nm)) (n :avet :form/refs nm) (n :avet :form/quoted nm)))))
                (seq (d/datoms db :eavt e :seon.doc/address))
                (let [x (d/entity db e)]
                  (+ (k :seon.doc/names) (k :seon.doc/references) (count (:seon.doc/_references x)) (count (:seon.doc/_parent x))))
@@ -119,7 +119,7 @@
   1/(alpha eps) pushes; a node's degree is counted when its residual first reaches eps (`degree`:
   seeks, at most :hub datoms a read) and its neighbours read only when it pushes: flat in the
   store's size."
-  {:malli/schema [:=> [:cat :seon.host/db [:map-of :qualified-symbol [:set :int]] [:set :int] number?]
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/fn [:set :int] number?]
                   [:map [:rank [:map-of :int number?]] [:degree [:map-of :int nat-int?]]]]}
   [db names seeds eps]
   (let [{:keys [alpha hub]} (cfg/value :seon.config.render/relevance-features)]
@@ -345,7 +345,8 @@
                                  (entity-of db [kind n])))
         ;; the hits search can show: the first k x related-near by the fused score, a bound whatever
         ;; the corpus (a common word's text hits grow with it); the rest keep their fused order after
-        hits (into [] (comp (map key) (take n)) (sort-by (juxt (comp - val) (comp str key)) scores))
+        ;; each sort key made once, never in the comparator (a str of a hit at every comparison was most of a search's own ticks)
+        hits (into [] (comp (map peek) (take n)) (sort (map (fn [[h s]] [(- s) (str h) h]) scores)))
         chance (let [ks (into #{} (keep (comp rkind first)) hits)]
                  (if (empty? ks)
                    {}
