@@ -16,7 +16,7 @@ The owner's rulings of 2026-11-09, on one system of agents, rendering from data,
 
 ### No hacks: adjust the system (owner, 2026-11-09)
 
-"I don't want hacks I want to adjust the system so it works properly". A fix removes the cause: never a special case, a retry, a hand-kept list or a moved verdict, and its report tells what was verified from what is inferred. Stated in: AGENTS.md section 3 (the method, step 4).
+"I don't want hacks I want to adjust the system so it works properly" (from session memory, 2026-11-10; unverified wording). A fix removes the cause: never a special case, a retry, a hand-kept list or a moved verdict, and its report tells what was verified from what is inferred. Stated in: AGENTS.md section 3 (the method, step 4).
 
 ### Understand before writing (owner, 2026-11-09)
 
@@ -24,7 +24,7 @@ The owner's rulings of 2026-11-09, on one system of agents, rendering from data,
 
 ### Questions go through the question tool (owner, 2026-11-09)
 
-"ask questions you are awaiting answers for with your questions tool"; before it, 2026-11-06: "lets do a round of using your questions tool and give me background". One round, each question with its background, the session's pick first. Stated in: AGENTS.md section 2, docs/sessions.md#asking-the-owner.
+"ask questions you are awaiting answers for with your questions tool" (from session memory, 2026-11-10; unverified wording); before it, 2026-11-06: "lets do a round of using your questions tool and give me background" (from session memory, 2026-11-10; unverified wording). One round, each question with its background, the session's pick first. Stated in: AGENTS.md section 2, docs/sessions.md#asking-the-owner.
 
 ### A red verdict is never deleted or moved (owner, 2026-11-09)
 
@@ -112,7 +112,7 @@ The owner's rulings of 2026-11-08, on what the model knows, erasing the store, a
 
 ### What a new design replaces goes with it (owner, 2026-11-08)
 
-"I want this shit gone so it doesn't keep coming back". The tasks, wiki text, decisions pointers and session notes of what a design replaces leave in the same change. Stated in: AGENTS.md section 3, docs/merging.md#a-landing-message-carries-its-audit.
+"I want this shit gone so it doesn't keep coming back" (from session memory, 2026-11-10; unverified wording). The tasks, wiki text, decisions pointers and session notes of what a design replaces leave in the same change. Stated in: AGENTS.md section 3, docs/merging.md#a-landing-message-carries-its-audit.
 
 ### An estimate that is exceeded stops the work (owner, 2026-11-08)
 
@@ -282,7 +282,7 @@ Two ideas, two fields: "theres' sa field for natural language responses to anyth
 
 ### Sessions work together with no fixed ceremony
 
-"I don't want the work done twice. If you do it well merge it. If optimization does it well merge it. If you hand something off to optimization just do it. No more ceremony and mandated fixed policies." "Only give optimization work that it can work on." "Aim to get 90% of the benefit for 10% of the effort." Machine load is balanced by judgment. Stated in AGENTS.md sections 2 and 3.
+"I don't want the work done twice. If you do it well merge it. If optimization does it well merge it. If you hand something off to optimization just do it. No more ceremony and mandated fixed policies." "Only give optimization work that it can work on." "Aim to get 90% of the benefit for 10% of the effort." Machine load is balanced by judgment. Stated in AGENTS.md sections 2, 3 and 8.
 
 ### A slow test runs last in a merge, and is left out of a plain run until it is fast
 
@@ -336,7 +336,7 @@ The owner's rulings of 2026-11-05, on looking before building and on what makes 
 
 ### The debug page draws history with today's renders, and says when that differs (owner, 2026-11-05)
 
-Asked whether the debug page should draw history with today's renders plus a hash that flags any difference: "Yes, and try it". It stands over AGENTS.md §3's "as recorded" for a request. Stated in: [the debug page](render.md#the-debug-page-is-the-wire-request).
+Asked whether the debug page should draw history with today's renders plus a hash that flags any difference: "Yes, and try it". It stands over "as recorded" for a request ([render](render.md#a-render-does-no-work-of-its-own)). Stated in: [the debug page](render.md#the-debug-page-is-the-wire-request).
 
 ### The render is an eval, and what changed is another (owner, 2026-11-05)
 
@@ -353,6 +353,10 @@ Asked whether the debug page should draw history with today's renders plus a has
 ## 2026-11-04 rulings
 
 The owner's rulings of 2026-11-04, on what an agent is and how everything it reads is made. They stand over earlier entries where they differ.
+
+### No parallel systems (owner, 2026-11-04)
+
+"I don't want agents to keep building parallel systems". A second layout, a second cache, a second path to the model, an entity to hold what an attribute or the db's history already holds, a store of printed values: before adding one, look at what already does it, and ask whether the problem is a cause or a consequence of something else being wrong ([a bug is a class](#a-bug-is-a-class-remove-what-allowed-it-owner-2026-11-03)). Stated in: AGENTS.md section 9.
 
 ### Data is stored as data; the one printer is for context (owner, 2026-11-04)
 
@@ -416,7 +420,7 @@ The owner's rulings of 2026-11-01, after the audit of what agents read; they sta
 
 ### Benefits are general; nothing leads an agent to its answer (owner, 2026-11-01)
 
-"We don't mimic repl output with comments it breaks the models. Do not lead the models just to score a win. All benefits should be general." Nothing an agent reads (the help page, its instructions, a cited section, a task's plan) tells a run's story or hints at the change it is asked for. A benchmark is work whose answer is not in the tree: a reverted change whose tests stay behind measures nothing. A red cost proof is never cleared by the changing agent raising its own bound; an overrun is accepted only as [cost](cost.md#an-accepted-overrun-and-its-ratchet) says, filed by a person (AGENTS §3, every change earns its place).
+"We don't mimic repl output with comments it breaks the models. Do not lead the models just to score a win. All benefits should be general." Nothing an agent reads (the help page, its instructions, a cited section, a task's plan) tells a run's story or hints at the change it is asked for. A benchmark is work whose answer is not in the tree: a reverted change whose tests stay behind measures nothing. A red cost proof is never cleared by the changing agent raising its own bound; an overrun is accepted only as [cost](cost.md#an-accepted-overrun-and-its-ratchet) says, filed by a person (docs/merging.md#a-landing-message-carries-its-audit, every change earns its place).
 
 ### An agent's evals on a task are a session; past ones are shown as curated sessions (owner, 2026-11-01)
 
@@ -448,7 +452,7 @@ The owner's rulings of 2026-10-30 morning, after the overnight md-scan runs; the
 
 ### A timed wait means the wrong design (owner, 2026-10-30)
 
-"timeouts just mean we have the wrong design (most of the time)". A wait ends on its value or on a typed error from the producer that owed it, never on a clock. Stated in: AGENTS.md section 4, docs/clocks.md.
+"timeouts just mean we have the wrong design (most of the time)" (from session memory, 2026-11-10; unverified wording). A wait ends on its value or on a typed error from the producer that owed it, never on a clock. Stated in: AGENTS.md section 4, docs/clocks.md.
 
 ### There are no runs: an agent has an env, a branch and its evals (owner, 2026-10-30)
 
@@ -596,7 +600,7 @@ Chose "root follows main ref": a topic branch checked out in the main tree never
 
 ### Old worktrees' run data is not kept (owner, 2026-10-29)
 
-"No run data is important right now." Untracked runs/ directories and stores in old worktrees went with their worktrees; branch refs are kept. Stated in: this entry (the store-is-a-record rule in AGENTS section 8 is unchanged for the standing store).
+"No run data is important right now." Untracked runs/ directories and stores in old worktrees went with their worktrees; branch refs are kept. Stated in: this entry (the rule that a store is kept, docs/machine.md#disk-stays-bounded, is unchanged for the standing store).
 
 ## 2026-10-28 rulings
 
@@ -662,13 +666,9 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 The owner's rulings of 2026-10-27, each with where it is now stated; they stand over earlier entries where they differ.
 
-### Unused is not dead (owner, 2026-10-27)
-
-"Just because things aren't in use doesn't mean I haven't worked hard on the design". Code with no caller is cut only with the owner's go. Stated in: AGENTS.md section 3, docs/merging.md#a-landing-message-carries-its-audit.
-
 ### An inventory before a plan (owner, 2026-10-27)
 
-"a new agent already has a plan? that can't be well thought out". A session taking over an area lists what exists (its file and line, its job, keep, extend or delete) before it designs. Stated in: AGENTS.md section 3 (the method, step 1), docs/sessions.md#sessions-own-their-areas.
+"a new agent already has a plan? that can't be well thought out" (from session memory, 2026-11-10; unverified wording). A session taking over an area lists what exists (its file and line, its job, keep, extend or delete) before it designs. Stated in: AGENTS.md section 3 (the method, step 1), docs/sessions.md#sessions-own-their-areas.
 
 ### A merge runs the process tests its change reaches, automatically (owner, 2026-10-27)
 
@@ -724,7 +724,7 @@ Worktrees run plain `bin/prove` and report ready; the merge session merges a bat
 
 ### Unused is not dead (owner, 2026-10-27)
 
-"Just because things aren't in use doesn't mean I haven't worked hard on the design" (seon.ratom): a new owner design with no callers yet is not cut for that. Stated: this entry; the audit's cuts check the design's task first.
+"Just because things aren't in use doesn't mean I haven't worked hard on the design" (seon.ratom): a new owner design with no callers yet is not cut for that, and code with no caller is cut only with the owner's go. Stated: AGENTS.md section 3, docs/merging.md#a-landing-message-carries-its-audit, this entry; the audit's cuts check the design's task first.
 
 ## 2026-10-26 night rulings
 
@@ -740,7 +740,7 @@ Asked which default tonight's runs use, the owner chose one whole task over desi
 
 ### Correctness and stability first, then efficiency to a stated bound; no regression without a reason (owner, 2026-10-26 night)
 
-"dig into all rough edges and process issues we have and trace down and prioritize correctness and stability first and efficiency after that to a resonable (it should roughly take this amount of ticks, memory, etc) and don't accept regressions for no reason". A branch's report compares its numbers (ticks, bytes, tokens, the left-out count) with main's before it; a number that got worse is refused unless the report names its reason and who follows it up. Stated in: AGENTS.md §3 (Every change earns its place).
+"dig into all rough edges and process issues we have and trace down and prioritize correctness and stability first and efficiency after that to a resonable (it should roughly take this amount of ticks, memory, etc) and don't accept regressions for no reason". A branch's report compares its numbers (ticks, bytes, tokens, the left-out count) with main's before it; a number that got worse is refused unless the report names its reason and who follows it up. Stated in: AGENTS.md §3 (No regressions), docs/merging.md#a-landing-message-carries-its-audit.
 
 ### The agent's view is the render of ctx; "page" names a wiki page only (owner, 2026-10-26 night)
 

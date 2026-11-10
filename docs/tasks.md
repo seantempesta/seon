@@ -31,6 +31,8 @@ A task is written held, released once and cancelled by root's functions; nothing
 
 A task file is one EDN vector of declarations named by its owning namespace, and root keeps main's tasks equal to the files.
 
+A session takes the task the owner names, or the first ready task in THE PLAN's order ([plan](plan.md)): one whose `:seon.task/needs` have merged. A failed attempt's cause stays on its task, in its plan, for whoever works it next.
+
 ```my.root/task-files``` reads the files under `:seon.config.root/tasks-dir` as `{owning-ns declarations-or-error}`; ```seon.task/file-declarations``` reads one file's text, and text that is not exactly one vector is the `:seon.task/refused` error, data and not a throw. ```my.root/load-tasks!``` reconciles the read into main: new entries created held, changed ones updated, removed ones cancelled, unchanged ones nothing, each task made to state exactly its declaration by ```seon.task/entity-tx``` (the values an entity holds that the declaration lacks retracted, the ones it lacks asserted). A good read writes root's `:seon.root/tasks` outcome; ```my.root/load-errors``` picks the typed errors out of the loaders' answers (a refused file, a refused load), each to be recorded and never dropped. Root loads the files when they change ([health](health.md#every-writer-root-loads-what-changed)).
 
 ## A task names example sessions
