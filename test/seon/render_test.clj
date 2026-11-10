@@ -390,7 +390,7 @@
     (let [html (h/html (r/hiccup {:seon.render/index (seon.db/index)} v))]
       (is (str/includes? html "owner: ") "the hiccup: the message's own render, inline")
       (is (str/includes? html "seon-print-keyword\">:count") "around it, the printer's map"))
-    (is (str/includes? (h/html (r/hiccup {:seon.render/index (seon.db/index)} a)) "message from owner") "the value itself by its render, as before")))
+    (is (re-find #"seon-note\">owner<" (h/html (r/hiccup {:seon.render/index (seon.db/index)} a))) "the value itself by its render, its sender above its body")))
 
 ;; ---- the pages: a page is its parts (task seon.render/every-page-is-its-parts) ----
 
