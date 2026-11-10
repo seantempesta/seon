@@ -258,6 +258,11 @@
      ;; 10 / 30 / 100 evals.
      :per-n {:calls 317 :bytes 280000}
      :fixed {:calls 1900 :bytes 6600000}
+     ;; owner's yes, 2026-11-10 ("Land now, three waivers", docs/decisions.md#three-request-cost-proofs-land-waived-owner-2026-11-10): a cold request draws
+     ;; the page at the first turn's basis and advances one walk through every later basis (~6k calls), and each history record is drawn
+     ;; by its own model render (~3k, an eval's print the most); the rest is outside the model render. The waiver comes off with that task.
+     ;; Measured on jolt/pages 2026-11-10 at its largest size, 42.1k calls and 42.8 MB at 100 (its bound: 33.6k calls, 34.6 MB).
+     :overrun {:task "seon.render/a-model-render-draws-each-turns-diff" :n 100 :measured {:calls 42100.0 :bytes 42800000.0}}
      :sizes [10 30 100]}))
 
 (deftest a-transaction-renders-what-it-touched
@@ -573,6 +578,11 @@
                        ;; here once, under the armed printer, 197 calls: seon.ctx.wire/request's old cold cost was 546 a record
                        :per-n {:calls 200 :bytes 120000}
                        :fixed {:calls 700 :bytes 1300000}
+                       ;; owner's yes, 2026-11-10 ("Land now, three waivers", docs/decisions.md#three-request-cost-proofs-land-waived-owner-2026-11-10): a cold request draws
+                       ;; the page at the first turn's basis and advances one walk through every later basis (~6k calls), and each history record is drawn
+                       ;; by its own model render (~3k, an eval's print the most); the rest is outside the model render. The waiver comes off with that task.
+                       ;; Measured on jolt/pages 2026-11-10 at its largest size, 66.3k calls and 127.2 MB at 80 (its bound: 16.7k calls, 10.9 MB).
+                       :overrun {:task "seon.render/a-model-render-draws-each-turns-diff" :n 80 :measured {:calls 66300.0 :bytes 127170000.0}}
                        :sizes [10 40 80]}))))))
 
 (defn newest-pair-of

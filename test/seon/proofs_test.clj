@@ -491,33 +491,40 @@
           (is (not (some #{"test/app/kc_bigger_test.clj"} (files-of kept))) "a deleted file is gone"))))
     (finally (close-stores! store fresh fresh2 fresh3)))))
 
-(defn kept-checkout-of
-  "program-db's arguments for a checkout whose src holds n functions (app.kp-big) and the
-  process's one program store, which then keeps its tree on a branch of its own (the first call,
-  not measured, imports it)."
+(defn kept-store-with-branches
+  "program-db's arguments for a small checkout whose tree a store of its own keeps (the first call, not measured,
+  imports it), the store holding n branches in all: the tree's, :db and the rest empty branches of :db, made here, so
+  the count is the test's and no earlier size's."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :string :string]]}
   [n]
   (let [d (checkout! {"deps.edn" "{}"
-                      "src/app/kp_big.clj" (apply str "(ns app.kp-big)\n" (for [i (range n)] (str "(defn f" i " [x] (+ x " i "))\n")))
+                      "src/app/kp_big.clj" "(ns app.kp-big)\n(defn f0 [x] (+ x 0))\n"
                       "test/app/kp_big_test.clj" "(ns app.kp-big-test (:require [clojure.test :refer [deftest is]] [app.kp-big :as b]))\n(deftest f0 (is (= 1 (b/f0 1))))\n"})
-        store (ts/program-store)]
+        store (str (ts/program-store) "-branches-" n "-" (random-uuid))]
     (runner/program-db d store)
+    (let [{:keys [conn]} (pdb/open! :lmdb store 0 :db)
+          have (count (d/branches conn))]
+      (try (doseq [i (range (max 0 (- n have)))] (d/branch! conn :db (keyword (str "kp-extra-" i))))
+           (finally (d/release conn))))
     [d store]))
 
 (deftest a-kept-tree-costs-its-lookup-not-its-program
-  ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: an unchanged tree's program db is its
-  ;; kept branch, whatever the program's size; a one-file change costs that file
-  ;; (seon.source/refresh-tx's proofs in seon.source-test: constant in the program's other files)
+  ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: an unchanged tree's program db is its kept branch, never its
+  ;; program; a one-file change costs that file (seon.source/refresh-tx's proofs in seon.source-test). What grows is the
+  ;; branches the store holds: Deep fixes measured 35.4k ticks, 102 KB and 3 konserve reads a branch (2026-11-10, notes
+  ;; open-is-o-branches-2026-11-11.md); program-db's own read of them (d/branches) is gone (seon.db/branch?), and what
+  ;; is left is seon.db/ids! reseeding the id allocator from every head at an open, which Deep fixes and Optimization
+  ;; are taking out: then this is :constant at about 0.6 M ticks, and tightened
   (cost/proof
-    {:of 'test-runner/program-db :input 'seon.proofs-test/kept-checkout-of
-     :n "functions in the checkout's src"
-     :work (str "the tree's id (git, a child process: no ticks here), the store opened and the tree's "
-                "branch found and connected: a pointer read; nothing of the program is read or imported")
-     :growth :constant
-     ;; re-measured 2026-10-31 at 10 30 100 functions: 1.12M ticks and 4.25 MB at 10 (bytes held to 1.25x by 4.3 MB)
-     ;; measured 2026-10-23: 1.17M ticks and 4.6 MB at 10, 100 and 1,000 functions (the store's open
-     ;; and the branch's connect); a whole import was ~1.8G ticks for the 2,400 forms of src and test
-     :fixed {:ticks 1200000.0 :bytes 4300000.0}
+    {:of 'test-runner/program-db :input 'seon.proofs-test/kept-store-with-branches
+     :n "branches the program store holds"
+     :work (str "the tree's id (git, a child process: no ticks here), the store opened (seon.db/ids! reads each branch's head),"
+                " the tree's branch asked for and connected; nothing of the program is read or imported")
+     :growth :linear
+     ;; measured 2026-11-10 at 1 10 30 100 300 branches: 1.22M 1.41M 1.89M 3.57M 8.36M ticks, 4.76 5.32 6.72 11.6 25.7 MB:
+     ;; 24.0k ticks and 70.2 KB a branch (Deep fixes' 35.4k and 102 KB before program-db stopped listing them) on 1.19M and 4.7 MB
+     :fixed {:ticks 1200000.0 :bytes 4700000.0}
+     :per-n {:ticks 24000.0 :bytes 70000.0}
      :sizes [10 30 100]}))
 
 ;; ---- every verdict is kept: a digest green and red is flaky (red, never reused as green, never run)
@@ -710,3 +717,19 @@
     (is (= #{'t/same 't/based} (proofs/main-red results cand base found))
         "its digest is base's, or base's verdict at it is red; green at base, new on the branch, or passing: the branch's")
     (is (= #{} (proofs/main-red results cand nil {})) "with no base nothing is main's")))
+
+(deftest a-run-runs-a-sample-of-its-reused-greens-again
+  ;; the owner's plan, 2026-11-10: a writer change reused 226 of 233 process tests' greens and five were red. Whatever the
+  ;; next missed input is, a run runs n reused greens of each class again, chosen by the tree (seon.proofs/reuse-audit)
+  (let [green {:pass 1 :fail 0 :error 0}
+        reused (merge (into {} (for [i (range 30)] [(symbol "app.ra-test" (str "p" i)) green]))
+                      (into {} (for [i (range 30)] [(symbol "app.ra-test" (str "q" i)) green]))
+                      {'app.ra-test/red {:pass 0 :fail 1 :error 0} 'app.ra-test/flaky (assoc green :flaky true) "a-step" green})
+        process (set (for [i (range 30)] (symbol "app.ra-test" (str "p" i))))
+        a (proofs/reuse-audit reused process "tree-a" 10)]
+    (is (= 20 (count a)) "n of each class")
+    (is (= 10 (count (filter process a))) "ten that start a process, ten that do not")
+    (is (not-any? #{'app.ra-test/red 'app.ra-test/flaky "a-step"} a) "never a red, a flaky one or a check step")
+    (is (= a (proofs/reuse-audit reused process "tree-a" 10)) "the same tree, the same ones")
+    (is (not= a (proofs/reuse-audit reused process "tree-b" 10)) "another tree, others")
+    (is (= [] (proofs/reuse-audit reused process "tree-a" 0)) "none at 0")))
