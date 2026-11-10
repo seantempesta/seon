@@ -6,7 +6,8 @@
   (:require [seon.test-store :as ts] [seon.agent-test :as at] [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.task :as task] [my.root :as root] [seon.root] [clojure.string :as str] [clojure.java.shell :as sh] [seon.config :as config]))
+            [seon.task :as task] [my.root :as root] [clojure.string :as str] [clojure.java.shell :as sh] [seon.config :as config]
+            [seon.ref :as ref] [seon.doc :as doc] [seon.root] [test-runner :as runner]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -86,14 +87,51 @@
            (refused-type db "[{:seon.task/name \"x\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/nope\"}}]"))
         "a need that names no task")))
 
-(deftest the-shipped-task-files-load
-  ;; every file in the shipped task directory
-  ;; reads and loads onto a test branch with no error (a task file is no input of the digest: an edit
-  ;; to one is found by the full run, bin/test --all)
-  (let [files (shipped-task-files)]
+(defn- refusal
+  "The typed error the checked write of tx on db answers (seon.db/with), or nil: [db' error]."
+  [db tx] (try [(pdb/db-with db tx) nil] (catch clojure.lang.ExceptionInfo e [db (ex-data e)])))
+
+(defn- dead-links
+  "Each link (or cited path#anchor) of the wiki pages ps ({path text}) that names no section of them nor of db: [page address]."
+  [db ps]
+  (let [have (into (set (map :v (d/datoms db :avet :seon.doc/address)))
+                   (for [[p t] ps sec (doc/page-sections p t)] (:seon.doc/address sec)))]
+    (vec (distinct (for [[p t] ps sec (doc/page-sections p t) {:seon.ref/keys [path anchor]} (:seon.ref/citations sec)
+                         :let [a (str path "#" anchor)] :when (and path anchor (not (have a)))]
+                     [p a])))))
+
+(defn- dead-cites
+  "Each citation of decls' plans and instructions whose target (seon.ref/target) db holds nothing by, or that names its own
+  task as a task (the name of what it makes, a var): [task-id text-key target]."
+  [db decls]
+  (vec (for [d decls k [:seon.task/plan :seon.task/instructions] :let [t (k d) id (task/task-id (:seon.task/ns d) (:seon.task/name d))] :when t
+             c (ref/kept db (ref/cited (:seon.ref/citations (ref/parse nil t))))
+             :when (not (:seon.ref/problem-kind c))
+             :let [[a v :as tg] (ref/target db c)]
+             :when (or (nil? (pdb/eid db a v)) (= tg [:seon.task/id id]))]
+         [id k tg])))
+
+(deftest the-trees-task-files-and-pages-load-with-no-refusal
+  ;; docs/references.md#an-entity-cites: a cite's target is a ref, so a task file or a wiki page that cites what does not exist
+  ;; is refused at its load. Every task file and page of this tree, on its own program (the program store's branch of
+  ;; this tree), loads by the checked write with no refusal: the wiki first, then the tasks that cite it. A task file is
+  ;; no input of the digest: an edit to one is found by the full run (bin/test --all)
+  (let [co (config/checkout)
+        db0 (runner/program-db co (ts/kept-program-store))
+        db0 (d/db-with db0 (vec (remove #(contains? (:schema db0) (:db/ident %)) pdb/schema)))
+        ps (into (sorted-map) (mapcat #(doc/pages co %)) (config/value :seon.config.root/wiki-dirs))
+        [db wiki-refused] (refusal db0 (seon.root/wiki-tx db0 co))
+        files (shipped-task-files)
+        decls (vec (mapcat val files))
+        tx (task/load-tx db files)
+        tasks-only (filterv #(and (map? %) (:seon.task/id %) (not (:seon.cite/id %))) (when (vector? tx) tx))
+        [_ tasks-refused] (refusal db tx)]
     (is (seq files))
     (is (= [] (vec (for [[ns-sym ds] files :when (:seon.error/type ds)] ns-sym))) "every file reads")
-    (is (not (:seon.error/type (task/load-tx (empty-db) files))) "and loads")))
+    (is (nil? wiki-refused) (str "the wiki loads; links to no section: " (pr-str (dead-links db0 ps))))
+    (is (vector? tx) (pr-str tx))
+    (is (nil? tasks-refused) (str "and the tasks; cites of nothing: "
+                                  (pr-str (dead-cites (:db-after (pdb/speculate db tasks-only)) decls))))))
 
 (deftest no-shipped-task-is-merged-work
   ;; docs/merging.md#a-merge-says-what-it-completes: the merge

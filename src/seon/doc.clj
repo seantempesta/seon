@@ -57,9 +57,9 @@
 (defn- citation-target
   "What citation c of a section reaches: [:section address] (a section this load holds, or one
   stored outside dir), [:var entity-id], [:missing address] for a path#anchor that is no
-  section (kept as a dead link), or nil (a schema key, a file, or a name that names nothing: not stored). stored:
-  the db's sections, address -> entity id; firsts: each loaded page's path -> its first
-  section's address, what a link with no anchor reaches."
+  section (written as the lookup of its address, which the write refuses: :seon.db/no-target), or nil (a schema key, a
+  file, or a name that names nothing: not stored). stored: the db's sections, address -> entity id; firsts: each loaded
+  page's path -> its first section's address, what a link with no anchor reaches."
   {:malli/schema [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :int] [:map-of :string :any] [:map-of :string :string] :seon.ref/citation]
                   [:maybe [:tuple :keyword :any]]]}
   [db dir stored loaded firsts {:seon.ref/keys [name path anchor]}]
@@ -71,22 +71,21 @@
 
 (defn- wanted
   "Section s as the attributes it should state: {attribute value}, a section named by its
-  stored entity id or, when this load creates it, its tempid (its address)."
+  stored entity id or, when this load creates it, its tempid (its address); a link to no section by the lookup of its
+  address, which the write refuses (:seon.db/no-target, docs/references.md#the-wiki-in-the-store)."
   {:malli/schema [:=> [:cat [:map-of :string :int] :seon.doc/parsed [:vector :any] [:set :qualified-symbol]] :map]}
   [stored s targets names]
   (let [ref (fn [a] (get stored a a))]
     (cond-> (select-keys s [:seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text])
       (seq names) (assoc :seon.doc/names names)
       (:seon.ref/parent s) (assoc :seon.doc/parent (ref (:seon.ref/parent s)))
-      (seq (remove (comp #{:missing} first) targets))
-      (assoc :seon.doc/references (into #{} (comp (remove (comp #{:missing} first)) (map (fn [[k x]] (if (= :var k) x (ref x))))) targets))
-      (seq (filter (comp #{:missing} first) targets))
-      (assoc :seon.doc/dead-links (into #{} (comp (filter (comp #{:missing} first)) (map second)) targets)))))
+      (seq targets)
+      (assoc :seon.doc/references (into #{} (map (fn [[k x]] (case k :var x :missing [:seon.doc/address x] (ref x)))) targets)))))
 
 (def ^:private section-attrs
   "A stored section's stated attributes (seon.task/entity-tx makes them exactly what its text says).
   :seon.doc/read is stated too, but by the load: it keeps the stored value while the text is unchanged."
-  [:seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text :seon.doc/parent :seon.doc/references :seon.doc/names :seon.doc/dead-links :seon.doc/read :seon.doc/baseline-unread])
+  [:seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text :seon.doc/parent :seon.doc/references :seon.doc/names :seon.doc/read :seon.doc/baseline-unread])
 
 (defn read-map
   "The form id of each of names that is a var of db with a form, {name form-id}: the code as it
@@ -131,8 +130,8 @@
   wiki under dir: every section of those pages, each stating what its own text says now, and no
   other section of those pages; a page not given is left as it is (a page gone from the checkout
   is load-dir-tx's to retract). A section that already states it writes nothing, so an unchanged
-  page answers []. A link (or cited path#anchor) that reaches no section is kept on its section
-  as :seon.doc/dead-links, and the rest of the wiki loads as it is."
+  page answers []. A link (or cited path#anchor) that reaches no section is written as the lookup of its address, so
+  the write refuses the load, :seon.db/no-target naming it (docs/references.md#the-wiki-in-the-store)."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string]] [:vector :any]]
                   [:=> [:cat :seon.host/db [:or :string [:vector :string]] [:map-of :string :string] :map] [:vector :any]]]}
   ([db dir pages] (load-tx db dir pages {}))
@@ -318,7 +317,7 @@
 (defn load-dir-tx
   "The one load of the wiki under dir of the checkout (or under each of dirs, in one parse and one
   transaction) onto db: load-tx over its pages (an unchanged wiki answers [], a link to no section
-  kept on its section as a dead link), and every section under dir of a page the checkout no
+  refused by the write, :seon.db/no-target), and every section under dir of a page the checkout no
   longer holds retracted. Root's boot and my.root/load-docs! both write it."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string [:or :string [:vector :string]]] [:vector :any]]
                   [:=> [:cat :seon.host/db :string [:or :string [:vector :string]] :map] [:vector :any]]]}

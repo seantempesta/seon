@@ -74,8 +74,9 @@
 (def ^:private bare
   "Root arguments for a root whose subject is its store, not the program or the wiki: it imports no source and
   loads no page: for a store of its own, which holds neither (the checkout's 4,500 forms and 39 pages are 15-20 s of its boot; on a seeded store the same arguments would retract both, 14-32 s,
-  docs/testing.md#a-root-costs-what-it-boots)."
-  ["--set" ":seon.config.source/dirs=[]" "--set" ":seon.config.root/wiki-dirs=[]"])
+  docs/testing.md#a-root-costs-what-it-boots). Its agents cite none of the pages it does not load: a cite names what
+  exists (docs/references.md#an-entity-cites), so every agent's standing cites are none here."
+  ["--set" ":seon.config.source/dirs=[]" "--set" ":seon.config.root/wiki-dirs=[]" "--set" ":seon.config.agent/cites=[]"])
 
 (deftest a-root-resumes-a-store-an-earlier-build-wrote
   ;; task seon.root/a-root-resumes-a-store-an-earlier-build-wrote: the store as builds of
@@ -355,15 +356,15 @@
     (is (= (:seed-t two) (:program-t two)) "and the boot wrote no program fact")))
 
 (def ^:private broken-boot
-  "boots-on-a-tree on a seeded tree whose wiki links to no section and whose next commit breaks its schema resource (it no
-  longer reads): the seed's output and the one boot's answer, with the dead citations my.root/problems shows. Two claims
-  read it, so they pay one boot."
+  "boots-on-a-tree on a seeded tree whose next commit breaks its schema resource (it no longer reads) and whose wiki
+  links to no section: the seed's output and the one boot's answer, with the refused wiki loads my.root/problems shows.
+  Two claims read it, so they pay one boot."
   (delay
     (let [file "resources/seon/schemas/seon.config.web.edn"
           merged (pr-str {:seon.config.web/streams-buf (get contract/forms :seon.config.web/streams-buf)})]
       (boots-on-a-tree file [merged (str merged "\n{:unclosed")]
                        {:wiki "# Broken\n\nIt links to [nowhere](agent.md#nowhere).\n"
-                        :also [{:op :eval :agent "root" :code "(mapv (juxt :section :message) (get-in (my.root/problems sys) [:classes :dead-citation :rows]))"}]}))))
+                        :also [{:op :eval :agent "root" :code "(vec (for [r (get-in (my.root/problems sys) [:classes :platform :rows]) :when (= :seon.db/no-target (:type r)) :when (not (false? (:open? r)))] [(:type r) (get-in r [:example :target])]))"}]}))))
 
 (deftest a-boot-reads-no-file-a-commit-broke
   ;; task seon.root/a-boot-resumes-from-the-db: the tree's schema resource no longer reads (a commit broke it). The boot
@@ -377,15 +378,16 @@
     (is (= (config/value :seon.config.web/streams-buf) (:streams-buf two)) "main's entries as they were")))
 
 (deftest a-dead-link-in-the-wiki-is-a-problem-and-the-boot-goes-on
-  ;; the wiki is indexed with the program (seon.root/seed!); one link to no section in any page used to end the boot,
-  ;; then refused the whole wiki. Now every page is indexed, the link is a dead citation my.root/problems shows, and the
-  ;; root that resumes it listens. On broken-boot's boot, whose wiki is one page linking to no section
+  ;; a boot that seeded its main loads the wiki through its writer after its boot fact (seon.root/wiki-boot!): a link to no section
+  ;; is that write's refusal (:seon.db/no-target, docs/references.md#the-wiki-in-the-store), recorded as a :platform error
+  ;; open until the page is fixed, and the root listens (AGENTS: nothing crashes). On broken-boot's boot, whose wiki is one
+  ;; page linking to no section
   (let [[_ two] @broken-boot
         page (str (:tree two) "/docs/zz-broken.md")]
     (is (true? (:listening? two)) (str "the root boots: " two))
-    (is (= [[(str page "#broken") (str page "#broken links to " (str/replace page "zz-broken" "agent") "#nowhere, which is no section")]]
+    (is (= [[:seon.db/no-target [:seon.doc/address (str (str/replace page "zz-broken" "agent") "#nowhere")]]]
            (first (:also two)))
-        (str "and the link is one dead citation, naming page, section and target: " (pr-str two)))))
+        (str "and the refused load is one open problem naming the link: " (pr-str two)))))
 
 (deftest a-root-restart-names-the-same-agent-by-the-same-name
   ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent's id is the keyword of its

@@ -55,19 +55,17 @@
            (set (filter #(str/starts-with? % "demo/async.md") (map :v (d/datoms db' :avet :seon.doc/address)))))
         "a page not given keeps every section")))
 
-(deftest a-link-to-no-section-is-a-dead-link-and-the-rest-loads
+(deftest a-link-to-no-section-refuses-the-load-naming-it
+  ;; docs/references.md#the-wiki-in-the-store: a link is a ref to its section, so one to no section is the write's
+  ;; refusal (:seon.db/no-target, the lookup of its address), and the page that adds the section loads
   (let [broken (assoc pages "demo/async.md" (str/replace async "flow.md#idioms" "flow.md#nowhere"))
-        db (load-pages (empty-db) broken)
-        dead #(get-in (problems/health %) [:classes :dead-citation :rows])]
-    (is (= #{"demo/flow.md#flow" "demo/flow.md#idioms" "demo/flow.md#quiet" "demo/async.md#async" "demo/async.md#waiting"}
-           (set (map :v (d/datoms db :avet :seon.doc/address)))) "every section loads")
-    (is (= #{"demo/flow.md#nowhere"} (set (:seon.doc/dead-links (d/pull db [:seon.doc/dead-links] [:seon.doc/address "demo/async.md#waiting"]))))
-        "the link is kept on the section that makes it")
-    (is (= [["demo/async.md#waiting" "demo/flow.md#nowhere" "demo/async.md#waiting links to demo/flow.md#nowhere, which is no section"]]
-           (mapv (juxt :section :target :message) (dead db))) "and is exactly one dead citation, naming page, section and target")
-    (is (empty? (doc/load-tx db "demo" broken)) "an unchanged wiki writes nothing")
-    (let [fixed (d/db-with db (doc/load-tx db "demo" (assoc broken "demo/flow.md" (str flow "\n## Nowhere\n\nNow it exists.\n"))))]
-      (is (empty? (dead fixed)) "the target section is added: the dead citation closes, and nothing was written to close it"))))
+        db (empty-db)
+        refusal (try (pdb/with db (doc/load-tx db "demo" broken)) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+    (is (= {:seon.error/type :seon.db/no-target :target [:seon.doc/address "demo/flow.md#nowhere"]}
+           (select-keys refusal [:seon.error/type :target])) "refused, naming the link")
+    (let [fixed (pdb/db-with db (doc/load-tx db "demo" (assoc broken "demo/flow.md" (str flow "\n## Nowhere\n\nNow it exists.\n"))))]
+      (is (= ["demo/flow.md#nowhere"] (mapv :seon.doc/address (:seon.doc/references (d/pull fixed [{:seon.doc/references [:seon.doc/address]}] [:seon.doc/address "demo/async.md#waiting"]))))
+          "the page that adds the section: the link is its ref"))))
 
 (defn- backlinks
   "The addresses of the sections whose text cites target (a section's address or a var's name), sorted."
@@ -371,12 +369,11 @@
     (fn [co]
       (let [db0 (mt/world)
             tx (seon.root/wiki-tx db0 co)
-            db (d/db-with db0 tx)
+            db (pdb/db-with db0 tx)
             paths (set (seon.doc/page-paths db))]
         (is (every? paths ["AGENTS.md" "BAGGAGE.md" "README.md" "docs/agent.md"]) "the top-level pages and docs/'s")
         (is (seq (seon.doc/page db "AGENTS.md" :summary)) "a top-level page reads through the one view")
         (is (= [] (seon.root/wiki-tx db co)) "an unchanged wiki writes nothing")
-        (is (= [] (mapv (juxt :section :message) (filter #(re-find #"^[^/#]+#" (:section %)) (problems/dead-citations db {})))) "the top-level pages add no dead citation")
         (is (= "docs" (first (seon.config/value :seon.config.root/wiki-dirs))))
         (is (= {"AGENTS.md" true} (select-keys (into {} (map (fn [p] [p true])) (keys (seon.doc/pages co "."))) ["AGENTS.md"])) "pages of \".\" are named without a directory")))))
 
@@ -387,7 +384,6 @@
         pages {"demo/a.md" "# A\n\nSee [b](../other/b.md#b).\n" "other/b.md" "# B\n\nIt is the target.\n"}
         tx (doc/load-tx db ["demo" "other"] pages)
         db' (d/db-with db tx)]
-    (is (not-any? #(and (map? %) (:seon.doc/dead-links %)) tx) "the link reaches the section of the other dir")
     (is (= 1 (count (:seon.doc/references (d/pull db' [{:seon.doc/references [:seon.doc/address]}] [:seon.doc/address "demo/a.md#a"]))))
         "and is stored as a reference")
     (is (= [] (doc/load-tx db' ["demo" "other"] pages)) "an unchanged wiki writes nothing")

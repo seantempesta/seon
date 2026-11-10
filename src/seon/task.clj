@@ -9,7 +9,7 @@
   and M1's proto.agents.task; the attributes are derived from resources/seon/schemas (session D1)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.db.utils :as dbu] [clojure.string :as str] [clojure.edn :as edn] [seon.merge :as pm] [seon.db :as pdb] [seon.edn :as sedn]
-            [seon.print :as print] [seon.ref :as ref] [seon.program :as program] [seon.config :as cfg] [seon.lib :as lib]))
+            [seon.print :as print] [seon.ref :as ref] [seon.program :as program] [seon.config :as cfg] [seon.lib :as lib] [clojure.walk :as walk]))
 
 ;; ---- identity --------------------------------------------------------------------
 
@@ -67,38 +67,37 @@
   [db decl]
   (into [] (remove :seon.ref/problem-kind) (ref/kept db (ref/cited (texts-citations (cited-texts decl))))))
 
-(defn- cite-target
-  "Citation c's target as its cite entity holds it on db, {:seon.cite/address a} or {:seon.cite/name n}: a
-  section's path#anchor; a page cited whole its top section's address (seon.ref/page-top: its sections
-  are joined below it), a page or file db holds no section of, its path as written; a name as itself, and a
-  name of a task (seon.ref/task?) its id beside it (:seon.cite/task, which the pattern joins the task by), unless it is the
-  citing entity's own identity self: a text naming its own task's id names what the task makes (a function of that name),
-  never the task itself, which its page already shows."
-  {:malli/schema [:=> [:cat :seon.host/db :map :string] :map]}
-  [db {:seon.ref/keys [name path anchor]} self]
-  (cond (and (qualified-symbol? name) (not= self (str name)) (ref/task? db name)) {:seon.cite/name name :seon.cite/task (str name)}
-        name {:seon.cite/name name}
-        anchor {:seon.cite/address (str path "#" anchor)}
-        :else {:seon.cite/address (or (some->> (ref/page-top db path) (d/pull db [:seon.doc/address]) :seon.doc/address) path)}))
-
 (defn cite-tx
   "The cite entity of entity of (a lookup ref, or the tempid of the write that makes it; of-id its identity
-  value) for citation c at place order: its target (cite-target), its depth, its content id
+  value) for citation c at place order: its target (seon.ref/target on db, the db the write holds: a lookup that resolves
+  against what the write made before it, so a task's own name is the task it makes), its depth, its content id
   \"<of-id> <target>\", upserted by it. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :any :string [:map [:seon.ref/depth :seon.ref/depth]] :int] :map]}
   [db of of-id c order]
-  (let [t (cite-target db c of-id)]
-    (merge t {:seon.cite/id (str of-id " " (or (:seon.cite/address t) (:seon.cite/name t)))
-              :seon.cite/of of :seon.cite/depth (:seon.ref/depth c) :seon.cite/order order})))
+  (let [t (ref/target db c)]
+    {:seon.cite/id (str of-id " " (second t)) :seon.cite/of of :seon.cite/target t
+     :seon.cite/depth (:seon.ref/depth c) :seon.cite/order order}))
+
+(def ^:private cite-pull
+  "What a reader that is no draw reads of a cite: its entity id (what a rewrite retracts), its own attributes and its target's
+  identity (seon.ref/target-attrs). See docs/references.md#an-entity-cites."
+  [:db/id :seon.cite/id :seon.cite/of :seon.cite/depth :seon.cite/order {:seon.cite/target (into [:db/id] ref/target-attrs)}])
 
 (defn cites-of
-  "The cite entities entity e holds on db (:seon.cite/of), pulled, in their order: what a reader that is no
-  draw reads of what e cites (the judge, a problem, my.agent/cite!). See docs/references.md#an-entity-cites."
+  "The cite entities entity e holds on db (:seon.cite/of), pulled with their targets' identities (cite-pull), in their
+  order: what a reader that is no draw reads of what e cites (the judge, a problem, my.agent/cite!). See
+  docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :int]] [:vector :map]]}
   [db e]
   (if e
-    (vec (sort-by :seon.cite/order (for [dt (d/datoms db :avet :seon.cite/of e)] (d/pull db '[*] (:e dt)))))
+    (vec (sort-by :seon.cite/order (for [dt (d/datoms db :avet :seon.cite/of e)] (d/pull db cite-pull (:e dt)))))
     []))
+
+(defn cited-name
+  "What cite c (as cites-of reads it) names, its target's identity value (seon.ref/target-value): a section's address, a
+  var's name, a task's id, a schema key, a namespace's name or a file's path. See docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :map] :any]}
+  [c] (ref/target-value (:seon.cite/target c)))
 
 (defn task-cites
   "What task id's page draws of what it cites, read on db: its own cites, then each need's (one level, a
@@ -110,15 +109,15 @@
   (let [e (pdb/eid db :seon.task/id id)
         needs (when e (sort-by :seon.task/id (remove #(= :merge (:seon.task/kind %)) (map #(d/pull db [:db/id :seon.task/id :seon.task/kind] (:v %)) (d/datoms db :eavt e :seon.task/needs)))))
         cs (concat (cites-of db e) (mapcat #(cites-of db (:db/id %)) needs))
-        target #(or (:seon.cite/address %) (:seon.cite/name %))
+        target #(get-in % [:seon.cite/target :db/id])
         by (group-by target cs)]
     (mapv (fn [t] (apply max-key #(ref/strength (:seon.cite/depth %)) (rseq (vec (by t))))) (distinct (map target cs)))))
 
 (defn cites-tx
   "The facts that make entity of (as cite-tx takes it) cite exactly citations cs on db: one cite entity per
-  target (cite-tx), at the strongest depth any of cs asks for it and its first's place, and each cite of
-  of on db no longer among them retracted whole. The one writer of a text's cites, called where the text
-  is written (create-tx, load-tx, rederive-tx). See docs/references.md#an-entity-cites."
+  target (cite-tx), at the strongest depth any of cs asks for it and its first's place, and each cite of of on db no
+  longer among them retracted whole. The one writer of a text's cites, called where the text is written (create-tx,
+  load-tx, rederive-tx), after what the same write makes. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :any :string [:sequential [:map [:seon.ref/depth :seon.ref/depth]]]] [:vector :any]]}
   [db of of-id cs]
   (let [{:keys [by order]} (reduce (fn [{:keys [by order] :as acc} c]
@@ -148,17 +147,6 @@
   {:malli/schema [:=> [:cat :seon.host/db :any :string] [:vector :any]]}
   [db of k]
   (vec (map-indexed (fn [i c] (cite-tx db of k c i)) (keep ref/address-citation (cfg/value :seon.config.agent/cites)))))
-
-(defn citation-problems
-  "Each citation of decls' text that resolves to nothing on db, as {:task :name :problem
-  :unresolved}: answered beside the write, never an error (docs/references.md)."
-  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/declaration]] [:vector :map]]}
-  [db decls]
-  (vec (for [decl decls
-             c (ref/kept db (ref/cited (texts-citations (cited-texts decl))))
-             :when (not (ref/names-something? db c))]
-         {:task (task-id (:seon.task/ns decl) (:seon.task/name decl))
-          :name (or (:seon.ref/name c) (:seon.ref/path c)) :problem :unresolved})))
 
 (defn- cycle-in
   "A task id on a needs cycle among decls (plus the needs already on main, which cannot
@@ -271,7 +259,7 @@
 (defn newest-process
   "The newest of processes ps (entities or pulled maps of :seon.process/agent's reverse) by when
   it forked, or nil when none says when: the agent's current process, whose telemetry the agent's
-  record no longer holds (docs/ctx.md#the-record-is-the-agents-work). An agent has one process per
+  record no longer holds (docs/ctx.md#the-agents-entity-holds-its-work). An agent has one process per
   spawn, written with its pid and fork time together (agent-tx)."
   {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:maybe :any]]}
   [ps] (some->> (seq (filter :seon.process/forked-ms ps)) (apply max-key :seon.process/forked-ms)))
@@ -322,15 +310,36 @@
                       (for [[member a] process-attrs :when (and (contains? m member) (nil? (get m member)))]
                         [:db.fn/retractAttribute [:seon.process/id pk] a])))))))
 
+(defn- canonical
+  "Value v with every map sorted by its keys' text, so the same value is the same text however it was built."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [v] (walk/postwalk #(if (map? %) (into (sorted-map-by (fn [a b] (compare (str a) (str b)))) %) %) v))
+
+(defn config-tx
+  "Config c and its sources as facts on main (platform records: never carried by a merge in
+  either direction): the config as an entity of its own, named by the content id of c (`:seon.config/id`, so the same config
+  is one entity on every branch), holding every key (each collection-valued key, the manifest among them, as data);
+  main's root entity with the layer each key came from and its one ref to that entity (`:seon.root/config`); and an
+  entity per provider and per model (:seon.ai.model/provider-id, :seon.ai.model/id). Root's boot writes it
+  with the boot fact, and again when a config entry moves (seon.config/moved). See docs/config.md#facts-on-main."
+  {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] [:vector :map]]}
+  [c srcs]
+  (into [{:seon.root/id :root :seon.config/sources srcs :seon.root/config "config"}
+         (assoc c :db/id "config" :seon.config/id (lib/id (lib/digest (sedn/encode (canonical c)))))]
+        (concat (for [[id p] (:seon.config.ai/providers c)]
+                  (-> (select-keys p [:seon.config.ai/base-url :seon.config.ai/api-key-variable :seon.ai.model/output-token-wire-key])
+                      (assoc :seon.ai.model/provider-id id)))
+                (for [[id m] (:seon.config.ai/models c)]
+                  (-> (dissoc m :seon.config.ai/max-in-flight :seon.config.ai/max-tokens) (assoc :seon.ai.model/id id))))))
+
 (defn boot-tx
-  "Root's boot: its id for this process lifetime and its max-running config key (merges at once,
-  :seon.config.merge/max-running, is written with the config in force, seon.config/facts), and
-  the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
+  "Root's boot: its id for this process lifetime (the config in force, max-running among its keys, is written with it,
+  config-tx), and the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
   makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.root/signed-in). See docs/users.md#what-each-thing-is."
-  {:malli/schema [:=> [:cat :string pos-int? :string] [:vector :any]]}
-  [boot max-running name]
+  {:malli/schema [:=> [:cat :string :string] [:vector :any]]}
+  [boot name]
   (into [{:db/id "user" :seon.agent/key name :seon.user/name name}
-         {:seon.root/id :root :seon.root/boot boot :seon.config.agent/max-running max-running :seon.root/signed-in "user"}]
+         {:seon.root/id :root :seon.root/boot boot :seon.root/signed-in "user"}]
         (agent-tx (keyword name) {})))
 
 (defn call-ref
@@ -351,15 +360,16 @@
 (defn undelivered
   "The messages main holds to the agent with key k that branch-db, its branch, does not hold: each {:id :from :body :sent-ms}, in main's
   order (by transaction, then id). The agent's ref on main is the fact (a seek of :seon.message/to on its entity, never a scan of the
-  messages), and a turn on the branch placing the message (:seon.message/call) is its delivery, so a message the agent removed (its ref retracted, the
-  entity kept) is not brought again, and one its branch inherited at a fork, which no turn placed, still arrives. The one reading of it: the agent's next act (seon.agent/undelivered) and root's check that a
-  parked agent is owed one. O(the messages to the agent). See docs/users.md#messages."
+  messages), and the message entity on the branch (one lookup of its id) is its delivery (docs/users.md#messages), written there by seon.agent/deliver! or brought down
+  by a merge or sync of main: a message the agent removed (its ref retracted, the entity kept) stays delivered, and one already on main when the branch forked is
+  delivered at the fork. The one reading of it: the agent's next act (seon.agent/undelivered) and root's check that a
+  parked agent is owed one. O(m) seeks on main and O(m) id lookups on the branch, m the messages to the agent. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :string] [:vector [:map [:id :string] [:from :string] [:body :string] [:sent-ms :int]]]]}
   [main branch-db k]
   (if-let [me (pdb/eid main :seon.agent/key k)]
     (->> (d/datoms main :avet :seon.message/to me)
          (map (fn [dt] [(:tx dt) (d/entity main (:e dt))]))
-         (remove (fn [[_ m]] (:seon.message/call (d/entity branch-db [:seon.message/id (:seon.message/id m)]))))
+         (remove (fn [[_ m]] (pdb/eid branch-db :seon.message/id (:seon.message/id m))))
          (sort-by (fn [[tx m]] [tx (:seon.message/id m)]))
          (mapv (fn [[_ m]] {:id (:seon.message/id m) :from (:seon.message/from m) :body (:seon.message/body m) :sent-ms (:seon.message/sent-ms m)})))
     []))
@@ -630,16 +640,19 @@
            a (assoc :agent (keyword (:seon.agent/key a)) :key (:seon.agent/key a) :env (:seon.agent/env a))))))
 
 (defn root
-  "Root's boot and config keys on db: {:boot :max-running :max-merging :gate-checkout :started-by}, nil
-  before the first boot."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running :int] [:max-merging {:optional true} :int]
+  "Root's boot and the config keys it reads on db: {:boot :max-running :max-merging :gate-checkout :started-by}, the config's
+  from the entity :seon.root/config refs (a key it lacks is absent), nil before the first boot."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running {:optional true} :int] [:max-merging {:optional true} :int]
                                                      [:gate-checkout {:optional true} :string] [:started-by {:optional true} :string]]]]}
   [db]
-  (when-let [r (d/pull db [:seon.root/boot :seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout :seon.root/started-by] [:seon.root/id :root])]
-    (cond-> {:boot (:seon.root/boot r) :max-running (:seon.config.agent/max-running r)}
-      (:seon.config.merge/max-running r) (assoc :max-merging (:seon.config.merge/max-running r))
-      (:seon.config.source/gate-checkout r) (assoc :gate-checkout (:seon.config.source/gate-checkout r))
-      (:seon.root/started-by r) (assoc :started-by (:seon.root/started-by r)))))
+  (when-let [r (d/pull db [:seon.root/boot :seon.root/started-by {:seon.root/config [:seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout]}]
+                       [:seon.root/id :root])]
+    (let [c (:seon.root/config r)]
+      (cond-> {:boot (:seon.root/boot r)}
+        (:seon.config.agent/max-running c) (assoc :max-running (:seon.config.agent/max-running c))
+        (:seon.config.merge/max-running c) (assoc :max-merging (:seon.config.merge/max-running c))
+        (:seon.config.source/gate-checkout c) (assoc :gate-checkout (:seon.config.source/gate-checkout c))
+        (:seon.root/started-by r) (assoc :started-by (:seon.root/started-by r))))))
 
 (defn proof?
   "Does task t (as `task` answers it) owe test var v green: its accumulated proofs, each a test var, never excused as main's red. See docs/merging.md#a-merge-runs-what-the-change-reaches."
@@ -762,8 +775,12 @@
           declared (fn [id d] {:seon.task/id id :seon.task/declared (sedn/encode d)})]
       (if-let [p (needs-problem graph graph)]
         (file-refused (first owners) p)
+        (let [created (when (seq new) (create-tx db new))
+              ;; a changed task's text may cite a task this write makes: its cites are read on the db the new tasks make,
+              ;; written after them, so the lookup resolves in the write
+              db' (if (seq new) (:db-after (pdb/speculate db (filterv #(and (map? %) (:seon.task/id %)) created))) db)]
         (vec (concat
-               (when (seq new) (create-tx db new))
+               created
                (for [d new] (declared (task-id (:seon.task/ns d) (:seon.task/name d)) d))
                (mapcat (fn [[id d]]
                          ;; what it states now: members, config flattened, references derived, branch
@@ -774,11 +791,11 @@
                            (cond-> (-> (entity-tx db (pdb/eid db :seon.task/id id) (conj stated-attributes :seon.task/needs) want)
                                        (conj [:db/add [:seon.task/id id] :seon.task/declared (sedn/encode d)])
                                        ;; what its text cites now
-                                       (into (cites-tx db [:seon.task/id id] id (text-citations db d))))
+                                       (into (cites-tx db' [:seon.task/id id] id (text-citations db' d))))
                              ;; declared again after its removal: revived
                              (and (nil? (stored id)) (= :cancelled (:seon.task/execution (all id))))
                              (conj [:db/add [:seon.task/id id] :seon.task/execution :held]))))
                        changed)
                (mapcat (fn [id] [[:db/add [:seon.task/id id] :seon.task/execution :cancelled]
                                  [:db/retract [:seon.task/id id] :seon.task/declared (stored id)]])
-                       removed)))))))
+                       removed))))))))

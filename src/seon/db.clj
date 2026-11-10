@@ -212,7 +212,8 @@
   incomplete before stays as it was (a whole-store scan's to report), and one left holding none of them has stopped
   being that thing. Presence is one seek
   per (entity, key), so a write costs its touched entities' required keys, never an entity's size or the store's; values
-  are each datom's own check (`invalid-datom`). The first refusal by entity id, then schema. See
+  are each datom's own check (`invalid-datom`). The first refusal by entity id, then schema, and every entity it broke in
+  :entities (a deleted var's cites, each a task and the name its text cites). See
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :map] [:maybe :seon.error/base]] [:=> [:cat :map :map] [:maybe :seon.error/base]]]}
   ([r] (invalid-entity r binary-index))
@@ -235,13 +236,18 @@
                                     broke (if was? (filter #(has? db-before e %) gone) gone)]
                                 (when (seq broke) {:at [e (str k)] :e e :k k :req req :broke (vec broke)}))))))
                       touched)]
-     (when-let [{:keys [e k req broke]} (first (sort-by :at broken))]
-       (let [ident (if-let [a (some #(when (contains? identity-schemas %) %) req)]
-                     (if-let [v (:v (first (d/datoms db-after :eavt e a)))] [a v] e) e)]
+     (when (seq broken)
+       (let [ident (fn [{:keys [e req]}] (if-let [a (some #(when (contains? identity-schemas %) %) req)]
+                                           (if-let [v (:v (first (d/datoms db-after :eavt e a)))] [a v] e) e))
+             text #(print/text (ident %) (:part print/budgets))
+             all (sort-by :at broken)
+             {:keys [k broke] :as b} (first all)]
+         ;; every entity the write broke is named (a var deleted under its cites: each cite, "<task> <name>", one turn's fix)
          (contract/error :seon.db/invalid-entity #'invalid-entity
-                         (str (print/text ident (:part print/budgets)) " holds attributes of " k ", which requires "
-                              (str/join ", " broke) ": a write that leaves them out breaks it")
-                         {:entity (print/text ident (:part print/budgets)) :schema k :missing broke}))))))
+                         (str (text b) " holds attributes of " k ", which requires "
+                              (str/join ", " broke) ": a write that leaves them out breaks it"
+                              (when (next all) (str " (and " (dec (count all)) " more, each in :entities)")))
+                         {:entity (text b) :schema k :missing broke :entities (mapv text all)}))))))
 
 (defn- refuse!
   "Throw error e (a typed refusal) as the transaction's answer. See docs/storage.md#the-write-checks-every-entity-it-touches."
@@ -250,8 +256,8 @@
 
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
-  datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, each entity it touched
-  (`invalid-entity`, by the branch's `write-index`) after; an entity retracted whole takes the entities named by it with it.
+  datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, a lookup ref to nothing
+  (:seon.db/no-target), each entity it touched (`invalid-entity`, by the branch's `write-index`) after; an entity retracted whole takes the entities named by it with it.
   A refusal throws its typed error, and the value is as it was. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
   [db tx-data schemas apply-fn]
@@ -277,7 +283,16 @@
                               out))))))
         tx-data (ends-with tx-data)]
     (when-let [e (invalid-datom db tx-data schemas)] (refuse! e))
-    (let [r (apply-fn tx-data)]
+    ;; Datahike refuses a lookup ref that names no entity (a cite's target, a wiki link: its :entity-id/missing): made the
+    ;; typed :seon.db/no-target naming the lookup; any other throw is Datahike's own (docs/references.md#an-entity-cites)
+    (let [r (try (apply-fn tx-data)
+                 (catch clojure.lang.ExceptionInfo x
+                   (let [{:keys [error entity-id]} (ex-data x)]
+                     (if (and (= :entity-id/missing error) (vector? entity-id) (= 2 (count entity-id)) (qualified-keyword? (first entity-id)))
+                       (refuse! (contract/error :seon.db/no-target #'checked (str "nothing on this branch is the lookup in :target: a cite or a link names what exists, or "
+                                                                                  "what the same write made before it; a name that does not exist yet is written in two backticks, ``ns/name``")
+                                                {:target entity-id}))
+                       (throw x)))))]
       (when-let [e (invalid-entity r ix)] (refuse! e))
       r)))
 
@@ -469,7 +484,7 @@
   "The tx-meta of every transaction Seon makes: the runtime that made it
   (:seon.tx/runtime, jolt.host/runtime-fingerprint) and the branch it is written on; and, given
   them, the eval whose code made it (:seon.tx/eval) and the branch a catch-up merged
-  (:seon.tx/merged): provenance is a query on these (docs/ctx.md#provenance). A runtime Jolt
+  (:seon.tx/merged): provenance is a query on these (docs/ctx.md#provenance-who-made-each-fact). A runtime Jolt
   cannot identify (nil) is refused by this contract, never recorded as no runtime."
   {:malli/schema [:function [:=> [:cat :seon.db/branch] [:map [:seon.tx/runtime :string] [:seon.tx/branch :seon.db/branch]]]
                   [:=> [:cat :seon.db/branch [:map [:seon.tx/eval {:optional true} :seon.tx/eval] [:seon.tx/merged {:optional true} :seon.tx/merged]]]

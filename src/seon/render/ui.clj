@@ -810,8 +810,9 @@
   "Where a cite's joins hold an entity, and the identity attribute that marks it held whole there (an entity
   is held once in ctx, {:db/id e} at any other path: docs/ctx.md#the-pattern): each join path below a cite,
   the ones that hold an entity by the cite's own pattern first."
-  [[[:section] :seon.doc/address] [[:var] :var/name] [[:var :var/form] :form/id] [[:schema] :schema/key] [[:ns] :ns/name]
-   [[:task] :seon.task/id] [[:section :seon.doc/_parent :*] :seon.doc/address] [[:var :callers :*] :form/id] [[:var :callers :* :form/defines :*] :var/name]])
+  (into (mapv (fn [a] [[:seon.cite/target] a]) ref/target-attrs)
+        [[[:seon.cite/target :var/form] :form/id] [[:seon.cite/target :seon.doc/_parent :*] :seon.doc/address]
+         [[:seon.cite/target :callers :*] :form/id] [[:seon.cite/target :callers :* :form/defines :*] :var/name]]))
 
 (defn- fill
   "Node x with each {:db/id e} held whole at another path of ctx c (held: e to that path) replaced by the node
@@ -826,13 +827,13 @@
                    :else x))]
     (go #{} x)))
 
-(declare page-cites)
+(declare page-cites held-whole)
 
 (defn help-form
-  "The form an agent runs to read more of x, a wiki address (a string), a namespace or a function (a symbol): the one place it is
-  written, so it changes in one place: `doc` takes a wiki address, a schema key or a name (docs/agent.md#finding-your-way)."
-  {:malli/schema [:=> [:cat [:or :string :symbol]] :string]}
-  [x] (if (string? x) (str "(doc \"" x "\")") (str "(doc '" x ")")))
+  "The form an agent runs to read more of x, a wiki address (a string), a namespace or a function (a symbol), a schema key: the
+  one place it is written, so it changes in one place: `doc` takes a wiki address, a schema key or a name (docs/agent.md#finding-your-way)."
+  {:malli/schema [:=> [:cat [:or :string :symbol :keyword]] :string]}
+  [x] (cond (string? x) (str "(doc \"" x "\")") (keyword? x) (str "(doc " x ")") :else (str "(doc '" x ")")))
 
 (defn- source-block
   "Source text src as the model and the page read code: a block the printer fences verbatim."
@@ -874,27 +875,24 @@
 (defn- var-hiccup
   "A cited function, drawn for the question the agent has of it. One it will change (the plan's task is in its namespace, or its
   proofs reach it): its source whole, which holds its doc and contract, and the tests that will judge the change. One it only
-  calls or copies: its signature, its doc and one real call taken from a test or a caller. A library var (v nil) from the
-  process's own metadata. Nothing of who calls it."
-  {:malli/schema [:=> [:cat :qualified-symbol [:maybe :map] :boolean] :any]}
+  calls or copies: its signature, its doc and one real call taken from a test or a caller. Nothing of who calls it."
+  {:malli/schema [:=> [:cat :qualified-symbol :map :boolean] :any]}
   [sym v changing?]
   (let [src (get-in v [:var/form :form/src])
-        m (when-not v (some-> (find-ns (symbol (namespace sym))) ns-interns (get (symbol (name sym))) meta))
         forms (vals (:callers v))
         defs-of (fn [f] (for [d (let [ds (:form/defines f)] (if (map? ds) (vals ds) ds)) :when (and (:var/name d) (not= sym (:var/name d)))] d))
         test? (fn [f] (some #(contains? (set (:var/meta %)) :test) (defs-of f)))
         tests (sort-by str (distinct (for [f forms :when (test? f) d (defs-of f) :when (contains? (set (:var/meta d)) :test)] (:var/name d))))
         call (some #(call-in (:form/src %) sym) (concat (filter test? forms) (remove test? forms)))
-        doc (or (:var/doc v) (:doc m))]
+        doc (:var/doc v)]
     [:section
      [:h3 (str sym)]
      (if changing?
        (list [:p (if (contains? (set (:var/meta v)) :test) "A test your plan names." "A function your plan names.")]
-             (if src (source-block src) (list (when m [:p (str (:arglists m))]) (when doc [:p doc]) [:p "Read it: " [:code (str "(source " sym ")")]]))
+             (if src (source-block src) (list (when doc [:p doc]) [:p "Read it: " [:code (str "(source " sym ")")]]))
              (when (seq tests) [:p {:key "tests that reach it"} (str (count tests) " tests reach it: " "(callers '" sym ") lists them.")]))
        (list [:p (if (contains? (set (:var/meta v)) :test) "A test your plan names." "A function your plan names.")]
              (when src [:p [:code (str (reader/arglists src (symbol (namespace sym))))]])
-             (when m [:p [:code (str (:arglists m))]])
              (when doc [:p doc])
              (when call [:p "A real call: " [:code call]])
              (when (and (contains? (set (:var/meta v)) :test) src) (source-block src))))]))
@@ -932,24 +930,21 @@
   [:section [:h3 path] (when (seq says) [:p says]) (when (seq usage) [:pre usage])])
 
 (defn cite-hiccup
-  "A cite as pulled (and filled) with its joins, as one hiccup by what it cites: a wiki section (`section-hiccup`), a function
-  (`var-hiccup`), a schema key or setting (`key-hiccup`), a namespace (its doc and how to read it), a task (its plan), or what
-  resolves to nothing, said so. The page and the model read it alike; `doc` answers it on demand. See
+  "A cite as pulled (and filled) with its target joined, as one hiccup by what the target is: a wiki section (`section-hiccup`),
+  a function (`var-hiccup`), a schema key or setting (`key-hiccup`), a namespace (its doc and how to read it), a task (its plan)
+  or a file (how to read it). The page and the model read it alike; `doc` answers it on demand. See
   docs/references.md#an-entity-cites."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] :any] [:=> [:cat :seon.host/db :map :map] :any]]}
   ([db c] (cite-hiccup db c {}))
-  ([db {:seon.cite/keys [address name depth] sec :section v :var tk :task sch :schema n :ns} {:keys [lookups changing?]}]
-   (let [x (or address name)]
-     (cond
-       (:seon.doc/address sec) (section-hiccup sec depth)
-       (:seon.task/id tk) [:section [:h3 (str (:seon.task/id tk))] [:p "Another task your plan names."]
-                           (when-let [pl (:seon.task/plan tk)] (markdown pl))]
-       (qualified-symbol? name) (if (and (nil? (:var/name v)) (nil? (some-> (find-ns (symbol (namespace name))) ns-interns (get (symbol (clojure.core/name name))))))
-                                  [:section [:h3 (str name)] [:p (:unresolved ref/problem-messages)]]
-                                  (var-hiccup name (when (:var/name v) v) (boolean changing?)))
-       (:schema/key sch) (key-hiccup db name sch (or lookups []))
-       (:ns/name n) [:section [:h3 (str name)] [:p (str "A namespace your plan names." (when (:ns/doc n) (str " " (:ns/doc n))))] [:p "Read it: " [:code (help-form name)]]]
-       :else [:section [:h3 (str x)] [:p (str "Your plan names this. " (:unresolved ref/problem-messages))]]))))
+  ([db {depth :seon.cite/depth t :seon.cite/target} {:keys [lookups changing?]}]
+   (cond
+     (:seon.doc/address t) (section-hiccup t depth)
+     (:seon.task/id t) [:section [:h3 (:seon.task/id t)] [:p "Another task your plan names."]
+                        (when-let [pl (:seon.task/plan t)] (markdown pl))]
+     (:var/name t) (var-hiccup (:var/name t) t (boolean changing?))
+     (:schema/key t) (key-hiccup db (:schema/key t) t (or lookups []))
+     (:ns/name t) [:section [:h3 (str (:ns/name t))] [:p (str "A namespace your plan names." (when (:ns/doc t) (str " " (:ns/doc t))))] [:p "Read it: " [:code (help-form (:ns/name t))]]]
+     (:file/path t) [:section [:h3 (:file/path t)] [:p "A file your plan names."] [:p "Read it: " [:code (str "(slurp \"" (:file/path t) "\")")]]])))
 
 (defn cited
   "One thing the agent's task or its needs cite (a component over ctx and the db), named by its target k: the cite at ctx path :at
@@ -992,13 +987,15 @@
   stored lead) and the form that reads it. Not shown whole: an agent reads one when it needs it. Nothing when it has none."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
-  (let [cites (for [k (sort-by #(get-in c [:seon.cite/_of % :seon.cite/order]) (keys (:seon.cite/_of c)))] (ratom/realize (get-in c [:seon.cite/_of k])))]
+  (let [ks (sort-by #(get-in c [:seon.cite/_of % :seon.cite/order]) (keys (:seon.cite/_of c)))
+        held (held-whole c (for [k ks] [:seon.cite/_of k]))
+        cites (for [k ks] (fill c held (ratom/realize (get-in c [:seon.cite/_of k]))))]
     (when (seq cites)
       [:section
        [:h2 "If you need more"]
        (into [:ul]
-             (for [{:seon.cite/keys [address name] sec :section} cites :let [x (or address name)]]
-               [:li (or (:seon.doc/heading sec) (str x)) ": " (:seon.doc/lead sec) " " [:code (help-form x)]]))])))
+             (for [{t :seon.cite/target} cites :let [x (ref/target-value t)]]
+               [:li (or (:seon.doc/heading t) (str x)) ": " (:seon.doc/lead t) " " [:code (help-form x)]]))])))
 
 (defn searched
   "One search the agent's context holds (a component over ctx and the db), drawn as one compact hiccup that the
@@ -1060,13 +1057,14 @@
                        (for [n (sort-by #(str (get-in task [:seon.task/needs % :seon.task/id])) (keys (:seon.task/needs task)))
                              :when (not= :merge (get-in task [:seon.task/needs n :seon.task/kind]))] [:seon.agent/task :seon.task/needs n :seon.cite/_of])
                        [])
-        all (for [g groups k (sorted g) :let [p (conj (vec g) k)]]
-              {:path p :target (str (or (get-in c (conj p :seon.cite/address)) (get-in c (conj p :seon.cite/name))))
-               :name (get-in c (conj p :seon.cite/name)) :rank (ref/strength (get-in c (conj p :seon.cite/depth)))})
+        paths (for [g groups k (sorted g)] (conj (vec g) k))
+        ;; each entity a cite joined is held once: a target held at another path is read from there
+        held (held-whole c paths)
+        all (for [p paths :let [t (fill c held (ratom/realize (get-in c (conj p :seon.cite/target))))]]
+              {:path p :id (:db/id t) :target (str (ref/target-value t)) :name (:var/name t) :rank (ref/strength (get-in c (conj p :seon.cite/depth)))})
         all (remove #(proofs (:name %)) all)
-        by (group-by :target all)
-        chosen (vec (for [t (distinct (map :target all))] (reduce (fn [a b] (if (> (:rank b) (:rank a)) b a)) (by t))))
-        held (held-whole c (map :path all))]
+        by (group-by :id all)
+        chosen (vec (for [t (distinct (map :id all))] (reduce (fn [a b] (if (> (:rank b) (:rank a)) b a)) (by t))))]
     (vec (for [{:keys [path target]} chosen] [path target held]))))
 
 (def ^:private reason-words
@@ -1568,14 +1566,15 @@
   [{db0 :seon.db/db k :key ix :seon.render/index}]
   (let [t (session/example-t db0 k)
         db (d/as-of db0 t)
-        c (ctx/agent-ctx ix db (seon.db/eid db :seon.agent/key k))]
+        c (ctx/agent-ctx ix db (seon.db/eid db :seon.agent/key k))
+        placed (ctx/placed-messages db c)]
     (into [:details {:wire/ref [:example k t]}
            [:summary {:class "muted" :wire/for "page"} (str "example session " k)]
            [:p {:wire/role "user" :wire/for "model"} (session/example-open k (:seon.agent/description c))]]
           (concat
-            (for [[_ cid] (ctx/turns c)
-                  :let [{:keys [messages evals]} (ctx/turn-members db c cid)
-                        evals (map first evals)
+            (for [[n cid] (ctx/turns c)
+                  :let [messages (get placed n)
+                        evals (map first (ctx/turn-evals c cid))
                         model? #(get-in c [:seon.eval/_agent % :seon.eval/call-id])
                         step #(eval-hiccup {:db db} (get-in c [:seon.eval/_agent %]))]]
               (into [:div {:wire/turn (get-in c [:seon.model-call/_agent cid :seon.model-call/n])}]
@@ -1631,11 +1630,12 @@
 
 (defn conversation-turn
   "Turn :key as the chat shows it and the model reads it, found by its model call's id, one seek (agent -> call -> its records, so a record of another turn touches nothing this read and an earlier
-  turn never runs again): the messages it took, its reply holding the evals it ran, and the evals of other hands after it, each eval and message a component of its own. See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:key :int]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db n :key}]
-  (when-let [cid (some->> (ratom/realize (:seon.agent/key c)) (ctx/call-of db n))]
-    (let [{:keys [messages evals]} (ctx/turn-members db c cid)
+  turn never runs again): the messages it took (:messages, [[m id]] as the list placed them: `seon.ctx/placed-messages`), its reply holding the evals it ran, and the evals of other hands after it, each eval and message a component of its own. A turn whose call is not made yet (the one now opening)
+  holds the messages delivered for it alone. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:key :int] [:messages {:optional true} [:sequential [:tuple :int :string]]]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db n :key messages :messages}]
+  (if-let [cid (some->> (ratom/realize (:seon.agent/key c)) (ctx/call-of db n))]
+    (let [evals (ctx/turn-evals c cid)
           model? (let [plain (ratom/untracked c)] (fn [e] (get-in plain [:seon.eval/_agent e :seon.eval/call-id])))
           ;; who posts that it was opened, read here once and not by each eval
           agent-key (ratom/realize (:seon.agent/key c)) agent-id (some-> agent-key keyword)
@@ -1657,22 +1657,28 @@
                                                                    (assoc ::in-flight true))
                                                                  (boolean (seq ours)) (map item ours))]
                                                   (map item (remove (comp model? first) evals)))))]
-          (into [:div {:class "seon-stack" :wire/turn n}] kids))))))
+          (into [:div {:class "seon-stack" :wire/turn n}] kids))))
+    ;; the turn now opening has no call yet: what was delivered since the last turn's edge reads here, before the turn begins
+    (when-let [ms (seq messages)]
+      (into [:div {:class "seon-stack" :wire/turn n}] (for [[m id] ms] [#'chat-message {:key id :at [:seon.message/_to m]}])))))
 
 (defn conversation-list
   "The conversation of an agent's page (c-rows), what the model reads as messages (:seon.render/messages) and the person as the chat: its system message, the example sessions it reads, what opens its own session (every conversation opens on a user
-  message), what was asked (the person's: the model reads the plan in the task's part), a component for each of its turns (`conversation-turn`), then how it stands (the person's). It reads the agent's turn number and nothing of its records: a new eval runs its turn alone, and a new turn this list and a lookup of each earlier turn's marker.
+  message), what was asked (the person's: the model reads the plan in the task's part), a component for each of its turns (`conversation-turn`), then how it stands (the person's). It reads the agent's turn number, the turns' bases and the index of the messages to the agent (`seon.ctx/placed-messages`: where each was read, derived from when it was delivered, handed to each turn as its :messages) and nothing else of its records: a new eval runs its turn alone, and a new turn or message this list and a lookup of each earlier turn's marker; a turn runs again for its own messages alone.
   See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:seon.render/list "c-rows" :seon.render/messages true :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  (let [k (ratom/realize (:seon.agent/key c))]
+  {:seon.render/list "c-rows" :seon.render/messages true :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db}]
+  (let [k (ratom/realize (:seon.agent/key c))
+        turn (or (ratom/realize (:seon.agent/turn c)) 0)
+        ;; where each message was read, once for every turn (a turn is given its own, so a message delivered runs this list and the turn it reached)
+        placed (when k (ctx/placed-messages db c))]
     [:ol {:id "c-rows"}
      [#'system-message {}]
      [#'session-examples {}]
      (when k [:li {:wire/role "user" :wire/for "model" :wire/ref [:session k]} (session/session-open k)])
      (when (:seon.agent/task c) [#'chat-ask {:wire/for "page"}])
      ;; one past the turn in force: what was taken for the turn that reads it comes before that turn begins (seon.turn/take!, tell-error!); a turn no record names draws nothing
-     (for [n (range 0 (+ 2 (or (ratom/realize (:seon.agent/turn c)) 0)))] [#'conversation-turn {:key n}])
+     (for [n (range 0 (+ 2 turn))] [#'conversation-turn (let [ms (get placed n (when (= n (inc turn)) (:pending placed)))] (cond-> {:key n} ms (assoc :messages ms)))])
      [#'chat-end {:wire/for "page"}]
      [#'proof-story {:wire/for "page"}]]))
 

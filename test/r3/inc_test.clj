@@ -25,7 +25,7 @@
                                       (zero? (.nextInt rng 3)) (assoc :seon.task/kind :merge))])
                 (task/execution-tx [(str "r3/" nm)] :running)))
       4 (when t (task/env-tx t {:max-turns (inc (.nextInt rng 9))}))
-      5 [{:seon.root/id :root :seon.config.agent/max-running (inc (.nextInt rng 40)) :seon.config.merge/max-running 1}]
+      5 (seon.test-store/root-tx {:seon.config.agent/max-running (inc (.nextInt rng 40)) :seon.config.merge/max-running 1})
       6 (when (zero? (.nextInt rng 4)) [{:seon.root/id :root :seon.root/boot (pick ["r3-boot" "old-boot"])}])
       ;; a need onto a plain work task (they need nothing), from a task that is not one: no cycle
       7 (let [work (filterv #(re-find #"/p[0-9]+$" %) ts) src (pick (filterv #(not (re-find #"/p[0-9]+$" %)) ts))]
@@ -40,7 +40,7 @@
   [seed]
   (fx/load! 30 6 (fn [conn] (let [rng (java.util.Random. seed)
                     ;; one merge at a time: the octopus merge degenerates to M1's merge queue, the oracle's rule
-          _ (d/transact conn {:tx-data [{:seon.root/id :root :seon.config.merge/max-running 1}]})]
+          _ (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.merge/max-running 1})})]
       (loop [k 0 idx (r/index @conn) bad 0]
         (if (= k 150)
           (is (zero? bad) (str "seed " seed))

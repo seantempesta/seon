@@ -8,19 +8,18 @@
 
 (defn- write-declared!
   "Declared state's tx written on main: the error that built it as it is; an empty tx
-  writes nothing ({:ok true :changed 0}); else the writer's answer, with counts, the datoms
-  written and the citation problems of decls (seon.task/citation-problems) when any."
-  {:malli/schema [:=> [:cat :seon.root/sys :any :map [:maybe [:sequential :any]]] :map]}
-  [sys tx counts decls]
+  writes nothing ({:ok true :changed 0}); else the writer's answer, with counts and the datoms
+  written. A cite whose target is no entity is the writer's refusal, :seon.db/no-target (docs/references.md#an-entity-cites)."
+  {:malli/schema [:=> [:cat :seon.root/sys :any :map] :map]}
+  [sys tx counts]
   (cond (contract/error? tx) tx
         (empty? tx) (assoc counts :ok true :changed 0)
-        :else (let [ps (when decls (task/citation-problems @(:conn sys) (vec decls)))]
-                (cond-> (merge @(root/transact-main! sys tx) counts {:datoms (count tx)}) (seq ps) (assoc :problems ps)))))
+        :else (merge @(root/transact-main! sys tx) counts {:datoms (count tx)})))
 
 (defn create!
   "Write task declarations as held tasks. Answers the writer's answer, or the error."
   {:malli/schema [:=> [:cat :seon.root/sys [:vector :seon.task/declaration]] :map]}
-  [sys decls] (write-declared! sys (task/create-tx @(:conn sys) decls) {} decls))
+  [sys decls] (write-declared! sys (task/create-tx @(:conn sys) decls) {}))
 
 (defn request!
   "Work request decl as the tasks template makes of it (seon.template/request, the default: one
@@ -226,7 +225,7 @@
        ;; the outcome rides in the declarations' transaction, and only when it changed: an unchanged
        ;; good read still writes nothing
        (load-answer (write-declared! sys (cond-> tx (and (not (contract/error? tx)) (not= outcome held)) (into (tasks-read-tx outcome)))
-                                     {:files (count files)} (mapcat identity (vals files))))))))
+                                     {:files (count files)}))))))
 
 (def ^:private example-identities
   "The attributes that name a record of an example session, each unique. See docs/tasks.md#a-task-names-example-sessions."
@@ -277,21 +276,22 @@
 (defn load-docs!
   "Re-index the wiki (the pages under dir of the checkout, docs by default) into main as section
   entities (seon.doc/load-tx), a person's explicit act: a changed section rewritten, a removed one retracted, an
-  unchanged wiki writing nothing. Answers the writer's answer with the counts. See docs/source.md#indexing-a-tree."
+  unchanged wiki writing nothing. Answers the writer's answer with the counts; a link to no section is its refusal, :seon.db/no-target naming
+  it (docs/references.md#the-wiki-in-the-store). See docs/source.md#indexing-a-tree."
   {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
   ([sys dir]
    (locking load-lock
      (let [db @(:conn sys)]
        (write-declared! sys (doc/load-dir-tx db (config/checkout) dir (root/wiki-baseline sys (config/checkout) dir))
-                        {:pages (count (doc/pages (config/checkout) dir))} nil)))))
+                        {:pages (count (doc/pages (config/checkout) dir))})))))
 
 (defn problems
   "Every open problem on main, by class (seon.problems/health): recorded errors counted
   by signature (:platform :eval :agent :effect) and runs' red proofs, cost verdicts,
   merges, deaths, errors and waste, each row with its producer, owning namespace, evidence
   as data, reproducing proofs and the tasks already answering it; and what the program's
-  facts make true now (:dead-citation). Reads main and the api's fold (the true counts of
+  facts make true now (:unnamed-site, :stale-section). Reads main and the api's fold (the true counts of
   repeats not yet on main). The render proc's health, kept by what each move of main changed
   (seon.render.proc/health!), brought to main as this call reads it: a read costs what main changed
   since the last, never the whole program (seon.problems/health). See docs/health.md#cost."

@@ -288,7 +288,7 @@ The owner's rulings of 2026-11-05, on looking before building and on what makes 
 
 ### An agent's entity, pull and renders make most of its context (owner, 2026-11-05)
 
-"Design the agents entity with useful information and make it so the pull pattern and the render functions generate the majority of the agents context. It teaches them about the system, it explain what task they are working on, how messaging works when they get a message, evertyhing. It's all data driven." And: "NO SPECIAL CASE FOR CITING. That's just data and a render function". And: "Definitely got rid of \"runs\" (that concept doesn't exist) agents have turns, evals, max turns, etc." Stated in: [ctx](ctx.md#what-the-model-reads-and-what-the-page-draws).
+"Design the agents entity with useful information and make it so the pull pattern and the render functions generate the majority of the agents context. It teaches them about the system, it explain what task they are working on, how messaging works when they get a message, evertyhing. It's all data driven." And: "NO SPECIAL CASE FOR CITING. That's just data and a render function". And: "Definitely got rid of \"runs\" (that concept doesn't exist) agents have turns, evals, max turns, etc." Stated in: [ctx](ctx.md#what-the-model-reads-and-what-the-page-renders).
 
 ### The debug page draws history with today's renders, and says when that differs (owner, 2026-11-05)
 
@@ -472,7 +472,7 @@ The owner's rulings of 2026-10-29, each with where it is now stated; they stand 
 
 ### The agent's record is facts about its work (owner, 2026-10-29)
 
-"The agent's record is facts about its work. Telemetry and derived data live on their own entities, pointing at what they describe: a vector at its eval, a model call at its turn, a process sample at its agent. The agent's pull never reaches them, and the debug view and the ui render them." The agent's pull is `*` plus hand-declared reverse joins (its turns, evals, newest messages) and its task; anything an agent writes on its entity is pulled and rendered by its schema. Stated in: docs/ctx.md#the-record-is-the-agents-work, docs/ctx.md#the-pattern.
+"The agent's record is facts about its work. Telemetry and derived data live on their own entities, pointing at what they describe: a vector at its eval, a model call at its turn, a process sample at its agent. The agent's pull never reaches them, and the debug view and the ui render them." The agent's pull is `*` plus hand-declared reverse joins (its turns, evals, newest messages) and its task; anything an agent writes on its entity is pulled and rendered by its schema. Stated in: docs/ctx.md#the-agents-entity-holds-its-work, docs/ctx.md#the-pattern.
 
 ### The agent is the unit, not the run (owner, 2026-10-29)
 
@@ -930,7 +930,7 @@ Owner, 2026-10-24: "Approve :seon.turn/error." A turn is written with its sent r
 
 ### A turn records what it sent as refs; texts are read as of the turn
 
-Owner, 2026-10-24: "Approve :seon.turn/sent only; refer to the system prompt's wiki section and the task entity as of the turn's t instead of new :seon.text attributes." One new attribute, `:seon.turn/sent`: the ordered refs to what the turn's request carried (its evals, messages, the system prompt's wiki section and the task entity), resolved as of the turn's t (history is kept); no separate text store. Stated in: docs/ctx.md#the-record-is-the-agents-work (since 2026-10-29 the sent refs are the turn's model call's, `:seon.model-call/sent`).
+Owner, 2026-10-24: "Approve :seon.turn/sent only; refer to the system prompt's wiki section and the task entity as of the turn's t instead of new :seon.text attributes." One new attribute, `:seon.turn/sent`: the ordered refs to what the turn's request carried (its evals, messages, the system prompt's wiki section and the task entity), resolved as of the turn's t (history is kept); no separate text store. Stated in: docs/ctx.md#the-agents-entity-holds-its-work (since 2026-10-29 the sent refs are the turn's model call's, `:seon.model-call/sent`).
 
 ### A config key does what it says; a provider's schema refuses a combination it forbids
 
