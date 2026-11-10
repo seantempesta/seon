@@ -1117,13 +1117,15 @@
   ;; repetition loops asking for answers the model could not see. Now each call of the one
   ;; tool, eval, is answered as its own tool message before the next model call: the scripted model
   ;; (seon.fixtures/two-calls) writes its second call from the answer its first call got. (A reply's text and reasoning are
-  ;; an assistant message of their own before its calls, left out here: seon.ctx.wire-test has them.)
+  ;; an assistant message of their own before its calls, left out here: seon.ctx.wire-test has them.) The request's parts of the
+  ;; agent's evals are read ([:eval id], seon.ctx.wire/request's :parts), so the page, a call Seon made ([:page n]), is not one of them
   (let [[end msgs] (in-agent (fn [{:keys [task ns]}]
                                (let [run (str ns "/t#calls")]
                                  [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 2})")
                                   (str "(let [db (seon.agent/db)]"
-                                       " (->> (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
+                                       " (->> (:parts (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
                                        "                                       :turn 3 :max-turns 2 :origin :model :agent (:key @seon.agent/state)}))"
+                                       "      (filter #(= :eval (ffirst %))) (mapcat second)"
                                        "      (filter #(#{\"assistant\" \"tool\"} (:role %))) (remove #(and (= \"assistant\" (:role %)) (empty? (:tool-calls %)))) (mapv #(select-keys % [:role :tool-calls :tool-call-id :content]))))")]))
                              {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
         end (:value end)
@@ -1263,8 +1265,9 @@
                              (let [run (str ns "/t#throws")]
                                [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                                 (str "(let [db (seon.agent/db)]"
-                                     " (->> (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
+                                     " (->> (:parts (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
                                      "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
+                                       "      (filter #(= :eval (ffirst %))) (mapcat second)"
                                      "      (filter #(= \"tool\" (:role %))) (mapv #(select-keys % [:tool-call-id :content]))))")]))
                            {:config {:seon.config.ai/script 'seon.fixtures/calls-one-throws}})
         [r0 r1 r2 :as rs] (:value msgs)]
@@ -1278,8 +1281,9 @@
                              (let [run (str ns "/t#refused")]
                                [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                                 (str "(let [db (seon.agent/db)]"
-                                     " (->> (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
+                                     " (->> (:parts (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
                                      "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
+                                       "      (filter #(= :eval (ffirst %))) (mapcat second)"
                                      "      (filter #(= \"tool\" (:role %))) (mapv #(select-keys % [:tool-call-id :content]))))")]))
                            {:config {:seon.config.ai/script 'seon.fixtures/calls-one-refused}})
         [_ r1 r2 :as rs] (:value msgs)]
@@ -1300,8 +1304,9 @@
                              (let [run (str ns "/t#forms")]
                                [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                                 (str "(let [db (seon.agent/db)]"
-                                     " (->> (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
+                                     " (->> (:parts (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) 
                                      "                                       :turn 2 :max-turns 1 :origin :model :agent (:key @seon.agent/state)}))"
+                                       "      (filter #(= :eval (ffirst %))) (mapcat second)"
                                      "      (filter #(= \"tool\" (:role %))) (mapv :content)))")]))
                            {:config {:seon.config.ai/script 'seon.fixtures/two-forms-in-a-call}})
         [r0 r1 :as rs] (:value msgs)]
@@ -2552,7 +2557,7 @@
     (is (= :error (:outcome (:value end))) (pr-str end))
     (is (= 16 (count (:sent-hash (:value turn)))) "the hash of the bytes it sent, written before the call")
     (is (= (:sent-hash (:value turn)) (:redrawn (:value turn))) "and its request made again from its records is those bytes")
-    (is (= ["system" "user" "user"] (:roles (:value turn))) "the system message, what opens the session, then the page as Seon's message")
+    (is (= ["system" "user" "assistant" "tool"] (:roles (:value turn))) "the system message, what opens the session, then the page as the call Seon made and its answer (seon.ctx.wire/page-diff-msgs)")
     (is (not (str/includes? (str (peek (:read (:value turn)))) "turns")) (str "the page announces no cap: " (peek (:read (:value turn)))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 
