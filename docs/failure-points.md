@@ -326,7 +326,11 @@ txnid lives in the lock region, where LMDB's oldest-reader rule holds it as it h
 process's death clears it. The first writer to open the store alone after the OS booted again, when a
 newer meta than the mark's is there, writes the mark's meta into both meta pages: the commits after the
 last sync are lost, the store is whole. In the same boot nothing is rolled back (the page cache kept
-every commit). So a SIGKILL loses nothing, and an OS crash or power loss loses only the commits since
+every commit). Until that writer has rolled it back the store is unsettled, and every other open of
+it fails with `MDB_UNSETTLED` (a read-only one, `mdb_copy`'s, one while another process holds it); a
+process waiting on the lock file while the first writer opens it finds it settled. Where the OS's boot
+cannot be identified (LMDB reads it on macOS and Linux) a kill cannot be told from a crash, and an open
+with the flag, or of a store that has marks, fails with EINVAL. So a SIGKILL loses nothing, and an OS crash or power loss loses only the commits since
 the last sync. `bin/check`'s `lmdb-crash` step (`native/lmdb_crash.c`) crashes a run of 40 commits at
 every write point, with any subset of the unflushed writes landing in any order torn at 4 KB, and opens
 each image after a reboot: every one holds the last synced commit (or the one whose sync was under way)

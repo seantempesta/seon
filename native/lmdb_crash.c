@@ -27,6 +27,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdarg.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <signal.h>
@@ -34,6 +35,9 @@
 #include <sys/uio.h>
 #include <sys/wait.h>
 
+#ifndef MDB_UNSETTLED
+#define MDB_UNSETTLED (-30768)	/* a LMDB without it: no open answers it */
+#endif
 #ifndef MDB_SAFENOSYNC
 #define MDB_SAFENOSYNC 0	/* a LMDB without it: plain MDB_NOSYNC, the red control */
 #endif
@@ -76,7 +80,7 @@ int crash_fcntl(int fd, int cmd, ...) {
   int arg = va_arg(a, int); va_end(a);
   return fcntl(fd, cmd, arg);
 }
-int crash_boot_id(uint64_t b[2]) { b[0] = boot; b[1] = 0; return 1; }
+int crash_boot_id(uint64_t b[2]) { b[0] = boot; b[1] = 0; return boot != 0; }	/* boot 0: this OS's boot cannot be identified */
 
 /* ---- the workload and its model ---- */
 #define CHK(x) do { int _r = (x); if (_r) { printf("FAIL %s:%d %s: %s\n", __FILE__, __LINE__, #x, mdb_strerror(_r)); exit(2); } } while (0)
@@ -131,6 +135,70 @@ static int check(const char *path, size_t lo, size_t hi, size_t pending) {
   size_t used = sm.ms_branch_pages + sm.ms_leaf_pages + sm.ms_overflow_pages + sf.ms_branch_pages + sf.ms_leaf_pages + sf.ms_overflow_pages + ids + 2;
   if (r != MDB_NOTFOUND || used != inf.me_last_pgno + 1) { printf("    after a commit: %zu pages accounted, %zu in use (%s)\n", used, inf.me_last_pgno + 1, mdb_strerror(r)); return 4; }
   return 0;
+}
+
+/* ---- what may open a store left unsettled by a crash, and where the boot cannot be identified ---- */
+static int open_as(const char *path, unsigned fl, MDB_env **out) {
+  MDB_env *e; int r = mdb_env_create(&e);
+  if (!r) r = mdb_env_set_mapsize(e, 64u << 20);
+  if (!r) r = mdb_env_open(e, path, fl, 0664);
+  if (r) { mdb_env_close(e); e = NULL; }
+  *out = e; return r;
+}
+static size_t opened_txn(MDB_env *e) { MDB_txn *t; size_t x = 0; if (!mdb_txn_begin(e, NULL, MDB_RDONLY, &t)) { x = mdb_txn_id(t); mdb_txn_abort(t); } return x; }
+
+/* A store whose newest mark is from another boot and older than its newest meta (a crash left
+ * it unsettled): a read-only or MDB_PREVSNAPSHOT open is refused with MDB_UNSETTLED; the first
+ * writable open alone rolls it back to the mark; then a read-only open reads the mark's txn. */
+static int unsettled(const char *dir) {
+  char p[512]; MDB_env *e; int ok = 1, r; size_t synced, newest;
+  snprintf(p, 512, "%s/unsettled.mdb", dir);
+  printf("unsettled: a store with commits after its last sync, opened after a reboot\n");
+  boot = 1;
+  if ((r = open_as(p, flags(), &e))) { printf("  open: %s\n", mdb_strerror(r)); return 0; }
+  churn(e, 50, 0); CHK(mdb_env_sync(e, 1)); synced = txnid_now(e);
+  churn(e, 20, 5); churn(e, 20, 5); newest = txnid_now(e);
+  mdb_env_close(e);
+  boot = 2;	/* the OS booted again; the page cache kept everything, as a crash may not have */
+  r = open_as(p, MDB_NOSUBDIR | MDB_NOTLS | MDB_RDONLY, &e);
+  printf("  read-only first: %s\n", r ? mdb_strerror(r) : "opened");
+  ok = ok && r == MDB_UNSETTLED; if (e) mdb_env_close(e);
+  r = open_as(p, flags() | MDB_PREVSNAPSHOT, &e);
+  printf("  MDB_PREVSNAPSHOT first: %s\n", r ? mdb_strerror(r) : "opened");
+  ok = ok && r == MDB_UNSETTLED; if (e) mdb_env_close(e);
+  r = open_as(p, flags(), &e);
+  size_t at = e ? opened_txn(e) : 0;
+  printf("  then writable, alone: %s at txn %zu (synced %zu, newest %zu)\n", r ? mdb_strerror(r) : "opened", at, synced, newest);
+  ok = ok && !r && at == synced && newest > synced; if (e) mdb_env_close(e);
+  r = open_as(p, MDB_NOSUBDIR | MDB_NOTLS | MDB_RDONLY, &e);
+  at = e ? opened_txn(e) : 0;
+  printf("  then read-only: %s at txn %zu\n", r ? mdb_strerror(r) : "opened", at);
+  ok = ok && !r && at == synced; if (e) mdb_env_close(e);
+  return ok;
+}
+
+/* Where this OS's boot cannot be identified a kill and a crash look alike: MDB_SAFENOSYNC is
+ * refused (EINVAL), for a new store and for one that has marks; a plain MDB_NOSYNC open of a
+ * store without marks still works. */
+static int unknown_boot(const char *dir) {
+  char p[512], q[512]; MDB_env *e; int ok = 1, r;
+  snprintf(p, 512, "%s/marked.mdb", dir); snprintf(q, 512, "%s/plain.mdb", dir);
+  printf("unknown boot: the OS's boot identity cannot be read\n");
+  boot = 1;
+  if ((r = open_as(p, flags(), &e))) return 0;
+  churn(e, 20, 0); CHK(mdb_env_sync(e, 1)); mdb_env_close(e);
+  boot = 0;
+  r = open_as(q, flags(), &e);
+  printf("  a new store, MDB_SAFENOSYNC: %s\n", r ? mdb_strerror(r) : "opened");
+  ok = ok && r == EINVAL; if (e) mdb_env_close(e);
+  r = open_as(p, MDB_NOSUBDIR | MDB_NOTLS | MDB_NOSYNC, &e);
+  printf("  a store with marks, without the flag: %s\n", r ? mdb_strerror(r) : "opened");
+  ok = ok && r == EINVAL; if (e) mdb_env_close(e);
+  r = open_as(q, MDB_NOSUBDIR | MDB_NOTLS | MDB_NOSYNC, &e);
+  printf("  a store without marks, MDB_NOSYNC: %s\n", r ? mdb_strerror(r) : "opened");
+  ok = ok && !r; if (e) mdb_env_close(e);
+  boot = 1;
+  return ok;
 }
 
 int main(int argc, char **argv) {
@@ -216,6 +284,9 @@ int main(int argc, char **argv) {
   close(fdi); unlink(ipath); unlink(path);
   { char l[600]; snprintf(l, 600, "%s-lock", path); unlink(l); }
   printf("%ld images at %d crash points: %ld failed, at %ld crash points\n", images, nev + 1, fails, failpts);
-  printf(fails ? "LMDB-CRASH FAILED\n" : "LMDB-CRASH OK\n");
-  return fails ? 1 : 0;
+  int u = unsettled(argv[1]), b = unknown_boot(argv[1]);
+  { const char *n[] = {"unsettled.mdb", "marked.mdb", "plain.mdb"}; char f[600]; for (i = 0; i < 3; i++) { snprintf(f, 600, "%s/%s", argv[1], n[i]); unlink(f); snprintf(f, 600, "%s/%s-lock", argv[1], n[i]); unlink(f); } }
+  printf("cases: crash images %d, unsettled %d, unknown boot %d\n", !fails, u, b);
+  printf(fails || !u || !b ? "LMDB-CRASH FAILED\n" : "LMDB-CRASH OK\n");
+  return fails || !u || !b ? 1 : 0;
 }
