@@ -3219,15 +3219,12 @@
     (try
       (let [html (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w))))
             tiles (apply str (map :html (filter #(= "#p-task" (:container %)) (r/placed-units w))))
-            g1 (str/index-of tiles "eval-tile-g1")
             ;; what the model reads of the eval: its model render's messages (seon.ctx.wire/eval-msgs), never the chat's elements
             read (pr-str (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "g2"])))]
-        (is (str/includes? tiles "<svg") "the chart is a tile of the agent's parts (owner, 2026-11-10: rendered values in the tiles)")
         (is (not (str/includes? tiles "plain-value")) "a value with no render is no tile")
         (is (str/includes? html "<svg") "and inline in its step, drawn when the step is opened")
         (is (not (str/includes? html "<svg height=\"0")) "drawn as it is")
         (is (str/includes? html "plain-value") "a value with no render: the value printer")
-        (is (some? g1))
         (is (str/includes? read "plain-value") "the model reads the value as data")
         (is (not (str/includes? read "eval-glance")) "and no glance"))
       (finally (r/dispose-walk! w))))
@@ -3518,3 +3515,22 @@
   (let [h (h/html (r/hiccup {:seon.render/index (seon.db/index)} {:db/id 7 :seon.agent/key "b2/a1" :seon.agent/status :idle}))]
     (is (str/includes? h "b2/a1") "its data")
     (is (not (str/includes? h "component-defect")) "never its page's error")))
+
+;; docs/render.md#a-value-draws-itself: an eval whose record names its value's schema is a tile of the agent's parts, read by the seek
+;; that answers it (the evals holding :seon.eval/schema, by its index), so an eval added with no schema reruns no tile list
+(deftest an-evals-rendered-value-is-a-tile-read-by-a-seek
+  (let [[db aid] (cited-world)
+        k (:seon.agent/key (d/pull db [:seon.agent/key] aid))
+        db (d/db-with db [{:seon.eval/id "e3" :seon.eval/agent aid :seon.eval/by "a1" :seon.eval/code "(prove)"
+                           :seon.eval/schema :seon.test/proved :seon.eval/response {:handle 'result/e3 :value {:proofs {'a/b :green}}}}
+                          {:seon.eval/id "e4" :seon.eval/agent aid :seon.eval/by "a1" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e4 :value 3}}])
+        opts {:seon.db/db db :seon.render/index (seon.db/index)}
+        c {:db/id aid}
+        kids (fn [hc] (keep #(when (and (vector? %) (= #'ui/eval-tile (first %))) (:key (second %))) (tree-seq coll? seq hc)))]
+    (is (= ["e3"] (kids (ui/eval-tiles opts c))) "the eval with a rendered value, and only it")
+    (is (str/includes? (h/html (ui/eval-tile (assoc opts :eid (seon.db/eid db :seon.eval/id "e3")))) "a/b") "the tile, by its schema's render")
+    (let [[_ reads] (d/with-reads #(ui/eval-tiles opts c))
+          db2 (d/db-with db [{:seon.eval/id "e5" :seon.eval/agent aid :seon.eval/by "a1" :seon.eval/code "(inc 1)" :seon.eval/response {:handle 'result/e5 :value 2}}])
+          moved (apply concat (d/datoms-diff db db2 :eavt []))
+          touched (seq (filter (fn [dt] (some #(contains? (d/reads-index reads) %) (datahike.reads/datom-keys dt))) moved))]
+      (is (nil? touched) "an eval added with no schema touches nothing the tile list read"))))

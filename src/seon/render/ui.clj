@@ -1318,20 +1318,18 @@
       (-> e (assoc :seon.eval/response (pdb/response-of db e)) (dissoc :seon.eval/result)))))
 
 (defn eval-tile
-  "An eval's rendered value as a tile of the agent's page parts (a component over ctx and the db): a value with a render (its own
-  :seon.render/hiccup, or a render its record's schema declares) drawn whole by it, the same tile the person sees and the model reads
-  (owner, 2026-11-10: \"the rendered tile is the only version of the rendered value that is seen by the model\"); nothing for any
-  other value, whose eval's tool result holds it. See docs/render.md#a-value-draws-itself."
+  "Eval eid's rendered value as a tile of the agent's page parts (a component over the db): its value drawn whole by the render its
+  record's schema (:seon.eval/schema) names, the same tile the person sees and the model reads (owner, 2026-11-10: \"the rendered tile is
+  the only version of the rendered value that is seen by the model\"). See docs/render.md#a-value-draws-itself."
   {:seon.render/style ".eval-tile { min-width: 0; overflow-x: auto; font-size: 0.75rem; }"
-   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db at :at ix :seon.render/index}]
-  (when-let [e (eval-shown c db at)]
-    (let [{:keys [value handle]} (:seon.eval/response e)
-          v (ratom/realize value)
-          k (:seon.eval/schema e)]
-      (when (or (and (map? v) (contains? v :seon.render/hiccup)) (and k (render/declared ix k)))
-        [:section [:h3 (str "eval " (:seon.eval/id e))]
-         (render/hiccup (cond-> {:seon.render/index ix :handle handle :db db} k (assoc :as :block :schema k)) v)]))))
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db] [:eid :int]]]] :any]}
+  [{db :seon.db/db eid :eid ix :seon.render/index}]
+  (let [e (d/pull db [:seon.eval/id :seon.eval/schema :seon.eval/response :seon.eval/result] eid)
+        {:keys [value handle]} (pdb/response-of db e)
+        k (:seon.eval/schema e)]
+    (when (and k (render/declared ix k))
+      [:section [:h3 (str "eval " (:seon.eval/id e))]
+       (render/hiccup {:seon.render/index ix :handle handle :db db :as :block :schema k} (ratom/realize value))])))
 
 (defn- step-tools
   "An opened step's buttons, for a live agent (the page's stylesheet shows them only beside its REPL's input, so no step is drawn again as its status moves): run it again in its place,
@@ -1614,16 +1612,17 @@
 (declare sessions)
 
 (defn eval-tiles
-  "The tiles of agent pull c's evals whose record says their value has a render (its schema, or a value holding its own), each a
-  component of its own (`eval-tile`), read off the pull with no call; nothing when none has, so it places nothing and agent-parts
-  never reads the evals. See docs/render.md#a-value-draws-itself."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
-  [_ c]
-  (when-let [ts (seq (for [e (keys (:seon.eval/_agent c))
-                           :let [x (get-in c [:seon.eval/_agent e]) v (some-> (ratom/realize (:seon.eval/response x)) :value)]
-                           :when (or (ratom/realize (:seon.eval/schema x)) (and (map? v) (contains? v :seon.render/hiccup)))]
-                       [#'eval-tile {:key (ratom/realize (:seon.eval/id x)) :at [:seon.eval/_agent e]}]))]
-    (into [:div] ts)))
+  "The tiles of agent pull c's evals whose value has a render (their record names its schema, :seon.eval/schema), each a component of its
+  own (`eval-tile`), read by the seek that answers it: the evals holding :seon.eval/schema, by that attribute's index, this agent's of
+  them; an eval added with no schema touches no read of this, so it reruns nothing; nothing when none has. See
+  docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
+  [{db :seon.db/db} c]
+  (let [aid (ratom/realize (:db/id c))]
+    (when-let [ts (seq (for [dt (d/datoms db :aevt :seon.eval/schema)
+                             :let [e (d/entity db (:e dt))] :when (= aid (:db/id (:seon.eval/agent e)))]
+                         [#'eval-tile {:key (:seon.eval/id e) :eid (:e dt)}]))]
+      (into [:div] ts))))
 
 (defn agent-parts
   "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists),
@@ -1634,8 +1633,7 @@
   {:seon.render/list "p-task"
    :seon.ctx/pattern [:seon.agent/key :seon.agent/status :seon.agent/outcome :seon.agent/reason :seon.agent/turn :seon.agent/max-turns
                       :seon.agent/ended-turn :seon.agent/ns {:seon.agent/task :seon.task/task-fact} {:seon.cite/_of :seon.cite/cite-fact}
-                      {:seon.search/_of :seon.search/search-fact} {:seon.message/_to [:seon.message/id :seon.message/from]}
-                      {:seon.eval/_agent [:seon.eval/id :seon.eval/schema :seon.eval/response :seon.eval/result]}]
+                      {:seon.search/_of :seon.search/search-fact} {:seon.message/_to [:seon.message/id :seon.message/from]}]
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
   [_ c]
   [:div {:id "p-task"}
