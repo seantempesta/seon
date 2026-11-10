@@ -249,6 +249,26 @@
       (is (= {:pass 0 :fail 1 :error 0} (select-keys (found "d-red") [:pass :fail :error])) "the red is stored red: reused as red, not run again")
       (is (= "1 is not 2" (:message (first (:failures (found "d-red"))))) "with the failures it recorded"))))))
 
+;; docs/merging.md#verdicts-are-a-cache: a run asks the cache for a test's green just before the test would start, so a green
+;; another run stored since this run's plan is reused, never run again (owner, 2026-11-10: ten agents asking for the whole
+;; suite "just want to know if the tests have passed"); a step toward the test service owning each (test, digest) item
+(deftest a-green-stored-since-the-plan-is-reused-not-run
+  (prog)
+  (let [tests '[app.pv-calc-test/add-test app.pv-calc-test/twice-test]
+        dg '{app.pv-calc-test/add-test "d-add" app.pv-calc-test/twice-test "d-twice"}
+        notes (atom [])
+        asked (atom [])
+        ;; another run stored twice-test's green at its digest after this run was planned
+        reused (fn [t d] (swap! asked conj [t d]) (when (= t 'app.pv-calc-test/twice-test) {:digest d :pass 1 :fail 0 :error 0}))
+        ran (proofs/run-tests! tests dg #(swap! notes conj %) nil nil reused)
+        started (set (keep :seon.test/started @notes))]
+    (is (= '[[app.pv-calc-test/add-test "d-add"] [app.pv-calc-test/twice-test "d-twice"]] (sort-by str @asked)) "each test asked for at its digest")
+    (is (started 'app.pv-calc-test/add-test) "a test with no stored green runs")
+    (is (not (started 'app.pv-calc-test/twice-test)) "one stored green since the plan never starts")
+    (is (= {:reused true :pass 1} (select-keys (ran 'app.pv-calc-test/twice-test) [:reused :pass])) "its result is the stored green, said reused")
+    (is (some #(and (:reused %) (= 'app.pv-calc-test/twice-test (:test %))) @notes) "and told as it is reused, as a run's result is as it ends")
+    (is (proofs/green? (ran 'app.pv-calc-test/add-test)))))
+
 (deftest a-refused-commit-or-a-throwing-fixture-is-recorded-red
   ;; review 2026-10-22: a write's declared error was dropped (read as stored), and a fixture's
   ;; throw went only to printed output with a guessed message; the store's refused write is

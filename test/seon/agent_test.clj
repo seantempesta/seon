@@ -1174,6 +1174,22 @@
     (is (str/starts-with? first-code "(my.render/page {:commit #uuid \"") "the first request holds the page as the call (my.render/page p)")
     (is (str/includes? first-page "Your task") "the task's part")))
 
+(deftest a-printed-page-call-runs-at-the-agents-repl
+  ;; docs/prompt.md: before a turn Seon shows the page as a call it made, and the agent can make either call itself with any point it
+  ;; printed. The points a call prints are {:commit :t} (seon.ctx.wire/point-text), so my.render/diff takes them as printed: its code,
+  ;; read from the request and evaluated in the agent, answers what the call's message showed
+  (let [[_ _ r] (in-agent (fn [{:keys [task]}]
+                            [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
+                             (str "(my.task/update! :seon.task/plan (constantly \"Make it, then make it again.\"))")
+                             (str "(let [db (seon.agent/db) k (:key @seon.agent/state)"
+                                  "      ms (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :turn 2 :max-turns 2 :origin :model :agent k}))"
+                                  "      [call answer] (first (for [[a b] (partition 2 1 ms) :let [c (some-> a :tool-calls first :code)] :when (and c (.startsWith c \"(my.render/diff\"))] [c (:content b)]))]"
+                                  "  {:code call :same (when call (= answer (seon.print/text (vary-meta (eval (read-string call)) assoc :seon.print/full true))))})")])
+                          {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
+        {:keys [code same]} (:value r)]
+    (is (some? code) (str "the request after the plan moved holds the diff call: " (pr-str (select-keys r [:value :ex]))))
+    (is (true? same) "its printed code, run at the agent's REPL, answers what the call's message showed")))
+
 ;; docs/resolution.md: the chain holds vars, so what a program defines is what it calls; a delay of fn values kept the old ones, and an edit of wrap-record reached nothing
 (deftest an-edit-of-a-middleware-runs-next
   (let [[_ _ marked vars] (in-agent ["(def marks (atom 0)) (in-ns 'seon.repl)"

@@ -595,9 +595,10 @@
   seon.profile/measure!, the one measurement of a call, and told (done v measured) once it ended,
   measured carrying :fns, what each contracted function it called cost (seon.profile/touched).
   Each measure opens its own epoch of contracted calls (seon.profile/begin!), so a caller's epoch
-  open around an in-process run counts from the last test on (bin/test's shards open none)."
-  {:malli/schema [:=> [:cat :symbol [:sequential :any] [:maybe pos-int?] [:maybe [:map-of :qualified-symbol pos-int?]] :seon.host/fn] :nil]}
-  [n vars ticks budgets done]
+  open around an in-process run counts from the last test on (bin/test's shards open none). A var for which (skip? v) holds,
+  asked just before it would start, is not run: another run has its verdict now (run-tests!'s reused)."
+  {:malli/schema [:=> [:cat :symbol [:sequential :any] [:maybe pos-int?] [:maybe [:map-of :qualified-symbol pos-int?]] :seon.host/fn :seon.host/fn] :nil]}
+  [n vars ticks budgets done skip?]
   (let [each (t/join-fixtures (get @t/each-fixtures n []))
         ;; a test's own budget: its history's (budgets, seon.fx/test-budgets), raised to the
         ;; ^{:seon.test/ticks n} on its deftest (in its digest, being its source), never past ticks
@@ -618,7 +619,7 @@
                            (profile/measure! #(one v) #(vreset! m %))
                            (done v (assoc @m :fns (profile/with-reads (profile/touched)) :budget (budget v)))))
         body #((t/join-fixtures (get @t/once-fixtures n []))
-               (fn [] (doseq [v vars :when (:test (meta v))] (each (fn [] (measured v))))))]
+               (fn [] (doseq [v vars :when (and (:test (meta v)) (not (skip? v)))] (each (fn [] (measured v))))))]
     (if ticks
       (jolt.host/run-interruptible (jolt.host/make-interrupt) body (+ ticks (reduce + (map budget vars))))
       (body))
@@ -631,7 +632,9 @@
   starts, {:seon.test/report m :test test} for each assertion (clojure.test's report map),
   each result {:test :digest :pass :fail :error :ms} as it ends, and {:seon.test/output text
   :ns n} for a red namespace's clojure.test output. It only runs: its caller caches the verdicts
-  (seon.fx/write-verdicts!). Answers {test result}; a test that never reported, because its namespace's
+  (seon.fx/write-verdicts!), each as its test ends (note!), so a run beside it reuses it at once. reused, when given,
+  is asked (reused test digest) just before each test would start: a green result it answers (another run's, stored
+  since this run's plan) is this test's result, :reused true, and the test is not run. Answers {test result}; a test that never reported, because its namespace's
   run threw (a fixture), is an :error result (:unreported true: no verdict of its own, never
   stored) and an :error report carrying that throw's message and data. Each test runs within its budget of engine ticks of work of its own (Jolt's
   run-interruptible): the one from budgets ({test ticks}, seon.fx/test-budgets: from the test's own
@@ -649,10 +652,13 @@
                   [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?]]
                    [:map-of :qualified-symbol :map]]
                   [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?] [:maybe [:map-of :qualified-symbol pos-int?]]]
+                   [:map-of :qualified-symbol :map]]
+                  [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?] [:maybe [:map-of :qualified-symbol pos-int?]] [:maybe :seon.host/fn]]
                    [:map-of :qualified-symbol :map]]]}
-  ([tests digests note!] (run-tests! tests digests note! nil nil))
-  ([tests digests note! ticks] (run-tests! tests digests note! ticks nil))
-  ([tests digests note! ticks budgets]
+  ([tests digests note!] (run-tests! tests digests note! nil nil nil))
+  ([tests digests note! ticks] (run-tests! tests digests note! ticks nil nil))
+  ([tests digests note! ticks budgets] (run-tests! tests digests note! ticks budgets nil))
+  ([tests digests note! ticks budgets reused]
   (let [tset (set tests) ticks (when (and ticks (pos? ticks)) ticks)]
     (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
                    :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.)
@@ -674,7 +680,14 @@
                                                                                   (note! {:seon.test/report m :test v}))
                                                          nil))
                                                      (binding [t/*test-out* out] (report m)))]
-                                  (try (test-vars n (keep #(ns-resolve n (symbol (name %))) ts) ticks budgets done!) nil
+                                  (try (test-vars n (keep #(ns-resolve n (symbol (name %))) ts) ticks budgets done!
+                                                  ;; a green another run stored since this run's plan, looked up just before the test would
+                                                  ;; start: reused, never run again (its result names the run that wrote it)
+                                                  (fn [tv] (let [v (test-symbol (str tv))]
+                                                             (when-let [r (and reused (reused v (digests v)))]
+                                                               (let [r (assoc r :test v :digest (digests v) :reused true)]
+                                                                 (vswap! ran assoc v r) (note! r) true)))))
+                                       nil
                                        (catch Throwable e e)))
                          unreported (for [tst ts :when (not (@ran tst))]
                                       (let [msg (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))
