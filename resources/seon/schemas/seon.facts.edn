@@ -495,7 +495,8 @@
  ;; live): how many keys it swept, how long it took, the branches it saw (a later collection
  ;; runs only once one of them is gone) and how many were gone since the one before
  :seon.root/retained [:map [:swept :int] [:ms number?] [:generation :int]]
- :seon.root/collected [:map [:swept :int] [:ms number?] [:branches [:set :keyword]] [:gone :int]]
+ ;; no history: only the last collection is read (seon.db/collect!), and its history cost 4 nodes a write
+ :seon.root/collected [:and {:seon.db/no-history? true} [:map [:swept :int] [:ms number?] [:branches [:set :keyword]] [:gone :int]]]
  ;; main's content mark: a t past every t main held before the commit that last moved main's content (a datom of an
  ;; attribute a program key's content reads, or carried task content: seon.merge/moves-content?); the writer moves it in that
  ;; same commit, and at its start, so two commits of main with one mark hold the same content (docs/storage.md#mains-content-mark)
@@ -532,8 +533,10 @@
  ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)
  :seon.tx/runtime :string
  ;; the branch the transaction was written on: it travels with a merged datom, so the union
- ;; of every branch's history names who wrote what (seon.union)
- :seon.tx/branch [:and {:seon.db/index true} :keyword]
+ ;; of every branch's history names who wrote what (seon.union). Not indexed by value: it is read off the
+ ;; transaction entity (seon.ctx/made-by), never sought by value, and the index cost 5 nodes a write
+ ;; (docs/storage.md#what-a-datom-costs-to-add)
+ :seon.tx/branch :keyword
  ;; the eval whose code made it (its :seon.eval/id on the branch, "e<its eid>"): an agent's write during
  ;; an eval, its record's included (seon.agent/transact!); none outside an eval
  :seon.tx/eval [:string {:min 1}]
