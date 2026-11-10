@@ -199,22 +199,21 @@
 
 (defn turn-now
   "The agent's turn number in force: its :seon.agent/turn on this branch, 0 before its first model turn. Every record
-  the agent writes names that turn's model call (:seon.eval/call, :seon.message/call: seon.task/call-ref). See docs/turn.md#the-turn-is-a-number."
+  the agent writes names that turn's model call (:seon.eval/call: seon.task/call-ref). See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat] nat-int?]}
   [] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key @state)])) 0))
 
 (defn own-message-tx
-  "Message mid from from, sent at sent-ms, delivered to this agent at turn n: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only, and
-  the turn's model call (:seon.message/call). See docs/turn.md#the-turn-is-a-number."
-  {:malli/schema [:=> [:cat :string :string :any :int nat-int?] :seon.db/tx-data]}
-  [mid from body sent-ms n]
-  (update (task/message-tx mid from [(:key @state)] body sent-ms) 0 assoc :seon.message/call (task/call-ref (:key @state) n)))
+  "Message mid from from, sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
+  took it is derived from the transaction that wrote it (seon.ctx/turn-members). See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :string :string :any :int] :seon.db/tx-data]}
+  [mid from body sent-ms]
+  (task/message-tx mid from [(:key @state)] body sent-ms))
 
 (defn entries-tx
-  "The transaction that writes entries (undelivered) on this branch, delivered at turn n: the entity root wrote on main, with this agent's ref
-  and the turn (own-message-tx)."
-  {:malli/schema [:=> [:cat [:sequential :map] nat-int?] :seon.db/tx-data]}
-  [entries n] (into [] (mapcat (fn [{:keys [id from body sent-ms]}] (own-message-tx id from body sent-ms n))) entries))
+  "The transaction that writes entries (undelivered) on this branch: the entity root wrote on main, with this agent's ref only (own-message-tx)."
+  {:malli/schema [:=> [:cat [:sequential :map]] :seon.db/tx-data]}
+  [entries] (into [] (mapcat (fn [{:keys [id from body sent-ms]}] (own-message-tx id from body sent-ms))) entries))
 
 (defn taken!
   "The first n entries of the inbox (effect outcomes, which no model turn reads) leave it at a turn's take (seon.turn/take!). nil."
@@ -407,24 +406,25 @@
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
 (defn deliver!
-  "Bring what main holds for this agent onto its branch, committed, as turn n's: its messages (undelivered) and the facts of
-  its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). Answers the
+  "Bring what main holds for this agent onto its branch, committed: its messages (undelivered) and the facts of
+  its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). A message
+  on the branch is delivered; the turn that read it is derived from its transaction (seon.ctx/turn-members). Answers the
   messages delivered. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
-  [n]
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
   (let [es (undelivered)
-        tx (into (untaken-facts) (entries-tx es n))]
+        tx (into (untaken-facts) (entries-tx es))]
     (when (seq tx) (transact! tx))
     (commit!)
     es))
 
 (defn messages
-  "The messages to this agent not yet delivered, delivered (deliver!, as a turn delivers them, at the turn in force: `turn-now`: the entities on
+  "The messages to this agent not yet delivered, delivered (deliver!, as a turn delivers them: the entities on
   main to it, another agent's sends included), then the effect outcomes of the inbox. Delivered, a message stays in `@ctx` until the agent
   removes it (`(swap! ctx update :seon.message/_to dissoc e)`), and is not delivered again. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [es (deliver! (turn-now))]
+  (let [es (deliver!)]
     (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
 (def ^:dynamic *fx-stub*

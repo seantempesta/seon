@@ -104,8 +104,7 @@
 (defn task-data
   "The task's data: task t's run sections as data, the same each turn of a run: the task (its
   plan as it accumulated along :needs, prerequisites first); its write set, each program var cites
-  name with its source and its callers (doc/callers), the names that resolve to nothing said
-  once; each proof to the form that runs it at the REPL, or, when it is not written, that it
+  name with its source and its callers (doc/callers); each proof to the form that runs it at the REPL, or, when it is not written, that it
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view). cites: what the task cites, its cite entities and its needs'
   (seon.task/task-cites). What `my.task/data` answers at the agent's REPL, on demand; the page's task part is
@@ -114,16 +113,13 @@
   [db t cites]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)
         refs (search/program-vars db cites)
-        sections (into [] (keep (fn [{a :seon.cite/address n :seon.cite/name tk :seon.cite/task d :seon.cite/depth}]
-                                  (cond a (doc/view db a d) tk (ref/task-view db n d)))) cites)]
+        sections (into [] (keep (fn [{{a :seon.doc/address tk :seon.task/id} :seon.cite/target d :seon.cite/depth}]
+                                  (cond a (doc/view db a d) tk (ref/task-view db (symbol tk) d)))) cites)]
     (cond-> {:task (assoc (select-keys t [:seon.task/id :seon.task/kind :seon.task/instructions])
                           :seon.task/plan plan)
-             ;; a proof is shown with the proofs, not again in the write set; the names that
-             ;; resolve to nothing are one entry, their problem said once
-             :write-set (let [rs (into [] (comp (remove (set proofs)) (map #(ctx/cited db %))) refs)
-                              {gone true there false} (group-by (comp boolean :unresolved) rs)]
-                          (cond-> (vec there)
-                            gone (conj {:unresolved (mapv :unresolved gone) :problem (:unresolved ref/problem-messages)})))
+             ;; a proof is shown with the proofs, not again in the write set; each var a cite names exists (a cite of
+             ;; nothing is refused at its write: docs/references.md#task-references)
+             :write-set (into [] (comp (remove (set proofs)) (map #(ctx/cited db %))) refs)
              ;; (the turn sections' :proofs are each turn's statuses; these are how to run them)
              :to-prove (into (sorted-map-by #(compare (str %1) (str %2)))
                              (for [p proofs]

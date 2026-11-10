@@ -512,18 +512,18 @@
   [] (str (.relativize (.toPath (io/file (str (config/checkout)))) (.toPath (io/file (config/value :seon.config.root/tasks-dir))))))
 
 (defn- with-wiki
-  "Program db db with the tasks and the wiki of the checkout at dir, by root's own loaders
-  (seon.task/load-tx, then seon.doc/load-dir-tx: a text word is a citation when it names a task
-  too). A task file that does not read throws its error: no tasks is no answer."
+  "Program db db with the wiki and the tasks of the checkout at dir, by root's own loaders
+  (seon.doc/load-dir-tx of the wiki dirs, then seon.task/load-tx: a task's cite of a section is a ref to it, so the
+  sections are there first). A task file that does not read throws its error: no tasks is no answer."
   [db dir]
   ;; the program store is keyed by the program's attributes alone (seon.test-store/program-schema-digest),
   ;; so a kept tree's db may lack an attribute a task or a page holds (the cite entities, :seon.cite/id): the ones it
   ;; lacks are added to this value first, as seon.db/install-missing! adds them to a store a root opens
   (let [db (d/db-with db (vec (remove #(contains? (:schema db) (:db/ident %)) pdb/schema)))
+        db (d/db-with db (doc/load-dir-tx db dir (config/value :seon.config.root/wiki-dirs) {}))
         tx (task/load-tx db (my.root/task-files (str dir "/" (tasks-dir))))
-        _ (when (contract/error? tx) (throw (ex-info (:seon.error/message tx) tx)))
-        db (d/db-with db tx)]
-    (d/db-with db (doc/load-dir-tx db dir "docs" {}))))
+        _ (when (contract/error? tx) (throw (ex-info (:seon.error/message tx) tx)))]
+    (d/db-with db tx)))
 
 (defn- health!
   "The health step (docs/health.md#checks-are-callers-of-seon): what this checkout caused since its
@@ -543,7 +543,7 @@
             ;; the base's tasks and wiki, as git holds them, in a directory of this run's own, removed once read
             dir (str root "/target/tmp/health-base-" base "-" (random-uuid))
             based (try (with-wiki (program-db root store (fx/tree-of root base))
-                                  (fx/checkout-at root base ["docs" (tasks-dir)] dir))
+                                  (fx/checkout-at root base ["docs" (tasks-dir) "*.md"] dir))
                        (finally (fx/remove-tree! dir)))
             {:keys [caused attention checks]} (branch-health based head classes)
             h (problems/health head)
