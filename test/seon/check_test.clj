@@ -21,6 +21,27 @@
 
 ;; docs/clocks.md#time-decides-the-owners-exceptions: a step that runs past its bound (the plan's step-bounds) is ended after its
 ;; evidence is captured, and is red with its typed reason, never run again by the run. laws at a bound of 1 ms: ended at once
+;; docs/checks.md#modes: a check that ran nothing is no green (AGENTS.md §9): a selection with one step name a line runs each
+;; (2026-11-10: a plan written one a line ran none and said CHECK OK), and a name no step has is red, never passed over.
+;; Each step under a 1 ms bound, so the run is seconds; what it shows is which steps it ran
+(deftest a-selection-runs-every-step-it-names-and-refuses-one-it-cannot
+  (let [run (fn [steps bounds]
+              (let [sel (str (System/getProperty "java.io.tmpdir") "/check-sel-" (random-uuid))]
+                (clojure.java.shell/sh "mkdir" "-p" sel)
+                (doseq [[f t] {"steps" steps "steps-binary" "" "step-bounds" bounds}] (spit (str sel "/" f) t))
+                (let [r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/check") "--steps" sel)
+                      out (second (re-find #"(?m)^outputs: (\S+)" (:out r)))]
+                  (clojure.java.shell/sh "rm" "-rf" sel)
+                  (some->> out (clojure.java.shell/sh "rm" "-rf"))
+                  r)))
+        lines (run "laws\nlmdb-sem\n" "laws 1\nlmdb-sem 1\n")
+        unknown (run "laws no-such-step" "laws 1\n")]
+    ;; a step's header is printed only when the selection holds it (bin/check's unit)
+    (is (re-find #"(?m)^== laws " (:out lines)) (:out lines))
+    (is (re-find #"(?m)^== lmdb-sem " (:out lines)) "both names, one a line, ran")
+    (is (= 1 (:exit unknown)) (:out unknown))
+    (is (re-find #"FAILED no-such-step: no step of that name" (:out unknown)) "a name no step has is red, named")))
+
 (deftest a-step-past-its-bound-is-ended-red-with-its-evidence
   (let [sel (str (System/getProperty "java.io.tmpdir") "/step-bound-" (random-uuid))
         _ (clojure.java.shell/sh "mkdir" "-p" sel)
