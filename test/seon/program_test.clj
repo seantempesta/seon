@@ -721,6 +721,11 @@
         "and a class of its own, for a reach that reads the whole program's text (a docstring)")
     (spit (str b "/deps.edn") "{:paths []}")
     (is (= (:env in-a) (:env (fx/inputs b))) "deps.edn is a class of its own too")
+    ;; a hotfix landing of .gitignore and one task file reused 14 of 1,891 keys: .gitignore was in :env
+    (spit (str b "/.gitignore") "target/")
+    (is (= (:env in-a) (:env (fx/inputs b))) "a file at the checkout's root (git's, the tools') is no input of every test")
+    (is (not= (get-in in-a [:config :seon.env/bin]) (get-in (fx/inputs b) [:config :seon.env/bin]))
+        "it is the bin class, which a test running git or a script takes")
     (.mkdirs (java.io.File. (str b "/native")))
     (spit (str b "/native/x.c") "int x;")
     (is (not= (:env in-a) (:env (fx/inputs b))) "native/, the pins and the fixtures are every test's")))))
