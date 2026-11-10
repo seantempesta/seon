@@ -109,6 +109,8 @@ if (( st == 0 )) && [[ -s $OUT/slow ]]; then
   echo "prove: the slow tests, last: $(<$OUT/slow)"
   nice -n 15 "$ROOT/bin/test" ${=$(<$OUT/slow)} || st=1
 fi
+# the proofs that pass by waiver (an :overrun in their form), counted by seon.problems/waived-proofs on the tree this run proved
+[[ -s $OUT/waived ]] && echo "prove: $(<$OUT/waived) proofs pass by waiver"
 if (( st == 0 )); then echo "PROVE OK"; else echo "PROVE FAILED"; fi
 print $st > "$OUT/prove.st"; exit $st
 ) 2>&1 | tee "$OUT/prove.log" &

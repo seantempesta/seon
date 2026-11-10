@@ -116,7 +116,7 @@
 (defn per-unit
   "What one unit of W(n) costs under estimate e: its :ops priced by the unit table u,
   overridden by what :per-n states."
-  {:malli/schema [:=> [:cat :seon.cost/sized [:map-of :keyword :seon.cost/unit]] :seon.cost/dims]}
+  {:malli/schema [:=> [:cat :seon.cost/priced [:map-of :keyword :seon.cost/unit]] :seon.cost/dims]}
   [e u]
   (let [derived (reduce (fn [acc [op k]]
                           (if-let [{:keys [ticks ns bytes]} (get u op)]
@@ -128,7 +128,7 @@
 
 (defn expected
   "What estimate e allows at n, per dimension it states: fixed + per-unit x W(n)."
-  {:malli/schema [:=> [:cat :seon.cost/sized [:map-of :keyword :seon.cost/unit] pos-int?] :seon.cost/dims]}
+  {:malli/schema [:=> [:cat :seon.cost/priced [:map-of :keyword :seon.cost/unit] pos-int?] :seon.cost/dims]}
   [e u n]
   (let [p (per-unit e u) f (:fixed e {}) w (work (:growth e) n)]
     (into {} (for [d dimensions :when (or (contains? p d) (contains? f d))]
@@ -175,6 +175,15 @@
       (fit :increments (for [r incs] [(:n r) (- (m r) (m r0))]) (for [r incs] [(:n r) (- (w r) (w r0))]))
       :else (bounded))))
 
+(defn row-ratio
+  "Dimension d of row ({:measured :expected}) as a multiple of its bound: measured over expected, infinite for a
+  measure past a bound of nothing, nil when either is missing. The one arithmetic of a verdict (`judge`) and of a
+  waived proof's multiple (seon.problems/waived-proofs). docs/cost.md#an-accepted-overrun-and-its-ratchet."
+  {:malli/schema [:=> [:cat [:map [:measured :map] [:expected :map]] :keyword] [:maybe :double]]}
+  [{:keys [measured expected]} d]
+  (let [m (get measured d) x (get expected d)]
+    (when (and (some? m) (some? x)) (if (pos? x) (/ (double m) x) (if (pos? m) Double/POSITIVE_INFINITY 1.0)))))
+
 (defn open-tasks
   "The ids (ns/name) of the tasks the checkout's task files declare (resources/seon/tasks, read by the one
   reader of task files, seon.task/file-declarations): the tasks an :overrun may name. docs/cost.md#an-accepted-overrun-and-its-ratchet."
@@ -206,9 +215,7 @@
         ;; but the smallest before growth is fitted (one chunk, never more; a measure under it is
         ;; left as it is, so no point is dropped from the fit)
         quantum {:ticks (double (config/value :seon.config.proofs/tick-quantum))}
-        ratio (fn [{:keys [measured expected]} d]
-                (let [m (get measured d) x (get expected d)]
-                  (when (and (some? m) (some? x)) (if (pos? x) (/ (double m) x) (if (pos? m) Double/POSITIVE_INFINITY 1.0)))))
+        ratio row-ratio
         less-quantum (fn [m d] (let [q (get quantum d 0.0)] (if (> m q) (- m q) m)))
         allowed-ratio (fn [{:keys [measured] :as r} d]
                         (ratio (cond-> r (get measured d) (update-in [:measured d] #(less-quantum % d))) d))

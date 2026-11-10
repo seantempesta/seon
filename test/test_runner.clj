@@ -403,7 +403,8 @@
     (do (println (str "TEST FAILED: " bad)) 1)
   (let [t0 (profile/now-ns)
         ;; the selection's time is the plan's: program db, reach graph, digests and the results read
-        plan (plan-of (source-tree) what all? names (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
+        store (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest)
+        plan (plan-of (source-tree) what all? names store)]
   (if-let [u (:unread plan)]
     ;; a read that failed is not zero greens: nothing runs, and the run says why
     (do (println (str "TEST FAILED: " (:seon.error/message u)))
@@ -412,6 +413,8 @@
         tests? (not= what "checks") checks? (not= what "tests")
         {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky]} plan
         ;; a merge runs these last, once all else is green (bin/prove): out/slow, names, one line
+        ;; the proofs of the tree that pass by a waiver (an :overrun in the form: seon.problems/waived-proofs), for bin/prove's last lines
+        _ (write! (str out "/waived") (str (count (problems/waived-proofs (program-db (source-tree) store) {})) "\n"))
         _ (write! (str out "/slow") (str (str/join " " (sort (map str (keys slow)))) (when (seq slow) "\n")))
         _ (when (seq slow)
             (println (str "prove: " (count slow) " slow tests left for last (bin/prove runs them once all else is green; run one by name: bin/test NS/TEST, all: bin/test --all): "

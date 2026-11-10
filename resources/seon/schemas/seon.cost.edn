@@ -31,6 +31,8 @@
                        [:gen {:optional true} :qualified-symbol]]
  ;; a generated estimate of a function whose contract carries no bound (seon.cost/bound)
  :seon.cost/no-bound [:and :seon.error/base [:map [:seon.error/type [:= :seon.cost/no-bound]] [:var :qualified-symbol]]]
+ ;; what prices an estimate (per-unit, expected): its growth and costs, a proof's whole estimate or the part of its form that states them
+ :seon.cost/priced [:map [:growth :seon.cost/growth] [:ops {:optional true} [:map-of :keyword :seon.cost/amount]] [:per-n {:optional true} :seon.cost/dims] [:fixed {:optional true} :seon.cost/dims]]
  :seon.cost/sized [:map {:closed true}
                       ;; the function measured, and the function of n answering its argument vector
                       [:of :qualified-symbol]
