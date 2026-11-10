@@ -603,8 +603,8 @@
   once its first agent runs. With a running sys, also one thread per :mixed proc of its
   declaration (Flow runs :io procs, agent procs included, on the carriers), its two edge
   readers (Flow's error channel, the fork server's socket) and, while the web proc listens,
-  the web server's acceptor and sweeper (ring-chez-adapter's, each a future of Jolt's agent
-  pool; task seon.web/web-server-threads-are-joined-at-stop). The embedding model's threads are the
+  the web server's acceptor and sweeper (ring-chez-adapter's, each a future, which runs on Jolt's
+  solo pool as clojure-agent-send-off-pool-N, the JVM's name; task seon.web/web-server-threads-are-joined-at-stop). The embedding model's threads are the
   helper's process's, none root's (docs/vector.md#the-model)."
   ([] {:roster {"main" 1 "jolt-shutdown" 1 "jolt-timer" 1 "jolt-io-poller" 1 "jolt-asleep" 1 "jolt-carrier" (fiber-carriers)}
        :gc-sweepers (seon.config/value :seon.config.root/gc-sweepers)
@@ -617,7 +617,7 @@
          web? (true? (get-in (c/state sys) [:web :listening]))]
      (update (declared-threads) :roster merge
              (cond-> {"async-mixed" mixed "seon-fs-events" 1}
-               web? (assoc "clojure-agent-pool" 2))))))
+               web? (assoc "clojure-agent-send-off-pool" 2))))))
 
 (defn- threads
   "The threads this process runs now, measured as declared-threads declares them, and :os,
