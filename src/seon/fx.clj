@@ -779,6 +779,15 @@
                      (recur more (if (.delete f) (- size n) size))
                      size)))))))
 
+(defn forget-greens!
+  "Take back the greens of written ({key digest}) from the cache at dir (:seon.config.proofs/results-dir unless given):
+  what a run stored as each test ended, when the tree changed under it (test-runner's shard), so no green names code it
+  may not have run. A green is a cache (docs/merging.md#verdicts-are-a-cache); a red is never removed. Answers nil."
+  {:malli/schema [:function [:=> [:cat [:map-of [:or :qualified-symbol :string] :string]] :nil]
+                  [:=> [:cat :string [:map-of [:or :qualified-symbol :string] :string]] :nil]]}
+  ([written] (forget-greens! (cfg/value :seon.config.proofs/results-dir) written))
+  ([dir written] (doseq [[k dg] written] (.delete (java.io.File. ^String (verdict-path dir k dg :pass)))) nil))
+
 (defn write-verdicts!
   "Cache what ran ({key result}, a test's {:test :digest :pass :fail :error :ms :ticks :bytes :fns :cost} or a
   step's {:step :digest ...}) of run ({:id, and :tree or :branch :t}, the writer every file names), with

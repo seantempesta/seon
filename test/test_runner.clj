@@ -301,16 +301,17 @@
   "tests (var symbols) dealt into at most jobs shards (shards: :seon.config.proofs/jobs for a full run or a merge's
   verification, what their work is worth for what a change reaches: seon.proofs/worth-shards), the generative check's keys mg
   ({key digest}) dealt among them (deal-mg), each written as out/shard-<i>.edn ({:tests [...] :mg {key digest}
-  :digests {test digest} :tree t}, t the planned tree's id) for bin/test to run, one process each (bin/test
+  :digests {test digest} :tree t :rerun #{test}}, t the planned tree's id, rerun the tests that run whatever the cache
+  holds: every one of a full run, and the reuse audit's) for bin/test to run, one process each (bin/test
   removes the last run's first), and each measured test's stall bound as out/stall-bounds (\"<test> <ms>\"
   lines, for bin/stalls). Answers the shard count."
-  [out tests digests tree mg jobs ms]
+  [out tests digests tree mg jobs ms rerun]
   (let [sh (proofs/shards tests jobs ms)
         mg-ms (measured-ms (keys mg))
         floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
         dealt (deal-mg sh mg ms mg-ms)]
     (doseq [[i [ts m]] (map-indexed vector dealt)]
-      (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :mg m :digests (select-keys digests ts) :tree tree})))
+      (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :mg m :digests (select-keys digests ts) :tree tree :rerun (into (sorted-set) (filter (set ts)) rerun)})))
     ;; each measured test's stall bound, k times its own last run, for bin/stalls (a test with no
     ;; record takes the floor, out/stall-ms)
     (write! (str out "/stall-bounds") (apply str (for [[t m] (sort-by key ms)] (str t " " (max floor (* k m)) "\n"))))
@@ -319,26 +320,22 @@
 (defn- shard!
   "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
   (seon.proofs/run-tests!), each test named as it starts (started) and as it ends (ended), each
-  red one printed (RED); then
-  its results, greens and reds, recorded at their digests in the results store in one commit (seon.fx/write-verdicts!:
-  their failures and each test's contracted functions' cost with them), unless the tree is not the
-  plan's before and after the run (an edit during the run: what ran is not what the digests name, so
-  nothing is kept, and the run stays as reported). A shard stopped midway (TERM: a red check step
-  stopped the run, or the run itself was stopped) stores the greens of the tests that ended, by a
-  shutdown hook, so the next run never repeats them; its reds and unfinished tests are not stored.
-  Then SHARD n green m red. Answers the exit status."
+  red one printed (RED). A test another run stored green at its digest since the plan is not run (looked up just before
+  it would start: reused), unless the plan says it runs whatever the cache holds (:rerun: a full run's, the reuse audit's). A green is stored the moment its test ends (seon.fx/write-verdicts!, with its contracted
+  functions' cost), so every run beside this one reuses it at once, and a stopped shard keeps what ended; its reds and
+  the generative keys are stored at the end, in one write. Unless the tree is not the plan's before and after the run
+  (an edit during the run: what ran is not what the digests name): then its greens are taken back
+  (seon.fx/forget-greens!) and nothing else is stored, and the run stays as reported. Then SHARD n green m red. Answers the exit status."
   [file]
-  (let [{:keys [tests digests tree mg]} (edn/read-string (slurp file))
+  (let [{:keys [tests digests tree mg rerun]} (edn/read-string (slurp file))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     ;; armed as root arms them at boot, so a proof counts the same contracted calls here as in an agent's test child (docs/cost.md#counting-calls)
     (contract/instrument! contract/boot-nss)
-    (let [;; the greens of the tests that ended, kept by a stop (the hook below) when the shard ends early
-          greens (volatile! {})
-          stored (volatile! false)
-          _ (.addShutdownHook (Runtime/getRuntime)
-                              (Thread. ^Runnable (fn [] (when (and (not @stored) (seq @greens) (= tree (fx/tree-id (seon.config/checkout))))
-                                                          (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree} @greens {})))))
+    (let [;; one writer for every verdict this shard stores
+          run {:id (str "bin/test " tree " " (random-uuid)) :tree tree}
+          ;; the greens this shard wrote as each ended (the cache's, so a run beside it reuses them at once), and the ones it reused
+          written (volatile! {}) reused (volatile! #{})
           ;; each test under the one bound an agent's run has (seon.proofs/run-tests!): one verdict wherever it runs
           reports (volatile! [])
           ran (proofs/run-tests! tests digests
@@ -355,22 +352,36 @@
                                                                                                  (and (map? (:actual m)) (:verdict (:actual m))) (assoc :cost (select-keys (:actual m) [:rows :verdict]))))))
                                                ;; a test's end, so bin/stalls never names one that finished
                                                ;; and its cost, the work it did (a green test's is read nowhere else)
+                                               (:reused x) (do (println "reused" (:test x) "(green at its digest since the plan: another run stored it)")
+                                                              (vswap! reused conj (:test x)))
                                                :else (do (println "ended" (:test x) (str (:ticks x) " ticks"))
-                                                         (when (proofs/green? x) (vswap! greens assoc (:test x) x))
+                                                         ;; a green is stored the moment it ends, so every run beside this one reuses it
+                                                         (when (proofs/green? x)
+                                                           (let [own (filterv #(= (:var %) (str "#'" (:test x))) @reports)
+                                                                 c ((proofs/costs {:reports own}) (:test x))]
+                                                             (doseq [u (record-run! run {(:test x) (cond-> x c (assoc :cost c))} {})]
+                                                               (println "UNRECORDED" (:key u) (:message u)))
+                                                             (vswap! written assoc (:test x) (:digest x))))
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
                                  (config/value :seon.config.agent/test-ticks)
-                                 (fx/test-budgets tests))
+                                 (fx/test-budgets tests)
+                                 ;; a green another run stored since the plan, looked up just before the test would start
+                                 ;; (not one the plan says runs whatever the cache holds: a full run's, the reuse audit's)
+                                 (fn [t dg] (when-not (contains? rerun t)
+                                              (let [r (get (fx/stored-results {t dg}) dg)] (when (and (map? r) (proofs/green? r)) r)))))
           ;; the tree the tests read is the plan's, still, after the run: an edit during the run (a test
           ;; reading files reads it) is not what the digests name. The plan's tree is the before (one
           ;; tree-id per shard, not two)
           same? (= tree (fx/tree-id (seon.config/checkout)))
-          _ (vreset! stored true)
-          ;; the shard's verdicts, their failures and each test's function costs, cached
+          ;; an edit during the run: the greens stored as they ended name code they may not have run, so they are taken back
+          ;; (a green is a cache; a red is never removed, and none was written before this line)
+          _ (when-not same? (fx/forget-greens! @written))
+          ;; the shard's reds, their failures and each test's function costs, cached (its greens were, as each ended)
           unstored (when same?
                      (let [cost-of (proofs/costs {:reports @reports})]
-                       (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree}
-                                    (into {} (for [[t r] ran] [t (cond-> r (cost-of t) (assoc :cost (cost-of t)))]))
+                       (record-run! run
+                                    (into {} (for [[t r] ran :when (not (or (@written t) (@reused t)))] [t (cond-> r (cost-of t) (assoc :cost (cost-of t)))]))
                                     (proofs/failures {:reports @reports}))))
           ;; the generative check's keys of this shard (seon.proofs/mg-run), cached as steps at their digests; a red
           ;; one with its failure, so it reads as a red test does
@@ -381,11 +392,11 @@
                                              :actual (print/text (:failure r) (:part print/budgets))}]]))
           _ (doseq [[k fs] mg-failures] (println (:message (first fs)) (:actual (first fs))))
           unstored-mg (when (and same? (seq mg-ran))
-                        (record-run! {:id (str "bin/test " tree " " (random-uuid)) :tree tree} mg-ran mg-failures))
+                        (record-run! run mg-ran mg-failures))
           red (+ (count (remove proofs/green? (vals ran))) (count mg-failures))]
       (when-not same? (println "the tree changed since the plan: no result stored"))
       (doseq [u (concat unstored unstored-mg)] (println "UNRECORDED" (:key u) (:message u)))
-      (println (str "SHARD " (+ (count ran) (count mg-ran)) " tests, " (- (+ (count ran) (count mg-ran)) red) " green, " red " red, in "
+      (println (str "SHARD " (+ (count ran) (count mg-ran)) " tests, " (- (+ (count ran) (count mg-ran)) red) " green (" (count @reused) " reused from another run), " red " red, in "
                     (quot (- (profile/now-ns) t0) 1000000) " ms"))
       (if (and (zero? red) (empty? unstored) (empty? unstored-mg)) 0 1))))
 
@@ -473,7 +484,10 @@
                           (config/value :seon.config.proofs/shard-mb) " MB a shard above " (config/value :seon.config.proofs/free-floor-mb) " MB kept free)")))
         n (write-shards! out (if no-test [] run-tests) digests (:tree inputs) (select-keys steps mg-run)
                          (if all? jobs (proofs/worth-shards run-tests jobs ms (config/value :seon.config.proofs/shard-min-ms)))
-                         ms)
+                         ms
+                         ;; run whatever the cache holds: every test of a full run (bin/test --all, which a rerun by name asks
+                         ;; for too), and the reuse audit's greens, whose rerun is its point
+                         (if (true? all?) run-tests audit))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
         step-bin (filterv proofs/step-needs-binary? run-steps)
