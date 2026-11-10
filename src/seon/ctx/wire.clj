@@ -240,7 +240,8 @@
   [h] (clojure.walk/postwalk (fn [x] (if (and (vector? x) (keyword? (first x)) (map? (second x)))
                                        (let [m (second x)
                                              r (when (:id m) (first (str/split (str (:class m)) #"\s+")))
-                                             a (cond-> (dissoc m :class :style :id) (seq r) (assoc :class r))]
+                                             ;; and the page's own marks (:wire/for \"page\"): what the page alone shows says nothing to the model
+                                             a (cond-> (into {} (remove (fn [[k _]] (or (#{:class :style :id} k) (= "wire" (namespace k))))) m) (seq r) (assoc :class r))]
                                          (if (seq a) (assoc x 1 a) (into [(first x)] (nnext x))))
                                        x))
                              h))
