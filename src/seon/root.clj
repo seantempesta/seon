@@ -1293,6 +1293,75 @@
       (:tree built) (assoc :binary-tree (:tree built))
       (and one? (:inputs built)) (assoc :inputs (update (:inputs built) :config merge config-input)))))
 
+(def root-entries
+  "Where the binary's own code starts, the roots of root-reach: its one entry (its modes, root's boot and procs among
+  them: system.edn's procs are edges of seon.system/read-decl, the reach graph's :data-refs). See
+  docs/source.md#the-binary-records-its-program."
+  '[seon.main/-main])
+
+(def agent-body
+  "Where a forked child stops running the binary's code and becomes an agent, which loads main's program from the db: the
+  body the fork server's :fork hands it, and the agent's process entries (:seon.config.source/process-entry's agent side),
+  which the reach graph links from every form that starts a process (seon.lib/fork!'s callers, the fork server's among
+  them). root-reach enters none of them. See docs/source.md#the-binary-records-its-program."
+  '[seon.repl/run! seon.repl/serve! seon.turn/work!])
+
+(defn root-reach
+  "The vars of reach graph g that root's process runs from its binary: the closure of root-entries over g's edges, never
+  entering agent-body. A change to one of them is judged only by a binary built with it (binary-current). See
+  docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :map] [:set :qualified-symbol]]}
+  [{:keys [defs adj rows]}]
+  (let [cut (set (mapcat #(get defs %) agent-body))
+        start (vec (remove cut (mapcat #(get defs %) root-entries)))
+        forms (into (set start) (program/closure start #(remove cut (get adj %))))]
+    (into #{} (for [f forms [k s] (:defines (rows f)) :when (= :var k)] s))))
+
+(defn- build-input?
+  "Is changed path p (with its git modes) something the binary bakes and no load of the db brings: a pin (a gitlink),
+  native code, deps.edn, bin/build, .gitmodules, or a class of resource the build compiles in (seon.fx/env-class: the
+  schemas, system.edn) or the shipped config. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string :string :string] :boolean]}
+  [p old-mode new-mode]
+  (boolean (or (= "160000" old-mode) (= "160000" new-mode)
+               (str/starts-with? p "native/") (#{"deps.edn" "bin/build" ".gitmodules"} p)
+               (str/starts-with? p "resources/seon/config/")
+               (#{:seon.env/schemas :seon.env/system :seon.env/deps} (fx/env-class p)))))
+
+(defn binary-current
+  "Whether a binary built from built's tree (binary-program's record, its :inputs :tree) runs tree's program as tree
+  would have it built: nil when it does, else {:binary its tree :tree tree :reaches [what differs that it bakes]}. Equal
+  trees, or a tree unknown on either side, are nil. What differs is git's changed paths between the two trees: a build
+  input (build-input?) is not current; a source file under src/ is not current when a var defined by one of its forms
+  that changed (its text on db, main holding tree's program, is not in the file as the binary's tree has it) is in
+  root-reach of db's reach graph, or when db holds no namespace of it (added or gone: what it held is unknown). Anything else (tests, the wiki, task files, agent-side code) is current: a process
+  loads it from main's db. The one rule a spawn refusal, the stale-binary row and the gate's build all ask (Point,
+  2026-11-10). Cost: one git diff, one reach graph of db (or g, when the caller holds one), O(changed files' forms).
+  See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string]] [:maybe :map]]
+                  [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string] [:maybe :map]] [:maybe :map]]]}
+  ([db built tree] (binary-current db built tree nil))
+  ([db built tree g]
+   (let [from (get-in built [:inputs :tree])]
+     (when (and from tree (not= from tree))
+       (let [changed (fx/tree-diff (cfg/checkout) from tree)]
+         (if (contract/error? changed)
+           ;; a diff git cannot make is no answer of current: the error, which a caller reads as not current
+           changed
+           (let [inputs (vec (for [[p om nm] changed :when (build-input? p om nm)] p))
+                 src (for [[p] changed :when (and (str/starts-with? p "src/") (str/ends-with? p ".clj"))] p)
+                 g (or g (program/reach-graph db (fx/declared-refs system/built-text)))
+                 reach (root-reach g)
+                 ns-of (fn [p] (d/q '[:find ?n . :in $ ?p :where [?e :ns/file ?p] [?e :ns/name ?n]] db p))
+                 ;; a form changed when its text on db is not in the file as the binary's tree has it (required!'s test)
+                 changed-vars (fn [n p] (let [old (fx/tree-file (cfg/checkout) from p)]
+                                          (for [[id src] (d/q '[:find ?id ?src :in $ ?n :where [?ns :ns/name ?n] [?f :form/ns ?ns] [?f :form/id ?id] [?f :form/src ?src]] db n)
+                                                :when (not (and old (str/includes? old src)))
+                                                [k s] (:defines (get (:rows g) id)) :when (= :var k)] s)))
+                 hits (vec (for [p src :let [n (ns-of p)] v (if n (filter reach (changed-vars n p)) [(symbol p)])] v))
+                 reaches (into inputs hits)]
+             (when (seq reaches) {:binary from :tree tree :reaches reaches}))))))))
+
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote
   none (SIGKILL, a crash: nothing could be written), :unclean, found now. nil on a main no

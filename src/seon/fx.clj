@@ -257,6 +257,27 @@
     {'seon.system/read-decl (set (filter qualified-symbol? (tree-seq #(or (coll? %) (tagged-literal? %))
                                                                      #(if (tagged-literal? %) [(:form %)] (seq %)) decl)))}))
 
+(defn tree-diff
+  "What changed between git trees from and to of the repository at root: [[path old-mode new-mode] ...] (git diff --raw, no
+  renames: a mode 160000 is a pin), or :seon.fx/io-error with git's words when git cannot diff them (a tree it does not
+  hold). See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string :string :string] [:or [:vector [:tuple :string :string :string]] :seon.error/base]]}
+  [root from to]
+  (let [r (git-run {} root ["diff" "--raw" "--no-renames" from to] nil)]
+    (if (zero? (:exit r))
+      (vec (for [l (str/split-lines (:out r)) :when (not (str/blank? l))
+                 :let [[meta p] (str/split l #"\t" 2) [om nm] (str/split (subs meta 1) #" ")]]
+             [p om nm]))
+      (error #'seon.fx/tree-diff :seon.fx/io-error (str "git diff " from " " to ": " (str/trim (str (:err r)))) {:path root}))))
+
+(defn tree-file
+  "The text of path in git tree tree of the repository at root (git show TREE:PATH), or nil when the tree holds no such
+  file. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string :string :string] [:maybe :string]]}
+  [root tree path]
+  (let [r (git-run {} root ["show" (str tree ":" path)] nil)]
+    (when (zero? (:exit r)) (:out r))))
+
 (defn tree-id
   "git's id of the tree at root as it is on disk: HEAD's tree (none before a first commit) with every
   changed and untracked unignored file added, in an index of its own (the repository's untouched), less
