@@ -64,7 +64,7 @@ bridge() {
     my $md = join " ", map { edn($_) . " " . edn($mode{$_}) } sort keys %mode;
     my $code = "(let [db @(:conn sys) r @(seon.root/transact-main! sys (seon.root/landed-tx db {$ch} {$md} " . edn($tree) . " " . edn($new) . "))] (if (seon.contract/error? r) r :landed))";
     print "{:op :eval :agent \"root\" :code " . edn($code) . "}\n";
-  ' "$repo" "$new" "$(git -C "$repo" rev-parse "$new^{tree}")" | "$MAIN/bin/ask" $port)
+  ' "$repo" "$new" "$("$MAIN/bin/tree" "$repo" "$new")" | "$MAIN/bin/ask" $port)
   [[ $r == *':landed'* ]] || { print "bridge: $new did not enter main: $r"; return 1 }
   print "bridge: $new entered main"
 }
