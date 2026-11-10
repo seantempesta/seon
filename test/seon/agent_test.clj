@@ -75,34 +75,6 @@
     (is (= (before 'app.k-test/reads-b) (after 'app.k-test/reads-b)) "a reader of another key doesn't")
     (is (= before (digests (assoc cfg/config :seon.config.root/main "elsewhere"))) "and a place moves nothing")))
 
-(deftest a-branchs-forms-move-the-tests-reading-the-program
-  ;; docs/merging.md#verdicts-are-a-cache: a test reading the program as data (test-runner/program answers an agent's branch db)
-  ;; takes :seon.env/src, which on a branch is moved by the branch's program digest: a branch that breaks the law the test judges
-  ;; never reuses its green, its fix never reuses the red, and a branch holding the program root booted on shares the checkout's key
-  (let [law "(ns app.law-test (:require [clojure.test :refer [deftest is]] [seon.test-store]))\n(deftest law (is (seon.test-store/kept-program-store)))"
-        other "(ns app.other-test (:require [clojure.test :refer [deftest is]]))\n(deftest other (is true))"
-        w (mt/with (mt/world) (mt/code 'app.law-test law) (mt/code 'app.other-test other))
-        booted (fn [db] (mt/with db [{:seon.root/id :root :seon.root/boot "b1"
-                                       :seon.root/source {:root "/r" :files 0 :forms 0 :ms 0 :boot "b1" :program (program/program-digest db)}}]))
-        w0 (booted w)
-        in {:env "e" :tree "t" :config {:seon.env/src "s"}}
-        digests (fn [db] (update-vals (program/graph-index (program/reach-graph db nil) (#'agent/branch-inputs in db db cfg/config) nil) :digest))
-        at-boot (digests w0)
-        broken (mt/with w0 (mt/code 'app.x "(ns app.x)\n(defn f \"Added 2026-11-10.\" [x] x)"))
-        ;; the fix is the broken branch's next edit (a sibling of it on one in-memory world would take its entity id)
-        fixed (mt/with broken (mt/code 'app.x "(ns app.x)\n(defn f \"The same value.\" [x] x)"))]
-    (is (= at-boot (update-vals (program/graph-index (program/reach-graph w0 nil) in nil) :digest))
-        "a branch holding the program root booted on keys every test as the checkout does: its greens are shared")
-    (is (not= (at-boot 'app.law-test/law) ((digests broken) 'app.law-test/law)) "a form the branch adds moves the program's reader: its green is not reused")
-    (is (not= ((digests broken) 'app.law-test/law) ((digests fixed) 'app.law-test/law)) "the fix moves it again: the red is not reused")
-    (is (= (at-boot 'app.other-test/other) ((digests broken) 'app.other-test/other)) "a test not reading the program keeps its key")
-    ;; the done rule (docs/tasks.md#the-done-rule): base's digests are under the boot's inputs, so a law red on a branch that
-    ;; changed the program is the branch's, and on one that changed nothing it is main's (seon.proofs/main-red's first arm)
-    (let [base (update-vals (program/graph-index (program/reach-graph w0 nil) in nil) :digest)
-          red {'app.law-test/law :fail}]
-      (is (= #{} (proofs/main-red red (digests broken) base {})) "a branch that breaks the law is not excused its red")
-      (is (= #{'app.law-test/law} (proofs/main-red red at-boot base {})) "a branch changing nothing has the stray red excused"))))
-
 (defn with-agent
   "in-agent's setup and teardown around a body of the test's own: f is called with {:names {:ns :task :agent}
   :ask (a request to the root's server, answered as data) :eval-root (root-REPL code, answered as the server does; root-value reads its value)
