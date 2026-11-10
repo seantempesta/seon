@@ -97,7 +97,7 @@ The principles a design is held to; each links the section that states it in ful
   - a Flow proc and its channels ([flow](docs/flow.md#the-step-fn-contract-every-proc-follows));
   - a task: desired state on attributes, observed state as facts, one reconciler ([tasks](docs/tasks.md)); an OS child is an effect, and its exit is a fact;
   - a process: an agent is a forked OS process with a real REPL, on its own branch, named by role, task and checkout ([processes](docs/processes.md#the-agent-process));
-  - a render declared on the entity's schema, `:seon.render/hiccup` for html and `:seon.render/model` for the model's messages ([render](docs/render.md));
+  - a render declared on the entity's schema: `:seon.render/hiccup` for html, `:seon.render/openai-compat` for an entity's messages to the model (`:seon.render/model` is how the printer prints a value for the model) ([render](docs/render.md));
   - an error as data, flowing to whoever can fix it ([errors](docs/errors.md)).
 - **Nothing crashes and nothing hangs** (owner, 2026-10-28: "I want our system to be robust and to have it not crash or hang ever."): every wait ends, with its value or a typed error saying why it never will, and the agent fixes a failure or messages root when it needs another process ([errors](docs/errors.md#nothing-crashes-and-nothing-hangs)).
 - **Never pass or keep a db value:** a kept db value is a reference, `{:branch :commit :t}` ([storage](docs/storage.md#a-kept-db-value-is-a-reference)).

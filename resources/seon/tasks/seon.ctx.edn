@@ -64,4 +64,7 @@ Proofs: two agents with different data read different context with no code chang
 3. seon.ctx's write! refuses an edit of a var through swap! by checking :var/name in code; instead a property on the var's and form's entity schemas says the entity is changed by its definition, and the edit walk reads it."
   :seon.task/proofs #{}
   :seon.task/kind :work}
-]
+
+ {:seon.task/name "ctx-reads-attribute-owners-by-the-one-lookup"
+  :seon.task/plan "Owner, 2026-11-10: \"No duplicate implementations\". Which entity schema owns an attribute is read through one function, seon.db/owners (the write check, seon.db/most-specific, seon.render/schema-of and entity-schema call it; Web, jolt/walk-2a). Three readers in seon.ctx still read the entity index's :entity-schemas inline: seon.ctx's time-ordered join test (a reverse join's members by store-issued id) and the patch's new-member identity check and its refusal text. Moved to owners as one call each, seon.ctx-test/a-lookups-patch-costs-its-change went from 31 to 33 contracted calls at n=20 (its bound 31, allowed 1.0x), since owners is contracted and these run a member at a time. The change: read the owners of a patch's attributes once per patch (one call), and of a join's attribute once where the join is built, so the cost proof stays at its bound. Proof: that cost proof unchanged; no (:entity-schemas ix) left in src outside seon.db/owners."
+  :seon.task/kind :work}]

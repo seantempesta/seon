@@ -91,7 +91,7 @@
           (if (contains? contract/forms t) t :seon.error/base)
           ;; what the map is, as the write check reads it (the best match of the attributes it holds); one that names no one
           ;; schema with a render is drawn as the data it is. One owning schema, the common case, is a lookup a key and no call
-          (let [ss (into #{} (keep (:entity-schemas ix)) (keys v))
+          (let [ss (set (vals (pdb/owners ix (keys v))))
                 s (if (next ss) (most-specific ix v) (first ss))]
             (when (contains? (:drawn-schemas ix) s) s))))))
 
@@ -1154,7 +1154,7 @@
   {:malli/schema [:=> [:cat :map :map [:maybe :keyword]] [:maybe :qualified-keyword]]}
   [ix e via]
   (let [s (most-specific ix e)]
-    (cond (nil? s) (get (:entity-schemas ix) via)
+    (cond (nil? s) (get (pdb/owners ix [via]) via)
           (keyword? s) s
           :else (throw (ex-info (str "no one entity schema names this entity: " (:ambiguous s) " extend none of each other")
                                 (contract/error :seon.render/no-one-schema #'entity-schema "its identity attributes name entity schemas that extend none of each other"
