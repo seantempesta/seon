@@ -6,7 +6,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [jolt.ffi :as ffi] [jolt.scheme :as scm]
             [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config]
-            [seon.edn :as sedn]))
+            [seon.edn :as sedn] [clojure.java.shell :as sh] [konserve.jolt.lmdb :as klmdb]))
 
 (def ^:private c-schemas
   "Malli schemas of C types, for contracts derived from an FFI declaration (G1's proto.lib)."
@@ -347,3 +347,16 @@
   of either. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :string [:or nat-int? :string]] [:re "^[a-p][0-9a-f]{15}$"]]}
   [k n] (id (digest (str k "/" n))))
+
+(defn remove-tree!
+  "Remove each directory and all it holds (`rm -rf`: a symbolic link is removed, never entered), and the
+  semaphore sets of the LMDB stores in it: this process closes the stores it has open there
+  (konserve.jolt.lmdb/close-envs-under!), whose last close removes the set, then target/remove-tree
+  (native/remove_tree.c) releases the locks of every store there that no process holds (a set its last
+  user left when it exited without closing) and removes the tree. The one way a directory is deleted,
+  since a store's set outlives its files otherwise (docs/failure-points.md#lmdb-robust-locks).
+  Answers nil; a directory that is not there is already removed."
+  {:malli/schema [:=> [:cat :string [:* :string]] :nil]}
+  [dir & dirs]
+  (run! klmdb/close-envs-under! (cons dir dirs))
+  (apply sh/sh (str (config/checkout) "/target/remove-tree") dir dirs) nil)

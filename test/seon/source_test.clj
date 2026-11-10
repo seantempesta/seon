@@ -4,7 +4,7 @@
   account and its exact text, written back byte for byte, a merged change rewriting only
   its form, and the written files committed on the merges branch through the :git effect's
   performer. Never the live tree: write-back and commits go to a copy under target/."
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
+  (:require [seon.lib] [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell :as sh]
             [clojure.string :as str] [clojure.edn :as edn] [seon.config :as config]
             [datahike.api :as d]
@@ -413,7 +413,7 @@
         (let [c (index kept)]
           (is (not (marked?)) "a change to a form the indexing code reaches makes the index again from nothing")
           (is (= c (index (str dir "/fresh2"))) "and it holds what a fresh index holds")))
-      (finally (sh/sh "rm" "-rf" dir)))))
+      (finally (seon.lib/remove-tree! dir)))))
 
 (deftest a-landing-moves-roots-source-fact-to-the-landed-tree
   ;; docs/source.md#a-landing-enters-main-as-data: what the bridge writes (seon.root/landed-tx) moves root's source fact to
@@ -1171,7 +1171,7 @@
         (testing "at its pin, nothing moves"
           (git x "checkout" "-q" "--" ".") (git x "checkout" "-q" "--detach" a)
           (is (= "" (str/trim (:out (sync!)))))))
-      (finally (sh/sh "rm" "-rf" tmp)))))
+      (finally (seon.lib/remove-tree! tmp)))))
 
 ;; a scratch repository of one file on a store of its own, empty: the seed is one of the claims, and none reads more
 ;; than one namespace (the checkout's tree analysed at each boot was 81 s)
@@ -1227,7 +1227,7 @@
           (is (= [true true] [(has-var? 1) (has-var? 2)]) "and brings what it changed onto main")))
       (finally
         (when @root (ts/stop-root! @root))
-        (sh/sh "rm" "-rf" dir)))))
+        (seon.lib/remove-tree! dir)))))
 
 ;; docs/source.md#a-boot-catches-up-with-its-checkout: the default boot of a root with a source tree indexes what its checkout changed
 ;; since main last indexed it, through bin/root, end to end: an untracked new file reaches main; a file that does not read is named
@@ -1285,7 +1285,7 @@
       (is (str/includes? (str (src-of 1)) "(defn probe [] 1)") "main keeps the merge's text, never the checkout's over it")
       (finally
         (when @root (ts/stop-root! @root))
-        (sh/sh "rm" "-rf" dir)))))
+        (seon.lib/remove-tree! dir)))))
 
 (defn tree-of
   "read-source's request for one changed file in a tree of n source files (a new directory under

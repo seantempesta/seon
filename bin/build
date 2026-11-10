@@ -150,11 +150,14 @@ build_native() {
 # open (measured 2026-10-21; docs/failure-points.md#lmdb-robust-locks). Robust, it uses SysV
 # semaphores with SEM_UNDO: the kernel releases a dead holder's lock. target/lmdb-kill
 # (native/lmdb_kill.c) is its proof, a bin/check step; target/lmdb-sem (native/lmdb_sem.c), that
-# each env has a semaphore set of its own (our fork's jolt/sysv-sem-identity), another.
+# each env has a semaphore set of its own (our fork's jolt/sysv-sem-identity), another. target/remove-tree
+# (native/remove_tree.c: rm -rf after releasing each env's locks, so a deleted store leaves no set;
+# bin/remove-tree, seon.lib/remove-tree!) and target/semsets (native/semsets.c, the hand tool bin/semsets) link it too.
 LMDB_SRC=$RC/lmdb/libraries/liblmdb
+LMDB_NATIVE="native/lmdb_kill.c native/lmdb_sem.c native/remove_tree.c native/semsets.c"
 build_lmdb() {
   [ -f "$LMDB_SRC/mdb.c" ] || die "missing LMDB source at $LMDB_SRC (the reference-code/lmdb submodule)"
-  pin="$(pin "$LMDB_SRC") robust"
+  pin="$(pin "$LMDB_SRC") robust $(cd "$ROOT" && git hash-object $LMDB_NATIVE | tr '\n' ' ')"
   if fresh lmdb "$pin" && [ -f "$T/lib/liblmdb.dylib" ]; then say "lmdb up to date ($pin)"; return; fi
   mkdir -p "$T/lib"
   say "lmdb: $LMDB_SRC at $pin -> target/lib/liblmdb.dylib (MDB_USE_ROBUST)"
@@ -164,6 +167,9 @@ build_lmdb() {
     die "lmdb-kill (native/lmdb_kill.c) build failed"
   cc -O2 -I"$LMDB_SRC" -o "$T/lmdb-sem" "$ROOT/native/lmdb_sem.c" "$T/lib/liblmdb.dylib" -Wl,-rpath,"$T/lib" ||
     die "lmdb-sem (native/lmdb_sem.c) build failed"
+  cc -O2 -I"$LMDB_SRC" -o "$T/remove-tree" "$ROOT/native/remove_tree.c" "$T/lib/liblmdb.dylib" -Wl,-rpath,"$T/lib" ||
+    die "remove-tree (native/remove_tree.c) build failed"
+  cc -O2 -o "$T/semsets" "$ROOT/native/semsets.c" || die "semsets (native/semsets.c) build failed"
   echo "$pin" > "$T/lmdb.stamp"
 }
 

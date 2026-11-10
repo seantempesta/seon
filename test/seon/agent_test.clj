@@ -103,7 +103,7 @@
         ;; (cancelled) and their branches
         end! (fn []
                (let [agent @made]
-                 (sh/sh "rm" "-rf" tasks)
+                 (seon.lib/remove-tree! tasks)
                  (cond (:port root) (eval-root (str "(let [ev (c/events sys) a " (when agent (str ":" agent)) "]"
                                                     " (when-let [v (resolve 'ready-ev)] (clojure.core.async/untap (:events-mult sys) @v))"
                                                     " (when (and a (not (:ended-ms (get (:agents (c/state sys)) a))))"
@@ -232,7 +232,7 @@
           log (ts/output (str runs "/root.log"))]
       (doseq [p left] (sh/sh "kill" "-9" (str p)))
       (ts/drop-main! store main)
-      (sh/sh "rm" "-rf" runs)
+      (seon.lib/remove-tree! runs)
       {:ids ids :agents agents :out log :left (if drained left (conj left :not-drained))})))
 
 (deftest a-tests-request-is-answered-while-an-eval-blocks
@@ -555,7 +555,7 @@
         [_ _ _ _ two] (in-agent (conj (mapv ns-form (range 4)) (run)))
         v #(some-> (:value %) clojure.edn/read-string)
         counts (mapv #(parse-long (ts/output (str dir "/" %))) (range 4))]
-    (sh/sh "rm" "-rf" dir)
+    (seon.lib/remove-tree! dir)
     (is (every? pos-int? counts) (str "every child counted: " (pr-str counts) " " (pr-str two)))
     (is (apply = counts) (str "the children hold the same descriptors: " (pr-str counts)))
     (is (<= 2 (:children (v two))) "at least two children forked (a death forks a new one for what its child had left)")

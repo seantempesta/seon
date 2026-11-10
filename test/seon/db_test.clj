@@ -79,7 +79,7 @@
         (let [r2 (d/transact conn [{:db/id "n" :note/text "after" :note/agent :t}])]
           (is (< e (get-in r2 [:tempids "n"])))
           (is (< t (:max-tx (:db-after r2))))))
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 (def ^:private stores-made
   "The paths of the stores on disk branched-store made, removed by the test that measured them."
@@ -289,7 +289,7 @@
         (pdb/sync! cfg)
         (is (< used-bytes (:used-bytes (pdb/map-use cfg))) "it grows as the store does"))
       (is (nil? (pdb/map-use (ts/test-branch! (fn [c _] c)))) "an in-memory store has no map")
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 (deftest two-processes-branch-one-store
   ;; two processes at once each make 50 branches of one store (two roots on one store, as
@@ -315,7 +315,41 @@
         (is (= 0 (ends t)) (str "process " t " ended " (ends t) ": " (slurp (str path "-" t ".err")))))
       (is (= 100 (count (filter #(pdb/branch? conn %) made))) "every branch's head was written")
       (is (= (set made) (disj (d/branches conn) :db)) "and every branch is listed")
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path (str path "-x.err") (str path "-y.err"))))))
+      (finally (d/release conn) (seon.lib/remove-tree! path (str path "-x.err") (str path "-y.err"))))))
+
+(deftest a-deleted-store-leaves-no-semaphore-set
+  ;; docs/failure-points.md#lmdb-robust-locks: a store whose last user ended without closing it keeps its
+  ;; semaphore set until its next open, which never comes once its files are deleted. Five stores of this
+  ;; test's own (the race is between processes): two last used by a process that exits with them open, two
+  ;; by one SIGKILLed, one still open in this process; then seon.lib/remove-tree! deletes them. A hard link
+  ;; to each lock file, outside the tree, keeps its inode, so its identity (the set's semaphores 2 and 3)
+  ;; still names it after: the sets naming the five are counted by target/semsets before and after.
+  (let [base (str (seon.config/checkout) "/target/tmp/semset-test-" (random-uuid))
+        dir (str base "/stores") keep (str base "-locks") lst (str base "-locks.txt")
+        paths (mapv #(str dir "/s" %) (range 5))
+        jolt (str (seon.config/checkout) "/target/jolt/jolt")
+        code (fn [ps end] (pr-str `(do (require 'seon.db 'datahike.api 'seon.lib)
+                                       (doseq [p# ~ps] (datahike.api/transact (:conn (seon.db/open! :lmdb p# 0 :db)) [{:note/text "x" :note/agent :t}]))
+                                       ~end)))
+        child (fn [ps end] (str "'" jolt "' -A:test -e " (pr-str (code ps end)) " > /dev/null 2>&1; echo $?"))
+        named (fn [] (let [out (:out (clojure.java.shell/sh (str (seon.config/checkout) "/target/semsets") lst))]
+                       (or (some-> (re-find #"matched to a lock file (\d+)" out) second parse-long) out)))]
+    (try
+      (run! #(d/release (:conn (pdb/open! :lmdb % 0 :db))) paths)
+      (let [ends (str/split-lines (str/trim (:out (clojure.java.shell/sh "nice" "-n" "10" "zsh" "-c"
+                                                   (str (child (subvec paths 0 2) '(seon.lib/c-exit 0)) "; "
+                                                        (child (subvec paths 2 4) '(seon.lib/kill! (seon.lib/c-getpid) 9)))
+                                                   :dir (seon.config/checkout)))))
+            _held (pdb/open! :lmdb (paths 4) 0 :db)]
+        (is (= ["0" "137"] ends) "one child exits with its stores open, the other is SIGKILLed")
+        (.mkdirs (java.io.File. ^String keep))
+        (spit lst (str/join "\n" (for [i (range 5) :let [l (str keep "/" i)]]
+                                   (do (clojure.java.shell/sh "ln" (str (paths i) "/lock.mdb") l) l))))
+        (is (= 5 (named)) "each store's set is there: four left by their dead last users, one held here")
+        (seon.lib/remove-tree! dir)
+        (is (not (.exists (java.io.File. ^String dir))))
+        (is (= 0 (named)) "deleting them through seon.lib/remove-tree! leaves no set naming them"))
+      (finally (seon.lib/remove-tree! base keep lst)))))
 
 (deftest opening-a-kept-store-installs-the-attributes-it-lacks
   ;; a store on disk of this test's own, the last resort: what is proved is what a root's
@@ -341,7 +375,7 @@
             {c2 :conn} (pdb/open! :lmdb path 0 :db)]
         (is (= t (:max-tx @c2)) "an open that finds nothing missing writes nothing")
         (d/release c2))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-kept-store-gains-content-ids-and-keeps-its-entities
   ;; a store seeded before content ids (its identities without :db/contentId): opening it
@@ -365,7 +399,7 @@
         (is (= (datahike.db.transaction/content-eid :form/id "app.k/new") new) "a new identity takes its content id")
         (is (= old-ns (get-in r [:tempids "n"]) (:db/id (:form/ns (d/entity @conn new))))
             "a tempid naming an identity the store holds is that entity, refs made before its map included"))
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 (deftest a-release-commits-what-was-applied
   ;; a write applied run-ahead (datahike.writer/apply!, an agent's transact!) and not yet
@@ -380,7 +414,7 @@
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
         (is (some #(= "applied, not committed" (:v %)) (d/datoms @conn :aevt :note/text)) "the applied write is in the store")
         (d/release conn true))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest database-exists-answers-whether-a-store-is-there
   ;; datahike.api/database-exists? answered through a go block that put! its value on
@@ -392,9 +426,9 @@
       (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "no store at the path")
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (d/release conn true))
       (is (true? (d/database-exists? (pdb/store-cfg :lmdb path))) "a store made there")
-      (clojure.java.shell/sh "rm" "-rf" path)
+      (seon.lib/remove-tree! path)
       (is (false? (d/database-exists? (pdb/store-cfg :lmdb path))) "and none once it is removed")
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-store-made-again-at-a-removed-path-is-a-new-store
   ;; a store released and removed, then made again at its path in the same process: the
@@ -407,12 +441,12 @@
       (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
         (d/transact conn {:tx-data [{:note/text "the first store's" :note/agent :t}] :tx-meta (pdb/tx-meta :db)})
         (d/release conn true))
-      (clojure.java.shell/sh "rm" "-rf" path)
+      (seon.lib/remove-tree! path)
       (let [{:keys [conn seeded?]} (pdb/open! :lmdb path 0 :db)]
         (is (true? seeded?) "made, not found")
         (is (not-any? #(= "the first store's" (:v %)) (d/datoms @conn :aevt :note/text)) "none of the removed store's facts")
         (d/release conn true))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-read-after-release-is-a-typed-error
   ;; task seon.db/a-read-after-release-is-a-typed-error: a db value reads its nodes lazily from
@@ -432,7 +466,7 @@
                     (catch Throwable e (some #(when (= :lmdb-env-closed (:type (ex-data %))) (ex-data %))
                                              (take-while some? (iterate ex-cause e))))))
             "the read after the last release answers the typed error naming the store"))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-create-that-fails-leaves-no-store
   ;; task seon.db/a-store-is-made-whole-or-not-at-all: the full run of 2026-10-26 failed a create
@@ -459,7 +493,7 @@
         ;; made here, not by a budget past the create's ~22 M: a create that came to cost more would make that case a kill
         (is (= :opens (opens (str base "/whole"))))
         (is (empty? (filter #(str/includes? (.getName ^java.io.File %) ".making-") (.listFiles (java.io.File. base))))))
-      (finally (clojure.java.shell/sh "rm" "-rf" base)))))
+      (finally (seon.lib/remove-tree! base)))))
 
 (deftest a-kept-store-from-before-the-runtime-attribute-opens
   ;; the transaction that installs :seon.tx/runtime cannot carry it in its tx-meta: a kept
@@ -476,7 +510,7 @@
         (let [r (d/transact conn {:tx-data [{:note/text "after" :note/agent :t}] :tx-meta (pdb/tx-meta :db)})]
           (is (string? (:seon.tx/runtime (d/entity @conn (:db/current-tx (:tempids r))))) "and the next transaction names its runtime"))
         (d/release conn))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-moved-store-opens
   ;; task seon.db/a-store-opens-where-it-lies: a store was named by (hasch/uuid path) of the
@@ -501,7 +535,7 @@
     (try
       (opens moved)
       (opens copied)
-      (finally (clojure.java.shell/sh "rm" "-rf" base moved copied)))))
+      (finally (seon.lib/remove-tree! base moved copied)))))
 
 (deftest a-kept-store-whose-types-differ-is-refused
   ;; an attribute's value type is fixed once installed (Datahike refuses to alter it), so a
@@ -518,7 +552,7 @@
       (let [r (try (pdb/open! :lmdb path 0 :db) (catch Exception e (ex-data e)))]
         (is (= :seon.db/types-differ (:seon.error/type r)) (pr-str r))
         (is (= {:seon.model-call/basis {:stored :db.type/string :declared :db.type/data}} (:seon.db/attributes r))))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-kept-store-on-a-retired-name-is-refused
   ;; a stored keyword is renamed by erasing the store, never by a migration (docs/storage.md#a-renamed-attribute): a store holding a retired name (here :schema.file/path, before
@@ -533,7 +567,7 @@
       (let [r (try (pdb/open! :lmdb path 0 :db) (catch Exception e (ex-data e)))]
         (is (= :seon.db/name-retired (:seon.error/type r)) (pr-str r))
         (is (= {:schema.file/path :file/path} (:seon.db/retired r))))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-value-with-no-one-type-is-plain-data-by-its-shape
   ;; a schema says plain data by its shape, with no mark (owner, 2026-10-25: "support vectors and
@@ -613,7 +647,7 @@
         (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
           (is (= kept? (:keep-history? (:config @conn))) (str "a store made with :keep-history? " kept? " opens keeping it"))
           (d/release conn))
-        (finally (clojure.java.shell/sh "rm" "-rf" path))))))
+        (finally (seon.lib/remove-tree! path))))))
 
 (defn- stored-bytes
   "Value bytes of every key in the LMDB store at path, by key."
@@ -717,7 +751,7 @@
         (on :db #(d/delete-branch! % :turns))
         (gc!)
         (is (not (stored?))))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-large-value-holding-ratios-commits-and-reads-back
   ;; A value past :seon.config.store/value-out-of-line-bytes is stored
@@ -735,7 +769,7 @@
       (let [c (pdb/connect cfg)]
         (try (is (= [v] (d/q '[:find [?r ...] :where [_ :seon.eval/response ?r]] @c)) "the value reads back equal, ratios and all")
              (finally (d/release c))))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest hasch-ids-are-the-jvms
   ;; A content key is hasch's uuid of the value (docs/storage.md#values-out-of-line), and reference-code/jolt-overlay's
@@ -767,7 +801,7 @@
       (let [r @(d/gc-storage conn (java.util.Date. 0))]
         (is (set? r) (pr-str r))
         (is (= #{"kept"} (notes @conn)) "the branch reads as before"))
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 (deftest a-collection-runs-when-a-branch-is-gone
   ;; seon.db/collect! (root's writer runs it, :collect, at quiescence when no agent is live:
@@ -806,7 +840,7 @@
         (is (= #{:db} (:branches r2))))
       (is (not (k/exists? (:store @conn) vk {:sync? true})) "and its value out of line")
       (is (= #{"main's"} (notes @conn)) "main reads as before")
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 ;; docs/storage.md#collection: a sweep frees pages, and only a compaction makes the file smaller
 (deftest a-store-a-sweep-freed-is-compacted-at-its-next-boot
@@ -839,7 +873,7 @@
           (d/transact conn [{:note/text "after" :note/agent :t}])
           (is (some #(= "after" (:v %)) (d/datoms @conn :aevt :note/text)) "and it takes a write")
           (d/release conn)))
-      (finally (clojure.java.shell/sh "rm" "-rf" path (str path ".compact"))))))
+      (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
 ;; docs/storage.md#collection: old snapshots go when enough commits have landed, and nothing a merge or a page reads goes with them
 (deftest a-store-keeps-what-is-read-and-sweeps-old-snapshots
@@ -883,7 +917,7 @@
       (let [cfg (:config @conn)]
         (pdb/sync! cfg) (d/release conn)
         (is (:bytes-after (pdb/compact-if-due! path)) "the sweep left its freed pages to compact"))
-      (finally (clojure.java.shell/sh "rm" "-rf" path (str path ".compact"))))))
+      (finally (seon.lib/remove-tree! path (str path ".compact"))))))
 
 ;; the rule a collection keeps beside "no agent live" (docs/storage.md#collection)
 (deftest a-root-that-shares-its-store-never-collects
@@ -904,7 +938,7 @@
       (is (= {:skipped true :shared true} (pdb/collect! conn false)) "a shared store: nothing swept, nothing recorded")
       (is (k/exists? (:store @conn) vk {:sync? true}) "the gone branch's value out of line is kept")
       (is (not (:skipped (pdb/collect! conn true))) "while the sole writer's collection of the same store runs")
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 (deftest a-commit-costs-what-it-writes
   ;; docs/storage.md#the-proof-what-a-commit-costs. Estimate, from what a commit must
@@ -932,7 +966,7 @@
         (is (<= per-turn bound)
             (str n " per-turn commits wrote " per-turn " bytes; the same turns in one commit wrote " once
                  ", so the bound is " bound " (" (format "%.1f" (/ (double per-turn) bound)) "x over)")))
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 (deftest two-branches-diff-by-what-each-wrote
   ;; datoms-diff walks both trees and skips every subtree they share (Jolt's HashSet needs
@@ -1020,7 +1054,7 @@
                                  (let [w0 (writes)]
                                    (doseq [c (range 10)] (d/transact conn (mapv #(ent (str "new " m " " c " " %)) (range m))))
                                    [m (/ (- (writes) w0) 10.0)]))))
-                    (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+                    (finally (d/release conn) (seon.lib/remove-tree! path)))))
         counter (nodes false) content (nodes true)
         ratio (fn [m] (/ (content m) (counter m)))]
     (is (< (ratio 2) 2.0) (str "2 new identities: " (ratio 2) "x the counter's nodes"))
@@ -1294,7 +1328,7 @@
               encoded (reduce + (map #(alength (konserve.jolt.fasl-store/serialize %)) values))]
           (is (<= (* 2 encoded) (- s o)) (str "serialized once: " o " bytes against the streams' " s ", " encoded " bytes encoded")))
         (d/release conn true))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (deftest a-store-names-its-encoding-where-konserve-reads-it
   ;; docs/storage.md#compression: seon.db/store-cfg names the serializer and the compressor under :config :encoding,
@@ -1313,7 +1347,7 @@
             (is (= :FaslSerializer (:default-serializer store)) (str backend))
             (is (= (seon.config/value :seon.config.store/compressor) (get-in store [:config :compressor :type])) (str backend))
             (d/release conn true)))
-        (finally (clojure.java.shell/sh "rm" "-rf" path))))))
+        (finally (seon.lib/remove-tree! path))))))
 
 (deftest a-file-store-reads-what-it-wrote-before-it-compressed
   ;; docs/storage.md#compression: a value's header names its codec, so a store holds values of either kind. A file
@@ -1340,7 +1374,7 @@
       (let [{:keys [conn]} (pdb/open! :file path 0 :db)]
         (is (= (all 100) (notes conn)) "old and new read from one store")
         (d/release conn true))
-      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (seon.lib/remove-tree! path)))))
 
 (defrecord PlainR [x])
 
@@ -1362,7 +1396,7 @@
         (doseq [[i v] (map-indexed vector samples)]
           (is (= v (back i)) (str "kept and given back: " (pr-str v))))
         (d/release conn))
-      (finally (clojure.java.shell/sh "rm" "-rf" path))))
+      (finally (seon.lib/remove-tree! path))))
   (testing "what is not plain is refused, a lazy or infinite seq unrealized"
     (let [realized (volatile! false)]
       (doseq [v [(->PlainR 1) {:a (->PlainR 1)} {(->PlainR 1) 1} (sorted-map :a 1) (sorted-set 1) (byte-array 1) inc (Object.) (range) (map inc [1])
@@ -1618,7 +1652,7 @@
             ;; main's datoms in another order than main did, so a branch can own leaves holding only main's datoms (the literal 8 passed
             ;; by luck). Random addresses kept 76 of 157 (48%) after the same 20 merges, red here; docs/sharing.md#what-a-branchs-nodes-are
             (is (<= own (quot total 10)) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
-          (finally (d/release br) (d/release main) (clojure.java.shell/sh "rm" "-rf" path))))))
+          (finally (d/release br) (d/release main) (seon.lib/remove-tree! path))))))
 
 (deftest a-branchs-own-entity-schema-is-the-one-its-writes-are-held-to
   ;; docs/storage.md#the-write-checks-every-entity-it-touches: the per-datom check read a branch's own schemas and the

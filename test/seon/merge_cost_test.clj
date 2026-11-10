@@ -2,7 +2,7 @@
   "A merge's three-way costs what changed, never the program: over branches that hold n forms and each
   changed one, seon.merge/delta-three-way reads only the keys the datoms that differ bear."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest is use-fixtures]] [seon.contract :refer [defn defn-]]
+  (:require [seon.lib] [clojure.test :refer [deftest is use-fixtures]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [seon.program :as program] [seon.program-cost-test :as pc] [seon.vector :as vector] [seon.merge :as merge]
             [clojure.java.shell]))
 
@@ -127,7 +127,7 @@
     (try (run)
          (finally (when (realized? store)
                     (let [path (get-in @@store [:config :store :path])]
-                      (d/release @store) (clojure.java.shell/sh "rm" "-rf" path)))))))
+                      (d/release @store) (seon.lib/remove-tree! path)))))))
 
 (deftest a-main-that-only-embedded-changes-no-key
   (let [[base ours theirs das] (embedded-of 10)]

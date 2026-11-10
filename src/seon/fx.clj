@@ -129,7 +129,7 @@
   "The directory of one test child's own, named by its pid: under the agents' working directory
   (:seon.config.agent/cwd), where the child works so that whatever a test writes relative to its
   working directory (`target/...`, the temporary files of a fixture) is the run's, removed with
-  it (remove-tree!) and never left in the directory every agent shares. Answers the path; it is
+  it (seon.lib/remove-tree!) and never left in the directory every agent shares. Answers the path; it is
   made by the child (made-run-dir!). See docs/failure-points.md, a directory walk."
   {:malli/schema [:=> [:cat :int] :string]}
   [pid] (str (cfg/value :seon.config.agent/cwd) "/tests/" pid))
@@ -141,12 +141,6 @@
   named a test of the root's working tree that main does not hold, and its shard died at once). Used by build and run-tests."
   ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
    "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"])
-
-(defn remove-tree!
-  "Remove the directory dir and all it holds (`rm -rf`: a symbolic link is removed, never entered).
-  Answers nil; a directory that is not there is already removed."
-  {:malli/schema [:=> [:cat :string] :nil]}
-  [dir] (sh/sh "rm" "-rf" dir) nil)
 
 (defn source-file?
   "Is the file at relative path p one a read of the source takes, under a source dir: Clojure or EDN, or a kind the
@@ -999,7 +993,7 @@
                           :when (and (.isDirectory d) (re-matches #"(program-store|test-store)-[0-9a-f]+" n)
                                      (.isFile (java.io.File. d "data.mdb")))]
                     (let [to (str dir "/target/" rel)]
-                      (sh/sh "rm" "-rf" to) (sh/sh "mkdir" "-p" to)
+                      (seon.lib/remove-tree! to) (sh/sh "mkdir" "-p" to)
                       (doseq [n ["data.mdb" "reach-graph.fasl"] :when (.isFile (java.io.File. d n))]
                         (sh/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))))
               ;; a gate's run builds only through its runner, when the binary is not current for the candidate's tree

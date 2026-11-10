@@ -149,5 +149,5 @@ if [[ "$*" == "--all" && -n ${SEON_RESULTS_DIR:-} ]]; then
     mv "$SEON_RESULTS_DIR/.full-run.edn.$$" "$SEON_RESULTS_DIR/full-run.edn"
 fi
 # a green run's logs are read by no one: the directory a plain run made is reclaimed with it (a red run's stays)
-if (( st == 0 )); then echo "TEST OK"; (( OWN )) && rm -rf "$OUT"; else echo "TEST FAILED (logs: $OUT)"; fi
+if (( st == 0 )); then echo "TEST OK"; (( OWN )) && "$ROOT/bin/remove-tree" "$OUT"; else echo "TEST FAILED (logs: $OUT)"; fi
 exit $st

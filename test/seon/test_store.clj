@@ -62,7 +62,7 @@
   under target/tmp: a test process's own, so shards running at once never share one; removed
   when the process ends (a shutdown hook)."
   (delay (let [path (str (seon.config/checkout) "/target/tmp/program-store-" (random-uuid))]
-           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (fx/remove-tree! path))))
+           (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (seon.lib/remove-tree! path))))
            path)))
 
 (defn kept-program-store
@@ -290,7 +290,7 @@
         conn (pdb/connect cfg)
         gone (try (pdb/delete-main! conn (keyword main))
                   (finally (pdb/sync! cfg) (d/release conn)))]
-    (fx/remove-tree! (pdb/agents-dir (assoc cfg :branch (keyword main))))
+    (seon.lib/remove-tree! (pdb/agents-dir (assoc cfg :branch (keyword main))))
     {:deleted gone}))
 
 (defn start-args
@@ -429,7 +429,7 @@
                            :args (into ["--set" (str ":seon.config.source/branch=" (pr-str branch))] args)})]
     (.addShutdownHook (Runtime/getRuntime)
                       (Thread. ^Runnable (fn [] (let [s (stop-root! root)] (when-not (:exit s) (binding [*out* *err*] (println "shared root" main "not stopped:" (pr-str s)))))
-                                               (drop-main! store main) (fx/remove-tree! (:runs root))
+                                               (drop-main! store main) (seon.lib/remove-tree! (:runs root))
                                                (sh/sh "git" "-C" checkout "branch" "-q" "-D" branch))))
     root))
 

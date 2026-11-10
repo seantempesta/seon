@@ -16,7 +16,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 . "$ROOT/bin/env"
 export JOLT_PWD=$ROOT
 mkdir -p "$ROOT/target/tmp"; TMP=$(mktemp -d "$ROOT/target/tmp/forks-XXXXXX")
-trap 'rm -rf "$TMP"' EXIT
+trap '"$ROOT/bin/remove-tree" "$TMP"' EXIT
 # the units run on the Jolt the pin names: the step is binary-free (bin/prove builds nothing before
 # it), so a checkout's target/jolt left from an earlier pin ran the suites on that Jolt's bugs (a
 # background-gc-test hang in a prove, 2026-10-27, on a Jolt three fixes old). Up to date, 0.6 s.

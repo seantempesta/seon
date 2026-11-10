@@ -15,6 +15,12 @@
  * 5. a process that opened an env and was killed inside a write txn leaves its set, its writer
  *    lock given back by the kernel; the next process opens the env, writes and closes it, and no
  *    set names the env after.
+ * 6. a process that opened an env and was killed (its last user, so nobody closes it): the env's
+ *    locks released (mdb_env_release_locks, what deleting a store calls first) leave no set naming
+ *    it, while a set left by such a process outlives its env's files when they are deleted without
+ *    it (the leak: nothing opens that env again);
+ * 7. an env a live process has open: releasing its locks is refused (EBUSY) and changes nothing;
+ *    its files are then deleted under the holder, which still writes, and its close removes the set.
  * Prints LMDB-SEM OK and exits 0 only when every case holds. */
 #include <lmdb.h>
 #include <stdio.h>
@@ -213,12 +219,79 @@ static int crashed(const char *base) {
   return ok && n == 0;
 }
 
+/* fork a process that opens DIR and is SIGKILLed (no close): its set is left */
+static int killed_opener(const char *d) {
+  pid_t p = fork();
+  if (!p) {
+    MDB_env *e;
+    if (open_env(d, &e) || put(e, "k")) _exit(1);
+    kill(getpid(), SIGKILL);
+  }
+  int st; waitpid(p, &st, 0);
+  return WIFSIGNALED(st);
+}
+
+static int released(const char *base) {
+  char d[512], l[600], g[512], gl[600], cmd[1200];
+  sub(d, sizeof d, base, "released");
+  snprintf(l, sizeof l, "%s/lock.mdb", d);
+  sub(g, sizeof g, base, "deleted");
+  snprintf(gl, sizeof gl, "%s/lock.mdb", g);
+  printf("6. a process opens an env and is killed, then the env is deleted\n");
+  int k1 = killed_opener(d), k2 = killed_opener(g);
+  int before = sets_naming(l), r = mdb_env_release_locks(d, 0), after = sets_naming(l);
+  printf("  killed: %s; sets naming it %d, its locks released: %s, sets naming it after %d\n",
+         k1 ? "yes" : "no", before, r ? mdb_strerror(r) : "yes", after);
+  /* the other env deleted without releasing its locks: its set stays, found by its identity
+   * while its lock file is there, and removed here by hand */
+  int left = find_set(gl);
+  snprintf(cmd, sizeof cmd, "rm -rf '%s'", g);
+  system(cmd);
+  struct semid_ds buf; union semun_ u; u.buf = &buf;
+  int stays = left >= 0 && !semctl(left, 0, IPC_STAT, u);
+  printf("  without the release: deleted, its set %s\n", stays ? "left (the leak)" : "gone");
+  if (left >= 0) semctl(left, 0, IPC_RMID);
+  return k1 && k2 && before == 1 && !r && after == 0 && stays;
+}
+
+static int busy(const char *base) {
+  char d[512], l[600];
+  sub(d, sizeof d, base, "busy");
+  snprintf(l, sizeof l, "%s/lock.mdb", d);
+  printf("7. an env a live process has open\n");
+  int go[2], done[2]; pipe(go); pipe(done);
+  pid_t p = fork();
+  if (!p) {
+    MDB_env *e; char c; int r = open_env(d, &e);
+    if (!r) r = put(e, "a");
+    write(done[1], &r, sizeof r);
+    read(go[0], &c, 1);
+    if (!r) r = put(e, "b");
+    mdb_env_close(e);
+    _exit(r ? 1 : 0);
+  }
+  int r0 = 1; read(done[0], &r0, sizeof r0);
+  int s = find_set(l), r = mdb_env_release_locks(d, 0), kept = s >= 0 && find_set(l) == s;
+  printf("  holder opened: %s; release: %s; its set %s\n", r0 ? mdb_strerror(r0) : "yes",
+         r == EBUSY ? "refused (EBUSY)" : r ? mdb_strerror(r) : "done", kept ? "untouched" : "changed");
+  char cmd[600]; snprintf(cmd, sizeof cmd, "rm -rf '%s'", d);
+  system(cmd);
+  write(go[1], "x", 1);
+  int st; waitpid(p, &st, 0);
+  struct semid_ds buf; union semun_ u; u.buf = &buf;
+  int wrote = WIFEXITED(st) && !WEXITSTATUS(st), gone = s >= 0 && semctl(s, 0, IPC_STAT, u) < 0;
+  printf("  its files deleted, the holder writes again and closes: %s; its set after %s\n",
+         wrote ? "yes" : "no", gone ? "gone" : "left");
+  return !r0 && r == EBUSY && kept && wrote && gone;
+}
+
 int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
   if (argc != 2) { printf("usage: lmdb-sem DIR\n"); return 2; }
   mkdir(argv[1], 0755);
-  int c1 = foreign(argv[1]), c2 = removed(argv[1]), c3 = race(argv[1], 16, 200), c4 = many(argv[1]), c5 = crashed(argv[1]);
-  int ok = c1 && c2 && c3 && c4 && c5;
+  int c1 = foreign(argv[1]), c2 = removed(argv[1]), c3 = race(argv[1], 16, 200), c4 = many(argv[1]), c5 = crashed(argv[1]),
+      c6 = released(argv[1]), c7 = busy(argv[1]);
+  int ok = c1 && c2 && c3 && c4 && c5 && c6 && c7;
   printf(ok ? "LMDB-SEM OK\n" : "LMDB-SEM FAILED\n");
   return ok ? 0 : 1;
 }

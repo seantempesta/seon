@@ -288,7 +288,7 @@ and the verdict cache's count (`evict!`) use it; a new walk of a tree that may h
 The leftover came from tests writing relative to the working directory, which in an agent is the one
 directory every agent shares (`:seon.config.agent/cwd`). A test child now works in a directory of its own
 (`seon.fx/run-dir`, named by its pid), removed by its agent when the child has ended
-(`seon.fx/remove-tree!`; `seon.agent-test/a-test-run-leaves-nothing-in-its-agents-working-directory`), and
+(`seon.lib/remove-tree!`; `seon.agent-test/a-test-run-leaves-nothing-in-its-agents-working-directory`), and
 the wiki fixture of `seon.root-test` links the checkout's `target/` entries but `runs/`, not `target/`.
 
 ## LMDB robust locks
@@ -316,12 +316,12 @@ user is the process that gets the lock file's exclusive lock at its close, as fo
 semaphores; it marks the lock file's set gone and removes it, and a process that waited on the lock
 file meanwhile takes the set again by the same key (rc 22 was that race: the deaths of test roots
 under load, 2026-10-23 and 2026-10-26). `bin/check`'s `lmdb-sem` step (`target/lmdb-sem`,
-`native/lmdb_sem.c`) proves it in five cases: another lock file's set at a store's key, its writer
+`native/lmdb_sem.c`) proves it in seven cases: another lock file's set at a store's key, its writer
 lock held, stays untouched while the store is opened, written and closed; a set gone under a
 holder; 16 processes opening one store and adding under its writer lock (no open fails, no
 addition lost); one process opening and writing 50 stores at once; and a process killed inside a
 write txn, whose set is left with its writer lock given back, then taken by the next open and
-removed by its close. Each case counts the sets naming its store after the last close: none.
+removed by its close; cases 6 and 7 below. Each case counts the sets naming its store after the last close: none.
 
 A process holds a SEM_UNDO entry of its `kern.sysv.semume` (10 on macOS) only while it holds a
 lock (a writer's, a reader registering), as upstream does; an open env holds none. The fork before
@@ -330,12 +330,32 @@ held one for each env's life, so a process could open about five stores and the 
 open; `lmdb-sem` case 4 stopped at 9 envs on it). That error is still named, never EINVAL, for a
 process holding ten locks at once.
 
-A set outlives its processes when the last one died without closing (a SIGKILL); the next first
-open of its store takes it again (its key is the store's), and a clean last close removes it. A
-store deleted after such a death leaves its set (task `seon.db/a-deleted-store-leaves-no-semaphore-set`).
-See them with `ipcs -s` (LMDB's are mode `--ra-ra-r--`, owner you); the bound is `sysctl
-kern.sysv.semmns` (87,381 semaphores, about 21,800 sets at four a set), and at it an open fails in
-`semget` (ENOSPC). Sets of an earlier layout (two or six semaphores) are never taken, and a process
+A set outlives its processes when the last one ended without closing its env: a SIGKILL, but as often an
+ordinary exit with the store still open (`lib/c-exit`, a test process's exit, an agent's). The next first open
+of its store takes it again (its key is the store's), and a clean last close removes it. A store deleted after
+such an end was never opened again, so its set stayed until reboot: 21,861 sets on 2026-11-10, the bound
+(`sysctl kern.sysv.semmns`, 87,381 semaphores at four a set), where every new open in every session failed in
+`semget` with ENOSPC (`No space left on device`). So a store's directory is deleted only through
+```seon.lib/remove-tree!``` (the program's one way to delete a directory; `bin/remove-tree` the shell's, which
+`bin/check`, `bin/test`, `bin/prove`, `bin/forks`, `bin/root start --reindex` and `bin/worktree --remove` /
+`--remove-at`, for a worktree's `target/` and `runs/`, call). It closes the stores this process has open
+under the directory (``konserve.jolt.lmdb/close-envs-under!``: their last close removes their sets), then
+runs `target/remove-tree` (`native/remove_tree.c`), which releases the locks of every store there that no
+process holds, LMDB's `mdb_env_release_locks` from our fork (what a last close does: the lock file's exclusive
+lock, taken without waiting, then the set it names removed), and removes the tree. A separate process,
+because a process that has an env open must not release its locks itself (its `fcntl` locks are the
+process's). A store a live process still holds is left to it: the release is refused (EBUSY), its files are
+deleted under it, it keeps working on them, and its own last close removes the set (`lmdb-sem` case 7); were
+it then killed, that set is the one leak left. `lmdb-sem` case 6 proves the release on a killed last user's
+store, and `seon.db-test/a-deleted-store-leaves-no-semaphore-set` the whole path: five stores, last used by a
+process that exited with them open, one SIGKILLed and this one, deleted by `seon.lib/remove-tree!`, leave no
+set naming them.
+
+See them with `ipcs -s` (LMDB's are mode `--ra-ra-r--`, owner you), or `bin/semsets`, which counts this
+user's four-semaphore sets by whose they are (another layout, matched to a lock file found under the main
+tree, `/private/tmp`, `/private/var/folders` or a directory given, kept for a live last user, or orphaned),
+and with `--remove` removes the orphans. It is a hand tool, called by no run: a run that swept would hide
+the leak the proofs above exist to show. Sets of an earlier layout (two or six semaphores) are never taken, and a process
 on an earlier layout refuses this one's lock file (LMDB's lock format, type 7), so every process on
 a store must run this build. Removing a set (`ipcrm -s ID`) while no process has its store open is
 safe; LMDB makes a new one at the next open.
