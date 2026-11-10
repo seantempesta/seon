@@ -68,6 +68,8 @@
  :seon.root/no-gate-checkout [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-gate-checkout]]]]
  ;; a step of the fork server that threw (seon.fork-server/server-step): docs/processes.md#a-step-that-throws
  :seon.fork-server/step-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/step-failed]] [:op {:optional true} [:maybe :keyword]]]]
+ ;; the fork server made no standby (seon.root/back-op): a platform problem, and root's view shows it has none (docs/processes.md#a-step-that-throws)
+ :seon.fork-server/standby-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/standby-failed]] [:active-threads {:optional true} [:maybe :int]] [:gen {:optional true} [:maybe :int]]]]
  ;; a release (my.root/run!) of a task that is not held: unknown (execution nil), already
  ;; running, or cancelled; the held ids of the same call are released
  :seon.root/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/not-held]] [:task :string]
