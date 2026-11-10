@@ -42,6 +42,8 @@
  :seon.agent/died [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/died]] [:agent :keyword]
                                           [:pid {:optional true} [:maybe :int]] [:exit {:optional true} [:maybe :seon.lib/exit-status]]
                                           [:stderr {:optional true} [:maybe :string]] [:last-op {:optional true} [:maybe :seon.agent/last-op]]]]
+ ;; a message root sent an agent that the wire's codec cannot encode: answered to its request in its place, the end kept open
+ :seon.agent/unencodable [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/unencodable]] [:message-op {:optional true} [:maybe :keyword]]]]
  ;; what root saw go wrong for an agent: a red test run of an agent with no task (a task's
  ;; run records its reds at its end), a spawn or fork refused (seon.root/set-agent)
  :seon.agent/failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/failed]] [:agent :keyword]]]

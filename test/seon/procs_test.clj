@@ -146,6 +146,43 @@
         (is (= at (get-in problem [:error :commit])))
         (remote/close! end) (sock/close! a'))))))
 
+(deftest a-reply-the-wire-cannot-encode-answers-its-asker-and-the-end-serves-on
+  ;; task jolt.async/a-value-a-remote-end-cannot-encode-answers-its-asker: root's end sent an agent
+  ;; a reply holding a sorted map (no stable encoding), and the writer pump closed the end, which
+  ;; root read as the agent's death. The reply goes in the end's :encode-error, ap/unencodable: the
+  ;; asker's :k gets the typed error, and the next frame follows on the same end.
+  (let [[r a'] (sock/socketpair)
+        codec' {:encode codec/encode :decode codec/decode}
+        root-end (remote/open r {:codec codec' :pump :fiber :encode-error (partial ap/unencodable (a/chan 1))})
+        agent-end (remote/open a' {:codec codec' :pump :fiber})
+        take! #(a/<!! (:in agent-end))]   ; a closed end answers nil, so no wait outlives it
+    (a/>!! (:out root-end) {:op :reply :k 7 :result (sorted-map :a 1)})
+    (a/>!! (:out root-end) {:op :reply :k 8 :result {:ok true}})
+    (let [x (take!) y (take!)]
+      (is (= [:reply 7 :seon.agent/unencodable] [(:op x) (:k x) (get-in x [:result :seon.error/type])]) (pr-str x))
+      (is (re-find #"cannot encode|no stable encoding" (get-in x [:result :seon.error/message])) (pr-str x))
+      (is (= {:op :reply :k 8 :result {:ok true}} y) "the end carries the next frame"))
+    (remote/close! root-end) (remote/close! agent-end)))
+
+(deftest a-request-the-wire-cannot-encode-answers-roots-asker-and-nothing-waits
+  ;; the same class for a request of root's (an :id): root is its asker, so the agent proc answers
+  ;; the rid it holds in flight with the typed error, from the frame the end's hook puts on its :in
+  (let [[r a'] (sock/socketpair)
+        codec' {:encode codec/encode :decode codec/decode}
+        in (a/chan 4)
+        end (remote/open r {:codec codec' :pump :fiber :in in :encode-error (partial ap/unencodable in)})
+        agent-end (remote/open a' {:codec codec' :pump :fiber})
+        st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+        [st _] (step #'ap/agent-proc st :in {:op :req :rid 5 :kind :eval :msg {:op :eval :forms "(+ 1 2)" :opts (sorted-map :a 1)}})
+        frame (a/<!! in)
+        [st' outs] (step #'ap/agent-proc st :from frame)
+        answered (first (filter #(= {:rid 5} (:dest %)) (:to-api outs)))]
+    (is (= {:op :unsendable :rid 5} (select-keys frame [:op :rid])) (pr-str frame))
+    (is (= :seon.agent/unencodable (get-in answered [:r :seon.error/type])) (pr-str outs))
+    (is (empty? (:inflight st')) "nothing is left in flight")
+    (is (= :reply (:op (a/<!! (:in agent-end)))) "the agent is sent an answer no wait holds, and the end is open")
+    (remote/close! end) (remote/close! agent-end)))
+
 (deftest an-agent-root-cannot-interrupt-is-a-problem-and-memory-rides-its-commits
   ;; shrink brief 3, rows 19 and 34: an agent whose boot check found root's interrupt cannot
   ;; reach it says so in its hello, and root records :seon.agent/interrupt-unreachable (the
@@ -459,6 +496,30 @@
             rid (get-in (first (:to-writer outs)) [:dest :rid])
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
+
+(deftest an-end-closed-on-a-live-pid-ends-the-agent-and-answers-its-waiter
+  ;; an agent whose end closed can never answer root again: root ends it at once (the kill its :kill
+  ;; makes), and its exit, which comes, answers the requests it held through ::dying. No bound is
+  ;; reached and no stall timer is armed. The pid is a real child (sleep 20), alive unless killed.
+  (let [proc (.start (ProcessBuilder. ^java.util.List ["sleep" "20"]))
+        pid (.pid proc)
+        p (promise)
+        st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {:a1 {:status :busy :pid pid :branch :b1}}} :graph (promise)
+                             :system (doto (promise) (deliver {:procs {} :conns []}))})
+        st (-> st (assoc-in [:agents :a1] {:branch :b1}) (assoc :writer-closed true))
+        [st rid] (#'root/pend st p :eval :a1)
+        st (#'root/end-agent st (volatile! {}) {:agent :a1 :pid pid :inflight [rid]})
+        status {:exit (.waitFor proc)}]
+    (is (not= {:exit 0} status) (str "ended by root, not left to run out: " (pr-str status)))
+    (is (not (realized? p)) "its waiter is answered at its exit, not before")
+    (let [st' (#'root/back-op st (volatile! {}) {:ev :exit :pid pid :status status})]
+      (is (realized? p))
+      (when (realized? p)
+        (is (= [:seon.agent/died :a1] ((juxt :seon.error/type :agent) @p)) (pr-str @p))
+        (is (re-find #"ended by root" (:seon.error/message @p))))
+      (is (empty? (:seon.root/dying st')) "nothing is parked")
+      (is (nil? (:seon.root/stall-due st')) "and no stall timer was armed"))))
 
 (deftest root-records-what-it-observes-of-its-agents
   ;; what root observes of an agent is facts on the

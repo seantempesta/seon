@@ -138,7 +138,7 @@
   or an orphan, which are not the server's children)."
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :keyword [:maybe :seon.lib/exit-status] :map [:sequential :int]] :seon.root/api-state]}
   [st o aid exit died inflight]
-  (let [e (assoc died :exit exit :seon.error/message (str "agent " (name aid) " died" (exit-text exit)))
+  (let [e (assoc died :exit exit :seon.error/message (str "agent " (name aid) (if (:ended died) " closed its socket and was ended by root" " died") (exit-text exit)))
         st (problem st (err/occurrence e :agent {:agent aid :task (get-in st [:view :agents aid :task]) :form (get-in e [:last-op :form])}
                                        (System/currentTimeMillis)))]
     ;; a spawn whose agent died before its hello is answered that death
@@ -337,7 +337,9 @@
         branch (pdb/on-main (pdb/conn-main (:conn st)) (or branch (keyword (str "agent-" (name id)))))
         [r a] (sock/socketpair)
         ;; fiber pumps: an end costs no thread of its own (root may run a thousand agents)
-        end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :buf (cfg/value :seon.config.agent/inbox-size)})]
+        in (a/chan (cfg/value :seon.config.agent/inbox-size))
+        end (remote/open r {:codec {:encode codec/encode :decode codec/decode} :pump :fiber :in in :encode-error (partial ap/unencodable in)
+                            :buf (cfg/value :seon.config.agent/inbox-size)})]
     [(-> st (assoc ::update true)
          (assoc-in [:agents id] {:branch branch})
          (assoc-in [:agent-procs id] {:proc agent-launcher
@@ -378,8 +380,11 @@
                ;; orphan of a server that went down, a process never forked): now
                (or (:exit v) (:cloned-from v) (:orphan v) (nil? (or pid (:pid v)))) (record-death st o agent (:exit v) died inflight)
                ;; else when the fork server reaps it (:exit): the requests it died in are
-               ;; answered then, with the status that names the death
-               :else (assoc-in st [::dying (or pid (:pid v))] [agent died inflight]))
+               ;; answered then, with the status that names the death. Its end closed, so it can never answer root
+               ;; again: root ends it now (the kill its :kill makes), and its exit, which comes, answers
+               ;; the requests it held: a process whose end closed while it lived is never waited on
+               :else (do (lib/kill! (or pid (:pid v)) 9)
+                         (assoc-in st [::dying (or pid (:pid v))] [agent (assoc died :ended true) inflight])))
           st (cond-> st rid (deliver-rid o rid {:stopped true :agent agent}))]
       (let [st (-> st (update :agents dissoc agent) (update :agent-procs dissoc agent) (update ::inserting dissoc agent) (assoc ::update true)
                    (set-agent o agent {:status (or stop :dead) :ended-ms (System/currentTimeMillis) :running nil}))
