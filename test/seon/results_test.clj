@@ -161,7 +161,9 @@
                     :growth :constant
                     ;; raised from 16 calls and 60 KB by the owner, 2026-11-06, for seon.fx/history: measured 30 and 97 KB
                     :fixed {:calls 31 :bytes 100000}
-                    :sizes [10 100 1000]})
+                    ;; 1 to 100 spans the 100x a growth is judged on (docs/cost.md#how-we-measure); at 1,000 building the
+                    ;; cache was the test (1,110 verdicts written, 27 M of its 28 M ticks), and a write that counts it is red at n=1
+                    :sizes [1 10 100]})
        (finally (clean-costs!))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
@@ -186,7 +188,9 @@
                     :growth :linear
                     :per-n {:bytes 5600 :calls 6}
                     :fixed {:calls 10 :bytes 6000}
-                    :sizes [10 100 1000]})
+                    ;; 1 to 100 spans the 100x a growth is judged on; at 1,000 building the cache and touching it again on each
+                    ;; settling call was the test (54 M ticks against 6 M), and a read of each green's file is red at n=1
+                    :sizes [1 10 100]})
        (finally (clean-costs!))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
