@@ -82,7 +82,9 @@ VERDICT=CHECK; [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]] && VERDICT=${(U)1}
 # before it says anything): bin/build records the tree it built from, bin/tree names this one
 # The plan's out/build (bin/test's run dir: the steps' SEL, or its parent for the fast tier) says it when empty: the binary is
 # current for this tree by reach (seon.root/binary-current), what differs reaching nothing root runs from its binary
-CURRENT=; for b in ${SEL:+$SEL/build} ${SEL:+${SEL:h}/build}; do [[ -e $b && ! -s $b ]] && CURRENT=1; done
+# A check a test of that run starts itself (bin/check MODE from a shard) has no steps dir: the run's out/build is
+# SEON_PLAN_BUILD, which bin/test exports
+CURRENT=; for b in ${SEL:+$SEL/build} ${SEL:+${SEL:h}/build} ${SEON_PLAN_BUILD:-}; do [[ -e $b && ! -s $b ]] && CURRENT=1; done
 if (( NEEDS )) && [[ -z $CURRENT ]]; then
   BUILT=$(cat "$ROOT/target/seon.tree" 2>/dev/null) HERE=$("$ROOT/bin/tree" "$ROOT")
   if [[ -z $BUILT || $BUILT != $HERE ]]; then

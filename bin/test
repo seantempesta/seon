@@ -56,6 +56,9 @@ jobs=$(<$OUT/jobs)
 # which its digest does not cover: that binary is built from this tree first (a no-op build costs
 # ~30-45 s) unless it is current for this tree, what differs reaching nothing root runs from its binary
 # (seon.root/binary-current, the plan's out/build). The plan names what it selected that reaches one (out/binary); nothing, no build
+# the plan's answer on the binary (out/build, empty when it is current for this tree by reach): a check a test of this run
+# starts itself reads it (bin/check), as the run's own steps do
+export SEON_PLAN_BUILD=$OUT/build
 F=($OUT/shard-*.edn(N))
 # laws and health read the tree and answer in seconds, before any build: a run of their own beside the rest, whose red ends the run, shards and
 # steps, as no later result can make that tree mergeable and a red is reported as it stands (docs/merging.md#a-merge-runs-what-the-change-reaches)
