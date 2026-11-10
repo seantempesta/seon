@@ -124,7 +124,9 @@ fi
 # the full run's outcome, beside the verdict cache, so a store erase keeps it (docs/merging.md#the-full-run-is-the-net): the commit it
 # ran, green or red with each red test, and when it ended; written whole (temp + rename), green or red. A run that died writes
 # nothing, so the file still names the last run that ended: bin/land says how many landings main is past it
-if [[ " $* " == *" --all "* && -n ${SEON_RESULTS_DIR:-} ]]; then
+# only the full run is the full run: --all with no names (bin/test --all NS/TEST reruns those tests and is no net; a
+# named run recorded itself as the green full run at 6e1470f632, 2026-11-10)
+if [[ "$*" == "--all" && -n ${SEON_RESULTS_DIR:-} ]]; then
   reds=(${(f)"$(for f in $F; do grep -h "^RED " "${f%.edn}.log"; done | awk '{print $2}' | sort -u)"})
   { print -r -- "{:commit \"$(git -C "$ROOT" rev-parse HEAD)\" :status $( (( st == 0 )) && print :green || print :red)"
     print -r -- " :reds [${reds[*]}]"
