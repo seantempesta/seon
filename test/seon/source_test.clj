@@ -210,7 +210,9 @@
         git (fn [env & args] (:out (apply sh/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
         built-with (fn [path f]
                      ;; tree with path's text replaced by (f text), or its gitlink moved when f is :pin
-                     (let [idx (str here "/target/tmp/binary-current-" (random-uuid) ".index") env {"GIT_INDEX_FILE" idx}]
+                     ;; its index under target/tmp, made here: a fresh worktree has none, and git could not make the index (red in any new worktree)
+                     (let [idx (str here "/target/tmp/binary-current-" (random-uuid) ".index") env {"GIT_INDEX_FILE" idx}
+                           _ (.mkdirs (java.io.File. (str here "/target/tmp")))]
                        (git env "read-tree" tree)
                        (if (= :pin f)
                          (git env "update-index" "--cacheinfo" (str "160000," (apply str (repeat 40 "1")) "," path))
@@ -231,7 +233,7 @@
             "an agent-only change builds nothing")
         (is (= "" (test-runner/build-text [] r)) "and no process test selected builds nothing")))
     (is (= ["reference-code/lmdb"] (:reaches (current (built-with "reference-code/lmdb" :pin)))) "a pin: not current")
-    ;; seon.fx/a-gate-runs-the-candidates-own-binary: a candidate whose build input differs from the running binary's only in its runtime
+    ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a candidate whose build input differs from the running binary's only in its runtime
     ;; (the Jolt pin) is not current, so its gate builds before it runs; and so is one that adds a schema attribute (the binary bakes the schemas)
     (is (= ["reference-code/jolt"] (:reaches (current (built-with "reference-code/jolt" :pin)))) "the runtime's pin: not current")
     (is (= ["resources/seon/schemas/seon.facts.edn"]
@@ -1137,7 +1139,7 @@
                :sizes [5 15 50]}))
 
 (deftest a-gates-checkout-takes-its-roots-built-products
-  ;; seon.fx/a-gate-runs-the-candidates-own-binary: bin/worktree --at given FROM clones FROM's built products into the checkout's
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: bin/worktree --at given FROM clones FROM's built products into the checkout's
   ;; target/ (the runtime and native libraries a gate's runner runs on), not the main tree's: a gate's checkout is made from the
   ;; checkout of the root that runs it (seon.fx/run-on-checkout). Red before: --at took no FROM and cloned the main tree's
   (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-at-" (random-uuid))) (.mkdirs)))
