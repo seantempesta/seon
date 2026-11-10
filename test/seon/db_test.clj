@@ -1350,9 +1350,11 @@
           (d/transact br [{:note/agent :t :note/text "the branch's own"}])
           (let [[own total] (private)]
             (is (:crypto-hash? (:config @br)) "the store's nodes are addressed by their content")
-            ;; its own: the one write's path, a leaf and the branches over it to the root (4 of 157 measured, 2026-11-09);
-            ;; with random addresses 76 of 157, what the 20 merges rewrote
-            (is (<= own 8) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
+            ;; the branch's own nodes are its one write's path and a few leaves, under a tenth of the tree (Sean, 2026-11-10; measured 9 of
+            ;; 156): persistent-sorted-set is a plain B-tree whose leaf cut depends on insertion order, and seon.merge/merge-tx inserts
+            ;; main's datoms in another order than main did, so a branch can own leaves holding only main's datoms (the literal 8 passed
+            ;; by luck). Random addresses kept 76 of 157 (48%) after the same 20 merges, red here; docs/sharing.md#what-a-branchs-nodes-are
+            (is (<= own (quot total 10)) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
           (finally (d/release br) (d/release main) (clojure.java.shell/sh "rm" "-rf" path))))))
 
 (deftest a-branchs-own-entity-schema-is-the-one-its-writes-are-held-to

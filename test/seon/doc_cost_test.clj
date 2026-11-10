@@ -197,7 +197,7 @@
   (cost/proof
     {:of 'seon.doc/citing-sections :input 'seon.doc-cost-test/citing-input
      :n "wiki sections citing the var (all of them)"
-     :work "one pass over the sections' cited names (:seon.doc/names has no index), each match's address; the cut is the first :seon.config.ctx/cited-by of the sorted addresses"
+     :work "the sections naming the var, by the index of :seon.doc/names, each match's address; the cut is the first :seon.config.ctx/cited-by of the sorted addresses"
      :growth :linear
      ;; 2026-10-31 (shrink-tests-4): sizes [30 100 300], on the world
      ;; measured 2026-10-27: 332k ticks / 1.42 MB at 100, 1.04M / 4.65 MB at 300, 3.86M / 18.1 MB at 1,000

@@ -3,7 +3,7 @@
   (docs/render.md#the-models-context-a-cached-prefix-then-the-turn), and what reads them. Run: bin/test seon.ctx.wire-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.ctx] [seon.ctx] [seon.doc] [seon.fixtures] [seon.render]
-            [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.ctx.status]))
+            [datahike.api :as d] [seon.test-store :as ts] [my.test :as t] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.ctx.status] [seon.ctx.wire-test]))
 
 (defn- item
   "Eval record i of a run as the conversation reads it ([ref v k tx]): a model's call whose value
@@ -155,6 +155,32 @@
                :per-n {:calls 8 :bytes 15000}
                :fixed {:calls 900 :bytes 600000}
                :sizes [10 30 100]}))
+
+(defn greens-of
+  "seon.ctx.status/status's arguments for agent a1 on task demo/f, its proof red, on a branch holding n more green tests no
+  proof names: the tests a run judged that the done rule never reads, grown."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :map]]}
+  [n]
+  (let [db (#'seon.ctx.wire-test/db-f (#'seon.ctx.wire-test/db-with-program))
+        db (d/db-with db (into [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/f"]}
+                                {:var/name 'demo-test/f-test :seon.test/status :red :seon.test/failures [{:type :fail :expected "(= 4 (f 2))" :actual "(not (= 4 5))"}]}]
+                               (for [i (range n)] {:var/name (symbol "other-test" (str "t" i)) :seon.test/status :green})))]
+    [db (:tree (seon.ctx/build (seon.db/index) db (pdb/eid db :seon.agent/key "a1") :b)) {}]))
+
+;; See docs/render.md#how-the-work-stands
+(deftest a-status-costs-its-proofs-and-its-reds
+  ;; the status read every test's verdict on the branch each turn (seon.ctx.status's verdicts: one scan of :seon.test/status);
+  ;; the done rule reads the task's proofs and the tests that are not green, so the greens no proof names cost nothing
+  (ts/test-branch!
+    (fn [_ _]
+      (cost/proof {:of 'seon.ctx.status/status :input 'seon.ctx.wire-cost-test/greens-of
+                   :n "green tests on the branch that no proof of the task names"
+                   :work "the task's proof's verdict and source, a seek of :seon.test/status per value that is not green, the done rule"
+                   :growth :constant
+                   ;; measured 2026-11-10 at 10, 40, 160 greens: before, 142k, 278k, 836k ticks and 0.58, 1.06, 3.03 MB (about 4.8k ticks
+                   ;; and 16 KB a green test: a branch of 1,600 verdicts about 8M ticks and 27 MB a turn); after, 108k ticks and 0.46 MB at each
+                   :fixed {:bytes 500000 :calls 45}
+                   :sizes [10 40 160]}))))
 
 (defn test-ns-of
   "seon.ctx.status/test-shape's arguments for an unwritten proof of namespace demo-test, which holds n helpers and n tests, no

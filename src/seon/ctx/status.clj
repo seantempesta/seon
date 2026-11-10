@@ -129,13 +129,18 @@
       (seq sections) (assoc :sections sections))))
 
 (defn- verdicts
-  "Every test the branch db holds a verdict of (seon.proofs/result-tx: the verdict at its reach digest
-  now), {test {:status :pass|:fail|:deferred :failures [assertion]}}: green is :pass, red and flaky
-  :fail (a flaky test is no green), deferred left to root's gate. One scan of :seon.test/status's datoms."
-  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :qualified-symbol :map]]}
-  [db]
-  (into {} (for [{e :e st :v} (d/datoms db :aevt :seon.test/status)
-                 :let [v (d/entity db e)]]
+  "The verdicts on branch db of the tests the done rule reads (seon.proofs/result-tx: the verdict at its reach digest
+  now): each of proofs, and every test whose verdict is not green, {test {:status :pass|:fail|:deferred :failures
+  [assertion]}}: green is :pass, red and flaky :fail (a flaky test is no green), deferred left to root's gate. A seek of
+  :seon.test/status per value that is not green (indexed) and one per proof: the greens outside the proofs, which no
+  reason reads, are never read. See docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-symbol]] [:map-of :qualified-symbol :map]]}
+  [db proofs]
+  (into {} (for [e (into (into #{} (keep #(pdb/eid db :var/name %)) proofs)
+                         (comp (mapcat #(d/datoms db :avet :seon.test/status %)) (map :e))
+                         [:red :flaky :deferred])
+                 :let [v (d/entity db e) st (:seon.test/status v)]
+                 :when st]
              [(:var/name v) (cond-> {:status (case st :green :pass :deferred :deferred :fail)}
                               (seq (:seon.test/failures v)) (assoc :failures (:seon.test/failures v)))])))
 
@@ -240,7 +245,7 @@
         test-error (:seon.agent/test-error ag)
         ;; while it is so no verdict counts: what the branch holds is from before the change that the run
         ;; failed to judge (every proof :not-run, as the run's own results were none)
-        vs (if test-error {} (verdicts db))
+        vs (if test-error {} (verdicts db (set proofs)))
         ;; a deferred proof is neither red nor unknown (seon.reconcile/done-explain)
         deferred (into (set deferred) (keep (fn [[t {st :status}]] (when (= :deferred st) t))) vs)
         results (into {} (keep (fn [[t {st :status}]] (when (not= :deferred st) [t st]))) vs)
@@ -264,7 +269,7 @@
                        :else (r/index db)))
         ;; a red here that main was red on too, at the branch's merge base: said as a fact, and the agent's to clear all the same (the owner, 2026-11-07)
         also-on-main (when (and base (some (fn [[_ st]] (= :fail st)) results))
-                       (vec (sort-by str (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t)) (verdicts base)))))
+                       (vec (sort-by str (keep (fn [[t {st :status}]] (when (and (= :fail st) (= :fail (get results t))) t)) (verdicts base (set proofs))))))
         input (cond-> (if claims
                         (r/done-input claims tid results (set gaps) (mapv #(sedn/encode (:key %)) unmerged) nil plan-before (set deferred))
                         (cond-> {:proofs (set proofs) :kind kind :results results :main-green #{} :allowed-red #{}
