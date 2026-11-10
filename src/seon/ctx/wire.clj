@@ -233,10 +233,15 @@
 
 
 (defn- presentation-free
-  "Hiccup h without what is the page's alone: each element's class, style and id (seon.render's part-form leaves them out the same way)."
+  "Hiccup h without what is the page's alone: each element's class, style and id, but for a component's root (an element the walk
+  gave an id), which keeps its render's name, the first word of its class, so the model can look up the function that drew a part
+  (`(source seon.render.ui/task)`) and its CSS on that var's metadata. See docs/render.md#style."
   {:malli/schema [:=> [:cat :any] :any]}
   [h] (clojure.walk/postwalk (fn [x] (if (and (vector? x) (keyword? (first x)) (map? (second x)))
-                                       (let [a (dissoc (second x) :class :style :id)] (if (seq a) (assoc x 1 a) (into [(first x)] (nnext x))))
+                                       (let [m (second x)
+                                             r (when (:id m) (first (str/split (str (:class m)) #"\s+")))
+                                             a (cond-> (dissoc m :class :style :id) (seq r) (assoc :render r))]
+                                         (if (seq a) (assoc x 1 a) (into [(first x)] (nnext x))))
                                        x))
                              h))
 
@@ -252,7 +257,7 @@
         branch (get-in (or (:origin-db d) d) [:config :branch])]
     (let [parts (requiring-resolve 'seon.render.ui/agent-parts)
           ix (program/index-of-db d)]
-      (presentation-free (:hiccup (render/render-pull (:tree (ctx/build ix d a branch (:seon.ctx/pattern (meta parts)))) d parts ix #{:seon.render/hiccup}))))))
+      (presentation-free (:hiccup (render/render-pull (:tree (ctx/build ix d a branch (:seon.ctx/pattern (meta parts)))) d parts ix #{:seon.render/hiccup} {:seon.render/changes ctx/changes}))))))
 
 (defn page-message
   "The user message Seon writes the model before its turn n: `<page from=\"seon\" turn=\"n\">`, the edits that take the
@@ -311,7 +316,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
   [db c]
   (let [evals (:seon.eval/_agent c) msgs (:seon.message/_to c)
-        placed (ctx/placed-messages db c)]
+        placed (ctx/placed-messages db c)
         ;; the newest call's basis is written after the commit it names (seon.turn/open-turn!), so read at that commit it holds none:
         ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message
         here (when-let [id (d/commit-id db)] {:commit id :t (:max-tx db)})
@@ -350,7 +355,7 @@
         ix (program/index-of-db dbt)
         branch (get-in (or (:origin-db dbt) dbt) [:config :branch])
         pull (:tree (ctx/build ix dbt (pdb/eid dbt :seon.agent/key ek) branch))]
-    (:messages (render/render-pull pull dbt #'example-session-msgs ix #{:seon.render/openai-compat} {:seon.render/as :seon.render/openai-compat}))))
+    (:messages (render/render-pull pull dbt #'example-session-msgs ix #{:seon.render/openai-compat} {:seon.render/as :seon.render/openai-compat :seon.render/changes ctx/changes}))))
 
 (defn agent-msgs
   "An agent (:seon.db/agent-fact) as the model reads it: its system message (`agent-system-text`: the doc sections
