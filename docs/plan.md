@@ -19,7 +19,7 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 ## Now
 
-**The constraint (owner, 2026-11-10): the pull → ratom → render path does not change; the work is the data on entities and the renders.** Five sessions each own an area, and the managing session batches their ready branches: each session runs the tests it changed by name and the whole namespace of the mechanism it touched, and the managing session merges the tips into one branch, proves it once and lands it ([merging](merging.md#a-branch-lands-with-binland)). Nobody proves a small change alone (owner: "I don't want 100% separated work separately running all the tests for each little change").
+**The constraint (owner, 2026-11-10): the pull → ratom → render path does not change; the work is the data on entities and the renders.** Five sessions each own an area, and the managing session batches their ready branches: each session proves its own branch with `bin/prove` (everything its change reaches, the check steps included, every green at its digest reused: the whole suite at the cost of what changed), and the managing session merges the tips into one branch, proves it once and lands it ([merging](merging.md#a-branch-lands-with-binland)). Every session and agent checks its whole work before handing it over (owner, 2026-11-10: "make the entire suite run very fast so every agent can fully check their work", replacing "nobody proves a small change alone").
 
 What each session is on, in order:
 

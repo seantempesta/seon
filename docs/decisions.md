@@ -6,6 +6,10 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-10, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
 
+### Every session proves its branch before handing it over (owner, 2026-11-10)
+
+"Please task the test agent with coming up with a solution where we can catch these bugs more reliably. They are to ideally make the entire suite run very fast so every agent can fully check their work." Relayed by the managing session with the day's escapes (five changes handed over "green" on hand-picked namespaces turned whole proves red); the Tests session's plan, approved: one command checks a branch, the whole suite at the cost of what changed. That command is `bin/prove` (it runs what a change reaches, every check step a `src` change reaches, and reuses every green at its digest), not a second script beside it. Replaces "nobody proves a small change alone". Now stated in: AGENTS.md section 3 (the one way, item 2), [plan](plan.md).
+
 ### A test that starts a root takes what root runs (owner, 2026-11-10)
 
 Asked with the question tool by the managing session, the Tests session's evidence beside it: on main's reach graph, of 233 process tests 7 reached `seon.writer/commit-batch`, 9 `seon.reconcile/start` and 10 `seon.fork-server/main`, though each starts a root that runs all three; a change to root's writer reused 226 of their greens, and five of them were red in the batch. The owner chose to reverse 2026-10-27's "a root's boot is no entry" ("no test includes all of src"): a process test's digest takes what root runs. Now stated in: [source](source.md#tests-run-by-reach) (a test that starts a root takes what root runs).
