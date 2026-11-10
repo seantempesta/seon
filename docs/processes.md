@@ -69,7 +69,7 @@ Root records what it observes of each agent on main (```seon.root/record-agents`
 
 ## A stalled agent
 
-An agent with a request in flight that sends root nothing past the stall bound is observed stalled, once per quiet spell: a recorded fact on the agent, never an end (`seon.agent-proc`'s stall check; the bound is `:seon.config.agent/stall-ms`, a clock named in [clocks](clocks.md)).
+An agent with a request in flight that sends root nothing past the stall bound is observed stalled, once per quiet spell: a recorded fact on the agent, never an end (`seon.agent-proc`'s stall check; the bound is `:seon.config.agent/stall-ms`, a clock named in [clocks](clocks.md)). Root's frames to the agent never block its proc (```seon.agent-proc/to-proc!``` puts without waiting, in order): an agent that stopped reading its socket, an eval held in a blocking `open(2)`, once left the proc parked in a blocking put, so it never took the stall check and nothing was recorded (batch 16's `problems` step, 8.5 min; ```seon.procs-test/an-agent-that-reads-nothing-is-seen-as-a-stall```).
 
 Root writes it as `:seon.process/stall` on the agent's process entity, with what it waits on: the request root last sent it, its kind and form, and for a test run the test that started last (each test's start reaches root as a `:testing` frame from `seon.agent/run-tests-forked`). While the fact holds it is an open `:stalled` problem naming the agent and what it waits on (`seon.problems/stalled-agents`, under the agents area of root's page and `my.root/problems`), and it is in every ctx that holds the agent. The agent's next frame retracts it (`:spoke`), and so does its end.
 

@@ -32,12 +32,16 @@
 
 (defn- to-proc!
   "Send m to the agent's process: onto the end's :out (its writer pump frames it). While a
-  descriptor is in its handshake (:holding), m waits in :held."
+  descriptor is in its handshake (:holding), m waits in :held. The put never blocks this proc
+  (core.async put!: one the channel cannot take now waits on it, in order, holding no thread):
+  an agent that stops reading its socket left the blocking put (>!!) parked in this proc's
+  step, so the proc never took root's :stall? and no stall was recorded (docs/processes.md#a-stalled-agent).
+  An agent that reads nothing sends nothing, so the stall check sees it quiet."
   {:malli/schema [:=> [:cat :map :seon.wire/seon-msg] :map]}
   [st m]
   (cond (:dead? st) st
         (:holding st) (update st :held (fnil conj []) m)
-        :else (do (a/>!! (:out (:end st)) m) st)))
+        :else (do (a/put! (:out (:end st)) m) st)))
 
 (defn- send-fd!
   "The descriptor fd to the agent, in a frame of its own ({:op :fd :k k}, SCM_RIGHTS). The
