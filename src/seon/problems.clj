@@ -579,21 +579,18 @@
 
 (defn uncited-tasks
   "Each ready task, which holds the plans along its :needs (seon.task/accumulate), whatever its kind, whose
-  accumulated plan cites no program var (no cite of one along its needs, seon.task/cites-of: the context pulls
-  no var for it), that names no proof, or one of whose proofs is still the placeholder seon.ctx writes, as an
+  accumulated plan cites nothing (no cite along its needs, seon.task/cites-of, of a var, a section, a schema key, a file,
+  a task or a namespace: the context pulls nothing for it), that names no proof, or one of whose proofs is still the placeholder seon.ctx writes, as an
   :uncited-task row with its reason (:no-references, :no-proofs, :placeholder-proof). Closed when its plan
   cites a name and its proofs are named and written. Cost: the task, reference and proof datoms once, then a
   walk of each ready task's needs."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]]}
   ([db ans] (uncited-tasks db ans (task-reads db)))
-  ([db ans {:keys [ready? cited]}]
+  ([db ans {:keys [ready?]}]
   (let [chain (fn chain [seen e]
                 (if (seen e) seen
                     (reduce chain (conj seen e) (map :v (d/datoms db :eavt e :seon.task/needs)))))
         vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
-        ;; the program's vars among every task's cites, asked of the program once, when a ready implement step asks
-        ;; (seon.program/program-names)
-        program (delay (set (program/program-names db (vec (distinct (mapcat #(cited (:e %)) (d/datoms db :aevt :seon.task/id)))))))
         placeholder? (fn [sym] (some-> (pdb/eid db :var/name sym) (->> (d/entity db)) :var/form :form/src
                                       (str/includes? task/placeholder-assertion)))]
     (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
@@ -601,7 +598,9 @@
                :let [es (chain #{} e)
                      proofs (vals-of es :seon.task/proofs)
                      reasons (cond-> []
-                               (not-any? @program (mapcat cited es))
+                               ;; any cite: each names what exists (a dead one is refused at the write), and the context pulls it,
+                               ;; a section, a schema key, a file, a task or a dependency's var as much as one of the program
+                               (not-any? #(seq (d/datoms db :avet :seon.cite/of %)) es)
                                (conj :no-references)
                                (empty? proofs) (conj :no-proofs)
                                (some placeholder? proofs) (conj :placeholder-proof))]
@@ -609,7 +608,7 @@
                :let [s (str "uncited-task " v " " (name reason))]]
            (derived-row ans s 'seon.task
                         (case reason
-                          :no-references (str v " is ready and its plan cites no var, attribute or section: the context pulls nothing for it")
+                          :no-references (str v " is ready and its plan cites nothing (no var, section, schema key, file or task): the context pulls nothing for it")
                           :no-proofs (str v " is ready and names no proof")
                           :placeholder-proof (str v " is ready and a proof of it is still the placeholder assertion (seon.task/placeholder-assertion)"))
                         {:kind :uncited-task :task v :reason reason} {:task v :reason reason}))))))

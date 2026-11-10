@@ -474,7 +474,7 @@
                 :stale-binary 2        ; root's source fact: one seon.db/eid and one pull
                 :orphan-page 1         ; the sections' references, one scan
                 :leadless-section 1    ; the stored sections' first blocks
-                :uncited-task 19       ; the ready tasks' plans, cites and proofs (12 are the proofs read, seon.db/eid per proof), and task-reads
+                :uncited-task 15       ; the ready tasks' plans, cites and proofs (12 are the proofs read, seon.db/eid per proof), and task-reads (19 while it asked the program which cited vars were its own)
                 :unnamed-site 9        ; the catch sites of the program's forms (live? and form-of per form, the namespaces once)
                 :stale-section 2       ; the read datoms and the vars' forms, one scan each
                 :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
@@ -1168,7 +1168,7 @@
   ;; the class's work is per task; 68 calls measured at 20 tasks against 85 (per-n 4, fixed 5, unchanged)
   (cost/proof {:of 'seon.problems/uncited-tasks :input 'seon.problems-test/uncited-input
                :n "tasks examined: finished design steps and the ready implement steps that need them, each citing"
-               :work "the kind and task datoms once, then each implement step's needs walked once; the program's vars among the cites asked of the program once (seon.program/program-names, read from the cites at read time where :seon.task/references stored it at write: 43 calls before, 45 since)"
+               :work "the kind and task datoms once, then each implement step's needs walked once; whether any cite exists along them (one seek a task; until 2026-11-10 the program's vars among the cites, asked of seon.program/program-names)"
                :growth :linear
                :per-n {:ns 50000 :bytes 65000 :calls 4}
                :fixed {:ns 500000 :bytes 500000 :calls 5}
@@ -1217,6 +1217,18 @@
                                                    :seon.task/plan "The root tile shows what boot loaded."}]))
         rows (into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health db) [:classes :uncited-task :rows]))]
     (is (contains? rows ["app/tile" :no-references]) "a ready :whole task whose plan names nothing the context can pull")))
+
+(deftest a-task-citing-a-section-cites-something
+  ;; the standing root, 2026-11-10: 100 of 132 :no-references rows cited sections, files, schema keys or a dependency's vars, which
+  ;; the context pulls; only a cite of a program var counted. Any cite counts: each names what exists, a dead one refused at the write
+  (let [db0 (world)
+        db0 (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/p.md" "# P\n\nIt says what it is about.\n"}))
+        db (d/db-with db0 (seon.task/create-tx db0 [{:seon.task/ns 'app :seon.task/name "doc" :seon.task/kind :whole :seon.task/proofs #{'app-test/real}
+                                                     :seon.task/plan "Change what `docs/p.md#p` says."}]))
+        e (:db/id (d/entity db [:seon.task/id "app/doc"]))
+        rows (into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health db) [:classes :uncited-task :rows]))]
+    (is (seq (d/datoms db :avet :seon.cite/of e)) "the plan's cite of the section is written")
+    (is (not (contains? rows ["app/doc" :no-references])) "a task citing a section is not one that cites nothing")))
 
 (defn- var-forms
   "db0 with the vars app.cite/v0..: each in a src namespace, its form src, docstring and kind as given
