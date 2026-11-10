@@ -1360,6 +1360,23 @@
              {:status st :parents-hook-ran-in (when (.exists f) (slurp f))})
            (finally (.removeShutdownHook (Runtime/getRuntime) hook) (.delete f))))})
 
+(defn units
+  "The unit table's rows measured (seon.cost-test/measure-unit at its unit-n), each in a process that ran nothing before
+  it: a child forked from this process's main carrier per measurement, this process having only loaded the benches, so
+  what another measurement or a shard's earlier tests left in the process (a pull path's caches) moves no row. k one
+  unit (its keyword's text) or every row of seon.cost/units when nil or \"all\"; reps measurements of each. One line a
+  measurement, UNIT [k row]. See docs/cost.md#what-is-measured."
+  [k reps]
+  (let [measure @(requiring-resolve 'seon.cost-test/measure-unit)
+        unit-n @(requiring-resolve 'seon.cost-test/unit-n)
+        ks (if (and k (not= "all" k)) [(keyword (subs k (if (= \: (first k)) 1 0)))] (sort (keys seon.cost/units)))]
+    (jolt.host/main-carrier-run!
+      (fn []
+        (doseq [k ks _ (range (or (some-> reps parse-long) 1))]
+          (lib/fork! {:child #(out! "UNIT " (pr-str [k (measure k (unit-n k))]))
+                      :refused (fn [n] (out! "UNIT " (pr-str [k {:refused n}]))) :parent lib/wait-status}))))
+    (lib/c-exit 0)))
+
 (defn forks
   "Fork case k (fork-cases) on this process's main carrier: its answer, the last line as EDN."
   [k]
@@ -2084,6 +2101,7 @@
      "lifecycle-pause" (fn [n more] (lifecycle-pause))
      "boot-twice" (fn [n more] (boot-twice))
      "forks" (fn [n more] (forks n))
+     "units" (fn [n more] (units n (first more)))
      "sweepers-held" (fn [n more] (sweepers-held))
      "drain" (fn [n more] (drain (n-or n "8")))
      "backpressure" (fn [n more] (backpressure (n-or n "8")))
