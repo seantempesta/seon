@@ -98,4 +98,21 @@ Proof: a cited var's one-line edit gives a page message under the size of the va
   :seon.task/proofs #{}}
  {:seon.task/name "ctx-reads-attribute-owners-by-the-one-lookup"
   :seon.task/plan "Owner, 2026-11-10: \"No duplicate implementations\". Which entity schema owns an attribute is read through one function, seon.db/owners (the write check, seon.db/most-specific, seon.render/schema-of and entity-schema call it; Web, jolt/walk-2a). Three readers in seon.ctx still read the entity index's :entity-schemas inline: seon.ctx's time-ordered join test (a reverse join's members by store-issued id) and the patch's new-member identity check and its refusal text. Moved to owners as one call each, seon.ctx-test/a-lookups-patch-costs-its-change went from 31 to 33 contracted calls at n=20 (its bound 31, allowed 1.0x), since owners is contracted and these run a member at a time. The change: read the owners of a patch's attributes once per patch (one call), and of a join's attribute once where the join is built, so the cost proof stays at its bound. Proof: that cost proof unchanged; no (:entity-schemas ix) left in src outside seon.db/owners."
-  :seon.task/kind :work}]
+  :seon.task/kind :work}
+ {:seon.task/name "a-search-hit-shows-why-it-matters"
+  :seon.task/plan "What exists: the page's search part (seon.render.ui/searched) lists each hit by name alone. In curated run 1 (seon.model/a-streamed-reply-test-sleeps-not, 2026-11-10) its top hit, seon.check/named-test-inputs at 60%, was the hand-kept exemption the task also had to remove; the agent shown it did not act on a bare name, and the agent without the part found it through grep's matching line.
+
+The change: each hit shows the line of its text that matched (seon.doc/line-of, which search already computes for the hits it shows as :line), one line, so a hit says why it is there.
+
+Proof: a search hit for a var whose source holds the query's word renders that source line beside the name."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "the-context-shows-how-a-wiki-section-is-edited"
+  :seon.task/plan "What exists: in curated run 1 (2026-11-10) an agent spent four evals learning to edit a wiki section: (seon.repl/edit! \"docs/clocks.md\" ...) failed (\"no file at /private/tmp/seon-agents/docs/clocks.md: write it whole first\"), a search, a doc read, then a whitespace failure; the agent that read (doc seon.repl/edit!) first got the section-address form at once.
+
+The change: the system prompt's edit! line shows the three forms, a var, a file path and a wiki section's address (\"docs/x.md#anchor\"), and the file-path refusal names the section form when the path is a wiki page.
+
+Proof: edit! of a wiki page by path answers an error naming the section-address form."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+]
