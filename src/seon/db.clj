@@ -654,15 +654,20 @@
 
 (defn open-main!
   "main on the store of cfg, whose :db exists: made from :db's head when the store has no
-  such branch (one pointer write). Answers [conn existed?]."
+  such branch (one pointer write), on a connection that streams when root is the store's sole writer
+  (:seon.config.store/sole-writer?). Answers [conn existed?]."
   {:malli/schema [:=> [:cat :seon.db/cfg :seon.db/branch] [:tuple :seon.host/conn :boolean]]}
   [cfg main]
-  (let [seed-conn (connect cfg)
+  (let [;; root alone commits main when it is the store's sole writer: its connection streams (datahike's :writer :streaming?),
+        ;; so a deref is the connection's own value, never the store's head read again (24 ticks against 58,739 and 259 KB). Only
+        ;; this connection: the fork server's and the agents' read main as root commits it (the cfg answered keeps no :streaming?)
+        own (cond-> cfg (cfg/value :seon.config.store/sole-writer?) (assoc-in [:writer :streaming?] true))
+        seed-conn (connect (if (= :db main) own cfg))
         existed? (or (= :db main) (branch? seed-conn main))]
     (when-not existed? (d/branch! seed-conn :db main))
     (if (= :db main)
       [seed-conn existed?]
-      (let [conn (connect (assoc cfg :branch main))] (d/release seed-conn) [conn existed?]))))
+      (let [conn (connect (assoc own :branch main))] (d/release seed-conn) [conn existed?]))))
 
 (defn agents-dir
   "Where the agents of the root holding cfg keep their stderr (seon.agent/stderr-path):

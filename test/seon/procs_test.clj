@@ -51,6 +51,21 @@
     (testing "the stop transition releases the branch connections"
       (is (map? (#'writer/writer-proc st ::flow/stop))))))))
 
+(deftest a-refused-op-keeps-the-batch-committed-before-it
+  ;; docs/storage.md#durability-is-continuous-group-commit: an op other than :tx commits the batch first; an op that then
+  ;; throws (an interop edge) is answered as its error, and the writer keeps the state after that commit. Red before: one
+  ;; catch around both handed back the state from before the commit (batch 12: with writes then held ahead, the writer and
+  ;; Datahike fell apart; here the write's commit is lost from the writer's count)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        _ (a/>!! in {:op :clone-branch :from :no-such-branch :branch (pdb/on-main (:branch cfg) :x1) :dest {:rid 2}})
+        [st2 outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})
+        answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
+    (is (:ok (answers 1)) "the write is answered, stored")
+    (is (seon.contract/error? (answers 2)) "the op that throws is answered as its error")
+    (is (= 1 (- (:commits st2) (:commits st))) "and the writer counts the commit made before the op")
+    (is (= 1 (count (:main outs))) "whose notice went out")))))
+
 (deftest the-writers-transactions-name-their-runtime
   ;; main's transactions through the writer's group
   ;; commit carry the runtime that made them, and so does the stored commit the fork server's replica reads

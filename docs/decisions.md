@@ -6,6 +6,10 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
 
+### A write to main is answered after the store holds it (owner, 2026-11-10)
+
+Asked with the question tool (relayed by Point, 2026-11-10 ~19:40) between answering root's write at its apply, with root's api storing what ran ahead before any request reaches an agent, and answering after the store commit; the owner chose the second (in Point's relay: "answered means every process can read it"), one rule, no gate at root, no class of missed reads. Stated in [storage](storage.md#durability-is-continuous-group-commit).
+
 ### The best known way, improved (owner, 2026-11-10)
 
 "You do things the best known way until someone comes up with a better way and that becomes the standard 'best known way' of doing things." "Pain points can become well polished and intentional features." "We can iterate and on each run the system gets a little better." The wiki and AGENTS.md are the way, written down; a pain is a finding whose fix changes the way itself (a script, a check, a wiki section) and deletes the old one. Stated in AGENTS.md §1 and docs/sessions.md#the-way-improves.
