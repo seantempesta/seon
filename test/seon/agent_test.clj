@@ -2607,17 +2607,23 @@
 (deftest an-agent-commits-after-each-eval
   ;; each eval of a turn (the screen's two, then the model's) is committed as it lands, so a page
   ;; shows it then, not at the turn's end. Walked back from the branch's head, no commit adds more
-  ;; than one eval record (one commit at the turn's end added the turn's evals at once: 2 -> 4)
+  ;; than one eval record (one commit at the turn's end added the turn's evals at once: 2 -> 4). Only this agent's evals count, and
+  ;; a merge commit is walked back to its parent on this branch (the one holding most of them), never main's: parent-commit-ids
+  ;; is a set, and its first was main's at random, whose commits hold root's own evals two at a time (the flake, 2026-11-10)
   (let [[_ counts] (in-agent (fn [{:keys [task ns]}]
                              [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
-                              (str "(let [db (seon.agent/db)"
-                                   "      n (fn [db] (count (datahike.api/q '[:find ?e :where [?e :seon.eval/id]] db)))"
-                                   "      back (fn [db] (when-let [p (first (datahike.api/parent-commit-ids db))] (datahike.api/commit-as-db db p)))]"
-                                   "  (vec (distinct (map n (take 30 (take-while some? (iterate back db)))))))")])
+                              (str "(let [db (seon.agent/db) k (:key (clojure.core/deref seon.agent/state))"
+                                   "      n (fn [db] (count (datahike.api/q '[:find ?e :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/id]] db k)))"
+                                   "      evs (fn [db] (set (datahike.api/q '[:find ?i ?o ?c :in $ ?k :where [?a :seon.agent/key ?k] [?e :seon.eval/agent ?a] [?e :seon.eval/id ?i] [(get-else $ ?e :seon.eval/origin :none) ?o] [(get-else $ ?e :seon.eval/code \"\") ?c]] db k)))"
+                                   "      back (fn [db] (when-let [ps (seq (datahike.api/parent-commit-ids db))] (apply max-key n (map #(datahike.api/commit-as-db db %) ps))))"
+                                   "      dbs (vec (take 30 (take-while some? (iterate back db))))]"
+                                   "  {:counts (vec (distinct (map n dbs)))"
+                                   "   :over (vec (for [[a b] (map vector dbs (rest dbs)) :let [added (clojure.set/difference (evs a) (evs b))] :when (< 1 (count added))]"
+                                   "                {:t (:max-tx a) :parent-t (:max-tx b) :added (mapv (fn [[i o c]] [i o (subs c 0 (min 60 (count c)))]) added)}))})")])
                              {:config {:seon.config.ai/script 'seon.fixtures/same-call}})
-        ns (:value counts)]
-    (is (< 3 (count ns)) (pr-str ns))
-    (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns)))))
+        ns (:counts (:value counts))]
+    (is (< 3 (count ns)) (pr-str counts))
+    (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns) " commits that added more: " (pr-str (:over (:value counts)))))))
 
 (deftest a-model-turn-records-its-text-and-the-message-it-took
   ;; the owner's message is a fact root writes on

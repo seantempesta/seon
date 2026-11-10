@@ -53,9 +53,10 @@
   (assoc seon.reconcile/empty-index :acc acc :claims claims :done done))
 
 (defn- wiki!
-  "The checkout's wiki into conn, as root's boot loads it (seon.root/start!): the help page
-  every render reads is a page of it."
-  [conn] (d/transact conn (doc/load-tx @conn "docs" (doc/pages (seon.config/checkout) "docs"))))
+  "The checkout's system prompt into conn (seon.ctx.wire/system-page), as root's boot loads it with the rest of the wiki
+  (seon.root/start!): the one page a request reads (the help page is read on demand, by `doc`). The whole wiki
+  (1.4 MB, 40 pages) cost a request test 180 M ticks to load and check, and moved none of its bytes."
+  [conn] (d/transact conn (doc/load-tx @conn "docs" {wire/system-page (slurp (str (seon.config/checkout) "/" wire/system-page))})))
 
 (defn- un-example
   "Text s with each id example ek made of an id of db (seon.ctx.session's in-example: seon.lib/id of the digest of ek and it)

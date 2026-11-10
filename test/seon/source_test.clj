@@ -157,8 +157,10 @@
   ;; docs/storage.md#the-write-checks-every-entity-it-touches: seon.db/project-tx cuts a transaction to the attributes a speculation reads
   ;; after it (program/config-refused's config and schema entries, root/import-of's counts), so a full import is applied once, by its
   ;; write, not three times (the checkout's: 2.7 G ticks and 4.7 GB a speculation, 2026-11-10). What is read after the cut is what is
-  ;; read after the whole, on an import of real files and on a refresh that removes one (its retractions)
-  (let [files (into {} (for [p ["src/seon/lib.clj" "src/seon/ref.clj" "resources/seon/schemas/seon.config.edn" config/shipped-file]]
+  ;; read after the whole, on an import of real files and on a refresh that removes one (its retractions). Two small
+  ;; namespaces are the forms (the shipped config and its schema are the bulk the config check reads): lib.clj and ref.clj
+  ;; (70 KB) were 509 M ticks of speculating and importing forms that no assertion counts differently
+  (let [files (into {} (for [p ["src/seon/stage.clj" "src/seon/edn.clj" "resources/seon/schemas/seon.config.edn" config/shipped-file]]
                          [p (slurp (str here "/" p))]))
         counted #{:form/id :ns/name :ns/file :schema/key :schema/file}
         read-after (fn [db] {:entries (seon.config/entries db) :schemas (program/schema-changes db)
@@ -177,7 +179,7 @@
         db1 (d/db-with db0 tx)]
     (same? db0 tx)
     (testing "a refresh that removes a file and changes the config"
-      (let [refresh (source/tx-of db1 {"src/seon/ref.clj" nil config/shipped-file (str/replace (files config/shipped-file) #"(?m)^ :seon.config.root/view-window .*$" "")} true)]
+      (let [refresh (source/tx-of db1 {"src/seon/edn.clj" nil config/shipped-file (str/replace (files config/shipped-file) #"(?m)^ :seon.config.root/view-window .*$" "")} true)]
         (is (some #(and (vector? %) (= :db/retractEntity (first %))) refresh) "it retracts")
         (same? db1 refresh)))
     (testing "an import that registers a schema entry and a config entry it refuses: the cut keeps the schema the check reads"
@@ -202,7 +204,9 @@
   ;; with one change (a git index of its own: the repository is not touched)
   (let [db (test-runner/program)
         tree (fx/tree-id here)
-        g (program/reach-graph db (fx/declared-refs seon.system/built-text))
+        ;; the graph the plan kept for this program (test-runner/reach-graph-of: decoded and brought to date, a sixth of
+        ;; building it; docs/source.md#tests-run-by-reach), built only when the kept one is another builder's
+        g (test-runner/reach-graph-of db (fx/declared-refs seon.system/built-text) (ts/kept-program-store))
         git (fn [env & args] (:out (apply sh/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
         built-with (fn [path f]
                      ;; tree with path's text replaced by (f text), or its gitlink moved when f is :pin
