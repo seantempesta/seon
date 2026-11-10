@@ -744,7 +744,7 @@ Asked which default tonight's runs use, the owner chose one whole task over desi
 
 ### The agent's view is the render of ctx; "page" names a wiki page only (owner, 2026-10-26 night)
 
-"Yes it's just a render function for data. The render function for ctx is what is setting the layout and explicitly calling some render functions with args and just pulling data that is allowed to render itself. It's producing minimal hiccup that we can fully show so the agent understand what the user is seeing too. No separate systems right?" render-ctx is the layout: explicit render calls `[f opts & children]`, and every other value drawn by its schema's render, else the printer; the model reads its hiccup whole. The words: the render of ctx (not the agent's page, :page), the system prompt (not system-page), help (not help-page), the task's render (not task-page). Stated in: jolt/render-walk and build 4; AGENTS.md §7a once both merge.
+"Yes it's just a render function for data. The render function for ctx is what is setting the layout and explicitly calling some render functions with args and just pulling data that is allowed to render itself. It's producing minimal hiccup that we can fully show so the agent understand what the user is seeing too. No separate systems right?" render-ctx is the layout: explicit render calls `[f opts & children]`, and every other value drawn by its schema's render, else the printer; the model reads its hiccup whole. The words: the render of ctx (not the agent's page, :page), the system prompt (not system-page), help (not help-page), the task's render (not task-page). Stated in: docs/vocabulary.md#words-we-do-not-use.
 
 ### The render of ctx never repeats what an eval shows (owner, 2026-10-26 night)
 
@@ -966,11 +966,11 @@ Owner, 2026-10-25: "Maybe we should just keep the forks running and just parked.
 
 ### Correctness and performance come before lines of code
 
-Owner, 2026-10-25: "prioritize correctness and perf over lines of code. Lines of code is not my main metric". A change is judged first on whether it is right and on its measured work (ticks, bytes, turns to green); a smaller diff never wins over a correct or faster one. Resistance to growth (2026-10-23) still means reusing and improving the core rather than adding one-offs. Stated in: AGENTS §1 (owed).
+Owner, 2026-10-25: "prioritize correctness and perf over lines of code. Lines of code is not my main metric". A change is judged first on whether it is right and on its measured work (ticks, bytes, turns to green); a smaller diff never wins over a correct or faster one. Resistance to growth (2026-10-23) still means reusing and improving the core rather than adding one-offs. Stated in: (home not found, 2026-11-10).
 
 ### Root is main; everything else is the same system with different config
 
-Owner, 2026-10-25: "Root is main and is in charge with keeping main stable and working well. Agents can explore different ideas safely in their own forked processes ... and then we merge to main via the same task system. If a merge fails root needs a root specific merge task ... other tasks for root to handle like when agents die or health checks fail. All of these I want to run on main CURRENT ... we need to refactor to make this possible not build a separate system for root. It's one system where we use data and flows to have a runtime, db, and agent running against a task. Who and what they are doing on what branch they are is all just config options." Root's own work (a failed merge, a dead agent, a failing health check) is tasks run by agents on main's current commit; root is not a separate code path. Stated in: not yet (owed AGENTS §4 and docs after the one-system audit).
+Owner, 2026-10-25: "Root is main and is in charge with keeping main stable and working well. Agents can explore different ideas safely in their own forked processes ... and then we merge to main via the same task system. If a merge fails root needs a root specific merge task ... other tasks for root to handle like when agents die or health checks fail. All of these I want to run on main CURRENT ... we need to refactor to make this possible not build a separate system for root. It's one system where we use data and flows to have a runtime, db, and agent running against a task. Who and what they are doing on what branch they are is all just config options." Root's own work (a failed merge, a dead agent, a failing health check) is tasks run by agents on main's current commit; root is not a separate code path. Stated in: docs/users.md#the-entities (root is an agent keyed "root", the same schema).
 
 ### Agents restart from their record; the lifecycle is Flow's
 
@@ -1010,7 +1010,7 @@ Owner, 2026-10-24: "Approve the design as written, including the owner items in 
 
 ### Names tell a story; the printer shows every value well
 
-Owner, 2026-10-24: "Beautiful naming and the render tree should tell a story and not just be full of random words" and "We can adjust the value printer too as we want a general printer which shows all values well". Records and views are named by what they are, in Clojure's, nREPL's, Reagent's or the chat API's words (an agent's conversation of turns, each eval's response, the user's screen); a fix to how a value prints goes in the one printer, for every value. Stated in: docs/render.md "Names" (owed AGENTS §7a when it merges).
+Owner, 2026-10-24: "Beautiful naming and the render tree should tell a story and not just be full of random words" and "We can adjust the value printer too as we want a general printer which shows all values well". Records and views are named by what they are, in Clojure's, nREPL's, Reagent's or the chat API's words (an agent's conversation of turns, each eval's response, the user's screen); a fix to how a value prints goes in the one printer, for every value. Stated in: docs/vocabulary.md, docs/render.md#one-printer.
 
 ### A prove run is keyed by the digest of what it reads
 
@@ -1018,7 +1018,7 @@ Owner, 2026-10-24: "okay lets try the digest". The test service's run key (`seon
 
 ### Root merges verified fixes as they come in
 
-Owner, 2026-10-24: "merge fixes as they come in". A fix branch whose report carries its numbers, its self-review rating and a green bin/prove is merged by root without asking (bin/prove and smoke on the merged tree, then bin/update); a branch that adds a namespace, config key, schema attribute, proc or route still needs the owner's gate. Stated in: AGENTS §2, root's working rules (owed).
+Owner, 2026-10-24: "merge fixes as they come in". A fix branch whose report carries its numbers, its self-review rating and a green bin/prove is merged by root without asking (bin/prove and smoke on the merged tree, then bin/update); a branch that adds a namespace, config key, schema attribute, proc or route still needs the owner's gate. Stated in: docs/merging.md#a-branch-lands-with-binland (whoever proves a branch lands it), docs/merging.md#a-landing-message-carries-its-audit (the gate).
 
 ### One render per schema, declared where the schema is registered
 
@@ -1038,7 +1038,7 @@ Owner, 2026-10-23: "don't forget to clean up the old work trees once they aren't
 
 ### Reuse every unique, immutable result that is proven the same and expensive to make
 
-Owner, 2026-10-23: "I want reuse of all unique and immutable data we are sure is the same and is expensive to render". A pure computation's result is reused wherever its inputs are the same by content: keyed by the digest of exactly what it reads (content ids, the reach walk's digests), shared across branches, sessions and worktrees, and only for units measured as expensive (AGENTS §5). Anything that reads the clock, the network or a model, or launches a process, is not reused; the reach walk classifies it. One mechanism serves every such result, in `src`, `test` or `bin`, and it replaces the per-case caches it covers. Stated in: not yet (owed AGENTS §5 and the section of the task one-content-keyed-derivation (on ``jolt/one-content-keyed-derivation``, not merged yet)).
+Owner, 2026-10-23: "I want reuse of all unique and immutable data we are sure is the same and is expensive to render". A pure computation's result is reused wherever its inputs are the same by content: keyed by the digest of exactly what it reads (content ids, the reach walk's digests), shared across branches, sessions and worktrees, and only for units measured as expensive (AGENTS §5). Anything that reads the clock, the network or a model, or launches a process, is not reused; the reach walk classifies it. One mechanism serves every such result, in `src`, `test` or `bin`, and it replaces the per-case caches it covers. Stated in: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on.
 
 ### The turn's live state is REPL forms, run fresh each turn: the diff from main and the proofs to pass
 
@@ -1078,7 +1078,7 @@ Owner, 2026-10-23: "I think the current agent context isn't great. I'm not sure 
 
 ### The reuse design is approved: one memo keyed by what the process runs, for the walk's renders first
 
-Owner, 2026-10-23: "Approved: build the revised reuse design, walk node renders only, with its proofs." The design is the reuse design at 17ed5728 (``jolt/one-content-keyed-derivation``), after the independent attack (the scratch paper reuse/attack-2026-10-23.md (git history)): the key is a full SHA-256 of the boot digest (the build plus the config in force), the digest of everything loaded since boot, and the args' canonical EDN; non-EDN and rebound dynamics are refused; eviction is deterministic. Stated in: not yet (owed AGENTS §5 at its merge).
+Owner, 2026-10-23: "Approved: build the revised reuse design, walk node renders only, with its proofs." The design is the reuse design at 17ed5728 (``jolt/one-content-keyed-derivation``), after the independent attack (the scratch paper reuse/attack-2026-10-23.md (git history)): the key is a full SHA-256 of the boot digest (the build plus the config in force), the digest of everything loaded since boot, and the args' canonical EDN; non-EDN and rebound dynamics are refused; eviction is deterministic. Stated in: not built; the branch was retired on 2026-11-06 ([old work retired](#old-work-retired-not-left-halfway)).
 
 ### bin/test branches a kept program db per git tree (option B); each worktree's root is the end state
 
@@ -1086,19 +1086,19 @@ Owner, 2026-10-23: chose option B of docs/source.md. One durable test store per 
 
 ### Reuse is memoization: `(= (f x) (lookup f x))`, so return it
 
-Owner, 2026-10-23: "It's simpler than you think. (= (fn-a x) (cached-lookup `fn-a x)) they are literally the same so just return it". A pure function applied to the same immutable value gives the same result, so the one mechanism is a lookup keyed by the function (its var and the digest of its code and what it reaches) and the value it is given (its content). On a hit it returns the result, and nothing else changes. Owner, same day: "we shouldn't be caching on a key that needs to be updated. So key selection and however we are implementing this needs to be solid". A key is made only of content: a digest of the function's code and what it reaches, and of the argument's immutable value (a db value by its commit's content, never a branch name, a var name alone, a path or a time). So a key never goes stale and nothing is invalidated: a change makes a new key. Proved both ways: every change to the code or the input changes the key, and no other change does. Stated in: not yet (owed AGENTS §5 and the reuse task).
+Owner, 2026-10-23: "It's simpler than you think. (= (fn-a x) (cached-lookup `fn-a x)) they are literally the same so just return it". A pure function applied to the same immutable value gives the same result, so the one mechanism is a lookup keyed by the function (its var and the digest of its code and what it reaches) and the value it is given (its content). On a hit it returns the result, and nothing else changes. Owner, same day: "we shouldn't be caching on a key that needs to be updated. So key selection and however we are implementing this needs to be solid". A key is made only of content: a digest of the function's code and what it reaches, and of the argument's immutable value (a db value by its commit's content, never a branch name, a var name alone, a path or a time). So a key never goes stale and nothing is invalidated: a change makes a new key. Proved both ways: every change to the code or the input changes the key, and no other change does. Stated in: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on.
 
 ### Reuse is transparent and simple: a reused value is shown as it is, never marked
 
-Owner, 2026-10-23: "I wanted transparent and simple caching. The whole reuse thing is making me rethink showing it to the agent. Let's just show it as is if it's cached and don't state whether its generated or cached or not." A reused render, context or result reads exactly like a freshly made one: no reused/computed field in an eval's reply, a turn's record or the context. Its effect shows only in the cost proofs and in work-done facts recorded for the owner's views. Owner, same day, corrected: "the model should get cost numbers in the context. I just want them stable across turns in the run so we don't bust the cache. We want to get them used to seeing how expensive things are and so when they get warnings or limits it's easy to understand where they stand". Each eval's cost (ticks, bytes, calls, time) is shown with it, rendered from its recorded fact, so it never changes after the turn it happened in; what moves (the run's totals against its budget) is shown only in the turn's tail, after the cached prefix. Supersedes the hit recording of "Caching is never an excuse for slow code" below. Stated in: not yet (owed AGENTS §5 and the reuse task).
+Owner, 2026-10-23: "I wanted transparent and simple caching. The whole reuse thing is making me rethink showing it to the agent. Let's just show it as is if it's cached and don't state whether its generated or cached or not." A reused render, context or result reads exactly like a freshly made one: no reused/computed field in an eval's reply, a turn's record or the context. Its effect shows only in the cost proofs and in work-done facts recorded for the owner's views. Owner, same day, corrected: "the model should get cost numbers in the context. I just want them stable across turns in the run so we don't bust the cache. We want to get them used to seeing how expensive things are and so when they get warnings or limits it's easy to understand where they stand". Each eval's cost (ticks, bytes, calls, time) is shown with it, rendered from its recorded fact, so it never changes after the turn it happened in; what moves (the run's totals against its budget) is shown only in the turn's tail, after the cached prefix. Supersedes the hit recording of "Caching is never an excuse for slow code" below. Stated in: (home not found, 2026-11-10).
 
 ### Everything is fast; a render or a context whose inputs have not changed is never made again
 
-Owner, 2026-10-23: "In general I want everything to just be fast, but something are just dumb to not cache like web rendering and even ai context if the underlying data/functions haven't changed". The cold path is fast first (below), and some results are reused even when they are fast, because making them again is pure waste: a web render and the model's context are reused while the data they read (content ids) and the functions that make them (reach digests) are unchanged. Stated in: not yet (owed AGENTS §5 and the task one-content-keyed-derivation (on ``jolt/one-content-keyed-derivation``, not merged yet)).
+Owner, 2026-10-23: "In general I want everything to just be fast, but something are just dumb to not cache like web rendering and even ai context if the underlying data/functions haven't changed". The cold path is fast first (below), and some results are reused even when they are fast, because making them again is pure waste: a web render and the model's context are reused while the data they read (content ids) and the functions that make them (reach digests) are unchanged. Stated in: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on.
 
 ### Caching is never an excuse for slow code: the cold path is fast on its own, and a hit is visible
 
-Owner, 2026-10-23: "caching isn't an excuse for writing shitty code. If the cold version (can we return whether there was a cache hit in repl evals?) is fuckign slow as shit it's still not okay". A reused result's computation carries its own cost proof, measured cold (no reuse), at the work it needs; reuse is added on top, never instead. Owner, same day: "if it's fast enough we don't need caching then don't use caching." Reuse is added only where the fixed cold path is still measured as expensive; a cold path that is fast enough gets none. (Its hit recording, "a REPL eval's result says which results it reused", is superseded by the entry above: reuse is transparent.) Stated in: not yet (owed AGENTS §5, beside "Results are reused by input digest", and the task one-content-keyed-derivation (on ``jolt/one-content-keyed-derivation``, not merged yet)).
+Owner, 2026-10-23: "caching isn't an excuse for writing shitty code. If the cold version (can we return whether there was a cache hit in repl evals?) is fuckign slow as shit it's still not okay". A reused result's computation carries its own cost proof, measured cold (no reuse), at the work it needs; reuse is added on top, never instead. Owner, same day: "if it's fast enough we don't need caching then don't use caching." Reuse is added only where the fixed cold path is still measured as expensive; a cold path that is fast enough gets none. (Its hit recording, "a REPL eval's result says which results it reused", is superseded by the entry above: reuse is transparent.) Stated in: (home not found, 2026-11-10).
 
 ### Push pinned fork commits without asking
 
@@ -1259,7 +1259,7 @@ The owner's rulings of 2026-10-21, each with his words and where it is now state
 
 ### No locks, no cap on worktree sessions, no waiting
 
-Owner, 2026-10-21: "get rid of all of it". Stated in: AGENTS §3 (Every ready task runs now).
+Owner, 2026-10-21: "get rid of all of it". Stated in: docs/merging.md#main-goes-first (no lock).
 
 ### Every live run is better than the last; new real tasks, no rerun matrix; DeepSeek works every stage, measured
 
@@ -1375,7 +1375,7 @@ Owner, 2026-10-20: "No point in using flow if we are going to use it the wrong w
 
 ### Data-centric, always valid: contracts on every function
 
-Owner, 2026-10-20: "make this the universal thing that we hone and fix." Stated in: AGENTS §5.
+Owner, 2026-10-20: "make this the universal thing that we hone and fix." Stated in: AGENTS §5, docs/checks.md#contracts-armed-at-definition.
 
 ### Each agent writes its own branch, in its own process; root writes only main
 
@@ -1395,7 +1395,7 @@ Owner, 2026-10-20: "have everything be spec'ed and have only good tests using ou
 
 ### Everything on Jolt; libraries fixed properly, measured, with no extra caches
 
-Owner, 2026-10-20: "if it's faster to not use the cache why cache at all?" Stated in: AGENTS §5 (no other caches); docs/forks.md.
+Owner, 2026-10-20: "if it's faster to not use the cache why cache at all?" Stated in: docs/forks.md.
 
 ### Renders attach to schemas; the UI and the context are renders, ported not reinvented
 

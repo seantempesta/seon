@@ -1983,7 +1983,7 @@
   (let [path (seon.config/value :seon.config.root/store-path)
         own? (= path (seon.config/value :seon.config.proofs/check-store))
         targets (ts/standing-targets-tx)
-        ;; the checks' own store follows its seed (AGENTS section 5, a cache keyed by its inputs): path is a link to
+        ;; the checks' own store follows its seed (a cache keyed by its inputs: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on): path is a link to
         ;; path-<digest of what the seed writes>, so a changed seed opens a fresh store and the old one is removed
         ;; (seon.test-store/kept-store!), never read
         at (if own?
