@@ -110,4 +110,8 @@ The change: the function form exists, `my.agent/doc-of` (what the macro prints, 
 Proof: (map my.agent/doc-of addresses) answers the sections; (doc \\\"docs/x.md#y\\\") prints the section's text and names its subsections without their text."
   :seon.task/kind :work
   :seon.task/proofs #{seon.ctx-test/doc-let-bound-symbol-names-nothing-names-my}}
- ]
+ {:seon.task/name "a-first-namespace-from-the-prompt-works-the-first-time"
+  :seon.task/plan "A demo work agent (roles demo, 2026-11-10, agent h02459d3b542ab77) spent three evals before its first definition held, each on something its context should have made plain: (a) its namespace eval threw 'class clojure.lang.PersistentList cannot be cast to class clojure.lang.Symbol' although the ns form itself matched docs/prompt.md's line (it was sent together with a quoted (eval '(defn ...)) after it, and a variant with a escaped newline inside the string): find which form threw and whether the error names it; an error that does not say which form of a multi-form eval failed is the cause to fix, in the eval's error, not in the prompt; (b) a test called demo.math/double, which it never defined (No such var): the error is right; nothing to change unless the context showed a name it lacked; (c) its contract used :number, which malli does not have (number? does): the contract error should name the unknown schema and what malli offers (number?, :int, :double), and docs/prompt.md's contract line should show a non-int example. Reproduce each at n=1 in a worktree root first; record what the agent saw (seon_context) beside each fix."
+  :seon.task/proofs #{seon.repl-test/a-multi-form-eval-names-the-form-that-threw seon.contract-test/an-unknown-schema-in-a-contract-names-it}
+  :seon.task/kind :work}
+]
