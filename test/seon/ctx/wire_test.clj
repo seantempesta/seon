@@ -470,7 +470,7 @@
           (is (str/includes? (:content (peek r2)) "quadruple")))))))
 
 (deftest a-turns-diff-derived-from-its-two-points-is-the-page-eval-it-stored
-  ;; rule 6 of seon.render/one-walk-per-view, step 3: with no render change, the edits between a turn's point and the one before it
+  ;; docs/render.md#a-change-is-edits-by-name: with no render change, the edits between a turn's point and the one before it
   ;; (seon.render/changes-of, the function my.render/diff calls) are the page eval that turn stored today (page!, seon.turn/show-page!'s):
   ;; the first turn's the whole page as edits from nothing, [[id] :+ form]; a turn that moved nothing, none and no eval. The printer's
   ;; {:seon.print/plain s} wrapper is the stored form of a string with a line break: both sides read through it

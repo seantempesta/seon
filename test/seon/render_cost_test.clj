@@ -560,7 +560,7 @@
                        (point))))]))
 
 (deftest a-restart-draws-its-turns-in-one-walk
-  ;; rule 6 of seon.render/one-walk-per-view: every pair of an agent's turns filled in one pass (seon.ctx.wire/diffs-through), a draw at the
+  ;; docs/render.md#a-change-is-edits-by-name: every pair of an agent's turns filled in one pass (seon.ctx.wire/diffs-through), a draw at the
   ;; first point then what moved at each later one, so a restart of T turns costs the first draw and a part a turn, not a draw a pair.
   ;; Measured on the test world, whose store is :memory, where a commit's diff (seon.ctx/moved) walks the whole index; LMDB, where it costs
   ;; what changed, is what counts and is measured on a lab root.
