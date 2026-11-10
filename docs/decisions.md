@@ -4,7 +4,27 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-10 rulings
 
-The owner's rulings of 2026-11-10, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
+The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
+
+### The best known way, improved (owner, 2026-11-10)
+
+"You do things the best known way until someone comes up with a better way and that becomes the standard 'best known way' of doing things." "Pain points can become well polished and intentional features." "We can iterate and on each run the system gets a little better." The wiki and AGENTS.md are the way, written down; a pain is a finding whose fix changes the way itself (a script, a check, a wiki section) and deletes the old one. Stated in AGENTS.md §1 and docs/sessions.md#the-way-improves.
+
+### Small changes land in batches, proved once (owner, 2026-11-10)
+
+"Can we batch them together? ... Can we force merge the fixes into all the branches and have them at least run better code?"; "I don't want 100% separated work separately running all the tests for each little change." Sessions check their change and hand the tip over; the managing session merges the ready tips, proves once and lands. Stated in AGENTS.md §3 and docs/merging.md#the-managing-session-lands-a-batch.
+
+### A task a Seon agent finished reaches main by its owner's review (owner, 2026-11-10)
+
+"If the task is done well integrate it and merge to disk and remove the task." "I want the results reviewed by a competent agent in their speciality so they know the quality is good and if it's almost done right just fix it and sync it to disk and remove the task." A merged task whose files main does not hold is an `:unsynced` problem; the session owning its area reviews it and brings it to a branch with its entry removed; `bin/update` lands nothing of the standing root's own. Of the first six reviewed, three were not done as merged (a proof red by name, a tile drawing data nothing produced, a proof that could not fail). Stated in docs/source.md#a-merged-task-reaches-mains-files and AGENTS.md §3.
+
+### A root catches up with its checkout at start (owner, 2026-11-10)
+
+"I think I may have introduced chaos into the system with the boot resume from db and not re indexing from disk. While most development is happening with claude agents from the outside if it makes more sense change the default to always be building the latest binary off the code and indexing it ... This should be done efficienty too so if very littel has changed it doesn't take forever to start"; then "don't let this decision cause even more chaos. Address the issues you are seeing your agents facing." A small step on the one importer: a resumed boot indexes the files that changed since main last indexed them; nothing was deleted. Stated in docs/source.md#a-boot-catches-up-with-its-checkout.
+
+### Pages are built from data by one walk (owner, 2026-11-10)
+
+"No more hand drawn lists and custom shit. If I come up with a new agent type and I attach a bunch of data to it's entity and there are render functions it should just work everywhere. ... Root, the user, and normal agents should be different based on their data and their connections, not separate special code." "Why can't we write render functions that recognize 'this is a top level render it's not a leaf so it's not going to be rendered as a tile'"; "don't flatten, the location in the pull pattern has meaning"; on the chat's order, "Sort them by time?". One walk over the pull, nested like the pull; each entity drawn by its own schema's render, which knows only whether it is on top or nested; the chat is its entities in the order they were made; no declared places, no kinds, no read mark. With it, the same day: root's agent is made at boot (reversing 2026-11-08's "made by the first message"); an example session is sent to the model as real user, assistant and tool messages and drawn by the same renders ("not learn a text exampled but see exactly how to structure the tool calls"); a mechanical message's sender is the system entity, not an agent ("Why do we need a full agent for this?"). In flight on branch jolt/pages; the task is seon.render/a-model-render-draws-each-turns-diff until its own are landed.
 
 ### The test system runs inside Seon; the outside is thin wrappers (owner, 2026-11-10)
 
