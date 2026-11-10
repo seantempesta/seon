@@ -3,7 +3,7 @@
   the in-port, one Datahike commit per branch, one flush). From proto/flow f2-final
   proto.control's writer (session F2; writer design A, the session design papers in git history)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
+  (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [konserve.jolt.fasl :as fasl] [seon.db :as pdb] [seon.lib :as lib]
             [seon.program :as program] [seon.merge :as pm] [seon.union :as union] [seon.problems :as problems] [seon.source :as source] [seon.doc :as doc] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg] [seon.task :as task]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
@@ -236,6 +236,62 @@
         :else (do (answer o (:dest (first ms)) (refused (step/error-msg reps) {})) (dissoc st :pend))))
     st))
 
+(defn- applied
+  "Root's transaction m run ahead: applied to main in memory and shown on the connection at once
+  (datahike.writer/apply! {:show? true}: @conn answers it, with no commit id until it is stored), and its
+  requester answered now, {:ok :t :datoms} or the typed refusal (seon.db/invalid-entity), before any store
+  write or reader's wake (durability is continuous group commit: the answer is the apply). The store commit
+  follows in this writer's next step (commit-ahead, asked by the :commit this step queues). Answers st with
+  m and its report kept under :ahead. See docs/storage.md#durability-is-continuous-group-commit."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
+  [st o m]
+  (let [r (try ;; what the store's codec cannot encode (a sorted map, a host object) is refused here, to its asker, never at a
+               ;; commit after its answer: the tx-data encoded once as the store will encode its values (konserve.jolt.fasl)
+               (fasl/encode (:tx-data m))
+               (dw/apply! (:conn st) {:tx-data (:tx-data m) :tx-meta (pdb/tx-meta (pdb/conn-main (:conn st)))} {:show? true})
+               (catch Throwable e e))]
+    (if (map? r)
+      (do (answer o (:dest m) {:ok true :t (:max-tx (:db-after r)) :datoms (count (pdb/report->tx r))})
+          (update st :ahead (fnil conj []) {:m m :rep r}))
+      (do (answer o (:dest m) (or (when (:seon.error/type (ex-data r)) (ex-data r)) (refused (step/error-msg r) {}))) st))))
+
+(defn- commit-ahead
+  "The run-ahead writes stored: one commit of the value applied (datahike.writer/commit-pending!), then the notices
+  that carry its commit (stored! to the fork server, main-commit to main's readers): every reader wakes on a
+  stored commit, never on a value only shown. A commit the store refuses (a value its codec cannot encode) is
+  abandoned (the connection is the committed value again) and each write committed again alone (commit-batch),
+  so only the one that carried the value is lost; its requester was answered at the apply, so that refusal goes
+  to root's api as a recorded platform problem ({:op :writer-refused}). Answers st."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile] :seon.writer/state]}
+  [st o]
+  (if-let [ahead (seq (:ahead st))]
+    (let [st (dissoc st :ahead)
+          c (if (dw/pending? (:conn st))
+              (try (dw/commit-pending! (:conn st)) (catch Throwable e e))
+              ::none)]
+      (cond
+        ;; the writer holds writes ahead, so Datahike holds them pending: none pending is a defect, recorded, never committed twice
+        (= ::none c)
+        (do (step/out! o :to-api {:op :writer-refused :error (refused (str (count ahead) " writes ran ahead and the connection held none pending") {})})
+            st)
+        (map? c)
+        (let [reps (map :rep ahead) ops (vec (mapcat pdb/report->tx reps))]
+          (stored! st o ops)
+          ;; what main-commit queues (a moved config's facts) is committed as before
+          (commit-batch (main-commit (update st :commits inc) o (:max-tx (:db-before (first reps))) (:max-tx (:db-after (last reps))) ops (:db c)) o))
+        :else
+        (do (dw/abandon-pending! (:conn st))
+            (reduce (fn [st {:keys [m]}]
+                      ;; committed alone, its answer taken here (its requester has one), the rest of its outputs passed on
+                      (let [o2 (volatile! {})
+                            st (commit-batch (assoc st :pend [(assoc m :dest ::again)]) o2)
+                            r (some #(when (= ::again (:dest %)) (:r %)) (:to-api @o2))]
+                        (doseq [[port msgs] @o2 msg msgs :when (not= ::again (:dest msg))] (step/out! o port msg))
+                        (when (and r (not (:ok r))) (step/out! o :to-api {:op :writer-refused :error r}))
+                        st))
+                    st ahead))))
+    st))
+
 (defn- other-op
   "Every request but :tx. Answers the new state."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
@@ -321,15 +377,22 @@
       (reply st (refused (str "unknown op " op) {})))))
 
 (defn- writer-one
-  "One request into the batch: root's :tx on main joins the batch; any other op first
-  commits the batch (it reads committed heads), then runs."
+  "One request into the batch: root's :tx on main runs ahead (applied: answered at its apply, stored by the
+  :commit after it), a :flush? one joins the batch; any other op first commits what ran ahead and the batch (it
+  reads committed heads), then runs."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
   [st o {:keys [op] :as m}]
   (try
-    (if (= op :tx)
-      ;; the batch's transact checks it (seon.db/transact-checked): a refusal is answered to its requester alone
-      (update st :pend (fnil conj []) m)
-      (other-op (commit-batch st o) o m))
+    (cond
+      ;; root's write: run ahead, answered at its apply (applied); checked there (seon.db/transact-checked), a refusal
+      ;; answered to its requester alone
+      (and (= op :tx) (not (:flush? m))) (applied st o m)
+      ;; a write an outside effect follows: stored and synced before its answer, after what ran ahead
+      (= op :tx) (update (commit-ahead st o) :pend (fnil conj []) m)
+      ;; the commit this writer asked of itself after running ahead
+      (= op :commit) (commit-ahead (dissoc st :commit-asked) o)
+      ;; every other op reads committed heads: what ran ahead and the batch are committed first
+      :else (other-op (commit-batch (commit-ahead st o) o) o m))
     (catch Throwable e
       ;; an interop edge (Datahike) refused: the request's answer is the error, as data
       ;; with the store's map use: a full map (MDB_MAP_FULL) shows itself against its size
@@ -364,7 +427,9 @@
               :to-flusher "the store became dirty"}
        ;; its own thread: a transaction is CPU and store work the fiber scheduler cannot see
        :workload :mixed
-       :ping-map-fn (fn [st] {:tx-count (:tx-count st) :commits (:commits st) :flushes (:flushes st 0) :dirty (boolean (:dirty st)) :main-t (:max-tx @(:conn st))})})
+       :ping-map-fn (fn [st] {:tx-count (:tx-count st) :commits (:commits st) :flushes (:flushes st 0) :dirty (boolean (:dirty st)) :main-t (:max-tx @(:conn st))
+                              ;; what ran ahead, not stored yet, and whether its commit is asked
+                              :ahead (count (:ahead st)) :commit-asked (boolean (:commit-asked st))})})
   ([args] (assoc args :tx-count 0 :commits 0 :batches 0
                  ::flow/in-ports {:in (:to-writer args)} ::flow/out-ports {:events (:events args)}))
   ([st tr]
@@ -372,8 +437,12 @@
   ([st _ m]
    (if (nil? m)
      ;; the in-port closed: what was taken is committed; flush it, then done flows on
-     (do (when (and (:durable? st) (:dirty st)) (pdb/sync! (:cfg st)))
-         [(assoc st :dirty false) {:to-api [{:op :drained :tx-count (:tx-count st)}]}])
+     (let [o (volatile! {})
+           c0 (:commits st)
+           ;; what ran ahead is stored before the end: an answered write is never dropped at a stop
+           st (commit-ahead st o)]
+       (when (and (:durable? st) (or (:dirty st) (not= c0 (:commits st)))) (pdb/sync! (:cfg st)))
+       [(assoc st :dirty false) (update @o :to-api (fnil conj []) {:op :drained :tx-count (:tx-count st)})])
      (let [ms (drain (:to-writer st) m)
            o (volatile! {})
            c0 (:commits st)
@@ -381,7 +450,16 @@
            ;; the flusher's answers: the commit count its sync covered
            covered (some->> (seq (keep #(when (= :flushed (:op %)) (:commits %)) ms)) (apply max))
            reqs (remove #(= :flushed (:op %)) ms)
-           st (commit-batch (reduce #(writer-one %1 o %2) st reqs) o)
+           st (reduce #(writer-one %1 o %2) st reqs)
+           ;; a :flush? write's batch is stored on main's committed value: what ran ahead after it in this step is stored first
+           ;; (transact-batch! on a shown value would store the run-ahead beside it and leave the writer and Datahike apart)
+           st (commit-batch (if (seq (:pend st)) (commit-ahead st o) st) o)
+           ;; writes ran ahead: their store commit is this writer's next step, after this step's answers leave, asked through
+           ;; the flusher, which answers {:op :commit} on the writer's in-port as it answers :flushed (the loop the two already
+           ;; have: a proc's out-port on its own in-channel took that channel's name in Flow, and a closed :in then spun a stop)
+           st (if (and (seq (:ahead st)) (not (:commit-asked st)))
+                (do (step/out! o :to-flusher {:op :commit-due}) (assoc st :commit-asked true))
+                st)
            commits (- (:commits st) c0)
            st (cond-> st (pos? commits) (assoc :dirty true))  ; root's commits, or an agent's (:agent-commit)
            f0 (:flushes st 0)
@@ -405,14 +483,14 @@
                                :flushes (:flushes st 0)}))
        ;; a clean store answers who asked (after the flush's notice above, so it reaches the api
        ;; first); a store with no durability has nothing to sync
-       (if (and (seq (:clean-waiters st)) (not (and (:durable? st) (:dirty st))))
+       (if (and (seq (:clean-waiters st)) (empty? (:ahead st)) (not (and (:durable? st) (:dirty st))))
          (do (doseq [d (:clean-waiters st)] (answer o d {:ok true :commits (:commits st) :flushes (:flushes st 0) :durable? (boolean (:durable? st))}))
              [(dissoc st :clean-waiters) @o])
          [st @o])))))
 
 (defn flusher-proc
   "The group flush: parked until the writer says the store is dirty ({:op :dirty :commits
-  n}), it syncs at once (seon.db/sync! on the store config; commits during the sync share
+  n}) or that writes ran ahead ({:op :commit-due}: answered {:op :commit}, its store commit asked of its next step), it syncs at once (seon.db/sync! on the store config; commits during the sync share
   the next one) and answers the writer {:op :flushed :commits n}, the commits it covered.
   An idle system never syncs."
   {:malli/schema :seon.step/step-fn}
@@ -424,7 +502,9 @@
   ([args] (assoc args :flushes 0 ::flow/out-ports {:to-writer (:to-writer args)}))
   ([st _] st)
   ([st _ m]
-   (if (nil? m)
-     [st nil]
-     (do (pdb/sync! (:cfg st))
-         [(update st :flushes inc) {:to-writer [{:op :flushed :commits (:commits m)}]}]))))
+   (cond
+     (nil? m) [st nil]
+     ;; the writer ran writes ahead: it is answered its :commit, no sync (its commit makes the store dirty, which comes next)
+     (= :commit-due (:op m)) [st {:to-writer [{:op :commit}]}]
+     :else (do (pdb/sync! (:cfg st))
+               [(update st :flushes inc) {:to-writer [{:op :flushed :commits (:commits m)}]}]))))

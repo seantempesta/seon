@@ -783,6 +783,9 @@
       ;; the render proc's health of main (:health): its value, held at the counts this api's fold put it at
       ;; (the fold it was asked with, and which it keeps), so it is the same count as root's page's
       :health-answer (deliver-rid st o (:rid m) (:r m))
+      ;; a write answered at its apply that the store refused at its commit (seon.writer/commit-ahead): its requester
+      ;; holds an answer already, so it is a recorded platform problem, never silent
+      :writer-refused (problem st (err/occurrence (:error m) :platform {} (System/currentTimeMillis)))
       ;; what the test service holds, kept as it changes: a stall's evidence names it (stall-task)
       :prove-state (assoc st ::prove (:r m))
       :status (set-agent st o (:agent m) (:set m))

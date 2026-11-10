@@ -26,25 +26,43 @@
     (is (= :seon.step/step-fn (:malli/schema (meta v))) (str v))
     (arity-0 v)))
 
+(defn- committed
+  "The writer's step on m, then the :commit it asked through the flusher ({:op :commit-due}, answered {:op :commit}):
+  the state after both and their outputs merged. What a reader of the writer's notices waits for: a stored commit."
+  [st m]
+  (let [[st outs] (step #'writer/writer-proc st :in m)]
+    (if (some #(= :commit-due (:op %)) (:to-flusher outs))
+      (let [[st outs2] (step #'writer/writer-proc st :in {:op :commit})] [st (merge-with into outs outs2)])
+      [st outs])))
+
 (deftest writer
+  ;; docs/storage.md#durability-is-continuous-group-commit: root's write is answered at its apply, read at once on main's
+  ;; connection (shown, no commit id yet), and stored by the :commit the writer asks of itself next; every notice that
+  ;; names a commit (the fork server's, main's readers') leaves only then. Red before: one step committed, then answered
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         t0 (:max-tx @conn)]
-    (testing "a main transaction: committed once, its report to the reconciler, its commit to the fork server, its answer by dest"
+    (testing "a main transaction: answered at its apply, then committed once, its report to the reconciler, its commit to the fork server"
       (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})]
-        (is (< t0 (:max-tx @conn)) "main's t moves past its last")
-        (is (= [:tx] (map :op (:to-fork-server outs))))
-        (is (= [(:max-tx @conn)] (map :t (:main outs))))
         (is (= {:rid 1} (:dest (first (:to-api outs)))))
-        (is (true? (:ok (:r (first (:to-api outs))))))
-        (testing "group commit: three queued transactions, one step, one commit"
-          (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "c" :note/agent :t}] :dest {:rid 3}})
-          (a/>!! in {:op :tx :branch :db :tx-data [{:no/such 1}] :dest {:rid 4}})
-          (let [[st2 outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b" :note/agent :t}] :dest {:rid 2}})
-                answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
-            (is (= 1 (- (:commits st2) (:commits st))))
-            (is (every? :ok (map answers [2 3])))
-            (is (seon.contract/error? (answers 4)) "a refused transaction answers its error, the others commit")))))
+        (is (true? (:ok (:r (first (:to-api outs))))) "answered at the apply")
+        (is (< t0 (:max-tx @conn)) "main's connection reads the write at once")
+        (is (nil? (d/commit-id @conn)) "shown, not stored: no commit names it yet")
+        (is (= [] (vec (:to-fork-server outs)) (vec (:main outs))) "no reader is told of a commit not made")
+        (is (= [{:op :commit-due}] (:to-flusher outs)) "the store commit is asked of the writer's next step, through the flusher")
+        (let [[st outs] (step #'writer/writer-proc st :in {:op :commit})]
+          (is (some? (d/commit-id @conn)) "stored: main's connection names its commit")
+          (is (= [:tx] (map :op (:to-fork-server outs))))
+          (is (= [(d/commit-id @conn)] (map :commit (:to-fork-server outs))) "the fork server is told the stored commit")
+          (is (= [(:max-tx @conn)] (map :t (:main outs))))
+          (testing "group commit: three queued transactions, one step, one commit"
+            (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "c" :note/agent :t}] :dest {:rid 3}})
+            (a/>!! in {:op :tx :branch :db :tx-data [{:no/such 1}] :dest {:rid 4}})
+            (let [[st2 outs] (committed st {:op :tx :branch :db :tx-data [{:note/text "b" :note/agent :t}] :dest {:rid 2}})
+                  answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
+              (is (= 1 (- (:commits st2) (:commits st))))
+              (is (every? :ok (map answers [2 3])))
+              (is (seon.contract/error? (answers 4)) "a refused transaction answers its error, the others commit"))))))
     (testing "a closed in-port: drained"
       (let [[_ outs] (step #'writer/writer-proc st :in nil)]
         (is (= :drained (:op (first (:to-api outs)))))))
@@ -56,7 +74,7 @@
   ;; commit carry the runtime that made them, and so does the stored commit the fork server's replica reads
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
-        [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})
+        [_ outs] (committed st {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})
         fp (jolt.host/runtime-fingerprint)]
     (is (= fp (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "main's transaction names it")
     (let [m (first (:to-fork-server outs))]
@@ -115,7 +133,7 @@
     (let [in (a/chan 16)
           wst (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
           before @conn
-          [_ outs] (step #'writer/writer-proc wst :in {:op :tx :branch :db :tx-data (vec (for [i (range 2000)] {:note/text (str "n" i) :note/agent :t})) :dest {:rid 1}})
+          [_ outs] (committed wst {:op :tx :branch :db :tx-data (vec (for [i (range 2000)] {:note/text (str "n" i) :note/agent :t})) :dest {:rid 1}})
           m (first (filter #(= :tx (:op %)) (:to-fork-server outs)))
           fst (#'server/server-step {:db before :cfg cfg :store conn :conn nil})
           [fst' fouts] (step #'server/server-step fst :cmd m)
@@ -248,9 +266,9 @@
             [fl outs] (step #'writer/flusher-proc fl :in {:op :dirty :commits 3 :since 0})]
         (is (= {:to-writer [{:op :flushed :commits 3}]} outs))
         (is (= 1 (:flushes fl)))))
-    (testing "a write is answered unflushed, and the writer tells the flusher what it committed"
-      (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})
-            notice (first (:to-flusher outs))]
+    (testing "a write is answered unflushed, and the writer tells the flusher what it committed (once its run-ahead is stored)"
+      (let [[st outs] (committed st {:op :tx :branch :db :tx-data [{:note/text "a" :note/agent :t}] :dest {:rid 1}})
+            notice (first (filter #(= :dirty (:op %)) (:to-flusher outs)))]
         (is (true? (:ok (:r (first (:to-api outs))))))
         (is (= {:op :dirty :commits (:commits st)} (select-keys notice [:op :commits])))
         (testing "the flush that covers it leaves the store clean"
@@ -258,7 +276,7 @@
             (is (false? (:dirty st2)))
             (is (= 1 (- (:flushes st2 0) (:flushes st 0))))))
         (testing "a commit after the flush began: still dirty, and the flusher is told again"
-          (let [[st3 _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b" :note/agent :t}] :dest {:rid 2}})
+          (let [[st3 _] (committed st {:op :tx :branch :db :tx-data [{:note/text "b" :note/agent :t}] :dest {:rid 2}})
                 [st4 outs] (step #'writer/writer-proc st3 :in {:op :flushed :commits (:commits st)})]
             (is (true? (:dirty st4)))
             (is (= [{:op :dirty :commits (:commits st3)}] (mapv #(select-keys % [:op :commits]) (:to-flusher outs))))))))))))
@@ -296,7 +314,7 @@
           st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
           t0 (:max-tx @conn)
           _ (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "c" :note/agent :t}] :dest {:rid 3}})
-          [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text "b" :note/agent :t}] :dest {:rid 2}})
+          [_ outs] (committed st {:op :tx :branch :db :tx-data [{:note/text "b" :note/agent :t}] :dest {:rid 2}})
           n (first (:main outs))]
       (is (= 1 (count (:main outs))) "a group commit is one stored commit: one notice")
       (is (not-any? #(some? (:max-tx %)) (vals n)) "no db value in the notice")
