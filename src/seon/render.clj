@@ -144,6 +144,8 @@
   {:malli/schema [:=> [:cat :any :keyword] :any]}
   [v k] (or (when (map? v) (get v k)) (get (meta v) k)))
 
+(declare inputs)
+
 (defn render-of
   "The render function v takes, as the entity index ix reads schemas: its own override (a symbol), else its schema's declared one (opts :schema, else seon.render/schema-of: one metadata read or one map lookup
   per key, never a validation), else nil (the printer). nil also when v's own key holds an
@@ -155,7 +157,9 @@
       ;; a value's own says what it was drawn by where it was made: an agent's definition no other process holds, drawn as the data it is there (nil, the printer)
       (some-> (when-let [n (some-> (namespace own) symbol find-ns)] (ns-resolve n (symbol (name own)))) deref)
       (when-let [sym (when (nil? own) (declared ix (schema-of ix v hint)))]
-        @(requiring-resolve sym)))))
+        ;; a render that reads the walk's ctx (an entity's page: an agent's, root's) renders the entity a walk is rooted on, not a value
+        ;; an eval answered (a pulled agent): that value prints as the data it is
+        (let [f (requiring-resolve sym)] (when-not (contains? (inputs f) :seon.ctx/ctx) @f))))))
 
 (defn declared-var
   "The var of the render schema k declares (its nearest parent's), or nil: a layout the walk draws

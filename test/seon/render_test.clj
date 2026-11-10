@@ -3511,3 +3511,10 @@
   (let [ix {:forms {} :entity-schemas {} :marker ::mains}]
     (is (= ix (#'p/units-index {:root-walk {:w {:index (volatile! ix)}}})) "main's, as root's walk holds it")
     (is (= (seon.db/index) (#'p/units-index {})) "the binary's before main is read")))
+
+;; docs/render.md#a-value-draws-itself: a pulled agent an eval answered prints as the data it is; the agent's render is its page, which
+;; reads the walk's ctx and renders the entity a walk is rooted on
+(deftest a-pulled-agent-value-prints-as-data
+  (let [h (h/html (r/hiccup {:seon.render/index (seon.db/index)} {:db/id 7 :seon.agent/key "b2/a1" :seon.agent/status :idle}))]
+    (is (str/includes? h "b2/a1") "its data")
+    (is (not (str/includes? h "component-defect")) "never its page's error")))
