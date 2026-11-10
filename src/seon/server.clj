@@ -75,7 +75,9 @@
   cost, error maps, *1 and *e), in root.repl (my.root as root, seon.root as c, datahike as
   d) with `sys` a local bound to this root, unbounded (root's own forms take no tick or allocation
   budget: a whole-program load allocates tens of GB, and the agent's per-form
-  budget stopped it); its response recorded on main as root's eval, by \"outside\" (seon.repl/record-tx)."
+  budget stopped it); its response recorded on main as root's eval, by \"outside\" (seon.repl/record-tx). The record's write is
+  sent and not waited on: nothing reads it before the answer, and root's writer keeps its order before any later write
+  (it cost 6-30 ms of every root eval's 45-54 ms). See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.root/sys :string] :seon.repl/answer]}
   [sys code]
   (when-not (find-ns 'root.repl)
@@ -83,8 +85,8 @@
   (let [r (binding [*sys* sys]
             (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0 :bytes 0
                                     :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))}))]
-    @(c/transact-main! sys (repl/record-tx {:seon.root/id :root} (str "root-outside-" (profile/now-ns)) "outside"
-                                           (repl/record-details code r {})))
+    (c/transact-main! sys (repl/record-tx {:seon.root/id :root} (str "root-outside-" (profile/now-ns)) "outside"
+                                          (repl/record-details code r {})))
     ;; its value too: the :eval answer passes it on when it is plain data (op-answer :eval)
     r))
 
