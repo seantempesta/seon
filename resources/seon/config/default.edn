@@ -400,6 +400,12 @@
  ;; another tree: the main tree's names its merges worktree (bin/worktree --path merges), so
  ;; write-back never edits main's files.
  :seon.config.source/root #env SEON_SOURCE_ROOT
+ ;; Unit: boolean. Whether a boot of a root with a source tree (:seon.config.source/root) catches main up with the files that changed
+ ;; since main last indexed it (seon.root/catch-up, docs/source.md#a-boot-catches-up-with-its-checkout): about 40 ms when nothing
+ ;; changed, the changed files' forms when some did. Provenance: the owner, 2026-11-10 ("if very little has changed it doesn't take
+ ;; forever to start"); sessions edit the files from outside. False: the boot resumes main as it is and reads no file, for a Seon
+ ;; no one edits from outside. At the bound: n/a.
+ :seon.config.root/catch-up-on-boot true
  ;; Unit: boolean. Whether a merge writes its files and commits :seon.config.source/branch by itself. False: main is the source of truth, and
  ;; my.root/write-back! (seon_write_back) syncs main's changed files and commits, called by hand (owner, 2026-11-07). At the bound: n/a.
  :seon.config.source/write-back-on-merge true

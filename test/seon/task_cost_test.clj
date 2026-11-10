@@ -165,3 +165,42 @@
      :per-n {:ticks 20000.0 :bytes 30000.0 :calls 6.0}
      :fixed {:ticks 100000.0 :bytes 200000.0 :calls 20.0}
      :sizes [10 100 300]}))
+
+(defn shipped-shaped
+  "The input of size n: the world (mt/world), and n task entries as the shipped files hold them, ten a file: a plan of about
+  1.5 KB (the files' mean is 1,550 chars) citing a var (`app.calc/add`), a section (`docs/calc.md#reports`) and the entry
+  before it in the same load, naming a var, a page whole and a task on main as text words, with one or two proofs, a need on
+  the entry before it in one of ten, instructions in one of ten."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db [:map-of :symbol :any]]]}
+  [n]
+  (let [prose (apply str (repeat 12 "The reader takes the rows as they are, and a row it cannot read is the load's refusal. "))
+        entry (fn [i]
+                (let [nsym (symbol (str "app.gen" (quot i 10)))]
+                  (cond-> {:seon.task/ns nsym :seon.task/name (str "t" i)
+                           :seon.task/plan (str "What exists: `app.calc/add` sums two numbers, and docs/calc.md says why; app.calc/total "
+                                                "is the sum of a seq (`docs/calc.md#reports`), app.calc/total-is-exact its task. "
+                                                (when (pos? i) (str "It follows `app.gen" (quot (dec i) 10) "/t" (dec i) "`. "))
+                                                prose)
+                           :seon.task/proofs (if (even? i) #{(symbol (str nsym "-test") (str "t" i "-holds"))}
+                                               #{(symbol (str nsym "-test") (str "t" i "-holds")) 'app.calc-test/add-adds})}
+                    (and (pos? i) (zero? (mod i 10))) (assoc :seon.task/needs #{(str "app.gen" (quot (dec i) 10) "/t" (dec i))})
+                    (= 5 (mod i 10)) (assoc :seon.task/instructions "One pass over the rows; see `docs/calc.md#calc`."))))]
+    [(mt/world) (reduce (fn [m i] (let [e (entry i)] (update m (:seon.task/ns e) (fnil conj []) e))) {} (range n))]))
+
+(deftest a-load-costs-each-new-entry-its-text-and-its-cites
+  ;; docs/references.md#an-entity-cites: the shipped task files' load (seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal)
+  (cost/proof
+    {:of 'seon.task/load-tx :input 'seon.task-cost-test/shipped-shaped
+     :n "new task entries, each a production-shaped declaration (a 1.5 KB plan citing five things)"
+     :work (str "per entry: its declaration encoded once (seon.edn/encode, ~1.7 KB at pr-str's 43 ticks and 26 B a char: 74k "
+                "ticks, 44 KB); its plan parsed once (seon.ref/parse, a char seq step a char: 17k ticks, 120 KB); five citations "
+                "each resolved twice, kept then its cite written (seon.ref/target, ~3 index seeks at 2.4k ticks and 2.4 KB: 72k "
+                "ticks, 72 KB); its identity speculated once so a cite of a task of the same load resolves (one unique datom, "
+                "8.3k ticks and 19 KB: docs/storage.md#what-a-datom-costs-to-add); ~100 contracted calls (1.4k ticks). About "
+                "173k ticks and 255 KB an entry. Fixed: the held tasks' scans and the needs graph of a small world. Before, "
+                "every new task was speculated whole twice (create-tx's, then load-tx's), ~10 datoms each: +170k ticks and "
+                "+300 KB an entry")
+     :growth :linear
+     :per-n {:ticks 173000.0 :bytes 255000.0}
+     :fixed {:ticks 500000.0 :bytes 1000000.0}
+     :sizes [10 30 100]}))

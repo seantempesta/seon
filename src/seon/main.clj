@@ -79,6 +79,12 @@
         ;; bin/update end on it (docs/source.md#files-and-the-db-two-directions)
         ;; the boot view's :stale-binary (seon.root/stale-binary's answer), on one line: bin/root start and bin/update keep the
         ;; line that starts with it, so its fields are joined as text, never a value a printer may break across lines
+        ;; what this boot's catch-up indexed and left out (seon.root/catch-up), on one line each: bin/root start builds only after a
+        ;; catch-up line (docs/source.md#a-boot-catches-up-with-its-checkout)
+        (let [{:keys [paths skipped t] :as c} (get-in @(c/call! sys {:op :state}) [:boot :caught-up])]
+          (when (seq paths) (out! "ROOT CAUGHT UP " (count paths) " files at t " t ": " (clojure.string/join " " paths)))
+          (doseq [{:keys [path reason]} skipped] (out! "ROOT CATCH-UP LEFT OUT " path ": " reason))
+          (when (seon.contract/error? c) (out! "ROOT CATCH-UP FAILED " (:seon.error/message c) ": main resumed as it was")))
         (when-let [{:keys [binary tree reaches missing error]} (get-in @(c/call! sys {:op :state}) [:boot :stale-binary])]
           (out! "ROOT STALE BINARY binary " (or binary "unrecorded") ", main's tree " tree
                 (cond missing (str ", " (name missing) " missing") error (str ", " error) :else (str ", what differs reaches " (clojure.string/join " " reaches)))

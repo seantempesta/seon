@@ -62,6 +62,7 @@ Every limit, bound or default is a config key. A number left in src is one of th
 
 - `seon.cost/tick-allowance`, `seon.cost/steeper-by`, `seon.cost/ratchet`, `seon.cost/growth-share`, `seon.cost/increment-floor`: the cost judge's own definitions of a proof's tolerance, which task `seon.cost/cost-tolerances-are-derived` derives from measurement instead ([cost](cost.md)).
 - `seon.cost/min-points`: three, the fewest sizes a cost proof measures, because a growth is judged on a curve and two points always make a line. A definition of a growth judgement, not a tolerance; a proof the cap leaves fewer is refused ([cost](cost.md)).
+- `seon.program/form-ids`: `(drop 3 form)` takes a definition's head, name and docstring off its form, the shape of `defn`, not a bound: no size depends on it.
 - `seon.program/place-gap`: the space a file's forms are placed apart, a unit of the sort key, not a bound: no size depends on it, and a gap with no room places the file anew.
 - `seon.cron/day-ms`: a day's length in milliseconds, a unit of the calendar the cron proc reads a time of day against, not a bound.
 - `seon.server/verdict-line`: the ten reds `seon_done`'s line names with their first failure; it counts the rest, and the form under its `:handle` reads them all

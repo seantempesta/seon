@@ -8,6 +8,8 @@
 # bin/tree DIR REV names the tree of the commit REV the same way (its tree, the excluded paths left out), reading no
 # file of DIR: what bin/land gives root for a landing, so a landed main and a binary built from it name one tree.
 # Prints nothing and exits 1 when git cannot name it.
+# git reads the repository's own config and no other: a tree's id never depends on whose HOME runs it (seon.fx/git-run's rule)
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 ROOT=${1:-$(cd "$(dirname "$0")/.." && pwd)}
 REV=${2:-}
 CFG=$(dirname "$0")/../resources/seon/config/default.edn
