@@ -85,44 +85,37 @@ Asking the owner, helpers by the shape of the work, briefs and reviews: [session
 
 ## 4. The principles: everything is data flowing through the system
 
-**If nothing has changed, we do nothing.** No proc steps, renders, pings, flushes or polls on an idle system. Health is the absence of open problem facts.
-
-**No clock or timer decides anything.** Work runs because it arrived, is admitted by its measured workload, and parks when there is none. Time is measured, never acted on; a timed wait means the wrong design. The three exceptions: the cron proc, which only puts a message on a queue at a scheduled time; a message's delayed insert when a provider says to retry after a short wait; the kernel's TCP keepalive for a silent peer. Every site is named in [clocks](docs/clocks.md) (`bin/laws clocks`, `bin/laws measures`).
-
-Every need is met by one of these. If one doesn't fit, stop and say so; never route around them:
-- **A value:** immutable Datahike values in one store with many branches; agents own their branch, root owns main, and history is kept ([storage](docs/storage.md#history)).
-- **A Flow proc and its channels:** every component is a step-fn proc declared as data (`resources/seon/system.edn`); a dependency is a channel a proc parks on.
-- **A task:** desired state on attributes, observed state as facts, `:needs` between them; one reconciler closes the gap at the cost of what changed. An OS child is an effect, and its exit is a fact.
-- **A process:** an agent is a forked OS process with a real REPL, on its own branch.
-- **A render:** every view, the model's context included, is a render declared on the entity's schema (`:seon.render/hiccup` for html, `:seon.render/model` for the model's messages); one pass over the pull renders both.
-- **An error is data**, flowing to whoever can fix it. It keeps data, never a Throwable whose frames pin the system (root's `*e` reached 1.08 GB).
-
-**Nothing crashes and nothing hangs** (owner, 2026-10-28: "I want our system to be robust and to have it not crash or hang ever."). Every wait ends, with its value or a typed error saying why it never will. A hang is a defect at the producer that owed the answer, never fixed by a timeout or a watchdog. A failure comes back to the requester as an error value.
-
-**Never pass or keep a db value.** Holding one pins its whole version of the index (three procs each held ~160 MB). What must keep a point in time keeps `{:branch :commit :t}`: a kept db value is a reference.
-
-**A mechanism is built once, and reused everywhere.** Before building anything that waits, retries, admits, spawns, answers a request or reads config, find its one implementation: the wiki section where it lives names it and its owner. Nobody builds a second one, or a one-off beside it.
-
-**Get out of an agent's way.** An agent has a real REPL, and Clojure's own semantics are the interface. Record what happened; never gate what an agent may do, and put no cut or window on its context or its evals. Before adding a check, ask: what would a plain REPL do? Am I recording or judging? What observed thing breaks without it?
+- **If nothing has changed, we do nothing,** and no clock or timer decides anything, outside three exceptions the owner allowed ([clocks](docs/clocks.md#if-nothing-has-changed-we-do-nothing)).
+- **Every need is met by one of six things.** If none fits, stop and say so; never route around them:
+  - a value: immutable Datahike values in one store with many branches ([storage](docs/storage.md));
+  - a Flow proc and its channels ([flow](docs/flow.md#the-step-fn-contract-every-proc-follows));
+  - a task: desired state on attributes, observed state as facts, one reconciler ([tasks](docs/tasks.md)); an OS child is an effect, and its exit is a fact;
+  - a process: an agent is a forked OS process with a real REPL, on its own branch ([processes](docs/processes.md#the-agent-process));
+  - a render declared on the entity's schema, `:seon.render/hiccup` for html and `:seon.render/model` for the model's messages ([render](docs/render.md));
+  - an error as data, flowing to whoever can fix it ([errors](docs/errors.md)).
+- **Nothing crashes and nothing hangs** (owner, 2026-10-28: "I want our system to be robust and to have it not crash or hang ever."): every wait ends, with its value or a typed error saying why it never will ([errors](docs/errors.md#nothing-crashes-and-nothing-hangs)).
+- **Never pass or keep a db value:** a kept db value is a reference, `{:branch :commit :t}` ([storage](docs/storage.md#a-kept-db-value-is-a-reference)).
+- **A mechanism is built once, and reused everywhere.** Before building anything that waits, retries, admits, spawns, answers a request or reads config, find its one implementation: the wiki section where it lives names it and its owner. Nobody builds a second one, or a one-off beside it.
+- **Get out of an agent's way:** an agent has a real REPL; write down what happened, never gate what it may do, and put no cut on its context or its evals ([processes](docs/processes.md#an-agent-is-never-gated)).
 
 ## 5. Laws
 
-The laws every change is held to; a check or a test reads each of them.
+The laws every change is held to; a check or a test reads each of them, and its section says how.
 
-- **Data is entities, refs and indexes** ([data modeling](docs/data-modeling.md)): put a fact on what it is about, read it by the seek that answers it, and let a change cost what changed. There are no kinds: a thing is what its schema says.
-- **Only documented config.** Every limit, bound or default is a key in `resources/seon/config/default.edn` with its unit and provenance, read through the one resolver ([config](docs/config.md#the-resolver)). No literals, no `System/getenv` outside the loader. Reaching a bound is a typed error that names it, never a silent cut ([config](docs/config.md#a-bound-fails-loudly)).
-- **One store, many branches,** as in production; a separate store is a last resort, and says why.
-- **Every write passes the one path**, which checks each entity against its schema ([storage](docs/storage.md#the-write-checks-every-entity-it-touches); `bin/laws transactions`).
-- **Contracts (Malli function schemas) on every function,** and every contract generates (`bin/check mg-check`).
-- **No guards.** Every outside-world failure point is named in [failure points](docs/failure-points.md), with its one edge function and declared error; nothing else catches (`bin/laws catch`).
-- **Effects go through their owner** (`my.fx/call`, `my.fx/send`).
-- **Durability is continuous group commit:** a write is answered when committed in memory; one followed by an outside effect waits for the sync that covers it.
-- **Every definition happens once, where it is defined.** `intern`, `alter-var-root` and `with-redefs` are code smells, each site named in [resolution](docs/resolution.md) (`bin/laws resolution`).
-- **Results are reused by input digest.** Derived data may be cached, never relied on: a cache is keyed by its inputs, never by a clock, and its reader can regenerate it from the db at t.
-- **Estimates are proofs.** A function whose input grows carries a cost proof. Cost is work done (ticks, bytes, calls), never wall or CPU time: no assertion that the machine's load can turn red ([cost](docs/cost.md#what-is-measured)). A perf claim carries numbers from the same input before and after.
-- **Good tests only:** real assertions, red under a mutation, never timing-only, each under one ceiling of work (`:seon.config.agent/test-ticks`). Sample data looks like production data.
-- **Use the library's words and mechanisms** (§7a).
-- **Procs follow the step-fn contract** ([flow](docs/flow.md#the-step-fn-contract-every-proc-follows)): a step never blocks on another proc (`{:id :reply}`, exactly one answer), and no thread, future or atom lives outside procs, except an edge reader for a blocking read.
+- **Data is entities, refs and indexes;** there are no kinds ([data modeling](docs/data-modeling.md)).
+- **Only documented config:** every limit, bound or default is a key read through the one resolver, with no literals and no `System/getenv` outside the loader ([config](docs/config.md#constants)); reaching a bound is a typed error, never a silent cut ([config](docs/config.md#a-bound-fails-loudly)).
+- **One store, many branches,** as in production ([testing](docs/testing.md#testing-in-the-world)).
+- **Every write passes the one path,** checked against the entity's schema ([storage](docs/storage.md#the-write-checks-every-entity-it-touches); `bin/laws transactions`).
+- **Contracts on every function,** and every contract generates ([checks](docs/checks.md#contracts-armed-at-definition)).
+- **No guards:** only a named edge catches ([failure points](docs/failure-points.md); `bin/laws catch`).
+- **Effects go through their owner** ([flow](docs/flow.md#effects-one-owner-and-its-workers-per-kind)).
+- **Durability is continuous group commit** ([storage](docs/storage.md#durability-is-continuous-group-commit)).
+- **Every definition happens once, where it is defined** ([resolution](docs/resolution.md); `bin/laws resolution`).
+- **Results are reused by input digest,** and derived data is a cache, never relied on ([data modeling](docs/data-modeling.md#derived-data-is-a-cache-never-relied-on)).
+- **Estimates are proofs,** and cost is work done, never time: no assertion that the machine's load can turn red ([cost](docs/cost.md#what-is-measured)).
+- **Good tests only:** real assertions, red under a mutation, on data that looks like production's ([testing](docs/testing.md#a-proof-is-focused)).
+- **The library's words and mechanisms** (§7a).
+- **Procs follow the step-fn contract** ([flow](docs/flow.md#the-step-fn-contract-every-proc-follows)).
 
 ## 6. The running system, as a Seon agent sees it
 
@@ -168,19 +161,19 @@ Information has one home by what it is, and a fact found anywhere else is moved 
 
 ## 9. Mistakes we have made, and do not repeat
 
-The rules are above; these are the mistakes, each with where its incident is told.
+The rules are above; each mistake links where its incident is told.
 
-- **Fanning out:** ten and more sessions burned a fifth of a week's tokens in one night ([sessions](docs/sessions.md#no-fan-out)).
-- **Building infrastructure instead of the product** (owner, 2026-10-28: "we built out a lot of infrastructure thinking it would speed things up and it really hasn't"): before building tooling, ask whether it moves an agent finishing a real task.
+- **Fanning out** ([sessions](docs/sessions.md#no-fan-out)).
+- **Building infrastructure instead of the product** (owner, 2026-10-28: "we built out a lot of infrastructure thinking it would speed things up and it really hasn't"; [decisions](docs/decisions.md#build-the-product-not-infrastructure-owner-2026-10-28)).
 - **Trees before the forest:** a detail no step of THE PLAN asks for; a cause guessed instead of measured.
-- **A clock, timer, sleep, poll, deadline, ping or fixed slot** standing in for a dependency or a workload. "Never came" is a fact (blocked, stalled, dead).
-- **A swallowed error, an ignored answer, a fake default.** Unknown is not `{}`, `0`, `nil` or `:ok`, and a proc answers every request it took.
-- **Routing around a principle:** a fallback instead of an error fact; a runner or wrapper beside the reconciler; a store per test; an env var instead of config; regex over code instead of the compiler's facts; script order instead of `:needs`; a thread instead of a fiber; stdin as a lifecycle.
-- **A parallel system, or a mechanism built twice** (owner, 2026-11-04: "I don't want agents to keep building parallel systems"): a second cache, a second path to the model, two producers of one view.
+- **A clock standing in for a dependency or a workload** ([clocks](docs/clocks.md#if-nothing-has-changed-we-do-nothing)).
+- **A swallowed error, an ignored answer, a fake default** ([errors](docs/errors.md#unknown-is-never-a-default)).
+- **Routing around a principle:** a fallback instead of an error; a runner or wrapper beside the reconciler; a store per test; an env var instead of config; regex over code instead of the compiler's facts; script order instead of `:needs`; a thread instead of a fiber; stdin as a lifecycle.
+- **A parallel system, or a mechanism built twice** (owner, 2026-11-04: "I don't want agents to keep building parallel systems").
 - **Reinventing what v1 already solved,** or building a half-baked plan.
-- **A clipping function** (`clip`, `subs`, `take n` for output): output improves only through the one printer or a render on the value's schema, and every cut says what it left and how to read the rest.
-- **A check that cannot fail,** that only prints, or that ran nothing ([machine](docs/machine.md#reading-a-number)): every check mode ends on `X OK` / `X FAILED` and an exit status, and nobody merges on a check nobody read.
-- **Dropping a store, a branch or history:** reclaiming space is the owner's act. The exception while Seon holds no user's data: the standing store is erased, never migrated, when a change needs it, the other sessions warned first.
+- **A clipping function** ([render](docs/render.md#no-clipping)).
+- **A check that cannot fail,** that only prints, that ran nothing, or that nobody read ([machine](docs/machine.md#reading-a-number)).
+- **Dropping a store, a branch or history:** the owner's act. Only the standing store, while it holds no user's data, is erased when a change needs it, the other sessions warned first ([machine](docs/machine.md#disk-stays-bounded)).
 - **Throwing away good work, or keeping its slow copy** (owner, 2026-10-23: "don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code").
 
 ## 10. Done
