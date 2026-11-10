@@ -1226,7 +1226,7 @@
     (is (str/starts-with? first-page "<page from=\"seon\" turn=\"1\">") "the first request holds the page as turn 1's message")
     (is (str/includes? first-page "Your task") "the task's part")))
 
-;; AGENTS.md section 5: the chain holds vars, so what a program defines is what it calls; a delay of fn values kept the old ones, and an edit of wrap-record reached nothing
+;; docs/resolution.md: the chain holds vars, so what a program defines is what it calls; a delay of fn values kept the old ones, and an edit of wrap-record reached nothing
 (deftest an-edit-of-a-middleware-runs-next
   (let [[_ _ marked vars] (in-agent ["(def marks (atom 0)) (in-ns 'seon.repl)"
                                      "(let [old wrap-registry] (alter-var-root #'wrap-registry (fn [_] (fn [h] (let [n (old h)] (fn [req] (swap! @(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\"))) inc) (n req)))))))"
@@ -1642,8 +1642,8 @@
            _ (d/transact conn (task/message-tx "m-both" "owner" [ka kb] body 1000))
            ref-of (fn [db k] (set (map :seon.agent/key (:seon.message/to (d/entity db [:seon.message/id "m-both"])))))]
        (is (= #{ka kb} (ref-of @conn nil)) "main holds the one entity, to both")
-       (as ka #(agent/deliver! 1))
-       (as kb #(agent/deliver! 1))
+       (as ka #(agent/deliver!))
+       (as kb #(agent/deliver!))
        (as ka #(is (= [body] (messages-held)) "a holds it"))
        (as kb #(is (= [body] (messages-held)) "b holds it"))
        (is (= #{ka} (ref-of (heads ka) nil)) "a's branch has its own ref only")
@@ -1662,13 +1662,75 @@
            says (fn [] (let [db (agent/db) a (pdb/eid db :seon.agent/key ka)]
                          (pr-str (seon.fixtures/tree-messages (:tree (seon.ctx/build (seon.db/index) db a (:branch @agent/state))) db))))]
        (as ka #(do (is (= [{:id "m-once" :from "owner" :body body :sent-ms 1000}] (agent/undelivered)) "main holds it for this agent")
-                   (is (= 1 (count (agent/deliver! 1))))
+                   (is (= 1 (count (agent/deliver!))))
                    (is (str/includes? (says) body) "the request holds it")
                    (remove-held!)
                    (is (= [] (agent/undelivered)) "its entity is on the branch: nothing to deliver")
-                   (is (= [] (agent/deliver! 2)) "a later turn brings nothing")
+                   (is (= [] (agent/deliver!)) "a later turn brings nothing")
                    (is (= [] (messages-held)))
                    (is (not (str/includes? (says) body)) "and the request no longer holds it")))))))
+
+(defn- turn-at!
+  "The running agent opens turn n as the loop does: its model call, then its basis at the branch's t as it stands (seon.turn/basis!), committed. See docs/turn.md#the-turn-is-a-number."
+  [n]
+  (let [k (:key @agent/state)]
+    (agent/transact! (ts/turn-tx k n {}))
+    (agent/transact! [{:seon.model-call/id (lib/call-id k n) :seon.model-call/basis {:commit (d/commit-id (agent/db)) :t (:max-tx (agent/db)) :task "demo/x" :turn n :max-turns 9 :origin :model}}])
+    (agent/commit!)))
+
+(defn- read-at
+  "The ids of the messages the running agent's turn n reads, as its record holds them (seon.ctx/turn-members) on its branch's db."
+  [n]
+  (let [db (agent/db) k (:key @agent/state) c (seon.ctx/agent-ctx (seon.db/index) db (pdb/eid db :seon.agent/key k))]
+    (mapv second (:messages (seon.ctx/turn-members db c (seon.ctx/call-of db n k))))))
+
+(deftest a-message-taken-by-one-agent-is-still-owed-to-the-other
+  ;; docs/users.md#messages (owner, 2026-11-09: the message on the agent's branch is the proof of delivery): a's taking it writes a's branch alone
+  (delivery-world
+   (fn [{:keys [conn as ka kb heads]}]
+     (d/transact conn (task/message-tx "m-two" "owner" [ka kb] "to both" 1000))
+     (is (= ["m-two"] (as ka #(mapv :id (agent/undelivered)))) "owed to a")
+     (as ka #(agent/deliver!))
+     (is (= [] (as ka #(agent/undelivered))) "a took it")
+     (is (= ["m-two"] (as kb #(mapv :id (agent/undelivered)))) "and b is owed it still: a's taking changes nothing for b")
+     (is (= [] (d/q '[:find [?id ...] :where [_ :seon.message/id ?id]] (heads kb))) "b's branch holds none"))))
+
+(deftest a-message-synced-from-main-is-delivered-and-read-by-the-next-turn
+  ;; docs/users.md#messages: a merge or sync of main brings the message entity onto the branch, and that is its delivery: no longer owed, read once, by the first turn whose basis is at or after it
+  (delivery-world
+   (fn [{:keys [conn as kb]}]
+     (d/transact conn (task/message-tx "m-sync" "owner" [kb] "synced" 1000))
+     (as kb #(do (is (= ["m-sync"] (mapv :id (agent/undelivered))) "owed before the sync")
+                 (turn-at! 1)
+                 ;; what a merge of main writes onto the branch: the entity as main holds it
+                 (agent/transact! (task/message-tx "m-sync" "owner" [kb] "synced" 1000))
+                 (agent/commit!)
+                 (is (= [] (agent/undelivered)) "on the branch: delivered, though no turn marked it")
+                 (is (= [] (agent/deliver!)) "so a turn's delivery brings nothing again")
+                 (turn-at! 2)
+                 (is (= [] (read-at 1)) "the turn before the sync does not read it")
+                 (is (= ["m-sync"] (read-at 2)) "the next turn reads it, once")
+                 (turn-at! 3)
+                 (is (= [] (read-at 3)) "and no turn after")))))) 
+
+(deftest a-private-branch-is-owed-a-message-until-its-own-act-delivers-it
+  ;; docs/users.md#messages: nothing merged from main: owed until seon.agent/deliver! writes it on the branch; read by the next turn; one delivered after a turn's basis reads at the turn after
+  (delivery-world
+   (fn [{:keys [conn as kb]}]
+     (d/transact conn (task/message-tx "m-own" "owner" [kb] "own" 1000))
+     (as kb #(do (turn-at! 1)
+                 (is (= ["m-own"] (mapv :id (agent/undelivered))) "owed: nothing of main's is on the branch")
+                 (is (= ["m-own"] (mapv :id (agent/deliver!))))
+                 (is (= [] (agent/undelivered)) "delivered once written")
+                 (turn-at! 2)
+                 (is (= [] (read-at 1)))
+                 (is (= ["m-own"] (read-at 2)) "read at the next turn")
+                 (testing "delivered mid-turn, after the turn's basis: read at the next turn's start, not the turn in force"
+                   (d/transact conn (task/message-tx "m-mid" "owner" [kb] "mid" 2000))
+                   (agent/deliver!)
+                   (is (= ["m-own"] (read-at 2)) "turn 2 is as it was")
+                   (turn-at! 3)
+                   (is (= ["m-mid"] (read-at 3)))))))))
 
 (deftest a-program-pull-leaves-messages-alone
   ;; docs/users.md#messages: merge-main! brings the program, never another agent's messages
@@ -1684,8 +1746,8 @@
        (as ka #(is (true? (:ok (agent/merge-main! #{}))) "the pull applied main's program change"))
        (is (= [] (on-branch ka)) "and no message of b's came with it")
        (is (= [] (on-branch kb)) "b's branch holds none until b's own delivery")
-       (as ka #(is (= [] (agent/deliver! 1)) "a is sent none"))
-       (as kb #(do (agent/deliver! 1) (is (= [body] (messages-held))) (is (= ["m-b"] (on-branch kb)))))))))
+       (as ka #(is (= [] (agent/deliver!)) "a is sent none"))
+       (as kb #(do (agent/deliver!) (is (= [body] (messages-held))) (is (= ["m-b"] (on-branch kb)))))))))
 
 (deftest a-message-through-removal-merge-and-restart
   ;; docs/users.md#messages, context's break test, on the branches of a store (a restart is a process holding the branch anew:
@@ -1702,7 +1764,7 @@
                                         :seon.eval/response {:handle 'result/e1 :value 3}}])))
        (let [before (as ka #(texts (says)))
              _ (d/transact conn (task/message-tx "m-late" "owner" [ka kb] body 1000))
-             _ (as ka #(agent/deliver! 2))
+             _ (as ka #(agent/deliver!))
              after (as ka #(texts (says)))
              at (fn [ms] (first (keep-indexed (fn [i m] (when (str/includes? m body) i)) ms)))]
          (is (some? (at after)) "the message is in the request")
@@ -1714,10 +1776,10 @@
            (is (empty? (:ours r)) "merged up, the branch has no change of its own from the message")
            (d/merge-db conn #{(pdb/on-main (:branch cfg) :msg-a)} (pm/merge-tx main base head (keys (:ours r)) #{}) (pdb/tx-meta (:branch cfg))))
          (as ka #(do (is (= [] (agent/undelivered)) "after the merge, held anew: not delivered again")
-                     (is (= [] (agent/deliver! 3)))
+                     (is (= [] (agent/deliver!)))
                      (is (= [] (messages-held)))))
          (as kb #(do (is (= 1 (count (agent/undelivered))) "another recipient is still owed it")
-                     (agent/deliver! 2)
+                     (agent/deliver!)
                      (is (= [body] (messages-held)))))
          (is (= #{ka kb} (set (map :seon.agent/key (:seon.message/to (d/entity @conn [:seon.message/id "m-late"]))))) "main still names both"))))))
 
@@ -1751,7 +1813,7 @@
          (is (= [{:seon.eval/id "e1" :seon.eval/opened true}]
                 (agent/untaken-facts))
              "what main holds of its evals that the branch does not; e9 is no eval of its branch")
-         (is (= [] (agent/deliver! 1)) "the delivery a turn makes (seon.turn/deliver!): no messages here, the facts written")
+         (is (= [] (agent/deliver!)) "the delivery a turn makes (seon.turn/deliver!): no messages here, the facts written")
          (is (true? (:seon.eval/opened (member :seon.eval/_agent :seon.eval/id "e1"))) "the opened eval")
          (is (= [] (agent/untaken-facts)) "delivered: nothing more to copy")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
@@ -2267,7 +2329,7 @@
     (is (= {t :error} (:proofs (:value proved))) (pr-str proved))))
 
 (deftest a-gate-that-cant-read-its-candidate-answers
-  ;; AGENTS 4 "every wait ends": a :gate's writer refusal comes back to whoever asked, no test run (seon.root/ext-op)
+  ;; docs/errors.md#nothing-crashes-and-nothing-hangs "every wait ends": a :gate's writer refusal comes back to whoever asked, no test run (seon.root/ext-op)
   (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.root/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]
     (is (= :seon.writer/refused (:value r)) (pr-str r))))
 
@@ -2529,7 +2591,7 @@
 
 (deftest a-failed-call-keeps-what-it-sent
   ;; root, 2026-10-24: a turn whose model call fails still records what it sent (the hash of its bytes, written as the
-  ;; request goes; the request itself is made again from its records) and its typed error (an error is data, AGENTS section 4);
+  ;; request goes; the request itself is made again from its records) and its typed error (an error is data: docs/errors.md#errors);
   ;; the debug page shows both
   (let [[end turn] (in-agent (fn [{:keys [task ns]}]
                               [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
@@ -2606,7 +2668,7 @@
                                              "   :turn (:seon.agent/turn (datahike.api/entity db [:seon.agent/key (:key @seon.agent/state)]))"
                                              "   :eval-turns (set (datahike.api/q '[:find ?by ?t :where [?e :seon.eval/by ?by] [?e :seon.eval/call ?c] [?c :seon.model-call/n ?t]] db))"
                                              "   :loop-eval-turns (vec (datahike.api/q '[:find [?t ...] :where [?e :seon.eval/by ?b] [(not= ?b \"outside\")] [(not= ?b \"seon\")] [(missing? $ ?e :seon.eval/call-id)] [?e :seon.eval/turn ?t]] db))"
-                                             "   :message-turns (vec (datahike.api/q '[:find [?t ...] :where [?m :seon.message/call ?c] [?c :seon.model-call/n ?t]] db))"
+                                             "   :message-turns (let [c @seon.ctx/ctx] (vec (for [[n cid] (seon.ctx/turns c) :when (seq (:messages (seon.ctx/turn-members db c cid)))] n)))"
                                              "   :call-ids (vec (datahike.api/q '[:find [?id ...] :where [?m :seon.model-call/id ?id]] db))"
                                              "   :committed (msgs (datahike.api/commit-as-db db (get-in m [:seon.model-call/basis :commit])))"
                                              "   :intent (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/intent ?r]] db %) (map first evals))})")
@@ -2815,7 +2877,7 @@
     (is (= 3 (:value (second rs))) "the agent lives")))
 
 (deftest a-refused-write-in-a-proof-runs-finish-answers-the-asker-with-the-error
-  ;; AGENTS.md §4 (nothing hangs), docs/failure-points.md (a refused write): the run's results are
+  ;; docs/errors.md#nothing-crashes-and-nothing-hangs (nothing hangs), docs/failure-points.md (a refused write): the run's results are
   ;; recorded on the branch when the run finishes, which the loop runs, not the asker's eval; a
   ;; write the branch refuses there answers the asker (my.agent/prove) with the error, never leaves it waiting.
   ;; The agent's own REPL makes its writer refuse (its process, its definition of transact!)
@@ -2829,7 +2891,7 @@
 
 (deftest a-commit-the-store-refuses-leaves-the-agent-alive
   ;; task seon.repl/a-commit-that-keeps-failing-ends-no-agent-silently;
-  ;; AGENTS.md section 4 (nothing crashes), docs/storage.md#a-commit-the-store-refuses. A commit the store refuses used
+  ;; docs/errors.md#nothing-crashes-and-nothing-hangs (nothing crashes), docs/storage.md#a-commit-the-store-refuses. A commit the store refuses used
   ;; to throw out of the agent's loop and end the process, the next commit throwing again on the same pending value.
   ;; Now the eval answers what was refused as data under :unrecorded, its writes are dropped, the branch and @ctx are as
   ;; committed, and the next eval and commit are as any. The store's refusing is made in the agent's own REPL (its

@@ -112,8 +112,8 @@
   "What main changed since base, reduced to what main-line reads and held keyed by the two points
   (commit, t) it is a function of: {:after {program-key (hash of its content on main)}}, from
   seon.merge/delta-changes (declared data left out). The diff itself, whose values carry the forms
-  and so pin the dbs they were read from, is let go at once (AGENTS section 4, a kept db value is a
-  reference); the newest pair is held on the state (:main-changes), evicted by the next and
+  and so pin the dbs they were read from, is let go at once (a kept db value is a
+  reference: docs/storage.md#a-kept-db-value-is-a-reference); the newest pair is held on the state (:main-changes), evicted by the next and
   regenerated from the two dbs. {} when main's point is base's.
   See docs/merging.md#main-moved-is-said-at-every-eval."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map-of :any :int]]}
@@ -199,22 +199,21 @@
 
 (defn turn-now
   "The agent's turn number in force: its :seon.agent/turn on this branch, 0 before its first model turn. Every record
-  the agent writes names that turn's model call (:seon.eval/call, :seon.message/call: seon.task/call-ref). See docs/turn.md#the-turn-is-a-number."
+  the agent writes names that turn's model call (:seon.eval/call: seon.task/call-ref). See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat] nat-int?]}
   [] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key @state)])) 0))
 
 (defn own-message-tx
-  "Message mid from from, sent at sent-ms, delivered to this agent at turn n: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only, and
-  the turn's model call (:seon.message/call). See docs/turn.md#the-turn-is-a-number."
-  {:malli/schema [:=> [:cat :string :string :any :int nat-int?] :seon.db/tx-data]}
-  [mid from body sent-ms n]
-  (update (task/message-tx mid from [(:key @state)] body sent-ms) 0 assoc :seon.message/call (task/call-ref (:key @state) n)))
+  "Message mid from from, sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
+  took it is derived from the transaction that wrote it (seon.ctx/turn-members). See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :string :string :any :int] :seon.db/tx-data]}
+  [mid from body sent-ms]
+  (task/message-tx mid from [(:key @state)] body sent-ms))
 
 (defn entries-tx
-  "The transaction that writes entries (undelivered) on this branch, delivered at turn n: the entity root wrote on main, with this agent's ref
-  and the turn (own-message-tx)."
-  {:malli/schema [:=> [:cat [:sequential :map] nat-int?] :seon.db/tx-data]}
-  [entries n] (into [] (mapcat (fn [{:keys [id from body sent-ms]}] (own-message-tx id from body sent-ms n))) entries))
+  "The transaction that writes entries (undelivered) on this branch: the entity root wrote on main, with this agent's ref only (own-message-tx)."
+  {:malli/schema [:=> [:cat [:sequential :map]] :seon.db/tx-data]}
+  [entries] (into [] (mapcat (fn [{:keys [id from body sent-ms]}] (own-message-tx id from body sent-ms))) entries))
 
 (defn taken!
   "The first n entries of the inbox (effect outcomes, which no model turn reads) leave it at a turn's take (seon.turn/take!). nil."
@@ -407,24 +406,25 @@
 ;; ---- effects (seon.fx, worktree session FX1): root's owner procs, through the agent's proc ---
 
 (defn deliver!
-  "Bring what main holds for this agent onto its branch, committed, as turn n's: its messages (undelivered) and the facts of
-  its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). Answers the
+  "Bring what main holds for this agent onto its branch, committed: its messages (undelivered) and the facts of
+  its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). A message
+  on the branch is delivered; the turn that read it is derived from its transaction (seon.ctx/turn-members). Answers the
   messages delivered. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
-  [n]
+  {:malli/schema [:=> [:cat] [:vector :map]]}
+  []
   (let [es (undelivered)
-        tx (into (untaken-facts) (entries-tx es n))]
+        tx (into (untaken-facts) (entries-tx es))]
     (when (seq tx) (transact! tx))
     (commit!)
     es))
 
 (defn messages
-  "The messages to this agent not yet delivered, delivered (deliver!, as a turn delivers them, at the turn in force: `turn-now`: the entities on
+  "The messages to this agent not yet delivered, delivered (deliver!, as a turn delivers them: the entities on
   main to it, another agent's sends included), then the effect outcomes of the inbox. Delivered, a message stays in `@ctx` until the agent
   removes it (`(swap! ctx update :seon.message/_to dissoc e)`), and is not delivered again. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [es (deliver! (turn-now))]
+  (let [es (deliver!)]
     (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
 (def ^:dynamic *fx-stub*
@@ -728,7 +728,7 @@
 (defn- base-graph
   "The reach graph of base under inputs, with its index ({:graph :index}: seon.program/
   graph-index), reused while base is the point (seon.db/point) it was made for: a value never changes,
-  so neither does its graph (AGENTS §5, results reused by input), and the db itself is not held. A new base (merge-main!, a
+  so neither does its graph (results reused by input: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on), and the db itself is not held. A new base (merge-main!, a
   resumed branch's older one) is the graph held updated to it (seon.program/reach-update, in
   either direction), never built again: the graph held is the one this process was forked
   with, main's, kept by the fork server (:graph) with its index (seon.program/reach-indexed), and built
@@ -770,7 +770,7 @@
 (defn branch-graph
   "The reach graph of branch db under in, the one test-plan selects by: base's graph (base-graph)
   updated to db (seon.program/reach-update), or db's own with no base; reused while db is the point
-  (seon.db/point) it was made for (a value never changes, AGENTS section 5), so a second ask of one db is a
+  (seon.db/point) it was made for (a value never changes: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on), so a second ask of one db is a
   key lookup; a new db is base's graph updated again, at the cost of what the branch changed
   from base (20-45 ms for one form). Holds the point of the newest asked, never its db."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :seon.program/inputs] :map]}
@@ -792,7 +792,7 @@
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [{from :db c :commit idx :index} (:index @state)
-        ;; the db it is of, made again from its commit: a db held past its moment pins its index (AGENTS 4)
+        ;; the db it is of, made again from its commit: a db held past its moment pins its index (docs/storage.md#a-kept-db-value-is-a-reference)
         from (or from (some->> c (d/commit-as-db (:store db))))
         v (if idx (r/index idx from db) (r/index db))]
     (swap! state assoc :index {:commit (d/commit-id db) :index v})

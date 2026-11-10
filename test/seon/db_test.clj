@@ -326,7 +326,7 @@
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-kept-store-on-a-retired-name-is-refused
-  ;; a stored keyword is renamed by erasing the store, never by a migration (AGENTS 7a): a store holding a retired name (here :schema.file/path, before
+  ;; a stored keyword is renamed by erasing the store, never by a migration (docs/storage.md#a-renamed-attribute): a store holding a retired name (here :schema.file/path, before
   ;; :file/path) would open, gain the new name and hold no text under it, and its next write-back would rewrite each resource from nothing. Refused at open, saying what to do.
   ;; A store on disk of this test's own, the last resort: what is proved is a root's open of a kept store
   (let [path (str (seon.config/checkout) "/target/db-test-retired-" (random-uuid))
@@ -501,7 +501,9 @@
         reply (slice @text 7 3000)
         vk (hasch.core/uuid reply)
         on (fn [b f] (let [c (pdb/connect (assoc cfg :branch b))] (try (f c) (finally (d/release c)))))
-        cold-read (fn [] (on :turns (fn [c] [(d/q '[:find ?r . :where [_ :seon.model-call/reply ?r]] @c)
+        ;; the large reply's own call, by its id: the branch holds turn 0's reply too, so a query for any reply answered
+        ;; whichever of the two Datahike found first (red on main 210ad0bcf1, when the docs both are cut from changed)
+        cold-read (fn [] (on :turns (fn [c] [(:seon.model-call/reply (d/pull @c [:seon.model-call/reply] [:seon.model-call/id (seon.lib/call-id "att" 0)]))
                                              (:reads @(:stats (:storage (:store @c))))])))
         stored? (fn [] (on :db #(k/exists? (:store @%) vk {:sync? true})))
         gc! (fn [] (on :db #(datahike.gc/gc-storage! @% (java.util.Date. 0) {:sync? true})))]

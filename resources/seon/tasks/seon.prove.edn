@@ -6,7 +6,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.db-test/stored-values-compress-through-the-codecs-the-build-made}}
  {:seon.task/name "load-never-turns-a-test-red"
-  :seon.task/plan "Seen 2026-11-09 in jolt/dbboot's proves at load 14-17: STALLED seon.root-test/root-threads-are-what-root-declares 58000 ms (bound 57312 ms) and seon.test-store-test/n-roots-open-the-process-store-at-once 31000 ms (bound 30000 ms). A wall-clock bound that turns a test red under load breaks AGENTS.md section 5 (no assertion the machine's load can turn red; wall time is measured and recorded, never red). Find what applies the bound (the stall check of a test's wall time), and make a stall a fact about a wait that never ends (its producer died, a typed error), never a time; a slow test is shown by its measured time, not failed by it. Proof: the same test under a forced load passes, with its time recorded."
+  :seon.task/plan "Seen 2026-11-09 in jolt/dbboot's proves at load 14-17: STALLED seon.root-test/root-threads-are-what-root-declares 58000 ms (bound 57312 ms) and seon.test-store-test/n-roots-open-the-process-store-at-once 31000 ms (bound 30000 ms). A wall-clock bound that turns a test red under load breaks docs/cost.md#what-is-measured (no assertion the machine's load can turn red; wall time is measured and recorded, never red). Find what applies the bound (the stall check of a test's wall time), and make a stall a fact about a wait that never ends (its producer died, a typed error), never a time; a slow test is shown by its measured time, not failed by it. Proof: the same test under a forced load passes, with its time recorded."
   :seon.task/kind :work
   :seon.task/proofs #{}}
 ]

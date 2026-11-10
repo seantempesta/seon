@@ -1214,7 +1214,7 @@
         digests (fn [inputs roots] (update-vals (program/graph-index g inputs roots) :digest))
         a (digests (in "t1") nil)
         b (digests (in "t2") nil)
-        step #(digests (in %) {"step" ['seon.task-files-test/the-shipped-task-files-load]})]
+        step #(digests (in %) {"step" ['seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal]})]
     (is (< 20 (count a)) "a sample of the suite, not an empty tree")
     ;; the one exception: a test whose test namespace reads the checkout's files itself judges the files
     ;; themselves, so it takes the tree

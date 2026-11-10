@@ -383,6 +383,9 @@
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
             one #(try (let [env' (assoc env :children kids :self k)
+                            ;; the bridge's root (no entity of its own): its source's identity read tracked, so the root runs again
+                            ;; when the entity first appears (a walk made before its agent's entity is on the branch)
+                            _ (when (and ev (empty? children)) (get ev :db/id))
                             ;; a call an output placed answers that output (and what it places), kept as this component's answer to it
                             as (:seon.render/as opts)
                             out (if as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil) (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
@@ -411,7 +414,7 @@
                        (:once w) [(binding [ratom/*ratom-context* nil] (draw)) nil]
                        (:rx prev) (let [rx (:rx prev)] (ratom/-set! rx :f draw) [(ratom/-run rx false) rx])
                        :else (ratom/run-in-reaction draw k (fn [k] (vswap! (:queue w) conj k)) {}))
-            ;; run: its closure holds the db and the ctx view of this run, which a kept walk has no use for (AGENTS.md section 4, a kept db value is a reference); render! sets it anew
+            ;; run: its closure holds the db and the ctx view of this run, which a kept walk has no use for (a kept db value is a reference: docs/storage.md#a-kept-db-value-is-a-reference); render! sets it anew
             _ (when rx (ratom/-set! rx :f (constantly nil)))
             bytes (- (profile/alloc-bytes) a0)
             ;; a child the hiccup and the model output both placed is held once
