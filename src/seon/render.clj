@@ -348,7 +348,8 @@
             ;; the page alone pays nothing here
             others (disj (or (:outputs w) #{}) :seon.render/hiccup)
             ix @(:index w)
-            ;; the entity: the component's argument, else, for the walk's root called with none (a layout), the walk's source, the pull it walks
+            ;; the entity: the component's argument, else, for the walk's root called with none (a layout), the walk's source, the pull it walks:
+            ;; a bridge until 2b with 7c roots the agent's walk on [#'seon.render.ui/agent {} view], which deletes this case (docs/render.md)
             ev (when (seq others) (or (first children) (when (or (nil? @(:out w)) (= k @(:out w))) (ratom/ref-view (:ref (:src w)) (:changes (:src w))))))
             e0 (some-> ev ratom/untracked)
             s0 (when (and (map? e0) (:db/id e0)) (schema-of ix e0 nil))
