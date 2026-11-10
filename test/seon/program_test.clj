@@ -1451,5 +1451,5 @@
     (is (moved? "in-vector-test") "a var named in a string in a vector")
     (is (moved? "quoted-in-string-test") "a var quoted in a string that does not start with a paren")
     (is (moved? "in-map-test") "a var named in a string in a map")
-    (is (not (moved? "not-code-test")) "a string that is no code names nothing, and does not throw")
+    (is (not (moved? "not-code-test")) "a string that is no code names nothing and does not throw (reader/forgive makes \"app.pt-sn/f is not code\" a comment; unbalanced text reads as nil)")
     (is (not (moved? "pure-test")) "a test naming nothing keeps its digest")))
