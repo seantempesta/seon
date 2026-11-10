@@ -1197,7 +1197,9 @@
       held
       (let [w (cond-> (render/walker {:ref ctx/ctx :changes ctx/changes}
                              agent/db [l {}] (agent/branch-index))
-                (or (nil? held) (:model-only held)) (assoc :model-only true))]
+                (or (nil? held) (:model-only held)) (assoc :model-only true)
+                ;; its model output too: each entity's model render, read as the request (seon.ctx.wire/request)
+                true (assoc :outputs #{:seon.render/hiccup :seon.render/openai-compat}))]
         (some-> held render/dispose-walk!)
         (swap! agent/state assoc :walk w)
         w))))

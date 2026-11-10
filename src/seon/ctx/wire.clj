@@ -74,20 +74,6 @@
   {:malli/schema [:=> [:cat :map [:maybe :seon.host/db] :map] :string]}
   [ix db e] (render/result-text ix db (result-mark db e)))
 
-(def render-calls
-  "What Seon runs to show an agent its page, each [intent code]: :whole, the page whole (an agent's first eval, and an outside
-  read's last), and :changes, the parts that moved since it was last shown. The intent reads true for the model and for a person
-  on the page, so it speaks of the agent. See docs/render.md#the-render-is-an-eval."
-  {:whole ["The agent's page: its task and how its proofs stand."
-           "(my.render/render-ctx)"]
-   :changes ["What changed on the agent's page."
-             "(my.render/render-changes)"]})
-
-(defn- render-eval?
-  "Is eval e (an eval record) one of the page's renders, whole or what changed (`render-calls`)?"
-  {:malli/schema [:=> [:cat :map] :boolean]}
-  [e] (boolean (some #(= (:seon.eval/code e) (second %)) (vals render-calls))))
-
 (defn at-t
   "Branch db as of t, as a page is drawn: the earliest commit of its line that holds t, a real db value, found by walking the line back from db at the cost of the commits since; past what collection kept, the same datoms as of t, which is all a status can't do a diff of (docs/storage.md#collection). See docs/storage.md#collection."
   {:malli/schema [:=> [:cat :seon.host/db :int] :seon.host/db]}
@@ -107,29 +93,44 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] :seon.host/db]}
   [db p] (or (d/commit-as-db (pdb/store-of db) (:commit p)) (d/as-of db (:t p))))
 
+(declare page-diff-msgs example-msgs reply-of)
+
+(defn- part-ref
+  "The ref and turn of message m the agent's model output holds, from src, the component whose own answer held it
+  (seon.render/answer-sources: {:f :args}): an eval [:eval id] in its reply's turn, a message [:message id] in its call's, a
+  reply [:reply id] in its own, a turn's page message [:page n] in turn n, an example session [:example key], and the agent's
+  own: its system message [:section addresses], what opens its session [:session key]. What the debug page labels each
+  message by. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  {:malli/schema [:=> [:cat :seon.host/db :map :map] [:tuple [:vector :any] [:maybe :int]]]}
+  [db {:keys [f args]} m]
+  (let [x (some-> (first args) ratom/realize)]
+    (cond (= f #'page-diff-msgs) [[:page (nth args 3)] (nth args 3)]
+          (= f #'example-msgs) [[:example (first args)] nil]
+          (:seon.eval/id x) [[:eval (:seon.eval/id x)] (reply-of db x)]
+          (:seon.message/id x) [[:message (:seon.message/id x)] (some->> (:seon.message/call x) :db/id (d/entity db) :seon.model-call/n)]
+          (:seon.model-call/id x) [[:reply (:seon.model-call/id x)] (:seon.model-call/n x)]
+          (= "system" (:role m)) [[:section (vec (sort (keys (:seon.agent/system x))))] nil]
+          :else [[:session (:seon.agent/key x)] nil])))
+
 (defn request
-  "The agent's request, a reading of walk w, the one tree its page draws (docs/render.md#the-models-context-a-cached-prefix-then-the-turn): its conversation's list through the one generic conversion
-  (seon.render/wire), so the request is what the tree holds, a re-eval in its own place. A request whose records hold no render of the page (an observer's context read, the first move a judge scores) ends
-  with the page whole as a call of its own and its result, when the tree holds a page to show. Answers {:messages :parts}: provider-neutral messages (seon.model/wire-messages makes the wire shape), and :parts, each
-  [ref messages turn] in order (what the debug page labels its messages by): ref [:section address] the system message, [:example key t], [:session id], [:eval id], [:message id], [:reply id] or [:render]. A tree that draws no system message is refused, :seon.ctx/no-system-message, never sent without one."
+  "The agent's request, walk w's model output (seon.render/openai-compat: each entity rendered by its schema's model render, in
+  the order the agent's render places them; docs/render.md#the-models-context-a-cached-prefix-then-the-turn). Answers
+  {:messages :parts}: provider-neutral messages (seon.model/wire-messages makes the wire shape), and :parts, each [ref messages
+  turn] in order, the ref of what answered them (`part-ref`), which the debug page labels its messages by. A request with no
+  system message is refused, :seon.ctx/no-system-message, never sent without one."
   {:malli/schema [:=> [:cat :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]}
   [w]
-  (let [ps (render/wire w)
-        ;; a conversation's other defects reach the model as what threw, in their place; a request with no system message is no request
-        _ (when-not (= "system" (:role (first (second (first ps)))))
-            (throw (ex-info "the request has no system message"
-                            (contract/error :seon.ctx/no-system-message #'request "the request has no system message: its component drew none (a db without the prompt, or a section it links gone)"
-                                            {:first (some-> (first ps) second first (select-keys [:role :content]))}))))
-        ;; its own: an example session's render of its page shows the agent nothing of its own
-        shown? (some (fn [[r ms]] (when-not (= :example (first r)) (some (fn [m] (some #(render-eval? {:seon.eval/code (:code %)}) (:tool-calls m))) ms))) ps)
-        lists (render/page-lists w)
-        parts (when (and (not shown?) (seq lists)) (not-empty (render/placed-hiccup w lists)))
-        ps (cond-> ps
-             parts (into (let [[_ code] (:whole render-calls) id "render"
-                               record {:seon.eval/schema :seon.render/parts :seon.eval/response {:value (render/parts-value parts)}}]
-                           (render/hiccup-wire @(:index w) [:li {:wire/role "assistant" :wire/call-id id :wire/ref [:render] :wire/result {:record record}}
-                                                [:pre {:wire/field "code"} code]]))))]
-    {:messages (into [] (mapcat second) ps) :parts ps}))
+  (let [db ((:db w))
+        ps (reduce (fn [acc [m src]]
+                     (let [[ref n] (part-ref db src m) [r0 ms n0] (peek acc)]
+                       (if (and (seq acc) (= ref r0)) (conj (pop acc) [r0 (conj ms m) n0]) (conj acc [ref [m] n]))))
+                   [] (render/answer-sources w :seon.render/openai-compat))
+        ms (into [] (mapcat second) ps)]
+    (when-not (= "system" (:role (first ms)))
+      (throw (ex-info "the request has no system message"
+                      (contract/error :seon.ctx/no-system-message #'request "the request has no system message: the agent's render answered none (a db without the prompt, or a section it links gone)"
+                                      {:first (some-> (first ms) (select-keys [:role :content]))}))))
+    {:messages ms :parts ps}))
 
 (defn messages-tokens
   "Messages ms in tokens, by the printer's sizer over their contents and their calls' code, sized
@@ -151,7 +152,7 @@
      (request walk)
      (let [ix (or index (program/index-of-db db))
            t (or ctx (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key agent)))
-           w (render/draw t ctx/changes db (render/layout-of ix (merge {:seon.agent/key agent} t)) {:model-only true :once true :index ix})]
+           w (render/draw t ctx/changes db (render/layout-of ix (merge {:seon.agent/key agent} t)) {:model-only true :once true :index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
        (try (request w) (finally (render/dispose-walk! w)))))))
 
 (defn provider-of
@@ -178,7 +179,7 @@
    (let [{:keys [messages parts]} (render db basis)
          p (provider-of db basis)
          ;; of a turn after since, or since's own but for the messages it took, which that request read
-         fresh? (fn [[ref _ n]] (boolean (and since (or (= [:render] ref) (and n (or (> n since) (and (= n since) (not= :message (first ref)))))))))
+         fresh? (fn [[ref _ n]] (boolean (and since n (or (> n since) (and (= n since) (not (#{:message :page} (first ref))))))))
          ;; each neutral message's ref and whether it is new, in order, then each wire message's by the one fold
          per (into [] (mapcat (fn [[ref ms :as part]] (repeat (count ms) [ref (fresh? part)]))) parts)
          groups (model/wire-groups messages)]
@@ -343,14 +344,13 @@
     (:messages (render/render-pull pull dbt #'example-session-msgs ix #{:seon.render/openai-compat} {:seon.render/as :seon.render/openai-compat}))))
 
 (defn agent-msgs
-  "An agent (:seon.db/agent-fact) as the model reads it: its system message, from the doc sections :seon.agent/system names
-  (only the request's root agent pulls them, so only it has one: a placed example contributes its turns, never an agent
-  message), each example session its task names as a placed call of `example-msgs`, what opens its own session, then its turns'
+  "An agent (:seon.db/agent-fact) as the model reads it: its system message (`agent-system-text`: the doc sections
+  :seon.agent/system names, else the system prompt; a placed example is answered by its own call, so it has none), each example session its task names as a placed call of `example-msgs`, what opens its own session, then its turns'
   entities (`turn-entities`). The task is read in the page parts alone, never here. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
   [{db :seon.db/db} a]
   (let [k (:seon.agent/key a)]
-    (-> (if (seq (:seon.agent/system a)) [{:role "system" :content (agent-system-text db a)}] [])
+    (-> [{:role "system" :content (agent-system-text db a)}]
         (into (map (fn [ek] [#'example-msgs {} ek])) (session/session-examples db a))
         (into (when k [{:role "user" :content (session/session-open k)}]))
         (into (turn-entities db a)))))
