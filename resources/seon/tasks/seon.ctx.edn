@@ -10,7 +10,7 @@ Deletes: every eid or transaction order of context items listed above.
 
 Proofs, red first: a reply's evals in key order with their eids scrambled; a message sent mid-turn placed after that turn's evals; two agents' items on one branch each in its own order; a window of 10 over 1,000 items, its cost flat (seon.cost/proof); test/seon/recorded_requests.edn unchanged."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.ctx-test/reply-s-evals-read-seon-ctx-sort-key}}
  {:seon.task/name "the-turn-shows-how-main-diverged"
   :seon.task/plan "What exists: :will-merge (seon.merge/divergence against the agent's merge base) shows what the branch carries; nothing shows what main changed since that base, so a coming conflict is met only at the merge. Stage 5 of docs/users.md#the-stages-agreed-2026-11-09 (seon.merge/a-session-syncs-with-main-unless-private) takes main in at each turn for a syncing session and shows what holds a change as unmerged entries on the page parts; this task is what a private session, which syncs only when saved, reads instead.
 
@@ -26,7 +26,7 @@ The change: a cost proof on a production-shaped world for a first request's part
 
 Proofs: a first request's cost proof by part (seon.cost/proof)."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.ctx-test/production-shaped-world-first-request-s-cites-search}}
  {:seon.task/name "the-status-declares-its-summary"
   :seon.task/plan "What was seen, in the lab, 2026-11-04: 22 stray red tests made the status 32k tokens a turn, repeated on the page each request. A prototype render, each red's name, its first failure and a form that reads it, made it 2k. What should be true: the status's declared model render is that summary, any agent can override it, and the whole is a read away, by a form the render names. The no-cuts ruling of 2026-10-30 is about an agent's own values: this is a render's choice with the rest a form away, and the owner's call. my.agent/red does not exist yet."
   :seon.task/kind :work
@@ -40,15 +40,11 @@ The change: what an agent reads is data on its entity, or on entities it refs, r
 
 Deletes: session-open and the example tags' fixed words where a render can say them; page-cites, agent-cites-tx, :seon.config.agent/cites, my.agent/cite! and uncite!; help-text's copy of what the wiki holds.
 
-Proofs: two agents with different data read different context with no code changed; the system message's words come from the entity's refs. Judged by real agents' turns to green (seon.ctx/context-makes-agents-better)."
+Proofs: two agents with different data read different context with no code changed; the system message's words come from the entity's refs. Judged by real agents' turns to green."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
- {:seon.task/name "context-makes-agents-better"
-  :seon.task/plan "Done means agents do better, not that the code moved (strategy agreed with the owner, 2026-11-10): Sonnet subagents work real ready tasks through the seon MCP tools only (bin/mcp call), on a worktree's own root, never the standing root; each run records turns to green, tokens, and what the agent lacked; each lack becomes a context fix or a task. The session reviews every line a helper writes. Measured against the previous set on the same tasks, with what got worse named and followed up."
-  :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.ctx-test/two-agents-different-data-their-entities-read-different}}
  {:seon.task/name "the-models-readers-follow-the-re-models"
-  :seon.task/plan "Context's readers that move when Optimization's re-models land (docs/users.md#the-stages-agreed-2026-11-09), each in the same branch as its schema change or right after it:
+  :seon.task/plan "Not ready: item 1 waits on Optimization's re-model 1 (run measures as entities, jolt/sync), item 3 needs a schema-property design, and item 2 has landed; Optimization lands re-model 1, then Context splits what is left into a task with a proof. Context's readers that move when Optimization's re-models land (docs/users.md#the-stages-agreed-2026-11-09), each in the same branch as its schema change or right after it:
 1. A run's measures are entities of their own, a ref to what they measured, summed when read (re-model 1, Optimization, on jolt/sync): seon.ctx.status's readers of :seon.test/ticks, :seon.test/bytes and :seon.fn/stats (status, task-of's :proved, the var pattern's :seon.test/* attributes) read the measures by their ref.
 2. Landed (jolt/cite-ref, 2026-11-09): a cite's target is a ref to an entity that exists, and `seon.ctx-test/a-pattern-joins-refs-by-their-attribute` holds every pattern's joins keyed by their attribute.
 3. seon.ctx's write! refuses an edit of a var through swap! by checking :var/name in code; instead a property on the var's and form's entity schemas says the entity is changed by its definition, and the edit walk reads it."
@@ -61,7 +57,7 @@ The change: the example is the shortest test that calls a function the task cite
 
 Proof: an unwritten proof of a task citing seon.render.ui/process-tile shows as its example a test that calls process-tile."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.ctx-test/unwritten-proof-task-citing-seon-render-ui-process}}
  {:seon.task/name "an-edit-says-when-it-repaired-the-forms"
   :seon.task/plan "What exists: seon.repl/edit! reads the new text with the forgiving reader (seon.reader/forgive), which inserts or drops delimiters, and says so only in the answer's :repaired key. In the T3 rerun the agent spent an eval re-reading its edit to see what the repair did.
 
@@ -69,7 +65,7 @@ The change: docs/prompt.md's line on edit! says it repairs delimiters and that :
 
 Proof: an edit! whose text drops a closing paren answers with its repair named first in the printed text."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.ctx-test/edit-text-drops-closing-paren-answers-repair-named}}
  {:seon.task/name "the-system-prompt-holds-what-agents-use"
   :seon.task/plan "What exists: docs/prompt.md is about 8.6k chars, every agent's first message. Three baseline agents and the T3 rerun (2026-11-10) each named most of it unused: branches and merging, the page's CSS and its edit format; what they used was the tool list, proofs, and the REPL's rules.
 
@@ -77,7 +73,7 @@ The change, by measurement: for each section of docs/prompt.md, count over a set
 
 Proof: a cost proof of the system message's size, and the curated tasks' turns to green no worse after the cut."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.ctx-test/system-message-holds-docs-prompt-md-section-curated}}
  {:seon.task/name "a-components-change-sends-what-moved-inside-it"
   :seon.task/plan "What exists: a turn's page message holds editscript edits between the page parts at two bases (`seon.ctx.wire/diffs-through` over `seon.render/page-edits`; since 2026-11-06 a change is editscript edits by name, `seon.render/component-edits`, which resends a whole part only when that is shorter: docs/render.md#a-change-is-edits-by-name). In the T3 rerun (on main's page evals, before stage 2b) the agent's own edits to seon.render.ui/process-tile resent the tile whole three times, about 3k chars each.
 
@@ -85,10 +81,11 @@ What is left: measure on 2b's page message, for a cited function edited at the R
 
 Proof: a cited var's one-line edit gives a page message under the size of the var's source."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.ctx-test/line-edit-cited-var-gives-turn-s-page}}
  {:seon.task/name "ctx-reads-attribute-owners-by-the-one-lookup"
   :seon.task/plan "Owner, 2026-11-10: \"No duplicate implementations\". Which entity schema owns an attribute is read through one function, seon.db/owners (the write check, seon.db/most-specific, seon.render/schema-of and entity-schema call it; Web, jolt/walk-2a). Three readers in seon.ctx still read the entity index's :entity-schemas inline: seon.ctx's time-ordered join test (a reverse join's members by store-issued id) and the patch's new-member identity check and its refusal text. Moved to owners as one call each, seon.ctx-test/a-lookups-patch-costs-its-change went from 31 to 33 contracted calls at n=20 (its bound 31, allowed 1.0x), since owners is contracted and these run a member at a time. The change: read the owners of a patch's attributes once per patch (one call), and of a join's attribute once where the join is built, so the cost proof stays at its bound. Proof: that cost proof unchanged; no (:entity-schemas ix) left in src outside seon.db/owners."
-  :seon.task/kind :work}
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.ctx-test/entity-schemas-ix-left-src-outside-seon-db}}
  {:seon.task/name "the-context-shows-how-a-wiki-section-is-edited"
   :seon.task/plan "What exists: in curated run 1 (2026-11-10) an agent spent four evals learning to edit a wiki section: (seon.repl/edit! \"docs/clocks.md\" ...) failed (\"no file at /private/tmp/seon-agents/docs/clocks.md: write it whole first\"), a search, a doc read, then a whitespace failure; the agent that read (doc seon.repl/edit!) first got the section-address form at once.
 
@@ -96,7 +93,7 @@ The change: the system prompt's edit! line shows the three forms, a var, a file 
 
 Proof: edit! of a wiki page by path answers an error naming the section-address form."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.ctx-test/edit-wiki-page-file-path-answers-error-naming}}
  {:seon.task/name "a-stale-section-block-says-how-to-clear-it"
   :seon.task/plan "What exists: a change to a var's contract or docstring stales the wiki sections that cite it, and the status shows them under :attention, a read-and-probably-fix that does not refuse done (seon.problems/stale-sections, seon.problems/caused-split; docs/health.md#a-stale-section). In curated pair 2 (2026-11-10) both agents were sent to docs/resolution.md#sanctioned and docs/source.md#tests-run-by-reach; one edited the sections, the other found my.doc/reviewed! by trying, and then hit its arity (\\\"it is called as (my.doc/reviewed! address who)\\\").
 
@@ -104,7 +101,7 @@ The change: the status's attention line for a stale section (its text says only:
 
 Proof: an agent whose change stales a section reads, in its status, each section with both forms; evaluating the second clears the attention."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.ctx-test/agent-change-stales-section-reads-status-section-s}}
  {:seon.task/name "doc-of-a-section-answers-small"
   :seon.task/plan "What exists: (doc x) is a macro taking a literal: (doc addr) in a let or map fails with \\\"Unable to resolve var\\\"; and doc of a wiki address returns a large map that it also prints. In curated pair 2 (2026-11-10) an agent spent about five evals filtering doc's output, one answering 30 KB.
 
@@ -112,5 +109,5 @@ The change: the function form exists, `my.agent/doc-of` (what the macro prints, 
 
 Proof: (map my.agent/doc-of addresses) answers the sections; (doc \\\"docs/x.md#y\\\") prints the section's text and names its subsections without their text."
   :seon.task/kind :work
-  :seon.task/proofs #{}}
+  :seon.task/proofs #{seon.ctx-test/doc-let-bound-symbol-names-nothing-names-my}}
  ]

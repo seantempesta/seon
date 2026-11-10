@@ -18,8 +18,6 @@
   :seon.task/proofs #{seon.fx-test/redirects-are-bounded seon.fx-test/search-key-stays-in-root}}
  {:seon.task/name "a-tree-run-is-one-function"
   :seon.task/plan "Found by the one-offs survey (the archived paper one-offs-2026-10-23.md (git history); owner, 2026-10-23: src resists growth so agents reuse and improve the core parts rather than making one-offs, DECISIONS). Item 5. What exists: `seon.fx/build` and `seon.fx/run-on-checkout` (the :tests effect's run, `seon.fx/run-tests`) repeat one mechanism (the `child-env-scrub` env, `bin/worktree --at`, a log file, a niced command in that tree, the cleanup). Done since: `seon.fx/test-results` reads the stored results at each test's digest (`seon.fx/stored-results`, seon.proofs' verdicts), no longer prove's stdout. Correct: one private in-tree runner both call. Risk: the two differ in where the tree lives (generations-dir against tests-dir) and in what they keep after (a build's tree stays, a test run's is removed)."
-  :seon.task/kind :work}
- {:seon.task/name "the-commit-notice-commits-are-reviewed"
-  :seon.task/plan "Left from seon.fx/the-standing-root-follows-main-not-the-checkouts-head (merged c5e44b3138): three commits of the commit notice reached main unreviewed (c0a9fdde89, 46c1d2929f, 10c98b1e7d), with +30 MB in `e2e calc` unexplained. The review's fixes are on main (the render proc's stale-notice skip, the conn's exception in docs/machine.md). Left: measure root at `e2e calc` now and before c0a9fdde89, find the +30 MB if it is still there, and cut what costs memory for nothing (owner, 2026-10-29: review, fix, measure)."
-  :seon.task/kind :work}
-]
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.fx-test/seon-fx-build-run-checkout-call-private-tree}}
+ ]

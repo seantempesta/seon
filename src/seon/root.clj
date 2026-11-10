@@ -719,6 +719,8 @@
                    (view! assoc-in [:fork-server :mismatch] (:mismatch m)))
       ;; a throw in a fork server step: an error fact on root, the server serving on (seon.fork-server/server-step)
       :step-failed (problem st (err/occurrence (:error m) :platform {} (System/currentTimeMillis)))
+      ;; the server made its standby: the view shows it has one again
+      :standby (view! st assoc-in [:fork-server :standby] true)
       ;; the server made no standby (docs/processes.md#a-step-that-throws): a recorded platform problem, and the view shows it has none
       :standby-failed (-> st
                           (view! assoc-in [:fork-server :standby] false)
