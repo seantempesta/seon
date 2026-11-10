@@ -32,4 +32,12 @@ The change: bound each class's reader by its own calls at the world's size, so a
 Proof: the test names each class and its calls; adding a class adds a row, red only when that class overruns."
   :seon.task/kind :work
   :seon.task/proofs #{}}
+ {:seon.task/name "a-plan-goes-stale-when-what-it-cites-changes"
+  :seon.task/plan "What exists: seon.problems/stale-sections names a wiki section whose cited var changed since the section was written; nothing does the same for a task's plan. In curated pair 2 (seon.turn/a-branch-asks-whether-a-test-is-a-process-test, 2026-11-10) both agents spent evals finding that my.agent/process-test? already existed: the plan, written before it did, described it as missing.
+
+The change: a :stale-plan problem class reading each ready task's cites (:seon.cite/_of): a cited var defined or changed since the plan was last written (the transaction of :seon.task/plan against the var's :var/form's) is a row naming the task and the var; and the agent's status shows it on its task, so the agent reads that the plan's premise may have moved. Read from cites and two transaction ids per cite, no hand check.
+
+Proof: a task whose plan cites a var, the var redefined after the plan, is a :stale-plan row naming both; rewriting the plan closes it."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
 ]

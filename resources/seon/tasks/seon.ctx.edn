@@ -115,4 +115,20 @@ The change: the system prompt's edit! line shows the three forms, a var, a file 
 Proof: edit! of a wiki page by path answers an error naming the section-address form."
   :seon.task/kind :work
   :seon.task/proofs #{}}
+ {:seon.task/name "a-stale-section-block-says-how-to-clear-it"
+  :seon.task/plan "What exists: a change to a var's contract or docstring stales the wiki sections that cite it, and the done rule blocks the merge on them (seon.problems/stale-sections, seon.reconcile/done-explain). In curated pair 2 (2026-11-10) both agents were blocked on docs/resolution.md#sanctioned and docs/source.md#tests-run-by-reach; one edited the sections, the other found my.doc/reviewed! by trying, and then hit its arity (\\\"it is called as (my.doc/reviewed! address who)\\\").
+
+The change: the status's refusal for a stale section names, per section, its address, the var that changed, and the two forms that clear it, ready to evaluate: (seon.repl/edit! \\\"docs/x.md#y\\\" old new) and (my.doc/reviewed! \\\"docs/x.md#y\\\" \\\"<agent key>\\\"). The block stays.
+
+Proof: an agent whose change stales a section reads, in its status, each section with both forms; evaluating the second clears the refusal."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "doc-of-a-section-answers-small"
+  :seon.task/plan "What exists: (doc x) is a macro taking a literal: (doc addr) in a let or map fails with \\\"Unable to resolve var\\\"; and doc of a wiki address returns a large map that it also prints. In curated pair 2 (2026-11-10) an agent spent about five evals filtering doc's output, one answering 30 KB.
+
+The change: a function form beside the macro, my.agent/section (address -> {:heading :text :address}), that takes a value, so it composes; and doc of a section prints the heading and its text, the section's references and the sections below it by name only, each with the form that reads it.
+
+Proof: (map my.agent/section addresses) answers the sections; (doc \\\"docs/x.md#y\\\") prints the section's text and names its subsections without their text."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
 ]
