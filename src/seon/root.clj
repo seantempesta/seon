@@ -561,7 +561,9 @@
       :message (if-let [k (or (agent-key-of st id)
                               ;; the first message to root makes root's session, in the same write (docs/users.md#roots-session)
                               (when (= :root id) ::root-session))]
-                 (let [from (signed-in-key @(:conn st) 'seon.root/message!)]
+                 ;; who sends it: the sender the caller names (root's own, :root, as the reconciler's stage boundary sends; an agent's), else
+                 ;; the signed-in person (the page's message!, which names none); a person's with no one signed in is refused
+                 (let [from (if-some [f (:from m)] (name f) (signed-in-key @(:conn st) 'seon.root/message!))]
                    (if (contract/error? from)
                      (reply! st o p from)
                      (let [[st rid] (pend st p :tx nil)

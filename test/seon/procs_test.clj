@@ -473,7 +473,10 @@
        (let [[_ outs] (ask {:op :ask :text "do a thing"})]
          (is (some #{[:db/add [:seon.task/id "request/do-a-thing"] :seon.task/started-by [:seon.agent/key "sean"]]} (txs outs)) "the signed-in user started it"))
        (let [[_ outs] (ask {:op :message :id :a1 :body "hi"})]
-         (is (some #(and (map? %) (= "sean" (:seon.message/from %))) (txs outs)) "from the signed-in user"))))))
+         (is (some #(and (map? %) (= "sean" (:seon.message/from %))) (txs outs)) "from the signed-in user"))
+       ;; a sender the caller names is kept: root's own (the reconciler's stage boundary sends :from :root), never the person
+       (let [[_ outs] (ask {:op :message :id :a1 :from :root :body "the design is done"})]
+         (is (some #(and (map? %) (= "root" (:seon.message/from %))) (txs outs)) "from root, as the caller named"))))))
 
 (deftest root-moves-the-signed-in-users-focus-and-refuses-an-unknown-agent-or-no-user
   ;; docs/users.md#whats-on-screen: root's focus! request writes the signed-in user's :seon.user/focus to the agent named by key
