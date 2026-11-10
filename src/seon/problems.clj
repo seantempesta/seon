@@ -556,10 +556,10 @@
   :uncited-task row with its reason (:no-references, :no-proofs, :placeholder-proof). Closed when its plan
   cites a name and its proofs are named and written. Cost: the task, reference and proof datoms once, then a
   walk of each ready task's needs."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
-  [db ans]
-  (let [{:keys [ready? cited]} (task-reads db)
-        chain (fn chain [seen e]
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]]}
+  ([db ans] (uncited-tasks db ans (task-reads db)))
+  ([db ans {:keys [ready? cited]}]
+  (let [chain (fn chain [seen e]
                 (if (seen e) seen
                     (reduce chain (conj seen e) (map :v (d/datoms db :eavt e :seon.task/needs)))))
         vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
@@ -584,17 +584,18 @@
                           :no-references (str v " is ready and its plan cites no var, attribute or section: the context pulls nothing for it")
                           :no-proofs (str v " is ready and names no proof")
                           :placeholder-proof (str v " is ready and a proof of it is still the placeholder assertion (seon.task/placeholder-assertion)"))
-                        {:kind :uncited-task :task v :reason reason} {:task v :reason reason})))))
+                        {:kind :uncited-task :task v :reason reason} {:task v :reason reason}))))))
 
 (defn stale-plans
   "Each ready task (its own plan, not its needs') citing a var whose form was written after the task's plan, as a
   :stale-plan row naming the task and the var: the plan was written before the var took its present form, so its
   premise (a function it says is missing, code it describes) may have moved. Closed when the plan is written again
   (a new :seon.task/plan datom). Cost: the ready tasks, then two datom reads a cite (the plan's and the var form's
-  transaction). See docs/health.md#a-plan-that-went-stale."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
-  [db ans]
-  (let [{:keys [ready? cited]} (task-reads db)]
+  transaction). tr, the reading of readiness and cites it shares with `uncited-tasks` (`task-reads`), made once a health read
+  (`other-derived`). See docs/health.md#a-plan-that-went-stale."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]] [:=> [:cat :seon.host/db :map :map] [:vector :seon.problems/row]]]}
+  ([db ans] (stale-plans db ans (task-reads db)))
+  ([db ans {:keys [ready? cited]}]
     (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
                :when (ready? e)
                :let [plan-tx (:tx (first (d/datoms db :eavt e :seon.task/plan)))]
@@ -750,8 +751,11 @@
   "The derived classes `caused-split` does not read, their rows on db."
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
   [db ans]
+  (let [tr (task-reads db)]
   {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :stale-binary (stale-binary db ans) :orphan-page (orphan-pages db ans)
-   :leadless-section (leadless-sections db ans) :uncited-task (uncited-tasks db ans) :stale-plan (stale-plans db ans)})
+   :leadless-section (leadless-sections db ans)
+   ;; the tasks' readiness and cites read once for the two classes that judge them
+   :uncited-task (uncited-tasks db ans tr) :stale-plan (stale-plans db ans tr)}))
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
