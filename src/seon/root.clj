@@ -809,7 +809,7 @@
                                     (update-in [:stats :batched-tx] (fnil + 0) (:n-tx m)))))
       ;; the end of the flow: the writer has drained; the fork server goes last
       :drained (do (step/out! o :to-fs {:op :shutdown}) st)
-      :fs-down (do (some-> (:shutdown-p st) (deliver {:drained true :fork-server (:pid m)})) st)
+      :fs-down (do (some-> (:shutdown-p st) (deliver {:drained true :fork-server (:pid m) :ended (:ended m)})) st)
       ;; a defect in a root proc: recorded as data (its error map when it carries one), and
       ;; the message the step took answered with it (Flow's catch dropped the step's outputs):
       ;; the api's own throw answers every message its step took (::lost)

@@ -209,6 +209,25 @@
             "a boot that left no stop fact is found :unclean"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
+(deftest a-root-stops-in-a-second
+  ;; task seon.root/a-root-stops-in-a-second (measured 2026-11-10): every stop of a root less than ~35 s old took 26-32 s,
+  ;; because its stop waited for the boot fork server to read the EOF of its socket, which a server still warming (preload!,
+  ;; its tests' load) did not do until its warm-up was done. The stop ends the boot server's process group at once
+  ;; (seon.fork-server/release!), and says so: stopped at once after its start, the root's answer names the group ended. Red
+  ;; before: the server was left to read its EOF (no :ended)
+  (let [checkout (seon.config/checkout)
+        main (str "root-test-stops-" (random-uuid))
+        runs (str checkout "/target/runs/" main "-runs")
+        root (ts/start-root! {:store (ts/process-store checkout) :main main :runs runs})
+        {:keys [exit log]} (ts/stop-root! root)
+        i (clojure.string/index-of log "ROOT STOPPED ")
+        stopped (when i (edn/read-string {:default tagged-literal} (subs log (+ i (count "ROOT STOPPED ")))))]
+    (is (= 0 exit) log)
+    (is (= :group-ended (get-in stopped [:drained :ended])) (str "the boot server's group was ended by the stop: " (pr-str stopped)))
+    (is (true? (:graph stopped)) "every proc exited")
+    ;; what the stop calls, named here so this test's digest takes it (a root's own code is the full run's otherwise)
+    (is (= [:enum :group-ended :eof] (last (:malli/schema (meta #'seon.fork-server/release!)))) "release! answers how the server ended")))
+
 (deftest a-test-roots-task-files-are-its-own
   ;; the second boot above read 810 tasks (2026-10-25): its root started seconds after a merge
   ;; rewrote the checkout's task files, and a load read them. A test root's task dir is its own
