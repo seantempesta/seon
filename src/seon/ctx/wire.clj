@@ -240,7 +240,7 @@
   [h] (clojure.walk/postwalk (fn [x] (if (and (vector? x) (keyword? (first x)) (map? (second x)))
                                        (let [m (second x)
                                              r (when (:id m) (first (str/split (str (:class m)) #"\s+")))
-                                             a (cond-> (dissoc m :class :style :id) (seq r) (assoc :render r))]
+                                             a (cond-> (dissoc m :class :style :id) (seq r) (assoc :class r))]
                                          (if (seq a) (assoc x 1 a) (into [(first x)] (nnext x))))
                                        x))
                              h))
