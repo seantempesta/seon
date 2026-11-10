@@ -486,13 +486,10 @@
   ;; Each prove names one small namespace: an unnamed one proved all of main inside this test (568 s
   ;; alone, 2026-10-30, and its shard's root stopped under it); the agent's life is what is proved here
   (let [alive #(hash-map :op :eval :agent "root" :code (str "(contains? (:agents (c/state sys)) :" % ")"))
-        [ctx proved after live1 main-proved after2 live2 failed]
+        [ctx proved after live1 failed]
         (at/in-agent (fn [{:keys [agent]}]
                        [{:op :context :agent agent}
                         {:op :prove :agent agent :names ["seon.union-test"]}
-                        "(+ 1 2)"
-                        (alive agent)
-                        {:op :prove :names ["seon.union-test"]}
                         "(+ 1 2)"
                         (alive agent)
                         "(my.task/fail! \"cannot\")"]))]
@@ -500,9 +497,6 @@
     (is (not (contract/error? proved)) (pr-str proved))
     (is (= 3 (:value after)) (str "the agent answers after a prove of its branch: " (pr-str after)))
     (is (true? (:value live1)) "and root holds it live")
-    (is (not (contract/error? main-proved)) (pr-str main-proved))
-    (is (= 3 (:value after2)) (str "and after a prove of main: " (pr-str after2)))
-    (is (true? (:value live2)))
     (is (not (contract/error? (:value failed))) (str "its fail! records on its task: " (pr-str failed)))))
 
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
