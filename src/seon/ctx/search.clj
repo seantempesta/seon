@@ -37,11 +37,12 @@
 
 
 (defn program-vars
-  "Of cites (cite entities, as ctx holds them or seon.task/cites-of reads them), the names of the program's
-  vars (seon.program/program-names), in their order: what a task's data shows as its write set."
+  "Of cites (cite entities, as seon.task/cites-of reads them: each target's identity), the names of the program's
+  vars (seon.program/program-names), in their order: what a task's data shows as its write set. See
+  docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :map]] [:vector :qualified-symbol]]}
   [db cites]
-  (vec (program/program-names db (into [] (comp (keep :seon.cite/name) (filter qualified-symbol?) (remove #(ref/task? db %))) cites))))
+  (vec (program/program-names db (into [] (keep #(get-in % [:seon.cite/target :var/name])) cites))))
 
 ;; ---- relevance: one calibrated score for a context and an item (docs/vector.md#relevance) ----
 

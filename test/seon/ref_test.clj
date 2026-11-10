@@ -73,14 +73,15 @@
   (is (= [] (kinds nil "```\nnever closed\n`seon.ref/parse`\n")) "an unclosed fence runs to the end"))
 
 (deftest a-bare-word-is-a-reference-only-when-it-names-something
-  (let [db (program-db)]
+  ;; what a word names is an entity of the db (docs/references.md#resolving-and-showing): a schema entry, a page's sections
+  (let [db (d/db-with (program-db) [{:schema/key :seon.task/plan :schema/form "[:string]"} {:seon.doc/address "docs/flow.md#flow" :seon.doc/heading "Flow"}])]
     (is (= ['app.m0/f1] (names-on db "Then app.m0/f1 calls app.m0/nope and seon.nope/x; :seon.nope/y too."))
         "a bare word naming a var on the branch is a reference; one naming nothing is text")
     (is (= [:seon.task/plan] (names-on db "Write :seon.task/plan, not :seon.nope/key."))
-        "a bare keyword counts when it is a registered schema")
+        "a bare keyword counts when it names a schema entry")
     (is (= ['app.m0/nope] (names-on db "Write `app.m0/nope`.")) "an explicit name that resolves to nothing stays a reference")
     (is (= [[nil "docs/flow.md"]] (mapv (juxt :seon.ref/name :seon.ref/path) (ref/references db "See docs/flow.md and docs/nope.md.")))
-        "a bare path counts when its file exists")))
+        "a bare path counts when the db holds its page")))
 
 (deftest an-alias-form-in-a-code-span-is-code-not-a-reference
   (is (= ['demo.calc/add] (names-on (program-db) "Call `str/subs` and `m/validator`, not `demo.calc/add`."))))
@@ -359,23 +360,25 @@
 
 (deftest a-citation-naming-no-page-names-nothing
   ;; wiki audit 2026-10-23 R1: names-something? threw (io/file of a nil path) on an anchor
-  ;; link read with no page of its own; it names nothing, and an anchor names a section only
-  ;; when its page holds one
-  (let [db (program-db)
-        [c] (ref/cited (:seon.ref/citations (ref/parse nil "[above](#the-api)")))]
+  ;; link read with no page of its own; it names nothing. What a citation names is an entity of the db
+  ;; (docs/references.md#an-entity-cites): a section, a file, a namespace's file; a library var, a directory and a host
+  ;; predicate are no entity, so they name nothing a cite can be a ref to
+  (let [db (d/db-with (program-db) [{:seon.doc/address "docs/references.md#references" :seon.doc/heading "References"}
+                                    {:file/path "resources/demo.edn" :file/text "{}"}
+                                    {:ns/name 'demo.ops :ns/file "src/demo/ops.clj"}])
+        [c] (ref/cited (:seon.ref/citations (ref/parse nil "[above](#the-api)")))
+        names? (fn [m] (ref/names-something? db (assoc m :seon.ref/depth :doc :seon.ref/line 1)))]
     (is (= :anchor-missing (:seon.ref/problem-kind c)))
     (is (false? (ref/names-something? db c)) "an anchor with no page names nothing")
-    (is (true? (ref/names-something? db {:seon.ref/path "docs/references.md" :seon.ref/depth :doc :seon.ref/line 1})))
-    (is (false? (ref/names-something? db {:seon.ref/path "docs/references.md" :seon.ref/anchor "no-such-section"
-                                          :seon.ref/depth :doc :seon.ref/line 1}))
-        "a path#anchor names something only when the page holds that section")
-    (is (true? (ref/names-something? db {:seon.ref/path "docs" :seon.ref/depth :doc :seon.ref/line 1})) "a directory of the checkout")
-    (is (true? (ref/names-something? db {:seon.ref/name 'clojure.core/map :seon.ref/depth :doc :seon.ref/line 1}))
-        "a var of a namespace this process holds, as a namespace counts when loaded")
-    (is (true? (ref/names-something? db {:seon.ref/name :seon.host/db :seon.ref/depth :doc :seon.ref/line 1}))
-        "a host predicate of the contract registry, as a declared schema key counts")
-    (is (true? (ref/names-on-db? db 'clojure.core/map)) "a name alone: no file of the checkout is read")
-    (is (false? (ref/names-on-db? db 'no.such-ns/nothing)) "and one that names nothing is false")))
+    (is (true? (names? {:seon.ref/path "docs/references.md"})) "a page by its top section")
+    (is (false? (names? {:seon.ref/path "docs/references.md" :seon.ref/anchor "no-such-section"}))
+        "a path#anchor names something only when the db holds that section")
+    (is (true? (names? {:seon.ref/path "resources/demo.edn"})) "a file of the program")
+    (is (= [:ns/name 'demo.ops] (ref/target db {:seon.ref/path "src/demo/ops.clj"})) "a namespace's file is its namespace")
+    (is (true? (names? {:seon.ref/path "src/demo/ops.clj"})))
+    (is (false? (names? {:seon.ref/path "docs"})) "a directory is no entity")
+    (is (false? (names? {:seon.ref/name 'clojure.core/map})) "a library var is no entity of the program")
+    (is (false? (names? {:seon.ref/name :seon.host/db})) "a host predicate is no schema entry")))
 
 (deftest a-task-name-is-a-reference-to-the-task
   ;; wiki audit 2026-10-23 R4: a cited ns/name naming a :seon.task/id resolves, and shows the

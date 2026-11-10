@@ -1084,10 +1084,10 @@
   (baseline-of @(:conn sys) #(deref (call! sys {:op :fx :kind :history :req %})) checkout dir))
 
 (defn wiki-tx
-  "The wiki (the checkout's :seon.config.root/wiki-dirs: docs/ and the top-level pages) onto main db, written in the boot fact's own commit so main
+  "The wiki (the checkout's :seon.config.root/wiki-dirs: docs/ and the top-level pages) onto main db, written by the boot right after its boot fact (wiki-boot!) so main
   holds it before any agent forks: the system prompt every agent reads first is one of its pages
-  (seon.ctx.wire/system-text), and the help page another (seon.ctx.wire/help-text). An unchanged wiki writes nothing. A link to no section is kept on
-  its section and shows as a dead citation (seon.problems/health), never refuses the load.
+  (seon.ctx.wire/system-text), and the help page another (seon.ctx.wire/help-text). An unchanged wiki writes nothing. A link to no section refuses
+  the write, :seon.db/no-target naming it (docs/references.md#the-wiki-in-the-store).
   baseline: what the sections with no record were last written against (wiki-baseline)."
   {:malli/schema [:function [:=> [:cat :seon.host/db :string] [:vector :any]]
                   [:=> [:cat :seon.host/db :string :map] [:vector :any]]]}
@@ -1145,7 +1145,7 @@
   [db] (if (pdb/eid db :seon.agent/key "root") [{:seon.agent/key "root" :seon.ctx/pattern (root-session-pattern)}] []))
 
 (defn wiki-boot-tx
-  "The wiki's part of the boot fact's commit: wiki-tx, with the digest of what it read (wiki-digest) on root's
+  "The wiki's load at boot (wiki-boot!, its own transaction after the boot fact): wiki-tx, with the digest of what it read (wiki-digest) on root's
   fact, or [] when main already holds that digest (the load is a function of that input, so it would write
   nothing). baseline: a function answering wiki-tx's baseline, called only when it loads. docs/root.md#boot."
   {:malli/schema [:=> [:cat :seon.host/db :string :seon.host/fn] [:vector :any]]}
@@ -1154,6 +1154,21 @@
     (if (= digest (when-let [e (pdb/eid db :seon.root/id :root)] (:seon.root/wiki (d/pull db [:seon.root/wiki] e))))
       []
       (conj (vec (wiki-tx db checkout (baseline))) {:seon.root/id :root :seon.root/wiki digest}))))
+
+(defn- wiki-boot!
+  "The wiki's load at boot (wiki-boot-tx on db, main before the boot), written in a transaction of its own after the boot
+  fact, so a page the write refuses (a link to no section, :seon.db/no-target) never stops the boot: the refusal is a
+  :platform error on main naming :seon.root/wiki as its subject, open until a load writes the wiki's digest (a fixed
+  page). See docs/root.md#boot."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.host/db] :nil]}
+  [sys db]
+  (let [tx (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))]
+    (when (seq tx)
+      (let [r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}})]
+        (when (contract/error? r)
+          @(call! sys {:op :write :req {:op :tx :branch :db
+                                        :tx-data (platform-tx @(:conn sys) (assoc r :seon.error/subject :seon.root/wiki) (System/currentTimeMillis))}}))))
+    nil))
 
 (defn import-tree!
   "Main's program on conn brought to the source tree {:root :dirs :follow :branch} (branch, root's merges branch, brought
@@ -1373,12 +1388,13 @@
     ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
     (let [prev (previous-end db)
-          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot max-running (person)) (into (task/earlier-agents-tx db)) (into (cfg/facts config in-force-sources))
-                                                                                  (into (wiki-boot-tx db (cfg/checkout) #(wiki-baseline sys (cfg/checkout) "docs"))) (into (root-session-refresh-tx db)))
+          r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (person)) (into (task/earlier-agents-tx db)) (into (task/config-tx config in-force-sources))
+                                                                                  (into (root-session-refresh-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
+    (wiki-boot! sys db)
     (when source (import-source! sys source))
     ;; what the first agent's fork would wait for is done now, as main stands (seon.fork-server/preload); nothing waits on its answer
     (call! sys {:op :fs :req {:op :preload :t (:max-tx @conn)}})
