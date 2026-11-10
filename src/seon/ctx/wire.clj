@@ -149,11 +149,14 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]
                   [:=> [:cat :seon.host/db :seon.model-call/basis :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]]}
   ([db basis] (render db basis {}))
-  ([db {:keys [agent]} {:keys [walk ctx index]}]
+  ([db {:keys [agent commit] :as basis} {:keys [walk ctx index]}]
    (if walk
      (request walk)
      (let [ix (or index (program/index-of-db db))
-           t (or ctx (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key agent)))
+           ;; the point this request is made at, which its newest call's basis will name (written after this commit): a db read
+           ;; as of a t (a commit collection took) holds no commit id of its own
+           t (cond-> (or ctx (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key agent)))
+               commit (assoc ::here {:commit commit :t (or (:t basis) (:max-tx db))}))
            w (render/draw t ctx/changes db (render/layout-of ix (merge {:seon.agent/key agent} t)) {:model-only true :once true :index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
        (try (request w) (finally (render/dispose-walk! w)))))))
 
@@ -342,7 +345,7 @@
         ;; the newest call's basis is written after the commit it names (seon.turn/open-turn!), so read at that commit it holds none:
         ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message; a pull
         ;; that leaves bases out (a smaller pattern) shows no page
-        here (when-let [id (d/commit-id db)] {:commit id :t (:max-tx db)})
+        here (or (::here (ratom/untracked c)) (when-let [id (d/commit-id db)] {:commit id :t (:max-tx db)}))
         cs (map val (sort-by (comp :seon.model-call/n val) (filter (comp :seon.model-call/n val) (:seon.model-call/_agent c))))
         newest (:seon.model-call/n (last cs))
         ;; a call whose basis the db holds but the pull left out has none here: the pull says what the agent reads
