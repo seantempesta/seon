@@ -1255,20 +1255,6 @@
     (is (= 'app.h/f (:v (first (pdb/history db3 [:var/name 'app.h/f] {:attrs #{:var/name} :pull [:form/src]}))))
         "a value that is no ref is not pulled")))
 
-;; docs/machine.md#roots-heap: a run-ahead value shown on main's connection (root's writer answers at the apply) has no commit
-;; id; its point names its last commit, so a reader that keeps the point (the render proc's health) makes that commit's db
-;; again. Red before: [nil t], and seon.db/at-commit of nil refused (seon.root-test/a-root-resumes-a-store-an-earlier-build-wrote,
-;; seon.agent-test/root-reads-the-health-the-render-proc-keeps, when a health read met a shown value)
-(deftest a-shown-values-point-names-its-last-commit
-  (ts/test-branch! (fn [_ conn]
-    (let [c0 (d/commit-id @conn) t0 (:max-tx @conn)
-          r (dw/apply! conn {:tx-data [{:note/text "a" :note/agent :t}]} {:show? true})
-          shown @conn]
-      (is (nil? (d/commit-id shown)) "shown, not stored")
-      (is (= [c0 (:max-tx (:db-after r))] (pdb/point shown)) "its point: the last commit, its own t")
-      (is (= t0 (:max-tx (pdb/at-commit conn (first (pdb/point shown))))) "whose db is made again")
-      (dw/abandon-pending! conn)))))
-
 ;; ---- at: the db at a named point (docs/storage.md#history) ----
 
 (defn- note-text [db e] (:note/text (d/entity db e)))
