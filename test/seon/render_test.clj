@@ -3788,3 +3788,15 @@
     (is (str/includes? (h/html (ui/message {} {:seon.message/from {:seon.agent/key "user" :seon.user/name "sean"} :seon.message/body "hi"}))
                        "href=\"/agent/user\"")
         "a message names its sender by that render")))
+
+(deftest an-opened-step-says-who-ran-it
+  ;; docs/users.md#messages: an opened step (seon.render.ui/eval-output) names who ran it from its :seon.eval/by: the agent's own turn, or
+  ;; "run by" the sender (seon.render.ui/sender), as the pull joins it (with its :db/id, so "own" is the same entity, not a name)
+  (let [[_ branch _] (paged-dbs)
+        a (seon.db/eid branch :seon.agent/key "a3")
+        out (fn [by] (h/html (ui/eval-output {:seon.db/db branch :seon.render/index (seon.db/index)}
+                                             {:seon.eval/id "e1" :seon.eval/code "(+ 1 2)" :seon.eval/agent {:db/id a} :seon.eval/by by
+                                              :seon.eval/response {:handle 'result/e1 :value 3}})))]
+    (is (str/includes? (out {:db/id a :seon.agent/key "a3"}) "its own turn") "the agent's own")
+    (is (str/includes? (out {:db/id (inc a) :seon.agent/key "user"}) "run by <a href=\"/agent/user\">user</a>") "another's: run by its sender, linked")
+    (is (str/includes? (out {:db/id 1 :seon.root/id :root}) "run by <span>Seon</span>") "the system's")))
