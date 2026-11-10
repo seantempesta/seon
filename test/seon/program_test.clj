@@ -721,11 +721,6 @@
         "and a class of its own, for a reach that reads the whole program's text (a docstring)")
     (spit (str b "/deps.edn") "{:paths []}")
     (is (= (:env in-a) (:env (fx/inputs b))) "deps.edn is a class of its own too")
-    ;; a hotfix landing of .gitignore and one task file reused 14 of 1,891 keys: .gitignore was in :env
-    (spit (str b "/.gitignore") "target/")
-    (is (= (:env in-a) (:env (fx/inputs b))) "a file at the checkout's root (git's, the tools') is no input of every test")
-    (is (not= (get-in in-a [:config :seon.env/bin]) (get-in (fx/inputs b) [:config :seon.env/bin]))
-        "it is the bin class, which a test running git or a script takes")
     (.mkdirs (java.io.File. (str b "/native")))
     (spit (str b "/native/x.c") "int x;")
     (is (not= (:env in-a) (:env (fx/inputs b))) "native/, the pins and the fixtures are every test's")))))
@@ -769,15 +764,9 @@
                         (set (for [[t d] a :when (not= d (b t))] (symbol (name t))))))
         bin (moved :seon.env/bin) web (moved :seon.env/web) system (moved :seon.env/system) deps (moved :seon.env/deps)
         schemas (moved :seon.env/schemas) src (moved :seon.env/src)]
-    ;; a test reading the checkout's whole program takes its text from the graph (index-answer), not the src class's
-    ;; files: an agent's branch is its own program, never root's tree
-    (let [elsewhere (set (for [[t d] (update-vals (program/graph-index (program/reach-graph (mt/with db (form 'app.fc "elsewhere" :fn #{})) nil) in nil) :digest)
-                               :when (not= d (a t))]
-                           (symbol (name t))))]
-      (is (= #{} src) "the src class's files are no input of a test: the program's text is")
-      (is (elsewhere 'reads-program) "a test reading the whole program takes its text: a form it does not reach moves it")
-      (is (not (elsewhere 'pure)) "a pure test takes no program text")
-      (is (not (elsewhere 'starts-a-process)) "nor does a test that only starts processes"))
+    (is (src 'reads-program) "a test reading the checkout's whole program takes the src class")
+    (is (not (src 'pure)) "a pure test takes no src class")
+    (is (not (src 'starts-a-process)) "nor does a test that only starts processes")
     ;; bin/check contracts judges every var of src (seon.contract/uncontracted): batch 18 added one uncontracted with
     ;; the step green at its digest, which only its own code made (2026-10-30)
     (let [step (fn [in] (:digest (get (program/graph-index g in {"contracts" '[app.fc/contracts-step]}) "contracts")))]
@@ -1357,31 +1346,18 @@
 (deftest a-comment-or-whitespace-edit-moves-no-test
   ;; owner, 2026-11-06: "make sure test reuse is working": a form's own digest was its text's, so a reflowed body or a
   ;; comment reran every test reaching the form. It is the read text less comments and whitespace runs
-  ;; (seon.program/form-ids). A docstring is left out too (owner, 2026-11-10: a test's digest takes code, not docstrings):
-  ;; a test that reads docs says so on the test, ^{:seon.test/reads #{:docs}}, and takes the program's
-  ;; text (docs/source.md#what-a-test-takes-of-a-forms-text)
+  ;; (seon.program/form-ids); a docstring is not left out (it is data some code reads: docs/source.md#what-a-test-takes-of-a-forms-text)
   (let [src "(defn add \"Adds.\" [a b] (+ a b))"
         db (apply record (empty-db) (concat (take 2 calc-srcs)
                                             ['app.pt-calc src
-                                             'app.pt-calc "(defn neg \"Negates.\" [x] (- x))"
                                              'user "(ns app.pt-calc-test (:require [clojure.test :refer [deftest is]] [app.pt-calc :refer [add]]))"
-                                             'app.pt-calc-test "(deftest add-test (is (= 3 (add 1 2))))"
-                                             'app.pt-calc-test "(deftest ^{:seon.test/reads #{:docs}} docs-test (is (string? (:doc (meta #'add)))))"]))]
-    (is (= '#{app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\"\n  [a b]\n  ;; commutative\n  (+ a   b))")))
-        "a comment and whitespace: only the reader of the program's text, which takes its every byte")
-    (is (= '#{app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b]\n  (+ a b)) ; tail"))) "a trailing comment")
-    (is (= '#{app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Sums.\" [a b] (+ a b))")))
-        "a docstring moves only the test that says it reads docs")
-    (is (= '#{app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn neg \"Flips the sign.\" [x] (- x))")))
-        "and that test takes the whole program's text: a docstring of a form it does not reach")
-    (let [code #(second (program/form-ids 'app.x % 0 (read-string %)))]
-      (is (= (code "(def x \"Doc.\" 5)") (code "(def x \"Other.\" 5)")) "a def's docstring")
-      (is (= (code "(ns app.x \"Doc.\" (:require [a.b]))") (code "(ns app.x \"Other.\" (:require [a.b]))")) "a namespace's")
-      (is (not= (code "(def x \"Doc.\")") (code "(def x \"Other.\")")) "a def's only string is its value")
-      (is (not= (code "(defmethod m \"a\" [x] x)") (code "(defmethod m \"b\" [x] x)")) "a method's dispatch value is code"))
-    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ b a))"))) "a change of code")
-    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ a \"x;y\"))"))) "a string literal holding a ; and spaces is code")
-    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn ^:private add \"Adds.\" [a b] (+ a b))"))) "a visibility")
+                                             'app.pt-calc-test "(deftest add-test (is (= 3 (add 1 2))))"]))]
+    (is (= '#{} (selected db (record db 'app.pt-calc "(defn add \"Adds.\"\n  [a b]\n  ;; commutative\n  (+ a   b))"))) "a comment and whitespace")
+    (is (= '#{} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b]\n  (+ a b)) ; tail"))) "a trailing comment")
+    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Sums.\" [a b] (+ a b))"))) "a docstring is data some code reads")
+    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ b a))"))) "a change of code")
+    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ a \"x;y\"))"))) "a string literal holding a ; and spaces is code")
+    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn ^:private add \"Adds.\" [a b] (+ a b))"))) "a visibility")
     (let [code #(second (program/form-ids 'app.x % 0 (read-string %)))]
       (is (= (code "(def x \"a;b  c\")") (code "(def x   \"a;b  c\"   ; why\n)")) "a string keeps its own ; and spaces, the rest is squeezed")
       (is (not= (code "(def x \"a;b  c\")") (code "(def x \"a;b c\")")) "and its spaces are its own")

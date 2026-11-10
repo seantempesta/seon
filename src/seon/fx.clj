@@ -248,7 +248,7 @@
            (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
 
 (defn env-class
-  "The class of the file at relative path p: :seon.env/system, /web, /deps, /bin (bin/ and the root's other files), /schemas or /src (the .clj
+  "The class of the file at relative path p: :seon.env/system, /web, /deps, /bin, /schemas or /src (the .clj
   files, which env-input? leaves to the program facts: a class only for a reach that reads the program's text), each a part of the checkout one kind of test reads (seon.program/env-class-readers),
   or nil (every test's: native/, the pins, the fixtures, everything else)."
   {:malli/schema [:=> [:cat :string] [:maybe :keyword]]}
@@ -256,10 +256,9 @@
   (cond (= p "resources/seon/system.edn") :seon.env/system
         (or (str/starts-with? p "resources/public/") (str/starts-with? p "web/")) :seon.env/web
         (= p "deps.edn") :seon.env/deps
-        ;; a file at the checkout's root (.gitmodules, .gitignore, .mcp.json): git's and the tools', read by git and the
-        ;; bin/ scripts. In :env, which every test takes, a new submodule moved every test's digest, and a .gitignore
-        ;; edit reran 1,600 of 1,891 keys (each pin is its own input, pin-class)
-        (or (str/starts-with? p "bin/") (not (str/includes? p "/"))) :seon.env/bin
+        ;; .gitmodules: read by git and the bin/ scripts that sync submodules; each pin is its own input
+        ;; (pin-class), so in :env, which every test takes, a new submodule moved every test's digest
+        (or (str/starts-with? p "bin/") (= p ".gitmodules")) :seon.env/bin
         (str/starts-with? p "resources/seon/schemas/") :seon.env/schemas
         ;; the program's text, which a test reading the whole program (a docstring, a form's source) reads
         (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))) :seon.env/src))

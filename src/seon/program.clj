@@ -378,17 +378,11 @@
   [nsym src k]
   (str nsym "/" (hasch/uuid [nsym src]) (when (pos? k) (str "#" k))))
 
-(def ^:private docstring-heads
-  "The heads of the definitions whose third element is a docstring when more follows it (clojure.core's): form-ids leaves
-  it out of a form's code. defmethod's third is a dispatch value, which is code."
-  '#{def defn defn- defmacro defmulti defprotocol ns})
-
 (defn form-ids
   "A form's [id code] for its namespace, exact text, occurrence k and the form as the reader read it: its id
   (form-id's: the hash of the namespace and the exact text) and the digest of its namespace and code, which is
   the form's EDN as seon.edn/encode makes it (printed here, named in docs/render.md#printing-beside-the-printer-the-wire):
-  the reader has dropped its comments and whitespace, a definition's docstring is left out (docstring-heads: a test that reads docs says so,
-  :seon.test/reads, and takes the program's text, as a reader of the src class does: index-answer), and the encoding leaves out its :line and :column. Two things the print does not hold are made to: the numbers the reader gives a gensym (`p1__12#`,
+  the reader has dropped its comments and whitespace, and the encoding leaves out its :line and :column. Two things the print does not hold are made to: the numbers the reader gives a gensym (`p1__12#`,
   `x__3__auto`, counted over the process) are renumbered by first appearance, and the name's metadata
   (`^:private`) follows. Stored with the form (:form/code), what a test's reach digest takes of it
   (docs/source.md#what-a-test-takes-of-a-forms-text). Across all of src and test (3,831 forms) a form read twice
@@ -396,10 +390,6 @@
   {:malli/schema [:=> [:cat :symbol :string :int :any] [:tuple :string :string]]}
   [nsym src k form]
   (let [id (str nsym "/" (hasch/uuid [nsym src]) (when (pos? k) (str "#" k)))
-        ;; a definition's docstring is no code: the string after its name, when more follows
-        form (if (and (seq? form) (docstring-heads (first form)) (symbol? (second form)) (string? (nth form 2 nil)) (< 3 (count form)))
-               (with-meta (apply list (first form) (second form) (drop 3 form)) (meta form))
-               form)
         ;; seon.edn/encode's own print, inline: a contracted call more is the account proof's call count
         printed (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str form))
         counts (volatile! {})
@@ -1661,8 +1651,6 @@
         sids (fn [text] (into [] (map #(str "schema " %)) (names (sedn/decode text))))
         contract (reduce (fn [m [v e]] (if-let [t (:contract e)] (assoc m v (sids t)) (dissoc m v))) (:contract g) facts)
         tests (reduce (fn [s [v e]] (if (contains? (:meta e) :test) (conj s v) (disj s v))) (:tests g) facts)
-        ;; a test that says it reads docs (^{:seon.test/reads #{:docs}}) takes the program's text (index-answer)
-        readers (reduce (fn [s [v e]] (if (and (contains? (:meta e) :test) (contains? (:meta e) :seon.test/reads)) (conj s v) (disj s v))) (:readers g #{}) facts)
         ;; a name quoted in a test's namespace is one the test hands to what runs it by name
         ;; ((cost/proof {:of 'ns/f}), resolve, an agent's eval): a reach edge there, as a
         ;; reference is (a quoted name in src is data: schema-forms' renders, tree-readers)
@@ -1744,9 +1732,7 @@
         stale (when held
                 (-> (into #{} (for [id affected, [k a] (:defines (rows id)) :when (and (= :var k) (tests a))] a))
                     (into (mapcat tests-by-ns)
-                          (into #{} (comp (filter plain?) (map :ns)) (concat gone (map rows affected))))
-                    ;; a test that took the program's text (index-answer's :text?) moves with any form or schema entry
-                    (into (when (or (seq removed) (seq added)) (:text-tests g)))))
+                          (into #{} (comp (filter plain?) (map :ns)) (concat gone (map rows affected))))))
         dead (when held (filter #(and ((:tests g) %) (not (tests %))) V))
         ;; the affected components re-folded sinks first (Bazel's and Nix's action keys): a
         ;; component's digest is its forms' own and those of the components it reaches
@@ -1771,7 +1757,7 @@
                                    (transient (apply dissoc (:flags g) olds))
                                    (:next g)]
                                   (components (vec affected) (fn [id] (filter affected (adj id)))))]
-    (cond-> (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :readers readers :test-nss test-nss :refd refd :adj adj :rev rev
+    (cond-> (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :test-nss test-nss :refd refd :adj adj :rev rev
            :reads reads :scans scans :proc proc :bin bin :walks walks :plain plain :own own :computed computed
            :comp-of (persistent! comp-of) :cd (persistent! cd) :flags (persistent! fl) :next n :affected (count affected))
       held (assoc :tests-by-ns tests-by-ns
@@ -1887,11 +1873,8 @@
   "The function of a key and its starting forms' ids that answers {:digest :process? :binary?} (graph-index)
   over graph g under inputs: the config lines and env keys it shares are made once here, for every key asked."
   {:malli/schema [:=> [:cat :map :seon.program/inputs :boolean] :seon.host/fn]}
-  [{:keys [rows plain comp-of cd flags readers live schemas]} {:keys [env tree code config]} roots?]
+  [{:keys [rows plain comp-of cd flags]} {:keys [env tree code config]} roots?]
   (let [line (into {} (for [[ck v] config] [ck (str "\n" ck " " v)]))
-        ;; the program's text, docstrings and comments and all: every live form's id (the hash of its exact text) and every
-        ;; schema entry's text, from the graph, so an agent's branch is its own; made once, when one asks
-        text (delay (lib/digest (str/join "\n" (concat (sort (keys live)) (sort (map str schemas))))))
         ;; :seon.env/src is a direct reader's (kept-program-store): a process test runs a program it names
         env-keys (filterv #(and (= "seon.env" (namespace %)) (not= % :seon.env/src)) (keys config))]
     (fn [k ids]
@@ -1906,18 +1889,12 @@
             ;; process runs on, are the forks' suites' and the daily full run's
             ks (if (some #(let [f (flags %)] (or (:proc f) (:bin f))) cs) (into ks env-keys) ks)
             ;; a step's src is :code; the src class is test/'s too, which a step does not run (every step reaches seon.contract/uncontracted)
-            src? (some #(contains? (:config (flags %)) :seon.env/src) cs)
-            ;; a test reading the program's text (the src class's readers, kept-program-store's walks of every form) or
-            ;; saying it reads docs (^{:seon.test/reads #{:docs}}: (:doc (meta v))) takes the program's text
-            text? (and (not roots?) (or src? (contains? readers k)))
-            src? (and roots? src?)
-            ks (disj ks :seon.env/src)]
+            src? (and roots? (some #(contains? (:config (flags %)) :seon.env/src) cs))
+            ks (if roots? (disj ks :seon.env/src) ks)]
         {:digest (lib/digest (apply str k "\n" env "\n" (when (some #(:scans (flags %)) cs) tree)
-                                      (when text? (str "\n" @text))
                                       (when (and roots? (or src? (some #(:reads (flags %)) cs))) code)
                                       (concat (sort (map cd cs)) (map line (sort ks)))))
-         :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))
-         :text? text?}))))
+         :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))))
 
 (defn graph-index
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
@@ -1937,15 +1914,14 @@
     (if roots
       ;; a root naming a var with no form here (renamed, not imported) gets no digest: its
       ;; caller names it missing, never a digest of :env alone that a stale green matches
-      (into {} (for [[k vars] roots :when (every? var-form vars)] [k (dissoc (answer k (map var-form vars)) :text?)]))
-      (into {} (for [t tests :let [id (var-form t)] :when id] [t (dissoc (answer t [id]) :text?)])))))
+      (into {} (for [[k vars] roots :when (every? var-form vars)] [k (answer k (map var-form vars))]))
+      (into {} (for [t tests :let [id (var-form t)] :when id] [t (answer t [id])])))))
 
 (defn reach-indexed
   "Graph g holding the tests' index under inputs (graph-index's, with no roots): the answers it
   held still (reach-step drops those a change can move and names them :stale, so a graph updated
   from one holding an index answers only for what moved, never for the program), the rest
-  computed, all of them when it holds none or holds one under other inputs; :text-tests, those whose answer took the
-  program's text (index-answer), which any change makes stale. The index is
+  computed, all of them when it holds none or holds one under other inputs. The index is
   derived data, a function of the graph and inputs: regenerated whenever it is not held
   (docs/data-modeling.md#derived-data-is-a-cache-never-relied-on). Read it with index-of. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map :seon.program/inputs] :map]}
@@ -1956,11 +1932,9 @@
       g
       (let [var-form #(peek (get defs %))
             answer (index-answer g inputs false)
-            new (for [t (if fresh? (:stale g) tests) :let [id (var-form t)] :when id] [t (answer t [id])])
-            answers (into (if fresh? (:answers (:index g)) {}) (map (fn [[t a]] [t (dissoc a :text?)])) new)
-            ;; the tests that took the program's text, which reach-step names stale at any change
-            text-tests (reduce (fn [s [t a]] (if (:text? a) (conj s t) (disj s t))) (if fresh? (:text-tests g #{}) #{}) new)]
-        (assoc g :index {:in inputs :answers answers} :stale #{} :text-tests text-tests
+            answers (into (if fresh? (:answers (:index g)) {})
+                          (for [t (if fresh? (:stale g) tests) :let [id (var-form t)] :when id] [t (answer t [id])]))]
+        (assoc g :index {:in inputs :answers answers} :stale #{}
                :tests-by-ns (or (:tests-by-ns g) (group-by (comp symbol namespace) tests)))))))
 
 (defn index-of

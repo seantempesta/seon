@@ -223,7 +223,7 @@
      :fixed {:ticks 3000 :bytes 20500}
      :sizes [250 500 1000 10000 100000 1000000]}))
 
-(deftest ^{:seon.test/reads #{:docs}} a-transport-failure-is-answered-to-the-agent
+(deftest a-transport-failure-is-answered-to-the-agent
   (let [failure (model/complete {:kind :openai-compat :base-url "http://127.0.0.1:1" :model "m" :api-key-env "HOME" :max-tokens 2048}
                                 {:messages [{:role "user" :content "x"}] :task "t/x" :turn 0})
         dest {:agent "boot/1" :op :fx-reply :k 1}
