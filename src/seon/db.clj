@@ -974,9 +974,11 @@
   derived something from (a graph, a diff), in place of the db, which pins its own version of the
   index; the thing derived is a cache keyed by the point, and the db is made again with at-commit
   when it must be read. Two values of one commit differ by their t (a run-ahead branch is ahead of
-  its last commit). See docs/machine.md#roots-heap."
+  its last commit): a run-ahead value shown on its connection (datahike.writer/apply! {:show? true}, root's writer) carries
+  no commit id, so its point names its last commit (:datahike/uncommitted-parent), as an unshown one's does.
+  See docs/machine.md#roots-heap."
   {:malli/schema [:=> [:cat :seon.host/db] [:tuple [:maybe :uuid] :int]]}
-  [db] [(d/commit-id db) (:max-tx db)])
+  [db] [(or (d/commit-id db) (get-in db [:meta :datahike/uncommitted-parent])) (:max-tx db)])
 
 (defn at-commit
   "The db of commit cid on conn's store: conn's own head when cid is the commit it holds (already
