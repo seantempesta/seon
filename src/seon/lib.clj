@@ -156,8 +156,12 @@
                (mutex-acquire #%$tc-mutex)
                (let ([pid (if (= (jolt-active-threads) 1) (fork) -2)])
                  (mutex-release #%$tc-mutex)
-                 (enable-interrupts)
+                 ;; the child drops the parent's fibers and run queue before interrupts are enabled: a
+                 ;; preemption between the fork and that reset switched the child to the scheduler over
+                 ;; the parent's queue, which ran the parent's ready fibers in the child, or, once the
+                 ;; reset had marked them, died of \"fiber in unexpected state forked\"
                  (when (= pid 0) (jolt-after-fork-child!))
+                 (enable-interrupts)
                  pid))))")
       true))
 
