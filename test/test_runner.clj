@@ -436,7 +436,7 @@
         ;; seconds of work they split (the owner, 2026-10-30); past that it shards, as a gate of 206 tests took 751 s on
         ;; one; the full run and a merge's verification shard
         ;; each test's ms, measured or its class's configured estimate (never 1 ms: an unmeasured run dealt itself one shard)
-        ms (proofs/estimated-ms run-tests (measured-ms run-tests) (set process))
+        ms (proofs/estimated-ms run-tests (measured-ms run-tests) (into #{} (filter qualified-symbol?) process))  ; process holds the check steps' names too (strings)
         ;; as many shards as free memory holds, at most the configured jobs (never fewer for the load average: bin/test)
         avail (long (:available-mb (seon.lib/sysmem)))
         jobs (proofs/memory-jobs (config/value :seon.config.proofs/jobs) avail
