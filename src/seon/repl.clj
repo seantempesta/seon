@@ -655,7 +655,8 @@
 
 (defn- by
   "Who evaluated, as the record names it (:seon.eval/by, a ref): :self, the evaluating agent itself (its model's turn, an outside model working
-  its task, its own code), written as the record's own agent; the user, by the configured name (:seon.config.root/user-name), for a
+  its task, or a session at its REPL: where an eval came from is its model call's origin, not its author; its own code), written as the
+  record's own agent; the user, by the configured name (:seon.config.root/user-name), for a
   person's eval from the page; the system (seon.task/system-sender) for an eval root inserts or root's own; else the agent an inserted
   eval names (seon.task/sender). A context read is recorded by no one. See docs/users.md#what-each-thing-is."
   {:malli/schema [:=> [:cat :map] [:or [:= :self] :map]]}
