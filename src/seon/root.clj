@@ -456,6 +456,17 @@
       (nil? commit) (refused 'seon.root/back! (str "eval " id " has no commit of its own: a sweep took it, or a later eval shares it") {:eval id})
       :else {:commit commit :t t :branch (keyword (namespace (:branch a)) (str (name (:branch a)) "-back-" (:max-tx db)))})))
 
+(defn request-name
+  "The name of the request task text asks for on db: its first sentence's words (a sentence ends at a . ! or ? before a space or
+  the end, so a dot inside a name, demo.math/double, is part of it), else \"work\"; words asked before take the next number, 2, 3, ...
+  See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
+  [db text]
+  (let [words (re-seq #"[a-z0-9]+" (str/lower-case (re-find #"(?:[^.!?\n]|[.!?](?=[^\s.!?]))*" (str/triml text))))
+        said (str/join "-" (or (seq words) ["work"]))
+        free? #(nil? (pdb/eid db :seon.task/id (task/task-id 'request %)))]
+    (if (free? said) said (some #(let [n (str said "-" %)] (when (free? n) n)) (iterate inc 2)))))
+
 (defn- ext-op {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.root/request] :seon.root/api-state]}
   [st o m]
   (let [{:keys [op p id]} m]
@@ -485,10 +496,7 @@
                               (assoc-in st [::backing id] {:p p :branch (:branch pt)}))))))
       ;; what a sentence says, or an agent's launch: a task from a template, released, answered with its id (:dest's :asked)
       :ask (let [db @(:conn st)
-                 words (re-seq #"[a-z0-9]+" (str/lower-case (re-find #"[^.!?\n]*" (str/triml (:text m)))))
-                 said (str/join "-" (or (seq words) ["work"]))
-                 ;; its first sentence's words are its name and title; the same words asked again take the one number that tells them apart
-                 nm (if (pdb/eid db :seon.task/id (task/task-id 'request said)) (str said "-" (:max-tx db)) said)
+                 nm (request-name db (:text m))
                  template (get tpl/templates (:template m :user))
                  ;; who started it, the agent that launched it or the person asking: its agent is linked to them when it starts (seon.task/start-tx), and the reconciler tells them how it ends (seon.reconcile/tell-tx)
                  by (or (when (:agent m) (agent-key-of st (:agent m))) (person))]
