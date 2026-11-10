@@ -376,20 +376,30 @@
              (catch Exception _ nil))))
 
 (defn ask
-  "One request m to a started root's server (bin/ask: its line on a socket, one reply line read,
-  ending on the reply or when the root closes the connection or dies): the reply as data
-  (tagged literals kept), or one recorded error value, {:error :eof} (closed with no reply),
-  {:error :reset} or {:error :refused} (docs/failure-points.md), never a hang on nc's timeout,
-  which macOS never fires. A root that died before listening (start-root!'s :port nil) answers
-  {:error :root-did-not-listen :log}, its log, never a request to no port. A caller asserts on :error."
+  "One request m to a started root's server: its line on a socket this process opens, one reply line read,
+  ending on the reply or when the root closes the connection or dies: the reply as data (tagged literals
+  kept), or one recorded error value, {:error :eof} (closed with no reply), {:error :reset} or {:error
+  :refused} (docs/failure-points.md). A root that died before listening (start-root!'s :port nil) answers
+  {:error :root-did-not-listen :log}, its log, never a request to no port. A caller asserts on :error.
+  In-process, not bin/ask: a perl process a request was ~17 ms of a cheap one's ~20 under load
+  (docs/testing.md#a-root-costs-what-it-boots)."
   {:malli/schema [:=> [:cat [:map [:port [:maybe :int]]] :map] :map]}
   [{:keys [port log]} m]
   (if (nil? port)
     {:error :root-did-not-listen :log log}
-    (let [{:keys [out]} (sh/sh (str (seon.config/checkout) "/bin/ask") (str port) :in (str (pr-str m) "\n") :dir (seon.config/checkout))]
-      (if (clojure.string/blank? out)
-        {:error :no-answer}
-        (clojure.edn/read-string {:default tagged-literal} out)))))
+    ;; the edge where the socket's failures become values (bin/ask's three)
+    (try
+      (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
+        (let [w (java.io.OutputStreamWriter. (.getOutputStream s) "UTF-8")
+              r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8"))]
+          (.write w (str (pr-str m) "\n"))
+          (.flush w)
+          (let [line (.readLine r)]
+            (if (clojure.string/blank? line)
+              {:error :eof}
+              (clojure.edn/read-string {:default tagged-literal} line)))))
+      (catch java.net.ConnectException _ {:error :refused})
+      (catch java.io.IOException _ {:error :reset}))))
 
 (defn stop-root!
   "Stop a root start-root! started (bin/root stop: its stdin closes, it stops cleanly, and the

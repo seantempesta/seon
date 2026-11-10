@@ -751,14 +751,16 @@
   (let [defs (into [] (mapcat val) (:defs @agent/state))
         id (:seon.eval/id rec)]
     (swap! agent/state dissoc :defs)
-    ;; an eval within another (seon.repl/edit!'s) is that eval's: its definitions are program, its record the outer one
-    (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)))
+    ;; an eval within another (seon.repl/edit!'s) is that eval's: its definitions are program, its record the outer one; a read of
+    ;; the agent's context (origin :context with no eval of its own to run again, the server's :context op) records nothing
+    ;; (owner, 2026-11-10: "A read never writes")
+    (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)) (not (and (= :context (:origin req)) (nil? (:id req)))))
       ;; the write is the edge: a branch that refuses it answers the eval :unrecorded with the writer's message, so the
       ;; turn that asked goes on (a refused write thrown from here ended the whole turn: its reply and evals lost, the turn run again)
       (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state)} id (by req)
                                                   (let [working? (some? (:turn @agent/state))]
                                                     (cond-> rec
-                                                      ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) and a context read are no conversation record: they name no call
+                                                      ;; the turn loop's own eval (the agent working a task, no model call, made by the agent) and a step's run again are no conversation record: they name no call
                                                       (not (or (= :context (:origin req)) (:id req) (and working? (not (:call-id req)) (not (#{:ui :outside :insert} (:origin req))))))
                                                       (assoc :seon.eval/call (task/call-ref (:key @agent/state) (agent/turn-now))))))))
            (assoc r :record id)

@@ -550,7 +550,8 @@
     (bm25-scores feat avg idf fs lens)))
 
 (defonce ^:private indexes
-  ;; [the db's [:hash :max-tx] it was built at, its text-index]; one slot, replaced by the next build
+  ;; [the db's [:hash :max-tx] it was built at, its text-index, the term counts of its rows (`text-terms`, an atom of
+  ;; {[e a] [counts length]})]; one slot, replaced by the next build
   (volatile! nil))
 
 (def ^:private index-attrs
@@ -577,7 +578,7 @@
     (if (= at was)
       ix
       (let [new (build-index db)]
-        (vreset! indexes [at new])
+        (vreset! indexes [at new (atom {})])
         (when ix (sqlite/retire! ix))
         new))))
 
@@ -597,16 +598,38 @@
   its merge of main (seon.agent), the fork server's commit of main (seon.fork-server). nil. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential [:tuple :int :any]]] :nil]}
   [before after written]
-  (let [at0 [(:hash before) (:max-tx before)] at1 [(:hash after) (:max-tx after)] [was ix] @indexes]
+  (let [at0 [(:hash before) (:max-tx before)] at1 [(:hash after) (:max-tx after)] [was ix counted] @indexes]
     (when (and (not= at0 at1) (= at0 was))
       (let [number (zipmap index-attrs (range))
             texts (into [] (comp (filter (fn [[_ a]] (number a))) (distinct)) written)]
         (when (seq texts)
           (sqlite/using ix #(sqlite/replace-rows! %
                               (for [[e a] texts :when (seq (d/datoms before :eavt e a))] [e (number a)])
-                              (for [[e a] texts :let [dt (first (d/datoms after :eavt e a))] :when dt] [e (number a) (str (:v dt))]))))
-        (vreset! indexes [at1 ix])))
+                              (for [[e a] texts :let [dt (first (d/datoms after :eavt e a))] :when dt] [e (number a) (str (:v dt))])))
+          ;; and the counts of those rows go, counted again when next read: a move re-counts the texts it wrote alone
+          (swap! counted #(apply dissoc % texts)))
+        (vreset! indexes [at1 ix counted])))
     nil))
+
+(defn text-terms
+  "The term counts of texts on db, each [e a] (entity e's text under text attribute a; a nil a is no text), as relevance reads a
+  text (`terms`), in their order: each [counts length], counts each term to how often the text holds it and length how many terms it holds. Kept
+  beside the text index's row of that text (`text-index`), counted the first time a reader asks and kept until a move writes
+  that text (`carry-index!`) or the index is built again, so a reader that ranks a text's words pays a lookup, never its length
+  (task seon.ctx.search/a-search-costs-what-it-ranks: tokenizing 40 texts was 2.5M ticks of a search's 8.7M). Not counted when
+  the index is built: the program's texts are millions of characters, seconds of a fork server's warm start, for the few dozen a
+  search ranks. Derived data, never relied on. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential [:tuple :int [:maybe :qualified-keyword]]]] [:vector [:tuple [:map-of :string :int] :int]]]}
+  [db texts]
+  ;; the slot held for db's value, built when it is another's (`text-index`)
+  (let [[_ _ counted] (if (= [(:hash db) (:max-tx db)] (first @indexes)) @indexes (do (text-index db) @indexes))]
+    (mapv (fn [k] (or (when-not (nth k 1) [{} 0])
+                      (get @counted k)
+                      (let [ts (terms (some-> (first (d/datoms db :eavt (nth k 0) (nth k 1))) :v str))
+                            v [(frequencies ts) (count ts)]]
+                        (swap! counted assoc k v)
+                        v)))
+          texts)))
 
 (defn- match-query
   "The FTS5 query of words ws: each quoted and joined by OR."

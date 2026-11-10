@@ -30,12 +30,19 @@ Progress is **turns to green** and **tasks merged**, with every v1 capability pr
 
 Run, then right, then fast. The demo is the spec: if you can't show it running, it isn't done. The system shows what it is doing, live.
 
+**We work the best known way, and we improve it** (owner, 2026-11-10: "You do things the best known way until someone comes up with a better way and that becomes the standard 'best known way' of doing things"; "Pain points can become well polished and intentional features"). This file and the wiki are that way, written down: follow them as they stand. When the way hurts (a step done by hand twice, a wait, a miss a check should have caught, a number that is absurd), that is a finding, never something to work around quietly:
+1. say what it cost, with its number;
+2. find what allowed it;
+3. change the way itself, so the next session does the better thing by default: a script before a rule, a rule in the wiki before a note in a report, and the old way deleted in the same change;
+4. tell every session what to stop doing.
+A better way becomes the standard only when it is written here or in the wiki and the old text is gone; a habit one session keeps is not the standard ([how the way improves](docs/sessions.md#the-way-improves)).
+
 ## 2. Who does what
 
 Who decides, who owns which area, and what a helper may do.
 
 - **The owner (Sean)** sets direction and makes the rulings. Bring him one decision at a time with its evidence, through the question tool, your pick first; a well-scoped task or a clear defect needs no asking.
-- **Named sessions each own an area** (Context, Web, Optimization), and one managing session keeps the landing order (`docs/plan.md`). A session knows its whole area and never answers for code it has not read (owner, 2026-11-08: "We are moving away from monolithic orchestrators who don't know anything and implementation agents who don't know the big picture").
+- **Named sessions each own an area** (Context, Web, Optimization, Tests, Deep fixes: [sessions](docs/sessions.md#sessions-own-their-areas)), and one managing session keeps the schedule, batches the landings and brings the owner his decisions ([the managing session](docs/sessions.md#the-managing-session)). A session knows its whole area and never answers for code it has not read (owner, 2026-11-08: "We are moving away from monolithic orchestrators who don't know anything and implementation agents who don't know the big picture").
 - **Sessions work together, with no fixed ceremony** (owner, 2026-11-06: "I don't want the work done twice. If you do it well merge it... No more ceremony and mandated fixed policies"): each says by message what it is taking.
 - **No fan-out** (owner, 2026-10-28: "This system of launching 10+ agents just burned my tokens and was not productive"). A session starts no other session unless the owner asks. It uses as many helpers as its work needs (owner, 2026-11-10: "allocate whatever resources we need"), each on its own well-specified piece with its own files, and reviews every line each one writes.
 - **A helper is hands for a well-specified piece.** It works in a worktree of its own, branched from the session's branch, commits there and stops: no `bin/land`, no push.
@@ -68,11 +75,12 @@ What a session does from its first command to its last.
 
 **Land small and often; nothing is run twice** ([merging](docs/merging.md#a-branch-lands-with-binland)):
 1. **Iterate** at the REPL, then with `bin/test NS` or `bin/test NS/TEST`.
-2. **Prove once, when done:** `nice -n 15 bin/prove` in your worktree; never again on a tree it proved green.
+2. **Check your change, then hand it over** (owner, 2026-11-10: "I don't want 100% separated work separately running all the tests for each little change"): run the tests you changed by name, the whole namespace of the mechanism you changed and `seon.main-test`, then `bin/laws` and `bin/check health`; a digest, selection or runner change also runs the whole `seon.agent-test`. Commit and send the managing session the tip. Nobody proves a small change alone.
 3. **Audit** (owner, 2026-11-09: "If you find yourself needing heroics and writing a shitload of code we are doing the wrong thing and we need to fix the design"). The landing session reads its whole diff and writes the audit into the landing message; the managing session reads it and gives its go. The message states the step of THE PLAN, the `src` delta, what it replaces and deletes (a branch that grows `src` names what it deletes), and its estimate beside each number measured ([merging](docs/merging.md#a-landing-message-carries-its-audit)).
-4. **Land:** `/Users/sean/src/seon-next/bin/land -F MSGFILE` in your worktree. Never merge by hand; never wait for another session's proof.
+4. **The managing session lands:** it merges the ready tips into one branch from main, proves it once (`nice -n 15 bin/prove`) and lands it (`bin/land -F MSGFILE`), which brings the standing root to it. A red batch is bisected, the branch at fault taken out with its evidence, and the rest landed. Never merge by hand.
 
-- **Combine your own ready branches,** prove once and land once. **Never wait on a landing:** start the next change in a new worktree branched from the landing branch, and never touch a worktree while its `bin/land` runs.
+- **Never wait on a landing:** start the next change in a new worktree from main or from your own tip. A root catches up with its checkout at start ([source](docs/source.md#a-boot-catches-up-with-its-checkout)), so a worktree's store is not erased after an edit from outside.
+- **A task a Seon agent finished reaches main by review** (owner, 2026-11-10: "reviewed by a competent agent in their speciality ... if it's almost done right just fix it and sync it to disk and remove the task"): the session that owns its area reviews it, fixes it when it is almost right and brings it to a branch with its entry removed ([source](docs/source.md#a-merged-task-reaches-mains-files)); one that is not done gets its plan rewritten with what the attempt showed.
 - **A merge that completes a task** removes the task's entry and says `Completes: ns/name` ([merging](docs/merging.md#a-merge-says-what-it-completes)).
 - **No regressions** (owner, 2026-10-26: "don't accept regressions for no reason"): a number that got worse is refused unless the message names its reason and who follows it up. A cost bound moves only with the owner's yes, and a new `:overrun` on a cost proof is added only with his yes.
 - **What a new design replaces goes with it** (tasks, wiki text, pointers); code with no caller is cut only with the owner's go.
@@ -81,6 +89,7 @@ What a session does from its first command to its last.
 - **Run only what your change reaches:** `bin/prove` reuses every green stored at its reach digest ([merging](docs/merging.md#a-merge-runs-what-the-change-reaches)). Never repeat a run on an unchanged tree.
 - **A green `bin/prove` counts only with its plan:** a jump in what it left out is red until explained.
 - **No full runs from a session** (owner, 2026-11-08: "don't waste everyone's time"): `bin/test --all` and `bin/check 100` are the daily run's and a pin bump's ([merging](docs/merging.md#conflicts-and-pins)). A red on main gets an owner and a task within the hour.
+- **A dependency pin proves whole before it is handed over:** a pin moves every digest, so its session runs `bin/prove` on the pin's own branch and sends the tip with the prove's last lines; parts of a prove are not a prove ([merging](docs/merging.md#conflicts-and-pins)).
 - **A test runs on the world**, at the smallest input that shows its claim ([testing](docs/testing.md#testing-in-the-world)).
 - **A slow test is a bug** (owner, 2026-11-08: "Slow tests should be treated as bugs and fixed"); **a flaky result is a defect** to fix at its cause, never a reason to run again.
 - **Never delete or move a red verdict:** the fix is a new digest ([merging](docs/merging.md#verdicts-are-a-cache)).
@@ -183,6 +192,8 @@ The rules are above; each mistake links where its incident is told.
 - **Reinventing what v1 already solved,** designing before researching, building a half-baked plan, or too many worktrees at once on overlapping work.
 - **A clipping function** ([render](docs/render.md#no-clipping)).
 - **A check that cannot fail,** that only prints, that ran nothing, or that nobody read ([machine](docs/machine.md#reading-a-number)); whole files copied over newer changes. When a rule changes, read every step it touches.
+- **"Ready" on a partial or reused run:** a change handed over green on a hand-picked part of the suite, or on greens reused from before the change ([merging](docs/merging.md#the-managing-session-lands-a-batch)).
+- **A claim passed on unchecked,** or the owner's sentence turned into a build before the code was read: verify by one command, quote his words, and say "inferred" when it is ([sessions](docs/sessions.md#the-managing-session)).
 - **Dropping a store, a branch or history:** the owner's act. Only the standing store, while it holds no user's data, is erased when a change needs it, the other sessions warned first ([machine](docs/machine.md#disk-stays-bounded)).
 - **Throwing away good work, or keeping its slow copy** (owner, 2026-10-23: "don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code").
 
