@@ -4,8 +4,9 @@
 #                             worktree is inside the root it belongs to)
 # bin/worktree --path NAME    that path
 # bin/worktree --remove NAME  remove that worktree and its submodule worktrees (the branch is kept)
-# bin/worktree --at DIR COMMIT [REPO]  a detached worktree of REPO (default next/) at COMMIT in DIR, set
-#                             up as below: what a generation is built in (seon.fx/build, docs/source.md)
+# bin/worktree --at DIR COMMIT [REPO [FROM]]  a detached worktree of REPO (default next/) at COMMIT in DIR, set
+#                             up as below, its target/ products cloned from FROM's (default the main tree's): what a generation
+#                             is built in (seon.fx/build, docs/source.md), and a gate's checkout, from its root's checkout (seon.fx/run-tests)
 # bin/worktree --remove-at DIR remove such a worktree and its submodule worktrees
 # bin/worktree --setup [DIR]  set up a worktree made by something else (the Agent tool's, default the one this
 #                             runs in) as below, with its ports: an existing checkout, built and rooted as any
@@ -50,6 +51,9 @@ fi
 # commit records (read with ls-tree, never `git submodule`), and target/ cloned
 setup() {
   local WT=$1
+  # the tree whose built products target/ is cloned from: the main tree's, or the one named (--at's FROM: a gate's checkout takes the
+  # products of the checkout whose root runs it, so a candidate runs on its root's runtime and libraries, never another tree's pins)
+  local FROM=${2:-$MAIN}
   git -C "$WT" ls-tree HEAD reference-code/ | while read -r mode type sha sub; do
     [[ $type == commit ]] || continue
     rmdir "$WT/$sub" 2>/dev/null || true
@@ -78,28 +82,28 @@ setup() {
   # target/prove/ holds each run's logs (only its measured ms are cloned), and target/tmp/ holds tests' scratch (a generation a test builds lives there); nor of the
   # compile caches: target/cache is the one shared copy, and target/home/.jolt's caches are
   # what a checkout held before it was shared (bin/env)
-  if [[ -d $MAIN/target ]]; then
+  if [[ -d $FROM/target ]]; then
     mkdir -p "$WT/target/home/.jolt"
     # only the build's products, named by their stamps (bin/build writes NAME.stamp beside NAME, NAME.build
     # and NAME.tree) and the native outputs no stamp names: never the verdicts (target/results, shared
     # through SEON_RESULTS_DIR), the runs, logs, or a test's scratch, which a prove's other shards make
     # and delete while this copies (a directory deleted under cp failed the copy: seon.source-test's
     # bin/worktree --at went red in full proves, never alone)
-    for e in "$MAIN"/target/*.stamp(N); do
+    for e in "$FROM"/target/*.stamp(N); do
       # and NAME.program, the program the binary was built from (seon.root/binary-current reads it: without it a gate's binary is unknown, and builds)
       for p in $e ${e%.stamp} ${e%.stamp}.build ${e%.stamp}.tree ${e%.stamp}.program; do
         if [[ -e $p ]]; then cp -cR "$p" "$WT/target/"; fi
       done
     done
     # the plan's kept program store, regenerable and keyed by its importer and tree, so a new checkout's first plan reads what changed, not every form (22 s against 3 s)
-    for e in "$MAIN"/target/program-store-*(N/); do cp -cR "$e" "$WT/target/"; done
+    for e in "$FROM"/target/program-store-*(N/); do cp -cR "$e" "$WT/target/"; done
     for n in lib watch lmdb-kill lmdb-sem remove-tree semsets tailwind src; do
-      if [[ -e $MAIN/target/$n ]]; then cp -cR "$MAIN/target/$n" "$WT/target/"; fi
+      if [[ -e $FROM/target/$n ]]; then cp -cR "$FROM/target/$n" "$WT/target/"; fi
     done
-    for e in "$MAIN"/target/home/*(ND); do
+    for e in "$FROM"/target/home/*(ND); do
       [[ ${e:t} == .jolt ]] || cp -cR "$e" "$WT/target/home/"
     done
-    for e in "$MAIN"/target/home/.jolt/*(ND); do
+    for e in "$FROM"/target/home/.jolt/*(ND); do
       [[ ${e:t} == (aot-cache|build-cache|runtime-cache) ]] || cp -cR "$e" "$WT/target/home/.jolt/"
     done
   fi
@@ -117,13 +121,14 @@ unsub() {
 stores() { "$BIN/remove-tree" "$1/target" "$1/runs" }
 
 if [[ ${1:-} == --at ]]; then
-  WT=${2:-} SHA=${3:-} REPO=${4:-$MAIN}
-  [[ -n $WT && -n $SHA ]] || die "usage: bin/worktree --at DIR COMMIT [REPO]"
+  WT=${2:-} SHA=${3:-} REPO=${4:-$MAIN} FROM=${5:-$MAIN}
+  [[ -n $WT && -n $SHA ]] || die "usage: bin/worktree --at DIR COMMIT [REPO [FROM]]"
+  [[ -d $FROM/target ]] || die "--at: no built products to clone at $FROM/target"
   [[ ! -e $WT ]] || die "$WT exists"
   mkdir -p "${WT:h}"
   git -C "$REPO" worktree add -q --detach "$WT" "$SHA"
-  setup "$WT"
-  print "worktree $WT at ${SHA:0:12} of $REPO"
+  setup "$WT" "$FROM"
+  print "worktree $WT at ${SHA:0:12} of $REPO, its products from $FROM"
   exit 0
 fi
 
