@@ -597,9 +597,11 @@
  :seon.config.proofs/child-min-ms 100
  ;; Unit: ms. What a test never measured counts for in a deal of tests into shards or children (seon.proofs/estimated-ms):
  ;; never 1 ms, which dealt a run of 234 unmeasured process tests into one shard. Provenance: the mean typical ms (fx/typical-ms)
- ;; of the verdict cache's in-process tests, 2026-11-10: 172 over 1,381 measured of 1,385 (median 10). The mean, since a deal
- ;; sums work.
- :seon.config.proofs/unmeasured-ms 172
+ ;; of the verdict cache's in-process tests, 2026-11-10: 172 over 1,381 measured of 1,385 (median 10).
+ ;; 16, the MEDIAN typical ms of the in-process tests (a verdict cache read, 2026-10-29), not their mean of 172: the mean is
+ ;; pulled up by a few slow tests, and at 172 a handful of unmeasured tests counted as work for four children
+ ;; (seon.agent-test/a-handful-of-tests-runs-in-one-child, batch 2, 2026-11-10).
+ :seon.config.proofs/unmeasured-ms 16
  ;; Unit: ms. The same for a process test (one that reaches a process of its own: seon.program/graph-index's :process?).
  ;; Provenance: the mean typical ms of the verdict cache's process tests, 2026-11-10: 3,027 over 228 of 228 (median 1,220).
  :seon.config.proofs/unmeasured-process-ms 3027
