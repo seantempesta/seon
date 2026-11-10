@@ -1798,7 +1798,7 @@
 
 (deftest an-agents-chat-places-what-its-model-reads-beside-it
   ;; owner, 2026-11-08: "What happened to the sidebar on the right with all the rendered context parts? Docs that get pulled in,
-  ;; the task, etc?": the task's list (seon.render.ui/task-list), which the model reads as parts, has its place on the chat page,
+  ;; the task, etc?": the task's list (seon.render.ui/agent-parts), which the model reads as parts, has its place on the chat page,
   ;; the same components, so a person sees what the agent was told
   (let [[main branch _] (paged-dbs)
         [st _] (#'p/pass-view (proc-state main branch) [:chat :a3])
@@ -3469,3 +3469,89 @@
         to-root (filter #(and (#{:patch :keyframe} (:op %)) (= :root (:view %))) (:to-web @o))]
     (is (seq to-root) (str "the spawn reaches root's tab: " (pr-str (map :op (:to-web @o)))))
     (is (some? st2))))
+;; Stage 2a's walk (docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09): one pass over a pull renders the page and
+;; the model's messages. A lab schema in a branch's index names each entity's two renders; recognition is the best match of the
+;; attributes an entity holds; a parent's render orders and places its children; a call placed in a model output is a
+;; component of its own; the walk renders the model output only when asked (:outputs)
+(defn lab-turns [c]
+  (for [[_ call] (sort-by (comp :lab.ow/n val) (:lab.ow/_agent c))]
+    [call (vec (for [[_ e] (:lab.ow/_by c) :when (= (:lab.ow/turn e) (:lab.ow/n call))] e))]))
+(defn lab-agent [_ c] [:article [:h1 (:lab.ow/key c)] (into [:ol] (for [[call evals] (lab-turns c)] (into [:li call] evals)))])
+(defn lab-turn-open [_ n] [{:role "user" :content (str "turn " n)}])
+(defn lab-session-wire [_ c] (vec (concat [{:role "user" :content "open"}] (mapcat (fn [[call evals]] (concat [[#'lab-turn-open {} (:lab.ow/n call)] call] evals)) (lab-turns c)) [{:role "user" :content "close"}])))
+(defn lab-agent-wire [_ c] (vec (mapcat (fn [[call evals]] (concat [[#'lab-turn-open {} (:lab.ow/n call)] call] evals)) (lab-turns c))))
+(defn lab-call [_ x] [:p (str (:lab.ow/reply x))])
+(defn lab-call-wire [_ x] [{:role "assistant" :content (str (:lab.ow/reply x))}])
+(defn lab-eval [_ x] [:code (str (:lab.ow/code x))])
+(defn lab-eval-wire [_ x] [{:role "tool" :content (str (:lab.ow/code x))}])
+(defn lab-layout [_] [:main "a layout over the walk's source"])
+
+(deftest one-pass-renders-the-page-and-the-models-messages
+  (let [forms {:lab.ow/key [:and {:seon.db/identity true} :string] :lab.ow/n :int :lab.ow/reply :string :lab.ow/code :string :lab.ow/turn :int
+               :lab.ow/agent [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/lab-agent :seon.render/openai-compat 'seon.render-test/lab-agent-wire} [:lab.ow/key :lab.ow/key]]
+               :lab.ow/call [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/lab-call :seon.render/openai-compat 'seon.render-test/lab-call-wire} [:lab.ow/n :lab.ow/n] [:lab.ow/reply {:optional true} :lab.ow/reply]]
+               :lab.ow/eval [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/lab-eval :seon.render/openai-compat 'seon.render-test/lab-eval-wire} [:lab.ow/code :lab.ow/code] [:lab.ow/turn :lab.ow/turn]]}
+        ix (seon.db/index-of {:forms forms})
+        call (fn [id n r] {:db/id id :lab.ow/n n :lab.ow/reply r})
+        ev (fn [id n code] {:db/id id :lab.ow/code code :lab.ow/turn n})
+        ;; a collection as seon.ctx holds one: members by id, sorted as ctx sorts them
+        coll (fn [& kvs] (into (sorted-map-by (fn [a b] (cond (and (int? a) (int? b)) (compare b a) (int? a) -1 (int? b) 1 :else (compare (str a) (str b))))) (apply hash-map kvs)))
+        t2 {:db/id 1 :lab.ow/key "a" :lab.ow/_agent (coll 10 (call 10 1 "Reading.") 11 (call 11 2 "Fixing."))
+            :lab.ow/_by (coll 20 (ev 20 1 "(+ 1 1)") 21 (ev 21 2 "(+ 2 2)"))}
+        a (seon.ratom/atom t2)
+        db (ts/test-db)
+        walk (fn [outputs] (assoc (r/walker {:ref a :changes seon.ctx/changes} (constantly db) [#'lab-agent {} (seon.ratom/ref-view a seon.ctx/changes)] ix) :outputs outputs))
+        w (walk #{:seon.render/hiccup :seon.render/openai-compat})
+        ran (r/flush! w nil)]
+    (is (= :lab.ow/agent (seon.db/most-specific ix t2)) "the pull's root is recognized by the attributes it holds")
+    (is (= {:ambiguous [:lab.ow/call :lab.ow/eval]} (seon.db/most-specific ix {:lab.ow/n 1 :lab.ow/code "x"})) "a tie is an error value naming both")
+    (is (= #{'seon.render-test/lab-agent 'seon.render-test/lab-call 'seon.render-test/lab-eval 'seon.render-test/lab-turn-open}
+           (set (map (comp symbol first) (keys ran)))) "each entity rendered by its own schema's render, the placed call a component of its own")
+    (is (str/includes? (h/html (r/resolved w @(:out w) true)) "Fixing."))
+    (is (= [{:role "user" :content "turn 1"} {:role "assistant" :content "Reading."} {:role "tool" :content "(+ 1 1)"}
+            {:role "user" :content "turn 2"} {:role "assistant" :content "Fixing."} {:role "tool" :content "(+ 2 2)"}]
+           (r/openai-compat w)) "the messages, in the order the agent's model render places them")
+    (swap! a assoc-in [:lab.ow/_by 21 :lab.ow/code] "(+ 2 3)")
+    (is (= ['seon.render-test/lab-eval] (mapv (comp symbol first) (keys (r/flush! w nil)))) "one eval changed reruns its component alone, page and model")
+    (is (= {:role "tool" :content "(+ 2 3)"} (peek (r/openai-compat w))))
+    (let [before (pr-str (r/openai-compat w))]
+      (swap! a (fn [t] (-> t (assoc-in [:lab.ow/_agent 12] (call 12 3 "Done.")) (assoc-in [:lab.ow/_by 22] (ev 22 3 "(+ 3 3)")))))
+      (let [ran (r/flush! w nil) after (r/openai-compat w)]
+        (is (= #{'seon.render-test/lab-agent 'seon.render-test/lab-call 'seon.render-test/lab-eval 'seon.render-test/lab-turn-open} (set (map (comp symbol first) (keys ran))))
+            "a new turn runs the agent and the new turn's components alone")
+        (is (= 4 (count ran)))
+        (is (= before (pr-str (vec (take 6 after)))) "every earlier message is the same bytes")))
+    (let [once (r/render-pull @a db #'lab-agent ix #{:seon.render/hiccup :seon.render/openai-compat} {:seon.render/changes seon.ctx/changes})]
+      (is (= (r/openai-compat w) (:messages once)) "render-pull, one pass let go, answers what the kept walk does")
+      (is (empty? (:messages (r/render-pull @a db #'lab-agent ix #{:seon.render/hiccup}))) "and asked for the page alone, no messages")
+      (is (= (into [{:role "user" :content "open"}] (conj (r/openai-compat w) {:role "user" :content "close"}))
+             (:messages (r/render-pull @a db #'lab-session-wire ix #{:seon.render/openai-compat} {:seon.render/as :seon.render/openai-compat})))
+          "a root call answers the model output itself, placing the pull's entities each by its own model render"))
+    (let [lw (assoc (r/walker {:ref a :changes seon.ctx/changes} (constantly db) [#'lab-layout {}] ix) :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
+      (r/flush! lw nil)
+      (is (= (r/openai-compat w) (r/openai-compat lw)) "a root called with no entity (a layout) answers its walk's source entity's model render")
+      (r/dispose-walk! lw))
+    ;; the bridge's root before its entity exists: a walk flushed on an empty pull, then the entity, answers the entity's model render
+    (let [e (seon.ratom/atom {})
+          ew (assoc (r/walker {:ref e :changes seon.ctx/changes} (constantly db) [#'lab-layout {}] ix) :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
+      (r/flush! ew nil)
+      (is (= [] (r/openai-compat ew)) "no entity yet: no model output")
+      (reset! e @a)
+      (seon.ratom/flush!)
+      (r/flush! ew nil)
+      (is (= (r/openai-compat w) (r/openai-compat ew)) "the entity appears: the root runs again and answers its model render")
+      (r/dispose-walk! ew))
+    (let [h (walk #{:seon.render/hiccup}) _ (r/flush! h nil)]
+      (is (= [] (r/openai-compat h)) "a walk asked for the page alone runs no model render")
+      (is (not-any? :outs (vals @(:cache h)))))))
+
+;; docs/references.md#an-entity-cites: a cite is rendered by its schema's render wherever a walk places it; a pulled var or section alone
+;; is not (it prints as the data it is), since an agent's eval of a pull reads the data it asked for (Context, 2026-11-10)
+(deftest a-placed-cite-is-its-schemas-render
+  (let [ix (seon.db/index)
+        a (seon.ratom/atom {:db/id 1 :c {:db/id 2 :seon.cite/id "c1" :seon.cite/depth :summary :seon.cite/order 0
+                                         :seon.cite/target {:db/id 3 :file/path "README.md"}}
+                            :v {:db/id 4 :var/name 'demo/f :var/ns 'demo}})
+        view (seon.ratom/ref-view a seon.ctx/changes)]
+    (is (= [#'ui/cite {:key "c1"}] (r/entity-render ix (get view :c))) "a cite: its schema's render, keyed by its identity")
+    (is (nil? (r/entity-render ix (get view :v))) "a pulled var: no render, it prints")))

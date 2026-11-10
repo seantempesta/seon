@@ -320,10 +320,10 @@
  :seon.search/query :string
  ;; how many hits are shown, when the search asks other than :seon.config.render/search
  :seon.search/k pos-int?
- :seon.search/search-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:seon.search/id :seon.search/query :seon.search/k]}
+ :seon.search/search-fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/searched :seon.ctx/pattern [:seon.search/id :seon.search/query :seon.search/k]}
                            [:seon.search/id :seon.search/id] [:seon.search/of {:optional true} :seon.search/of] [:seon.search/query :seon.search/query]
                            [:seon.search/k {:optional true} :seon.search/k]]
- :seon.cite/cite-fact [:map {:seon.db/attributes true
+ :seon.cite/cite-fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/cite
                              :seon.ctx/pattern [:seon.cite/id :seon.cite/depth :seon.cite/order
                                                 {:seon.cite/target [:seon.doc/address :seon.doc/heading :seon.doc/lead :seon.doc/text :seon.doc/references
                                                                     {:seon.doc/_parent [:seon.doc/address :seon.doc/heading]}

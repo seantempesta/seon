@@ -106,7 +106,7 @@
   ({:seon.db/attributes true}) names itself (`own-keys`), to that schema; :identity-schemas, those of them that are upsert
   keys; :required-keys {schema [attribute ...]}, the keys each requires, its own and those of the schemas it extends, and
   :own-required, only its own; :schema-identities, :identity-schemas turned around; :targets, each ref attribute's target
-  entity schemas ({:seon.db/to}); :drawn-schemas, the identity schemas that declare a render (:seon.render/hiccup), theirs or a parent's; and :forms, the forms it was built from}. It is the one value every reader of what an entity
+  entity schemas ({:seon.db/to}); :drawn-schemas, the entity schemas that declare a render (:seon.render/hiccup), theirs or a parent's; and :forms, the forms it was built from}. It is the one value every reader of what an entity
   is takes first (ix): a branch's own entity schema is recognized by its own index, never the binary's.
   See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :map] [:map [:forms :map] [:entity-schemas :map] [:identity-schemas :map] [:schema-identities :map] [:drawn-schemas [:set :any]] [:required-keys :map] [:own-required :map] [:targets :map]]]}
@@ -120,7 +120,7 @@
      :identity-schemas ids
      :schema-identities (into {} (map (fn [[a k]] [k a])) ids)
      ;; the identity schemas that declare a render, theirs or a parent's: what seon.render/schema-of names a pulled map by, one lookup
-     :drawn-schemas (into #{} (filter (fn [k] (some #(:seon.render/hiccup (form-props forms %)) (tree-seq (constantly true) #(parents-in forms %) k)))) (vals ids))
+     :drawn-schemas (into #{} (filter (fn [k] (some #(:seon.render/hiccup (form-props forms %)) (tree-seq (constantly true) #(parents-in forms %) k)))) (distinct (vals es)))
      :required-keys (into {} (for [k (distinct (vals es))]
                                [k (vec (distinct (mapcat #(required (get forms %)) (filter entity? (tree-seq (constantly true) #(parents-in forms %) k)))))]))
      :own-required (into {} (for [k (distinct (vals es))] [k (vec (required (get forms k)))]))
@@ -172,13 +172,19 @@
   [ix a b] (boolean (or (= a b) (some #(extends? ix % b) (parents ix a)))))
 
 (defn most-specific
-  "The entity schemas the identity attributes of map e name, as one: the one that extends all the others, nil for none,
-  or {:ambiguous [s ...]} when none does, as the entity index ix says. The order of e's keys never decides. See docs/ctx.md#the-pattern."
+  "What map e is, one schema, read from the index the write check reads (ix's :entity-schemas, the schema that owns each
+  attribute; the write check holds each owning schema to its required keys and names none as the one): of
+  the schemas owning the attributes e holds, the best match, the one with the most of its attributes present, those it
+  inherits (`parents`) counted, so a schema beats the one it extends; nil for none, {:ambiguous [s ...]} for a tie. One lookup a key, then a sum a candidate
+  over its parents. The order of e's keys never decides. See docs/data-modeling.md#a-thing-is-its-attributes."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [ix e]
-  (let [ss (distinct (keep (:identity-schemas ix) (keys e)))]
-    (when (seq ss)
-      (or (some (fn [s] (when (every? #(extends? ix s %) ss) s)) ss) {:ambiguous (vec ss)}))))
+  (let [own (frequencies (keep (:entity-schemas ix) (keys e)))]
+    (when (seq own)
+      (let [score (fn score [s] (+ (get own s 0) (reduce + 0 (map score (parents ix s)))))
+            ranked (sort-by (comp - second) (map (juxt identity score) (keys own)))
+            [[s0 n0] [s1 n1]] ranked]
+        (if (and s1 (= n0 n1)) {:ambiguous (vec (sort (map first (filter #(= n0 (second %)) ranked))))} s0)))))
 
 (defn index-of
   "The `entity-index` of a branch's own schema changes (schemas, {:forms :registry}, or nil): the binary's (`index`) when it
