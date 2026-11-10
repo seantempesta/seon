@@ -348,7 +348,9 @@
             ;; the page alone pays nothing here
             others (disj (or (:outputs w) #{}) :seon.render/hiccup)
             ix @(:index w)
-            e0 (when (seq others) (some-> (first children) ratom/untracked))
+            ;; the entity: the component's argument, else, for the walk's root called with none (a layout), the walk's source, the pull it walks
+            ev (when (seq others) (or (first children) (when (or (nil? @(:out w)) (= k @(:out w))) (ratom/ref-view (:ref (:src w)) (:changes (:src w))))))
+            e0 (some-> ev ratom/untracked)
             s0 (when (and (map? e0) (:db/id e0)) (schema-of ix e0 nil))
             fs (when s0 (into {} (keep (fn [o] (some->> (render-for ix s0 o) requiring-resolve (vector o)))) others))
             ;; output o's answer: its values, and each entity or call it places run as a component (the one the hiccup placed is a
@@ -387,7 +389,7 @@
                             as (:seon.render/as opts)
                             out (if as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil) (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
                         ;; an entity's own render for each other output, where no call answers that output for it
-                        (doseq [[op of] fs :when (not= op as)] (vswap! outs assoc op (place op env' (of {:seon.db/db ((:db w)) :seon.render/index ix} (first args)))))
+                        (doseq [[op of] fs :when (not= op as)] (vswap! outs assoc op (place op env' (of {:seon.db/db ((:db w)) :seon.render/index ix} (or (first args) ev)))))
                         out)
                       ;; a component that throws draws its error in its place: a call of the error's render on the error as data (what
                       ;; threw, and the thrown error's own data: a contract's problems), so the page writes that render and the model
