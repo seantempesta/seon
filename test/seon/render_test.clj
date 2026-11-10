@@ -3590,3 +3590,10 @@
     (is (= ["working" "between turns"] ((juxt :text :detail) (s :idle :running))))
     (is (nil? (:detail (s :busy :running))) "a running process is just working")
     (is (not-any? #(re-find #"(?i)\byou\b" (str (:detail %))) [(s :dead :parked) (s :idle :told) (s :idle :running)]) "no second person")))
+
+;; docs/render.md#one-rendering-system-drawn-from-the-data: a view's units are rendered in main's entity index as root's walk holds it,
+;; never the binary's once main is read, so a render main declares or changes is the one a unit runs
+(deftest a-views-units-render-in-mains-index
+  (let [ix {:forms {} :entity-schemas {} :marker ::mains}]
+    (is (= ix (#'p/units-index {:root-walk {:w {:index (volatile! ix)}}})) "main's, as root's walk holds it")
+    (is (= (seon.db/index) (#'p/units-index {})) "the binary's before main is read")))

@@ -118,6 +118,13 @@
         draw (let [[hc k] (draw kept)] [hc (h/html hc) k])
         :else (let [hc (render/hiccup {:schema schema :unit id :seon.render/index ix} input)] [hc (h/html hc) nil])))
 
+(defn- units-index
+  "The entity index a view's units are rendered in: main's as root's walk holds it (built from main, again when a schema entry
+  moves), so a render main declares or changes is the one a unit runs; the binary's only before main is read. See
+  docs/render.md#one-rendering-system-drawn-from-the-data."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [st] (or (some-> (:root-walk st) :w :index deref) (seon.db/index)))
+
 (defn- step-units
   "Run a layout's units, in the order the layout shows them, against what the view retained: a
   unit whose input is unchanged is skipped; one whose bytes are unchanged sends nothing; a new one
@@ -705,7 +712,7 @@
                                           (hold st (cond-> {:skeleton (h/html hc) :layout hc :units {}} (= :seon.render/no-location (:seon.error/type out)) (assoc :status 404)))) nil]
     :else
     (let [units (:seon.render/units out)
-          [view patch n] (step-units (seon.db/index) held units)
+          [view patch n] (step-units (units-index st) held units)
           [view patch] (finish-patch view patch (set (map :id units)))
           skel (h/html (:seon.render/hiccup out))
           view (assoc view :skeleton skel :layout (:seon.render/hiccup out))]
