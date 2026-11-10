@@ -461,7 +461,9 @@
         ;; most jobs: early takes what its work is worth, the rest what is left (at least one)
         {late true early false} (group-by #(contains? binary %) (if no-test [] run-tests))
         worth #(if all? %2 (proofs/worth-shards %1 %2 ms (config/value :seon.config.proofs/shard-min-ms)))
-        n-early (if (or (seq early) (seq mg-run)) (worth (vec early) jobs) 0)
+        ;; the build and the seed run beside the early shards when a test reaches the binary: they take a slot of the jobs
+        ;; the free-memory rule allows (seon.proofs/memory-jobs), so early takes one fewer then
+        n-early (if (or (seq early) (seq mg-run)) (worth (vec early) (if (seq late) (max 1 (dec jobs)) jobs)) 0)
         n (+ (if (pos? n-early) (write-shards! out "early" (vec early) digests (:tree inputs) (select-keys steps mg-run) n-early ms) 0)
              (if (seq late) (write-shards! out "shard" (vec late) digests (:tree inputs) {} (worth (vec late) (max 1 (- jobs n-early))) ms) 0))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
