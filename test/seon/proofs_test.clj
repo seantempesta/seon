@@ -686,3 +686,13 @@
     (try (reset! seon.agent/state {:db w})
          (is (identical? w (test-runner/program)) "the branch's db, as held: no import, and the branch's own program")
          (finally (reset! seon.agent/state before)))))
+
+(deftest a-red-at-bases-digest-or-red-at-base-is-mains
+  ;; docs/tasks.md#the-done-rule: of the reds of a run, those the branch's change did not make
+  (let [results {'t/same :error 't/based :fail 't/mine :error 't/new :error 't/ok :pass}
+        cand {'t/same "d1" 't/based "d2x" 't/mine "d3x" 't/new "d4" 't/ok "d5x"}
+        base {'t/same "d1" 't/based "d2" 't/mine "d3" 't/ok "d5"}
+        found {"d2" {:fail 1} "d3" {:pass 1}}]
+    (is (= #{'t/same 't/based} (proofs/main-red results cand base found))
+        "its digest is base's, or base's verdict at it is red; green at base, new on the branch, or passing: the branch's")
+    (is (= #{} (proofs/main-red results cand nil {})) "with no base nothing is main's")))
