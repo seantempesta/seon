@@ -30,7 +30,7 @@
   `report` reads what was recorded, at a cost that follows the problems. `health` adds the
   derived classes, read from the program's facts when asked (docs/health.md#cost)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config] [seon.cost :as cost] [seon.reader :as reader]))
 
 (def counted-classes [:platform :eval :agent :effect])
 (def ^:private death-statuses task/failed)
@@ -427,6 +427,34 @@
            (derived-row ans s nsym (str v " is " n " tokens, over the bound of " bound ": split it by what it does")
                         {:kind :long-form :var v :tokens n :bound bound} {:var v :tokens n :bound bound})))))
 
+(defn waived-proofs
+  "Each cost proof of a test form of the program that carries an `:overrun` (a waiver: seon.cost/proof), as a
+  :waived-proof row with its test, the task it names, the size it was taken at (:n), the numbers it recorded and
+  `multiple`, the greatest of the counted dimensions' recorded multiples of the proof's own bound at that size (the
+  arithmetic of a verdict: seon.cost/expected, seon.cost/row-ratio; nil when the record states no size or the
+  estimate is not literal). Found by the forms that reference seon.cost/proof (one :form/refs seek), the
+  `:overrun` map read out of the form by the reader. Closed when the proof's `:overrun` is deleted. Cost: the forms that call
+  seon.cost/proof, each read once. See docs/health.md#a-proof-that-passes-by-waiver."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (vec (for [{:keys [e]} (d/datoms db :avet :form/refs 'seon.cost/proof)
+             :let [f (d/entity db e) nsym (:ns/name (:form/ns f))]
+             v (:form/defines f) :when (contains? (set (:var/meta v)) :test)
+             :let [t (:var/name v)
+                   proofs (filter #(and (map? %) (map? (:overrun %))) (tree-seq coll? seq (reader/read-all (:form/src f) nsym)))]
+             [i m] (map-indexed vector proofs)
+             :let [{:keys [task n measured]} (:overrun m)
+                   estimate (select-keys m [:ops :per-n :fixed :growth])
+                   literal? (and (every? map? (vals (dissoc estimate :growth))) (keyword? (:growth estimate)) (pos-int? n))
+                   bound (when literal? (cost/expected estimate cost/units n))
+                   multiple (when bound (some->> (for [d (keys measured) :when (and (cost/exact d) (contains? bound d))]
+                                                   (cost/row-ratio {:measured measured :expected bound} d))
+                                                 seq (apply max)))
+                   s (str "waived-proof " t " " i)]]
+         (derived-row ans s nsym (str t " passes by a waiver for task " task (when multiple (format ", at %.2fx its bound" multiple)) ": fix the task, then delete the :overrun")
+                      {:kind :waived-proof :test t :task task :n n :measured measured :multiple multiple}
+                      {:test t :task task :n n :measured measured :multiple multiple}))))
+
 (def caused-classes
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
   #{:unnamed-site :stale-section :uncited-var :long-form})
@@ -737,7 +765,8 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
   [db ans]
   {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :stale-binary (stale-binary db ans) :orphan-page (orphan-pages db ans)
-   :leadless-section (leadless-sections db ans) :uncited-task (uncited-tasks db ans)})
+   :leadless-section (leadless-sections db ans) :uncited-task (uncited-tasks db ans)
+   :waived-proof (waived-proofs db ans)})
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the

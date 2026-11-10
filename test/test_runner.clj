@@ -220,6 +220,8 @@
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
+     ;; the proofs of this tree that pass by a waiver (an :overrun in the form), counted on the db the plan reads
+     :waived (count (problems/waived-proofs db {}))
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
      :binary (set (keep (fn [[t v]] (when (:binary? v) t)) idx))}))
 
@@ -380,14 +382,15 @@
   :seon.proofs/unread, when the results could not be read (read-results)."
   [root what all? names store]
   (let [unread (volatile! nil)
-        p (proofs/plan-of (assoc (tests-of root names store) :slow-of fx/slow-tests) what all? names
+        reach (tests-of root names store)
+        p (proofs/plan-of (assoc reach :slow-of fx/slow-tests) what all? names
                   (some->> (fx/base-commit root) (fx/tree-of root))
                   ;; the verdicts cached at the candidates' digests; a read that failed is the plan's
                   ;; :unread (prove! stops on it), never zero greens
                   (fn [cand]
                     (let [r (read-results cand)]
                       (if (contract/error? r) (do (vreset! unread r) {}) r))))]
-    (cond-> p @unread (assoc :unread @unread))))
+    (cond-> (assoc p :waived (:waived reach)) @unread (assoc :unread @unread))))
 
 (defn- prove!
   "The planning part of bin/prove and bin/test (what is tests, checks or both): plan-of's tests
@@ -409,8 +412,10 @@
         1)
   (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky]} plan
+        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived]} plan
         ;; a merge runs these last, once all else is green (bin/prove): out/slow, names, one line
+        ;; the proofs of the tree that pass by a waiver (an :overrun in the form: seon.problems/waived-proofs), for bin/prove's last lines
+        _ (write! (str out "/waived") (str waived "\n"))
         _ (write! (str out "/slow") (str (str/join " " (sort (map str (keys slow)))) (when (seq slow) "\n")))
         _ (when (seq slow)
             (println (str "prove: " (count slow) " slow tests left for last (bin/prove runs them once all else is green; run one by name: bin/test NS/TEST, all: bin/test --all): "
