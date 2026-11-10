@@ -27,6 +27,15 @@ export HOME=$ROOT/target/home
 # No key holds a checkout's path, and entries are published by temp+rename. One directory in the main
 # tree's target/, found from git's common dir so a worktree anywhere (bin/worktree --at DIR too)
 # names the same absolute path.
+# git, the real binary: /usr/bin/git on macOS is a shim that finds the developer directory (xcrun) on every call, 11.3 ms
+# a call against 5.1 ms (measured 2026-11-10, rev-parse HEAD, 30 calls each). Every git child of a script, a test, root and
+# its agents pays it (seon.fx/tree-id is ~7 a call), so a directory holding only git, linked to the binary git's own
+# exec path names, goes first on PATH for everything this environment starts. Where git is already the binary, nothing moves.
+GIT_REAL=$(cd "$(git --exec-path)" 2>/dev/null && cd "$(dirname "$(readlink git 2>/dev/null || echo git)")" 2>/dev/null && pwd)/git
+if [[ -x $GIT_REAL && $(command -v git) != $GIT_REAL ]]; then
+  mkdir -p "$ROOT/target/git-bin" && ln -sf "$GIT_REAL" "$ROOT/target/git-bin/git"
+  [[ :$PATH: == *:$ROOT/target/git-bin:* ]] || export PATH=$ROOT/target/git-bin:$PATH
+fi
 MAIN_TREE=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
 JOLT_BUILD_CACHE_DIR=${JOLT_BUILD_CACHE_DIR:-$MAIN_TREE/target/cache/build}
 JOLT_RUNTIME_CACHE_DIR=${JOLT_RUNTIME_CACHE_DIR:-$MAIN_TREE/target/cache/runtime}
