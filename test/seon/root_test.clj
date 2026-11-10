@@ -406,7 +406,7 @@
     (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
     (is (= :seon.root/refused type) (str "the spawn is refused: " (pr-str (first (:also two)))))
     (is stale? "naming the two trees")
-    (doseq [act ["rm -rf runs/store" "bin/root start --reindex" "my.root/import!" "bin/root next"]]
+    (doseq [act ["bin/remove-tree runs/store" "bin/root start --reindex" "my.root/import!" "bin/root next"]]
       (is (str/includes? (str message) act) (str "its message names " act))
       ;; docs/source.md#files-and-the-db-two-directions: a mismatch is never silent to a person
       (is (str/includes? (str (:started two)) act) (str "and bin/root start's last line names it too: " (:started two))))
