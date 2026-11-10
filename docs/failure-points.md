@@ -245,7 +245,7 @@ The rules of the OS and Chez that no code may "fix" by adding a thread or a chec
   that pump is idle: the agent asks for it (`:fd-ready`) and the agent proc holds its other
   messages until it is sent.
 
-- **A child that cannot end.** A child stuck in a mutex wait with a zombie grandchild ignores SIGTERM, so only SIGKILL ends it, and `kill -INFO` writes nothing for it. Jolt's all-asleep check never ends a process: it throws to the waiters it finds and counts a timed wait, a blocking foreign call or a thread in `recv` as running, so a process whose starter died before `-main` left its watch empty lives on. A test child that reaches Jolt's heap ceiling (about 2.14 GB on 25010632) may park instead of dying, and its `kill -INFO` answers "fiber dump failed: out of memory". Take `sample`, `lsof` and the thread list before killing ([AGENTS §2](../AGENTS.md)).
+- **A child that cannot end.** A child stuck in a mutex wait with a zombie grandchild ignores SIGTERM, so only SIGKILL ends it, and `kill -INFO` writes nothing for it. Jolt's all-asleep check never ends a process: it throws to the waiters it finds and counts a timed wait, a blocking foreign call or a thread in `recv` as running, so a process whose starter died before `-main` left its watch empty lives on. A test child that reaches Jolt's heap ceiling (about 2.14 GB on 25010632) may park instead of dying, and its `kill -INFO` answers "fiber dump failed: out of memory". Take `sample`, `lsof` and the thread list before killing ([machine](machine.md#reading-a-hang)).
 
 ## A model's reply is read after it is forgiven
 

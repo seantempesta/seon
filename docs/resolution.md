@@ -8,6 +8,8 @@ namespace's requires, and behaviour varies through the environment or through da
 data names it (a declaration, a schema's render, a cost estimate) or where the compiler's
 facts are read; a Var's root changes only when its contract is armed.
 
+`intern`, `alter-var-root` and `with-redefs` are code smells, not banned (owner, 2026-10-21: "intern isn't banned it's a code smell"). A legitimate use builds vars programmatically in a namespace you own, where no definition form exists (a REPL harness, a test environment), and its docstring says why. A gap in another namespace (a library's, Jolt's stdlib) is filled in that namespace's owner instead, and a stub made by rebinding is replaced by a test environment that holds the stub's definition.
+
 `bin/laws resolution` lists every function in `src/` that calls `requiring-resolve`,
 `ns-resolve`, `resolve` on a quoted symbol, `intern`, `alter-var-root` or `with-redefs`
 (strings and comments left out), and fails on one not named here; a name a list item gives

@@ -84,6 +84,17 @@ The ways a Flow graph wedges, hangs or drops messages silently, found in Jolt's 
 3. **Time inside Flow:** `compute-timeout-ms` 5000, `finish-outputs!` 1000 ms per message, `stop-timeout-ms` 10000, and ping's 1000. Each is a clock that decides, in the dependency ([clocks](clocks.md)).
 4. **Silent drops:** an unconnected out, report and error chans past 100, casts past 100, and a mult with no taps.
 
+## The step-fn contract every proc follows
+
+Every component of Seon is a step-fn proc declared as data (`resources/seon/system.edn`), and each follows one contract ([AGENTS.md §5](../AGENTS.md)):
+- a Var with four arities, whose `describe` declares ins, outs, an honest `:workload` and a ping-map;
+- `transform` returns `[state' outputs]`, with data outputs;
+- a step never blocks on another proc: request and answer with credit, `{:id :reply}`, exactly one answer ([below](#idioms-for-seon));
+- state is plain data under its schema, and a host object lives only in its owning proc;
+- buffers are bounded by their loss semantics; a dependency is a channel a proc parks on, and back-pressure is a full one;
+- procs run on fibers, and a blocking foreign call gets a declared thread; no thread, future or atom lives outside procs, except an edge reader for a blocking read;
+- a proc reports its own problems as facts and its changes as events, and steps only when a message arrived.
+
 ## Idioms for Seon
 
 How Seon meets each need (a dependency, a backlog, a delayed retry, quiet) on Flow.
