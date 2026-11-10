@@ -2190,8 +2190,8 @@
   (is (= :seon.db/user-fact (r/entity-schema (seon.db/index) (array-map :seon.user/name "sean" :seon.agent/key "sean") nil)) "in either order")
   (is (= :seon.db/agent-fact (r/entity-schema (seon.db/index) {:seon.agent/key "b2/a1"} nil)))
   (is (= :seon.db/user-fact (r/schema-of (seon.db/index) (array-map :seon.agent/key "sean" :seon.user/name "sean") nil)) "and a value's schema the same way")
-  (is (= (r/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) (r/schema-property (seon.db/index) :seon.db/user-fact :seon.ctx/pattern))
-      "a user's pattern is the agent's it extends")
+  (is (not= (r/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) (r/schema-property (seon.db/index) :seon.db/user-fact :seon.ctx/pattern))
+      "a user declares its own pattern, not the agent's it extends (docs/users.md#whats-on-screen)")
   (is (= :seon.agent/key (some #{:seon.agent/key} (keys (:entity-schemas (seon.db/index))))) "an attribute an extended schema names")
   (is (= :seon.db/agent-fact ((:entity-schemas (seon.db/index)) :seon.agent/key)) "is named by that schema alone"))
 
