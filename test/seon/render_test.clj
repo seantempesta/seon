@@ -5,7 +5,7 @@
   retained. Run: bin/test seon.render-test"
   (:require [clojure.edn] [seon.test-store :as ts] [test-runner :as runner] [clojure.test :refer [deftest is testing]] [clojure.data.json]
             [clojure.string :as str] [clojure.core.async :as a]
-            [seon.render :as r] [seon.fixtures] [seon.render.ui :as ui] [seon.render.proc :as p]
+            [seon.render :as r] [seon.fixtures :refer [flush! draw]] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.ctx] [seon.contract] [seon.repl] [datahike.api :as d]
             [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx]))
 
@@ -494,21 +494,14 @@
       (is (= ctx (:context (#'p/pass st1 (volatile! {}))))))
     (r/dispose-walk! (get-in st1 [:root-walk :w]))))
 
-(defn- flush!
-  "`seon.fixtures/flush!`: a walk flushed and the assertion that no component drew an error. A test that renders an error on purpose calls r/flush! itself and checks its defects."
-  [w & more] (apply seon.fixtures/flush! w more))
-
-(defn- draw
-  "`seon.fixtures/draw`: a page drawn and the assertion that no component drew an error."
-  [& args] (apply seon.fixtures/draw args))
-
 (defn- pass-view
   "`seon.render.proc/pass-view`, and the assertion that no walk its state holds (root's, each branch's read, each user's) drew an error
-  in a component's place (seon.fixtures/no-error-render): a view-pass drains them, so they are read here."
+  in a component's place (seon.fixtures/no-error-render): a view-pass drains them, so they are read here. See docs/render.md#a-component-answers-hiccup."
+  {:malli/schema [:=> [:cat :map :any] [:tuple :map :any]]}
   [st view]
   (let [r (#'p/pass-view st view)]
     (doseq [w (concat (some-> (:root-walk (first r)) :w vector) (keep #(some-> (:walk (val %)) deref :w) (:branch-reads (first r))) (map :w (some-> (:user-walks (first r)) deref vals)))]
-      (seon.fixtures/no-error-render w))
+      (seon.fixtures/no-error-render @(:defects w)))
     r))
 
 (defn- a3-walk
@@ -2740,7 +2733,7 @@
   ;; reads, the thrown error's own data in it; every other part draws
   (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'two-part-layout {}])]
     (try (r/flush! w nil)
-         (seon.fixtures/no-error-render w {:expects #{"seon.render-test/throwing-view"}})
+         (seon.fixtures/no-error-render @(:defects w) {:expects #{"seon.render-test/throwing-view"}})
          (is (= 1 (count @(:defects w))) "the one error is on purpose")
          (let [placed (r/placed-hiccup w ["#parts"])
                [[_ [_ _ [_ _ broken]]] [_ [_ _ fine]]] (seq placed)]

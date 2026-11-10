@@ -44,18 +44,18 @@
   {:malli/schema [:function [:=> [:cat] :nil] [:=> [:cat :map] :nil]]}
   ([] (end-agent! {}))
   ([opts]
-  ;; no page this test drew drew an error in a component's place (seon.fixtures/no-error-render): the walk's own defects and the ones
-  ;; seon.repl/page-walk took into the agent's errors; a test that draws an error on purpose names it in :expects
-  (seon.fixtures/no-error-render
-   {:defects (volatile! (into (vec (some-> (:walk @seon.agent/state) :defects deref))
-                              (comp (map :error) (filter #(= :seon.render/component-defect (:seon.error/type %)))) (vals (:errors @seon.agent/state))))}
-   opts)
-  (some-> (:walk @seon.agent/state) seon.render/dispose-walk!)
-  (remove-watch seon.agent/state :seon.ctx/ctx)       ; the record the test drew stays @ctx's (the test reads it after), as with an empty state
-  (reset! seon.agent/state (when (not= ::unset @found) @found))
-  (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)
-  (reset! found ::unset)
-  nil))
+   ;; no page this test drew drew an error in a component's place (seon.fixtures/no-error-render): the walk's own defects and the ones
+   ;; seon.repl/page-walk took into the agent's errors; a test that draws an error on purpose names it in :expects
+   (seon.fixtures/no-error-render (into (vec (some-> (:walk @seon.agent/state) :defects deref))
+                                        (comp (map :error) (filter #(= :seon.render/component-defect (:seon.error/type %))))
+                                        (vals (:errors @seon.agent/state)))
+                                  opts)
+   (some-> (:walk @seon.agent/state) seon.render/dispose-walk!)
+   (remove-watch seon.agent/state :seon.ctx/ctx)       ; the record the test drew stays @ctx's (the test reads it after), as with an empty state
+   (reset! seon.agent/state (when (not= ::unset @found) @found))
+   (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)
+   (reset! found ::unset)
+   nil))
 
 (defn- aid "The test agent's entity on db." {:malli/schema [:=> [:cat :seon.host/db] [:maybe pos-int?]]}
   [db] (:db/id (d/entity db [:seon.agent/key k])))

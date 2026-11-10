@@ -459,18 +459,19 @@
   [db c] (@(requiring-resolve (quote seon.ctx.wire/model-call-msgs)) {:seon.db/db db} (assoc c :seon.model-call/origin :model)))
 
 (defn no-error-render
-  "Asserts that walk w (a seon.render walk: a map holding `:defects`, the volatile its components that threw are kept in) drew no
-  component's error in its page: each `:seon.render/component-defect` it holds that `:expects` does not name is a failed assertion
-  naming the render and its message. Reads the defects without taking them (`seon.render/take-defects!` is the reader that drains).
-  `:expects` is a set of strings, each matched exactly against a defect's `:seon.error/message` or the name of the render that threw
-  (`:seon.error/in`, as a string): a test that renders an error on purpose names it, and nothing else passes. Answers the defects not
-  expected (empty when the assertion held). A page built in an agent's own process (a forked one, as seon.agent-test's in-agent tests
-  build) has no walk here: those tests check the agent's page themselves. See docs/render.md#a-component-answers-hiccup and docs/testing.md#a-proof-is-focused."
-  {:malli/schema [:function [:=> [:cat :map] [:vector :map]]
-                  [:=> [:cat :map [:map [:expects {:optional true} [:set :string]]]] [:vector :map]]]}
-  ([w] (no-error-render w {}))
-  ([w {:keys [expects]}]
-   (let [unexpected (into [] (remove (fn [d] (or (contains? (set expects) (:seon.error/message d)) (contains? (set expects) (str (:seon.error/in d)))))) @(:defects w))]
+  "Asserts that defects ds (a walk's `:seon.render/component-defect`s, read with @(:defects w): `seon.render/take-defects!` is the
+  reader that drains them) hold no component's error drawn in a page: each that `:expects` does not name is a failed assertion naming
+  the render and its message. `:expects` is a set of strings, each matched exactly against a defect's `:seon.error/message` or the
+  name of the render that threw (`:seon.error/in`, as a string): a test that renders an error on purpose names it, and nothing else
+  passes. Answers the defects not expected (empty when the assertion held). A page built in an agent's own process (a forked one, as
+  seon.agent-test's in-agent tests build) has no walk here: those tests check the agent's page themselves. See
+  docs/render.md#a-component-answers-hiccup and docs/testing.md#a-proof-is-focused."
+  {:malli/schema [:function [:=> [:cat [:sequential :map]] [:vector :map]]
+                  [:=> [:cat [:sequential :map] [:map [:expects {:optional true} [:set :string]]]] [:vector :map]]]}
+  ([ds] (no-error-render ds {}))
+  ([ds {:keys [expects]}]
+   (let [ok (set expects)
+         unexpected (into [] (remove (fn [d] (or (ok (:seon.error/message d)) (ok (str (:seon.error/in d)))))) ds)]
      (is (empty? unexpected) (str "a page drew an error in a component's place: " (pr-str (mapv #(select-keys % [:seon.error/in :seon.error/message]) unexpected))))
      unexpected)))
 
@@ -480,7 +481,7 @@
   {:malli/schema [:function [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]]] :map]
                   [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]] [:maybe :map]] :map]]}
   ([w datoms] (flush! w datoms nil))
-  ([w datoms ix] (let [ran (seon.render/flush! w datoms ix)] (no-error-render w) ran)))
+  ([w datoms ix] (let [ran (seon.render/flush! w datoms ix)] (no-error-render @(:defects w)) ran)))
 
 (defn draw
   "`seon.render/draw` of ctx tree c (the walk), and `no-error-render` of that walk: a test that draws a page through this checks that no
@@ -488,7 +489,7 @@
   {:malli/schema [:function [:=> [:cat :map :any :any :any] :map]
                   [:=> [:cat :map :any :any :any :map] :map]]}
   ([c changes db f] (draw c changes db f nil))
-  ([c changes db f opts] (let [w (if opts (seon.render/draw c changes db f opts) (seon.render/draw c changes db f))] (no-error-render w) w)))
+  ([c changes db f opts] (let [w (if opts (seon.render/draw c changes db f opts) (seon.render/draw c changes db f))] (no-error-render @(:defects w)) w)))
 
 (defn tree-parts
   "The conversation of agent record c on db as the agent's walk answers it for the model, cold: parts [ref messages turn] of the request, its system message, its opening and the page calls Seon generates (seon.ctx.wire/page-diff-msgs) left out. A db that holds no system prompt gets a stub of one, which the walk needs and the parts leave out."
