@@ -9,7 +9,8 @@
 # ARGS go to the restarted root (bin/root start ARGS): the standing root's profile is one of them
 #   (bin/update --profile deepseek), as it is on every root's command line (docs/config.md#layers).
 # bin/land runs it after it moves main (docs/merging.md#a-branch-lands-with-binland); the owner runs it by hand too.
-# Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED.
+# Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED (UPDATE FAILED: ROOT STALE BINARY ... when the
+# restarted root's binary is another program than its store's main: it runs, forks no agent, and the line names the acts).
 setopt pipefail
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 fail() { print -u2 "update: $*"; print "UPDATE FAILED"; exit 1 }
@@ -50,7 +51,11 @@ git -c protocol.file.allow=always submodule update --init -q || fail "main's sub
 nice -n 15 bin/build > target/update-build.log 2>&1 || { tail -5 target/update-build.log >&2; fail "build (target/update-build.log)" }
 print "built $(ls -l target/seon | awk '{print $6, $7, $8}')"
 bin/root stop >/dev/null 2>&1
-bin/root start "$@" | tail -1 || fail "the standing root did not start (runs/root.log)"
+out=$(bin/root start "$@") || fail "the standing root did not start (runs/root.log)"
+# a root whose binary is another program than its main's forks no agent: the update's last line says so, with its acts
+stale=$(print -r -- "$out" | grep -m1 '^ROOT STALE BINARY')
+[[ -n $stale ]] || print -r -- "${out##*$'\n'}"
 # what the verdict cache shows slow is work: root files a held task per slow test (docs/merging.md#a-slow-test-runs-last)
 printf '{:op :eval :agent "root" :code "(my.root/file-slow-tests! sys)"}\n' | bin/ask "${$(bin/ports)%% *}" >/dev/null || print "filing the slow tests' tasks failed: run (my.root/file-slow-tests! sys) at root"
+[[ -z $stale ]] || { print -r -- "UPDATE FAILED: $stale"; exit 1 }
 print "UPDATE OK"
