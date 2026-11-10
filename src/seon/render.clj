@@ -1040,6 +1040,36 @@
   [ix k p]
   (when k (or (get (contract/properties k) p) (some #(schema-property ix % p) (parents ix k)))))
 
+(defn- join-targets
+  "The entity schemas join [k sub] of a pattern reaches, as the entity index ix says: sub itself when the pattern names a schema there,
+  else a forward ref's targets (:targets, its schema's :seon.db/to) or a reverse ref's owner (:entity-schemas of the attribute it reverses)."
+  {:malli/schema [:=> [:cat :map :any :any] [:sequential :any]]}
+  [ix k sub]
+  (if (keyword? sub)
+    [sub]
+    (let [a (if (vector? k) (first k) k)]
+      (if (dbu/reverse-ref? a)
+        (keep identity [(get (:entity-schemas ix) (dbu/reverse-ref a))])
+        (get (:targets ix) a)))))
+
+(defn page-pattern
+  "Pattern p as a page's parts read it: p without the joins whose target schema declares :seon.render/openai-compat (the conversation:
+  the model reads those entities as its history, never a second time in its page). The one reading of what a page's parts pull, for
+  the walk that places them (seon.render.ui/agent-parts) and the model's page at a basis (seon.ctx.wire/page-parts-through). See
+  docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map [:sequential :any]] [:vector :any]]}
+  [ix p]
+  (vec (keep (fn [x] (if (map? x)
+                       (not-empty (into {} (remove (fn [[k sub]] (some #(render-for ix % :seon.render/openai-compat) (join-targets ix k sub)))) x))
+                       x))
+             p)))
+
+(defn entity-pattern
+  "Pulled entity e's pattern: its own :seon.ctx/pattern (an agent's edit), else the one its entity schema declares or a schema it extends
+  does, in the entity index ix; nil for no entity (a point before it was made). See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :map [:maybe :map]] [:maybe [:sequential :any]]]}
+  [ix e] (when e (or (:seon.ctx/pattern e) (some->> (entity-schema ix e nil) (#(schema-property ix % :seon.ctx/pattern))))))
+
 (defn render-var-of
   "The render var of entity e (a ctx's tree, an entity pulled by its pattern): its entity schema's :seon.render/hiccup (`entity-schema`,
   `declared-var`, so a branch that redefines that var renders by its own), the render a walk of e is rooted on as [f {} view]. An entity

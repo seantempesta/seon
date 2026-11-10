@@ -776,12 +776,12 @@
         as #(try (enter-agent! {:db db :key k :branch :b}) (%) (finally (end-agent!)))
         hiccup (into {} (as seon.repl/render-ctx-hiccup))
         units (:units (as seon.repl/render-ctx))
-        task-id (some #(when (= % "task") %) (keys hiccup))
-        style (:seon.render/style (meta #'seon.render.ui/task))]
+        task-id (some #(when (str/starts-with? % "task-view") %) (keys hiccup))
+        style (:seon.render/style (meta #'seon.render.ui/task-view))]
     (is (string? style) "the render's var states its style")
-    (is (= 'seon.render.ui/task (first (hiccup task-id))) "the model reads the render's name as the part's head")
+    (is (= 'seon.render.ui/task-view (first (hiccup task-id))) "the model reads the render's name as the part's head")
     (is (not (str/includes? (pr-str hiccup) style)) "no part the model reads holds the rules")
-    (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) "class=\"task\"")
+    (is (str/includes? (:html (some #(when (= task-id (:id %)) %) units)) "class=\"task-view\"")
         "a render with CSS rules keeps its name as its one class")
     (is (some #(and (str/starts-with? (:id %) "page-rules") (str/includes? (:html %) "> h2 {")) units)
         "the page's rules component draws them, a selector's > as written")))
@@ -1370,7 +1370,7 @@
 (deftest the-rules-move-only-when-a-rule-does
   ;; docs/render.md#style: the page draws the CSS and the model's request holds none (owner, 2026-11-08); a rule edited moves the page's rules, never the model's page
   (let [db (seeded 3 nil)
-        v #'seon.render.ui/task
+        v #'seon.render.ui/task-view
         was-style (:seon.render/style (meta v))
         was-f (var-get v)
         rules-of (fn [page] (some #(when (str/starts-with? (:id %) "page-rules") (:html %)) (:units page)))]
@@ -1379,11 +1379,11 @@
       (let [page (seon.repl/render-ctx)
             read #(pr-str (:messages (seon.ctx.wire/request (seon.repl/page-walk))))
             before (read)
-            _ (alter-meta! v assoc :seon.render/style ".task { color: red; }")
+            _ (alter-meta! v assoc :seon.render/style ".task-view { color: red; }")
             _ (alter-var-root v (fn [f] (fn [& args] (apply f args))))
             page' (seon.repl/render-ctx)]
-        (is (not (str/includes? before ".task >")) "no CSS anywhere in what the model reads")
-        (is (str/includes? (rules-of page) ".task") "the page holds the rules")
+        (is (not (str/includes? before ".task-view")) "no CSS anywhere in what the model reads")
+        (is (str/includes? (rules-of page) ".task-view") "the page holds the rules")
         (is (str/includes? (rules-of page) ".chat-ask") "a page-only render's too")
         (is (str/includes? (rules-of page') "color: red") "and a rule edited moves the page's rules")
         (is (= before (read)) "and nothing the model reads"))

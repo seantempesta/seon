@@ -108,7 +108,7 @@
   is not and what it should assert in the plan's words (whether it fails, and why, is the
   proofs part's: it changes each turn); the wiki sections and the tasks cites name (a task by its plan, seon.ref/task-view). cites: what the task cites, its cite entities and its needs'
   (seon.task/task-cites). What `my.task/data` answers at the agent's REPL, on demand; the page's task part is
-  the pulled task's own renders (seon.render.ui/task, docs/render.md#a-component-answers-hiccup)."
+  the pulled task's own renders (seon.render.ui/task-view, docs/render.md#a-component-answers-hiccup)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task [:sequential :map]] :map]}
   [db t cites]
   (let [{:keys [plan proofs]} (:seon.task/accumulated t)

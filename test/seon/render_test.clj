@@ -2667,12 +2667,9 @@
     (is (str/includes? html "task · seon.program · stopped at its cap") html)
     (is (not (str/includes? html "running")))
     (is (str/includes? (h/html (ui/task-view {} (dissoc t :seon.task/outcome))) "task · seon.program · running") "no outcome yet: its execution as before")
-    (testing "the agent's task part, drawn from the agent's branch, which holds no outcome of the task: its agent's own end says it"
-      (let [part (ui/task {:seon.ctx/ctx {:seon.agent/task (dissoc t :seon.task/outcome) :seon.agent/outcome :cap :seon.agent/ended-turn 40 :seon.agent/status :idle}})
-            h (h/html part)]
-        (is (str/includes? h "task · seon.program · stopped at its cap · 40 turns") h)
-        (is (not (str/includes? h "running")))
-        (is (not (str/includes? (h/html (ui/task {:seon.ctx/ctx {:seon.agent/task t :seon.agent/status :busy}})) "working")) "an agent with no end says nothing")))))
+    ;; the agent's own end (an agent whose branch holds no outcome of its task) is the agent's own state, drawn by its render
+    ;; (seon.render.ui/agent-state: a-merged-task-reads-merged-everywhere)
+    ))
 
 (deftest a-long-part-on-the-ctx-page-starts-closed-and-opens-on-demand
   ;; owner, 2026-11-05: @ctx was 1.3 MB and 614,773 px tall: the status part, as the model reads it, is a million
@@ -3038,14 +3035,16 @@
         db (d/db-with db [{:seon.agent/key "b1/a2" :seon.agent/task [:seon.task/id "demo/m"]}])
         aid (seon.db/eid db :seon.agent/key "b1/a2")
         tree (:tree (seon.ctx/build (seon.db/index) db aid :b))
-        w (r/walker {:ref (seon.ratom/atom tree) :changes seon.ctx/changes}
+        ;; the task drawn by its schema's render over the task's pull, as the agent's page walk places it (seon.render.ui/tiles)
+        r0 (seon.ratom/atom (:seon.agent/task tree))
+        w (r/walker {:ref r0 :changes seon.ctx/changes}
                     (fn [] (throw (ex-info "the task's part read the db" {})))
-                    [#'ui/task {}] (seon.db/index))
+                    [#'ui/task-view {} (seon.ratom/ref-view r0 seon.ctx/changes)] (seon.db/index))
         [text html] (try (flush! w nil)
                          [(r/part-text (r/part-form w @(:out w))) (h/html (r/resolved w @(:out w) true))]
                          (finally (r/dispose-walk! w)))]
     (is (nil? (:data (get @(:cache w) @(:out w)))) "hiccup, not a map of keys")
-    (is (re-find #"\[:h2 \"Your task\"\]" text) (str "the agent has a task: " text))
+    (is (re-find #"Task: demo/m" text) (str "the agent's task, named: " text))
     (is (< (str/index-of text "First the need.") (str/index-of text "Then make")) "its plan accumulated over its need, the need's first")
     (is (not (str/includes? text "to-prove")) "the proofs are the status's")
     (is (not (str/includes? text ":seon.task/")) "no map keys")
@@ -3388,8 +3387,8 @@
            :seon.agent/task {:seon.task/id "app.x/a-thing" :seon.task/outcome :merged}}
         opts {:seon.ctx/ctx c :seon.db/db (ts/test-db)}]
     (is (= "merged" (:text (ui/standing {:seon.agent/outcome :green} {:seon.task/outcome :merged}))))
-    (let [h (h/html (ui/task opts))]
-      (is (str/includes? h "task · app.x · merged") "the task's part")
+    (let [h (h/html (ui/task-view {} (:seon.agent/task c)))]
+      (is (str/includes? h "task · app.x · merged") "the task's tile")
       (is (not (str/includes? h "· done")) "not the agent's own end"))
     (is (str/includes? (pr-str (ui/agent-state opts)) "● merged") "the agent state")
     (is (not (str/includes? (pr-str (ui/agent-state opts)) "● done")))))

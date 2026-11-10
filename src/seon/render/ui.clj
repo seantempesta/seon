@@ -601,7 +601,10 @@
   id, kind and execution; whole, its name as a title, its namespace and how its work stands above it (the task's outcome
   where it holds one: a capped task is not \"running\"), how its kind is worked and its plan accumulated over its needs
   as Markdown. The agent's own task part is `task`. See docs/render.md#a-component-answers-hiccup."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  {:seon.render/style ":is(.task-view, .cited, .citations, .references, .searched, .status) { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
+:is(.task-view, .cited, .citations, .references, .searched, .status) > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }
+.task-view h3 { font-size: 0.75rem; color: var(--color-text-300); }"
+   :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.task/keys [id kind execution instructions] :as t}]
   (if (= :inline (:as opts))
     [:span (str "task " id (when kind (str " · " (kname kind))) (when execution (str " · " (kname execution))))]
@@ -807,34 +810,6 @@
   "The page's rules as a list of their own (p-rules), so a change of a rule draws nothing else: on the page, never in the model's request. See docs/render.md#style."
   {:seon.render/list "p-rules" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_] [:div {:id "p-rules"} [#'page-rules {:wire/for "page"}]])
-
-(defn task
-  "The task its agent works (a component over ctx alone): its name as the heading, its plan accumulated over its needs
-  (seon.task/pulled-accumulated), and under it one done line (a work or whole task's; the other kinds' instructions say what
-  they are for). Not a map of keys: what the agent reads cold. For the person, beside it, the namespace and how the
-  work stands (`standing`, from the task's outcome where the task holds one, else the agent's own end). The cites are
-  their own parts (`citations`); which proofs are written is the status's. It reads no db. See
-  docs/render.md#a-component-answers-hiccup."
-  {:seon.render/style ":is(.task, .cited, .citations, .references, .searched, .status) { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
-:is(.task, .cited, .citations, .references, .searched, .status) > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }
-.task h3 { font-size: 0.75rem; color: var(--color-text-300); }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  (when-let [t* (:seon.agent/task c)]
-    (let [own (fn [x] (into {} (for [k (keys x) :when (not= :seon.cite/_of k)] [k (ratom/realize (get x k))])))
-          t (assoc (own t*) :seon.task/needs (into {} (for [[k n] (:seon.task/needs t*)] [k (own n)])))
-          id (:seon.task/id t)
-          {:keys [plan]} (task/pulled-accumulated t)
-          agent (into {} (for [k [:seon.agent/outcome :seon.agent/ended-turn :seon.agent/turn :seon.agent/max-turns :seon.agent/reason :seon.agent/status]
-                               :let [v (ratom/realize (get c k))] :when (some? v)] [k v]))
-          stands (when (or (:seon.agent/outcome agent) (:seon.task/outcome t)) (standing agent (select-keys t [:seon.task/outcome :seon.task/reason])))]
-      [:section
-       [:h2 "Your task"]
-       [:p {:wire/for "page"} (str "task · " (namespace (symbol id)) (when stands (str " · " (:text stands) (when (:detail stands) (str " · " (:detail stands))))))]
-       (when plan (markdown plan))
-       ;; a work or whole task is done by the rule in the system prompt; the other kinds (design, merge, test) say what they are for
-       (when-not (#{:work :whole} (:seon.task/kind t :work))
-         (when-let [ins (:seon.task/instructions t)] [:p ins]))
-       [:p (str "Task: " id)]])))
 
 (def ^:private cite-joins
   "Where a cite's joins hold an entity, and the identity attribute that marks it held whole there (an entity
@@ -1657,13 +1632,10 @@
 (defn agent-parts
   "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists): the
   agent's own state, drawn from its own attributes (how its work stands, its open problems, the keys it added, its turn, its state),
-  then the tiles of what its pull joins (`tiles`, by this render's pattern: no part named here), then the tiles of its evals' rendered
+  then the tiles of what its pull joins (`tiles`, by the agent's own pattern less its conversation, seon.render/page-pattern: no part named here), then the tiles of its evals' rendered
   values (`eval-tiles`, by the seek). The cites of its task are drawn by `cite-parts` until the cite's own render resolves what it
   joins (Context, step 1 of docs/users.md's pages from data). See docs/render.md#the-page."
   {:seon.render/list "p-task"
-   :seon.ctx/pattern [:seon.agent/key :seon.agent/status :seon.agent/outcome :seon.agent/reason :seon.agent/turn :seon.agent/max-turns
-                      :seon.agent/ended-turn :seon.agent/ns {:seon.agent/task :seon.task/task-fact} {:seon.cite/_of :seon.cite/cite-fact}
-                      {:seon.search/_of :seon.search/search-fact} {:seon.message/_to [:seon.message/id :seon.message/from]}]
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.render/index :map]]] :any] :any]}
   [{ix :seon.render/index} c]
   [:div {:id "p-task"}
@@ -1674,7 +1646,8 @@
    [#'turn {:at [:seon.agent/ns]}]
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]
    ;; what its pull joins, each by its own render, in the pull's order (the cites until their render resolves its joins)
-   (seq (remove #(= :seon.cite/cite-fact (render/entity-schema ix (ratom/untracked %) nil)) (tiles ix c (:seon.ctx/pattern (meta #'agent-parts)))))
+   (seq (remove #(= :seon.cite/cite-fact (render/entity-schema ix (ratom/untracked %) nil))
+                (tiles ix c (render/page-pattern ix (or (render/entity-pattern ix (ratom/untracked c)) [])))))
    ;; until the cite's own render resolves what it joins (step 1's last piece): the task's cites and the agent's own, as before
    (when (:seon.agent/task c) (list [#'citations {:at [:seon.agent/task :seon.cite/_of]}] (seq (cite-parts c))))
    (when (seq (:seon.cite/_of c)) [#'references {:at [:seon.cite/_of]}])

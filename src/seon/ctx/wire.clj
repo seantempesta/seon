@@ -246,7 +246,7 @@
 (defn- presentation-free
   "Hiccup h without what is the page's alone: each element's class, style and id, but for a component's root (an element the walk
   gave an id), which keeps its render's name, the first word of its class, so the model can look up the function that drew a part
-  (`(source seon.render.ui/task)`) and its CSS on that var's metadata, and its id (seon.render/key-id: the render and what it shows), by which
+  (`(source seon.render.ui/task-view)`) and its CSS on that var's metadata, and its id (seon.render/key-id: the render and what it shows), by which
   a diff names it (seon.render/keyed); each element's children vectors only (`children`). See docs/render.md#style."
   {:malli/schema [:=> [:cat :any] :any]}
   [h]
@@ -265,8 +265,8 @@
 (defn page-parts-through
   "Agent a's page parts at each point of chain, a vector of points ({:commit :t}, in order on one branch; a first of nil: nothing
   before the second, answered nil), on db's store, as the model reads them: one walk of its page-parts render
-  (seon.render.ui/agent-parts, named here by symbol: seon.render.ui requires this namespace) over the agent pulled by what that
-  render reads (its :seon.ctx/pattern), drawn once at the first point and advanced to each later one as a kept walk moves
+  (seon.render.ui/agent-parts, named here by symbol: seon.render.ui requires this namespace) over the agent pulled by what the
+  parts read (seon.render/page-pattern of the agent's own pattern), drawn once at the first point and advanced to each later one as a kept walk moves
   (seon.ctx/moved, seon.ctx/patch, seon.render/flush! of what those datoms reach: docs/render.md#a-page-is-a-kept-walk), each
   point's hiccup stripped of presentation (`presentation-free`). So a chain costs one draw and what moved between its points,
   never a draw a point. The branch is the db's own (Datahike's config). See docs/render.md#a-change-is-edits-by-name."
@@ -276,7 +276,9 @@
     (let [parts (requiring-resolve 'seon.render.ui/agent-parts)
           d0 (db-at db p)
           branch (get-in (or (:origin-db d0) d0) [:config :branch])
-          c0 (assoc-in (ctx/build (program/index-of-db d0) d0 a branch (:seon.ctx/pattern (meta parts))) [:ix :own-index?] true)
+          ix0 (program/index-of-db d0)
+          ;; what the parts read: the agent's own pattern less its conversation (seon.render/page-pattern, the walk's own reading)
+          c0 (assoc-in (ctx/build ix0 d0 a branch (render/page-pattern ix0 (or (render/entity-pattern ix0 (d/pull d0 '[*] a)) []))) [:ix :own-index?] true)
           at (volatile! d0) c (volatile! c0) r (ratom/atom (:tree c0))
           w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [parts {} (ratom/ref-view r ctx/changes)] (:index (:ix c0)))
                    :outputs #{:seon.render/hiccup})

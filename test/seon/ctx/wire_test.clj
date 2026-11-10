@@ -458,7 +458,7 @@
         (is (str/includes? (:content (peek r1)) "[\"page\" \"cited-demo_2Ff\"") "the cited var's edit, at its part: the id names the function that drew it and what it shows")
         (is (not (str/includes? (:content (peek r1)) "Your proofs")) "one edit at the part that moved, never the page whole")
         (is (str/includes? (:content (peek r1)) "Triples."))
-        (is (not (re-find #"seon\.render\.ui/task\b" (:content (peek r1)))) "a component that did not change is not told again")
+        (is (not (re-find #"seon\.render\.ui/task-view\b" (:content (peek r1)))) "a component that did not change is not told again")
         (is (not (re-find #"\"status\"" (:content (peek r1)))) "a turn taken moved nothing of how the work stands: not told again")
         (is (str/includes? (:content (peek r2)) "quadruple") "the plan changed mid-run: the task's part in the next diff")
         (let [db @conn
@@ -822,7 +822,7 @@
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
         (is (not (re-find #"\"related" (:content (peek r1)))) "what a verdict does not move is not told again")
         (is (str/includes? (:content (peek r1)) "fails") "the proof's new verdict")
-        (is (not (str/includes? (:content (peek r1)) "seon.render.ui/task")) "the rest unchanged, not told again")
+        (is (not (str/includes? (:content (peek r1)) "seon.render.ui/task-view")) "the rest unchanged, not told again")
         (is (not-any? #(str/includes? (str (:content %)) ";;") (rest r1)) "no ;; reaches the model")
         (is (nil? (resolve 'seon.ctx/messages)) "one path: no request without an agent")))))
 
@@ -1182,7 +1182,7 @@
         [w :as walk] (walked db)
         ran #(do (vreset! (:ledger w) {}) (step! walk %) (into #{} (for [[f c] (render/ledger w) :when (or (:miss c) (:same c))] (name f))))]
     (is (not (contains? (ran [{:seon.agent/key "demo/a2"}]) "task")) "an agent written: nothing the task's data reads")
-    (is (contains? (ran [[:db/add te :seon.task/plan "Make ```demo/g``` say two things."]]) "task") "the plan rewritten: the task's data runs again")
+    (is (contains? (ran [[:db/add te :seon.task/plan "Make ```demo/g``` say two things."]]) "task-view") "the plan rewritten: the task's data runs again")
     (render/dispose-walk! w)))
 
 (deftest a-vars-arglists-are-its-recorded-sources
@@ -1338,7 +1338,7 @@
             a (:db/id (d/entity db [:seon.agent/key "a1"]))
             parts (wire/page-parts-at db a {:commit (d/commit-id db)})
             text (pr-str parts)]
-        (is (str/includes? text "Your task") "the task's part")
+        (is (str/includes? text "Task: ") "the task's part, by its own render (seon.render.ui/task-view)")
         (is (str/includes? text "Make f.") "and its plan's text")
         (is (str/includes? text "Your proofs") "the proofs' part beside it")))))
 
@@ -1350,7 +1350,7 @@
         (is (= ["system" "user" "assistant" "tool"] (mapv :role messages)) "the system prompt, what opens the session (a conversation never opens on a blank assistant message), then the page as a generated eval and its result")
         (is (= [:section :session :page] (mapv (comp first first) parts)) "the entities it was made of")
         (is (str/starts-with? (page-code messages) "(my.render/page {:commit #uuid \"") "the page whole, as the call (my.render/page p)")
-        (is (str/includes? (:content (peek messages)) "Your task") "the task's part is in it")))))
+        (is (str/includes? (:content (peek messages)) "Task: ") "the task's part is in it, by its own render")))))
 
 (deftest a-turn-appends-the-parts-that-moved-as-a-message
   (ts/test-branch!
@@ -1653,7 +1653,7 @@
             ms (:messages r0)]
         (is (= {:role "system" :content (wire/system-text @conn)} (first ms)))
         (is (= ["system" "user" "assistant" "tool"] (mapv :role ms)) "the system prompt, what opens the session, then the page whole as a generated eval")
-        (is (str/includes? (:content (peek ms)) "Your task") "the task's part")
+        (is (str/includes? (:content (peek ms)) "Task: ") "the task's part, by its own render")
         (is (re-find #"demo-test/g-test" (:content (peek ms))) "and its proof")))))
 
 (deftest a-task-with-no-examples-sends-the-conversation
