@@ -1775,8 +1775,9 @@
   "What an entry of the agents list reads of an agent on main: its identity, its process's status, its branch and turns, and its task."
   [:seon.agent/key :seon.agent/started-ms :seon.agent/status :seon.agent/branch :seon.agent/max-turns
    {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure :seon.task/plan {:seon.task/started-by [:seon.user/name]}]}
-   ;; the agents doing the tasks it started (a request's work agents), shown under its tile and its entry
-   {:seon.task/_started-by [{:seon.task/agent [:db/id :seon.agent/key]}]}])
+   ;; the agents it started (a request's work agents), shown under its tile and its entry: :seon.agent/agents, the one path, read
+   ;; forward from the agent (seon.task's agent-tx writes it from the task's :seon.task/started-by)
+   {:seon.agent/agents [:db/id :seon.agent/key]}])
 
 (defn session-address
   "The name of an agent's page: its key (:seon.agent/key, its id's name), the one name of a session that survives a root's restart,
@@ -1813,7 +1814,7 @@
   "A session of main in the agents list (a component over the db, its agent's entity id: every agent on main, of any boot, a
   process or none): lit while it works, what it works on (its task in words, else its branch; else its id), how its work stands
   (standing), the whole pill one link to its page by its stable address (session-address), the whole name in its title; under it,
-  by this same render, the agents doing the tasks it started (a request's work), so the list is the tree of what each started.
+  by this same render, the agents it started (its :seon.agent/agents: a request's work), so the list is the tree of what each started.
   See docs/render.md#a-sessions-address-and-the-agents-list."
   {:seon.render/style ".agent-side:has(> .seon-nest) { flex-direction: column; align-items: stretch; } .agent-side > .seon-nest { margin-left: 0.75rem; padding-left: 0.5rem; border-left: 1px solid var(--color-base-800); }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
@@ -1830,7 +1831,7 @@
            ;; named by what it works on (its task in words), its key in the title: a person tells agents apart by their work
            [:span {:class "min-w-0 truncate font-semibold text-text-100"} (or what (kname id))]
            (when (:seon.agent/status a) [:span {:class (str "shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)])]]
-     (when-let [kids (seq (distinct (keep #(get-in % [:seon.task/agent :db/id]) (:seon.task/_started-by a))))]
+     (when-let [kids (seq (distinct (keep :db/id (:seon.agent/agents a))))]
        [:ul {:class "seon-nest"} (for [k (sort-by #(session-order db %) kids)] [#'agent-side {} k])])]))
 
 (defn- session-order
@@ -1986,7 +1987,7 @@
        (when asked [:p {:class "asked"} [#'markdown asked {:inline? true}]])
        (when reply [#'markdown reply {:inline? true}])]]
      ;; the agents doing what it started, each its own tile under it, so a request and its work read as one tree
-     (when-let [ks (seq (distinct (keep #(get-in % [:seon.task/agent :seon.agent/key]) (:seon.task/_started-by a))))]
+     (when-let [ks (seq (distinct (keep :seon.agent/key (:seon.agent/agents a))))]
        (into [:div {:class "started"}] (for [k ks] [#'session-card {} k])))]))
 
 (defn- sessions-by-standing

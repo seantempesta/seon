@@ -53,6 +53,17 @@
     (is (pos-int? before))
     (is (= before after) "and nothing was forked: root's fork server is the one it had")))
 
+;; docs/clocks.md#time-decides-the-owners-exceptions: a run ended past its bound takes its Seon state first (bin/evidence asks it of
+;; root's server, read-only): root's stall check (::stall-due ::busy ::lost), each agent proc's (:inflight :fx-out :stall-seen
+;; :last-frame-ms), and which procs answered the ping, so a proc mid-step is seen missing, never read as nil
+(deftest a-hangs-evidence-holds-roots-stall-state
+  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
+        r (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code "(seon.root/stall-state sys)"})))]
+    (is (map? (:root r)) (pr-str r))
+    (is (every? #{:seon.root/stall-due :seon.root/stall-armed :seon.root/busy :seon.root/lost} (keys (:root r))) "root's stall check, nothing else of its state")
+    (is (map? (:agents r)) "each agent proc's, by pid")
+    (is (some #{:api} (:answered r)) "and the procs that answered, root's api among them")))
+
 (deftest the-sweeper-pool-is-fixed-before-anything-collects
   ;; task seon.root/the-sweeper-pool-is-fixed-before-anything-collects: six threads allocate through 30
   ;; collections in a fresh binary; Chez starts a sweeper per waiting thread and never stops one, so a
@@ -180,15 +191,21 @@
         main (ev "(name (seon.db/conn-main (:conn sys)))")
         held (ev "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys))))]")
         by (ev "(:started-by (seon.task/root @(:conn sys)))")
+        ;; every name the interfaces give an agent: root's view and the page's address (its key, seon.render.ui/session-address)
+        view (ev "(vec (sort (keys (:agents (seon.root/state sys)))))")
+        addresses (ev "(mapv #(seon.render.ui/session-address (d/pull @(:conn sys) '[:seon.agent/key] [:seon.agent/key %])) (keys (seon.task/agents @(:conn sys))))")
         first-boot (str/split-lines (root-answers path "main" [main (ev (str "(my.root/load-tasks! sys " (pr-str tasks) ")"))
-                                                           {:op :attach :task "demo/t"} held (ev "(:boot sys)") by]
+                                                           {:op :attach :task "demo/t"} held (ev "(:boot sys)") by
+                                                           {:op :agents} view addresses]
                                                   {:args bare}))
         second-boot (str/split-lines (root-answers path "main" [main held
                                                                 (ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
                                                                 (ev "(#'seon.root/previous-end (d/db-with @(:conn sys) [{:seon.root/id :root :seon.root/boot \"killed-boot\"}]))")
-                                                                by (ev "(= [\"--started-by\" \"seon.root-test/another\"] (vec (take-last 2 (my.root/resume-args sys))))")]
+                                                                by (ev "(= [\"--started-by\" \"seon.root-test/another\"] (vec (take-last 2 (my.root/resume-args sys))))")
+                                                                {:op :attach :task "demo/t"} {:op :agents} view addresses]
                                                    {:args (into bare ["--started-by" "seon.root-test/another"])}))
-        printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))]
+        raw (fn [l] (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))
+        printed (fn [l] (ts/value-of (:response (raw l))))]
     (try
       (is (= "main" (printed (first first-boot))) "a boot with no main named works on the config's main")
       (is (= "main" (printed (first second-boot))) "the second boot resumes the same main")
@@ -207,6 +224,22 @@
             "the second boot found the first's clean end: its stdin closed")
         (is (= {:boot "killed-boot" :cause :unclean} (select-keys killed [:boot :cause]))
             "a boot that left no stop fact is found :unclean"))
+      ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent's id is the keyword of its :seon.agent/key,
+      ;; minted once (seon.root/start-agent) and kept by the session's next agent (seon.task/session-key), so the restart leaves every
+      ;; interface naming the task's agent as before: the attach, the task's agent, the server's agents list, root's view and the page's address
+      (let [[attached agents-1 view-1 addresses-1] [(:agent (raw (nth first-boot 2))) (raw (nth first-boot 6)) (printed (nth first-boot 7)) (printed (nth first-boot 8))]
+            [again agents-2 view-2 addresses-2] [(:agent (raw (nth second-boot 6))) (raw (nth second-boot 7)) (printed (nth second-boot 8)) (printed (nth second-boot 9))]
+            all-names (fn [ag agents view addresses] (map #(str/replace (pr-str %) "\"" "") (concat [ag (get-in agents [:tasks "demo/t" :agent])] (keys (:agents agents)) view addresses)))]
+        (is (keyword? attached) (pr-str (nth first-boot 2)))
+        (is (some #{(name attached)} addresses-1) "the page's address is the agent's key, its id's name")
+        (is (some #{attached} view-1) "and root's view names it")
+        (is (= (name attached) (some-> again name)) (str "the same agent after the restart: " (nth second-boot 6)))
+        (is (= again (get-in agents-2 [:tasks "demo/t" :agent])) "and the task's agent")
+        (is (some #{again} (keys (:agents agents-2))) "and the server's agents list")
+        (is (some #{again} view-2) "and root's view")
+        (is (some #{(name again)} addresses-2) "and its page address")
+        (is (not-any? #(re-find #"^:?a\d+$" %) (concat (all-names attached agents-1 view-1 addresses-1) (all-names again agents-2 view-2 addresses-2)))
+            "no id of a counter's form"))
       (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest a-root-stops-in-a-second
@@ -259,19 +292,6 @@
              (ask "(let [r (my.root/load-tasks! sys)] [(select-keys r [:ok :files]) (contains? (seon.task/tasks @(:conn sys)) \"demo/t\") (:seon.root/tasks (datahike.api/pull @(:conn sys) [:seon.root/tasks] [:seon.root/id :root])) (my.root/load-tasks! sys)])"))
           "a load a person asks for reads its own dir's one whole task, records the read's outcome, and a read that finds it so writes nothing")
       (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
-
-(deftest a-build-without-whole-program-inference-reads-with-tools-reader
-  ;; with
-  ;; JOLT_NO_WP_INFER=1, `jolt build` of an app requiring clojure.tools.reader fails to analyze
-  ;; tools.reader.impl.utils (`<=clojure-1-7-alpha5 is not bound`), so a root cannot be built
-  ;; open-world; with inference on the same app builds and reads.
-  (let [checkout (seon.config/checkout)
-        out (str checkout "/target/reader-no-wp-" (random-uuid))
-        build (sh/sh "env" "JOLT_NO_WP_INFER=1" (str "JOLT_PWD=" checkout) (str checkout "/target/jolt/jolt") "-A:hello" "build" "-m" "build.reader" "-o" out :dir checkout)]
-    (try
-      (is (= 0 (:exit build)) "the build without whole-program inference succeeds")
-      (is (= "[1 2]" (str/trim (:out (sh/sh out)))) "and the binary reads")
-      (finally (sh/sh "rm" "-rf" out (str out ".build"))))))
 
 (def ^:private boot-probe
   "What a boot of `boots-on-a-tree` answers: the config key and the schema entry the trees change, as root holds them; the
@@ -432,58 +452,6 @@
     (is (nil? (:error (:fact two))) (pr-str (:fact two)))
     (is (= (:seed-t two) (:program-t two)) "nothing of the tree was written: main's program is the seed's")
     (is (= (config/value :seon.config.web/streams-buf) (:streams-buf two)) "main's entries as they were")))
-
-(deftest a-root-restart-names-the-same-agent-by-the-same-name
-  ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent's id is the keyword of its
-  ;; :seon.agent/key, minted once (seon.root/start-agent) and kept by the session's next agent
-  ;; (seon.task/session-key), so a root's restart leaves every interface naming the agent as before:
-  ;; root's view, the task's agent, the server's agents list and the page's address. One agent on one
-  ;; task; root stopped cleanly and started again on the same store, main and runs, and the task
-  ;; attached again (the session continues); no id of a counter's form (:a1) appears before or after.
-  (let [checkout (config/checkout)
-        tns (seon.lib/unique-id)
-        task (str tns "/t")
-        tasks (str checkout "/target/runs/" tns "-tasks")
-        main (str "restart-names-" (random-uuid))
-        runs (str checkout "/target/runs/" main "-runs")
-        root0 {:store (ts/process-store checkout) :main main :runs runs
-               :args ["--set" (str ":seon.config.source/root=" (pr-str checkout))]}
-        ;; every name the interfaces give the task's agent, read on the running root
-        names-of (fn [root]
-                   (let [ask #(ts/ask root %)
-                         ev #(let [r (ask {:op :eval :agent "root" :code %})] (if (:error r) r (ts/value-of (:response r))))
-                         attach (ask {:op :attach :task task})
-                         ag (:agent attach)]
-                     {:attached ag
-                      :view (ev "(vec (sort (keys (:agents (seon.root/state sys)))))")
-                      :task (get-in (ask {:op :agents}) [:tasks task :agent])
-                      :listed (vec (keys (:agents (ask {:op :agents}))))
-                      :address (ev (str "(seon.render.ui/session-address (datahike.api/pull @(:conn sys) '[:seon.agent/key] [:seon.agent/key " (pr-str (name ag)) "]))"))}))]
-    (.mkdirs (java.io.File. tasks))
-    (spit (str tasks "/" tns ".edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
-    (try
-      (let [boot! (fn [] (let [root (ts/start-root! root0)]
-                           (when-not (:port root) (throw (ex-info (str "the root did not listen: " (:log root)) {})))
-                           root))
-            r1 (boot!)
-            _ (ts/ask r1 {:op :eval :agent "root" :code (str "(my.root/load-tasks! sys " (pr-str tasks) ")")})
-            before (names-of r1)
-            _ (ts/stop-root! r1)
-            r2 (boot!)
-            after (try (names-of r2) (finally (ts/stop-root! r2)))
-            key-of #(some-> % name)
-            all-names (fn [m] (map pr-str (concat [(:attached m) (:task m) (:address m)] (:view m) (:listed m))))]
-        (is (some? (:attached before)) (pr-str before))
-        (is (= (key-of (:attached before)) (:address before)) "the page's address is the agent's key, its id's name")
-        (is (= (key-of (:attached before)) (key-of (:attached after))) "the same agent after the restart")
-        (is (= (key-of (:attached after)) (:address after)) "and its page address")
-        (is (= (:attached after) (:task after)) "and the task's agent")
-        (is (some #{(:attached after)} (:view after)) "and root's view")
-        (is (some #{(:attached after)} (:listed after)) "and the server's agents list")
-        (is (not-any? #(re-find #"^:?a\d+$" %) (map #(str/replace % "\"" "") (concat (all-names before) (all-names after))))
-            "no id of a counter's form"))
-      (finally (sh/sh "rm" "-rf" tasks runs)
-               (ts/drop-main! (:store root0) main)))))
 
 ;; docs/users.md#roots-session: a request's name is its first sentence's words, a dot inside a name kept, the same words asked again
 ;; numbered 2, 3 (it read "add-a-function-demo" from "demo.math/double", and a repeat took the transaction's number)

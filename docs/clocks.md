@@ -1,10 +1,11 @@
 # Clocks
 
-Time is measured and recorded, and decides only at the owner's three exceptions; `bin/laws clocks` and `bin/laws measures` name every place in `src/` that reads or waits on a clock.
+Time is measured and recorded, and decides only at the owner's four exceptions; `bin/laws clocks` and `bin/laws measures` name every place in `src/` that reads or waits on a clock.
 
 Work runs because it arrived and parks when there is none; a missing answer is a recorded
 fact (blocked, stalled, dead), never a timer's guess. The exceptions are the cron proc, a
-message's delayed insert, and the kernel's TCP keepalive ([below](#time-decides-the-owners-exceptions)).
+message's delayed insert, the kernel's TCP keepalive, and a run ended far past its measured time once its evidence is
+captured ([below](#time-decides-the-owners-exceptions)).
 
 `bin/laws clocks` lists every function in `src/` whose code (strings and comments left
 out) sleeps, takes a timeout, holds a deadline or names a `*-MS` constant, and fails on one
@@ -29,6 +30,7 @@ The sites where time decides because the owner allowed it, the provider's delaye
 
 - `seon.fx/wake-later`: the delayed insert, with its helpers `seon.fx/refill`, `seon.fx/admit`, `seon.fx/dispatch` and `seon.fx/owner-proc`. The provider's rate is a token bucket (halved by a rate-limit outcome, raised by a twentieth toward the configured rate by every other, and a request is admitted only while a worker is free and the bucket holds its estimate); a request the bucket cannot cover yet is put back on the owner's `:tick` port once it refills, by `seon.step/put-after!`.
 - `seon.step/put-after!`: the one timer: a go block parks on a core.async `timeout`, then puts the message. The delayed insert, the cron's tick and root's stall check (`seon.root/api-proc`, below) all arm through it. Measured on the current Jolt pin, 25 and 1000 pending timers hold the same thread count (21) for this form and for the callback `take!` it replaced, so the saving is one mechanism, not threads (`seon.step-test/timer-threads`).
+- `bin/check`'s step bound (owner, 2026-11-10, [decisions](decisions.md#a-run-far-past-its-measured-time-is-ended-after-its-evidence-owner-2026-11-10)): a step of a `bin/prove` run past its bound (the plan's `step-bounds`: `:seon.config.check/step-end-factor` times the median of its measured runs, the `:ms` its green verdicts keep, floored at `:seon.config.agent/stall-ms`; a step never measured has none) is captured by `bin/evidence` first (the process tree, each process's sample and files, its fiber dumps, and its root's Seon state, `seon.root/stall-state`, asked of the server each check step's root serves on the port it writes beside its store), then ended and red with the typed reason `STEP-OVERRAN`, never run again by the run; the cause gets its task. `seon.root/stall-state`'s one Flow ping is bounded by `:seon.config.check/ping-ms`: a proc mid-step that long is missing from its `:answered`.
 - `seon.step/timer`, `seon.step/arm!` and `seon.step/fired!`: a self-timer's armed flag, a host object the proc's state holds, so a step that took the timer's message and then threw (Flow keeps the state from before it) cannot leave the timer armed for good: root's stall check and the delayed insert's `:tick` arm through it. With the flag in the state, root's stall check stayed armed and was never armed again for the life of root (batch 15's problems step waited 14.5 min on a stall it never recorded; the proof is root's step-fn test of a step that throws after a stall check). The cron's tick is armed in the step that takes it, before anything can throw.
 - `seon.cron/cron-proc`, with `seon.cron/next-fire-ms` and `seon.cron/epoch-ms`: the cron proc, the owner's one allowed schedule. At the time of day `:seon.config.proofs/full-run-at` names (UTC), `seon.step/put-after!` puts a `:tick` on its port, and the proc puts one full-run request for main on the test service's queue, then arms the next day's: it decides nothing but when the message is put. `epoch-ms` is its one clock read, to find that time. A root started after the time waits for the next day's.
 

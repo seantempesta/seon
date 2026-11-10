@@ -727,12 +727,9 @@
         n 20]
     (try
       (let [once (write-turns! conn cfg path :once n n)
-            t0 (profile/now-ns)
             per-turn (write-turns! conn cfg path :per-turn n 1)
-            ms (profile/ms-since t0)
             bound (+ once (* n 32 1024))]
-        (println (str "a-commit-costs-what-it-writes: " n " turns, one commit " once " B, per turn " per-turn " B, bound " bound " B, "
-                      (format "%.1f" (/ ms n)) " ms per turn (compressor " (cfg/value :seon.config.store/compressor)
+        (println (str "a-commit-costs-what-it-writes: " n " turns, one commit " once " B, per turn " per-turn " B, bound " bound " B (compressor " (cfg/value :seon.config.store/compressor)
                       ", out of line from " (cfg/value :seon.config.store/value-out-of-line-bytes) " B)"))
         (is (<= per-turn bound)
             (str n " per-turn commits wrote " per-turn " bytes; the same turns in one commit wrote " once
@@ -1396,10 +1393,11 @@
   ;; only the nodes its own datoms are in. With random addresses every node a merge rewrote stayed the branch's own: 66 to
   ;; 81 percent of a long-lived branch's nodes after 100 merges in the lab, against 6 to 9 with content addresses. A store
   ;; on disk of its own, the last resort: a node has an address only once a durable store holds it; removed at the end.
-  ;; Its seed is 5 namespaces of the example program (550), not 18 (2000): seeding a durable store was 361 M of the
-  ;; test's 552 M ticks, and the claim holds as sharply at either size (5 of 85 own; 39 of 85 with random addresses)
+  ;; Its seed is 1000 datoms of the example program: at 550 (87 nodes) one node is 1.1% of the tree, so one more config
+  ;; key on main moved a B-tree split and turned it red, 9 of 87 against the tenth (batch 20, 2026-11-10); measured on
+  ;; that tree: 5 of 108 own at 1000, 4 of 158 at 2000, the bound five nodes clear, for about 1 s more than 550
   (let [path (str (seon.config/checkout) "/target/db-test-nodes-" (random-uuid))
-        {cfg :cfg main :conn} (pdb/open! :lmdb path 550 :db)]
+        {cfg :cfg main :conn} (pdb/open! :lmdb path 1000 :db)]
       (let [b (keyword (str "test-" (random-uuid)))
             _ (d/branch! main :db b)
             br (pdb/connect (assoc cfg :branch b))
