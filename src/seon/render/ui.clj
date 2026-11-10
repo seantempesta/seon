@@ -776,7 +776,7 @@
 (defn rules-list
   "The page's rules as a list of their own (p-rules), so a change of a rule draws nothing else: on the page, never in the model's request. See docs/render.md#style."
   {:seon.render/list "p-rules" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_] [:div {:id "p-rules"} [#'page-rules {}]])
+  [_] [:div {:id "p-rules"} [#'page-rules {:wire/for "page"}]])
 
 (defn task
   "The task its agent works (a component over ctx alone): its name as the heading, its plan accumulated over its needs
@@ -1211,7 +1211,7 @@
         stands (standing agent t)
         verdicts (for [[_ ps] (concat [[nil (:proved task)]] (map (fn [[_ nd]] [nil (:proved nd)]) (:seon.task/needs task))) [_ v] ps] (ratom/realize (:seon.test/status v)))
         running (d/q '[:find ?r . :in $ ?a :where [?p :seon.process/agent ?a] [?p :seon.process/running ?r]] db (:db/id c))]
-    [:div {}
+    [:div {:wire/for "page"}
      [:p (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))) (when (:reason stands) (str " · " (:reason stands))))]
      (when-let [id (:seon.task/id t)] [:p "task " (task-title id)])
      (when running [:p "running " [:code running]])
@@ -1291,8 +1291,8 @@
       [:div {:class "ml-4 flex min-w-0 max-w-full flex-col gap-1 overflow-x-auto py-1"}
        ;; the code as the agent wrote it, whole, highlighted
        [:div {:class "min-w-0"} [#'emit/marked-hiccup :seon.print/code (or code "")]]
-       (when at [#'eval-output {:key id :at at :agent agent}])]]
-     (when at [#'eval-glance {:key id :at at}])]))
+       (when at [#'eval-output {:key id :at at :agent agent :wire/for "page"}])]]
+     (when at [#'eval-glance {:key id :at at :wire/for "page"}])]))
 
 (defn eval-item
   "An eval of the conversation (a component over ctx and the db), its one hiccup (`eval-hiccup`) (owner: \"I
@@ -1434,7 +1434,7 @@
       [:section (cond-> {:class "flex w-full flex-col gap-1"} (pos? (or n 0)) (assoc))
        (if (str/blank? reasoning)
          (when (and sent? (some? reasoning)) [:span {} reasoning])
-         [:details [:summary {:class "text-xs text-text-500"} "thinking"]
+         [:details [:summary {:class "text-xs text-text-500" :wire/for "page"} "thinking"]
           [:div {} [#'markdown reasoning {:inline? true}]]])
        (when spoke? [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"} [#'markdown reply {:inline? true}]])
        (when (seq children) [:ol {:class "seon-turn flex flex-col"} (seq children)])]
@@ -1457,7 +1457,7 @@
   message. See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :string [:sequential [:tuple :string :string :string]]] :any]}
   [in parts]
-  (into [:div {:id (render/key-id [in]) :class "seon-stream" :aria-busy "true" :data-ignore-morph "" :data-stream-in in}]
+  (into [:div {:id (render/key-id [in]) :class "seon-stream" :aria-busy "true" :data-ignore-morph "" :data-stream-in in :wire/for "page"}]
         (for [[id part text] parts] (stream-part id part text))))
 
 (defn chat-ask
@@ -1558,7 +1558,7 @@
   {:seon.render/style ":is(.system-message, .example-session, .proof-story) {font-size: 0.75rem; line-height: 1rem; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   [:details {}
-   [:summary {:class "muted"} "system message"]
+   [:summary {:class "muted" :wire/for "page"} "system message"]
    [#'markdown (wire/agent-system-text db c)]])
 
 (defn example-session
@@ -1570,7 +1570,7 @@
         db (d/as-of db0 t)
         c (ctx/agent-ctx ix db (seon.db/eid db :seon.agent/key k))]
     (into [:details {}
-           [:summary {:class "muted"} (str "example session " k)]
+           [:summary {:class "muted" :wire/for "page"} (str "example session " k)]
            [:p {} (session/example-open k (:seon.agent/description c))]]
           (concat
             (for [[_ cid] (ctx/turns c)
@@ -1676,11 +1676,11 @@
      [#'system-message {}]
      [#'session-examples {}]
      (when k [:li {} (session/session-open k)])
-     (when (:seon.agent/task c) [#'chat-ask {}])
+     (when (:seon.agent/task c) [#'chat-ask {:wire/for "page"}])
      ;; one past the turn in force: what was taken for the turn that reads it comes before that turn begins (seon.turn/take!, tell-error!); a turn no record names draws nothing
      (for [n (range 0 (+ 2 (or (ratom/realize (:seon.agent/turn c)) 0)))] [#'conversation-turn {:key n}])
-     [#'chat-end {}]
-     [#'proof-story {}]]))
+     [#'chat-end {:wire/for "page"}]
+     [#'proof-story {:wire/for "page"}]]))
 
 (def ^:private task-stands
   "How a task's :seon.task/outcome reads to a person: [words tone]. :parked and :told are woken by a message (seon.reconcile/park-outcomes);
