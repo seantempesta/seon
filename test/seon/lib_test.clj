@@ -1,7 +1,7 @@
 (ns seon.lib-test
   "The native probes (native/probe.c through seon.lib): what they answer."
   (:require [clojure.test :refer [deftest is]] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm]
-            [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str]))
+            [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str] [clojure.core.async]))
 
 (deftest a-fork-beside-a-running-thread-is-refused-and-says-how-many-run
   ;; lib/fork! is the one spawning skeleton: a second active Chez thread breaks a forked
@@ -129,3 +129,26 @@
     (is (= {:exit 0} (:go r)) "a go block that parks is resumed in the child")
     (is (= {:exit 0} (:timeout r)) "a timeout fires in the child")
     (is (= {:exit 0} (:store r)) "an in-memory Datahike store is made and written in the child")))
+
+(deftest a-forked-child-is-reset-before-anything-can-preempt-it
+  ;; docs/failure-points.md#physics-who-may-run-threads: fork(2) copies the parent's fibers and its carrier's run queue, and the
+  ;; child drops them (jolt.host/after-fork-child!). Nothing may run between the fork and that reset: with interrupts enabled
+  ;; first, a preemption there switched the child to the scheduler over the parent's queue, which ran a parent's ready fiber in
+  ;; the child (exit 7 here), or, once the reset had marked them, died of "fiber in unexpected state forked" (bin/check scale,
+  ;; 2026-11-10: an agent exited 1 with nothing on its stderr). Forced: the smallest quantum, ready fibers queued behind each fork
+  ;; the forks are made in a child of this process that runs as a main-carrier program (its fibers on its one thread, as a root's
+  ;; boot and an agent do), since a shard has threads of its own; that child answers 0 when every one of its forks did
+  (let [run (fn []
+              (jolt.host/main-carrier-run!
+                (fn []
+                  (jolt.host/fiber-preempt-ticks-set! 100)
+                  ;; the quantum is armed at a dispatch: yield once so this fiber runs under the small one
+                  (jolt.host/fiber-yield)
+                  (let [me (lib/c-getpid)
+                        ;; fibers that are always ready behind the forking one, as a root's procs are: in a child they are the parent's
+                        _ (dotimes [_ 4] (jolt.host/fiber-spawn (fn [] (loop [] (when (not= me (lib/c-getpid)) (lib/c-exit 7)) (jolt.host/fiber-yield) (recur)))))
+                        exits (vec (for [_ (range 50)]
+                                     (lib/fork! {:child #(lib/c-exit 0) :parent lib/wait-status :refused (fn [n] {:refused n})})))]
+                    (lib/c-exit (if (= {{:exit 0} 50} (frequencies exits)) 0 9))))))]
+    (is (= {:exit 0} (lib/fork! {:child run :parent lib/wait-status :refused (fn [n] {:refused n})}))
+        "every child of 50 reset itself and ran only its own code (9: one did not; before the fix all 50 ran a parent's fiber)")))
