@@ -281,7 +281,7 @@
   "Search hits as grep's rows (`grep`), best first: each {:at \"name:n\" :kind :text :name :relevance}, :at the hit's name and the
   number of the line :text is (the line of its text holding a word of q, else its first), so a hit reads as a grep line does and
   (lines name n 20) reads on from it; :relevance where the hit has one; the last {:kind :more} entry as it is. An agent trusts
-  grep because it shows the line (curated runs, 2026-11-10: 7 greps to 0 searches). See docs/vector.md#search."
+  grep because it shows the line. See docs/vector.md#search."
   {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
   [hits]
   (mapv (fn [{:keys [kind name line at relevance] :as h}]
