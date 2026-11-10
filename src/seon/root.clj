@@ -417,19 +417,17 @@
   "Why this root's binary is not current for its main, or nil: binary-current's answer for the tree main was last brought to
   from outside (db's :seon.root/source :tree, moved only by an import or a landing), {:binary :tree :reaches}, where what differs
   between the two trees reaches root's own code or a build input. What agents merged into main since is main's own and never a
-  mismatch (the db is the source of truth). Unknown is never current: a main with a source tree on a binary whose build recorded
-  none is {:binary nil :tree :missing :binary-tree}, and a diff git cannot make is {:binary :tree :error}. Nil with no source tree
+  mismatch (the db is the source of truth). Unknown is never current (binary-current's own rule: a main with a source tree on a binary whose build
+  recorded none names :missing :binary-tree), and a diff git cannot make is {:binary :tree :error}. Nil with no source tree
   (a store seeded with no source: nothing known). Agents of a stale binary would load main's forms over code it was not built
   from, so no agent is forked (no-room). See docs/source.md#a-boot-resumes-from-the-db."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
   (let [held (:tree (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root])))
         built (binary-program)
-        from (get-in built [:inputs :tree])]
-    (cond (nil? held) nil
-          (nil? from) {:binary nil :tree held :missing :binary-tree}
-          :else (let [r (binary-current db built held)]
-                  (if (contract/error? r) {:binary from :tree held :error (:seon.error/message r)} r)))))
+        r (binary-current db built held)]
+    ;; a diff git cannot make is no answer of current: held as what the row says
+    (if (contract/error? r) {:binary (get-in built [:inputs :tree]) :tree held :error (:seon.error/message r)} r)))
 
 (defn- no-room
   "Why no agent can be started now, or nil: no fork server to fork it (refused before an agent proc and its socket are made: a socket the lost server closes would end that agent first, as a death), or too many live agents. n: the agents the start would leave, a Back's old one not among them."
