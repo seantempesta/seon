@@ -3485,6 +3485,37 @@
         to-root (filter #(and (#{:patch :keyframe} (:op %)) (= :root (:view %))) (:to-web @o))]
     (is (seq to-root) (str "the spawn reaches root's tab: " (pr-str (map :op (:to-web @o)))))
     (is (some? st2))))
+;; focus is a ref on the user entity (docs/users.md#whats-on-screen): a tab opening an agent's page writes it, home reads it
+(defn- signed-in-main
+  "Main with the user sean signed in, and focus on agent key focus when given."
+  [main focus]
+  (d/db-with main (cond-> [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"} {:seon.root/id :root :seon.root/signed-in "u"}]
+                    focus (conj [:db/add "u" :seon.user/focus [:seon.agent/key focus]]))))
+
+(deftest the-user-entity-has-a-focus-ref-to-an-agent
+  (let [a (get (d/schema (ts/test-db)) :seon.user/focus)]
+    (is (= :db.type/ref (:db/valueType a)) "an optional ref on the user")))
+
+(deftest opening-an-agents-page-writes-the-signed-in-users-focus
+  (let [[main branch _] (paged-dbs)
+        st (assoc (proc-state (signed-in-main main nil) branch) :watch #{:root})
+        txs (fn [outs] (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= [:focus] (:tag %)) (:to-api outs)))))
+        [st1 o1] (#'p/render-proc st :from-web {:op :views :views #{:root :a3} :tabs 1})]
+    (is (= [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.agent/key "a3"]]] (txs o1)) "the agent's page is the focus")
+    (let [st2 (assoc st :main-db (signed-in-main main "a3") :watch #{:root :a3})
+          [_ o2] (#'p/render-proc st2 :from-web {:op :views :views #{:root :a3} :tabs 2})]
+      (is (empty? (txs o2)) "written only when it changes")
+      (let [[_ o3] (#'p/render-proc st2 :from-web {:op :views :views #{:root :a3 :home} :tabs 2})]
+        (is (= [[:db.fn/retractAttribute [:seon.user/name "sean"] :seon.user/focus]] (txs o3)) "opening home retracts it")))
+    (is (some? st1))))
+
+(deftest home-is-the-users-focus-else-the-user
+  (let [[main _ _] (paged-dbs)
+        user-of (fn [db] (:db/id (d/entity db [:seon.user/name "sean"])))
+        a3 (fn [db] (:db/id (d/entity db [:seon.agent/key "a3"])))]
+    (is (= (user-of (signed-in-main main nil)) (#'p/location (signed-in-main main nil) :home)) "no focus: the user")
+    (is (= (a3 (signed-in-main main "a3")) (#'p/location (signed-in-main main "a3") :home)) "a focus: its agent")))
+
 ;; Stage 2a's walk (docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09): one pass over a pull renders the page and
 ;; the model's messages. A lab schema in a branch's index names each entity's two renders; recognition is the best match of the
 ;; attributes an entity holds; a parent's render orders and places its children; a call placed in a model output is a

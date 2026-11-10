@@ -281,6 +281,13 @@
   {:malli/schema [:=> [:cat] :string]}
   [] (System/getProperty "user.name"))
 
+(defn- signed-in-key
+  "The :seon.agent/key of the user signed in on db (root's :seon.root/signed-in), who a person's ask and message are from, else op's refusal: no default. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:or :string :seon.root/refused]]}
+  [db op]
+  (or (:seon.agent/key (:seon.root/signed-in (d/entity db [:seon.root/id :root])))
+      (refused op "no user is signed in" {})))
+
 (declare root-session-message-tx)
 
 (defn- agent-key-of
@@ -499,9 +506,12 @@
                  nm (request-name db (:text m))
                  template (get tpl/templates (:template m :user))
                  ;; who started it, the agent that launched it or the person asking: its agent is linked to them when it starts (seon.task/start-tx), and the reconciler tells them how it ends (seon.reconcile/tell-tx)
-                 by (or (when (:agent m) (agent-key-of st (:agent m))) (person))]
-             (if-not template
+                 by (or (when (:agent m) (agent-key-of st (:agent m))) (signed-in-key db 'seon.root/ask!))]
+             (cond
+               (contract/error? by) (reply! st o p by)
+               (not template)
                (reply! st o p (refused 'seon.root/ask! (str "no template " (:template m)) {:templates (vec (sort (keys tpl/templates)))}))
+               :else
                (let [id (task/task-id 'request nm)
                      tx (tpl/request-tx db (tpl/from template {:seon.task/ns 'request :seon.task/name nm :seon.task/plan (:text m)}))]
                  (if (contract/error? tx)
@@ -542,14 +552,17 @@
       :message (if-let [k (or (agent-key-of st id)
                               ;; the first message to root makes root's session, in the same write (docs/users.md#roots-session)
                               (when (= :root id) ::root-session))]
-                 (let [[st rid] (pend st p :tx nil)
-                       w (if (= ::root-session k)
-                           ;; the message names the session by its tempid: a lookup ref cannot reach an entity its own transaction makes
-                           (-> (message-write st (:from m) ["root"] (:body m) {:rid rid})
-                               (update :tx-data #(root-session-message-tx @(:conn st) %)))
-                           (message-write st (:from m) [k] (:body m) {:rid rid}))]
-                   (step/out! o :to-writer w)
-                   (update st :writes (fnil conj #{}) rid))
+                 (let [from (signed-in-key @(:conn st) 'seon.root/message!)]
+                   (if (contract/error? from)
+                     (reply! st o p from)
+                     (let [[st rid] (pend st p :tx nil)
+                           w (if (= ::root-session k)
+                               ;; the message names the session by its tempid: a lookup ref cannot reach an entity its own transaction makes
+                               (-> (message-write st from ["root"] (:body m) {:rid rid})
+                                   (update :tx-data #(root-session-message-tx @(:conn st) %)))
+                               (message-write st from [k] (:body m) {:rid rid}))]
+                       (step/out! o :to-writer w)
+                       (update st :writes (fnil conj #{}) rid))))
                  (reply! st o p (gone id (str "no agent " id " on main"))))
       ;; requests for the writer: answered by rid; a collection only while no agent is live,
       ;; the store's only writer then being root's writer (seon.db/collect!)
@@ -1452,6 +1465,7 @@
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root
     ;; whose boot fact was refused cannot start anything, so its error ends the boot
     ;; with it, how the root before it on main ended (its stop fact, or :unclean)
+    ;; owed (owner's call): a fresh store's user name needs a documented config key, not the OS account (person)
     (let [prev (previous-end db)
           held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (person)) (into (task/earlier-agents-tx db)) (into (task/config-tx config in-force-sources))
@@ -1546,7 +1560,7 @@
       ;; :judge, which keys the run by its head's digest): recorded on main, one run with any other asker's
       run-tests! {:op :judge :id id}
       kill! {:op :kill :id id}
-      message! {:op :message :id id :from (person) :body (:body args)}
+      message! {:op :message :id id :body (:body args)}
       ;; my.root/run!'s one transaction: the held task (:task) released, its next run the reconciler's
       release! {:op :write :req {:op :tx :branch :db :tx-data (task/execution-tx [(:task args)] :running)}}
       ;; a reader opened an eval of agent key's page: the fact on the agent's entity on main (opened!), named by a lookup ref:
