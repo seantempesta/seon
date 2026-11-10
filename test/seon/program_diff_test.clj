@@ -4,7 +4,7 @@
   seon.program/diff-plan reads what the two values' program datoms differ by, and plans what
   reading both programs whole planned."
   (:refer-clojure :exclude [defn defn-])
-  (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [datahike.api :as d]
+  (:require [seon.lib] [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [datahike.api :as d]
             [seon.cost :as cost] [seon.program :as program] [seon.program-cost-test :as pc] [seon.db :as pdb]
             [clojure.java.shell :as sh]))
 
@@ -82,4 +82,4 @@
     (finally
       (doseq [n diff-sizes :let [path (#'pc/on-disk-path n)] :when (pdb/store? path)]
         (doseq [b [:db :branch]] (d/release (pdb/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
-        (sh/sh "rm" "-rf" path)))))
+        (seon.lib/remove-tree! path)))))

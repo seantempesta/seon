@@ -526,7 +526,9 @@
   (its work refused, its agent dead, its merge refused, or marked failed: its reason),
   each task whose root refused to spawn (its reason: the branch is held, or
   too many live agents), each task whose agent parked its session (its outcome: it waits
-  for a message, which wakes it), and each other task not released (cancelled, held) that released
+  for a message, which wakes it) at its cap or told, or that holds up other work (a session parked for
+  its person that blocks nothing is at rest, not a cause: root's own session, made at every boot, is one),
+  and each other task not released (cancelled, held) that released
   work needs, with the released tasks it blocks, and each merged task whose write-back failed (its
   :seon.git/commit-failed error: no commit holds its files). Read once at quiescence: one pass over the
   tasks."
@@ -538,9 +540,9 @@
                    o (:seon.task/outcome t)
                    f (when (= :held ex) (:seon.task/failure t))
                    refused (when (= :refused o) t)
-                   parked (when (#{:parked :told :cap} o) t)
-                   stopped (or refused parked)
-                   bs (blocks idx id)]
+                   bs (blocks idx id)
+                   parked (when (or (#{:told :cap} o) (and (= :parked o) (seq bs))) t)
+                   stopped (or refused parked)]
              :when (cond (= :running ex) stopped f true :else (seq bs))]
          (cond-> {:task id :cause (cond f (:reason f) refused (:seon.task/reason refused)
                                         parked (str "parked: " (name o) ", waiting for a message")
@@ -711,7 +713,7 @@
                    tx)
         from (:seon.agent/key (:seon.task/agent (d/entity db [:seon.task/id id])))]
     (if k
-      (task/message-tx (lib/id (lib/digest (str "asked/" id "/" (:max-tx db)))) (or from "root") [k]
+      (task/message-tx (lib/id (lib/digest (str "asked/" id "/" (:max-tx db)))) (task/sender from) [k]
                        (str "Task " id " " (ends-told to) (when said (str ": " said))
                             (when (and from (#{:parked :cap} to) (not (:seon.user/name (:seon.task/started-by (d/entity db [:seon.task/id id]))))) (str "\nTo answer it: (send-message [:" from "] \"...\")")))
                        now)
@@ -900,7 +902,7 @@
         tx (-> move
                (into [{:seon.agent/key k :seon.agent/ended-ms now}])
                (into (when (and (:verdict j) (not marked?))
-                       (task/message-tx (str "v-" id "-" turn) "root" [k]
+                       (task/message-tx (str "v-" id "-" turn) task/system-sender [k]
                                         (verdict-body (:verdict j) {:results results :deferred deferred :unmerged unmerged :caused (:caused diff)
                                                                     :basis (or base-t (:max-tx main))})
                                         now)))

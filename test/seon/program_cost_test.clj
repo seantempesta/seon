@@ -4,7 +4,7 @@
   branch that already holds n forms are a few index seeks, whatever n. Loading orders the
   forms in one pass over them and their references."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
+  (:require [seon.lib] [seon.test-store :as ts] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
             [datahike.api :as d] [seon.db :as pdb] [seon.cost :as cost] [my.test :as mt] [seon.program :as program] [seon.merge] [seon.agent] [seon.ctx] [seon.doc] [test-runner :as runner] [clojure.java.shell :as sh]))
 
 (defn- acct
@@ -109,7 +109,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db]]}
   [n]
   (let [path (on-disk-path n)
-        _ (sh/sh "rm" "-rf" path)
+        _ (seon.lib/remove-tree! path)
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)
         _ (d/transact conn {:tx-data (vec (mapcat #(program/account-tx @conn (acct % "x") %) (range n)))})
         base @conn
@@ -125,7 +125,7 @@
   (swap! seon.agent/state dissoc :branch-changes)
   (doseq [n divergence-sizes :let [path (on-disk-path n)] :when (pdb/store? path)]
     (doseq [b [:db :branch]] (d/release (pdb/connect (assoc (pdb/store-cfg :lmdb path) :branch b)) true))
-    (sh/sh "rm" "-rf" path)))
+    (seon.lib/remove-tree! path)))
 
 (defn on-disk-changes-of
   "seon.merge/delta-changes' arguments on on-disk-diverged-of's stores: main holding n forms, its

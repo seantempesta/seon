@@ -226,6 +226,26 @@
         (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (gone-statuses (:status a))) (not (gone-statuses (:status a')))) conj disj) #{}) id)))
     st))
 
+(defn stall-state
+  "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
+  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-due, ::busy and ::lost, and
+  each agent proc's :inflight (each request's kind), :fx-out, :stall-seen and :last-frame-ms, read by one Flow ping of
+  the graph, with :answered, every proc that answered it. The ping's bound is :seon.config.check/ping-ms: a proc
+  mid-step that long answers nothing and is missing from :answered (an agent in ::busy and not there is mid-step), never
+  read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
+  {:malli/schema [:=> [:cat :seon.root/sys] :map]}
+  [sys]
+  (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
+        state #(::flow/state (get states %))]
+    {:root (let [api (state :api)]
+             ;; the stall check's armed flag: ::stall-due, or once seon.step/timer holds it, ::stall-timer's value (a volatile)
+             (cond-> (select-keys api [::stall-due ::busy ::lost])
+               (contains? api ::stall-timer) (assoc ::stall-armed (some-> (::stall-timer api) deref))))
+     :agents (into (sorted-map)
+                   (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
+                     [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms]) :inflight (update-vals (:inflight s) :kind))]))
+     :answered (vec (sort (keys states)))}))
+
 (defn- stall-task
   "Root's task to deal with agent id's stall s, when it works a task (seon.template/stall: one per
   agent and task, so a later stall of the same task writes none): written to main, held, worked by
@@ -283,7 +303,6 @@
   (or (:seon.agent/key (:seon.root/signed-in (d/entity db [:seon.root/id :root])))
       (refused op "no user is signed in" {})))
 
-(declare root-session-message-tx)
 
 (defn- agent-key-of
   "The key of agent id, whom messages are to: its name when a live agent has it or main records it (its process is not
@@ -293,13 +312,13 @@
   (when (or (get-in st [:agents id]) (pdb/eid @(:conn st) :seon.agent/key (name id))) (name id)))
 
 (defn- message-write
-  "The writer's request for one message: from `from` (a keyword or string) to the agents with keys tos, its body: the one message entity
+  "The writer's request for one message: from `from` (a keyword or string: an agent's key, a user's included, its sender by seon.task/sender; :root, root's own, the system: seon.task/system-sender, as the reconciler's stage boundary sends it) to the agents with keys tos, its body: the one message entity
   on main (seon.task/message-tx, sent now), which the writer syncs before it answers dest; each recipient is then woken (back-op: the
   writer's answer is what wakes, never a commit). The one write of a person's message and an agent's send. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :seon.root/api-state :any [:sequential :string] :any :map] :map]}
   [st from tos body dest]
   {:op :tx :branch :db :flush? true :dest (assoc dest :wake (vec tos))
-   :tx-data (task/message-tx (lib/unique-id) (name from) tos body (System/currentTimeMillis))})
+   :tx-data (task/message-tx (lib/unique-id) (if (= "root" (name from)) task/system-sender (task/sender (name from))) tos body (System/currentTimeMillis))})
 
 (defn- deliver-message
   "An agent's send m ({:from :to [id ...] :body}) written as one message entity on main to every agent it names, live or not
@@ -577,20 +596,15 @@
       ;; (seon.task/message-tx), synced before it is answered, so what follows (the turn that delivers it) finds it in the
       ;; store; the agent's turn reads it from main and writes the same entity on its branch (seon.turn/deliver!,
       ;; seon.agent/undelivered). No frame carries it: delivery is the fact. Its writer's answer wakes the agent (back-op)
-      :message (if-let [k (or (agent-key-of st id)
-                              ;; the first message to root makes root's session, in the same write (docs/users.md#roots-session)
-                              (when (= :root id) ::root-session))]
+      ;; root's session (key "root") is made at boot (root-session-boot-tx), so a message to root names it as any agent's does
+      :message (if-let [k (agent-key-of st id)]
                  ;; who sends it: the sender the caller names (root's own, :root, as the reconciler's stage boundary sends; an agent's), else
                  ;; the signed-in person (the page's message!, which names none); a person's with no one signed in is refused
                  (let [from (if-some [f (:from m)] (name f) (signed-in-key @(:conn st) 'seon.root/message!))]
                    (if (contract/error? from)
                      (reply! st o p from)
                      (let [[st rid] (pend st p :tx nil)
-                           w (if (= ::root-session k)
-                               ;; the message names the session by its tempid: a lookup ref cannot reach an entity its own transaction makes
-                               (-> (message-write st from ["root"] (:body m) {:rid rid})
-                                   (update :tx-data #(root-session-message-tx @(:conn st) %)))
-                               (message-write st from [k] (:body m) {:rid rid}))]
+                           w (message-write st from [k] (:body m) {:rid rid})]
                        (step/out! o :to-writer w)
                        (update st :writes (fnil conj #{}) rid))))
                  (reply! st o p (gone id (str "no agent " id " on main"))))
@@ -843,7 +857,8 @@
       :spoke (set-agent st o (:agent m) {:stalled nil})
       ;; the stall timer: each agent with an eval in flight checks its own quiet time
       :stall-check (let [now (System/currentTimeMillis)]
-                     (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) (dissoc st ::stall-due) (::busy st)))
+                     (step/fired! (::stall-timer st))
+                     (reduce (fn [st id] (to-agent st o id {:op :stall? :now-ms now :stall-ms (:stall-ms st)})) st (::busy st)))
       st)))
 
 (defn- answer-taken
@@ -905,6 +920,8 @@
                  ;; what this step took, kept across Flow's catch (which keeps the state from
                  ;; before the step): a host object of this proc's own
                  ::taken (volatile! [])
+                 ;; the stall check's timer: armed while an agent has an eval in flight (seon.step/timer)
+                 ::stall-timer (step/timer)
                  ::errors {}
                  ::flow/in-ports {:ext (:ext args) :back (:back args)}
                  ::flow/out-ports {:to-writer (:to-writer args) :events (:events args)}))
@@ -931,11 +948,9 @@
          st (flush-problems st o)
          st (record-agents st o before)
          ;; while an agent has an eval in flight, the stall check runs every half stall bound
-         st (if (and (seq (::busy st)) (not (::stall-due st)) (pos? (:stall-ms st)) (:back st))
-              (let [back (:back st)]
-                (step/put-after! back (quot (:stall-ms st) 2) {:op :stall-check})
-                (assoc st ::stall-due true))
-              st)
+         ;; its armed flag is a host object (seon.step/timer): a step that took :stall-check and then threw cannot leave it armed for good
+         _ (when (and (seq (::busy st)) (pos? (:stall-ms st)) (:back st))
+             (step/arm! (::stall-timer st) (:back st) (quot (:stall-ms st) 2) {:op :stall-check}))
          st (if (::update st)
               (do (flow/update! @(:graph st) {:procs (merge (get-in st [:system :procs]) (:agent-procs st)) :conns (get-in st [:system :conns])})
                   (dissoc st ::update))
@@ -1095,11 +1110,11 @@
            {:seon.agent/root [{:seon.agent/_root [:seon.agent/key :seon.agent/status {:seon.agent/task [:seon.task/id :seon.task/outcome]}]}]}))
 
 (defn root-session-tx
-  "Root's session, made by the first message to root (the api's :message), an ordinary agent made the ordinary way: an agent entity keyed
-  \"root\" (a reserved key, as the user's is its name; its tempid \"root-session\", which that message names it by), linked to root by
-  :seon.agent/root, its pattern `root-session-pattern`, and the task request/root of the chat template (seon.template/request-tx),
-  parked, its agent that entity, so the same write's wake spawns it. A root no one messages has none. Root's own entity is untouched: an
-  entity's id derives from its identity, so it cannot take a key too. See docs/users.md#roots-session."
+  "Root's session, made at the boot of a main that has none (`root-session-boot-tx`), an ordinary agent made the ordinary way: an agent
+  entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern
+  `root-session-pattern`, and the task request/root of the chat template (seon.template/request-tx), parked, its agent that entity, so
+  the first message's wake spawns it. Root's own entity is untouched: an entity's id derives from its identity, so it cannot take a
+  key too. See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db]
   (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))]
@@ -1108,18 +1123,12 @@
       (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)}]
             (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked})))))
 
-(defn root-session-message-tx
-  "The first message to root (its message-tx) as the write that also makes root's session (`root-session-tx`): the message names the
-  session by its tempid, since a lookup ref cannot reach an entity its own transaction makes. See docs/users.md#roots-session."
-  {:malli/schema [:=> [:cat :seon.host/db [:vector :map]] [:vector :any]]}
-  [db message-tx]
-  (into (root-session-tx db) (map (fn [e] (cond-> e (:seon.message/to e) (assoc :seon.message/to ["root-session"])))) message-tx))
-
-(defn root-session-refresh-tx
-  "At boot, root's session's pattern written again when it has one (`root-session-pattern`), so an edit of the agent's pattern reaches it
-  at the next boot; its task and conversation untouched; nothing when no one has messaged root. See docs/users.md#roots-session."
+(defn root-session-boot-tx
+  "At boot, root's session: made when main has none (`root-session-tx`; the owner's ruling, root's agent is there from boot), else
+  its pattern written again (`root-session-pattern`), so an edit of the agent's pattern reaches it at the next boot, its task and
+  conversation untouched. See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
-  [db] (if (pdb/eid db :seon.agent/key "root") [{:seon.agent/key "root" :seon.ctx/pattern (root-session-pattern)}] []))
+  [db] (if (pdb/eid db :seon.agent/key "root") [{:seon.agent/key "root" :seon.ctx/pattern (root-session-pattern)}] (root-session-tx db)))
 
 (defn import-tree!
   "Main's program on conn brought to the source tree {:root :dirs}, only what it changed since root's :seon.root/source fact
@@ -1320,7 +1329,7 @@
                    (d/release conn)
                    out)))
         r (once)]
-    (if (:moved r) (do (fx/remove-tree! path) (once)) r)))
+    (if (:moved r) (do (seon.lib/remove-tree! path) (once)) r)))
 
 (defn seed-program!
   "Index the tree (source root and dirs from the config) into :db of the store at path (made when missing): seed!, so a
@@ -1626,7 +1635,7 @@
     (let [prev (previous-end db)
           held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
           r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data (cond-> (-> (task/boot-tx boot (cfg/value :seon.config.root/user-name)) (into (task/earlier-agents-tx db)) (into (task/config-tx config in-force-sources))
-                                                                                  (into (root-session-refresh-tx db)))
+                                                                                  (into (root-session-boot-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
                                                                          held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (binary-program) digest (fx/config-input cfg/config (cfg/checkout)) stale

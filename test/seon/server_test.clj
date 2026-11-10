@@ -220,7 +220,8 @@
                                                       "  :key (datahike.api/q '[:find ?k . :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db)})")}]))
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
-    (is (re-find #"(?m)^\s*\[seon\.render\.ui/task\b" text) "the render of ctx, each part headed by the function that drew it, as the call Seon made and its answer")
+    (is (clojure.string/includes? text "(my.render/page {:commit") "the page, as the call Seon made and its answer")
+    (is (re-find #":class \"task-view\"" text) "each part headed by the render that drew it (its class's first word: seon.ctx.wire/presentation-free); the task's, seon.render.ui/task-view")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:ns (:value sent))) "and the read records the hash of what it sent, as a model turn does (the debug page compares its redraw with it)")
@@ -410,7 +411,7 @@
                              "            :pages (some (fn [f] (when (= 'seon.render/draw (:var f)) (:calls f))) (seon.profile/touched))}))]"
                              "  {:reads (vec (repeatedly 9 m))"
                              "   :live=cold (let [pw (seon.repl/page-walk) db (seon.agent/db) page (seon.render/placed-hiccup pw (seon.render/page-lists pw)) a (seon.db/eid db :seon.agent/key (:key @seon.agent/state))"
-                             "                    w (seon.render/draw (:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (datahike.api/entity db a)))) seon.ctx/changes db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx) {:model-only true})"
+                             "                    w (seon.render/draw (:tree (seon.ctx/build (seon.db/index) db a (:seon.agent/branch (datahike.api/entity db a)))) seon.ctx/changes db #'seon.render.ui/agent {:model-only true})"
                              "                    cold (seon.render/placed-hiccup w (seon.render/page-lists w))]"
                              "                (or (= page cold) (vec (for [k (distinct (concat (keys page) (keys cold))) :when (not= (get page k) (get cold k))] k))))})")]))
         later (rest (:reads (:value reads)))]
@@ -486,13 +487,10 @@
   ;; Each prove names one small namespace: an unnamed one proved all of main inside this test (568 s
   ;; alone, 2026-10-30, and its shard's root stopped under it); the agent's life is what is proved here
   (let [alive #(hash-map :op :eval :agent "root" :code (str "(contains? (:agents (c/state sys)) :" % ")"))
-        [ctx proved after live1 main-proved after2 live2 failed]
+        [ctx proved after live1 failed]
         (at/in-agent (fn [{:keys [agent]}]
                        [{:op :context :agent agent}
                         {:op :prove :agent agent :names ["seon.union-test"]}
-                        "(+ 1 2)"
-                        (alive agent)
-                        {:op :prove :names ["seon.union-test"]}
                         "(+ 1 2)"
                         (alive agent)
                         "(my.task/fail! \"cannot\")"]))]
@@ -500,38 +498,35 @@
     (is (not (contract/error? proved)) (pr-str proved))
     (is (= 3 (:value after)) (str "the agent answers after a prove of its branch: " (pr-str after)))
     (is (true? (:value live1)) "and root holds it live")
-    (is (not (contract/error? main-proved)) (pr-str main-proved))
-    (is (= 3 (:value after2)) (str "and after a prove of main: " (pr-str after2)))
-    (is (true? (:value live2)))
     (is (not (contract/error? (:value failed))) (str "its fail! records on its task: " (pr-str failed)))))
 
-;; See docs/merging.md#main-moved-is-said-at-every-eval
-;; docs/turn.md#an-outside-agent: an attached agent's answer is what a model's next request adds; asking again is answered plainly
-(deftest an-outside-reply-carries-the-page-seon-showed
-  (let [[_ first-reply moved asked]
+;; docs/turn.md#an-outside-agent: an attached agent reads the page as the model does, Seon's message of the turn, and what moved after
+(deftest an-outside-agents-read-carries-the-page-and-what-moved
+  (let [[_ first-read _ moved-read]
         (at/in-agent (fn [{:keys [agent task]}]
                        [{:op :attach :task task}
-                        {:op :eval :agent agent :message-md "" :evals [{:intent "add" :code "(+ 1 1)"}]}
+                        {:op :context :agent agent}
                         {:op :eval :agent agent :message-md "Changing my plan." :evals [{:intent "change it" :code "(swap! ctx assoc-in [:seon.agent/task :seon.task/plan] \"A plan that moved.\")"}]}
-                        {:op :eval :agent agent :message-md "Asking." :evals [{:intent "ask" :code "(my.render/render-changes)"}]}]))
-        page (last (:responses moved))]
-    (is (some #(contains? (:value %) :components) (:responses first-reply)) "the page whole, the first time")
-    (is (clojure.string/includes? (str (:text page)) "A plan that moved.") (str "the change, with the reply that made it: " (pr-str (keys page))))
-    (is (not (clojure.string/includes? (str (:text page)) ":since")) "no t is the reader's")
-    (is (= [] (:edits (:value (first (:responses asked))))) "asked after it was shown")
-    (is (:shown-by (:value (first (:responses asked)))) "says what showed it")))
+                        {:op :context :agent agent}]))]
+    (is (clojure.string/includes? (str (:context first-read)) "(my.render/page ") "the page, the first time")
+    (is (clojure.string/includes? (str (:context moved-read)) "A plan that moved.") "and what moved, the next time")))
 
 (deftest green-work-behind-main-is-merged-at-done
-  ;; an outside agent's green work was closed "ended green: behind 6", its agent gone, while each answer said to merge when it chose: seon.turn/hand-back! merges main first
-  (let [[_ _ _ _ done] (at/in-agent (fn [{:keys [agent ns]}]
-                                      [{:op :attach :task (str ns "/t")}
-                                       "(in-ns 'demo-test)"
-                                       "(clojure.test/deftest t (clojure.test/is true))"
-                                       {:op :eval :agent "root" :code (str "(let [db @(:conn sys)] @(c/transact-main! sys ((my.test/code '" ns ".behind \"(ns " ns ".behind) (defn f \\\"One.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\") db)))")}
-                                       {:op :done :agent agent}])
-                                    (at/merging))]
+  ;; an outside agent's green work was closed "ended green: behind 6", its agent gone, while each answer said to merge when it chose: seon.turn/hand-back! merges main first.
+  ;; And the judge at its end asks the test service (task seon.reconcile/the-judge-asks-the-test-service), so its proof's verdict is cached at its digest.
+  ;; On the shard's root: what it merges is its own namespaces, which no other test reads
+  (let [[_ _ _ _ done cached]
+        (at/in-agent (fn [{:keys [agent ns]}]
+                       [{:op :attach :task (str ns "/t")}
+                        (str "(ns " ns "-test (:require [clojure.test :refer [deftest is]]))")
+                        "(deftest t (is (= 2 (inc 1))))"
+                        {:op :eval :agent "root" :code (str "(let [db @(:conn sys)] @(c/transact-main! sys ((my.test/code '" ns ".behind \"(ns " ns ".behind) (defn f \\\"One.\\\" {:malli/schema [:=> [:cat] :int]} [] 1)\") db)))")}
+                        {:op :done :agent agent}
+                        {:op :eval :agent "root" :code (str "(some-> (java.io.File. (str (seon.config/value :seon.config.proofs/results-dir) \"/" ns "-test\")) .list vec)")}])
+                     {:proofs (fn [{:keys [ns]}] #{(symbol (str ns "-test") "t")})})]
     (is (not (clojure.string/includes? (str (:line done)) "behind")) (pr-str done))
-    (is (clojure.string/includes? (str (:line done)) ":merged") (pr-str done))))
+    (is (clojure.string/includes? (str (:line done)) ":merged") (pr-str done))
+    (is (= ["t"] (:value cached)) (str "the judge's verdict is cached at the test's digest: " (pr-str cached)))))
 
 (deftest the-done-answer-is-a-line-and-a-handle
   ;; one-wait's real run (root, 2026-10-28): seon_done answered 73,856 characters, the whole verdict

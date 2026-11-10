@@ -224,6 +224,13 @@
  ;; proc. At the bound: the proc is recorded {:blocked pid :ping-ms ..} in the check's report
  ;; and the check that read it fails, naming it.
  :seon.config.check/ping-ms 10000
+ ;; Unit: times. A bin/check step that runs this many times its median measured run (its greens' :ms, seon.fx/typical-ms),
+ ;; floored at :seon.config.agent/stall-ms, is ended: bin/evidence captures it first (its process tree, samples, fiber
+ ;; dumps, and its root's stall state), and it is red with the typed reason STEP-OVERRAN, never retried (the owner's
+ ;; fourth clock exception, 2026-11-10: docs/clocks.md#time-decides-the-owners-exceptions). Provenance: of 6,239 green
+ ;; runs in the verdict cache of tests whose median is 2 s or more, 161 ran past 5 times it and 30 (0.5%) past 10, most
+ ;; at load 30-40 before proves took slots; past 10 is a hang more often than a slow machine.
+ :seon.config.check/step-end-factor 10
  ;; Unit: ms over which a check measures that something does not happen: a paused agent's
  ;; request unanswered (lifecycle), a paused proc's flood not taken and a paused writer's
  ;; commits held (backpressure). Provenance: the windows it replaced were 300, 400 and 500 ms.
@@ -892,6 +899,12 @@
  ;; and the ones that explain it. Provenance: root's coverage gap 7 (2026-10-27): wiki sections reached the
  ;; agent only through the task's own citations. At the bound: 0 shows none.
  :seon.config.ctx/cited-by 3
+ ;; Unit: commits. How far back from a request's point seon.ctx.wire/page-parts-through looks for the commit its kept
+ ;; page walk is at (Datahike's commit graph records, a read a step), to advance that walk by what moved rather than draw
+ ;; the page again (about 17M ticks on Seon's program). Provenance: a test's context read drew the page cold at every
+ ;; read, 2026-11-10; between two requests of one agent there are a few commits (its evals', its read's). At the bound:
+ ;; the page is drawn again, never advanced across another lineage.
+ :seon.config.ctx/kept-walk-steps 16
  ;; Unit: tokens of a form's :form/src as the model reads it (seon.print.emit/chars-tokens, the printer's
  ;; one estimate), src and test alike: about a printed page. A live form longer than this is an open
  ;; :long-form problem row (seon.problems/long-forms), shown to a branch that adds one (attention, never

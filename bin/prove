@@ -123,5 +123,5 @@ if (( st == 0 )) && [[ -n $KEY && $("$ROOT/bin/tree" "$ROOT") == $TREE ]]; then
 fi
 # a green run's logs are read by no one: the directory it made is reclaimed with the run (a red or
 # killed run's stays, its evidence; a --merge run's too, the merge log names it; one --out named is its caller's)
-if (( ! MERGE )); then (( st == 0 && OWN )) && rm -rf "$OUT"; exit $st; fi
+if (( ! MERGE )); then (( st == 0 && OWN )) && "$ROOT/bin/remove-tree" "$OUT"; exit $st; fi
 merge_verdict "$OUT" $st

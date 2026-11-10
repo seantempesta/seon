@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.merge :as pm]
-            [seon.program :as program] [seon.doc] [seon.config] [seon.source]
+            [seon.program :as program] [seon.doc] [seon.config] [seon.source] [seon.profile :as profile]
             [seon.edn :as sedn] [seon.contract :as contract] [malli.core :as m] [malli.generator :as mg]
             [my.schema :as schema]
             [seon.source :as source] [seon.writer]
@@ -207,8 +207,9 @@
 
 (deftest scratch-and-observations-never-merge
   (let [ours (with (base) [{:note/text "scratch" :note/agent :a1}
-                         {:seon.eval/id "e1" :seon.eval/by "a1" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}
-                         {:seon.agent/key "a1" :seon.process/pid 7}
+                         ;; the agent once, by its identity, under the eval's :by: two maps of one content-id identity in one write
+                         ;; resolve to two ids (a Datahike finding, sent to Deep fixes)
+                         {:seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1" :seon.process/pid 7} :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}
                          {:task/name :x/y :task/status :done}])]
     (is (= (pm/program (base) #{}) (pm/program ours #{})))
     (is (empty? (:ours (tw ours (base)))))))
@@ -495,6 +496,32 @@
         after (d/db-with main (pm/merge-tx main b head ks #{}))]
     (is (= 1 (count (d/datoms after :avet :ns/name 'app.z))) "one entity for the namespace")
     (is (= 'app.z (:ns (val (first (filter #(= :form (first (key %))) (pm/program-of after ks #{})))))) "the carried form reads it")))
+
+;; docs/storage.md#mains-content-mark: two commits of main with one content mark hold the same content, so a reader of main's
+;; content asks the mark and reads no diff; a main no writer marked is diffed. Red before: content-commit diffed every attribute
+(deftest same-content-is-read-from-mains-mark
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [mark! #(d/transact conn [{:seon.root/id :root :seon.root/content-t (inc (:max-tx @conn))}])
+            calls (fn [f] (profile/begin!) (f) (into {} (map (juxt :var :calls)) (profile/touched)))]
+        (d/transact conn ((var-tx "f" "x") @conn))
+        (let [unmarked @conn]
+          (d/transact conn [{:seon.agent/key "b1/a1" :seon.agent/status :busy}])
+          (is (not (pm/same-content? unmarked @conn)) "a main no writer marked is not known to hold the same content")
+          (is (pos? (get (calls #(pm/content-commit unmarked @conn)) 'seon.merge/content-datoms 0)) "so it is diffed"))
+        (mark!)
+        (let [held @conn]
+          (d/transact conn [{:seon.agent/key "b1/a1" :seon.agent/status :idle}])
+          (is (pm/same-content? held @conn) "a commit of records leaves the mark")
+          (is (= (d/commit-id held) (pm/content-commit held @conn)) "so the commit held stands")
+          (is (nil? (get (calls #(pm/content-commit held @conn)) 'seon.merge/content-datoms)) "and no content is read")
+          (is (not (pm/moves-content? [[:db/add 1 :seon.agent/status :idle]])) "records are no content")
+          (is (pm/moves-content? [[:db/add 1 :var/name 'app/g]]) "a definition is")
+          (is (pm/moves-content? [[:db/add 1 :seon.task/plan "p"]]) "and so is carried task content")
+          (d/transact conn ((var-tx "g" "x") @conn))
+          (mark!)
+          (is (not (pm/same-content? held @conn)) "the writer moves the mark with the content")
+          (is (= (d/commit-id @conn) (pm/content-commit held @conn)) "and a definition moves the commit"))))))
 
 ;; docs/render.md#how-the-work-stands: what a reader of main's content keys on moves when the content does, never on a commit of records
 (deftest a-commit-of-records-leaves-mains-content-commit

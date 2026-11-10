@@ -101,7 +101,7 @@
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
           e (some #(when (:seon.eval/response %) %) (get-in w [:req :req :tx-data]))]
       (is (= "(seon.root/kill! :a1)" (:seon.eval/code e)))
-      (is (= "user" (:seon.eval/by e)))
+      (is (= "user" (:seon.agent/key (:seon.eval/by e))) "by the user, a ref to the user's agent")
       (is (str/includes? (seon.print/record-text (assoc e :seon.eval/response (seon.db/response-of nil e))) ":killed :a1") "what root answered"))))
 
 (deftest an-eval-opened-on-a-page-is-no-eval-of-roots
@@ -178,7 +178,7 @@
   (into {} (for [[id a] index] [id (assoc a :key (str "b1/" (name id)))])))
 
 (def ^:private call-el
-  "The in-flight element a1's call b1/a1/3 has on a page (seon.render.ui/reply-hiccup draws it)."
+  "The in-flight element a1's call b1/a1/3 has on a page (seon.render.ui/model-call-view draws it)."
   "<div id=\"app\"><div id=\"b1_2Fa1_2F3\" class=\"seon-stream\" data-ignore-morph=\"\" data-stream-in=\"b1/a1/3\"></div></div>")
 
 (defn- stream-tabs

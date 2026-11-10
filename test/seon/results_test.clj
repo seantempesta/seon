@@ -3,7 +3,7 @@
   key, digest and status, flaky kept across writers, the least recently used evicted past a capacity, the cost a test spent per
   function kept with its verdict, and nothing written to the store; each test on a cache directory of
   its own under target/tmp."
-  (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [seon.config :as cfg]
+  (:require [seon.lib] [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [seon.config :as cfg]
             [seon.fx :as fx] [seon.proofs :as proofs] [seon.cost :as cost]))
 
 (defn- fc [v calls ticks self bytes] {:var v :calls calls :ticks ticks :self-ticks self :bytes bytes :self-bytes bytes})
@@ -12,7 +12,7 @@
   "f called with a fresh cache directory under this checkout's target/tmp, removed after."
   [f]
   (let [dir (str (cfg/checkout) "/target/tmp/verdicts-" (random-uuid))]
-    (try (f dir) (finally (sh/sh "rm" "-rf" dir)))))
+    (try (f dir) (finally (seon.lib/remove-tree! dir)))))
 
 (defn- rec!
   ([dir ran] (rec! dir ran {}))
@@ -69,9 +69,10 @@
 (defn- file-of [dir k dg st] (java.io.File. (str dir "/" (namespace k) "/" (name k) "/" dg "." (name st) ".edn")))
 
 (defn- age!
-  "Set the mtime of key k's verdict at digest dg and status st to age-s seconds ago."
+  "Set the mtime of key k's verdict at digest dg and status st to age-s seconds before a fixed instant (2023-11-14), older
+  than any read, which sets a verdict's mtime to now: the order is the claim, never the clock."
   [dir k dg st age-s]
-  (.setLastModified (file-of dir k dg st) (- (System/currentTimeMillis) (* 1000 age-s))))
+  (.setLastModified (file-of dir k dg st) (- 1700000000000 (* 1000 age-s))))
 
 (defn- bytes-in
   "Bytes of the verdict files under dir."

@@ -48,6 +48,23 @@
   (let [st (union-caught-up st (pdb/conn-main (:conn st)) db)]
     (if-let [{c :config srcs :sources} (cfg/moved db ops)] (update st :pend (fnil conj []) {:tx-data (task/config-tx c srcs)}) st)))
 
+(defn- mark-tx
+  "The tx-data that moves main's content mark (:seon.root/content-t) past every t db, main before the commit, holds, so a
+  commit that moves the content never shares a mark with one before it (docs/storage.md#mains-content-mark)."
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.db/tx-data]}
+  [db] [{:seon.root/id :root :seon.root/content-t (inc (:max-tx db))}])
+
+(defn- mark!
+  "The report of main's content mark moved, applied on the connection after ops (resolved datoms applied and not yet
+  committed, from db, main before them) when they move main's content (seon.merge/moves-content?), else nil: the commit
+  that stores them carries it (docs/storage.md#mains-content-mark). A mark the connection refuses throws, so no commit is
+  made without it."
+  {:malli/schema [:=> [:cat :seon.writer/state :seon.db/resolved-tx :seon.host/db] [:maybe :map]]}
+  [st ops db]
+  (when (pm/moves-content? ops)
+    (let [r (dw/apply! (:conn st) {:tx-data (mark-tx db) :tx-meta (pdb/tx-meta (pdb/conn-main (:conn st)))})]
+      (if (map? r) r (throw r)))))
+
 (defn- stored!
   "Main's stored commit, made of ops (its transactions' resolved datoms, in order): the fork
   server's replica reads that commit from the store (d/commit-as-db; FIFO with fork
@@ -183,7 +200,8 @@
       ;; member's own datoms for the keys it changed, as they are (seon.merge/merge-tx)
       ;; each member's parent is the commit its merge was computed from, not its head when this commits
       (let [rep (d/merge-db conn (set (map (comp d/commit-id :head) ok))
-                            (vec (mapcat (fn [{:keys [r head base]}] (pm/merge-tx main base head (keys (:ours r)) data-attrs)) ok))
+                            ;; a merge moves main's content: its mark in the same commit (docs/storage.md#mains-content-mark)
+                            (into (vec (mapcat (fn [{:keys [r head base]}] (pm/merge-tx main base head (keys (:ours r)) data-attrs)) ok)) (mark-tx main))
                             (pdb/tx-meta (pdb/conn-main conn)))
             t (:max-tx (:db-after rep))
             ops (pdb/report->tx rep)
@@ -202,38 +220,40 @@
   [o dest r] (when dest (step/out! o :to-api {:dest dest :r r})))
 
 (defn- commit-batch
-  "Group commit of root's writes to main: every queued transaction, one Datahike commit
-  (datahike.writer/transact-batch!), in arrival order. A commit the store refuses (its codec
-  has no encoding for a value; main stays as it was, Datahike moves it only after the write)
-  is retried one transaction at a time, so only the one that carried the value is answered
-  refused. Answers st."
+  "Group commit of root's writes to main: every queued transaction applied in arrival order (datahike.writer/apply!), main's
+  content mark after them when they moved it (`mark!`), then one Datahike commit (datahike.writer/commit-pending!). A
+  transaction that fails its apply is answered refused and the others commit. A commit the store refuses (its codec has no
+  encoding for a value; main stays as it was, Datahike moves it only after the write) is abandoned and retried one
+  transaction at a time, so only the one that carried the value is answered refused. Answers st."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile] :seon.writer/state]}
   [st o]
   (if-let [ms (seq (:pend st))]
-    (let [reps (try (dw/transact-batch! (:conn st) (mapv (fn [m] {:tx-data (:tx-data m) :tx-meta (pdb/tx-meta (pdb/conn-main (:conn st)))}) ms))
-                    (catch Throwable e e))]
+    (let [conn (:conn st)
+          before @conn
+          reps (mapv (fn [m] (dw/apply! conn {:tx-data (:tx-data m) :tx-meta (pdb/tx-meta (pdb/conn-main conn))})) ms)
+          ok (filter (comp map? second) (map vector ms reps))
+          ops (vec (mapcat (comp pdb/report->tx second) ok))
+          c (when (seq ok)
+              (try (let [mk (mark! st ops before)] (assoc (dw/commit-pending! conn) :mark mk))
+                   (catch Throwable e e)))
+          refuse (fn [m rep] (answer o (:dest m) (or (when (:seon.error/type (ex-data rep)) (ex-data rep)) (refused (step/error-msg rep) {}))))]
       (cond
-        (sequential? reps)
-        (let [ok (filter (comp map? second) (map vector ms reps))]
-          (when (seq ok) (stored! st o (vec (mapcat (comp pdb/report->tx second) ok))))
-          ;; one stored commit, one notice: the last report's t, every report's ops in order
-          (let [st (reduce (fn [st [m rep]]
-                             (if-not (map? rep)
-                               ;; a typed refusal (seon.db/invalid-entity) is answered as itself
-                               (do (answer o (:dest m) (or (when (:seon.error/type (ex-data rep)) (ex-data rep)) (refused (step/error-msg rep) {}))) st)
-                               (let [t (:max-tx (:db-after rep)) ops (pdb/report->tx rep)]
-                                 (answer o (:dest m) {:ok true :t t :datoms (count ops)})
-                                 st)))
-                           (-> st (dissoc :pend) (update :commits inc))
-                           (map vector ms reps))]
-            (if (seq ok)
-              ;; what main-commit queued (a moved config's facts) is this batch's next commit
-              (commit-batch (main-commit st o (:max-tx (:db-before (second (first ok)))) (:max-tx (:db-after (second (last ok))))
-                                         (vec (mapcat (comp pdb/report->tx second) ok)) (:db-after (second (last ok))))
-                            o)
-              st)))
-        (next ms) (reduce (fn [st m] (commit-batch (assoc st :pend [m]) o)) (dissoc st :pend) ms)
-        :else (do (answer o (:dest (first ms)) (refused (step/error-msg reps) {})) (dissoc st :pend))))
+        (empty? ok)
+        (do (doseq [[m rep] (map vector ms reps)] (refuse m rep)) (dissoc st :pend))
+        (map? c)
+        ;; one stored commit, one notice: the last report's t, every report's ops in order, the mark's after them
+        (let [ops (into ops (some-> (:mark c) pdb/report->tx))
+              t (:max-tx (:db c))]
+          (stored! st o ops)
+          (doseq [[m rep] (map vector ms reps)]
+            (if (map? rep) (answer o (:dest m) {:ok true :t (:max-tx (:db-after rep)) :datoms (count (pdb/report->tx rep))}) (refuse m rep)))
+          ;; what main-commit queued (a moved config's facts) is this batch's next commit
+          (commit-batch (main-commit (-> st (dissoc :pend) (update :commits inc)) o (:max-tx before) t ops (:db c)) o))
+        :else
+        (do (dw/abandon-pending! conn)
+            (if (next ms)
+              (reduce (fn [st m] (commit-batch (assoc st :pend [m]) o)) (dissoc st :pend) ms)
+              (do (refuse (first ms) c) (dissoc st :pend))))))
     st))
 
 (defn- other-op
@@ -322,19 +342,20 @@
 
 (defn- writer-one
   "One request into the batch: root's :tx on main joins the batch; any other op first
-  commits the batch (it reads committed heads), then runs."
+  commits the batch (it reads committed heads), then runs. Only the op itself is caught (an
+  interop edge, Datahike, refused: its answer is the error, as data): the batch's commit is
+  outside the catch, so a refused op never hands back a state from before a commit Datahike made."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.writer/request] :seon.writer/state]}
   [st o {:keys [op] :as m}]
-  (try
-    (if (= op :tx)
-      ;; the batch's transact checks it (seon.db/transact-checked): a refusal is answered to its requester alone
-      (update st :pend (fnil conj []) m)
-      (other-op (commit-batch st o) o m))
-    (catch Throwable e
-      ;; an interop edge (Datahike) refused: the request's answer is the error, as data
-      ;; with the store's map use: a full map (MDB_MAP_FULL) shows itself against its size
-      (answer o (:dest m) (refused (step/error-msg e) (cond-> {} (pdb/map-use (:cfg st)) (assoc :store (pdb/map-use (:cfg st))))))
-      (dissoc st :pend))))
+  (if (= op :tx)
+    ;; the batch's transact checks it (seon.db/transact-checked): a refusal is answered to its requester alone
+    (update st :pend (fnil conj []) m)
+    (let [st (commit-batch st o)]
+      (try (other-op st o m)
+           (catch Throwable e
+             ;; with the store's map use: a full map (MDB_MAP_FULL) shows itself against its size
+             (answer o (:dest m) (refused (step/error-msg e) (cond-> {} (pdb/map-use (:cfg st)) (assoc :store (pdb/map-use (:cfg st))))))
+             (dissoc st :pend))))))
 
 (defn- drain {:malli/schema [:=> [:cat :seon.host/chan :seon.writer/request] [:vector :seon.writer/request]]}
   [ch m]
@@ -365,8 +386,12 @@
        ;; its own thread: a transaction is CPU and store work the fiber scheduler cannot see
        :workload :mixed
        :ping-map-fn (fn [st] {:tx-count (:tx-count st) :commits (:commits st) :flushes (:flushes st 0) :dirty (boolean (:dirty st)) :main-t (:max-tx @(:conn st))})})
-  ([args] (assoc args :tx-count 0 :commits 0 :batches 0
-                 ::flow/in-ports {:in (:to-writer args)} ::flow/out-ports {:events (:events args)}))
+  ([args]
+   ;; main's content mark moves at the writer's start: what a boot wrote before it ran (a seed, a catch-up) bears no mark of
+   ;; its own, so no branch's base shares the mark main carries from here (docs/storage.md#mains-content-mark)
+   (d/transact (:conn args) {:tx-data (mark-tx @(:conn args)) :tx-meta (pdb/tx-meta (pdb/conn-main (:conn args)))})
+   (assoc args :tx-count 0 :commits 0 :batches 0
+          ::flow/in-ports {:in (:to-writer args)} ::flow/out-ports {:events (:events args)}))
   ([st tr]
    st)
   ([st _ m]
