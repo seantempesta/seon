@@ -1591,28 +1591,34 @@
   (when-let [ks (seq (session/session-examples db c))]
     (into [:div] (for [k ks] [#'example-session {:key k}]))))
 
-(declare task-list conversation-list tiles)
+(declare agent-parts conversation-list tiles)
 
 (defn render-ctx
   "The render of an agent's ctx, the one tree the model and the person read (the declared html
   render of :seon.render/render-ctx, which an agent overrides on its branch like any render): components placed in its
-  lists, each keyed by what it shows, each holding what the agent's pull holds, so a smaller pattern is a smaller tree. The task's list (p-task, `task-list`), which the model reads as
+  lists, each keyed by what it shows, each holding what the agent's pull holds, so a smaller pattern is a smaller tree. The agent's page parts (p-task, `agent-parts`, given the pull), which the model reads as
   parts; and the conversation (c-rows, `conversation-list`), which it reads as messages. Each
   list is a component of its own, and the layout reads nothing, so a change of one list's members reruns that list alone: an eval
   added never reruns the task's. See docs/render.md#the-page and docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [_]
-  [:div {:id "render-ctx"} [#'task-list {}] [#'conversation-list {}]
+  [{c :seon.ctx/ctx}]
+  [:div {:id "render-ctx"} [#'agent-parts {} c] [#'conversation-list {}]
    [#'rules-list {}]])
 
 (declare sessions)
 
-(defn task-list
-  "The task's list of an agent's page (p-task, read by the model as parts: seon.render/page-lists), in the order
-  they are placed here: the task, its proofs, what it cites, each search, the references its agent cites, its added keys, and
-  last its own problems, its turn and its state. A piece is here when the agent's pull holds what it shows. See docs/render.md#the-page."
-  {:seon.render/list "p-task" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
+(defn agent-parts
+  "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists),
+  in the order they are placed here: the task, its proofs, what it cites, each search, the references its agent cites, its added
+  keys, and last its own problems, its turn and its state; what a turn's diff compares. A piece is here when the pull holds what it
+  shows; :seon.ctx/pattern is what it reads of the agent, so a past point's parts are pulled by that alone (its added keys are
+  the agent's own pattern's, which a point's pull by this one leaves out). See docs/render.md#the-page."
+  {:seon.render/list "p-task"
+   :seon.ctx/pattern [:seon.agent/key :seon.agent/status :seon.agent/outcome :seon.agent/reason :seon.agent/turn :seon.agent/max-turns
+                      :seon.agent/ended-turn :seon.agent/ns {:seon.agent/task :seon.task/task-fact} {:seon.cite/_of :seon.cite/cite-fact}
+                      {:seon.search/_of :seon.search/search-fact}]
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
+  [_ c]
   [:div {:id "p-task"}
    ;; root's sessions, when this record's pull holds root (root's session's pattern does: docs/users.md#roots-session)
    (when (:root c) [#'sessions {:at [:root]}])

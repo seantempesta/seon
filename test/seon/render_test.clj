@@ -1798,7 +1798,7 @@
 
 (deftest an-agents-chat-places-what-its-model-reads-beside-it
   ;; owner, 2026-11-08: "What happened to the sidebar on the right with all the rendered context parts? Docs that get pulled in,
-  ;; the task, etc?": the task's list (seon.render.ui/task-list), which the model reads as parts, has its place on the chat page,
+  ;; the task, etc?": the task's list (seon.render.ui/agent-parts), which the model reads as parts, has its place on the chat page,
   ;; the same components, so a person sees what the agent was told
   (let [[main branch _] (paged-dbs)
         [st _] (#'p/pass-view (proc-state main branch) [:chat :a3])

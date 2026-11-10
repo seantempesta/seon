@@ -1326,7 +1326,7 @@
         [parts unwatched watched page] (as #(let [p (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w))) u (ledger) pg (seon.repl/render-ctx-hiccup)]
                                               [p u (ledger) pg]))
         whole (as #(do (seon.repl/render-ctx-hiccup) (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w)))))]
-    (is (unwatched 'seon.render.ui/task-list) "the model's list is drawn")
+    (is (unwatched 'seon.render.ui/agent-parts) "the model's list is drawn")
     (is (every? unwatched '[seon.render.ui/conversation-list seon.render.ui/eval-item]) "and the conversation, which it reads as messages")
     (is (not-any? unwatched '[seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) (pr-str unwatched))
     (is (every? watched '[seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) "a person's page draws what is its alone")
