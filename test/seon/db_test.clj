@@ -1084,6 +1084,25 @@
         (d/release conn true))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 
+(deftest a-store-names-its-encoding-where-konserve-reads-it
+  ;; docs/storage.md#compression: seon.db/store-cfg names the serializer and the compressor under :config :encoding,
+  ;; the one place konserve reads them (konserve.impl.defaults/normalize-store-config). An older spelling still
+  ;; worked and made every open log a deprecation, which a script reading a process's output once took for the
+  ;; store's path (bin/check, batch 3). Either backend: no old spelling is handed over, the serializer is ours,
+  ;; and the compressor the config names is the store's (the :file backend's config map once replaced it).
+  (doseq [backend [:lmdb :file]]
+    (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+          seen (atom [])]
+      (try
+        (with-redefs [konserve.impl.defaults/deprecated! (fn [from _] (swap! seen conj from))]
+          (let [{:keys [conn]} (pdb/open! backend path 0 :db)
+                store (:store @conn)]
+            (is (= [] @seen) (str backend ": no deprecated spelling"))
+            (is (= :FaslSerializer (:default-serializer store)) (str backend))
+            (is (= (seon.config/value :seon.config.store/compressor) (get-in store [:config :compressor :type])) (str backend))
+            (d/release conn true)))
+        (finally (clojure.java.shell/sh "rm" "-rf" path))))))
+
 (defrecord PlainR [x])
 
 (deftest plain-is-what-the-store-keeps
