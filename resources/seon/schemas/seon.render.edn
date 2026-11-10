@@ -74,8 +74,8 @@
  ;; ---- root's process: its own data beside its db pull (seon.render.proc/process-value) ----
  ;; the writer's, fork server's and store's numbers, each proc's defects and the newest events,
  ;; part of root's ctx (:process), drawn by seon.render.ui/process-tile; never written
- :seon.render/process [:map [:writer [:maybe :map]] [:fork-server [:maybe :map]] [:store {:optional true} [:maybe :map]] [:root-errors-total :int]
-                       [:health :map] [:events [:vector :any]]]
+ :seon.render/process [:map [:writer [:maybe :map]] [:fork-server [:maybe :map]] [:store {:optional true} [:maybe :map]] [:boot {:optional true} [:maybe :map]]
+                       [:root-errors-total :int] [:health :map] [:events [:vector :any]]]
  ;; ---- the parts of a page (seon.render.ui/page-chrome): each unit's input, its render declared here ----
  ;; (a unit names its input's schema, never a render function: docs/render.md#the-page)
  ;; the entity a page is of, its main pane
