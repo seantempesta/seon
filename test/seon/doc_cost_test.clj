@@ -3,7 +3,7 @@
   section, and writes nothing."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.test-store :as ts] [my.test :as mt] [clojure.test :refer [deftest is]] [seon.contract :refer [defn defn-]]
-            [datahike.api :as d] [seon.db :as pdb] [seon.doc :as doc] [seon.sqlite :as sqlite] [seon.cost :as cost] [seon.doc-test]))
+            [datahike.api :as d] [seon.db :as pdb] [seon.doc :as doc] [seon.sqlite :as sqlite] [seon.cost :as cost] [seon.doc-test] [seon.ctx.search]))
 
 (defn- base
   "The world, and the namespace app.m0 the pages cite (f0 to f10)."
@@ -216,6 +216,30 @@
                                                   :seon.doc/text (str "Names " i ".") :seon.doc/names #{(symbol "app" (str "g" i))}})))]
     (doc/text-index db)
     [db q opts qv]))
+
+(defn long-texts-input
+  "search's arguments over search-input's corpus at 100 texts, each text n words longer (words the query is not), the search
+  asked once already: what is measured is a search over texts whose terms were counted (seon.doc/text-terms), grown in length."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string :map :any]]}
+  [n]
+  (let [[db q opts qv] (search-input 100)
+        pad (apply str (repeat n " padding"))
+        db (d/db-with db (vec (concat (for [{:keys [e v]} (d/datoms db :aevt :form/src)] [:db/add e :form/src (str v "\n;;" pad)])
+                                      (for [a [:seon.doc/text :seon.task/plan :schema/form] {:keys [e v]} (d/datoms db :aevt a)] [:db/add e a (str v pad)]))))]
+    (seon.ctx.search/search db q opts qv)
+    [db q opts qv]))
+
+;; See docs/vector.md#search
+(deftest a-search-costs-flat-in-its-texts-length
+  ;; task seon.ctx.search/a-search-costs-what-it-ranks: relevance tokenized each pool item's whole text on every search (seon.doc/terms over 40
+  ;; texts' 134k characters, 2.5M ticks of an 8.7M search on main's program); a text's term counts are kept beside its row of the text
+  ;; index, counted once, so a search costs the words it ranks, not the length of the texts holding them
+  (cost/proof {:of 'seon.ctx.search/search :input 'seon.doc-cost-test/long-texts-input
+               :n "words added to each text (none the query's)"
+               :work "the fixed corpus's search: FTS5's rows of the word, its hits' names, relevance over a bounded pool reading each item's kept counts of the query's words"
+               :growth :constant
+               :fixed {:ticks 600000 :bytes 1700000 :calls 200}
+               :sizes [10 100 1000]}))
 
 ;; See docs/vector.md#search
 (deftest a-search-costs-nothing-for-sections-it-does-not-answer-from
