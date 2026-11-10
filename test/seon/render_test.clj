@@ -2469,6 +2469,8 @@
     (is (str/includes? head "proof-red seon.ref-test/an-alias") "its reason, in the header line")
     (is (not (str/includes? head "waiting")))
     (is (str/includes? side "stopped at its cap") side)
+    (is (str/includes? side ">An alias</span>") "the pill names the agent by its task")
+    (is (not (str/includes? side ">b2/a6<")) "its key only in the title")
     (is (not-any? #(str/includes? side %) ["idle" "waiting"]))
     (is (str/includes? card "stopped at its cap") card)
     (is (not (str/includes? card "idle")))
@@ -2489,7 +2491,7 @@
     (is (str/starts-with? a6 "<li") a6)
     (is (str/includes? a6 "href=\"/agent/b2/a6\"") "by its key")
     (let [[_ inside] (re-find #"<a [^>]*>(.*)</a>" a6)]
-      (is (and (str/includes? inside "○") (str/includes? inside "a6") (str/includes? inside "stopped at its cap")) "its dot, name and status are inside the link")
+      (is (and (str/includes? inside "○") (str/includes? inside "An alias") (str/includes? inside "stopped at its cap")) "its dot, name (its task in words) and status are inside the link")
       (is (str/includes? inside "An alias") "and its task in words"))
     (is (str/includes? a6 "title=\"") "the whole name in a title")
     (is (str/includes? a6 "seon.ref/an-alias") "the title names the task whole")

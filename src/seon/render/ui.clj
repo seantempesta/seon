@@ -1870,8 +1870,8 @@
 
 (defn agent-side
   "A session of main in the agents list (a component over the db, its agent's entity id: every agent on main, of any boot, a
-  process or none): lit while it works, its id, how its work stands (standing) and what it works on (its task in words, else its
-  branch, cut to the pill's width), the whole pill one link to its page by its stable address (session-address), the whole name in its title. See docs/render.md#a-sessions-address-and-the-agents-list."
+  process or none): lit while it works, what it works on (its task in words, else its branch; else its id), how its work stands
+  (standing), the whole pill one link to its page by its stable address (session-address), the whole name in its title. See docs/render.md#a-sessions-address-and-the-agents-list."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
   [{db :seon.db/db} eid]
   (let [a (d/pull db session-attrs eid)
@@ -1883,9 +1883,9 @@
               :title (str/join " · " (remove nil? [id (:text stands) (:detail stands) what (:seon.task/id t)]))}
           [:span {:class "flex items-baseline gap-2"}
            [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
-           [:span {:class "font-semibold text-text-100"} (kname id)]
-           (when (:seon.agent/status a) [:span {:class (str "truncate text-2xs " (tone-class (:tone stands)))} (:text stands)])]
-          (when what [:span {:class "truncate text-2xs text-text-400"} what])]]))
+           ;; named by what it works on (its task in words), its key in the title: a person tells agents apart by their work
+           [:span {:class "min-w-0 truncate font-semibold text-text-100"} (or what (kname id))]
+           (when (:seon.agent/status a) [:span {:class (str "shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)])]]]))
 
 (defn- session-order
   "How a boot's sessions sort in the list: by when they started (oldest first)."
