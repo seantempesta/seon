@@ -116,7 +116,12 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
   if git update-ref -m "bin/land $B" refs/heads/main "$NEW" "$OLD" 2>/dev/null; then
     print "main $(git log --oneline -1 "$NEW" | cut -c1-100)"
     # the landed change into the standing root's main, as data, before bin/update builds main's binary
-    bridge "$MAIN" "$OLD" "$NEW" "${$("$MAIN/bin/ports")%% *}" | tail -1
+    # a landing the standing root's main did not take leaves root as it is: a new binary on main's older program would
+    # run agents on code the binary was not built from. Main moved in git all the same; the line says what to run
+    if ! bridge "$MAIN" "$OLD" "$NEW" "${$("$MAIN/bin/ports")%% *}"; then
+      print -u2 "land: the standing root's main did not take $NEW, so root was NOT updated: bring the tree in (my.root/import! at root, or erase runs/store and bin/update), then bin/update"
+      tidy; print "LANDED, ROOT NOT UPDATED"; exit 2
+    fi
     UARGS=(${=SEON_UPDATE_ARGS:---profile deepseek})
     nice -n 15 "$MAIN/bin/update" $UARGS | tail -1
     tidy; print LANDED; exit 0
