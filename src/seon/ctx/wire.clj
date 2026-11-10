@@ -232,18 +232,25 @@
   [{:role "user" :content (print/text (array-map :from (str from) :body (str body)) (:context print/budgets))}])
 
 
+(defn- children
+  "An element's children xs as the tree holds them: a seq a render returned (a `for`) spliced in its place, nils dropped, so
+  the model reads vectors only and a diff names each child (seon.render/keyed). See docs/render.md#style."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:vector :any]]}
+  [xs] (into [] (comp (mapcat #(if (seq? %) (children %) [%])) (remove nil?)) xs))
+
 (defn- presentation-free
   "Hiccup h without what is the page's alone: each element's class, style and id, but for a component's root (an element the walk
   gave an id), which keeps its render's name, the first word of its class, so the model can look up the function that drew a part
-  (`(source seon.render.ui/task)`) and its CSS on that var's metadata. See docs/render.md#style."
+  (`(source seon.render.ui/task)`) and its CSS on that var's metadata, and its id (seon.render/key-id: the render and what it shows), by which
+  a diff names it (seon.render/keyed); each element's children vectors only (`children`). See docs/render.md#style."
   {:malli/schema [:=> [:cat :any] :any]}
   [h] (clojure.walk/postwalk (fn [x] (if (and (vector? x) (keyword? (first x)) (map? (second x)))
                                        (let [m (second x)
                                              r (when (:id m) (first (str/split (str (:class m)) #"\s+")))
                                              ;; and the page's own marks (:wire/for \"page\"): what the page alone shows says nothing to the model
-                                             a (cond-> (into {} (remove (fn [[k _]] (or (#{:class :style :id} k) (= "wire" (namespace k))))) m) (seq r) (assoc :class r))]
-                                         (if (seq a) (assoc x 1 a) (into [(first x)] (nnext x))))
-                                       x))
+                                             a (cond-> (into {} (remove (fn [[k _]] (or (#{:class :style :id} k) (= "wire" (namespace k))))) m) (seq r) (assoc :class r :id (:id m)))]
+                                         (into (if (seq a) [(first x) a] [(first x)]) (children (nnext x))))
+                                       (if (and (vector? x) (keyword? (first x))) (into [(first x)] (children (next x))) x)))
                              h))
 
 (defn page-parts-at
@@ -261,9 +268,10 @@
       (presentation-free (:hiccup (render/render-pull (:tree (ctx/build ix d a branch (:seon.ctx/pattern (meta parts)))) d parts ix #{:seon.render/hiccup} {:seon.render/changes ctx/changes}))))))
 
 (defn- point-text
-  "Basis b as the point it names, written as the agent's code writes it: {:commit #uuid \"..\", :t n}, no branch, with the t the basis kept else the commit's own max-tx. Built by hand (not a printer's), as it is code the agent evals, whole. See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
+  "Basis b as the point it names, written as the agent's code writes it: {:commit #uuid \"..\", :t n}, no branch, with the t the basis kept
+  else the commit's own max-tx, printed by the one printer (seon.print/text), whole. See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat :seon.host/db :map] :string]}
-  [db b] (str "{:commit #uuid \"" (:commit b) "\", :t " (or (:t b) (:max-tx (d/commit-as-db (pdb/store-of db) (:commit b)))) "}"))
+  [db b] (print/text (with-meta (array-map :commit (:commit b) :t (or (:t b) (:max-tx (d/commit-as-db (pdb/store-of db) (:commit b))))) {:seon.print/full true})))
 
 (defn page-message
   "The page as the model reads it, a call Seon generated and its result: an assistant message whose one tool call is code (the
