@@ -7,6 +7,8 @@
  :seon.ref/depth [:enum :summary :doc :code]
  ;; a qualified symbol or keyword, or a simple symbol naming a namespace
  :seon.ref/name [:or :qualified-symbol :qualified-keyword :symbol]
+ ;; what a citation names, as the lookup of its identity ([attribute value]: seon.ref/target), whether or not a db holds it
+ :seon.ref/target [:tuple :qualified-keyword :any]
  ;; a path based at the checkout's top level (docs/flow.md), and a heading anchor in it
  :seon.ref/path :string
  :seon.ref/anchor :string

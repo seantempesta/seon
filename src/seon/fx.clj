@@ -1283,7 +1283,7 @@
             :else (recur from (inc i))))))
 
 (defn- read-lines!
-  "The edge reader of a streaming perform (the one thread AGENTS section 4 allows outside procs, for a blocking read, as
+  "The edge reader of a streaming perform (the one thread docs/flow.md#the-step-fn-contract-every-proc-follows allows outside procs, for a blocking read, as
   seon.fork-server's socket reader): pulls the body's pieces (pull answers the next byte array, nil at the end, or an error
   map when the socket failed) and puts each whole line on lines, then {:end true}, or {:error e} for the failure. Ends
   at either, or when lines is closed; shut (the stream's :shut, nil: none) is called whenever it ends, so the

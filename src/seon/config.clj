@@ -23,7 +23,7 @@
   every read takes that map, and a fork inherits it. A value resolving to nil (an unset `#env`) is
   absent; the result must satisfy `:seon.config/config` as a config is read (`closed`: an unknown key, an
   invalid value or a missing key a config may not lack refuses with `:seon.config/refused`). Root
-  writes the resolved config as facts on main's root entity (`facts`), platform records a
+  writes the resolved config as facts on main (`seon.task/config-tx`: an entity of its own, named by its content, which root's entity refs), platform records a
   merge never carries, where agents, the dashboard and the context read it.
 
   A foundational namespace, below seon.contract (which reads the instrument config key here): its
@@ -103,7 +103,7 @@
 (defn- closed
   "The compiled config map s as a config is read: closed at its top (an unknown key refuses it) and every key but those it
   `may-be-absent` required (a missing one refuses it, at boot, never at its first read). The schema itself is open and its
-  keys optional, as every entity schema's are (root's entity holds the config beside its own facts, and a task holds single
+  keys optional, as every entity schema's are (the config in force is an entity of its own, and a task holds single
   keys as its overrides); nested values keep their own shape. See docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat :any] :any]}
   [s] (mu/required-keys (mu/update-properties s assoc :closed true) (remove may-be-absent (map first (m/entries s)))))
@@ -490,28 +490,12 @@
 
 ;; ---- the facts on main ------------------------------------------------------------------------
 
-(defn facts
-  "Config c and its sources as facts on main (platform records: never carried by a merge in
-  either direction): main's root entity holding every key (each collection-valued key, the
-  manifest among them, as data), and an entity per provider and per model
-  (:seon.ai.model/provider-id, :seon.ai.model/id)."
-  {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] [:vector :map]]}
-  [c srcs]
-  (into [(assoc c :seon.root/id :root :seon.config/sources srcs)]
-        (concat (for [[id p] (:seon.config.ai/providers c)]
-                  (-> (select-keys p [:seon.config.ai/base-url :seon.config.ai/api-key-variable :seon.ai.model/output-token-wire-key])
-                      (assoc :seon.ai.model/provider-id id)))
-                (for [[id m] (:seon.config.ai/models c)]
-                  (-> (dissoc m :seon.config.ai/max-in-flight :seon.config.ai/max-tokens) (assoc :seon.ai.model/id id))))))
-
-(defn moved-facts
-  "The facts main's root entity takes when ops (resolved tx-data, read against db after them) touch config entries, as this process now holds them: each touched key and each provider and model, nil when none is touched. A place, which this process doesn't act on, stays. See docs/config.md#facts-on-main."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:maybe [:vector :map]]]}
+(defn moved
+  "This process's config and sources as {:config :sources} when ops (resolved tx-data, read against db after them) touch config entries, else nil: what main's config entity is written again from (seon.task/config-tx), a new entity when its content moved, which root's ref then names. A place, which this process doesn't act on, stays. See docs/config.md#facts-on-main."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:maybe [:map [:config :map] [:sources :seon.config/sources]]]]}
   [db ops]
-  (when-let [ks (seq (for [[_ e a] ops :when (= a :config/form) :let [k (:config/key (d/entity db e))] :when k] k))]
-    (let [{c :config srcs :sources} @held
-          [root & more] (facts c srcs)]
-      (into [(select-keys root (conj (remove #(of-key (merge schema-forms (:changes @held)) % :seon.config/place) ks) :seon.root/id))] more))))
+  (when (some (fn [[_ e a]] (and (= a :config/form) (:config/key (d/entity db e)))) ops)
+    (select-keys @held [:config :sources])))
 
 (defn secret
   "The value of the environment variable named var-name (a credential, e.g. the model's key,
@@ -522,18 +506,18 @@
 
 (defn from-db
   "The config root wrote on db (main, or any branch made from it since): every declared key
-  the root entity holds, each as its schema declares it. What agents, the dashboard and the
+  the entity root's :seon.root/config names holds, each as its schema declares it. What agents, the dashboard and the
   context read. A [:set T] key is a cardinality-many attribute (seon.schema.datahike/
   declaration), which a pull answers as a vector: it is read back as the set it was (the
   first set-valued key, :seon.config.source/process-vars, came back a vector, so the config
   in force and main's copy of it differed)."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
-  (not-empty (into {} (for [[k v] (d/pull db (keys-declared) [:seon.root/id :root])]
+  (not-empty (into {} (for [[k v] (:seon.root/config (d/pull db [{:seon.root/config (keys-declared)}] [:seon.root/id :root]))]
                         [k (if (dbu/multival? db k) (set v) v)]))))
 
 (defn provider-at
-  "The model provider as the config stands now: main's root entity on main (from-db: what root wrote
+  "The model provider as the config stands now: main's config entity (from-db: what root wrote
   at boot and any change since), over this process's own config for a key it does not hold, and the
   task's own settings over both (the declared :seon.config.* keys its entity holds on task-db, the
   flattened :seon.task/config): the one resolver (resolve-in: task, model, provider, config) read at

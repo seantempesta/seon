@@ -412,11 +412,12 @@
                       [[{:seon.root/id :root :seon.root/boot "b1"}]
                        (into [{:db/id "demo/f" :seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan walked-plan :seon.task/execution :running
                                :seon.task/branch :task-demo-f :seon.task/kind :work :seon.task/proofs #{'demo/f-test}}]
-                             ;; what its plan cites, as the task writer writes it (seon.task/cites-tx)
-                             (seon.task/cites-tx (ts/test-db) "demo/f" "demo/f" (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil walked-plan)))))
+                             ;; what its plan cites, as the task writer writes it (seon.task/cites-tx): its targets made before them in this write
+                             (into [{:var/name 'seon.render/hiccup} {:seon.doc/address "docs/render.md#no-clipping" :seon.doc/heading "No clipping"}]
+                                   (seon.task/cites-tx (ts/test-db) "demo/f" "demo/f" (seon.ref/kept (ts/test-db) (seon.ref/cited (:seon.ref/citations (seon.ref/parse nil walked-plan)))))))
                        (seon.task/agent-tx :a3 {:status :idle :pid 77 :branch :task-demo-f})
                        (seon.test-store/work-tx "demo/f" :running {:boot "b1" :agent :a3 :branch :task-demo-f :model "m" :max-turns 8 :start-ms 0})
-                       (update (seon.task/message-tx "m-1" "owner" [k] "check g" 1000) 0 assoc :seon.message/call (seon.task/call-ref k 1))
+                       (seon.task/message-tx "m-1" "owner" [k] "check g" 1000)
                        ;; the agent's task, which its record pulls (seon.agent/the-agent-is-the-unit-not-the-run)
                        [{:seon.agent/key k :seon.agent/task {:seon.task/id "demo/f"}}]
                        ;; root's own evaluation, from its REPL
@@ -453,7 +454,7 @@
   "St with root's walk current as of main (seon.render.proc/advance-main: root's ctx built at main's
   first read, its page the walk's units, root's agents list among them)."
   [st main]
-  (#'p/advance-main (dissoc st :main-db) (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])))
+  (#'p/advance-main (dissoc st :main-db) (d/db-with main (seon.test-store/root-tx {:seon.config.agent/max-running 4}))))
 
 (deftest a-dropped-page-lets-go-of-its-branchs-db
   ;; docs/machine.md#roots-heap: a branch's db read for a page is kept while a page shows it. The
@@ -475,7 +476,7 @@
         st1 (#'p/pass (update st :watch conj [:debug :root]) (volatile! {}))
         ctx (:context st1)
         budget (seon.config/value :seon.config.render/root-context-budget)]
-    (testing "printed only for a reader (a tab on /root/debug, or a :context request): a pass nobody reads it in prints nothing (derived data, AGENTS section 5)"
+    (testing "printed only for a reader (a tab on /root/debug, or a :context request): a pass nobody reads it in prints nothing (derived data: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on)"
       (is (nil? (:context (#'p/pass st (volatile! {})))) "no tab: nothing printed, no health read")
       (is (nil? (:health-at (#'p/pass st (volatile! {})))))
       (is (= ctx (:context (#'p/with-context (#'p/health! st)))) "the :context request's print is the page's")
@@ -525,7 +526,7 @@
   ;; commit: from the point it was read at, made again by seon.db/at-commit), and the tile draws what it holds
   (ts/test-branch! (fn [_ conn]
   (let [[_ branch _] (paged-dbs conn)
-        main0 (:db-after (d/transact conn {:tx-data [{:seon.root/id :root :seon.config.agent/max-running 4}]}))
+        main0 (:db-after (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}))
         st (assoc (#'p/advance-main (dissoc (proc-state main0 branch) :main-db) main0) :conn conn)
         tile (fn [st] (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st :root))))))
         main2 (:db-after (d/transact conn {:tx-data [{:seon.task/id "zz/dead" :seon.task/ns 'zz :seon.task/name "dead" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work
@@ -659,7 +660,7 @@
   ;; root's, which its walk marks (root-walk) when main moved
   (ts/test-branch! (fn [_ conn]
   (let [[main0 branch eid] (paged-dbs conn)
-        main0 (:db-after (d/transact conn {:tx-data [{:seon.root/id :root :seon.config.agent/max-running 4}]}))
+        main0 (:db-after (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}))
         o (volatile! {})
         st (#'p/pass (assoc (#'p/advance-main (dissoc (proc-state main0 branch) :main-db) main0) :conn conn) o)
         main (:main-db st)
@@ -682,7 +683,7 @@
     (r/dispose-walk! (get-in st [:root-walk :w]))))))
 
 (deftest a-wanted-keyframe-is-answered-when-its-read-fails
-  ;; docs/render.md#the-page: every wait ends, with its value or a typed error (AGENTS 4): a keyframe a tab asked for while the view could not
+  ;; docs/render.md#the-page: every wait ends, with its value or a typed error (docs/errors.md#nothing-crashes-and-nothing-hangs): a keyframe a tab asked for while the view could not
   ;; be drawn yet is answered when the read it waits on answers an error, by that error drawn, so the tab turns fresh and a later
   ;; read redraws it (task seon.web/a-tabs-first-keyframe-settles-on-its-own: bin/check idle waited ~30 min for a keyframe)
   (let [[main branch _] (paged-dbs)
@@ -700,7 +701,7 @@
   ;; an agent's commit: its branch read again, and what moved is the datoms-diff of the held and
   ;; the new branch db; the page walks only when the diff touches its reads
   (let [[main branch _] (paged-dbs)
-        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
+        main (d/db-with main (seon.test-store/root-tx {:seon.config.agent/max-running 4}))
         o (volatile! {})
         st (#'p/pass (proc-state main branch) o)
         k "a3"
@@ -776,8 +777,7 @@
                           {:seon.eval/call-id (str "c-" id) :seon.eval/call (seon.task/call-ref k n) :seon.eval/code (str "(inc " i ")")
                            :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
      (when (zero? (mod i 3))
-       (update (seon.task/message-tx (str "mm-" i) "owner" [k] (str "How is step " i "?") 1000) 0 assoc
-               :seon.message/call (seon.task/call-ref k n))))))
+       (seon.task/message-tx (str "mm-" i) "owner" [k] (str "How is step " i "?") 1000)))))
 
 (defn- step-dbs
   "a3's branch as of each of n further turns: [before turn 0, after turn 0, ... after turn n-1]."
@@ -939,7 +939,7 @@
   ;; and one still on an older read could refill the cache the newer one had invalidated. One read
   ;; per branch, shown by every view of the agent at once
   (let [[main branch _] (paged-dbs)
-        main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
+        main (d/db-with main (seon.test-store/root-tx {:seon.config.agent/max-running 4}))
         st (-> (proc-state main branch) (assoc :watch #{:a3 [:debug :a3]} :branches {}) (assoc-in [:view :agents :a3 :t] 7))
         o (volatile! {})
         st (#'p/ask-branches st o)
@@ -1350,7 +1350,7 @@
   (let [k "a1"
         ;; a db that holds no system prompt: the request a turn made again needs it, and making it throws
         db0 (reduce d/db-with (ts/test-db)
-                   [[{:seon.root/id :root :seon.root/boot "b1" :seon.config.agent/max-running 4}]
+                   [(seon.test-store/root-tx {:seon.root/boot "b1" :seon.config.agent/max-running 4})
                     (seon.task/agent-tx :a1 {:status :busy})
                     (seon.repl/record-tx {:seon.agent/key k} "e1" "a1" {:seon.eval/call-id "c-e1" :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}})
                     [{:seon.agent/key k :seon.agent/turn 1}
@@ -2242,7 +2242,7 @@
   "The test world after a root's boot and the person's first message to root, which makes root's session (seon.root/root-session-message-tx,
   as root's api writes it)."
   []
-  (let [db (d/db-with (my.test/world) (seon.task/boot-tx "b1" 1 "sean"))]
+  (let [db (d/db-with (my.test/world) (seon.task/boot-tx "b1" "sean"))]
     (d/db-with db (seon.root/root-session-message-tx db (seon.task/message-tx "m-first" "sean" ["root"] "Hi root." 1)))))
 
 (deftest roots-session-is-an-agent-of-its-own
@@ -2262,7 +2262,7 @@
     (let [db2 (d/db-with db (seon.root/root-session-refresh-tx db))
           same (fn [d] [(dissoc (d/pull d '[*] [:seon.agent/key "root"]) :db/id) (dissoc (d/pull d '[*] [:seon.task/id "request/root"]) :db/id)])]
       (is (= (same db) (same db2)) "a boot after writes its pattern again and nothing else"))
-    (let [fresh (d/db-with (my.test/world) (seon.task/boot-tx "b1" 1 "sean"))]
+    (let [fresh (d/db-with (my.test/world) (seon.task/boot-tx "b1" "sean"))]
       (is (nil? (d/entity fresh [:seon.agent/key "root"])) "a root no one has messaged has no session")
       (is (= [] (seon.root/root-session-refresh-tx fresh)) "and its boot writes none"))))
 
@@ -2300,7 +2300,7 @@
   ;; on a demo root: \"no new one has appeared yet\")
   (ts/test-branch!
     (fn [_ conn]
-      (d/transact conn (seon.task/boot-tx "b1" 1 "sean"))
+      (d/transact conn (seon.task/boot-tx "b1" "sean"))
       (d/transact conn (seon.root/root-session-message-tx @conn (seon.task/message-tx "m-first" "sean" ["root"] "Hi root." 1)))
       (let [fork (d/commit-id @conn)
             _ (d/transact conn [{:seon.task/id "request/later" :seon.task/ns 'request :seon.task/name "later" :seon.task/plan "Asked after root's session forked."
@@ -2829,6 +2829,9 @@
                        {:db/id "top" :seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing" :seon.doc/lead "How a test is written."}
                        {:seon.doc/address "docs/testing.md#testing-in-the-world" :seon.doc/heading "Testing in the world" :seon.doc/parent "top"}
                        {:seon.doc/address "docs/references.md#an-entity-cites" :seon.doc/heading "An entity cites" :seon.doc/lead "A citation is an entity."}
+                       {:seon.doc/address "docs/agent.md#working-a-task" :seon.doc/heading "Working a task"}
+                       {:seon.doc/address "docs/agent.md#merging" :seon.doc/heading "Merging"}
+                       {:seon.doc/address "docs/data-modeling.md#data-modeling" :seon.doc/heading "Data modeling"}
                        {:db/id "g" :form/id "demo/g-1" :form/src "(defn g \"Gets it.\" [x] x)"} {:db/id "gv" :var/name 'demo/g :var/doc "Gets it." :var/form "g"}
                        {:db/id "t" :form/id "demo-test/g-test-1" :form/src "(deftest g-test (is (g 1)))" :form/refs #{'demo/g} :form/defines ["tv"]}
                        {:db/id "tv" :var/name 'demo-test/g-test :var/meta #{:test} :var/form "t"}
@@ -2852,7 +2855,10 @@
 (deftest a-work-task-is-sent-how-a-task-is-worked
   (let [k "b1/a1"
         db (ts/test-db)
-        db (d/db-with db (seon.doc/load-tx db "docs" {"docs/agent.md" (slurp (str (seon.config/checkout) "/docs/agent.md"))}))
+        ;; the section as the one parse reads it (seon.doc/page-sections), stored alone: its page's links reach pages this db does not hold
+        sec (some #(when (= "docs/agent.md#working-a-task" (:seon.doc/address %)) %)
+                  (seon.doc/page-sections "docs/agent.md" (slurp (str (seon.config/checkout) "/docs/agent.md"))))
+        db (d/db-with db [(select-keys sec [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/position :seon.doc/lead :seon.doc/text])])
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true. How: ```docs/agent.md#working-a-task```."})))
         db (d/db-with db [{:db/id k :seon.agent/key k :seon.agent/task [:seon.task/id "demo/w"]}])
         aid (seon.db/eid db :seon.agent/key k)
@@ -2872,8 +2878,8 @@
     (is (every? #(re-find #"\[:h3 \"" %) (vals drawn)) "every cite is headed")
     (is (str/includes? (drawn "docs/x.md#the-x") "What x does. And more.") "a section at doc depth: its lead")
     (is (str/includes? (drawn "docs/x.md#the-x") "(doc \"docs/x.md#the-x\")") "and how to read the rest")
-    (let [sec (r/part-text ['seon.render.ui/cited {} (ui/cite-hiccup (ts/test-db) {:seon.cite/address "docs/testing.md#testing" :seon.cite/depth :doc
-                                                                          :section {:seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing" :seon.doc/lead "How a test is written."
+    (let [sec (r/part-text ['seon.render.ui/cited {} (ui/cite-hiccup (ts/test-db) {:seon.cite/depth :doc
+                                                                          :seon.cite/target {:seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing" :seon.doc/lead "How a test is written."
                                                                                     :seon.doc/_parent {1 {:seon.doc/address "docs/testing.md#testing-in-the-world" :seon.doc/heading "Testing in the world"}}}})])]
       (is (str/includes? sec "Testing in the world (docs/testing.md#testing-in-the-world)") "a page cited whole: its top section, the headings below it joined"))
     (is (str/includes? (drawn "demo/g") "(defn g \"Gets it.\" [x] x)") "a function at doc depth: its whole source, in a fence")
@@ -3314,7 +3320,7 @@
   ;; my.root/problems does, and the problems banner is what root's walk then draws: it names the count the api names.
   (ts/test-branch! (fn [_ conn]
     (let [[_ branch _] (paged-dbs conn)
-          main0 (:db-after (d/transact conn {:tx-data [{:seon.root/id :root :seon.config.agent/max-running 4}]}))
+          main0 (:db-after (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}))
           e (seon.contract/error :seon.instrument/contract-error 'app/f "app/f invalid-input: its arguments do not satisfy its contract"
                                  {:seon.error/member :malli.core/invalid-input :seon.error/problems [{:path [0] :in [0] :expected :int :value {:seon.print/code "nil"}}]})
           occ (fn [i] (seon.error/occurrence e :eval {:agent :a1 :task "t/a" :form "(f 1)"} (+ 1000 i)))
@@ -3345,7 +3351,7 @@
 (clojure.test/deftest the-config-panel-names-each-source
   ;; task seon.render/config-shows-where-each-value-came-from (docs/config.md#layers): beside a value, the layer root recorded for it on main, a fact, so no test depends on the process it runs in
   (ts/test-branch! (fn [_ conn]
-    (d/transact conn {:tx-data (seon.config/facts (assoc seon.config/config :seon.config.agent/max-running 6) {:seon.config.agent/max-running "--set"})})
+    (d/transact conn {:tx-data (seon.task/config-tx (assoc seon.config/config :seon.config.agent/max-running 6) {:seon.config.agent/max-running "--set"})})
     (let [db @conn
           sources (:seon.config/sources (d/pull db [:seon.config/sources] [:seon.root/id :root]))
           html (h/html (ui/config-panel {:seon.render/index (seon.db/index) :seon.config/sources sources} (seon.config/from-db db)))]

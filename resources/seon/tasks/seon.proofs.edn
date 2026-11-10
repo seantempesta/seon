@@ -16,7 +16,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.agent-test/a-judge-reuses-the-red-its-turn-recorded}}
  {:seon.task/name "root-shows-the-results"
-  :seon.task/plan "Root's render shows main (seon.render.proc). The verdicts are a cache by digest (docs/merging.md#verdicts-are-a-cache), so a render over the one printer (docs/render.md) shows, where root's page shows problems, main's verdicts at its reach digests (seon.fx/stored-results over main's plan): the flaky digests, the reds, and the costliest functions per call over them (seon.proofs/per-call over seon.fx/details). A view renders what is cached, never reruns it (AGENTS §3)."
+  :seon.task/plan "Root's render shows main (seon.render.proc). The verdicts are a cache by digest (docs/merging.md#verdicts-are-a-cache), so a render over the one printer (docs/render.md) shows, where root's page shows problems, main's verdicts at its reach digests (seon.fx/stored-results over main's plan): the flaky digests, the reds, and the costliest functions per call over them (seon.proofs/per-call over seon.fx/details). A render shows what is cached, never computes it again (docs/render.md#a-render-does-no-work-of-its-own)."
   :seon.task/kind :work}
  {:seon.task/name "an-agents-prove-defers-a-process-test-it-cannot-run"
   :seon.task/plan "Dogfood 0.7 (an outside agent, 2026-10-27), found proving my.task/status-answers-before-any-turn through seon_eval and seon_prove. A deftest written at the agent's REPL that calls seon.agent-test/in-agent errors in (my.agent/prove) with \"no process store at .../target/runs/test-store-..: bin/test makes it (its plan: make-process-store!) before any shard starts; run the test through bin/test\". (my.agent/tests-reaching 'seon.test-store/shared-root!) lists the new test as reaching in-agent, which is in :seon.config.source/process-vars, yet (:deferred (my.agent/prove)) stayed [] and :at-judge 16: the test ran in the agent's fork instead of being deferred to the merge gate as my.agent/deferred says it is. Find why a test defined at the REPL is not classified a process test (the branch's reach graph not refreshed for a new test? deferral not applied to a registered proof?) and fix it at that producer. Proof: a process test defined on a branch is :deferred by (my.agent/prove), not run and not an error."
@@ -34,7 +34,7 @@
 history, replacing slice 1's file cache (8564dea1d5, ``target/results``). Owner rulings: \"one writer for sure\"; \"never
 300k new records per test run … just the essentials\" (2026-10-27); \"We want to be able to query things in the db,
 functions, tests, schemas and understand what tests are failing and timings\" (2026-10-28); derived data may be
-cached, always regenerable (AGENTS §5).
+cached, always regenerable (docs/data-modeling.md#derived-data-is-a-cache-never-relied-on).
 
 What is stored (all ``:db/noHistory`` via ``:seon.db/no-history?``, overwritten in place):
 - On the test's var entity (`:var/name`, kind `:test`, resources/seon/schemas/seon.facts.edn ~57-66):
@@ -74,7 +74,7 @@ Proofs, to write red first: a test run writes one fact set per test that ran and
 
 Scoped 2026-10-29 (the owner chose \"Agent runs only\" for step R2a of seon.ctx/the-context-is-the-agents-evals-and-seons): an agent's test runs write these facts on its branch, and the agent's readers (seon.agent/test-plan's reuse, stored-results, my.task/status, the proofs part, the merge check) read them there; bin/test and bin/prove keep the shared file cache for now (reuse across checkouts, no root needed), their move a later step with its own design (a shared store keeps cross-checkout reuse).
 
-Done: All proofs red → green; the readers above read the facts; the file cache and its keys are gone; docs/merging.md#verdicts
+Done: All proofs red → green; the readers above read the facts; the file cache and its keys are gone; docs/merging.md#verdicts-are-a-cache
 and docs/storage.md updated; `bin/prove` green; a one-function prove's result lookup still milliseconds."
   :seon.task/kind :work
   :seon.task/proofs #{}}
@@ -89,4 +89,8 @@ and docs/storage.md updated; `bin/prove` green; a one-function prove's result lo
  {:seon.task/name "a-test-parked-on-a-descriptor-holds-every-agent"
   :seon.task/plan "What exists: `seon.prove` runs one test run at a time per checkout, and an agent's test child ends by its tick budget, its death, or Jolt's all-asleep check (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent). A test parked on a descriptor nothing will ever write, a pipe it holds both ends of, is none of these: a descriptor awaited can wake it, so it is never told, and every other agent's turn waits behind it on the one slot. Seen as the promise case in deepseek-run3, whose cause is fixed; this one is left. What correct looks like: one agent's stuck run never stops another agent's turn, by running each branch's run on a slot of its own under a bound of work (a config key, no clock), its wait recorded as what the stuck agent waits on. Replaces the one `:running` of `seon.prove`."
   :seon.task/proofs #{seon.prove-test/a-stuck-run-of-one-branch-leaves-another-branchs-run-going}}
-]
+
+ {:seon.task/name "a-check-steps-digest-takes-the-seed-of-the-store-it-runs-on"
+  :seon.task/plan "Found 2026-11-09 in jolt/erase-window. jolt/cite-ref at 958ffb11cd moved its standing targets (the sections and var every agent and template cites) out of seon.db/seed-tx, and its bin/prove reused the green verdicts of e2e-conflict, e2e-semantic, e2e-hairy, e2e-newns, e2e-sibling, e2e-held and swarm. Their digests (seon.proofs/step-digests: the reach of each step's functions) did not move, because a step reads the check store, which another step (seed) made from seon.db/seed-tx and seon.test-store/standing-targets-tx, and neither is in the step's reach. In the erase window the same steps were red: each merge task's create was refused, :seon.db/no-target [:var/name my.branch/merge-main!], since the check store lacked the var the merge template's instructions cite. Reproduction: on a tree whose seed lacks the template's cited var, a check step that writes a merge task keeps its old green digest and reuses it, while bin/check --steps runs it red. The check store is keyed by its seed's digest since 2026-11-09 (seon.check/seed: the link target-dir check-store-<digest of [schema-digest, seed-tx, standing-targets-tx]>). Correct: each check step that runs on the check store takes that seed digest into its digest (step-digests' input beside :env), so a changed seed moves every such step's digest and runs it. Proof, red first: a change to standing-targets-tx moves an e2e step's digest."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]

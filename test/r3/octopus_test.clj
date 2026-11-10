@@ -13,7 +13,7 @@
   [changes f]
   (ts/test-branch! (fn [_ conn] (let [ds (tpl/with-merge (vec (for [[nm _] changes] {:seon.task/ns 't :seon.task/name nm :seon.task/plan "p"
                                                          :seon.task/proofs #{(symbol "t" (str nm "-test"))}})))]
-    (d/transact conn {:tx-data (into (task/boot-tx boot 16 "sean") [{:seon.root/id :root :seon.config.merge/max-running 8}])})
+    (d/transact conn {:tx-data (into (task/boot-tx boot "sean") (seon.task/config-tx {:seon.config.agent/max-running 16 :seon.config.merge/max-running 8} {}))})
     (d/transact conn {:tx-data (task/create-tx @conn ds)})
     (d/transact conn {:tx-data (task/execution-tx (mapv #(task/task-id 't (:seon.task/name %)) ds) :running)})
     (doseq [[nm ks] changes :let [id (str "t/" nm)]]

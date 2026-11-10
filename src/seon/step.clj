@@ -67,7 +67,7 @@
   {:malli/schema [:=> [:cat :seon.host/volatile [:or :keyword [:tuple :keyword :keyword]] :any] :nil]}
   [o port m] (vswap! o update port (fnil conj []) m) nil)
 
-;; Request/answer with credit (AGENTS §3: `{:id :reply}`, exactly one answer), the asker's
+;; Request/answer with credit (docs/flow.md#the-step-fn-contract-every-proc-follows: `{:id :reply}`, exactly one answer), the asker's
 ;; side, once for every proc: a request id from the state's :rid counter, and what awaits its
 ;; answer under :pending. Root's api, the reconciler and the render proc keep their asks so.
 

@@ -23,6 +23,8 @@
                                    :form/defines [(str v)]}
                                   (ns-fact v)])
                                '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))"]
+                                 ;; a var the tests' plans cite (a cite names what exists: docs/references.md#an-entity-cites)
+                                 [demo/g "(defn g \"Halves.\" [x] (/ x 2))"]
                                  [demo-test/f-test "(deftest f-test (is (= 4 (f 2))))"]
                                  [demo-test/g-test "(deftest g-test (is (= 1 (g))))"]
                                  ;; a test the agent wrote in its scratch namespace, no proof of its task
@@ -278,19 +280,20 @@
            (:seon.ref/lead (shown "docs/flow.md#step"))) "doc depth: the section's lead")
     (is (clojure.string/includes? (str (shown "docs/flow.md#stop")) "Then the graph is gone.") "code depth: the section whole")))
 
-;; docs/references.md#an-entity-cites: a cite of a schema key joins its entry, of a namespace its entity, each drawn
-;; from what the cite holds; a path no section of the db names joins nothing, and its part says so
+;; docs/references.md#an-entity-cites: a cite of a schema key joins its entry, of a namespace its entity, of a file its
+;; entity, each drawn from what the cite holds
 (deftest a-cited-schema-key-and-namespace-show-what-they-are
-  (let [db (d/db-with (db-with-program) [{:ns/name 'demo.calc :ns/doc "Adds. More."} {:schema/key :x.s/block :schema/form "[:map [:x.s/from :int]]"}])
+  (let [db (d/db-with (db-with-program) [{:ns/name 'demo.calc :ns/doc "Adds. More."} {:schema/key :x.s/block :schema/form "[:map [:x.s/from :int]]"}
+                                         {:file/path "bin/env" :file/text "#!/bin/sh"}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
                                                :seon.task/plan "Read `demo.calc`, `:x.s/block` and `bin/env`."}]))
         t (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.task/id "demo/n") :b))
-        m (into {} (for [c (vals (:seon.cite/_of t))] [(or (:seon.cite/address c) (:seon.cite/name c)) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c)])]))]
+        m (into {} (for [c (vals (:seon.cite/_of t))] [(task/cited-name c) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c)])]))]
     (is (str/includes? (m 'demo.calc) "Adds.") "a namespace: the first sentence of its doc")
     (is (str/includes? (m 'demo.calc) "(doc 'demo.calc)") "and the form that reads it")
     (is (str/includes? (m :x.s/block) ":int") "a schema key: what it holds")
     (is (not (str/includes? (m :x.s/block) "my.schema/register!")) "its change is taught once, not on every cite")
-    (is (str/includes? (m "bin/env") (:unresolved seon.ref/problem-messages)) "a file: it joins nothing, and its part says so")))
+    (is (str/includes? (m "bin/env") "(slurp \"bin/env\")") "a file: the form that reads it")))
 
 (deftest an-agent-reads-its-conversation-so-far
   ;; a live DeepSeek agent re-read the same Datahike source every other turn because each
@@ -593,7 +596,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan "Make ```ctx-big/big``` fast."}]))
         r (seon.doc/resolve-ref db 'ctx-big/big :code)
         ;; the task's cite as ctx holds it: the var it names, with its form
-        part {:seon.cite/name 'ctx-big/big :seon.cite/depth :code :var {:var/name 'ctx-big/big :var/form {:form/src src}}}
+        part {:seon.cite/depth :code :seon.cite/target {:var/name 'ctx-big/big :var/form {:form/src src}}}
         model (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db part {:changing? true})])]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} (select-keys r [:symbol :source])) "the source whole as code, never swapped for its doc by size")
     (is (str/includes? model src) "the part holds it whole, in a fence: a function cited to be changed is read whole")
@@ -604,16 +607,6 @@
   (let [v (mapv (fn [i] (* (Math/exp (/ (- i) 96.0)) (Math/sin (* (inc seed) (inc i) 0.37)))) (range 768))
         n (Math/sqrt (reduce + (map #(* % %) v)))]
     (mapv #(/ % n) v)))
-
-(deftest unresolved-names-share-one-problem
-  ;; a measured context (2026-10-22) repeated the same 280-character problem under each name
-  ;; that resolves to nothing; it is said once, beside every such name
-  (let [db (db-with-program)
-        db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "u" :seon.task/plan "Use `demo/f`, `demo/x` and `demo/y`."
-                                               :seon.task/proofs #{'demo-test/f-test}}]))
-        refs (:write-set (data-of db "demo/u"))]
-    (is (= ['demo/f] (keep :symbol refs)) "the resolved name as itself")
-    (is (= {:unresolved ['demo/x 'demo/y] :problem (:unresolved seon.ref/problem-messages)} (last refs)) "the others, one problem")))
 
 (deftest an-owners-message-reaches-the-next-turn
   ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
@@ -741,12 +734,12 @@
                                                :seon.task/proofs #{'demo-test/f-test}}]))
         block (data-of db "demo/f")
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))
-        ;; the page's part: the cite joins the task by its id (:seon.cite/task), drawn by its plan
-        cite (some #(when (= 'demo.other/g (:seon.cite/name %)) %) (vals (:seon.cite/_of (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.task/id "demo/f") :b)))))
+        ;; the page's part: the cite's target is the task, drawn by its plan
+        cite (some #(when (= "demo.other/g" (get-in % [:seon.cite/target :seon.task/id])) %) (vals (:seon.cite/_of (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.task/id "demo/f") :b)))))
         part (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db cite)])]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")
-    (is (= "demo.other/g" (get-in cite [:task :seon.task/id])) "the cite joins the task by its id")
+    (is (= "demo.other/g" (get-in cite [:seon.cite/target :seon.task/id])) "the cite's target is the task")
     (is (str/includes? part "G is defined first. Then f calls it.") "and its part shows the plan")
     (is (not (str/includes? part (:unresolved seon.ref/problem-messages))) "not an unresolved name")))
 
@@ -764,7 +757,7 @@
                                                             :seon.eval/code code :seon.eval/response {:handle (symbol "result" id) :value 1} :seon.eval/call (seon.task/call-ref "a1" turn)}]))
             _ (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "a1" :seon.agent/turn 2 :seon.agent/task {:seon.task/id "demo/f"}}}])
             _ (ev! "e1" "a1" "(f 1)" 1)
-            _ (d/transact conn (update (task/message-tx "m1" "user" ["a1"] "use g" 1000) 0 assoc :seon.message/call (seon.task/call-ref "a1" 2)))
+            _ (d/transact conn (task/message-tx "m1" "user" ["a1"] "use g" 1000))
             _ (ev! "e2" "a1" "(f 2)" 2)
             _ (ev! "x1" "b/a9" "(other)" 1)
             db @conn
@@ -802,7 +795,7 @@
             first-stage (turn! b0)
             boundary "demo/d is done. Your task now is demo/i, in this same session: what you did so far stays above.\n\nIts plan: Implement d."
             _ (work! "demo/i")
-            _ (d/transact conn (update (task/message-tx "m1" "root" ["a1"] boundary 1000) 0 assoc :seon.message/call (seon.task/call-ref "a1" 2)))
+            _ (d/transact conn (task/message-tx "m1" "root" ["a1"] boundary 1000))
             second-stage (turn! (basis "demo/i" 2))
             ms0 (:messages first-stage) ms1 (:messages second-stage)
             refs (mapv first (:parts second-stage))
@@ -820,7 +813,7 @@
   ;; byte for byte, after later turns, evals and a change of the task's own config
   (ts/test-branch!
     (fn [_ conn]
-      (d/transact conn (into (task/boot-tx "boot-1" 6 "sean") (seon.config/facts (merge seon.config/config {:seon.config.ai/provider :openai-compat}) {})))
+      (d/transact conn (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx (merge seon.config/config {:seon.config.ai/provider :openai-compat}) {})))
       (d/transact conn (doc/load-tx @conn "docs" {wire/system-page (slurp (str (seon.config/checkout) "/" wire/system-page))}))
       (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g."
                                                :seon.task/proofs #{'demo-test/g-test}}]))
@@ -1054,15 +1047,16 @@
         ;; demo is the program's (src/), demo-test and its helpers are test/'s (seon.program/program-nss),
         ;; held before the task cites them: a name in a namespace the program does not hold is not cited
         db (d/db-with db [{:ns/name 'demo :ns/file "src/demo.clj"} {:ns/name 'demo-test :ns/file "test/demo_test.clj"}])
+        ;; a function beside the plan by meaning, and a schema key its plan names
+        db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
+                          {:schema/key :demo/thing :schema/form "[:map]"}])
+        ;; (written before the task: its plan cites them, and a cite names what exists)
         ;; every item scored is shown (its cut 0), so these tests read relevance's whole order
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "r" :seon.task/plan plan
                                               :seon.task/config {:seon.config.render/relevance-summary 0.0}}]))
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.doc/address (anchors i))))
         db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) "m"))
-        ;; a function beside the plan by meaning, and a schema key its plan names
-        db (d/db-with db [{:db/id "f" :form/id "demo/g" :form/src "(defn g [])" :form/keywords #{:demo/thing :demo/not-a-schema}} {:var/name 'demo/g :var/form "f" :var/doc "Gets it. More."}
-                          {:schema/key :demo/thing :schema/form "[:map]"}])
         f (pdb/eid db :form/id "demo/g")]
     [(d/db-with db (vector/tx-data [f] [1] [(dir 1.0 0.05)] "m")) te dir]))
 
@@ -1166,12 +1160,13 @@
   (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
         [w :as walk] (walked db)
         says #(pr-str (into [] (mapcat second) (render/wire w)))
-        take! (fn [id n body] (update (seon.task/message-tx id "owner" ["demo/a1"] body 1000) 0 assoc :seon.message/call (seon.task/call-ref "demo/a1" n)))]
+        take! (fn [id body] (seon.task/message-tx id "owner" ["demo/a1"] body 1000))]
     (is (not (str/includes? (says) "Before the turn.")))
-    (step! walk (take! "m1" 1 "Before the turn."))
-    (is (str/includes? (says) "Before the turn.") "taken under turn 1, the turn in force 0")
-    (step! walk [{:seon.agent/key "demo/a1" :seon.agent/turn 1}])
-    (step! walk (take! "m2" 2 "One past it again."))
+    (step! walk (take! "m1" "Before the turn."))
+    (is (str/includes? (says) "Before the turn.") "delivered for the turn after the one in force, 0")
+    (step! walk (ts/turn-tx "demo/a1" 1 {}))
+    (is (str/includes? (says) "Before the turn.") "and read by turn 1 when it opens")
+    (step! walk (take! "m2" "One past it again."))
     (is (str/includes? (says) "One past it again.") "and past each turn after")))
 
 (deftest opening-a-page-does-not-change-what-the-model-reads
@@ -1443,17 +1438,17 @@
   ;; message taken by the second turn, an outside eval made during it and its message reply (a record, after what else the turn holds)
   (let [ev (fn [id by turn & [more]] (merge {:seon.eval/id id :seon.eval/by by :seon.eval/agent [:seon.agent/key "a1"] :seon.eval/call (seon.task/call-ref "a1" turn)
                                               :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value 1}} more))
-        msg (fn [id turn] {:seon.message/id id :seon.message/to [[:seon.agent/key "a1"]] :seon.message/call (seon.task/call-ref "a1" turn) :seon.message/from "owner" :seon.message/body id})
+        msg (fn [id] {:seon.message/id id :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body id})
         db (t/with (t/world)
                    [{:seon.agent/key "a1" :seon.agent/turn 2}]
-                   ;; written in time order, though not the transcript's: a message after its turn's evals' ids, a reply before an eval of its turn
-                   [(msg "m1" 1)
-                    (model-call-fact 1 {:seon.model-call/forms 2 :seon.model-call/reply "I look."})
+                   ;; written in time order, though not the transcript's: a message before the turn that reads it, a reply before an eval of its turn
+                   [(msg "m1")]
+                   [(model-call-fact 1 {:seon.model-call/forms 2 :seon.model-call/reply "I look."})
                     (ev "e10" "outside" 1)
                     (ev "e9" "a1" 1 {:seon.eval/call-id "c9"})
-                    (ev "e8" "a1" 1 {:seon.eval/call-id "c8"})
-                    (msg "m2" 2)
-                    (model-call-fact 2 {:seon.model-call/forms 0 :seon.model-call/reply "Done." :seon.model-call/reasoning "easy"})
+                    (ev "e8" "a1" 1 {:seon.eval/call-id "c8"})]
+                   [(msg "m2")]
+                   [(model-call-fact 2 {:seon.model-call/forms 0 :seon.model-call/reply "Done." :seon.model-call/reasoning "easy"})
                     (ev "e11" "outside" 2)])
         a (pdb/eid db :seon.agent/key "a1")
         ps (seon.fixtures/tree-parts (:tree (ctx/build (seon.db/index) db a :b)) db)]
@@ -1462,21 +1457,21 @@
     (is (= [1 1 1 1 1 2 2 2] (mapv #(nth % 2) ps)) "each record's turn")
     (is (= {:role "assistant" :content "Done." :reasoning "easy" :reply 2} (first (second (nth ps 6)))) "the reply is an assistant message")))
 
-(deftest a-mid-turn-message-takes-the-number-in-force-and-the-prefix-holds
-  ;; docs/turn.md#the-turn-is-a-number: a message the agent's code takes in the middle of turn 1 takes 1, a message the loop takes for
-  ;; turn 2 takes 2, and request 2 holds request 1 whole (its page first) and then turn 1's evals and messages, in order, the page's change after them
+(deftest a-mid-turn-message-reads-at-the-next-turn-and-the-prefix-holds
+  ;; docs/turn.md#the-turn-is-a-number: a message delivered in the middle of turn 1 (after its basis) is read by turn 2, so request 2 holds
+  ;; request 1 whole (its page first), then turn 1's evals as they were, then the message, the page's change after it
   (ts/test-branch!
     (fn [_ conn]
       (let [[ask! ev!] (parts-session conn)
             r0 (ask! 0)
             _ (ev! "e1")
-            _ (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/call (seon.task/call-ref "a1" 1) :seon.message/from "owner" :seon.message/body "note taken in turn 1"}])
+            _ (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body "note taken in turn 1"}])
             r1 (ask! 1)]
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "request 2 starts with request 1 whole, its page the first request's")
-        (is (= ["system" "user" "assistant" "tool" "user" "assistant" "tool" "assistant" "tool"] (mapv :role (:messages r1)))
-            "then the message of turn 1 (before turn 1's eval, though written after it), the eval and its result, then the page's change: the status says a message came after the plan")
-        (is (str/includes? (:content (nth (:messages r1) 4)) "note taken in turn 1"))
-        (is (str/includes? (:content (last (:messages r1))) "came after your plan last changed") "the change is that one step")))))
+        (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "assistant" "tool" "user"] (mapv :role (:messages r1)))
+            "then turn 1's eval and its result as they were, the page's change (an eval of turn 1: the status says a message came after the plan), then the message delivered after turn 1's basis, which turn 2 reads at its start")
+        (is (str/includes? (:content (last (:messages r1))) "note taken in turn 1"))
+        (is (str/includes? (:content (nth (:messages r1) 7)) "came after your plan last changed") "the change is that one step")))))
 
 (deftest a-record-takes-the-agents-turn-in-force
   ;; docs/turn.md#the-turn-is-a-number: agent/turn-now is the agent's :seon.agent/turn on its branch (0 before its first turn),
@@ -1488,8 +1483,8 @@
          (is (= 0 (agent/turn-now)) "before its first turn")
          (reset! agent/state {:key "a1" :db db3})
          (is (= 3 (agent/turn-now)))
-         (is (= [3 ["a1"]] ((juxt (comp :seon.model-call/n :seon.message/call) (comp #(mapv second %) :seon.message/to)) (first (agent/entries-tx [{:id "m" :from "owner" :body "x" :sent-ms 1000}] (agent/turn-now)))))
-             "a message delivered in turn 3 carries 3 and its agent")
+         (is (= [["a1"] false] ((juxt (comp #(mapv second %) :seon.message/to) #(contains? % :seon.message/call)) (first (agent/entries-tx [{:id "m" :from "owner" :body "x" :sent-ms 1000}]))))
+             "a message delivered to the agent carries its agent, and no turn: the turn that reads it is derived from when it was delivered")
          (finally (reset! agent/state old)))))
 
 (deftest failures-that-got-the-same-value-are-one-entry
@@ -1518,9 +1513,9 @@
   (let [db (db-with-program)
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "c" :seon.task/plan "Change `demo/f`."
                                                :seon.task/proofs #{'demo-test/f-test}}]))
-        names #(set (keep :seon.cite/name (vals (:seon.cite/_of (:tree (ctx/build (seon.db/index) % (pdb/eid % :seon.task/id "demo/c") :b))))))]
+        names #(set (keep (fn [c] (get-in c [:seon.cite/target :var/name])) (vals (:seon.cite/_of (:tree (ctx/build (seon.db/index) % (pdb/eid % :seon.task/id "demo/c") :b))))))]
     (is (= '#{demo/f} (names db)) "the cites its write made")
-    (let [db (d/db-with db [{:seon.task/id "demo/c" :seon.task/plan "Change `demo/g`."}])]
+    (let [db (d/db-with db [{:var/name 'demo/g} {:seon.task/id "demo/c" :seon.task/plan "Change `demo/g`."}])]
       (is (= '#{demo/f} (names db)) "a draw reads the entities, never the text again")
       (is (= '#{demo/g} (names (d/db-with db (task/rederive-tx db (task/task db "demo/c")))))
           "and a write of the plan makes them again"))))
@@ -1557,7 +1552,7 @@
    (d/transact conn [{:seon.agent/key "b/src" :seon.agent/turn 2 :seon.agent/task [:seon.task/id "demo/h"]}])
    (d/transact conn [{:seon.eval/id "s1" :seon.eval/by "src" :seon.eval/agent [:seon.agent/key "b/src"] :seon.eval/call (seon.task/call-ref "b/src" 1)
                       :seon.eval/code code :seon.eval/response {:handle 'result/s1 :value 3} :seon.eval/call-id "call_1" :seon.eval/intent "Add."}])
-   (d/transact conn [{:seon.message/id "m1" :seon.message/to [[:seon.agent/key "b/src"]] :seon.message/call (seon.task/call-ref "b/src" 2) :seon.message/from "owner" :seon.message/body "Looks right."}])
+   (d/transact conn [{:seon.message/id "m1" :seon.message/to [[:seon.agent/key "b/src"]] :seon.message/from "owner" :seon.message/body "Looks right."}])
    (d/transact conn [{:seon.model-call/id (seon.lib/call-id "b/src" 2) :seon.model-call/agent [:seon.agent/key "b/src"] :seon.model-call/n 2 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "Done."}])))
 
 (defn- example-world!
@@ -1690,7 +1685,7 @@
   (let [r0 (turn! conn 0)]
     (d/transact conn [{:seon.eval/id "e0" :seon.eval/by "a1" :seon.eval/agent [:seon.agent/key "a1"] :seon.eval/call (seon.task/call-ref "a1" 1)
                        :seon.eval/code "(+ 5 1)" :seon.eval/response {:handle 'result/e0 :value 6} :seon.eval/call-id "c0" :seon.eval/intent "Add."}])
-    (d/transact conn [{:seon.message/id "m0" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/call (seon.task/call-ref "a1" 2) :seon.message/from "owner" :seon.message/body "Go on."}])
+    (d/transact conn [{:seon.message/id "m0" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from "owner" :seon.message/body "Go on."}])
     (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" 2) :seon.model-call/agent [:seon.agent/key "a1"] :seon.model-call/n 2 :seon.model-call/origin :model :seon.model-call/forms 0 :seon.model-call/reply "Thinking."}])
     {:r0 r0 :r1 (turn! conn 2)}))
 
@@ -1991,7 +1986,7 @@
   ;; (vars-history spent turns 4-8 finding it out)
   (let [db (d/db-with (db-with-program) [{:schema/key :var/form :schema/form ":seon.db/ref"}
                                          {:schema/key :var/name :schema/form ":symbol"}])
-        text (fn [k] (seon.render/part-text ['seon.render.ui/cited {} (seon.render.ui/cite-hiccup db {:seon.cite/name k :seon.cite/depth :doc :schema (d/pull db '[*] [:schema/key k])})]))
+        text (fn [k] (seon.render/part-text ['seon.render.ui/cited {} (seon.render.ui/cite-hiccup db {:seon.cite/depth :doc :seon.cite/target (d/pull db '[*] [:schema/key k])})]))
         t (text :var/form)]
     (is (str/includes? t "An attribute your plan names.") t)
     (is (str/includes? t ":form/src") "a ref followed: what the form entity holds")

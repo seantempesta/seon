@@ -73,15 +73,18 @@
   followed by its merge task (seon.template/with-merge)."
   {:malli/schema [:=> [:cat [:vector :map] :symbol [:maybe :string]] [:vector :seon.task/declaration]]}
   [specs tns model]
+  ;; a plan cites the program the specs write; any other var its proof calls (seon.cost/proof) a literal, as a world
+  ;; without it holds nothing it names (docs/references.md#an-entity-cites)
+  (let [nss (into #{} (map #(str (:ns % 'app.calc))) specs)]
   (tpl/with-merge
     (vec (for [{:keys [name needs] :as s} specs :when name]
            (cond-> {:seon.task/ns tns :seon.task/name name
                     :seon.task/plan (or (:plan s)
-                                        (str "Make " (str/join ", " (map #(str "`" % "`") (proof-vars s))) " pass its proof `app.proofs/" name "-test`."
+                                        (str "Make " (str/join ", " (map #(if (nss (namespace %)) (str "`" % "`") (str "``" % "``")) (proof-vars s))) " pass its proof ``app.proofs/" name "-test``."
                                              (when (seq needs) (str " It may use " (str/join ", " (map #(str "`app.calc/" % "`") needs)) "."))))
                     :seon.task/proofs (or (:proofs s) #{(symbol "app.proofs" (str name "-test"))})}
              (seq needs) (assoc :seon.task/needs (set (map #(str tns "/" %) needs)))
-             model (assoc :seon.task/model model))))))
+             model (assoc :seon.task/model model)))))))
 
 ;; ---- merge scenarios (M1): two tasks on overlapping definitions -----------------------
 

@@ -40,7 +40,7 @@
   [db t]
   (let [cs (ref/references db (str (:seon.task/plan t) "\n" (:seon.task/instructions t)))
         proofs (set (:seon.task/proofs t))]
-    {:cited (set (program/program-names db (into [] (comp (keep :seon.cite/name) (filter qualified-symbol?))
+    {:cited (set (program/program-names db (into [] (keep #(get-in % [:seon.cite/target :var/name]))
                                                   (task/cites-of db (pdb/eid db :seon.task/id (:seon.task/id t))))))
      :shown (into #{} (comp (filter #(= :code (:seon.ref/depth %))) (map :seon.ref/name) (filter qualified-symbol?)) cs)
      :proofs proofs

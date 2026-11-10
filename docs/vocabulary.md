@@ -2,7 +2,7 @@
 
 The words this repo uses, and the namespace that owns each. Library words first (Clojure,
 core.async.flow, Datahike, Malli, nREPL, git); a word below is ours only where no library
-owns the concept. A new concept gets its word here before it appears in code. Names are Clojure's, its libraries' or Jolt's words (`AGENTS.md` §7a: a function, not a verb; a merge, not a landing; the server, not the door); a stored keyword keeps its old spelling until it is migrated.
+owns the concept. A new concept gets its word here before it appears in code. Names are Clojure's, its libraries' or Jolt's words (`AGENTS.md` §7a: a function, not a verb; a merge, not a landing; the server, not the door), and the words ruled out are [listed below](#words-we-do-not-use); a file or command keeps its old spelling until a rename task moves it, and a stored keyword is renamed by erasing the store, never by a migration.
 
 ## Processes (core.async.flow's words)
 
@@ -74,6 +74,23 @@ The words for data and branches, in Datahike's and git's terms, and the namespac
 | **observation** | data on the branch that observed it (evaluations, answered t), never merged: every `seon.*` attribute but the carried task content is a platform record | `seon.merge/carried-platform-attrs` |
 | **generation** | a build of Seon's own source: the running binary is one, and the next is the merges commit built by the `:build` effect, recorded on main (`:seon.root/generation`) and started on the same store by `bin/root next` ([source](source.md#the-next-generation)) | `seon.fx/build`, `my.root/generation`, `my.root/next-generation` |
 | **prove** | run what a change reaches and reuse every test and check step green at its reach digest: `bin/prove` in a checkout, ``(my.agent/prove)`` in an agent (the process tests it reaches run at the judge's merge gate, on a checkout, or when they are a proof; [merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
+
+## Words we do not use
+
+The words the owner has ruled out, each with what to say instead: a vague word hides what the data is, and a design described in it drifts from the database. A name in code or a heading that still holds one keeps its spelling until a rename task moves it; new text uses the right word.
+
+- **record** (noun): say entity, attribute, value, ref, pull pattern, the pulled map, datom. Owner, 2026-11-09: "Stop using 'record' btw ... I want us to be more clear about what we are talking about and to be more focused on data schemas and datahike terms so we are never far away from the truth."
+- **draw**: a render function takes data and returns hiccup; the Web side writes html. Owner, 2026-11-09: "Ditch the 'draw' term. I only want to focus on data right now; let Web focus on the html serving."
+- **page**, **walk**, **view** as loose nouns: say what it is in the library's terms (a ratom holding the pulled data, a Reaction per component, hiccup, html, a Datastar patch by element id, an SSE connection per browser tab), and name our var only as a citation after it. Owner, 2026-11-08: "What is a 'page' your predecessors keep making up words and I keep begging you to use specific clojure terms or their library interfaces". A wiki page is a page.
+- **table**, **row**: say entity, attribute, ref, schema, and write a comparison as a list of entities and their attributes. Owner, 2026-11-07: "There are no tables in the database please don't use any table or row references when doing these designs."
+- **run** (of an agent's work): an agent has an env, a branch and its evals; say a process, a test's verdict, a transaction, a commit, an experiment, `bin/prove`'s plan. Owner, 2026-11-07: "There are no runs and rows. Everything needs to be data driven and a run doesn't exist and neither does a row."
+- **kind**: a thing is what its schema says it is, and choosing among templates is a merge. Owner, 2026-11-07: "in general there are no "kinds" and those are generally code smells"; 2026-11-08: "kinds don't exist in datahike. Something is a thing if there's a schema for it".
+- **cursor**, **offset**: say what is held (how far an agent has read is an attribute holding a `t`). Owner, 2026-11-07: "We don't have cursors."
+- **part**: it is a component. Owner, 2026-11-06: "I really don't like the part name".
+- **fence** for a guard: say guard; a fence is CommonMark's code fence. Owner, 2026-11-07: "Fences are always signs a design is off."
+- **our own word where git has one**: merge (not save or landing), pull (not sync or track), rebase, cherry-pick, delete a branch, gc ([above](#data-datahikes-and-gits-words)). Owner, 2026-11-07: "I think we should stick to git terms whenever possible so agents have an intuitive understanding."
+
+Words that stay: the library's (proc, step-fn, transact, branch, merge, schema, registry, contract for a Malli function schema, flusher, group commit, fork server, lease, generation), and **waste**, our word for the turns and tokens an agent spent past what its work needed (`:seon.agent/waste`; owner, 2026-10-23).
 
 ## Tasks (TASK-CHAIN's words)
 

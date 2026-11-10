@@ -45,7 +45,7 @@ store, where the world costs about a millisecond and nothing (the owner, 2026-10
    `t/cost` readings ([cost](cost.md); the tests in seon.ref-test are examples).
 
 **Every test runs under a ceiling of work**, `:seon.config.agent/test-ticks` engine ticks; a test
-past it is red. Write tests far under it: a world test usually costs a few million ticks (a few
+past it is red (owner, 2026-10-30: tests "that run over a configured time [are] rejected"), ours and every Seon agent's alike. Write tests far under it: a world test usually costs a few million ticks (a few
 ms), and the ceiling is coming down to about a second of work (2e8 ticks) once the suite's heavy
 tests run on the world. Keep a test's input the smallest that still shows the error it guards. Run the tests your
 change reaches with `(my.agent/prove)`: its answer gives each test's verdict and cost (`bin/test`'s
@@ -60,6 +60,8 @@ test store (`seon.test-store/test-branch!`); say why in its comment.
 ## A proof is focused
 
 A proof decides one thing: whether a behaviour is correct, and with it whether the work is done; more proofs are not better ones. It makes one claim, statable in a sentence, about what the behaviour does and not how it is done. It fails when the behaviour is broken, which you have seen by breaking the source it guards with no green result to reuse, and its failure says what is wrong. An assertion that decides neither correctness nor done is removed; a proof another already makes is merged into it; a process test whose claim a world can show moves to the world.
+
+Its input is the smallest that still shows the claim (owner, 2026-10-22: "Shrink the tests down to sizes that capture the error class they are looking for"; 2026-10-31: "question what is being tested rather than how fast can we make it. Algorithmic improvements often can be found by rethinking the problem."). To make a test cheaper, state its claim first and find the input that shows exactly that; cutting sizes is the last resort. A helper once shrank sizes until five cost proofs spanned 1.5 to 6 times and could no longer judge growth; rethought by claim, the same tests went from 175 to 21 M ticks, 171 to 11 M and 116 to 68 M, with real spans. A growth claim is a cost proof at small sizes ([cost](cost.md)).
 
 ## A root costs what it boots
 

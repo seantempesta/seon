@@ -43,6 +43,10 @@ The REPL speaks nREPL's message model: a handler with middleware composed over i
 
 Its tests run in a fork of itself (`seon.agent/run-tests-forked`), each test bounded by a budget of work of its own, from its green history and under `:seon.config.agent/test-ticks` ([merging](merging.md#a-tests-tick-budget)) (one bound in a turn, the judge and bin/test: `seon.proofs/run-tests!`), never time; when every selected test is green at its digest nothing is forked; a process test runs there only when its namespace is named or it is one of the proofs; a fork refused because a thread is active answers `:seon.test/fork-refused` ([turn](turn.md#who-runs-which-tests)).
 
+## An agent is never gated
+
+An agent has a real REPL, and Clojure's own semantics are the interface: the system writes down what happened and never gates what an agent may do; it gets out of an agent's way. No cut or window is put on its context or its evals ([decisions](decisions.md#no-artificial-limits-or-cuts-on-an-agents-context-or-evals-owner-2026-10-29)), and a problem its branch made, such as an uncited var, is shown to it as attention ([health](health.md#a-function-that-cites-no-section)). Before adding a check on an agent, ask three questions: what would a plain REPL do? Is this recording or judging? What observed thing breaks without it?
+
 ## A parked process
 
 An agent that ends waiting or at its cap keeps its process, parked on its task, and the next message to the agent wakes that same process: the same agent, no fork (`seon.reconcile`, DECISIONS, Every agent parks).
