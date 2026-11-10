@@ -1011,8 +1011,8 @@
   page shows and the model is sent as it is: its query searched on the branch's
   db by seon.ctx.search/search (exact words, meaning once its query has a vector, and the names it holds;
   functions, wiki sections and schema keys, no relevance cut), its :seon.search/k hits (else
-  :seon.config.render/search's), each a line: its name (its first sentence added nothing a model used, at
-  ~90 tokens a hit against ~10: docs/vector.md#search); the hits left out are not drawn (my.agent/search answers them);
+  :seon.config.render/search's), each a line: its name and the line of its text holding a word of the query, as grep
+  shows a hit (a bare name was passed over; its first sentence, ~90 tokens a hit, added nothing a model used: docs/vector.md#search); the hits left out are not drawn (my.agent/search answers them);
   nothing until its query has a vector, since words alone match as weakly when nothing is to be found. A change of its query (a swap! on ctx)
   redraws this part alone, and the model is sent what changed of it
   (docs/render.md#the-render-is-an-eval). What it finds for a request is measured in
@@ -1032,7 +1032,9 @@
                            (search/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) e))]
           ;; the task's own request is on the page already: the heading names it rather than repeating it
           [:section [:h3 (if (= q (:seon.task/plan (:seon.search/of (d/pull db [{:seon.search/of [:seon.task/plan]}] e)))) "search: this task's request" (str "search: " q))]
-           (into [:ol] (for [{:keys [name]} hits] [:li [:code (str name)]]))])))))
+           ;; each hit with the line of its text that holds a word of the query, as grep shows a hit: a bare name was passed over
+           ;; (curated pair 1, 2026-11-10) where a line says why it matters
+           (into [:ol] (for [{:keys [name line]} hits] [:li [:code (str name)] (when (seq line) (str " " line))]))])))))
 
 (defn- held-whole
   "Where ctx c holds whole each entity the cites at paths ps joined, {e path}: the agent's task and its needs, the
