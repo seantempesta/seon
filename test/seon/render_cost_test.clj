@@ -261,9 +261,10 @@
      ;; owner's yes, 2026-11-10 ("Land now, three waivers", docs/decisions.md#three-request-cost-proofs-land-waived-owner-2026-11-10): a cold request draws
      ;; the page at the first turn's basis and advances one walk through every later basis (~6k calls), and each history record is drawn
      ;; by its own model render (~3k, an eval's print the most); the rest is outside the model render. The waiver comes off with that task.
-     ;; Measured on jolt/pages 2026-11-10 at its largest size, 42.1k calls and 42.8 MB at 100 (its bound: 33.6k calls, 34.6 MB).
-     :overrun {:task "seon.render/a-model-render-draws-each-turns-diff" :n 100 :measured {:calls 42100.0 :bytes 42800000.0}}
-     :sizes [10 30 100]}))
+     ;; Measured on jolt/pages 2026-11-10 at its largest size, re-taken at Tests' sizes [3 10 30] after Context's kept page walk: 14.8k calls
+     ;; and 14.52 MB at 30 (its bound: 11.4k calls, 15.0 MB; bytes now under it, calls 1.30x). Before, at 100: 42.1k calls, 42.8 MB.
+     :overrun {:task "seon.render/a-model-render-draws-each-turns-diff" :n 30 :measured {:calls 14800.0 :bytes 14520000.0}}
+     :sizes [3 10 30]}))
 
 (deftest a-transaction-renders-what-it-touched
   ;; task seon.render/a-page-is-its-entitys-view (4a), now every-page-is-its-parts: a commit on main touching
@@ -352,7 +353,7 @@
      :growth :linear
      :per-n {:calls 0 :bytes 3400}
      :fixed {:calls 400 :bytes 150000}
-     :sizes [100 300 1000 4000]})))
+     :sizes [30 100 300]})))
 
 ;; See docs/render.md#a-change-is-edits-by-name
 (defn keyed-part
@@ -439,7 +440,7 @@
      ;; (seon.print/response-text); the owner approved 250 for a change's 379, and said cull later
      :per-n {:calls 8.2 :bytes 37000}
      :fixed {:calls 1285 :bytes 11250000}
-     :sizes [10 40 160 640]})))
+     :sizes [10 40 160]})))
 
 ;; On disk, the one-store rule's last resort (docs/cost.md#how-we-measure): a page advanced from one turn's basis to the next
 ;; takes the datoms between the two commits (seon.ctx/moved, d/datoms-diff), which skips the subtrees they share by address; the

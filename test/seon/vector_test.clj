@@ -496,10 +496,14 @@
         (vector/close handle)))))
 
 (deftest a-helper-killed-while-idle-is-replaced-and-the-request-answered
+  ;; the idle helper is a scripted one (a shell reading its requests and answering none), held as start! holds one: what
+  ;; embed meets is a held helper whose process is gone, the same whatever ran in it, and the real helper's model load is
+  ;; paid once, by the replacement the claim is about (a real warm helper paid it twice: 2.75 s of the test's wall time)
   (lib/ignore-sigpipe!)
   (let [handle (vector/open nil)
         embed #(vector/embed {:batch [{:req {:texts %}}] :handle handle})
-        _ (embed ["warm"])
+        p (.start (ProcessBuilder. ^java.util.List ["sh" "-c" "cat > /dev/null"]))
+        _ (vreset! (:helper handle) {:process p :pid (.pid p) :in (.getOutputStream p) :out (.getInputStream p)})
         h @(:helper handle)]
     (lib/c-kill (:pid h) 9)
     (.waitFor (:process h))

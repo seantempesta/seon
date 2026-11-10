@@ -312,15 +312,19 @@
                                             [{:seon.message/id "m1" :seon.message/from "user" :seon.message/body "How is it going?"
                                               :seon.message/to [[:seon.agent/key k]]}]))))
         t (dissoc (:tree (ctx/build (seon.db/index) db (aid db) :b)) :branch :commit :t)
-        s (pulled-schema :seon.db/agent-fact)
-        opts {:registry seon.contract/registry}]
+        ;; the schema made once and its validator compiled once, for both checks: compiling it is seconds (malli's ref
+        ;; validators compile each ref again on every path to it), and each malli.core/validate of the form, with the
+        ;; explain the message evaluated on a pass too, compiled it again: three times, 9.6 s
+        opts {:registry seon.contract/registry}
+        s (malli.core/schema (pulled-schema :seon.db/agent-fact) opts)
+        valid? (malli.core/validate s t)]
     (is (= "lab/ctx" (get-in t [:seon.agent/task :seon.task/id])) "the task under its attribute")
     (is (= 3 (count (:seon.eval/_agent t))) "the evals, by the ref that reaches the agent")
     (is (= 1 (count (:seon.model-call/_agent t))) "the model call the evals name")
     (is (= ["m1"] (names (:seon.message/_to t) :seon.message/id)))
-    (is (malli.core/validate s t opts) (pr-str (some-> (malli.core/explain s t opts) :errors first (select-keys [:in :value]))))
+    (is valid? (when-not valid? (pr-str (some-> (malli.core/explain s t) :errors first (select-keys [:in :value])))))
     (let [e (first (keys (:seon.eval/_agent t)))]
-      (is (not (malli.core/validate s (assoc-in t [:seon.eval/_agent e :seon.eval/code] 42) opts)) "a bad value deep in it fails"))))
+      (is (not (malli.core/validate s (assoc-in t [:seon.eval/_agent e :seon.eval/code] 42))) "a bad value deep in it fails"))))
 
 (deftest an-agents-record-holds-only-its-work
   ;; the owner, 2026-10-29: "The agent's record is facts about its work. Telemetry and derived data live on their
@@ -504,10 +508,17 @@
   ;; (the owner, 2026-10-30: "deliver all messages and errors"): an
   ;; agent's own record, pulled by its schema's pattern, holds every message and every turn it has,
   ;; never the newest :seon.config.ctx/window of them (100), which only root's own record keeps for its copies
-  (let [n 2400 db (seeded n nil) c (ctx/build (seon.db/index) db (aid db) :b)]
-    (is (< (seon.config/value :seon.config.ctx/window) (quot n 20)) "more of each than the window")
-    (is (= (quot n 20) (count (:seon.message/_to (:tree c)))) "every message to the agent")
-    (is (= (quot n 3) (count (:seon.model-call/_agent (:tree c)))) "every model call it has")))
+  ;; n messages and n model calls, the turns' own entities, and no eval: the claim is of those two (a session of 2,400
+  ;; evals made the 120 messages and 800 calls before, most of the test's work)
+  (let [n 120
+        db (d/db-with (seeded 0 nil) (vec (mapcat (fn [i] [(seon.task/call-ref k i)
+                                                           {:seon.message/id (str "m" i) :seon.message/from "user"
+                                                            :seon.message/to [[:seon.agent/key k]] :seon.message/body "How is it going?"}])
+                                                  (range 1 (inc n)))))
+        c (ctx/build (seon.db/index) db (aid db) :b)]
+    (is (< (seon.config/value :seon.config.ctx/window) n) "more of each than the window")
+    (is (= n (count (:seon.message/_to (:tree c)))) "every message to the agent")
+    (is (= n (count (:seon.model-call/_agent (:tree c)))) "every model call it has")))
 
 (deftest the-patch-costs-the-change-not-the-session
   ;; a new eval's transaction patches the record in the work of its datoms, whatever the session's
