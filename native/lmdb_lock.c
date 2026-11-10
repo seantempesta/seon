@@ -16,8 +16,10 @@
  * 7. a store whose last user was SIGKILLed, then deleted: nothing of it is left (its directory is
  *    gone; case 1 says nothing outside it existed);
  * 8. a lock file of another lock format (a build of another layout): an open is refused with
- *    MDB_VERSION_MISMATCH while a process holds the store, and succeeds once the format is its own.
- * CASES, default 12345678, names the cases to run. Prints LMDB-LOCK OK and exits 0 only when every
+ *    MDB_VERSION_MISMATCH while a process holds the store, and succeeds once the format is its own;
+ * 9. two processes, each committing on one thread and beginning read txns on another, a long read
+ *    txn open in each: no begin or commit fails (no EDEADLK), and each long reader keeps its slot.
+ * CASES, default 123456789, names the cases to run. Prints LMDB-LOCK OK and exits 0 only when every
  * case run holds. */
 #include <lmdb.h>
 #include <stdio.h>
@@ -235,8 +237,10 @@ static int twice(const char *base) {
   close(go[1]); close(back[0]);
   int st; waitpid(p, &st, 0);
   printf("  another process sees: byte 0 %s, its pid's byte %s, the writer lock while A writes %s\n",
-         b0 == 1 && h0 == p ? "held" : "FREE", bp == 1 && hp == p ? "held" : "FREE", bw == 1 && hw == p ? "held" : "FREE");
-  return slot && b0 == 1 && h0 == p && bp == 1 && hp == p && bw == 1 && hw == p && WIFEXITED(st) && !WEXITSTATUS(st);
+         b0 == 1 && h0 == p ? "held" : "FREE", bp == 1 && hp == p ? "held" : "FREE", bw == 1 ? "held" : "FREE");
+  /* the writer lock is an open file description's: F_GETLK names no pid for it (hw is -1) */
+  (void)hw;
+  return slot && b0 == 1 && h0 == p && bp == 1 && hp == p && bw == 1 && WIFEXITED(st) && !WEXITSTATUS(st);
 }
 
 static int deleted(const char *base) {
@@ -274,18 +278,72 @@ static int format(const char *base) {
   return ok;
 }
 
+/* 9: two processes, each a writer thread committing and a reader thread beginning and ending read
+ * txns, while one long read txn per process stays open: no begin or commit fails (POSIX record locks,
+ * one owner a process, answered EDEADLK when one process's writer held the writer lock while its
+ * reader waited for the reader table lock, beside another doing the reverse), and each long reader
+ * keeps its slot at its txn. */
+enum { ROUNDS = 2000 };
+static MDB_env *penv;
+static int perr;
+static void *p_writer(void *a) {
+  int i; char k[16];
+  for (i = 0; i < ROUNDS; i++) {
+    MDB_txn *t; MDB_dbi d; MDB_val K, V = {4, "vvvv"};
+    if (mdb_txn_begin(penv, NULL, 0, &t)) { __sync_fetch_and_add(&perr, 1); continue; }
+    snprintf(k, sizeof k, "k%d", i % 100); K.mv_size = strlen(k); K.mv_data = k;
+    if (mdb_dbi_open(t, NULL, 0, &d) || mdb_put(t, d, &K, &V, 0) || mdb_txn_commit(t)) __sync_fetch_and_add(&perr, 1);
+  }
+  return NULL;
+}
+static void *p_reader(void *a) {
+  int i;
+  for (i = 0; i < ROUNDS * 4; i++) {
+    MDB_txn *t;
+    if (mdb_txn_begin(penv, NULL, MDB_RDONLY, &t)) { __sync_fetch_and_add(&perr, 1); continue; }
+    mdb_txn_abort(t);
+  }
+  return NULL;
+}
+static int pair_slot(const char *msg, void *ctx) {
+  long *c = ctx; int pid; size_t tx; unsigned long th;
+  if (sscanf(msg, " %d %lx %zu", &pid, &th, &tx) == 3 && pid == (int)c[0] && tx == (size_t)c[1]) c[2] = 1;
+  return 0;
+}
+static int threads_in_two(const char *base) {
+  char d[512]; int i, ok = 1, st;
+  sub(d, sizeof d, base, "threads-in-two");
+  printf("9. two processes, each committing on one thread and reading on another, %d rounds, a long reader in each\n", ROUNDS);
+  { MDB_env *e; if (open_env(d, &e) || put(e, "k")) return 0; mdb_env_close(e); }
+  for (i = 0; i < 2; i++) if (!fork()) {
+    pthread_t w, r; MDB_txn *lt; long c[3] = {getpid(), 0, 0};
+    if (mdb_env_create(&penv) || mdb_env_set_mapsize(penv, 1L << 30) || mdb_env_open(penv, d, MDB_NOTLS | MDB_NOSYNC, 0664) ||
+        mdb_txn_begin(penv, NULL, MDB_RDONLY, &lt)) _exit(2);
+    c[1] = (long)mdb_txn_id(lt);
+    pthread_create(&w, NULL, p_writer, NULL); pthread_create(&r, NULL, p_reader, NULL);
+    pthread_join(w, NULL); pthread_join(r, NULL);
+    mdb_reader_list(penv, pair_slot, c);
+    printf("  process %d: %d failed begins or commits; its long reader %s its slot\n", i, perr, c[2] ? "keeps" : "LOST");
+    fflush(stdout);
+    _exit(perr || !c[2] ? 1 : 0);
+  }
+  while (wait(&st) > 0) ok = ok && WIFEXITED(st) && !WEXITSTATUS(st);
+  return ok;
+}
+
 int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
   signal(SIGPIPE, SIG_IGN);	/* a write to a dead child is an error, not this process's death */
   if (argc < 2 || argc > 3) { printf("usage: lmdb-lock DIR [CASES]\n"); return 2; }
-  const char *only = argc == 3 ? argv[2] : "12345678";	/* the cases to run, by number */
+  const char *only = argc == 3 ? argv[2] : "123456789";	/* the cases to run, by number */
   mkdir(argv[1], 0755);
   int c1 = strchr(only, '1') ? no_semaphores() : 1, c2 = strchr(only, '2') ? race(argv[1], 16, 200) : 1,
       c3 = strchr(only, '3') ? threads(argv[1]) : 1, c4 = strchr(only, '4') ? many(argv[1]) : 1,
       c5 = strchr(only, '5') ? crashed(argv[1]) : 1, c6 = strchr(only, '6') ? twice(argv[1]) : 1,
-      c7 = strchr(only, '7') ? deleted(argv[1]) : 1, c8 = strchr(only, '8') ? format(argv[1]) : 1;
-  printf("cases: %d %d %d %d %d %d %d %d\n", c1, c2, c3, c4, c5, c6, c7, c8);
-  int ok = c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8;
+      c7 = strchr(only, '7') ? deleted(argv[1]) : 1, c8 = strchr(only, '8') ? format(argv[1]) : 1,
+      c9 = strchr(only, '9') ? threads_in_two(argv[1]) : 1;
+  printf("cases: %d %d %d %d %d %d %d %d %d\n", c1, c2, c3, c4, c5, c6, c7, c8, c9);
+  int ok = c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9;
   printf(ok ? "LMDB-LOCK OK\n" : "LMDB-LOCK FAILED\n");
   return ok ? 0 : 1;
 }

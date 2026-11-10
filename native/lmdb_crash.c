@@ -76,7 +76,11 @@ int crash_fcntl(int fd, int cmd, ...) {
   if (cmd == F_FULLFSYNC) { if (ours(fd)) push('S', 0, NULL, 0, 0); return 0; }
 #endif
   va_start(a, cmd);
-  if (cmd == F_SETLK || cmd == F_SETLKW || cmd == F_GETLK) { void *lk = va_arg(a, void *); va_end(a); return fcntl(fd, cmd, lk); }
+  if (cmd == F_SETLK || cmd == F_SETLKW || cmd == F_GETLK
+#ifdef F_OFD_SETLK
+      || cmd == F_OFD_SETLK || cmd == F_OFD_SETLKW || cmd == F_OFD_GETLK
+#endif
+      ) { void *lk = va_arg(a, void *); va_end(a); return fcntl(fd, cmd, lk); }
   int arg = va_arg(a, int); va_end(a);
   return fcntl(fd, cmd, arg);
 }

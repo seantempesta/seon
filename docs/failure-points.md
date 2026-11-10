@@ -295,19 +295,26 @@ the wiki fixture of `seon.root-test` links the checkout's `target/` entries but 
 
 LMDB's locks are our fork's ``MDB_USE_FCNTL`` (`bin/build lmdb` builds `reference-code/lmdb` with
 ``MDB_USE_ROBUST``, which on macOS selects it; [forks](forks.md#lmdb)): the reader table lock and the
-writer lock are each a mutex of the process and a POSIX record lock on one byte of the store's
-`lock.mdb` (`mdb_flock_wait` in `reference-code/lmdb/libraries/liblmdb/mdb.c`). The kernel gives a
+writer lock (and the sync lock) are each a mutex of the process and a record lock on one byte of the
+store's `lock.mdb`, taken through an open file description of its own (`F_OFD_SETLKW`; `mdb_flock_wait`
+in `reference-code/lmdb/libraries/liblmdb/mdb.c`). One description per lock, because the kernel answers
+a wait that would close a cycle of lock owners with EDEADLK: with one POSIX owner per process, a process
+whose writer thread held the writer lock while its reader thread waited for the reader table lock,
+beside another doing the reverse, was such a cycle (Seon's roots and agents failed `txn_begin` with
+"Resource deadlock avoided", 2026-11-11; `lmdb-lock` case 9). The kernel gives a
 record lock back when its process dies, and keeps nothing once the file is gone: a process SIGKILLed
 inside a write transaction never leaves the writer lock held (a "locked" word in the lock region tells
 the next holder, which repairs the region as for a dead mutex owner), and a store deleted after its
 last user was killed leaves nothing anywhere. LMDB makes no semaphore: no store, death or deletion can
 fill a system table, as SysV semaphore sets did until `kern.sysv.semmns` made every open fail.
 
-A record lock belongs to a process and a file, and closing any descriptor of the file drops them all;
-so a process opens a lock file once (`MDB_lockfile`), every env of it in the process shares that
-descriptor and the mutexes, and the last env to close closes it. A child of fork() forgets its parent's
-lock files without closing them and holds none of its locks: root forks agents with its store open,
-and each agent opens the store itself (```seon.db/after-fork!```). A dead process's reader slot is
+The env's POSIX locks (byte 0, this process's pid) belong to the process, and closing any descriptor of
+the file drops them all; so a process opens a lock file once (`MDB_lockfile`), every env of it in the
+process shares its descriptors and the mutexes, and the last env to close closes them. A child of fork()
+closes the descriptions it inherited (through them it would share every lock its parent holds, which
+would then outlive the parent) and opens its own: root forks agents with its store open, each agent
+opens the store itself (```seon.db/after-fork!```), and an agent still reads main's value it inherited
+through its parent's env, whose reader slots carry the parent's pid, as LMDB has always done. A dead process's reader slot is
 cleared without anyone calling `mdb_reader_check`: by a reader that finds the table full, and by a
 writer whose oldest reader belongs to a dead process (before it reads the freelist), so killed agents
 neither fill the table nor keep freed pages from reuse. The lock region's format is the build's
