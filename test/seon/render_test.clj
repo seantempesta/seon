@@ -2349,7 +2349,7 @@
       (is (some? (d/entity fresh [:seon.agent/key "root"])) "a root no one has messaged has its session from its boot")
       (is (= :parked (:seon.task/outcome (d/entity fresh [:seon.task/id "request/root"]))) "parked until a message"))))
 
-(deftest roots-session-reads-its-sessions
+(deftest roots-session-page-lists-no-sessions
   ;; docs/users.md#roots-session: root's session's record holds root's sessions (its pattern's :root join), and its task list shows each
   ;; by its address and how it stands; another agent's record holds none
   (let [db0 (booted)
@@ -2367,10 +2367,10 @@
                            w (draw c seon.ctx/changes db (r/render-var-of (seon.db/index) c) {:model-only true})]
                        (try (pr-str (r/placed-hiccup w (r/page-lists w))) (finally (r/dispose-walk! w)))))
         root-text (part "root")]
-    (is (str/includes? root-text "/agent/b1/a2") "root's session reads the other session by its address")
-    (is (str/includes? root-text "Say hi.") "what it works on")
-    (is (str/includes? root-text "/agent/b0/a9") "and a session of an earlier boot, which root no longer links")
-    (is (not (str/includes? root-text "/agent/root")) "but not itself")
+    ;; Context's ruling (step 3): root's model reads no list of sessions in its page (a scan of every agent each request); it asks at
+    ;; its REPL. The system entity its pull joins draws nothing nested (seon.render.ui/root), so no session's address is in its page
+    (is (not (str/includes? root-text "/agent/b1/a2")) "root's session's page lists no other session")
+    (is (not (str/includes? root-text "/agent/b0/a9")) "nor one of an earlier boot")
     (is (not (str/includes? root-text ":seon.config.")) "and none of root's config")
     (is (not (str/includes? (part "b1/a2") "Sessions")) "another agent reads no sessions")
     ;; its status answers: it threw "Duplicate key: root" when a set literal held "root" and the agent's own key, root's session's
@@ -2405,27 +2405,6 @@
     ;; an entity at two paths (a1, the focus and one of the agents) is whole at each (docs/ctx.md#the-pattern)
     (is (= #{(seon.db/eid db :seon.agent/key "b1/a1") (seon.db/eid db :seon.agent/key "b1/a2")} (set (keys (:seon.agent/agents tree)))))
     (is (= #{:running :idle} (set (keep :seon.agent/status (vals (:seon.agent/agents tree))))))))
-
-(deftest roots-session-sees-sessions-started-after-it-forked
-  ;; docs/users.md#roots-session: a branch takes main's program, not its data, so a session started on main after root's session forked is
-  ;; on main alone; root's session reads main as its last turn heard it (:seon.agent/main-commit), and so lists it (Context's review; seen
-  ;; on a demo root: \"no new one has appeared yet\")
-  (ts/test-branch!
-    (fn [_ conn]
-      (d/transact conn (into (seon.task/boot-tx "b1" "sean") (seon.root/root-session-boot-tx @conn)))
-      (d/transact conn (seon.task/message-tx "m-first" (seon.task/sender "sean") ["root"] "Hi root." 1))
-      (let [fork (d/commit-id @conn)
-            _ (d/transact conn [{:seon.task/id "request/later" :seon.task/ns 'request :seon.task/name "later" :seon.task/plan "Asked after root's session forked."
-                                 :seon.task/kind :user :seon.task/branch :task-request-later :seon.task/execution :running :seon.task/outcome :parked}
-                                {:seon.agent/key "b1/a7" :seon.agent/task [:seon.task/id "request/later"]}])
-            main (d/commit-id @conn)
-            ;; the session's branch: main as it forked, and the main its last turn heard
-            ours (d/db-with (d/commit-as-db conn fork) [{:seon.agent/key "root" :seon.agent/main-commit main}])
-            c (seon.ctx/agent-ctx (seon.db/index) ours (seon.db/eid ours :seon.agent/key "root"))
-            w (draw c seon.ctx/changes ours (r/render-var-of (seon.db/index) c) {:model-only true})
-            text (try (pr-str (r/placed-hiccup w (r/page-lists w))) (finally (r/dispose-walk! w)))]
-        (is (nil? (seon.db/eid ours :seon.agent/key "b1/a7")) "the later session is not on the branch")
-        (is (str/includes? text "/agent/b1/a7") "and root's session lists it, from main as it last heard it")))))
 
 (deftest a-users-page-moves-with-main
   ;; docs/render.md#a-page-is-a-kept-walk: a user's page is a kept walk, as root's is: a move of main draws what it reached, so an agent it starts appears on a page already open
