@@ -514,3 +514,13 @@
   [db c]
   (let [w (draw (:tree c) @(requiring-resolve 'seon.ctx/changes) db #'seon.render.ui/agent {:model-only true})]
     (try (seon.render/placed-hiccup w (seon.render/page-lists w)) (finally (seon.render/dispose-walk! w)))))
+
+(defn page-units
+  "Walk w's units as the page shows them (seon.render/placed-units, at any depth), each unit's html composed with its children's
+  (seon.render.proc/compose fills each slot): what a reader of the page's html reads. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [w]
+  (let [us (seon.render/placed-units w)
+        by (into {} (map (juxt :id identity)) us)
+        compose @(requiring-resolve 'seon.render.proc/compose)]
+    (mapv #(update % :html compose by) us)))

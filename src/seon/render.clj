@@ -678,18 +678,26 @@ themselves). See docs/render.md#a-layout-places-its-lists."
   (let [found (volatile! [])
         want (some-> sels set)
         list (fn [k] (let [f (:f (get @(:cache w) k))] (when (var? f) (:seon.render/list (meta f)))))
-        walk (fn walk [out]
-               (clojure.walk/prewalk (fn [x] (when (and (vector? x) (keyword? (first x)) (map? (second x)) (:id (second x)))
-                                               (doseq [m (tree-seq seq? seq (drop 2 x)) :when (and (vector? m) (= ::child (first m)) (some? (:out (get @(:cache w) (second m)))))]
-                                                 (if-let [l (list (second m))]
-                                                   ;; a list a reader of some lists did not ask for is not walked
-                                                   (when (or (nil? want) (want (str "#" l))) (walk (:out (get @(:cache w) (second m)))))
-                                                   (do (vswap! found conj [(str "#" (:id (second x))) (second m)])
-                                                       ;; nested?: the components inside it, each placed in the element of its own that holds it, at any depth
-                                                       (when nested? (walk (:out (get @(:cache w) (second m)))))))))
-                                       x)
-                                     out))]
-    (walk (:out (get @(:cache w) @(:out w))))
+        ;; x walked with sel, the selector of the nearest element above it with an id: a component's marker is placed there (a list
+        ;; component is no part: its output is walked as the list's own)
+        walk (fn walk [x sel]
+               (cond (and (vector? x) (= ::child (first x)))
+                     (let [k (second x) c (get @(:cache w) k)]
+                       (when (some? (:out c))
+                         (if-let [l (list k)]
+                           ;; a list a reader of some lists did not ask for is not walked
+                           (when (or (nil? want) (want (str "#" l))) (walk (:out c) sel))
+                           (when sel
+                             (vswap! found conj [sel k])
+                             ;; nested?: the components inside it, each in the element of its own that holds it, at any depth
+                             (when nested? (walk (:out c) nil))))))
+                     (and (vector? x) (keyword? (first x)))
+                     (let [attrs (when (map? (second x)) (second x))
+                           sel (if-let [id (:id attrs)] (str "#" id) sel)]
+                       (doseq [y (if attrs (drop 2 x) (rest x))] (walk y sel)))
+                     (sequential? x) (doseq [y x] (walk y sel))
+                     :else nil))]
+    (walk (:out (get @(:cache w) @(:out w))) nil)
     (if sels (vec (mapcat (group-by first @found) sels)) @found))))
 
 (defn placed-units

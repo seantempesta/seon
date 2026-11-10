@@ -524,7 +524,7 @@
   "a3's page's units as its process draws them (seon.repl/render-ctx), drawn here from branch: what the
   render proc's {:op :render} ask is answered with."
   [branch]
-  (let [w (a3-walk branch)] (try {:t (:max-tx branch) :units (r/placed-units w)} (finally (r/dispose-walk! w)))))
+  (let [w (a3-walk branch)] (try {:t (:max-tx branch) :units (seon.fixtures/page-units w)} (finally (r/dispose-walk! w)))))
 
 (defn- component-html
   "The html of the component whose element id is id in a3's page drawn from branch, however deep it sits (an eval is a
@@ -776,7 +776,7 @@
         e (d/entity main [:seon.agent/key k])
         cold (let [w (draw (:tree (seon.ctx/build (seon.db/index) branch' (seon.db/eid branch' :seon.agent/key k) (:seon.agent/branch e))) seon.ctx/changes branch'
                              #'seon.render.ui/agent)]
-               (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))))]
+               (try (mapv (juxt :id :html) (seon.fixtures/page-units w)) (finally (r/dispose-walk! w))))]
     (is (some? (:w @cell)) "the branch's read holds its walk")
     (is (= cold (mapv (juxt :id :html) (r/placed-units (:w @cell)))) "after the move, what a cold draw at the head draws")
     (let [w (:w @cell) [st3 _] (pass-view st2 :a3)
@@ -791,7 +791,7 @@
       (let [st5 (#'p/answered st2 o [:branch :task-demo-f] {:db branch})
             back (let [w (draw (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key k) (:seon.agent/branch e))) seon.ctx/changes branch
                                  #'seon.render.ui/agent)]
-                   (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))))]
+                   (try (mapv (juxt :id :html) (seon.fixtures/page-units w)) (finally (r/dispose-walk! w))))]
         (is (= back (mapv (juxt :id :html) (r/placed-units (:w @(get-in st5 [:branch-reads :task-demo-f :walk]))))))))
     (testing "the branch's read let go: its walk is disposed"
       (let [[st4 _] (p/render-proc st2 :from-web {:op :views :views #{} :tabs 0})]
@@ -837,7 +837,7 @@
   (let [k "a3"
         c (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.agent/key k) :task-demo-f)
         w (draw (:tree c) seon.ctx/changes db #'seon.render.ui/agent)]
-    [(try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w))) (dissoc (:tree c) :t :commit)]))
+    [(try (mapv (juxt :id :html) (seon.fixtures/page-units w)) (finally (r/dispose-walk! w))) (dissoc (:tree c) :t :commit)]))
 
 (deftest a-kept-walk-steps-any-way
   ;; docs/render.md#a-page-is-a-kept-walk: a kept walk moved to any value of its branch, forward, back and across several turns (the
@@ -1316,8 +1316,8 @@
   (let [[_ branch _] (paged-dbs)
         w (a3-walk branch)]
     (try
-      (is (not-any? #(= "#p-tiles" (:container %)) (r/placed-units w)))
-      (is (some #(= "#c-rows" (:container %)) (r/placed-units w)) "its conversation is")
+      (is (not-any? #(= "#p-tiles" (:container %)) (seon.fixtures/page-units w)))
+      (is (some #(= "#c-rows" (:container %)) (seon.fixtures/page-units w)) "its conversation is")
       (finally (r/dispose-walk! w)))))
 
 (deftest a-page-an-agent-built-renders-nested
@@ -1581,7 +1581,7 @@
         rid (seon.db/eid branch :seon.agent/key k)
         draw #(let [w (draw (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch
                               #'seon.render.ui/agent)]
-                (try (r/placed-units w) (finally (r/dispose-walk! w))))
+                (try (seon.fixtures/page-units w) (finally (r/dispose-walk! w))))
         units (draw)
         task (filterv #(= "#p-task" (:container %)) units)
         conv (filterv #(= "#c-rows" (:container %)) units)
@@ -1623,7 +1623,7 @@
         k "a3"
         draw #(let [w (draw (:tree (seon.ctx/build (seon.db/index) % (seon.db/eid % :seon.agent/key k) :task-demo-f)) seon.ctx/changes %
                               #'seon.render.ui/agent)]
-                (try (:html (unit-of (r/placed-units w) "status")) (finally (r/dispose-walk! w))))
+                (try (:html (unit-of (seon.fixtures/page-units w) "status")) (finally (r/dispose-walk! w))))
         written (d/db-with branch [{:db/id "f" :form/id "demo/f-test-1" :form/src "(deftest f-test (is (= 4 (f 2))))"}
                                    {:var/name 'demo/f-test :var/meta #{:test} :var/form "f"}])
         red (d/db-with written [{:var/name 'demo/f-test :seon.test/digest "digest-1" :seon.test/status :red
@@ -1647,7 +1647,7 @@
         k "a3"
         branch (d/db-with branch [{:var/name 'demo/f-test :seon.test/status :green}])
         w (draw (:tree (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key k) :task-demo-f)) seon.ctx/changes branch #'seon.render.ui/agent)
-        standing (try (unit-of (r/placed-units w) "status") (finally (r/dispose-walk! w)))
+        standing (try (unit-of (seon.fixtures/page-units w) "status") (finally (r/dispose-walk! w)))
         h (:html standing)]
     (is (some? standing) "the status is drawn")
     (is (str/includes? h "Every proof passes") (str "the verdict the branch holds: " h))
@@ -1804,7 +1804,7 @@
   ;; a component placed in a list is a unit; one nested in it (a key the agent added, under ctx-keys)
   ;; changing moves the unit's revision with it, so the render proc sends the unit
   (let [[w a _] (live-walk)
-        unit #(some (fn [u] (when (= "ctx-keys" (:id u)) u)) (r/placed-units w))]
+        unit #(some (fn [u] (when (= "ctx-keys" (:id u)) u)) (seon.fixtures/page-units w))]
     (swap! a assoc :lab.x/k "one")
     (flush! w nil)
     (let [u0 (unit)]
@@ -2405,9 +2405,9 @@
         db1 (d/db-with db0 [{:seon.agent/key "sean" :seon.user/name "sean"}])
         st {:user-walks (volatile! {}) :views {[:chat :sean] {} [:chat :a1] {}}}
         kw (#'p/user-walk st db1 (d/entity db1 [:seon.user/name "sean"]))
-        side (fn [w] (apply str (map :html (filter #(= "#c-side" (:container %)) (r/placed-units w)))))
+        side (fn [w] (apply str (map :html (filter #(= "#c-side" (:container %)) (seon.fixtures/page-units w)))))
         before (side (:w kw))
-        rows (fn [w] (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w)))))
+        rows (fn [w] (apply str (map :html (filter #(= "#c-rows" (:container %)) (seon.fixtures/page-units w)))))
         ;; read now: the walk is advanced in place
         rows-before (rows (:w kw))
         db2 (d/db-with db1 [{:seon.agent/key "sean" :seon.agent/agents [(:db/id (d/entity db1 [:seon.agent/key "b2/a1"]))]}])
@@ -3310,8 +3310,8 @@
                                           (ev "g2" {:plain-value 41}))))
         w (a3-walk db)]
     (try
-      (let [html (apply str (map :html (filter #(= "#c-rows" (:container %)) (r/placed-units w))))
-            tiles (apply str (map :html (filter #(= "#p-task" (:container %)) (r/placed-units w))))
+      (let [html (apply str (map :html (filter #(= "#c-rows" (:container %)) (seon.fixtures/page-units w))))
+            tiles (apply str (map :html (filter #(= "#p-task" (:container %)) (seon.fixtures/page-units w))))
             ;; what the model reads of the eval: its model render's messages (seon.ctx.wire/eval-msgs), never the chat's elements
             read (pr-str (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "g2"])))]
         (is (str/includes? tiles "<svg") "a value drawing itself is a tile too (its record names :seon.render/drawn)")
@@ -3448,7 +3448,7 @@
         cid (seon.lib/call-id k 1)
         ;; the agent's page as the walk draws it: the turn places the call's view, drawn by its own render (ui/model-call-view)
         at (fn [db] (let [w (draw (:tree (seon.ctx/build (seon.db/index) db aid :b)) seon.ctx/changes db #'ui/agent)]
-                      (try (apply str (map :html (r/placed-units w))) (finally (r/dispose-walk! w)))))
+                      (try (apply str (map :html (seon.fixtures/page-units w))) (finally (r/dispose-walk! w)))))
         open (d/db-with db [{:db/id aid :seon.agent/turn 1}
                             {:seon.model-call/id cid :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
         busy (at open)
@@ -3484,7 +3484,7 @@
     (is (= ["e3"] (map #(get % :seon.eval/id) (last (last (last reply)))))
         (str "its eval is the reply's step: " (pr-str reply)))
     (let [w (draw (:tree (seon.ctx/build (seon.db/index) db aid :b)) seon.ctx/changes db #'ui/agent)
-          page (try (apply str (map :html (r/placed-units w))) (finally (r/dispose-walk! w)))]
+          page (try (apply str (map :html (seon.fixtures/page-units w))) (finally (r/dispose-walk! w)))]
       (is (str/includes? page "aria-busy") "beside the in-flight element")
       (is (< (str/index-of page "seon-stream") (str/index-of page "id=\"evaluation-e3\"")) "the element is in the turn the page draws, its call's, above the step"))
     (is (not-any? #(str/includes? (pr-str %) "seon-stream")
