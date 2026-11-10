@@ -1903,7 +1903,7 @@
   answers stepped the fork server and the api inside the window under load), and the render
   proc's next settled mark when an ask of its own is still in flight (render-settled: its
   answer stepped the render proc, which sent a settled mark, inside the window under load).
-  Then a change reaches the tab: an agent spawned and a commit to main each grow what the
+  Then a change reaches the tab: an agent spawned and a commit to main that root's page shows (a held task) each grow what the
   tab received. The window is the measurement (that nothing happens), not a dependency."
   [window-ms]
   (run-check "IDLE" {:datoms 300}
@@ -1958,7 +1958,10 @@
         _ (out! "IDLE waiting: spawn-reached-tab (" n-spawn " bytes before)")
         spawned (await-feed feed #(> (:bytes %) n-spawn))
         n-commit (received)
-        _ @(c/transact-main! sys [{:db/id "n" :ns/name 'idle.check}])
+        ;; a commit root's page shows (a held task, which root's head counts), so the tab is owed what it waits for; a commit nothing
+        ;; on the page reads (a namespace entity, before) owed it nothing, and its wait ended only on bytes something else sent
+        ;; (task seon.web/a-tabs-first-keyframe-settles-on-its-own, 2026-11-10)
+        _ @(c/transact-main! sys (seon.task/create-tx @(:conn sys) [{:seon.task/ns 'idle :seon.task/name "check" :seon.task/plan "The idle check's commit: a held task root's head counts."}]))
         _ (out! "IDLE waiting: commit-reached-tab (" n-commit " bytes before)")
         committed (await-feed feed #(> (:bytes %) n-commit))]
       (.close sock)

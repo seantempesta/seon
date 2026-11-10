@@ -3429,6 +3429,32 @@
     (is (not-any? #(= "user-messages" %) (map #(when (var? %) (name (symbol %))) (tree-seq coll? seq (ui/user-ctx {:seon.ctx/ctx {}}))))
         "and the page has no feed of every message")))
 
+;; seon.web/a-tabs-first-keyframe-settles-on-its-own (the 2026-11-10 occurrence): seon.check/idle's last wait, a commit to main reaching
+;; root's quiet tab. A held task is one root's head counts (the tab is owed a patch); a namespace entity is nothing root's page reads,
+;; so that commit owes the tab nothing, and a wait on it could only be met by bytes something else happened to send
+(defn- root-tab-after
+  "What the render proc sends root's tab when main moves by tx-data, from root's view walked and quiet on conn's main."
+  [conn tx-data]
+  (let [[_ branch _] (paged-dbs conn)
+        main0 (:db-after (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}))
+        st0 (#'p/pass (assoc (#'p/advance-main (assoc (proc-state main0 branch) :watch #{:root} :main-db nil) main0) :conn conn) (volatile! {}))
+        st0 (#'p/pass st0 (volatile! {}))
+        o (volatile! {})
+        main1 (:db-after (d/transact conn {:tx-data tx-data}))]
+    (#'p/pass (#'p/advance-main st0 main1) o)
+    (filter #(and (#{:patch :keyframe} (:op %)) (= :root (:view %))) (:to-web @o))))
+
+(deftest a-commit-root-shows-reaches-a-quiet-root-tab
+  (ts/test-branch! (fn [_ conn]
+    (is (seq (root-tab-after conn [{:seon.task/id "idle/check" :seon.task/ns 'idle :seon.task/name "check" :seon.task/plan "p" :seon.task/execution :held
+                                    :seon.task/branch :task-idle-check :seon.task/kind :work}]))
+        "a held task moves root's head: the tab is sent it"))))
+
+(deftest a-commit-root-does-not-show-owes-its-tab-nothing
+  (ts/test-branch! (fn [_ conn]
+    (is (empty? (root-tab-after conn [{:db/id "n" :ns/name 'idle.check}]))
+        "the idle check's old commit: nothing root's page reads, so nothing is sent"))))
+
 ;; seon.web/a-tabs-first-keyframe-settles-on-its-own (the 2026-11-10 occurrence): a tab on root's view, walked and quiet, then an
 ;; agent spawned: its event and root's view with the new agent reach the render proc, and the tab is sent what moved
 (deftest a-spawn-reaches-a-quiet-root-tab
