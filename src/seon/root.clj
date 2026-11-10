@@ -130,7 +130,7 @@
 
 (declare deliver-rid answer-taken)
 
-(declare answer-spawn insert-evals start-spawn no-room binary-program)
+(declare answer-spawn insert-evals start-spawn no-room)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -413,31 +413,12 @@
   (cond-> (assoc-in st [::spawning aid] p)
     (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts)))))
 
-(defn stale-binary
-  "{:binary :program} when this root's binary was built from another program than the one main holds (db, main as it booted;
-  digest, seon.program/program-digest of it), else nil: a main indexed from a tree (it holds a :seon.root/source fact) on a
-  binary whose bin/build recorded another program. Agents would load main's forms over the binary's code and run the two
-  mixed, so no agent is forked (no-room) until they agree. See docs/source.md#a-boot-resumes-from-the-db."
-  {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe [:map [:binary :string] [:program :string]]]]}
-  [db digest]
-  (let [held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
-        built (:program (binary-program))]
-    (when (and held built (not= built digest)) {:binary built :program digest})))
-
 (defn- no-room
   "Why no agent can be started now, or nil: no fork server to fork it (refused before an agent proc and its socket are made: a socket the lost server closes would end that agent first, as a death), or too many live agents. n: the agents the start would leave, a Back's old one not among them."
   {:malli/schema [:=> [:cat :seon.root/api-state :int] [:maybe :map]]}
   [st n]
   (cond
     (= :lost (get-in st [:view :fork-server :status])) (fs/lost)
-    (get-in st [:view :boot :stale-binary])
-    (refused 'seon.root/spawn!
-             (str "this root's binary was built from another program than the one its store's main holds, so no agent is "
-                  "forked: it would run the two mixed. Bring them into agreement, then restart root: erase the store "
-                  "(bin/root stop; rm -rf runs/store; bin/root start), or reindex main from disk at root "
-                  "((my.root/import! sys), (my.root/load-docs! sys), (my.root/load-tasks! sys); then bin/root stop and bin/root start), "
-                  "or start the binary main's program was built from (bin/root next)")
-             (get-in st [:view :boot :stale-binary]))
     (> n (cfg/value :seon.config.root/max-agents)) (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)})))
 
 (defn- spawn-agent
@@ -1426,8 +1407,7 @@
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
               :boot {:gc-sweepers sweepers :compacted compacted :retained retained :seeded seeded :seed-ms (lib/r2 seed-ms)
                      :config-errors config-errors :digest digest :digest-ms (lib/r2 digest-ms)
-                     :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)
-                     :stale-binary (stale-binary db digest)}}
+                     :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)}}
         graph-p (promise)
         root-procs-p (promise)
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
