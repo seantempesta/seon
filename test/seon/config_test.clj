@@ -176,7 +176,11 @@
 
 (deftest machine-dependent-values-are-derived-at-load
   (let [c (shipped :scripted)]
-    (is (= (str (config/checkout) "/resources/seon/tasks") (:seon.config.root/tasks-dir c)))
+    ;; the task files' place is the environment's when it names one (bin/check's SEON_TASKS: this test also runs inside a
+    ;; check step, as an agent's), else derived from the checkout: the file's last alternative, read from its text
+    (let [f (get (edn/read-string {:default tagged-literal} (config/shipped-text)) :seon.config.root/tasks-dir)]
+      (is (= 'or (:tag f)))
+      (is (= (tagged-literal 'seon/checkout "resources/seon/tasks") (last (:form f)))))
     (is (= (str (config/checkout) "/resources/seon/system.edn") (:seon.config.root/system-path c)))
     ;; the writer's buffer is the live agents' bound, by #ref
     (is (= (:seon.config.root/max-agents c) (:seon.config.root/writer-buf c)))))
