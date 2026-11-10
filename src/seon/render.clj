@@ -203,8 +203,9 @@
 
 (defn entity-render
   "The component call x, a view of a pulled entity, is run as: [f opts], f the hiccup render var of its schema as the entity index ix
-  reads it (`schema-of`), opts' :key its identity value (so its element id names what it shows, never where the pull held it), or nil
-  for any other value. See docs/render.md#one-rendering-system-drawn-from-the-data."
+  reads it (`schema-of`), opts' :key its identity value (so its element id names what it shows, never where the pull held it) and
+  :seon.render/nested true (a parent placed it: a page's render answers it with the entity's entry), or nil for any other value. See
+  docs/render.md#one-rendering-system-drawn-from-the-data."
   {:malli/schema [:=> [:cat :map :any] :any]}
   [ix x]
   (when (ratom/view? x)
@@ -212,7 +213,8 @@
       (when (and (map? v) (:db/id v))
         (when-let [s (schema-of ix v nil)]
           (when-let [f (declared-var ix s)]
-            [f (if-some [id (some #(get v %) (keep #(get (:schema-identities ix) %) (tree-seq (constantly true) #(parents ix %) s)))] {:key id} {})]))))))
+            [f (let [id (some #(get v %) (keep #(get (:schema-identities ix) %) (tree-seq (constantly true) #(parents ix %) s)))]
+                 (cond-> {:seon.render/nested true} (some? id) (assoc :key id)))]))))))
 
 (defn hiccup
   "v rendered: (render-fn opts v), the function its override or schema names, else the printer's
@@ -242,6 +244,14 @@
   that declares any is a component, kept in the walk's cache, those keys filled in (`render!`)."
   {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
   [v] (into #{} (filter #{:seon.ctx/ctx :seon.db/db :seon.render/drawn}) (tree-seq vector? seq (opts-form v))))
+
+(defn page-render?
+  "Whether render var v draws a whole page: its opts contract REQUIRES :seon.ctx/ctx (an entry [:seon.ctx/ctx schema] not marked
+  {:optional true}), as an agent's, a user's and root's do. A render that may take ctx (an eval's, drawn in the chat or alone) is no
+  page. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [v] (boolean (some #(and (vector? %) (= :seon.ctx/ctx (first %)) (not (and (map? (second %)) (:optional (second %)))))
+                     (tree-seq vector? seq (opts-form v)))))
 
 (defn- inputs-in
   "The inputs render var f asks for (`inputs`), as walk w found them: kept by f with the value its root held then, so
@@ -1099,15 +1109,25 @@ components (the model's parts, which nest their children themselves). See docs/r
         (keep identity [(get (:entity-schemas ix) (dbu/reverse-ref a))])
         (get (:targets ix) a)))))
 
+(defn history?
+  "Whether entity schema s (in the entity index ix) is the conversation's: it declares :seon.render/openai-compat (the model reads
+  its entities as its native messages) and its hiccup render draws the entity from its own value (`page-render?` false). An agent
+  declares a model render too, but its hiccup render draws a whole page: it is a page, drawn nested as its entry, not history. Read
+  from the schemas, never a list of names. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] :boolean]}
+  [ix s]
+  (boolean (and s (render-for ix s :seon.render/openai-compat)
+                (not (some-> (declared-var ix s) page-render?)))))
+
 (defn page-pattern
-  "Pattern p as a page's parts read it: p without the joins whose target schema declares :seon.render/openai-compat (the conversation:
-  the model reads those entities as its history, never a second time in its page). The one reading of what a page's parts pull, for
-  the walk that places them (seon.render.ui/agent-parts) and the model's page at a basis (seon.ctx.wire/page-parts-through). See
+  "Pattern p as a page's parts read it: p without the joins whose target schema is history (`history?`: the conversation, which the
+  model reads as its native messages, never a second time in its page). The one reading of what a page's parts pull, for the walk
+  that places them (seon.render.ui/agent-parts) and the model's page at a basis (seon.ctx.wire/page-parts-through). See
   docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map [:sequential :any]] [:vector :any]]}
   [ix p]
   (vec (keep (fn [x] (if (map? x)
-                       (not-empty (into {} (remove (fn [[k sub]] (some #(render-for ix % :seon.render/openai-compat) (join-targets ix k sub)))) x))
+                       (not-empty (into {} (remove (fn [[k sub]] (some #(history? ix %) (join-targets ix k sub)))) x))
                        x))
              p)))
 

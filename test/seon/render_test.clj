@@ -3713,7 +3713,7 @@
                                          :seon.cite/target {:db/id 3 :file/path "README.md"}}
                             :v {:db/id 4 :var/name 'demo/f :var/ns 'demo}})
         view (seon.ratom/ref-view a seon.ctx/changes)]
-    (is (= [#'ui/cite {:key "c1"}] (r/entity-render ix (get view :c))) "a cite: its schema's render, keyed by its identity")
+    (is (= [#'ui/cite {:seon.render/nested true :key "c1"}] (r/entity-render ix (get view :c))) "a cite: its schema's render, keyed by its identity, marked nested (a parent placed it)")
     (is (nil? (r/entity-render ix (get view :v))) "a pulled var: no render, it prints")))
 
 ;; docs/render.md#the-page: a person's page asks for work; spawning agents and evaluating in every agent are root's debug page's
@@ -3800,3 +3800,18 @@
     (is (str/includes? (out {:db/id a :seon.agent/key "a3"}) "its own turn") "the agent's own")
     (is (str/includes? (out {:db/id (inc a) :seon.agent/key "user"}) "run by <a href=\"/agent/user\">user</a>") "another's: run by its sender, linked")
     (is (str/includes? (out {:db/id 1 :seon.root/id :root}) "run by <span>Seon</span>") "the system's")))
+
+(deftest an-agent-an-agent-started-is-an-entry-on-its-page
+  ;; docs/render.md#the-page (step 3 of pages from data): an agent another started is joined by the starter's pattern (:seon.agent/agents)
+  ;; and placed by the walk like any joined entity; its own render (seon.render.ui/agent) answers nested with its entry, a link to its
+  ;; page: no ui code names it. The page's alone: the model's parts hold no entry
+  (let [[_ branch _] (paged-dbs)
+        branch (d/db-with branch [{:seon.agent/key "a5" :seon.agent/status :busy :seon.agent/branch :task-a5}
+                                  {:seon.agent/key "a3" :seon.agent/agents [[:seon.agent/key "a5"]]}])
+        w (a3-walk branch)
+        units (try (seon.fixtures/composed (r/placed-units w)) (finally (r/dispose-walk! w)))
+        tiles (apply str (map :html (filter #(= "#p-task" (:container %)) units)))
+        model (seon.fixtures/drawn-parts branch (seon.ctx/build (seon.db/index) branch (seon.db/eid branch :seon.agent/key "a3") :task-demo-f))]
+    (is (str/includes? tiles "href=\"/agent/a5\"") "the started agent's entry, a link to its page, among the tiles")
+    (is (some #(= "agent-a5" (:id %)) units) "a unit of its own, keyed by the agent's key")
+    (is (not (str/includes? (pr-str model) "a5")) "the model's page holds no entry")))

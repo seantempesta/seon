@@ -1499,6 +1499,28 @@
 
 (declare agent-parts conversation-list tiles)
 
+(declare standing task-name session-address tone-class)
+
+(defn- agent-entry
+  "Agent view c as an entry where a page joins it (`agent` nested: the agents an agent or a user started, root's, a task's examples):
+  the whole entry one link to its page by its stable address, lit while it works, what it works on (what a person asked, its first
+  line, else its task's name in words) and how it stands (`standing`), then the task's reason when it holds one. Drawn from the view
+  alone: the joining pattern pulls what it reads. For the page alone (:wire/for \"page\"): the model reads its own conversation and
+  page, not the entries of the agents its entity joins (a task's examples are history, never a part: docs/users.md#roots-session). See
+  docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [c]
+  (let [a (ratom/realize c) t (:seon.agent/task a) stands (standing a t)]
+    [:section {:wire/for "page"}
+     [:a {:href (str "/agent/" (session-address a)) :title (str/join " · " (remove nil? [(:seon.agent/key a) (:seon.task/id t)]))}
+      [:span {:class "flex items-baseline gap-2"}
+       [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
+       [:span {:class "min-w-0 flex-1 truncate font-semibold text-text-100"}
+        (or (when (get-in t [:seon.task/started-by :seon.user/name]) (some-> (:seon.task/plan t) str/split-lines first str/trim not-empty))
+            (task-name a t) (str (:seon.agent/key a)))]
+       [:span {:class (str "shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)]]
+      (when-let [r (:reason stands)] [:p {:class "seon-note"} r])]]))
+
 (defn agent
   "An agent's page, the render of its pull c, the one tree the model and the person read (the declared html render of
   :seon.db/agent-fact, which an agent overrides on its branch like any render): components placed in its
@@ -1507,9 +1529,12 @@
   list is a component of its own, and the layout reads nothing, so a change of one list's members reruns that list alone: an eval
   added never reruns the task's. See docs/render.md#the-page and docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
-  [_ c]
-  [:div {:id "render-ctx"} [#'agent-parts {} c] [#'conversation-list {}]
-   [#'rules-list {}]])
+  [opts c]
+  (if (:seon.render/nested opts)
+    ;; placed by a parent (an agent another one started, joined in its pull): the agent's entry, from its own view alone
+    (agent-entry c)
+    [:div {:id "render-ctx"} [#'agent-parts {} c] [#'conversation-list {}]
+     [#'rules-list {}]]))
 
 (declare sessions)
 
@@ -1528,16 +1553,14 @@
       (into [:div] ts))))
 
 (defn- tile?
-  "Whether pulled entity e is drawn as a tile of a page: its schema (seon.render/entity-schema in the entity index ix) declares a hiccup
-  render, that render draws the entity from its own value (it takes no :seon.ctx/ctx: a render that takes one draws a whole page, as
-  an agent's, a user's and root's do) and the schema declares no :seon.render/openai-compat (the conversation's entities: the model
-  reads them as its history). Read from the schemas, never a list of names. See docs/render.md#the-page."
+  "Whether pulled entity e is placed on a page by the walk: its schema (seon.render/entity-schema in the entity index ix) declares a
+  hiccup render and is not the conversation's (seon.render/history?: the model reads those as its messages). A tile draws itself from
+  its own value; a page entity (an agent: its render takes :seon.ctx/ctx) is placed too, and its render answers nested with its entry
+  (seon.render/entity-render marks it). Read from the schemas, never a list of names. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :any] :boolean]}
   [ix e]
   (boolean (when-let [s (and (map? e) (:db/id e) (render/entity-schema ix e nil))]
-             (when-let [f (render/declared-var ix s)]
-               (and (nil? (render/render-for ix s :seon.render/openai-compat))
-                    (not (contains? (render/inputs f) :seon.ctx/ctx)))))))
+             (and (render/declared-var ix s) (not (render/history? ix s))))))
 
 (defn- pattern-joins
   "Pattern p's joins in its order, [key sub-pattern]: the key ctx holds the join under (its :as when it names one)."
