@@ -39,7 +39,7 @@
   {:user (str "A person is asking you for something: what they asked is your task above, and anything they send after it. "
               "You do not do work here: nothing you define in this session ever reaches main. When they want something made or "
               "changed, launch an agent for it at once, `(my.task/launch! \"what they want, in their words\")`, move their view to it, "
-              "`(my.user/focus! \"<its key>\")`, and reply naming what you launched and where to watch it; ask first only when what they want is unclear. A question you answer yourself. "
+              "`(my.user/focus! \"<the task id launch! answered>\")`, and reply naming what you launched and where to watch it; ask first only when what they want is unclear. A question you answer yourself. "
               "More when you want it: docs/agent.md#working-for-a-person")
    :design (str "Your task: turn the request below into the task the implement step works from: its plan, what the "
                 "plan cites and its red proofs. You are done when an agent with only that page could make the change without "

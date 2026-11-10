@@ -519,9 +519,12 @@
                    by (signed-in-key db 'seon.root/focus!)]
                (cond
                  (contract/error? by) (reply! st o p by)
-                 (not (pdb/eid db :seon.agent/key (:key m))) (reply! st o p (gone (keyword (:key m)) (str "no agent " (:key m) " on main")))
-                 :else (let [[st rid] (pend st p :tx nil)]
-                         (step/out! o :to-writer {:op :tx :branch :db :tx-data [[:db/add [:seon.user/name by] :seon.user/focus [:seon.agent/key (:key m)]]] :dest {:rid rid}})
+                 ;; an agent's key, or a task's id (my.task/launch! answers the task; its agent is made a moment later, and home follows it then)
+                 (not (or (pdb/eid db :seon.agent/key (:key m)) (pdb/eid db :seon.task/id (:key m))))
+                 (reply! st o p (gone (keyword (:key m)) (str "no agent or task " (:key m) " on main")))
+                 :else (let [[st rid] (pend st p :tx nil)
+                             to (if (pdb/eid db :seon.agent/key (:key m)) [:seon.agent/key (:key m)] [:seon.task/id (:key m)])]
+                         (step/out! o :to-writer {:op :tx :branch :db :tx-data [[:db/add [:seon.user/name by] :seon.user/focus to]] :dest {:rid rid}})
                          (update st :writes (fnil conj #{}) rid))))
       :clone (let [parent (:parent m)]
                (cond

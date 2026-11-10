@@ -3543,7 +3543,13 @@
         user-of (fn [db] (:db/id (d/entity db [:seon.user/name "sean"])))
         a3 (fn [db] (:db/id (d/entity db [:seon.agent/key "a3"])))]
     (is (= (user-of (signed-in-main main nil)) (#'p/location (signed-in-main main nil) :home)) "no focus: the user")
-    (is (= (a3 (signed-in-main main "a3")) (#'p/location (signed-in-main main "a3") :home)) "a focus: its agent")))
+    (is (= (a3 (signed-in-main main "a3")) (#'p/location (signed-in-main main "a3") :home)) "a focus: its agent")
+    ;; a focused task (an agent launched it; its agent is made a moment later): the user's page until its agent exists, then that agent's
+    (let [db (d/db-with (signed-in-main main nil) (seon.task/create-tx (signed-in-main main nil) [{:seon.task/ns 'request :seon.task/name "w" :seon.task/plan "Make w."}]))
+          db (d/db-with db [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.task/id "request/w"]]])]
+      (is (= (user-of db) (#'p/location db :home)) "a focused task with no agent yet: the user's own page")
+      (let [db (d/db-with db [[:db/add [:seon.task/id "request/w"] :seon.task/agent [:seon.agent/key "a3"]]])]
+        (is (= (a3 db) (#'p/location db :home)) "its agent made: that agent's page")))))
 
 ;; Stage 2a's walk (docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09): one pass over a pull renders the page and
 ;; the model's messages. A lab schema in a branch's index names each entity's two renders; recognition is the best match of the

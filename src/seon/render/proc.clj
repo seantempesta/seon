@@ -226,7 +226,9 @@
   (cond (vector? view) (location db (second view))
         (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
         ;; home: whoever is signed in (docs/users.md#whats-on-screen)
-        (= :home view) (let [u (:seon.root/signed-in (d/entity db [:seon.root/id :root]))] (:db/id (or (:seon.user/focus u) u)))
+        (= :home view) (let [u (:seon.root/signed-in (d/entity db [:seon.root/id :root])) f (:seon.user/focus u)]
+                         ;; a focused task is its agent's page once its agent exists, else the person's own
+                         (:db/id (or (if (:seon.task/id f) (:seon.task/agent f) f) u)))
         (keyword? view) (session-of db (address-of view))
         :else view))
 

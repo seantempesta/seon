@@ -492,7 +492,11 @@
          (is (re-find #"no user is signed in" (str (:seon.error/message @p))) "no user: refused"))
        (d/transact conn {:tx-data [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"} {:seon.root/id :root :seon.root/signed-in "u"}]})
        (let [[p _] (ask (req "nobody"))]
-         (is (re-find #"no agent nobody" (str (:seon.error/message @p))) "no such agent: refused"))
+         (is (re-find #"no agent or task nobody" (str (:seon.error/message @p))) "no such agent or task: refused"))
+       ;; a task an agent just launched, before its agent is made: the focus is the task
+       (d/transact conn {:tx-data (seon.task/create-tx @conn [{:seon.task/ns 'request :seon.task/name "w" :seon.task/plan "Make w."}])})
+       (let [[_ outs] (ask (req "request/w"))]
+         (is (= [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.task/id "request/w"]]] (vec (mapcat :tx-data (:to-writer outs)))) "a launched task, by its id"))
        (let [[_ outs] (ask (req "a1"))]
          (is (= [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.agent/key "a1"]]] (vec (mapcat :tx-data (:to-writer outs)))) "the signed-in user's focus moves to the agent"))))))
 
