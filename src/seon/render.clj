@@ -104,15 +104,21 @@
   validation). A nested map holding a render symbol under :seon.render/hiccup is data, printed as it
   is: it is what a schema's properties look like inside a printed schema form, and drawing it by
   that render called the render with the properties (an agent's registered :lab.ctx/steps form,
-  its lab.ui/steps called with {:seon.render/hiccup lab.ui/steps}, killed the agent drawing it). A reference is data too: a
-  map of identity attributes alone (a ref as a pull joins it, a message's sender {:seon.agent/key k}) names an entity the value
-  that holds it shows by its own render, so the printer leaves it to that render and never draws it again inside the value's line."
+  its lab.ui/steps called with {:seon.render/hiccup lab.ui/steps}, killed the agent drawing it). A reference
+  (a map of identity attributes alone, the entity index ix's :identity-schemas, :db/id beside them: a ref as a pull joins it) prints as its identity value, in the
+  line of the value holding it and alone, never drawn by its schema's render: what is read of a message's sender is the
+  name it was before senders were refs (:from \"user\"), and the data stays a ref."
   {:malli/schema [:=> [:cat :map :any] [:maybe [:map [:text :string] [:html :any]]]]}
   [ix v]
-  (when-let [h (when-not (or (symbol? (own-key v :seon.render/hiccup))
-                             (and (map? v) (seq v) (every? #(or (= :db/id %) (contains? (:identity-schemas ix) %)) (keys v))))
-                 (render-of ix v nil))]
-    {:text (print/line v (config/value :seon.config.render/line-budget)) :html [h {:as :inline :seon.render/index ix} v]}))
+  ;; the identity value x stands for when x is a reference, else nil: one rule, read here alone
+  (letfn [(reference-value [x] (when (and (map? x) (seq x) (every? #(or (= :db/id %) (contains? (:identity-schemas ix) %)) (keys x)))
+                                 (some (fn [[k y]] (when (not= :db/id k) y)) x)))]
+  (if-some [r (reference-value v)]
+    {:text (print/line r (config/value :seon.config.render/line-budget)) :html (str r)}
+    (when-let [h (when-not (symbol? (own-key v :seon.render/hiccup)) (render-of ix v nil))]
+      {:text (print/line (if (map? v) (into {} (map (fn [[k x]] [k (if-some [r (reference-value x)] r x)])) v) v)
+                         (config/value :seon.config.render/line-budget))
+       :html [h {:as :inline :seon.render/index ix} v]}))))
 
 (defn- nested-hiccup
   "The hiccup printer's :render: nested's, and a value whose own :seon.render/hiccup key holds hiccup

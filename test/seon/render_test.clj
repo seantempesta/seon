@@ -380,6 +380,17 @@
 
 ;; ---- the agent's debug view ----------------
 
+(deftest a-printed-reference-is-its-identity-value
+  ;; docs/render.md#a-render-is-a-value-printed-once: a map of identity attributes alone is a reference, as a pull joins a ref; the printer
+  ;; prints it as its identity value, alone and in the line of the value holding it, never drawn by its schema's render, so a message's
+  ;; line reads its sender's name as it did when senders were strings, and the data stays a ref
+  (let [ix (seon.db/index) nested #'seon.render/nested
+        msg {:seon.message/id "m1" :seon.message/from {:seon.agent/key "user"} :seon.message/body "hello"}]
+    (is (= {:text "user" :html "user"} (nested ix {:seon.agent/key "user"})) "a reference alone: its identity value")
+    (is (= {:text ":root" :html ":root"} (nested ix {:db/id 7 :seon.root/id :root})) "its :db/id beside it changes nothing")
+    (is (str/includes? (:text (nested ix msg)) ":from \"user\"") "in the line of the value holding it: the sender's name")
+    (is (vector? (:html (nested ix {:seon.agent/key "user" :seon.agent/status :running}))) "an entity with more than its identity is no reference: drawn by its schema's render")))
+
 (deftest the-printer-renders-each-nested-value-by-its-own-render
   ;; owner, 2026-10-23: the default render auto-renders. A value inside the printed one whose
   ;; schema declares a render shows as that render, one line, in its place: a call of its render
