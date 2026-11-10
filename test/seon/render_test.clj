@@ -2406,14 +2406,14 @@
         text (fn [x] (str (:text x) (when (:detail x) (str " · " (:detail x)))))]
     (testing "a task its agent works"
       (is (= "working" (text (st :busy :running))))
-      (is (= "working" (text (st :idle :running))) "between two forms it still works")
+      (is (= "working · between turns" (text (st :idle :running))) "between two forms it still works, and says so")
       (is (= "starting" (text (st :spawning :running))))
       (is (= :live (:tone (st :busy :running)))))
     (testing "parked, or told, only where a message would be taken"
-      (is (= "parked" (text (st :idle :parked))))
-      (is (= "told" (text (st :idle :told))))
-      (is (= "parked" (text (st :ended :parked))) "its process is gone, and a message starts it again")
-      (is (= "parked" (text (st :dead :parked)))))
+      (is (= "parked · waits for a message" (text (st :idle :parked))))
+      (is (= "told · ended, said how" (text (st :idle :told))))
+      (is (= "parked · waits for a message" (text (st :ended :parked))) "its process is gone, and a message starts it again")
+      (is (= "parked · waits for a message" (text (st :dead :parked)))))
     (testing "a capped task is stopped, however idle its process looks"
       (is (= "stopped at its cap · 40 turns" (text (st :idle :cap :seon.agent/max-turns 40))))
       (is (= "stopped at its cap · 38 turns" (text (st :idle :cap :seon.agent/max-turns 40 :seon.agent/ended-turn 38))) "the turns it took when it recorded them")
@@ -3580,3 +3580,13 @@
     (is (not (str/includes? person "spawn 10")) "no spawn on a person's page")
     (is (not (str/includes? person "all=&gt;")) "no eval-every-agent form")
     (is (str/includes? debug "spawn 10") "root's debug page holds them")))
+
+;; docs/render.md#a-sessions-address-and-the-agents-list: a status keeps its plain word (owner, 2026-11-08) and says beside it what the task
+;; waits on, as a fact about the task (Point, 2026-11-10), so "working" beside an idle process or "parked" beside a dead one reads right
+(deftest a-status-says-what-its-task-waits-on
+  (let [s (fn [status o] (ui/standing {:seon.agent/status status} {:seon.task/outcome o}))]
+    (is (= ["parked" "waits for a message"] ((juxt :text :detail) (s :dead :parked))))
+    (is (= "ended, said how" (:detail (s :idle :told))))
+    (is (= ["working" "between turns"] ((juxt :text :detail) (s :idle :running))))
+    (is (nil? (:detail (s :busy :running))) "a running process is just working")
+    (is (not-any? #(re-find #"(?i)\byou\b" (str (:detail %))) [(s :dead :parked) (s :idle :told) (s :idle :running)]) "no second person")))

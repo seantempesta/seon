@@ -1741,11 +1741,17 @@
                        :else [status-stands status])
         [text tone] (get from k [(kname k) :quiet])
         turns (when (= "stopped at its cap" text) (or (:seon.agent/ended-turn a) (:seon.agent/max-turns a)))
+        ;; what the task waits on, as a fact about it beside its word (Point's ruling within the owner's 2026-11-08 plain words,
+        ;; 2026-11-10): no instruction to the person
+        waits (cond (= k :parked) "waits for a message"
+                    (= k :told) "ended, said how"
+                    (and (= from task-stands) (= k :running) (= :idle status)) "between turns")
         waiting? (or (= :waiting end) (#{:parked :told} o))
         reason (when-not waiting? (some #(when-not (str/blank? %) %) [(:seon.task/reason t) (:reason (:seon.task/failure t)) (when end (:seon.agent/reason a))]))]
     (cond-> {:state (keyword (cond (= from task-stands) "task" (= from end-stands) "end" :else "status") (name (or k :none)))
              :text text :tone tone :lit? (= :live tone)}
       turns (assoc :detail (str turns (if (= 1 turns) " turn" " turns")))
+      waits (assoc :detail waits)
       reason (assoc :reason reason))))
 
 (defn agent
