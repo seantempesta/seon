@@ -170,8 +170,18 @@
   ;; its stdin closes, as bin/root stop closes it), the next boot records it as :seon.root/previous-end, and
   ;; a boot that left no stop fact (SIGKILL, a crash) is found :unclean. Who started a boot is that boot's
   ;; (:seon.root/started-by): the test running start-root!, or the last --started-by its arguments name
+  ;; And a test root's task files are its own (it was a test of its own, a third boot): the first boot's task dir is under
+  ;; its runs and holds one file, which the boot loads (my.root/watch!: a fresh store has nothing else to load it) and
+  ;; none of the checkout's (the second boot read 810 tasks, 2026-10-25, when a merge rewrote the checkout's task files
+  ;; and FSEvents delivered them to its new watcher); the watcher's roots are the loaders' dirs, never the checkout
+  ;; (task seon.watch/root-watches-what-its-loaders-read); and the built root reads a line citation (task
+  ;; jolt.ns/whole-program-inference-keeps-nil-checks: `[from to]` destructured from `(if dash [a b] [suffix])` typed
+  ;; `to` a string, so `src/a.clj:50` reached parse-long as nil)
   (let [checkout (seon.config/checkout)
         path (str checkout "/target/runs/root-test-main-" (random-uuid))
+        runs-tasks (str path "-main-runs/tasks")
+        _ (.mkdirs (java.io.File. runs-tasks))
+        _ (spit (str runs-tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
         tasks (str path "-tasks")
         _ (.mkdirs (java.io.File. tasks))
         _ (spit (str tasks "/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]))
@@ -180,7 +190,8 @@
         ;; and root's watch fact: a task count off names the batch that loaded the task files (:last-load)
         held (ev "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys)))) (dissoc (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root])) :roots :boot)]")
         by (ev "(:started-by (seon.task/root @(:conn sys)))")
-        first-boot (str/split-lines (root-answers path "main" [main (ev (str "(my.root/load-tasks! sys " (pr-str tasks) ")"))
+        at-boot (ev "[(seon.config/value :seon.config.root/tasks-dir) (count (seon.task/tasks @(:conn sys))) (:seon.root/tasks (d/pull @(:conn sys) [:seon.root/tasks] [:seon.root/id :root])) ((resolve 'seon.ref/line-citation) \"src/a.clj:50\") (let [co (seon.config/checkout)] [(:roots (:seon.root/watch (d/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root]))) (set (mapcat val (#'my.root/loader-dirs co))) co]) (vec (keys (my.root/watch-loads (seon.config/checkout) [[:path (str (seon.config/value :seon.config.root/tasks-dir) \"/x.edn\")]])))]")
+        first-boot (str/split-lines (root-answers path "main" [at-boot main (ev (str "(my.root/load-tasks! sys " (pr-str tasks) ")"))
                                                            {:op :attach :task "demo/t"} held (ev "(:boot sys)") by]
                                                   {:args bare}))
         second-boot (str/split-lines (root-answers path "main" [main held
@@ -190,66 +201,32 @@
                                                    {:args (into bare ["--started-by" "seon.root-test/another"])}))
         printed (fn [l] (ts/value-of (:response (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))))]
     (try
-      (is (= "main" (printed (first first-boot))) "a boot with no main named works on the config's main")
+      (let [[tasks-dir n outcome cite [roots dirs co] loads] (printed (first first-boot))]
+        (is (= (str path "-main-runs/tasks") tasks-dir) "its task dir is under its runs, not the checkout's")
+        (is (= 1 n) "its own task file's one whole task, loaded at boot, none of the checkout's")
+        (is (= {:files 1} outcome) "the boot read's outcome is root's :seon.root/tasks")
+        (is (= "src/a.clj" cite) "the built root reads a path:line citation")
+        (is (not-any? #{co} roots) (str "the checkout is no watched root: " roots))
+        (is (= dirs (set roots)) "the watched loaders' dirs alone: no source dir, no refs")
+        (is (= [:tasks] loads) "a task file in a task dir outside the checkout loads the tasks"))
+      (is (= "main" (printed (second first-boot))) "a boot with no main named works on the config's main")
       (is (= "main" (printed (first second-boot))) "the second boot resumes the same main")
-      (let [[tasks-1 agents-1 watch-1] (printed (nth first-boot 3))
+      (let [[tasks-1 agents-1 watch-1] (printed (nth first-boot 4))
             [tasks-2 agents-2 watch-2] (printed (second second-boot))]
         (is (= [1 1] [tasks-1 (count agents-1)]) (str "the first boot holds the one task it loaded (a file task is one whole task) and the agent it started; its watcher: " (pr-str watch-1)))
         (is (= 1 tasks-2) (str "the second boot still holds the task; its watcher: " (pr-str watch-2)))
         (is (every? agents-2 agents-1) "and the first boot's agent (its task is reaped, and started again by the next agent of the session)"))
-      (let [b1 (printed (nth first-boot 4))
+      (let [b1 (printed (nth first-boot 5))
             [prev killed by2 resume] (map printed (drop 2 second-boot))]
         (is (string? b1))
-        (is (= "seon.root-test/a-second-boot-resumes-the-same-main" (printed (nth first-boot 5))) "the test that started the boot is its fact")
+        (is (= "seon.root-test/a-second-boot-resumes-the-same-main" (printed (nth first-boot 6))) "the test that started the boot is its fact")
         (is (= "seon.root-test/another" by2) "and the next boot's is its own")
         (is (true? resume) "and the generation after it carries it")
         (is (= {:boot b1 :cause :stdin-eof} (select-keys prev [:boot :cause]))
             "the second boot found the first's clean end: its stdin closed")
         (is (= {:boot "killed-boot" :cause :unclean} (select-keys killed [:boot :cause]))
             "a boot that left no stop fact is found :unclean"))
-      (finally (sh/sh "rm" "-rf" path tasks (str path "-in") (str path ".log") (str path "-agents"))))))
-
-(deftest a-test-roots-task-files-are-its-own
-  ;; the second boot above read 810 tasks (2026-10-25): its root started seconds after a merge
-  ;; rewrote the checkout's task files, FSEvents delivered those writes to its new watcher, and
-  ;; a task file's event loads every file of the task dir. A test root's task dir is its own
-  ;; (seon.test-store/start-root!), so its loads read its own files and never the checkout's.
-  ;; Asserted through the root's own reads, with no watcher event and no write to the checkout.
-  ;; And the built root reads a line citation (task jolt.ns/whole-program-inference-keeps-nil-checks):
-  ;; compiled, `[from to]` destructured from `(if dash [a b] [suffix])` typed `to` a string, so
-  ;; `(nil? to)` folded false and `src/a.clj:50` reached parse-long as nil; my.root/load-tasks!
-  ;; failed on every task file citing `path:N`
-  (let [checkout (seon.config/checkout)
-        path (test-store)
-        main (str "root-test-own-tasks-" (random-uuid))
-        runs (str checkout "/target/runs/" main "-runs")
-        _ (.mkdirs (java.io.File. (str runs "/tasks")))
-        _ (spit (str runs "/tasks/demo.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Work." :seon.task/kind :work}]))
-        root (ts/start-root! {:store path :main main :runs runs})
-        ask (fn [code] (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code code}))))]
-    (try
-      (is (= (str runs "/tasks") (ask "(seon.config/value :seon.config.root/tasks-dir)")) "its task dir is under its runs, not the checkout's")
-      ;; a fresh root's boot loads its task dir (my.root/watch!: a fresh store, or a task file changed
-      ;; while root was down, has nothing else to load it): demo/t, a file task being one whole task
-      ;; (my.root/task-files), none of the checkout's. It held none before: a root loaded task files only on a
-      ;; watcher event, and this assertion was red (0 tasks), so no event for demo.edn's write
-      ;; loaded it; the count is the boot's load
-      (is (= 1 (ask "(count (seon.task/tasks @(:conn sys)))")) "its own task file's one whole task, loaded at boot")
-      (is (= "src/a.clj" (ask "((resolve 'seon.ref/line-citation) \"src/a.clj:50\")")) "the built root reads a path:line citation")
-      ;; its watcher's roots are what its watched loaders read, never the checkout, whose builds,
-      ;; stores and (in the main tree) worktrees no loader reads: the whole checkout kept fseventsd
-      ;; saturated (task seon.watch/root-watches-what-its-loaders-read)
-      (let [[roots dirs co] (ask "(let [co (seon.config/checkout)] [(:roots (:seon.root/watch (datahike.api/pull @(:conn sys) [:seon.root/watch] [:seon.root/id :root]))) (set (mapcat val (#'my.root/loader-dirs co))) co])")]
-        (is (not-any? #{co} roots) (str "the checkout is no watched root: " roots))
-        (is (= dirs (set roots)) "the watched loaders' dirs alone: no source dir, no refs")
-        ;; its task dir is outside its checkout, and a task file there is the task loader's
-        (is (= [:tasks] (ask (str "(vec (keys (my.root/watch-loads (seon.config/checkout) [[:path \"" runs "/tasks/x.edn\"]])))")))
-            "a task file in a task dir outside the checkout loads the tasks"))
-      ;; the read's outcome is root's :seon.root/tasks, the subject a refused read names; an unchanged good read writes nothing
-      (is (= [{:files 1} {:ok true :changed 0 :files 1}]
-             (ask "[(:seon.root/tasks (datahike.api/pull @(:conn sys) [:seon.root/tasks] [:seon.root/id :root])) (my.root/load-tasks! sys)]"))
-          "the boot read's outcome, and a read that finds it so writes nothing")
-      (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
+      (finally (sh/sh "rm" "-rf" path tasks (str path "-main-runs") (str path "-in") (str path ".log") (str path "-agents"))))))
 
 (deftest a-build-without-whole-program-inference-reads-with-tools-reader
   ;; with
