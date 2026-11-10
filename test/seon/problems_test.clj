@@ -447,19 +447,44 @@
   (let [m (volatile! nil) h (profile/measure! #(problems/health db) #(vreset! m %))]
     [h @m]))
 
+(defn- calls-of
+  "The contracted calls of thunk f."
+  [f]
+  (let [m (volatile! nil)] (profile/measure! f #(vreset! m %)) (:calls @m)))
+
 (deftest health-reads-each-part-once
   (let [db0 (seeded 3 2)
         db (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" "# P\n\nIt says what it is about.\n"}))
         [h m] (measured-health db)
-        rows (get-in h [:classes :problem-unlinked :rows])]
+        rows (get-in h [:classes :problem-unlinked :rows])
+        ans (problems/answers db)
+        classes {:stalled #(problems/stalled-agents db ans) :stale-pin #(problems/stale-pins db ans)
+                 :stale-binary #(problems/stale-binary db ans) :orphan-page #(problems/orphan-pages db ans)
+                 :leadless-section #(problems/leadless-sections db ans) :uncited-task #(problems/uncited-tasks db ans)
+                 :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
+                 :stale-plan #(problems/stale-plans db ans)
+                 ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it), and the folds
+                 :fixed #(let [a (problems/answers db)]
+                           (#'problems/health-with db a (:classes (#'problems/report-with db a {} nil)) {}))}
+        measured (update-vals classes calls-of)
+        ;; 74 -> 86 -> 88 -> 89 on 2026-11-10, one total; per class since. Each bound is the contracted calls measured on this world.
+        bounds {:stalled 1             ; the processes holding a stall fact, one range
+                :stale-pin 2           ; the pins of the branch scheme
+                :stale-binary 2        ; root's source fact: one seon.db/eid and one pull
+                :orphan-page 1         ; the sections' references, one scan
+                :leadless-section 1    ; the stored sections' first blocks
+                :uncited-task 19       ; the ready tasks' plans, cites and proofs (12 are the proofs read, seon.db/eid per proof), and task-reads
+                :unnamed-site 9        ; the catch sites of the program's forms (live? and form-of per form, the namespaces once)
+                :stale-section 2       ; the read datoms and the vars' forms, one scan each
+                :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
+                :fixed 48              ; answers, report-with (every recorded class), health-with (problem-unlinked over all of them)
+                :wrappers 4}]         ; health's and other-derived's own contracts (2), and 2 the rows above do not attribute
     (is (seq rows) "the db has unlinked classes to judge")
     (is (= rows (vec (distinct rows))) "no row twice")
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
-    ;; Sean, 2026-11-10: 74 -> 86: seon.problems/uncited-tasks judges every ready task (it judged only :implement, which no task
-    ;; was), and its placeholder check reads each ready task's proofs (seon.db/eid per proof): 12 calls that never ran before
-    ;; 2026-11-10, ruled by Point in Sean's absence, reported to him: 86 -> 88: dbboot's stale-binary class reads root's source fact (one
-    ;; seon.db/eid and one pull per health read), its floor
-    (is (<= (:calls m) 88) "the contracted calls of one health read (88 on the world, 2 of them stale-binary's read of root's source fact, 12 of them the ready tasks' proofs read by uncited-tasks; before that 74: its test namespace app.calc-test holds two forms carrying a catch (a deftest's `is`), which unnamed-sites reads lazily, so 8 calls the world before it did not make: live? and form-of per form, and the program namespaces read once (program-nss and its config value); 64 without them, with seon.config armed as at boot: value, resolve and resolve-in are one call more each; 59 before the fix; 51 with it and report-with's own contract; main has since added to health's reads, health-with's contract is one more, and the fold of the counted classes is one, fold-counted)")))
+    (doseq [[c bound] (dissoc bounds :wrappers)]
+      (is (<= (measured c) bound) (str c " reads " (measured c) " contracted calls, bound " bound)))
+    (is (<= (:calls m) (apply + (vals bounds))) (str "one health read makes " (:calls m) " contracted calls, the classes' bounds sum to " (apply + (vals bounds))))))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -1159,6 +1184,21 @@
                    ["bare" cited :seon.task/proofs #{'app-test/real}] ["waits" "Text, but its design step is not done."] ["real" cited :seon.task/proofs #{'app-test/real}]]]
         (is (= #{["app/waits" :no-references]} (rows (uncited-fixture fixed #{"waits"}))) "only the ready step still citing nothing")))
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :uncited-task))))
+
+(deftest a-plan-goes-stale-when-what-it-cites-changes
+  ;; in a real run two agents spent evals because a plan, written before a function existed, said it was missing
+  ;; (docs/health.md#a-plan-that-went-stale)
+  (let [v 'app.calc/inc2
+        redefine [{:var/name v :var/form -1} {:db/id -1 :form/id "f-inc2-new" :form/src "(defn inc2 [x] (+ x 2))"}]
+        db0 (world)
+        planned (d/db-with db0 (seon.task/create-tx db0 [{:seon.task/ns 'app :seon.task/name "plan" :seon.task/kind :whole :seon.task/proofs #{'app-test/real}
+                                                          :seon.task/plan (str "It changes `" v "`.")}]))
+        rows #(mapv :evidence (get-in (problems/health %) [:classes :stale-plan :rows]))]
+    (is (= [] (rows planned)) "a var defined before the plan: no row")
+    (let [moved (d/db-with planned redefine)]
+      (is (= [{:kind :stale-plan :task "app/plan" :var v}] (rows moved)) "the var redefined after the plan: one row naming both")
+      (is (= [] (rows (d/db-with moved [{:seon.task/id "app/plan" :seon.task/plan (str "It changes `" v "`, as it now is.")}])))
+          "the plan written again closes it"))))
 
 (deftest a-ready-task-of-any-kind-that-cites-nothing-is-a-problem
   ;; the class judged only :implement tasks, and no task on the store had that kind (all :whole, 2026-11-10): a check keyed on a

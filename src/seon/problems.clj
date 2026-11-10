@@ -538,6 +538,17 @@
    :seon.task/deferred :seon.task/gate-unread :seon.task/deferred-results :seon.task/conflicts
    {:seon.task/agent [:seon.agent/key :seon.agent/ended-ms]}])
 
+(defn- task-reads
+  "The one reading of which tasks are ready and what they cite, on db: {:ready? :cited}, `ready?` a function of a task
+  entity (not done, every task it needs done; every task's outcome read once, so readiness is a lookup) and `cited`
+  one of a task entity giving the var names its cites target. What `uncited-tasks` and `stale-plans` share.
+  See docs/health.md#a-task-that-cites-nothing."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db]
+  (let [done (into #{} (comp (filter #(task/finished (:v %))) (map :e)) (d/datoms db :aevt :seon.task/outcome))]
+    {:ready? (fn [e] (and (not (done e)) (every? #(done (:v %)) (d/datoms db :eavt e :seon.task/needs))))
+     :cited (fn [e] (into [] (comp (map #(:var/name (:seon.cite/target (d/entity db (:e %))))) (filter qualified-symbol?)) (d/datoms db :avet :seon.cite/of e)))}))
+
 (defn uncited-tasks
   "Each ready task, which holds the plans along its :needs (seon.task/accumulate), whatever its kind, whose
   accumulated plan cites no program var (no cite of one along its needs, seon.task/cites-of: the context pulls
@@ -547,16 +558,13 @@
   walk of each ready task's needs."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
-  (let [;; every task's outcome read once, so each task's readiness is a lookup (seon.task/done? per task was two contracted calls a task)
-        done (into #{} (comp (filter #(task/finished (:v %))) (map :e)) (d/datoms db :aevt :seon.task/outcome))
-        ready? (fn [e] (and (not (done e)) (every? #(done (:v %)) (d/datoms db :eavt e :seon.task/needs))))
+  (let [{:keys [ready? cited]} (task-reads db)
         chain (fn chain [seen e]
                 (if (seen e) seen
                     (reduce chain (conj seen e) (map :v (d/datoms db :eavt e :seon.task/needs)))))
         vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
         ;; the program's vars among every task's cites, asked of the program once, when a ready implement step asks
         ;; (seon.program/program-names)
-        cited (fn [e] (into [] (comp (map #(:var/name (:seon.cite/target (d/entity db (:e %))))) (filter qualified-symbol?)) (d/datoms db :avet :seon.cite/of e)))
         program (delay (set (program/program-names db (vec (distinct (mapcat #(cited (:e %)) (d/datoms db :aevt :seon.task/id)))))))
         placeholder? (fn [sym] (some-> (pdb/eid db :var/name sym) (->> (d/entity db)) :var/form :form/src
                                       (str/includes? task/placeholder-assertion)))]
@@ -577,6 +585,26 @@
                           :no-proofs (str v " is ready and names no proof")
                           :placeholder-proof (str v " is ready and a proof of it is still the placeholder assertion (seon.task/placeholder-assertion)"))
                         {:kind :uncited-task :task v :reason reason} {:task v :reason reason})))))
+
+(defn stale-plans
+  "Each ready task (its own plan, not its needs') citing a var whose form was written after the task's plan, as a
+  :stale-plan row naming the task and the var: the plan was written before the var took its present form, so its
+  premise (a function it says is missing, code it describes) may have moved. Closed when the plan is written again
+  (a new :seon.task/plan datom). Cost: the ready tasks, then two datom reads a cite (the plan's and the var form's
+  transaction). See docs/health.md#a-plan-that-went-stale."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
+  [db ans]
+  (let [{:keys [ready? cited]} (task-reads db)]
+    (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
+               :when (ready? e)
+               :let [plan-tx (:tx (first (d/datoms db :eavt e :seon.task/plan)))]
+               :when plan-tx
+               var (distinct (cited e))
+               :let [ve (pdb/eid db :var/name var)]
+               :when (and ve (> (or (:tx (first (d/datoms db :eavt ve :var/form))) 0) plan-tx))]
+           (derived-row ans (str "stale-plan " v " " var) 'seon.task
+                        (str v " cites " var ", which changed after the plan was written: the plan's premise may have moved; read the var and rewrite the plan")
+                        {:kind :stale-plan :task v :var var} {:task v :var var})))))
 
 ;; ---- tasks held for root -----------------------------------------------------------------
 
@@ -723,12 +751,12 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] :map]}
   [db ans]
   {:stalled (stalled-agents db ans) :stale-pin (stale-pins db ans) :stale-binary (stale-binary db ans) :orphan-page (orphan-pages db ans)
-   :leadless-section (leadless-sections db ans) :uncited-task (uncited-tasks db ans)})
+   :leadless-section (leadless-sections db ans) :uncited-task (uncited-tasks db ans) :stale-plan (stale-plans db ans)})
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
   program's facts make true now (`unnamed-sites`, `stale-pins`, `stale-binary`, `stale-sections`,
-  `orphan-pages`, `leadless-sections`, `uncited-tasks`, and `problem-unlinked` over all of them). What the page, an agent's context and
+  `orphan-pages`, `leadless-sections`, `uncited-tasks`, `stale-plans`, and `problem-unlinked` over all of them). What the page, an agent's context and
   the done and merge gates read: computed when read, never stored, never polled."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
                   [:=> [:cat :seon.host/db :seon.error/fold] :seon.problems/report]]}

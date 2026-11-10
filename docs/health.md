@@ -1,6 +1,6 @@
 # Health
 
-Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:leadless-section`, `:uncited-task`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
+Health is the set of open problems: a value computed when something reads it (`seon.problems/health`). It is never stored, never precomputed and never polled. Root's page, an agent's context and the done rule each read it on the db they hold. It is the recorded classes (`seon.problems/report`) beside the derived ones (`:unnamed-site`, `:stale-pin`, `:stale-section`, `:orphan-page`, `:leadless-section`, `:uncited-task`, `:stale-plan`, `:problem-unlinked`), one value by class (`:seon.problems/report`).
 
 ## Two kinds of problem
 
@@ -47,6 +47,10 @@ A section whose first block is a list, a table or code, not a paragraph, has no 
 ## A task that cites nothing
 
 An `:implement` task that is ready (not done, every task it needs done) is an `:uncited-task` (`seon.problems/uncited-tasks`) when the plan it holds, its own and its needs' (its design step's, `seon.task/accumulate`) cites no var, attribute or section (`:no-references`), when it names no proof (`:no-proofs`), or when a proof is still the placeholder `seon.ctx` writes for a missing one (`:placeholder-proof`). The context pulls what the plan cites ([references](references.md#task-references)), so a plan in text alone gives the agent nothing to read. A design step's text plan is its input and is never judged: the design step writes the cited plan. The problem closes when the design step's plan cites a name (one backtick, [references](references.md#the-delimiter-picks-the-depth)), the proofs are named and no proof is the placeholder, with nothing written to close it. Cost: the task, kind and `needs` datoms once, then a walk of each ready implement task's needs.
+
+## A plan that went stale
+
+A ready task whose own plan cites a var whose form was written after the plan is a `:stale-plan` (`seon.problems/stale-plans`): the plan was written before the var took its present form, so what it says of it (a function it calls missing, code it describes) may no longer be true, and an agent spends evals finding out. It compares the transaction of the task's current `:seon.task/plan` datom with that of each cited var's `:var/form` datom; the task's needs' plans are not judged. The problem closes when the plan is written again (a new plan datom), after reading the var. Cost: the ready tasks, then two datom reads a cite.
 
 ## A function that cites no section
 
