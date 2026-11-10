@@ -93,4 +93,8 @@ The change waits on the owner's design ruling about kinds (a thing is a map; cho
 Proofs, once ruled: a task file's declaration loads with the kind the ruling says, and no reader keys on a kind no task on the store holds."
   :seon.task/kind :work
   :seon.task/proofs #{}}
-]
+
+ {:seon.task/name "every-reader-of-the-binarys-tree-asks-binary-current"
+  :seon.task/plan "Reproduction (2026-11-10, a real agent's done on main 037296d7e5, a one-sentence docstring change to seon.turn/act!): its gate took root's running binary, current by reach (seon.root/binary-current, Point's one rule), and three readers that still compare the binary's tree or program literally closed the done with stray reds: bin/check's stale-binary refusal ('target/seon was built from tree X; this checkout is tree Y', seon.check-test/a-check-leaves-its-store-as-it-found-it and a-failed-seed-says-failed) and seon.root/booted-source, which hands agents :inputs only when the binary's program is main's (seon.agent-test/a-wide-reach-reuses-unchanged-results: inputs #{}). bin/test builds again meanwhile (jolt/tests-fast 43d8dc3638). Plan: bin/check's tree check and booted-source ask binary-current (bin/check through the plan's out/build when bin/test passes it, else a seon mode), and booted-source hands the inputs of the tree main holds (seon.fx/inputs of its source fact's tree), never the binary's own: a binary current for another tree must not key verdicts by its own tree. Then bin/test's build condition returns to out/build. Proofs: the three tests green with a binary current by reach and not built from the tree; a binary not current still refused."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.check-test/a-check-leaves-its-store-as-it-found-it seon.check-test/a-failed-seed-says-failed seon.agent-test/a-wide-reach-reuses-unchanged-results}}]
