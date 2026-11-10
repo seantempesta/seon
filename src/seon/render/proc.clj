@@ -73,7 +73,7 @@
   [st]
   (let [v (:view st)
         n (c/view-numbers v)]
-    {:writer (:writer n) :fork-server (:fork-server n) :store (:store n)
+    (cond-> {:writer (:writer n) :fork-server (:fork-server n) :store (:store n)
      :root-errors-total (:root-errors-total v 0)
      :health (proc-health-of st (:root-errors v []))
      ;; a stop that arrived before main recorded how the work ended says so once main does
@@ -83,7 +83,8 @@
                              (into {} (for [[_ t] (:tasks idx) :let [a (get (:agents idx) (:seon.task/agent t))] :when (and a (ids (keyword (:seon.agent/key a))))]
                                         [(keyword (:seon.agent/key a)) (:seon.task/outcome t)]))
                              {})]
-               (mapv #(ui/ended-as % (:agent %) outcome) evs))}))
+               (mapv #(ui/ended-as % (:agent %) outcome) evs))}
+      (:boot v) (assoc :boot (:boot v)))))
 
 ;;; --- main --------------------------------------------------------------------------------
 

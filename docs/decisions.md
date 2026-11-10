@@ -476,7 +476,7 @@ Approved after the run removal: a changed part that answers data sends clojure.d
 
 ### A process test's cache gap stays; the full run catches it (owner, 2026-10-30)
 
-An in-agent test's code strings are not in its reach, so its digest may reuse a green across a change it reaches; "leave it", the heavy pre-merge run catches it. Asked next: mark such tests uncacheable, so the heavy stage always reruns them ("Can we just mark tests that we know can't be cached so if they are touched they always rerun?"). Stated in docs/plan.md#now-one-step.
+An in-agent test's code strings are not in its reach, so its digest may reuse a green across a change it reaches; "leave it", the heavy pre-merge run catches it. Asked next: mark such tests uncacheable, so the heavy stage always reruns them ("Can we just mark tests that we know can't be cached so if they are touched they always rerun?"). Stated in docs/plan.md#now.
 
 ### Main keeps recording live data; agents react only when main's program moves (owner, 2026-10-30)
 
@@ -488,7 +488,7 @@ Budgets should be under 90%+ of the time and an overrun mostly a case worth inte
 
 ### Simplify by constraint; the test suite must be trusted (owner, 2026-10-30)
 
-"I'm okay with adding constraints to the system to simplify the solutions"; "I want all correctness issues solved with our test suite. We need to trust it as much as possible." Hangs are removed as a class (one reader of an agent's socket, a mailbox per request id, every taken request answered in a finally, the cap checked once at the top of each turn); tests run as agents run them. Stated in docs/plan.md#now-one-step.
+"I'm okay with adding constraints to the system to simplify the solutions"; "I want all correctness issues solved with our test suite. We need to trust it as much as possible." Hangs are removed as a class (one reader of an agent's socket, a mailbox per request id, every taken request answered in a finally, the cap checked once at the top of each turn); tests run as agents run them. Stated in docs/plan.md#now.
 
 ## 2026-10-29 rulings
 

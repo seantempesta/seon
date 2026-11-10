@@ -554,6 +554,18 @@
     (is (not (str/includes? html "effect")) "nor its class, which holds no open row")
     (is (str/includes? html "arity") "an open row is")))
 
+(deftest a-stale-binary-is-on-the-problems-tile-with-its-acts
+  ;; docs/source.md#files-and-the-db-two-directions: a mismatch is never silent to a person. The :stale-binary row health derives
+  ;; (seon.problems/stale-binary) is drawn on root's problems tile, never folded under upkeep, its message naming the acts
+  (let [db (seon.db/db-with (my.test/world {:history? true}) [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :boot "b" :binary "p0" :binary-tree "t0" :tree "t1" :program "p1" :stale-binary {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]}}}])
+        h (seon.problems/health db)
+        html (h/html (ui/problems-tile {:seon.render/index (seon.db/index) :seon.ctx/ctx {:health h}}))]
+    (is (= 1 (get-in h [:classes :stale-binary :n])) "health holds the row")
+    (is (str/includes? html "stale-binary") "the tile draws its class")
+    (is (not (str/includes? (h/html (ui/problems-tile {:seon.render/index (seon.db/index) :seon.ctx/ctx {:health (update h :classes select-keys [:stale-section])}})) "stale-binary"))
+        "and draws it from the row, not by itself")
+    (is (str/includes? (get-in h [:classes :stale-binary :rows 0 :message]) "bin/root start --reindex") "its message names the acts")))
+
 (deftest an-agents-page-draws-the-problems-of-its-own-task
   ;; task seon.problems/health-in-context: its task's open problems, by the report's render, beside the
   ;; task; none when none is open; another task's and main's classes are not drawn
@@ -3663,3 +3675,11 @@
   (let [ix {:forms {} :entity-schemas {} :marker ::mains}]
     (is (= ix (#'p/units-index {:root-walk {:w {:index (volatile! ix)}}})) "main's, as root's walk holds it")
     (is (= (seon.db/index) (#'p/units-index {})) "the binary's before main is read")))
+
+(clojure.test/deftest the-root-tile-shows-the-defs-boot-loaded
+  ;; docs/render.md#tiles-are-data-the-context-reads-the-pages-derivations: boot's program count is root's process data, drawn by the tile
+  (let [tile (fn [view] (pr-str (seon.render.ui/process-tile {:seon.ctx/ctx {:process (seon.render.proc/process-value {:view view})}})))]
+    (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "1233 forms loaded"))
+    (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "40"))
+    (is (str/includes? (tile {:boot {:program {:loaded 0 :ms 5}}}) "image held main's program"))
+    (is (str/includes? (tile {}) "program load not measured"))))

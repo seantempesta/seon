@@ -20,21 +20,11 @@ Waits on stage 5, which decides whether a private session keeps a base of its ow
   :seon.task/kind :work
   :seon.task/proofs #{seon.ctx.wire-test/a-turn-names-mains-coming-conflict}}
  {:seon.task/name "a-first-turns-context-costs-what-it-shows"
-  :seon.task/plan "What exists: a first request's size and cost are measured only by hand. Measured on main 850fbffbcc (seon_context, task seon.render/a-model-render-draws-each-turns-diff): about 23.4k tokens, of which the system message 8.5k characters, the task plan 20.4k and the task's cites 51.3k for 45 names in plan order.
+  :seon.task/plan "What exists: the parts of a request have cost proofs of their own in `seon.ctx.wire-cost-test` (the status, the task's plan with its cites, the search's push, a request's records), but a first request whole, by part, in tokens is measured only by hand. Measured on main 850fbffbcc (seon_context, task seon.render/a-model-render-draws-each-turns-diff): about 23.4k tokens, of which the system message 8.5k characters, the task plan 20.4k and the task's cites 51.3k for 45 names in plan order.
 
 The change: a cost proof on a production-shaped world for a first request's parts (the cites, the search, the status) in ticks, bytes and tokens, each part costing the text it shows. The size of what is shown is the area primer's plan (Context, 2026-11-10), not this task.
 
 Proofs: a first request's cost proof by part (seon.cost/proof)."
-  :seon.task/kind :work
-  :seon.task/proofs #{}}
- {:seon.task/name "an-agent-reads-what-its-entity-names"
-  :seon.task/plan "The owner, 2026-10-30: \"I want a way to put data or a ref or a set of refs on an agents entity record and I want pull to pull in all references to that pattern ... and I want a better system for representing the levels of detail ... I want it to work for all markdown files so nothing too complex\"; and, on the design below, \"I like it\". Why: every agent should read the testing instructions (docs/testing.md#testing-in-the-world) without a copy in the help page or the prompt that drifts from them, and the same for any wiki the system wants every agent to hold.
-The design (approved):
-1. A reference is [address depth]. The address is a markdown path in the checkout with an optional anchor: \"docs/testing.md#testing-in-the-world\" is that section and the sections under it; \"docs/testing.md\" (no anchor) is the whole page, every section of it, those added later too (the wildcard, no glob syntax); any markdown file works (\"AGENTS.md#5-laws\", \"README.md\"). The depth is one of three keywords: :summary (the heading and its lead's first sentence), :lead (the heading, the lead and the headings below), :full (the text whole). They are today's summary, doc and code (docs/references.md#the-delimiter-picks-the-depth), renamed for what they show; text delimiters keep working and map onto them (a bare word :summary, one backtick or a link :lead, three backticks :full). A link with no anchor shows the page whole at its depth, where today it shows only the page's first section.
-2. :seon.agent/reads on the agent's entity: a set of references. The agent's ctx pull pattern (seon.facts's agent pattern) holds it, and its render resolves each through seon.doc/view and seon.ref/shown, the one renderer a task's citations already go through, so a task's citations and an agent's reads are drawn alike.
-3. Defaults: one config key, :seon.config.agent/reads (first value #{[\"docs/testing.md\" :lead]}), written on every agent at its spawn; changing it changes what new agents read. An agent adds or drops its own at its REPL: (my.agent/read! address depth) and (my.agent/unread! address), recorded on its entity, held across turns.
-Cost: every :full reference is paid in every request's tokens (cached, still read), so defaults stay :lead and an agent opens more with my.agent/doc or read!. A cost proof: an agent's reads cost the sections they name, drawn once a wiki change, not once a turn.
-Owner: the context session (the ctx pull and its render); the optimization session proves and merges it."
   :seon.task/kind :work
   :seon.task/proofs #{}}
  {:seon.task/name "the-status-declares-its-summary"
@@ -60,7 +50,7 @@ Proofs: two agents with different data read different context with no code chang
  {:seon.task/name "the-models-readers-follow-the-re-models"
   :seon.task/plan "Context's readers that move when Optimization's re-models land (docs/users.md#the-stages-agreed-2026-11-09), each in the same branch as its schema change or right after it:
 1. A run's measures are entities of their own, a ref to what they measured, summed when read (re-model 1, Optimization, on jolt/sync): seon.ctx.status's readers of :seon.test/ticks, :seon.test/bytes and :seon.fn/stats (status, task-of's :proved, the var pattern's :seon.test/* attributes) read the measures by their ref.
-2. A cite's target is a ref to an entity that exists (Optimization, jolt/cite-ref in the erase window): the joins by value in the cite and task patterns (:proved, :section, :var, :callers, a cite's :task, :schema, :ns) become ref joins keyed by their attribute, and their readers in seon.ctx.status, seon.ctx.search, seon.render.ui's cite renders and my.agent/cites move; seon.ctx-test/a-pattern-joins-refs-by-their-attribute then holds no :by join.
+2. Landed (jolt/cite-ref, 2026-11-09): a cite's target is a ref to an entity that exists, and `seon.ctx-test/a-pattern-joins-refs-by-their-attribute` holds every pattern's joins keyed by their attribute.
 3. seon.ctx's write! refuses an edit of a var through swap! by checking :var/name in code; instead a property on the var's and form's entity schemas says the entity is changed by its definition, and the edit walk reads it."
   :seon.task/proofs #{}
   :seon.task/kind :work}
@@ -89,9 +79,9 @@ Proof: a cost proof of the system message's size, and the curated tasks' turns t
   :seon.task/kind :work
   :seon.task/proofs #{}}
  {:seon.task/name "a-components-change-sends-what-moved-inside-it"
-  :seon.task/plan "What exists: a turn's page message holds editscript edits between the page parts at two bases (seon.ctx.wire/page-edits-between over seon.render/page-edits). In the T3 rerun (on main's page evals, before stage 2b) the agent's own edits to seon.render.ui/process-tile resent the tile whole three times, about 3k chars each.
+  :seon.task/plan "What exists: a turn's page message holds editscript edits between the page parts at two bases (`seon.ctx.wire/diffs-through` over `seon.render/page-edits`; since 2026-11-06 a change is editscript edits by name, `seon.render/component-edits`, which resends a whole part only when that is shorter: docs/render.md#a-change-is-edits-by-name). In the T3 rerun (on main's page evals, before stage 2b) the agent's own edits to seon.render.ui/process-tile resent the tile whole three times, about 3k chars each.
 
-The change: measure on 2b's page message, for a cited function edited at the REPL, the bytes its turn's page message carries against the bytes that changed in its source; when the whole part is resent for a small change, the edit's path goes into the part (by element key) rather than replacing it, the owner's rule (2026-11-10): what changed is shown in full, a removal is one line.
+What is left: measure on 2b's page message, for a cited function edited at the REPL, the bytes its turn's page message carries against the bytes that changed in its source (no test states it; seon.render-test/a-change-speaks-in-names covers the edits' shape); where the whole part is still resent for a small change, find why `component-edits` chose it, the owner's rule (2026-11-10): what changed is shown in full, a removal is one line.
 
 Proof: a cited var's one-line edit gives a page message under the size of the var's source."
   :seon.task/kind :work
@@ -99,14 +89,6 @@ Proof: a cited var's one-line edit gives a page message under the size of the va
  {:seon.task/name "ctx-reads-attribute-owners-by-the-one-lookup"
   :seon.task/plan "Owner, 2026-11-10: \"No duplicate implementations\". Which entity schema owns an attribute is read through one function, seon.db/owners (the write check, seon.db/most-specific, seon.render/schema-of and entity-schema call it; Web, jolt/walk-2a). Three readers in seon.ctx still read the entity index's :entity-schemas inline: seon.ctx's time-ordered join test (a reverse join's members by store-issued id) and the patch's new-member identity check and its refusal text. Moved to owners as one call each, seon.ctx-test/a-lookups-patch-costs-its-change went from 31 to 33 contracted calls at n=20 (its bound 31, allowed 1.0x), since owners is contracted and these run a member at a time. The change: read the owners of a patch's attributes once per patch (one call), and of a join's attribute once where the join is built, so the cost proof stays at its bound. Proof: that cost proof unchanged; no (:entity-schemas ix) left in src outside seon.db/owners."
   :seon.task/kind :work}
- {:seon.task/name "a-search-hit-shows-why-it-matters"
-  :seon.task/plan "What exists: the page's search part (seon.render.ui/searched) lists each hit by name alone. In curated run 1 (seon.model/a-streamed-reply-test-sleeps-not, 2026-11-10) its top hit, seon.check/named-test-inputs at 60%, was the hand-kept exemption the task also had to remove; the agent shown it did not act on a bare name, and the agent without the part found it through grep's matching line.
-
-The change: each hit shows the line of its text that matched (seon.doc/line-of, which search already computes for the hits it shows as :line), one line, so a hit says why it is there.
-
-Proof: a search hit for a var whose source holds the query's word renders that source line beside the name."
-  :seon.task/kind :work
-  :seon.task/proofs #{}}
  {:seon.task/name "the-context-shows-how-a-wiki-section-is-edited"
   :seon.task/plan "What exists: in curated run 1 (2026-11-10) an agent spent four evals learning to edit a wiki section: (seon.repl/edit! \"docs/clocks.md\" ...) failed (\"no file at /private/tmp/seon-agents/docs/clocks.md: write it whole first\"), a search, a doc read, then a whitespace failure; the agent that read (doc seon.repl/edit!) first got the section-address form at once.
 
@@ -116,21 +98,19 @@ Proof: edit! of a wiki page by path answers an error naming the section-address 
   :seon.task/kind :work
   :seon.task/proofs #{}}
  {:seon.task/name "a-stale-section-block-says-how-to-clear-it"
-  :seon.task/plan "What exists: a change to a var's contract or docstring stales the wiki sections that cite it, and the done rule blocks the merge on them (seon.problems/stale-sections, seon.reconcile/done-explain). In curated pair 2 (2026-11-10) both agents were blocked on docs/resolution.md#sanctioned and docs/source.md#tests-run-by-reach; one edited the sections, the other found my.doc/reviewed! by trying, and then hit its arity (\\\"it is called as (my.doc/reviewed! address who)\\\").
+  :seon.task/plan "What exists: a change to a var's contract or docstring stales the wiki sections that cite it, and the status shows them under :attention, a read-and-probably-fix that does not refuse done (seon.problems/stale-sections, seon.problems/caused-split; docs/health.md#a-stale-section). In curated pair 2 (2026-11-10) both agents were sent to docs/resolution.md#sanctioned and docs/source.md#tests-run-by-reach; one edited the sections, the other found my.doc/reviewed! by trying, and then hit its arity (\\\"it is called as (my.doc/reviewed! address who)\\\").
 
-The change: the status's refusal for a stale section names, per section, its address, the var that changed, and the two forms that clear it, ready to evaluate: (seon.repl/edit! \\\"docs/x.md#y\\\" old new) and (my.doc/reviewed! \\\"docs/x.md#y\\\" \\\"<agent key>\\\"). The block stays.
+The change: the status's attention line for a stale section (its text says only: read it, then edit the section or review it) names, per section, its address, the var that changed, and the two forms that clear it, ready to evaluate: (seon.repl/edit! \\\"docs/x.md#y\\\" old new) and (my.doc/reviewed! \\\"docs/x.md#y\\\" \\\"<agent key>\\\").
 
-Proof: an agent whose change stales a section reads, in its status, each section with both forms; evaluating the second clears the refusal."
+Proof: an agent whose change stales a section reads, in its status, each section with both forms; evaluating the second clears the attention."
   :seon.task/kind :work
   :seon.task/proofs #{}}
  {:seon.task/name "doc-of-a-section-answers-small"
   :seon.task/plan "What exists: (doc x) is a macro taking a literal: (doc addr) in a let or map fails with \\\"Unable to resolve var\\\"; and doc of a wiki address returns a large map that it also prints. In curated pair 2 (2026-11-10) an agent spent about five evals filtering doc's output, one answering 30 KB.
 
-The change: a function form beside the macro, my.agent/section (address -> {:heading :text :address}), that takes a value, so it composes; and doc of a section prints the heading and its text, the section's references and the sections below it by name only, each with the form that reads it.
+The change: the function form exists, `my.agent/doc-of` (what the macro prints, as data, edges as addresses), but the macro's failure on a let-bound symbol does not name it, so it names it, and the shape below is `doc-of`'s; and doc of a section prints the heading and its text, the section's references and the sections below it by name only, each with the form that reads it.
 
-Proof: (map my.agent/section addresses) answers the sections; (doc \\\"docs/x.md#y\\\") prints the section's text and names its subsections without their text."
+Proof: (map my.agent/doc-of addresses) answers the sections; (doc \\\"docs/x.md#y\\\") prints the section's text and names its subsections without their text."
   :seon.task/kind :work
   :seon.task/proofs #{}}
- {:seon.task/name "a-persons-code-owes-no-wiki-citation"
-  :seon.task/plan "Found 2026-11-10 measuring the request agent (a root from jolt/request-launch, three home requests to add demo.math/triple with a test): of the three launched agents two merged and one, request/add-a-function-demo-536871029 (agent a5c60f647c9c6fc2), never wrote its test: after defining triple it spent its turns finding a wiki section to cite, `(doc \"docs/prompt.md#the-program-is-your-branchs-facts\")`, a d/q for :wiki/path holding demo, `(search \"wiki citation docstring entry\")`, app.calc's docstrings; run 0's agent did the same through `(cite/check 'demo.math/triple)`. The cause, read on its branch: the write-back gave the person's new namespace a file, src/demo/math.clj, so seon.program/program-nss counts it as the program's own and seon.problems/uncited-vars holds an open row 'demo.math/triple is public and its docstring cites no docs/ section: cite the one that describes it'. The citation law is about Seon's own program (AGENTS.md section 7); Seon does any work its user wants, and a person's code has no mechanism in the wiki to cite. The change: uncited-vars judges a namespace the wiki describes, known by data the namespace already holds: its ns docstring cites a docs/ section (every Seon namespace's does, AGENTS.md section 7), so a namespace made for a person's work, with no such citation, is not judged; the prompt says the same in one line (the citation rule binds the program's code you change; new code of the person's has a docstring that says what it is, no citation owed). Proofs: uncited-vars on a branch holding demo.math (a file under src/, no ns docstring citing a section) answers no row, and on a Seon namespace whose var cites nothing it answers its row, as today; and one curated request of plain user work merges with no eval searching for a section to cite (the held agent's evals are the reproduction)."
-  :seon.task/kind :work}]
+ ]
