@@ -147,11 +147,16 @@
   ;; alloc-bytes counted the whole
   ;; process (1,712 B idle against 1.4 GB in 200 ms while another thread allocated), so a cost
   ;; proof read other threads' work as its own. Now it is the calling thread's count alone.
-  (let [window #(let [a0 (profile/alloc-bytes) _ (Thread/sleep 200)] (- (profile/alloc-bytes) a0))]
-    (is (< (window) 65536) "idle, the caller allocates next to nothing")
-    (let [busy (allocating-thread)]
-      (try (let [w (window)] (is (< w 65536) (str "another thread allocating moves the caller's count by " w " B")))
-           (finally (end-threads! busy))))
+  ;; The window is another thread's work, waited on (its promise), never a sleep: [the caller's bytes, the worker's own]
+  (let [window (fn [work] (let [done (promise) a0 (profile/alloc-bytes)
+                                t (Thread. ^Runnable (fn [] (let [b0 (profile/alloc-bytes)] (work) (deliver done (- (profile/alloc-bytes) b0)))))]
+                            (.start t)
+                            (let [theirs @done] (.join t) [(- (profile/alloc-bytes) a0) theirs])))]
+    (let [[mine _] (window (fn []))]
+      (is (< mine 65536) "idle, the caller allocates next to nothing"))
+    (let [[mine theirs] (window #(dotimes [_ 100] (dotimes [_ 1000] (vec (range 100)))))]
+      (is (< 10000000 theirs) (str "the other thread allocated " theirs " B, its own count"))
+      (is (< mine 65536) (str "another thread allocating moves the caller's count by " mine " B")))
     (let [a0 (profile/alloc-bytes) b (byte-array 1000000) a1 (profile/alloc-bytes)]
       (is (<= 1000000 (- a1 a0) 1100000) (str "the caller's own " (count b) " bytes counted as " (- a1 a0))))))
 
