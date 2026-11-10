@@ -20,14 +20,17 @@
 (defn- release!
   "Write specs' program on main, then their tasks in task namespace tns (each with
   max-turns when set, each merge task after its merge task in after); answers the task ids,
-  for root/run!."
+  for root/run!, or the error answer of the tasks' write, printed whole, which the caller fails on."
   [sys {:keys [specs tns max-turns after]}]
   (doseq [tx (fx/program-txs (db sys) specs)] (println :program (select-keys @(c/transact-main! sys tx) [:ok :datoms])))
   (let [ds (mapv #(cond-> % max-turns (assoc :seon.task/config {:seon.config.agent/max-turns max-turns})) (fx/decls specs tns nil))]
-    (println :create (select-keys (root/create! sys ds) [:ok :datoms]))
-    (when (seq after)
-      (println :after (select-keys @(c/transact-main! sys (vec (for [[m n] after] [:db/add [:seon.task/id (str tns "/" m)] :seon.task/needs [:seon.task/id (str tns "/" n)]]))) [:ok])))
-    (mapv #(task/task-id tns (:seon.task/name %)) ds)))
+    (let [created (root/create! sys ds)]
+      (if (contract/error? created)
+        (do (println :create created) created)
+        (do (println :create (select-keys created [:ok :datoms]))
+            (when (seq after)
+              (println :after (select-keys @(c/transact-main! sys (vec (for [[m n] after] [:db/add [:seon.task/id (str tns "/" m)] :seon.task/needs [:seon.task/id (str tns "/" n)]]))) [:ok])))
+            (mapv #(task/task-id tns (:seon.task/name %)) ds))))))
 
 (defn agents-reused
   "Agent keys that serve tasks of more than one branch (must be empty): a session's tasks (a
@@ -133,7 +136,8 @@
   ([sys k]
   (let [ids (release! sys (assoc (get fx/scenarios k) :tns (symbol (name k)) :max-turns 2))
         t0 (now)
-        _ (root/run! sys ids)
+        ;; a refused write of the tasks is the turn's answer (release! printed it), never a run of no tasks
+        _ (when-not (contract/error? ids) (root/run! sys ids))
         q (quiet! sys)
         turn-ms (- (now) t0)
         d (db sys)
@@ -219,8 +223,11 @@
   [{:keys [boot specs during check expect ok label] :as row}]
   (let [t0 (now)
         sys (c/start! (merge {:datoms 300} boot))
-        ev (when during (c/events sys))]
-    (when specs (root/run! sys (release! sys row)))
+        ev (when during (c/events sys))
+        ;; a refused write of the row's tasks fails the row (its error printed by release!), never reads as tasks written
+        released (when specs (release! sys row))
+        refused? (contract/error? released)]
+    (when (and specs (not refused?)) (root/run! sys released))
     (when during (during sys ev) (a/untap (:events-mult sys) ev))
     (let [q (quiet! sys)
           _ (println :quiescent q)
@@ -232,7 +239,7 @@
       (println :agents-reused reused :merges (merge-counts d (branch-db-of sys d)) :fresh-agent fresh-r)
       (println :checks (dissoc checks :ok))
       (println :numbers (numbers sys t0))
-      (verdict! sys (and (:ok checks) (or (nil? specs) (empty? reused)) (or (nil? expect) (= expect fresh-r))) (or label "E2E")))))
+      (verdict! sys (and (not refused?) (:ok checks) (or (nil? specs) (empty? reused)) (or (nil? expect) (= expect fresh-r))) (or label "E2E")))))
 
 (defn- restart
   "A restart on main nm of the one store: phase 1 works the calc graph and SIGKILLs root

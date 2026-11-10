@@ -901,7 +901,7 @@
            commit! (fn [i] (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "t" i) :seon.task/plan (str "Make t" i " true.")}])))
            ;; each proc is judged against main as it stood when its own run of commits ended
            stale (fn [proc st] (for [[path t] (ts/stale-dbs st (:max-tx @conn))] [proc path t]))
-           _ (d/transact conn [{:seon.root/id :root :seon.root/boot "b" :seon.config.agent/max-running 4}])
+           _ (d/transact conn (seon.test-store/root-tx {:seon.root/boot "b" :seon.config.agent/max-running 4}))
            ;; the fork server: every commit is a :tx, and a fork or a standby is the only thing that brings its index to main
            fs (reduce (fn [st i]
                         (let [rep (commit! i)

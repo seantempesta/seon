@@ -22,17 +22,13 @@
                                     agent dead or its merge refused (seon.reconcile/hold-tx), or
                                     marked failed (my.task/fail!, root or a check): its reason, a
                                     counterexample when marked, its evidence; open while held
-    :dead-citation                  a name a wiki section cites (:seon.doc/names) that names
-                                    nothing now (seon.ref/names-on-db?): derived when read,
-                                    never written, so it is open exactly while it is true
     :unnamed-site                   a site of a law (`laws`: a catch) its page does not name:
                                     derived from the compiler's facts and the page's names
     :stale-pin                      a pin the wiki states (`pins`: docs/forks.md) that is not
                                     the gitlink root's source import recorded
 
   `report` reads what was recorded, at a cost that follows the problems. `health` adds the
-  derived classes, which read the program's names once (a set): their cost follows the
-  citations (seon.problems-test/dead-citations-follow-the-citations)."
+  derived classes, read from the program's facts when asked (docs/health.md#cost)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.print.emit :as emit] [datahike.api :as d] [clojure.string :as str] [clojure.set :as set] [seon.merge :as pm] [seon.source :as source] [seon.ref :as ref] [seon.program :as program] [seon.db :as pdb] [seon.doc :as doc] [seon.task :as task] [seon.config :as config]))
 
@@ -66,26 +62,17 @@
 ;; ---- recorded errors ------------------------------------------------------------------
 
 (defn- closed?
-  "Is the recorded error r (entity e) closed: a subject of it has a fact written after the error's
-  last one. The subjects: :seon.error/subject (a var's name, a section's address, or an attribute,
-  whose facts are its datoms on any entity), and, for a :seon.doc/refused error from a store
-  older than the type's removal, the link's target address and the citing section's (its example's). Such an error is closed too when the citing section
-  exists and no longer links to the target (not a dead link of it, not among its references).
-  Nothing is written to close it, and a subject that does not exist has changed nothing."
+  "Is the recorded error r (entity e) closed: its subject (:seon.error/subject: a var's name, a section's address, or an
+  attribute, whose facts are its datoms on any entity) has a fact written after the error's last one. Nothing is written
+  to close it, and a subject that does not exist has changed nothing. See docs/health.md#two-kinds-of-problem."
   {:malli/schema [:=> [:cat :seon.host/db :map :int] :boolean]}
   [db r e]
-  (let [ex (:seon.error/example r)
-        refused? (= :seon.doc/refused (:seon.error/type r))
-        [target from] (when refused? [(:seon.ref/address ex) (:seon.doc/address ex)])
-        facts (fn [s] (if (keyword? s)
-                        (d/datoms db :aevt s)
-                        (some->> (pdb/eid db (if (symbol? s) :var/name :seon.doc/address) s) (d/datoms db :eavt))))
-        subjects (remove nil? [(:seon.error/subject r) target from])
-        last-tx (reduce max (map :tx (d/datoms db :eavt e)))
-        citing (some->> from (pdb/eid db :seon.doc/address) (d/pull db [:seon.doc/dead-links {:seon.doc/references [:seon.doc/address]}]))]
-    (boolean (or (some (fn [s] (some #(> (:tx %) last-tx) (facts s))) subjects)
-                 (and citing (not-any? #{target} (:seon.doc/dead-links citing))
-                      (not-any? #(= target (:seon.doc/address %)) (:seon.doc/references citing)))))))
+  (let [s (:seon.error/subject r)
+        facts (if (keyword? s)
+                (d/datoms db :aevt s)
+                (some->> s (pdb/eid db (if (symbol? s) :var/name :seon.doc/address)) (d/datoms db :eavt)))
+        last-tx (reduce max (map :tx (d/datoms db :eavt e)))]
+    (boolean (some #(> (:tx %) last-tx) facts))))
 
 (defn- error-row
   "One recorded error (entity e) as a row, :open? false once its subject changed (`closed?`)."
@@ -136,37 +123,6 @@
                            (when kind (str ": " (name kind) (when form (str " " form)))))
                       {:kind :stalled :agent id :pid pid :quiet-ms (:quiet-ms st) :waits-on (:last-op st)}
                       {:agent id}))))
-
-(defn dead-citations
-  "Each name a wiki section cites (:seon.doc/names) that names nothing on db
-  (seon.ref/names-on-db?, the one rule for a name), and each link it makes that reached no
-  section at load (:seon.doc/dead-links) and still reaches none, as a :dead-citation row:
-  open while it is true, since nothing writes it. Cost: main's var names read once into a set
-  and one set lookup per cited name; the rule runs only on a name the set misses; one seek per
-  dead link. With only (a set of section entity ids) just those sections are read, a seek per
-  cited name and no set (what `caused` asks)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]
-                  [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
-  ([db ans] (dead-citations db ans nil))
-  ([db ans only]
-  (let [vars (if only
-               (fn [v] (seq (d/datoms db :avet :var/name v)))
-               (let [vs (into #{} (map :v) (d/datoms db :aevt :var/name))] #(vs %)))
-        row (fn [e k v message evidence]
-              (let [a (:seon.doc/address (d/pull db [:seon.doc/address] e))
-                    s (str "dead-citation " a " " v)]
-                (merge {:signature s :section a :open? true :message (message a)
-                        :producer nil :owner-ns (when (symbol? v) (symbol (namespace v))) :proofs []
-                        :evidence (assoc evidence :kind :dead-citation :section a) :answered-by (get-in ans [:signature s] []) :at-ms nil}
-                       {k v})))
-        datoms (fn [attr] (if only (mapcat #(d/datoms db :eavt % attr) only) (d/datoms db :aevt attr)))]
-    (vec (concat
-           (for [{:keys [e v]} (datoms :seon.doc/names)
-                 :when (not (or (vars v) (ref/names-on-db? db v)))]
-             (row e :name v #(str % " cites " v ", which names nothing") {:name v}))
-           (for [{:keys [e v]} (datoms :seon.doc/dead-links)
-                 :when (nil? (pdb/eid db :seon.doc/address v))]
-             (row e :target v #(str % " links to " v ", which is no section") {:target v})))))))
 
 (def laws
   "The laws the compiler's facts answer exactly, as data: the fact that marks a site, the page
@@ -261,7 +217,7 @@
   not a change of what the section describes. A var that did not exist then (seon.doc/load-tx
   recorded \"absent\", from git) is stale: code now; one whose docstring or contract changed
   after the section's last commit (\"changed\", from git) is stale; one imported after the section was
-  read is not. A var that is gone is a dead citation, not this. Open until the section is edited or
+  read is not. A var that is gone is not this. Open until the section is edited or
   reviewed; attention, never a reason to refuse done. Cost: the read datoms and the vars' and forms'
   datoms in one scan each (a recorded name whose form id is unchanged cannot have changed what it
   says), then per name whose form moved a seek of its var and of its name's and meaning's history. With only
@@ -380,20 +336,20 @@
 ;; ---- caused: what a branch's own work made true -----------------------------------------
 
 (def ^:private section-attrs
-  "The attributes `section-at` reads of a section: what a stale-section or dead-citation row of it depends on (docs/health.md#a-stale-section)."
-  [:seon.doc/address :seon.doc/names :seon.doc/dead-links :seon.doc/read :seon.doc/reviewed
+  "The attributes `section-at` reads of a section: what a stale-section row of it depends on (docs/health.md#a-stale-section)."
+  [:seon.doc/address :seon.doc/names :seon.doc/read :seon.doc/reviewed
    :seon.doc/baseline-unread :seon.doc/text])
 
 (defn- section-at
-  "{:e :names :dead :read :reviewed :baseline :text} of the section addressed a on db, by entity seeks and no
-  pull: what it cites, the links it made that reached nothing, and what closes or opens its stale-section rows
+  "{:e :names :read :reviewed :baseline :text} of the section addressed a on db, by entity seeks and no
+  pull: what it cites, and what closes or opens its stale-section rows
   (the code it read, who reviewed it, a baseline git could not give); nil when db holds none."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :map]]}
   [db a]
   (when-let [e (pdb/eid db :seon.doc/address a)]
     (let [one (fn [attr] (:v (first (d/datoms db :eavt e attr))))
           many (fn [attr] (into #{} (map :v) (d/datoms db :eavt e attr)))]
-      {:e e :names (many :seon.doc/names) :dead (many :seon.doc/dead-links) :read (one :seon.doc/read)
+      {:e e :names (many :seon.doc/names) :read (one :seon.doc/read)
        :reviewed (one :seon.doc/reviewed) :baseline (one :seon.doc/baseline-unread) :text (one :seon.doc/text)})))
 
 (defn- name-exists?
@@ -449,7 +405,7 @@
 
 (def caused-classes
   "The derived classes `caused-split` reads: the only ones a branch is judged on (the health step refuses any other). An attention class among them never fails a branch."
-  #{:dead-citation :unnamed-site :stale-section :uncited-var :long-form})
+  #{:unnamed-site :stale-section :uncited-var :long-form})
 
 (defn caused-datoms
   "The datoms that differ between base and head in the attributes `caused-split` reads (a section's, the var
@@ -476,7 +432,6 @@
         bs (memoize (fn [a] (section-at base a))) hs (memoize (fn [a] (section-at head a)))
         cand (into #{} (keep #(either % :seon.doc/address)) (ents section-attrs))
         changed (set (for [a cand :let [h (hs a)] :when (and h (not= (dissoc h :e) (dissoc (bs a) :e)))] a))
-        new-sections (set (for [a cand :when (and (hs a) (not (bs a)))] a))
         gone (set (for [a cand :when (and (bs a) (not (hs a)))] a))
         ;; the names a var or task gained or lost
         named (set (concat (map :v (by-attr :var/name))
@@ -484,12 +439,10 @@
         removed (set (filter #(and (name-exists? base %) (not (name-exists? head %))) named))
         added (set (filter #(and (name-exists? head %) (not (name-exists? base %))) named))
         address-of (fn [e] (first-v head e :seon.doc/address))
-        ;; a section is a candidate when what it cites or links to appeared or vanished, or it is itself gone from head
+        ;; a section is a candidate when what it cites appeared or vanished, or it is itself gone from head
         cited (when (or (seq removed) (seq added))
                 (into #{} (comp (mapcat #(d/datoms head :avet :seon.doc/names %)) (keep #(address-of (:e %)))) (into removed added)))
-        dead (when (seq new-sections)
-               (into #{} (comp (filter #(new-sections (:v %))) (keep #(address-of (:e %)))) (d/datoms head :aevt :seon.doc/dead-links)))
-        secs (-> changed (into cited) (into dead) (into gone))
+        secs (-> changed (into cited) (into gone))
         eids (fn [state] (into #{} (keep #(:e (state %))) secs))
         page? (fn [a] (some #(str/starts-with? a (str (:page %) "#")) laws))
         all-sites? (some page? changed)
@@ -506,8 +459,7 @@
         ;; the stale sections the branch's change can have made: those citing a var it changed, and the sections that differ
         moved-vars (pm/changed-vars ch)
         rows (fn [db state forms-of]
-               (concat (map #(assoc % :class :dead-citation) (dead-citations db ans (eids state)))
-                       (map #(assoc % :class :unnamed-site) (sites db state forms-of))
+               (concat (map #(assoc % :class :unnamed-site) (sites db state forms-of))
                        (map #(assoc % :class :stale-section) (stale-sections db ans {:names moved-vars :sections (eids state)}))
                        (map #(assoc % :class :uncited-var) (uncited-vars db ans moved-vars))
                        (map #(assoc % :class :long-form) (long-forms db ans moved-vars))))
@@ -524,9 +476,9 @@
   sections it made stale, which the agent reads and never a reason to refuse; the classes
   :seon.problems/attention declares). An evaluation is never refused (get out of an agent's way: docs/processes.md#an-agent-is-never-gated).
   Base and head are compared by value, never by tx (a branch's tx counter is its own): the
-  sections whose citations or dead links differ, the sections citing a name a var or task lost,
+  sections whose citations differ, the sections citing a name a var or task lost,
   and the forms carrying a law's fact whose catches or text differ are the candidates, and
-  `dead-citations` and `unnamed-sites` read only those, on head and on base; a change to a
+  `stale-sections` and `unnamed-sites` read only those, on head and on base; a change to a
   section of a law's page names or unnames any site, so then every site is read. The candidates are found
   from moved, the datoms that differ between base and head (`caused-datoms` when the caller holds none, or the
   whole :eavt diff it read already): Cost: the datoms of moved and one entity seek per section, name, form and
@@ -598,7 +550,7 @@
         vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
         ;; the program's vars among every task's cites, asked of the program once, when a ready implement step asks
         ;; (seon.program/program-names)
-        cited (fn [e] (into [] (comp (map #(:seon.cite/name (d/entity db (:e %)))) (filter qualified-symbol?)) (d/datoms db :avet :seon.cite/of e)))
+        cited (fn [e] (into [] (comp (map #(:var/name (:seon.cite/target (d/entity db (:e %))))) (filter qualified-symbol?)) (d/datoms db :avet :seon.cite/of e)))
         program (delay (set (program/program-names db (vec (distinct (mapcat #(cited (:e %)) (d/datoms db :aevt :seon.task/id)))))))
         placeholder? (fn [sym] (some-> (pdb/eid db :var/name sym) (->> (d/entity db)) :var/form :form/src
                                       (str/includes? task/placeholder-assertion)))]
@@ -769,7 +721,7 @@
 
 (defn health
   "Every open problem on db, one value by class: what was recorded (`report`) and what the
-  program's facts make true now (`dead-citations`, `unnamed-sites`, `stale-pins`, `stale-sections`,
+  program's facts make true now (`unnamed-sites`, `stale-pins`, `stale-sections`,
   `orphan-pages`, `leadless-sections`, `uncited-tasks`, and `problem-unlinked` over all of them). What the page, an agent's context and
   the done and merge gates read: computed when read, never stored, never polled."
   {:malli/schema [:function [:=> [:cat :seon.host/db] :seon.problems/report]
@@ -777,7 +729,7 @@
   ([db] (health db {}))
   ([db fold]
    (let [ans (answers db)]
-     (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans) :dead-citation (dead-citations db ans)
+     (health-with db ans (:classes (report-with db ans fold nil)) (assoc (other-derived db ans)
                                      :unnamed-site (unnamed-sites db ans) :stale-section (stale-sections db ans))))))
 
 (defn- touched-tasks
@@ -816,7 +768,7 @@
                                       :let [rows (into (into [] (comp (remove #(ids (:judged %))) (map current)) (get-in prev [:classes c :rows])) (get-in recorded [c :rows]))
                                             rows (vec (sort-by #(- (or (:end-ms %) 0)) rows))]]
                                   [c {:n (count rows) :rows rows}]))]
-    (health-with head ans recorded (assoc (other-derived head ans) :dead-citation (carried :dead-citation)
+    (health-with head ans recorded (assoc (other-derived head ans)
                                           :unnamed-site (carried :unnamed-site) :stale-section (carried :stale-section)))))
 
 (defn own

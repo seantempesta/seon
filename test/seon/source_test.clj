@@ -205,7 +205,7 @@
         (testing "it merges, and writes back byte-preserved"
           (is (true? (at-root "(-> @(seon.root/call! sys {:op :write :req {:op :octopus-merge :branches [:task-cfgt-one] :data-attrs #{}}}) :results first :merged?)")))
           (is (= 7 (at-root reads-the-key)) "root holds main's")
-          (is (= 7 (at-root (str "(" k " (datahike.api/pull @(:conn sys) [" k "] [:seon.root/id :root]))"))) "and main's root entity says so")
+          (is (= 7 (at-root (str "(get-in (datahike.api/pull @(:conn sys) [{:seon.root/config [" k "]}] [:seon.root/id :root]) [:seon.root/config " k "])"))) "and main's config in force, the entity root's :seon.root/config names, says so")
           (is (= (let [end (str/last-index-of held "}")] (str (subs held 0 end) "\n " k " 7" (subs held end)))
                  (at-root "(get (seon.source/files @(:conn sys) [seon.config/shipped-file]) seon.config/shipped-file)")))))
       (testing "a boot on a file that doesn't load comes up, says which file and which commit, and keeps main's"

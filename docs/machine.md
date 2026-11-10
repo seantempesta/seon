@@ -168,7 +168,7 @@ Measured 2026-10-29 on this checkout, an idle-ish machine (load 5-7; at load 13 
 | store open, main made from `:db` | 25 | 19 M |
 | program loaded from main (`program/load-all!`, no tests) | 1,050-1,550 | 1,050 M |
 | contracts, warm paths, static collect, fork server forked | 150-250 | 60 M |
-| wiki loaded onto main (`wiki-tx`, in the boot fact's commit) | 1,250-2,400 | 1,420-2,200 M |
+| wiki loaded onto main (`wiki-tx`, the boot's own transaction after its boot fact) | 1,250-2,400 | 1,420-2,200 M |
 | source import: read the tree, digest equal or not | 650 | 0.5 M |
 | source import: analyse and write 3,900 forms (a main with no program) | 5,600-12,600 | 5,900-6,000 M |
 | fork server: main's test namespaces compiled (`program/load-all!`, at the boot server's start, ```seon.fork-server/main```, while root writes its boot fact and imports; what the import changes loads as changes; a fork that comes in the meantime waits behind it) | | |

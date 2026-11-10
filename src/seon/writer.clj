@@ -4,7 +4,7 @@
   proto.control's writer (session F2; writer design A, the session design papers in git history)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.lib :as lib]
-            [seon.program :as program] [seon.merge :as pm] [seon.union :as union] [seon.problems :as problems] [seon.source :as source] [seon.doc :as doc] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg]
+            [seon.program :as program] [seon.merge :as pm] [seon.union :as union] [seon.problems :as problems] [seon.source :as source] [seon.doc :as doc] [seon.contract :as contract] [seon.sock :as sock] [seon.step :as step] [seon.config :as cfg] [seon.task :as task]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str]))
 
 (defn- union-caught-up
@@ -46,7 +46,7 @@
     (step/out! o :events (step/event {:type :load-errors :errors (vec errs)})))
   ;; a config entry moved: main's root entity says so with the next commit (docs/config.md#facts-on-main)
   (let [st (union-caught-up st (pdb/conn-main (:conn st)) db)]
-    (if-let [tx (cfg/moved-facts db ops)] (update st :pend (fnil conj []) {:tx-data tx}) st)))
+    (if-let [{c :config srcs :sources} (cfg/moved db ops)] (update st :pend (fnil conj []) {:tx-data (task/config-tx c srcs)}) st)))
 
 (defn- stored!
   "Main's stored commit, made of ops (its transactions' resolved datoms, in order): the fork

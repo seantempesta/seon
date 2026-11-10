@@ -665,69 +665,19 @@
                                        :seon.task/gate-unread [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]})))))
         "a gate that could not read a changed namespace names it, and why, on the open row")))
 
-;; ---- derived: a dead citation is true while it is true (docs/health.md) ----
-
-(deftest a-deleted-var-makes-its-citation-dead-until-it-is-back
-  (let [db (world)
-        v 'app.calc/inc2
-        e (pdb/eid db :var/name 'app.calc/inc2)
-        none (symbol (namespace v) "no-such-var")
-        page (str "# Health\n\nThe check reads `" v "` and `" none "`; a text word " (namespace v) "/nor-this is no citation.\n")
-        db (d/db-with db (seon.doc/load-tx db "demo" {"demo/h.md" page}))
-        dead #(get-in (problems/health %) [:classes :dead-citation])]
-    (testing "the loader keeps the names the text cites as references: a backticked name, never a text word naming nothing"
-      (is (= #{v none} (set (:seon.doc/names (d/pull db [:seon.doc/names] [:seon.doc/address "demo/h.md#health"]))))))
-    (testing "a backticked name that never named anything is dead from its load"
-      (is (= [[none "demo/h.md#health"]] (mapv (juxt :name :section) (:rows (dead db))))))
-    (let [gone (d/db-with db [[:db/retractEntity e]])]
-      (testing "the var deleted: its citation is dead, with what a row needs"
-        (let [rows (:rows (dead gone))
-              r (first (filter #(= v (:name %)) rows))]
-          (is (= 2 (:n (dead gone))))
-          (is (= (str "demo/h.md#health cites " v ", which names nothing") (:message r)))
-          (is (= (symbol (namespace v)) (:owner-ns r)) "owned by the namespace that lost it")
-          (is (contract/valid? :seon.problems/report (problems/health gone)))
-          (is (empty? (get-in (problems/report gone) [:classes :dead-citation])) "report is what was recorded: a derived class is health's")))
-      (testing "the var back: the citation names it again; nothing was written to close it"
-        (let [back (d/db-with gone [{:var/name v}])]
-          (is (= [none] (mapv :name (:rows (dead back))))))))))
-
-(defn citing-input
-  "The cost proof's input at n: a wiki page of n sections, each citing one of the seed's vars
-  (cycling past its count), every cited var then deleted, so every citation is dead."
-  [n] (let [db0 (world)
-            vs (vec (take n (map :v (d/datoms db0 :aevt :var/name))))
-            page (apply str "# Cited\n\nThe page.\n" (for [i (range n)] (str "\n## S" i "\n\nIt reads `" (nth vs (mod i (count vs))) "`.\n")))
-            db (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/c.md" page}))
-            cited (into #{} (map :v) (d/datoms db :aevt :seon.doc/names))]
-        [(d/db-with db (vec (for [s cited :let [e (pdb/eid db :var/name s)] :when e] [:db/retractEntity e]))) {}]))
-
-(deftest dead-citations-follow-the-citations
-  (cost/proof {:of 'seon.problems/dead-citations :input 'seon.problems-test/citing-input
-               :n "sections, each citing one var, every one deleted (each a dead citation)"
-               :work (str "fixed: main's var names read once into a set (the seed's ~300 vars). Per cited name: one set "
-                          "lookup; a dead one also runs seon.ref/names-on-db? (an AVET seek for the var, two for a task, "
-                          "one for its namespace: ~4 seeks at ~17 us and ~33 KB, seon.db/avet-seek-allocates) and pulls its "
-                          "section's address (one pull)")
-               :growth :linear
-               :per-n {:ns 90000 :bytes 170000 :calls 6}
-               :fixed {:ns 2000000 :bytes 3000000 :calls 5}
-               :sizes [10 30 100]}))
+(declare catch-forms)
 
 (deftest caused-is-what-the-branch-made-true
-  (let [db0 (world)
-        [v w] ['app.calc/inc2 'app.calc/add]
-        e (fn [db s] (pdb/eid db :var/name s))
-        none (symbol (namespace v) "no-such-var")
-        page (str "# P\n\nIt reads `" v "`, `" w "` and `" none "`.\n")
-        base (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/p.md" page}))]
-    (testing "an unchanged branch caused nothing, though base has a dead citation of its own"
+  ;; a catch site its page does not name (an :unnamed-site) is a derived row: what the branch made true is the rows head
+  ;; has that base had not
+  (let [base (catch-forms (world) 1)]
+    (testing "an unchanged branch caused nothing, though base has an unnamed site of its own"
+      (is (seq (get-in (problems/health base) [:classes :unnamed-site :rows])))
       (is (= #{} (problems/caused base base))))
-    (testing "the branch deleted v: the citation of v is its; the one base had is not"
-      (let [head (d/db-with base [[:db/retractEntity (e base v)]])]
-        (is (= #{(str "demo/p.md#p cites " v ", which names nothing")} (problems/caused base head)))
-        (testing "and fixed it by restoring v: nothing"
-          (is (= #{} (problems/caused base (d/db-with head [{:var/name v}])))))))))
+    (testing "the branch added a site: it is the branch's; the one base had is not"
+      (let [head (catch-forms base 2) made (problems/caused base head)]
+        (is (= 1 (count made)))
+        (is (str/includes? (first made) "app.cost/v2"))))))
 
 (deftest a-catch-its-page-does-not-name-is-a-law-problem
   ;; bin/laws catch's rule, from the compiler's facts: a live form carrying :form/catches, by
@@ -760,31 +710,9 @@
     (is (= [["reference-code/jolt" "4342b73c" nil]] (pinned {"reference-code/chez" "80e4b9f0"})) "a pin with no gitlink")))
 
 (deftest an-error-closes-when-its-subject-changes
-  ;; an old store's :seon.doc/refused error (the type left the code) names its link's target in
-  ;; its example; a new error may name :seon.error/subject. Neither is ever retracted.
+  ;; a recorded error may name :seon.error/subject; it is never retracted, and closes when its subject changes
   (let [db0 (world)
-        refused (fn [db] (d/db-with db [{:seon.error/signature "aaaaaaaaaaaaaaaa" :seon.error/class :platform :seon.error/count 1
-                                         :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1
-                                         :seon.error/type :seon.doc/refused :seon.error/message "demo/a.md#a links to demo/b.md#b, which is no section"
-                                         :seon.error/example {:seon.error/type :seon.doc/refused :seon.ref/address "demo/b.md#b"}}]))
-        row #(first (get-in (problems/report %) [:classes :platform :rows]))
-        db (refused db0)]
-    (testing "the target section is missing: the error is open"
-      (is (some? (row db)) "the error has a row") (is (not (false? (:open? (row db))))))
-    (let [after (d/db-with db (seon.doc/load-tx db "demo" {"demo/b.md" "# B\n\nThe target.\n"}))]
-      (testing "the section exists now: closed, with nothing written to close it"
-        (is (some? (pdb/eid after :seon.doc/address "demo/b.md#b")))
-        (is (false? (:open? (row after))))
-        (is (= 1 (:count (row after))) "the record is kept")))
-    (testing "the citing section's link is changed to an existing target: closed, nothing written (the target never appears)"
-      (let [dbc (d/db-with db0 (seon.doc/load-tx db0 "demo" {"demo/a.md" "# A\n\nIt links to [b](b.md#nowhere).\n" "demo/c.md" "# C\n\nThe other.\n"}))
-            err (d/db-with dbc [{:seon.error/signature "cccccccccccccccc" :seon.error/class :platform :seon.error/count 1
-                                 :seon.error/agents 0 :seon.error/first-ms 1 :seon.error/last-ms 1 :seon.error/type :seon.doc/refused
-                                 :seon.error/example {:seon.error/type :seon.doc/refused :seon.ref/address "demo/b.md#nowhere" :seon.doc/address "demo/a.md#a"}}])
-            rowc #(first (filter (fn [r] (= "cccccccccccccccc" (:signature r))) (get-in (problems/report %) [:classes :platform :rows])))
-            fixed (d/db-with err (seon.doc/load-tx err "demo" {"demo/a.md" "# A\n\nIt links to [c](c.md).\n" "demo/c.md" "# C\n\nThe other.\n"}))]
-        (is (some? (rowc err)) "the error has a row") (is (not (false? (:open? (rowc err)))) "the citing section still has the link")
-        (is (false? (:open? (rowc fixed))))))
+        row #(first (get-in (problems/report %) [:classes :platform :rows]))]
     (testing "a named subject: open until a fact of the var is written after the error"
       (let [v 'app.calc/inc2
             e (pdb/eid db0 :var/name 'app.calc/inc2)
@@ -793,7 +721,7 @@
         (is (some? (row err)) "the error has a row") (is (not (false? (:open? (row err)))))
         (is (false? (:open? (row (d/db-with err [{:db/id e :var/doc "changed"}])))))))))
 
-;; ---- cost proofs of the derived classes beyond dead-citations ---------------------------------
+;; ---- cost proofs of the derived classes ---------------------------------------------------
 
 (defn catch-forms
   "db0 with n more live forms in a src namespace, each defining one var and carrying a catch the
@@ -855,7 +783,7 @@
 (defn- caused-full
   "The old `caused`: both derived classes read in full over base and over head."
   [base head]
-  (let [derived #(concat (problems/dead-citations % {}) (problems/unnamed-sites % {}))
+  (let [derived #(problems/unnamed-sites % {})
         before (into #{} (map :signature) (derived base))]
     (into (sorted-set) (comp (remove (comp before :signature)) (map :message)) (derived head))))
 
@@ -885,7 +813,6 @@
                (problems/caused base head (seon.merge/delta-changes base head #{}) (diff base head)))
             "given the whole diff, the same rows: the datoms it holds beyond caused-datoms' are not read")))
     (testing "and the cases are not all empty"
-      (is (seq (problems/caused base (get scenarios "a var both sections cite is deleted"))))
       (is (seq (problems/caused base (get scenarios "a catch site is added")))))))
 
 (defn caused-flat-input
@@ -967,18 +894,7 @@
         (is (= 1 (get-in (problems/health-moved (problems/health db1) db1 db2 (diff db1 db2)) [:classes :stale-section :n])))
         (testing "and editing the section closes it"
           (is (same? db2 (d/db-with db2 (seon.doc/load-tx db2 "demo" {"demo/p.md" (str page "\nMore.\n")})))))))
-    (testing "a cited name added to a section opens a dead citation, a deleted var opens another"
-      (let [dead (d/db-with db1 (seon.doc/load-tx db1 "demo" {"demo/p.md" (str page "\nAnd `" (namespace v) "/no-such-var`.\n")}))]
-        (is (same? db1 dead))
-        (is (pos? (get-in (problems/health-moved (problems/health db1) db1 dead (diff db1 dead)) [:classes :dead-citation :n])))
-        (is (same? dead db1))
-        (is (same? dead (d/db-with dead [[:db/retractEntity (pdb/eid dead :var/name v)]])) "a deleted var opens more")
-        (testing "and a var added that an unchanged section cites closes it"
-          (let [back (d/db-with dead [{:var/name (symbol (namespace v) "no-such-var")}])]
-            (is (same? dead back))
-            (is (< (get-in (problems/health-moved (problems/health dead) dead back (diff dead back)) [:classes :dead-citation :n])
-                   (get-in (problems/health dead) [:classes :dead-citation :n])))))))
-    (testing "a section added that an unchanged section links to closes its dead link"
+    (testing "a page added that an unchanged section links to"
       (let [linking (d/db-with db1 (seon.doc/load-tx db1 "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n")}))
             both (d/db-with linking (seon.doc/load-tx linking "demo" {"demo/p.md" (str page "\nSee [q](q.md).\n") "demo/q.md" "# Q\n\nLead.\n"}))]
         (is (same? db1 linking))
@@ -1243,7 +1159,7 @@
                       (fn [i] (case (int i)
                                 7 {:src "(seon.contract/defn n [])" :doc "Does a thing."}
                                 1 {:src "(defn f [])" :doc "Does a thing."}
-                                2 {:src "(defn g [])" :doc "Does a thing. See docs/health.md#a-dead-citation."}
+                                2 {:src "(defn g [])" :doc "Does a thing. See docs/health.md#a-stale-section."}
                                 3 {:src "(defn- h [])" :doc "A private thing."}
                                 4 {:src "(defn k [])"}
                                 5 {:src "(deftest t [])" :doc "A test." :meta #{:test}}
