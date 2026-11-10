@@ -360,7 +360,10 @@
             ;; an entity's schema by its identity attributes, never a value's metadata: an agent's @ctx carries :seon.ctx/ctx's, which
             ;; names no model render, so the agent's own went unasked
             s0 (when (and (map? e0) (:db/id e0)) (entity-schema ix e0 nil))
-            fs (when s0 (into {} (keep (fn [o] (some->> (render-for ix s0 o) requiring-resolve (vector o)))) others))
+            ;; in the entity's own component alone, the one its schema's render runs (`declared-var`, the branch's own when it
+            ;; redefines it): a part handed the same view ([#'agent-parts {} c]) draws a piece of the entity's page and answers no
+            ;; output for it, so the model render runs once a walk, never once a part
+            fs (when (and s0 (= f (declared-var ix s0))) (into {} (keep (fn [o] (some->> (render-for ix s0 o) requiring-resolve (vector o)))) others))
             ;; output o's answer: its values, and each entity or call it places run as a component (the one the hiccup placed is a
             ;; hit; a call answers o), kept as its marker, so the parent orders and each child's answer stays its own
             place (fn [o env' xs] (mapv (fn [x] (if-let [[ef eo] (entity-render ix x)]
