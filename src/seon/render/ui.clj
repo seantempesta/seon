@@ -446,9 +446,15 @@
   [:span {:class "tabular-nums text-text-400"}
    (if (some r [:ms :ticks :bytes]) (print/cost-text (select-keys r [:ms :ticks :bytes])) "not run")])
 
-(def ^:private asked-by
-  "Who evaluated, by its :seon.eval/by (any other: the agent's own, its model's turn)."
-  {"user" "the owner, from this page" "outside" "an outside agent, through root's server" "context" "the context, read for a turn"})
+(defn sender
+  "Who sent a message or ran an eval, from the entity the pull joins as its :seon.message/from or :seon.eval/by, as a person reads it: an
+  agent (a user is one) by its name, else its key, linked to its page; the system entity as Seon; nothing for none. The one render of a
+  sender wherever one is drawn. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [x]
+  (let [x (ratom/realize x)]
+    (cond (:seon.agent/key x) [:a {:href (str "/agent/" (:seon.agent/key x))} (or (:seon.user/name x) (:seon.agent/key x))]
+          (:seon.root/id x) [:span "Seon"])))
 
 (defn- shown-value
   "What an eval's recorded response shows as its value: the response less its handle and what
@@ -482,8 +488,9 @@
         ;; rendered as structure (the printer's hiccup). A live reply's :text is text
         data? (and recorded? (nil? (:text r)) (nil? basis))
         r (cond-> r (and recorded? (nil? (:text r)) data? (= :inline (:as opts))) (assoc :text (print/record-text (assoc e :seon.eval/response resp) #(render/stored-model (:seon.render/index opts) %))))
-        ;; who evaluated, by name (seon.task/sender-name of the entity its pull joins)
-        by (or (some-> (:seon.eval/by e) ratom/realize task/sender-name) (:by r))
+        ;; who evaluated: the entity its pull joins (an agent, a user, the system); the agent's own when it is the eval's agent
+        by (some-> (:seon.eval/by e) ratom/realize)
+        own? (or (nil? by) (= (:db/id by) (:db/id (some-> (:seon.eval/agent e) ratom/realize))))
         err? (some? (:ex r))]
     (if (= :inline (:as opts))
       ;; its code's first line ⇒ its value's line, printed now by the one printer under the line budget, else its
@@ -529,7 +536,7 @@
              [:pre {:class "text-text-200"} [:span {:class "muted"} "⇒ "] (plain (or (:text r) "") (part))])))
        [:div {:class "flex flex-wrap gap-3 text-2xs text-text-500"}
         (cost-line r)
-        [:span (get asked-by by "its own turn")]
+        [:span (if own? "its own turn" (list "run by " (sender by)))]
         (when (seq (:fns r))
           [:details [:summary (str "costliest: " (:var (first (:fns r))) " · " (count (:fns r)) (if (= 1 (count (:fns r))) " function" " functions"))]
            [:table [:tbody (for [{:keys [var calls ticks self-ticks bytes]} (:fns r)]
@@ -590,10 +597,10 @@
    :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.message/keys [from body]}]
   (if (= :inline (:as opts))
-    [:span (str (task/sender-name from) ": ") (plain body (cell) {:one-line? true})]
+    [:span (sender from) ": " (plain body (cell) {:one-line? true})]
     [:section {}
-     ;; its sender by name (seon.task/sender-name of the entity its pull joins)
-     [:p {:class "seon-note"} (str (task/sender-name from))]
+     ;; its sender, by the one render of a sender
+     [:p {:class "seon-note"} (sender from)]
      [:div {} [#'markdown (str body) {:inline? true}]]]))
 
 (declare standing)

@@ -3776,3 +3776,15 @@
     (is (str/includes? (tile {:boot {:program {:loaded 0 :ms 5}}}) "image held main's program"))
     (is (str/includes? (tile {}) "program load not measured"))))
 
+
+(deftest a-sender-is-drawn-by-who-it-is
+  ;; docs/users.md#messages: a message's :seon.message/from and an eval's :seon.eval/by are the entity that sent or ran it (an agent, a
+  ;; user, the system), drawn by one render wherever a sender shows: a person or agent linked to its page by its name, Seon for the system
+  (let [html #(h/html (ui/sender %))]
+    (is (= "<a href=\"/agent/user\">sean</a>" (html {:seon.agent/key "user" :seon.user/name "sean"})) "a user by its name, linked to its page")
+    (is (= "<a href=\"/agent/a3\">a3</a>" (html {:seon.agent/key "a3"})) "an agent by its key")
+    (is (= "<span>Seon</span>" (html {:seon.root/id :root})) "the system as Seon")
+    (is (nil? (ui/sender nil)) "none: nothing")
+    (is (str/includes? (h/html (ui/message {} {:seon.message/from {:seon.agent/key "user" :seon.user/name "sean"} :seon.message/body "hi"}))
+                       "href=\"/agent/user\"")
+        "a message names its sender by that render")))
