@@ -367,7 +367,8 @@
             ;; output o's answer: its values, and each entity or call it places run as a component (the one the hiccup placed is a
             ;; hit; a call answers o), kept as its marker, so the parent orders and each child's answer stays its own
             place (fn [o env' xs] (mapv (fn [x] (if-let [[ef eo] (entity-render ix x)]
-                                                  (render! w ef eo [x] env')
+                                                  ;; placed for output o: a component no page holds, so its own hiccup is drawn for no reader
+                                                  (render! w ef eo [x] (cond-> env' (not= o :seon.render/hiccup) (assoc ::for o)))
                                                   (if (and (vector? x) (or (var? (first x)) (fn? (first x))))
                                                     (render! w (first x) (assoc (or (second x) {}) :seon.render/as o) (vec (nnext x)) env')
                                                     x)))
@@ -400,7 +401,9 @@
                             _ (when (ratom/view? ev) (get ev :db/id))
                             ;; a call an output placed answers that output (and what it places), kept as this component's answer to it
                             as (:seon.render/as opts)
-                            out (if as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil) (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
+                            out (cond (::for env) nil
+                                      as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil)
+                                      :else (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
                         ;; an entity's own render for each other output, where no call answers that output for it
                         ;; each in a run of its own at this edge (docs/failure-points.md, a component's render): a model render that throws
                         ;; is that output's defect, never the page's, which the person still reads; its error is data both see: a problem
