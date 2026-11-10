@@ -3482,4 +3482,4 @@
           "a root call answers the model output itself, placing the pull's entities each by its own model render"))
     (let [h (walk #{:seon.render/hiccup}) _ (r/flush! h nil)]
       (is (= [] (r/openai-compat h)) "a walk asked for the page alone runs no model render")
-      (is (not-any? :wired (vals @(:cache h)))))))
+      (is (not-any? :outs (vals @(:cache h)))))))

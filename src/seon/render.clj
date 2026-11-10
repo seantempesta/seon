@@ -343,24 +343,25 @@
              (every? true? (map ratom/view= children (:args prev)))
              (not (contains? @(:queue w) k)))
       (do (led! w f :hit nil nil) [::child k])
-      (let [;; an entity rendered by its schema's render: its model render runs in the same run when the walk asks for that output
-            ;; (:outputs, data on the walk), its reads tracked with the hiccup's; a walk that asks for the page alone pays nothing here
-            wire? (contains? (:outputs w) :seon.render/openai-compat)
+      (let [;; an entity rendered by its schema's render: the render its schema names for each other output the walk asks
+            ;; (:outputs, data on the walk; render-for) runs in the same run, its reads tracked with the hiccup's; a walk that asks for
+            ;; the page alone pays nothing here
+            others (disj (or (:outputs w) #{}) :seon.render/hiccup)
             ix @(:index w)
-            e0 (when wire? (some-> (first children) ratom/untracked))
-            wf (when (and (map? e0) (:db/id e0))
-                 (some-> (schema-of ix e0 nil) (#(render-for ix % :seon.render/openai-compat)) requiring-resolve))
-            ;; the model output: its messages, and each entity or call it places run as a component (the one the hiccup placed is a
-            ;; hit), kept as its marker, so the parent orders and each child's output stays its own
-            place (fn [env' xs] (mapv (fn [x] (if-let [[ef eo] (entity-render ix x)]
-                                                (render! w ef eo [x] env')
-                                                (if (and (vector? x) (or (var? (first x)) (fn? (first x))) (not (keyword? (first x))))
-                                                  (render! w (first x) (assoc (or (second x) {}) :seon.render/as :seon.render/openai-compat) (vec (nnext x)) env')
-                                                  x)))
-                                      xs))
+            e0 (when (seq others) (some-> (first children) ratom/untracked))
+            s0 (when (and (map? e0) (:db/id e0)) (schema-of ix e0 nil))
+            fs (when s0 (into {} (keep (fn [o] (some->> (render-for ix s0 o) requiring-resolve (vector o)))) others))
+            ;; output o's answer: its values, and each entity or call it places run as a component (the one the hiccup placed is a
+            ;; hit; a call answers o), kept as its marker, so the parent orders and each child's answer stays its own
+            place (fn [o env' xs] (mapv (fn [x] (if-let [[ef eo] (entity-render ix x)]
+                                                  (render! w ef eo [x] env')
+                                                  (if (and (vector? x) (or (var? (first x)) (fn? (first x))) (not (keyword? (first x))))
+                                                    (render! w (first x) (assoc (or (second x) {}) :seon.render/as o) (vec (nnext x)) env')
+                                                    x)))
+                                        xs))
             args (mapv ratom/fresh children)
-            db? (or (contains? ks :seon.db/db) (some? wf))
-            wired (volatile! nil)
+            db? (or (contains? ks :seon.db/db) (seq fs))
+            outs (volatile! nil)
             o (cond-> opts
                 (contains? ks :seon.ctx/ctx) (assoc :seon.ctx/ctx (if (:once w) @(:ref (:src w)) (ratom/fresh (ratom/ref-view (:ref (:src w)) (:changes (:src w))))))
                 db? (assoc :seon.db/db ((:db w)))
@@ -382,11 +383,11 @@
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
             one #(try (let [env' (assoc env :children kids :self k)
-                            ;; a call a model output placed answers messages (and what it places), kept as this component's model output
-                            wire-call? (= :seon.render/openai-compat (:seon.render/as opts))
-                            out (if wire-call? (do (vreset! wired (place env' (apply f (dissoc o :seon.render/as) args))) nil) (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
-                        ;; a call's answer is its model output; an entity's own model render runs only where no call answers for it
-                        (when (and wf (not wire-call?)) (vreset! wired (place env' (wf {:seon.db/db ((:db w)) :seon.render/index ix} (first args)))))
+                            ;; a call an output placed answers that output (and what it places), kept as this component's answer to it
+                            as (:seon.render/as opts)
+                            out (if as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil) (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
+                        ;; an entity's own render for each other output, where no call answers that output for it
+                        (doseq [[op of] fs :when (not= op as)] (vswap! outs assoc op (place op env' (of {:seon.db/db ((:db w)) :seon.render/index ix} (first args)))))
                         out)
                       ;; a component that throws draws its error in its place: a call of the error's render on the error as data (what
                       ;; threw, and the thrown error's own data: a contract's problems), so the page writes that render and the model
@@ -414,7 +415,7 @@
             _ (when rx (ratom/-set! rx :f (constantly nil)))
             bytes (- (profile/alloc-bytes) a0)
             ;; a child the hiccup and the model output both placed is held once
-            children (if wire? (vec (distinct @kids)) @kids)
+            children (if (seq others) (vec (distinct @kids)) @kids)
             same? (and prev (= out (:out prev)))
             read-keys (some-> @reads seq d/reads-index)]
         (vswap! (:queue w) disj k)
@@ -434,7 +435,7 @@
         (some-> (:ran env) (vswap! assoc k (if same? :same :miss)))
         ;; merged: its written html (placed-units) stays while its revision does
         (vswap! (:cache w) update k merge {:f f :opts opts :args args :rx rx :out (if same? (:out prev) out) :children children
-                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :kept @kept :wired @wired
+                                    :order order :id id :rev (if same? (:rev prev) (inc (:rev prev 0))) :kept @kept :outs @outs
                                     :reads read-keys})
         ;; the components that read the db: the ones a transaction's datoms are matched against
         (vswap! (:db-keys w) (if (seq @reads) conj disj) k)
@@ -1089,14 +1090,20 @@
     (try (flush! w nil) {:hiccup (resolved w @(:out w) false) :messages (openai-compat w)}
          (finally (dispose-walk! w))))))
 
-(defn openai-compat
-  "The model's messages of walk w: its root's model output (kept on its cache entry, :wired, made in the same run as its
-  hiccup, when the walk asks for :seon.render/openai-compat), each placed component's marker replaced by that component's own, as
-  `resolved` places hiccup: the order is each render's. See docs/render.md#one-rendering-system-drawn-from-the-data."
-  {:malli/schema [:=> [:cat :map] [:vector :seon.model/message]]}
-  [w]
+(defn answer-of
+  "Walk w's answer for output o (a schema property naming a render, asked in the walk's :outputs, other than hiccup): its root's
+  (kept on its cache entry, :outs, made in the same run as its hiccup), each placed component's marker replaced by that component's
+  own, as `resolved` places hiccup: the order is each render's. See docs/render.md#one-rendering-system-drawn-from-the-data."
+  {:malli/schema [:=> [:cat :map :qualified-keyword] [:vector :any]]}
+  [w o]
   (let [cache @(:cache w)]
-    (vec ((fn go [k] (mapcat #(if (and (vector? %) (= ::child (first %))) (go (second %)) [%]) (:wired (get cache k)))) @(:out w)))))
+    (vec ((fn go [k] (mapcat #(if (and (vector? %) (= ::child (first %))) (go (second %)) [%]) (get-in cache [k :outs o]))) @(:out w)))))
+
+(defn openai-compat
+  "The model's messages of walk w: its answer for :seon.render/openai-compat (`answer-of`). See
+  docs/render.md#one-rendering-system-drawn-from-the-data."
+  {:malli/schema [:=> [:cat :map] [:vector :seon.model/message]]}
+  [w] (answer-of w :seon.render/openai-compat))
 
 (defn tree
   "What draws what in walk w, from its root, as data that chains and prints nothing: each component its cache holds as
