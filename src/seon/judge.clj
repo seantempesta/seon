@@ -15,21 +15,27 @@
   messages seon.ctx.wire/render makes for a fresh agent whose proofs have no result yet
   (the agent written on a speculative db, d/with: nothing stored), and the model
   and thinking mode the task resolves to. A fresh agent's status has no verdicts yet: a proof
-  not written reads :undefined, so the judge's tasks are ones whose proofs are not written."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:map [:messages [:vector :seon.model/message]] [:model :string] [:thinking :any]]]}
+  not written reads :undefined, so the judge's tasks are ones whose proofs are not written.
+  :key, what makes it the same context (`digest`): the messages with each page call Seon made (its request's parts
+  [:page n], seon.ctx.wire/page-diff-msgs) as its turn and the page it answered, never the point it names: that point is
+  main's commit, which the pass's own score moves, so keyed by it a request was scored again at every pass."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:map [:messages [:vector :seon.model/message]] [:model :string] [:thinking :any] [:key :any]]]}
   [db t]
   (let [id (:seon.task/id t)
         k (str id "/first-move")
-        db (:db-after (pdb/speculate db [{:seon.agent/key k :seon.agent/task [:seon.task/id id]}]))]
-    {:messages (:messages (wire/render db {:commit (d/commit-id db) :task id :turn 1
-                                              :max-turns (config/value :seon.config.agent/max-turns) :origin :model :agent k}))
+        db (:db-after (pdb/speculate db [{:seon.agent/key k :seon.agent/task [:seon.task/id id]}]))
+        {:keys [messages parts]} (wire/render db {:commit (d/commit-id db) :task id :turn 1
+                                                  :max-turns (config/value :seon.config.agent/max-turns) :origin :model :agent k})]
+    {:messages messages
+     :key (into [] (mapcat (fn [[ref ms]] (if (= :page (first ref)) [[:page (second ref) (mapv :content (filter #(= "tool" (:role %)) ms))]] ms))) parts)
      :model (:value (config/resolve :seon.config.ai/model {:task t}))
      :thinking (:value (config/resolve :seon.config.ai/thinking {:task t}))}))
 
 (defn digest
-  "The request's digest: the record's key, so the same context, model and mode are scored once."
+  "The digest of record x, its key in the store: of a request (`request`), what makes it the same context (its :key, with
+  its model and mode), so the same context, model and mode are scored once; of anything else, the whole value."
   {:malli/schema [:=> [:cat :map] :string]}
-  [req] (lib/digest (sedn/encode req)))
+  [x] (lib/digest (sedn/encode (if (contains? x :key) (dissoc x :messages) x))))
 
 (defn subject
   "What task t's first move is judged against, from its text on db: the program's vars among its cites
