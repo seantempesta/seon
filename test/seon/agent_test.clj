@@ -2705,8 +2705,9 @@
                                " @(seon.root/call! sys {:op :render :id id}))")}
                    n
                    {:op :eval :agent "root" :code "@(seon.root/call! sys {:op :render :id :gone})"}))
-        ;; the keys it added, one component (seon.render.ui/ctx-keys) holding each key's own
-        steps (some #(when (= "ctx-keys" (:id %)) %) (:units (:value drawn)))]
+        ;; the keys it added, one component (seon.render.ui/ctx-keys) holding each key's own, a unit of its own inside it
+        steps (some #(when (= "ctx-key-lab_2Ectx_2Fsteps" (:id %)) %) (:units (:value drawn)))]
+    (is (= "ctx-keys" (:parent steps)) "the key's unit, inside the keys' component")
     (is (str/includes? (str (:html steps)) "<ol><li>read the plan</li><li>write the test</li></ol>")
         (str "the swap! answered " (pr-str swapped) "; the units: " (pr-str (map :id (:units (:value drawn))))))
     (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")

@@ -2097,8 +2097,9 @@
     (fn [_ conn]
       (binding [seon.render-cost-test/*conn* conn]
         (let [[_ ix a p0] (seon.render-cost-test/newest-pair-of 3)
-              ;; the agent's state moved after the newest turn's basis: a part the page shows (seon.render.ui/agent-state)
-              _ (d/transact conn [{:db/id a :seon.agent/status :ended}])
+              ;; the agent moved after the newest turn's basis: its REPL's namespace, which its page's turn part shows the model
+              ;; (seon.render.ui/turn; the agent's state for the person, agent-state, is the page's alone)
+              _ (d/transact conn [{:db/id a :seon.agent/ns 'lab.moved}])
               db @conn p1 {:branch :b :commit (d/commit-id db) :t (:max-tx db)}
               collected (assoc p0 :commit (random-uuid))
               held (wire/page-edits-between db ix a p0 p1)]

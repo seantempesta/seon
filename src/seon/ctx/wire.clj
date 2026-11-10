@@ -280,8 +280,9 @@
           ;; what the parts read: the agent's own pattern less its conversation (seon.render/page-pattern, the walk's own reading)
           c0 (assoc-in (ctx/build ix0 d0 a branch (render/page-pattern ix0 (or (render/entity-pattern ix0 (d/pull d0 '[*] a)) []))) [:ix :own-index?] true)
           at (volatile! d0) c (volatile! c0) r (ratom/atom (:tree c0))
+          ;; a walk the model reads (:model-only): what is the page's alone (:wire/for "page", the agent's state for the person) is not drawn
           w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [parts {} (ratom/ref-view r ctx/changes)] (:index (:ix c0)))
-                   :outputs #{:seon.render/hiccup})
+                   :outputs #{:seon.render/hiccup} :model-only true)
           hiccup #(presentation-free (render/resolved w @(:out w) false))]
       ;; a walk of its own, read by no reaction of the caller's: a render calling this (`turn-entities`) runs in its component's
       ;; reaction, which the walk's own atom and reactions would otherwise join, running it again for each
