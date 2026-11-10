@@ -469,67 +469,6 @@
           (is (= (at :model) (at :outside)) "an outside agent's read is the request a model's turn is sent, its conversation in it")
           (is (str/includes? (:content (peek r2)) "quadruple")))))))
 
-(deftest a-turns-diff-derived-from-its-two-points-is-the-page-eval-it-stored
-  ;; rule 6 of seon.render/one-walk-per-view, step 3: with no render change, the edits between a turn's point and the one before it
-  ;; (seon.render/changes-of, the function my.render/diff calls) are the page eval that turn stored today (page!, seon.turn/show-page!'s):
-  ;; the first turn's the whole page as edits from nothing, [[id] :+ form]; a turn that moved nothing, none and no eval. The printer's
-  ;; {:seon.print/plain s} wrapper is the stored form of a string with a line break: both sides read through it
-  (ts/test-branch!
-    (fn [_ conn]
-      (wiki! conn)
-      (d/transact conn (program-facts '[[demo/f "(defn f \"Doubles.\" [x] (* 2 x))" []]]))
-      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "Make ```demo/f``` triple."
-                                               :seon.task/proofs #{'demo-test/f-test}}]))
-      (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/f"}}}])
-      (let [a (pdb/eid @conn :seon.agent/key "a1")
-            plain (fn [x] (clojure.walk/postwalk #(if (and (map? %) (contains? % :seon.print/plain)) (:seon.print/plain %) %) x))
-            seen (atom nil)
-            point (fn [] (let [db @conn] {:branch :b :commit (d/commit-id db) :t (:max-tx db)}))
-            chains (atom [])
-            ;; the source: the agent's turns' points, and one walk across a chain of them (recorded: a call is a pass)
-            src (fn [pts] {:ref (seon.ratom/atom {}) :changes ctx/changes :points (fn [] pts)
-                           :diffs-through (fn [chain] (swap! chains conj chain) (wire/diffs-through @conn a chain))})
-            stored (fn [id] (when-let [e (d/pull @conn '[*] [:seon.eval/id id])]
-                              (when (:seon.eval/id e) (plain (:value (pdb/response-of @conn e))))))
-            turn! (fn [n] (let [p (point)] (page! conn seen (str "p" n) (dec n)) p))
-            p1 (turn! 1)
-            _ (d/transact conn (program-facts '[[demo/f "(defn f \"Triples.\" [x] (* 3 x))" []]]))
-            p2 (turn! 2)
-            _ (d/transact conn [[:db/add [:seon.task/id "demo/f"] :seon.task/plan "Make ```demo/f``` quadruple."]])
-            p3 (turn! 3)
-            _ (d/transact conn [{:seon.root/id :root :seon.root/boot "b1"}])
-            p4 (turn! 4)
-            w (render/walker (src [p1 p2 p3 p4]) (constantly nil) [#'identity {}] (seon.db/index))
-            diff (render/changes-of w)]
-        ;; a restart: nothing kept, the last turn's pair asked first. It fills every pair before it in one pass, one chain
-        ;; [nil p1 p2 p3 p4]: one walk drawn once at p1 and advanced through p2, p3 and p4 (a count of the source's calls, not time)
-        (is (= [] (diff p3 p4)) "turn 4 moved nothing")
-        (is (= [[nil p1 p2 p3 p4]] @chains) "one pass across the turns' points answered all four pairs")
-        (is (= 4 (count (keys @(:diffs w)))) "each pair computed once")
-        (is (= (vec (for [[id f] (:components (stored "p1"))] [[id] :+ f])) (plain (diff nil p1))) "the first turn: the page whole, as edits from nothing")
-        (is (= (:edits (stored "p2")) (plain (diff p1 p2))) "turn 2: the cited var's edit")
-        (is (= (:edits (stored "p3")) (plain (diff p2 p3))) "turn 3: the plan's edit")
-        (is (nil? (stored "p4")) "turn 4 stored no eval")
-        ;; a request asks in turn order, turn 1's pair first: still one pass, to the last turn, and every later ask is held
-        (let [_ (reset! chains [])
-              w2 (render/walker (src [p1 p2 p3 p4]) (constantly nil) [#'identity {}] (seon.db/index))
-              diff2 (render/changes-of w2)]
-          (doseq [[p0 p] [[nil p1] [p1 p2] [p2 p3] [p3 p4]]] (diff2 p0 p))
-          (is (= [[nil p1 p2 p3 p4]] @chains) "asked in turn order, one pass answered every pair"))
-        (is (= [[nil p1 p2 p3 p4]] @chains) "and none of them drew again")
-        (is (and (seq (:components (stored "p1"))) (seq (:edits (stored "p2"))) (seq (:edits (stored "p3")))) "and each is a change worth comparing")
-        ;; the pass equals the pairs computed one by one, each a walk drawn cold at its first point and advanced to its second
-        (doseq [[p0 p1'] [[nil p1] [p1 p2] [p2 p3] [p3 p4]]]
-          (let [w3 (render/walker (src []) (constantly nil) [#'identity {}] (seon.db/index))]
-            (is (= ((render/changes-of w3) p0 p1') (diff p0 p1')) "the pair alone equals the pair filled in the pass")
-            (render/dispose-walk! w3)))
-        (is (= 5 (count @chains)) "the four alone were four chains of their own, the pass one")
-        (let [w4 (render/walker {:ref (seon.ratom/atom {}) :changes ctx/changes} (constantly nil) [#'identity {}] (seon.db/index))
-              e ((render/changes-of w4) p1 p2)]
-          (is (= :seon.render/no-diffs-through (:seon.error/type e)) "a source that cannot draw a point answers a typed error, not nothing")
-          (render/dispose-walk! w4))
-        (render/dispose-walk! w)))))
-
 (deftest each-section-is-told-once-on-the-page
   ;; the old request sent the task, its references and its sections in the first turn's context
   ;; and again in the current block, every turn; on the page each is one part: the plan in
@@ -2064,13 +2003,13 @@
 (defn- model-walk
   "What Web's walk makes of agent a's model render on db: a walker on the agent's pull asked for both outputs, rooted on the
   agent's entity (its schema's renders), flushed once, the root's model output with each placed entity or call resolved
-  (seon.render/wire-of)."
+  (seon.render/openai-compat)."
   [db a]
   (let [ix (seon.program/index-of-db db)
         r (seon.ratom/atom (ctx/agent-ctx ix db a))
         w (assoc (render/walker {:ref r :changes ctx/changes} (constantly db) [#'seon.render.ui/agent {} (seon.ratom/ref-view r ctx/changes)] ix)
                  :outputs #{:seon.render/hiccup :seon.render/openai-compat})]
-    (try (render/flush! w nil) (render/wire-of w) (finally (render/dispose-walk! w)))))
+    (try (render/flush! w nil) (render/openai-compat w) (finally (render/dispose-walk! w)))))
 
 (defn- with-system
   "Db with agent key k's :seon.agent/system written as its run's start writes it (seon.agent/begin-run-tx): the system prompt's top section."

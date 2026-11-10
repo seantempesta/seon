@@ -60,8 +60,6 @@
  ;; hiccup marking a role or a field the tree's reading has no message for (seon.render/wire-parts): a typo is an error, not a silent drop
  :seon.render/unknown-mark [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/unknown-mark]] [:mark :string]]]
  ;; a page's location that main names no entity for (seon.render.proc/page-value): an agent's id of no agent in root's boot
- ;; a walk whose source cannot draw a page at a point (seon.render/changes-of): asked for the edits between two, it answers this, not nothing
- :seon.render/no-diffs-through [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-diffs-through]] [:from [:maybe :map]] [:to :map]]]
  :seon.render/no-location [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-location]] [:view :string]]]
  ;; a component whose render threw (seon.render/render!, a failure point: renders are code, and agents write
  ;; them), a call of its render in the component's place: :seon.error/in the render, and the thrown error's own data

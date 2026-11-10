@@ -5,7 +5,7 @@
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html] [seon.db]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.ctx] [seon.ctx] [seon.ratom]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.ctx] [seon.ctx] [seon.ratom] [seon.program] [seon.ctx.wire]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
 
@@ -542,72 +542,35 @@
                        :fixed {:calls 700 :bytes 1300000}
                        :sizes [10 40 80]}))))))
 
-(defn turns-of
-  "The input at n: the arguments of seon.ctx.wire/diffs-through for agent b/t<n> on a branch where it holds a task and works n turns, each a commit with an eval (a record as the REPL writes it) and the agent's turn number moved: the db, the agent, and the chain [nil p1 ... pn] of the turns' points."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int [:vector [:maybe :map]]]]}
+(defn newest-pair-of
+  "The input at n: the arguments of seon.ctx.wire/page-edits-between for agent b/t<n>'s newest turn, on a branch where it holds a
+  task and has worked n turns, each a commit with an eval and the turn number moved: the db, its index, the agent, and the bases of
+  turns n-1 and n."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map :int :map :map]]}
   [n]
   (let [conn *conn* k (str "b/t" n) tid (str "demo/t" n)
         point (fn [] (let [db @conn] {:branch :b :commit (d/commit-id db) :t (:max-tx db)}))]
-    (d/transact conn (seon.doc/load-tx @conn "docs" {seon.doc/system-page (str "# You are a Seon agent " n "\n\nRules.")}))
     (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "t" n) :seon.task/plan "Make t." :seon.task/proofs #{'demo-test/t-test}}]))
     (d/transact conn [{:seon.agent/key k :seon.agent/turn 0 :seon.agent/task {:seon.task/id tid}}])
-    [@conn (:db/id (d/entity @conn [:seon.agent/key k]))
-     (into [nil] (for [i (range n)]
-                   (do (d/transact conn [{:seon.agent/key k :seon.agent/turn (inc i)}
-                                         {:seon.eval/id (str "t" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
-                                          :seon.eval/call (assoc (seon.task/call-ref k (inc i)) :seon.model-call/origin :model :seon.model-call/reply (str "Trying " i "."))
-                                          :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "t" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/intent (str "Step " i ".")}])
-                       (point))))]))
+    (let [ps (vec (for [i (range n)]
+                    (do (d/transact conn [{:seon.agent/key k :seon.agent/turn (inc i)}
+                                          {:seon.eval/id (str "t" n "e" i) :seon.eval/by "a1" :seon.eval/agent {:seon.agent/key k}
+                                           :seon.eval/call (assoc (seon.task/call-ref k (inc i)) :seon.model-call/origin :model :seon.model-call/reply (str "Trying " i "."))
+                                           :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "t" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/intent (str "Step " i ".")}])
+                        (point))))
+          db @conn]
+      [db (seon.program/index-of-db db) (:db/id (d/entity db [:seon.agent/key k])) (peek (pop ps)) (peek ps)])))
 
-(deftest a-restart-draws-its-turns-in-one-walk
-  ;; rule 6 of seon.render/one-walk-per-view: every pair of an agent's turns filled in one pass (seon.ctx.wire/diffs-through), a draw at the
-  ;; first point then what moved at each later one, so a restart of T turns costs the first draw and a part a turn, not a draw a pair.
-  ;; Measured on the test world, whose store is :memory, where a commit's diff (seon.ctx/moved) walks the whole index; LMDB, where it costs
-  ;; what changed, is what counts and is measured on a lab root.
+(deftest a-turns-page-edits-cost-the-same-at-any-length
+  ;; task seon.render/a-model-render-draws-each-turns-diff: a turn's diff renders the page parts at its two bases (each pulled by
+  ;; what the parts render reads, never the agent's conversation), so the newest pair costs the same at 4 turns as at 64
   (ts/test-branch!
     (fn [_ conn]
       (binding [*conn* conn]
         (cost/proof
-          {:of 'seon.ctx.wire/diffs-through :input 'seon.render-cost-test/turns-of
-           :n "turns of the agent, each a commit holding an eval and the turn number moved"
-           :work "the page drawn once at the first point, then at each later point the datoms between it and the one before read, the ctx patched by them and the components they reached drawn again, their edits made"
-           :growth :linear
-           ;; measured 2026-11-08 on the :memory test store (a commit's diff walks the whole index there, so the bytes creep up; LMDB's costs what changed):
-           ;; 20.0 MB / 3,362 calls / 7.1M ticks at 4 turns, 41.7 MB / 5,714 / 15.8M at 8, 84.6 MB / 10,418 / 33.0M at 16
-           :per-n {:calls 600 :bytes 5400000}
-           :fixed {:calls 1000 :bytes 1000000}
-           :sizes [4 8 16]})))))
-
-;; See docs/render.md#a-change-is-edits-by-name
-(defn asks-changes
-  "A component that asks the walk for what changed between the points in its opts (the :seon.render/changes input), and draws the edits."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:from :map] [:to :map] [:seon.render/changes :seon.host/fn]]]] :any]}
-  [{:keys [from to] changes :seon.render/changes}]
-  [:p (pr-str (changes from to))])
-
-(defn two-askers
-  "A page whose two components, each its own key, ask for the same pair (two views of one point)."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:from :map] [:to :map]]]] :any]}
-  [{:keys [from to]}]
-  [:div [#'asks-changes {:key :a :from from :to to}] [#'asks-changes {:key :b :from from :to to}]])
-
-(deftest a-pair-of-points-is-computed-once
-  ;; rule 6: the input is one function of two points, memoized on the walk: two components and a second ask cost one pass; a pair
-  ;; asked cold fills every pair before it from the agent's points in the same pass, and a pair that is not between two turns is drawn alone
-  (let [passes (atom []) p0 {:branch :b :commit #uuid "00000000-0000-0000-0000-000000000000" :t 1}
-        p1 (assoc p0 :commit #uuid "00000000-0000-0000-0000-000000000001" :t 2) p2 (assoc p0 :commit #uuid "00000000-0000-0000-0000-000000000002" :t 3)
-        pages {nil {} p0 {"status" '[f {} "was"]} p1 {"status" '[f {} "now"]} p2 {"status" '[f {} "later"]}}
-        through (fn [chain] (swap! passes conj chain)
-                  (mapv (fn [[a b]] (seon.render/page-edits (seon.db/index) (seon.render/forms-moved (pages a) (pages b)))) (partition 2 1 chain)))
-        w (seon.render/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes :points (fn [] [p0 p1 p2]) :diffs-through through} (constantly nil)
-                              [#'two-askers {:from p1 :to p2}] (seon.db/index))]
-    (seon.render/flush! w nil)
-    (clojure.test/is (= [[nil p0 p1 p2]] @passes) "two components, one pair, cold: one pass from nothing through p2, filling the pairs before it")
-    (let [again ((seon.render/changes-of w) p0 p1)]
-      (clojure.test/is (= [[nil p0 p1 p2]] @passes) "an earlier pair of the pass: held")
-      (clojure.test/is (= (seon.render/page-edits (seon.db/index) (seon.render/forms-moved (pages p0) (pages p1))) again) "the edits of the two pages"))
-    ((seon.render/changes-of w) p0 p2)
-    (clojure.test/is (= [[nil p0 p1 p2] [p0 p2]] @passes) "a pair that is not between neighbours is drawn alone")
-    (seon.render/dispose-walk! w)
-    (let [no-source (seon.render/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly nil) [#'identity {}] (seon.db/index))]
-      (clojure.test/is (= :seon.render/no-diffs-through (:seon.error/type ((seon.render/changes-of no-source) p0 p1))) "no way to draw a point: a typed error, not nothing"))))
+          {:of 'seon.ctx.wire/page-edits-between :input 'seon.render-cost-test/newest-pair-of
+           :n "turns the agent has worked, each a commit holding an eval"
+           :work "the page parts pulled and rendered at two bases, and the edits between them"
+           :growth :constant
+           :fixed {:calls 2000 :bytes 4000000}
+           :sizes [4 16 64]})))))
