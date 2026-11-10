@@ -321,7 +321,7 @@
   inherited (a caller's SEON_STORE or SEON_MAIN, a bin/check run's, opened a store another run
   had written). Its server is on a port the kernel assigns (:seon.config.root/server-port -1),
   read back from its ROOT LISTENING line: bin/root returns at that line or at the root's death,
-  never on a clock (:started, the last line bin/root start printed). runs: its pids, log and port; env: more variables {name value}; args: more
+  never on a clock. runs: its pids, log and port; env: more variables {name value}; args: more
   root arguments. Answers the options with :port, nil when the root died before listening, and
   then its :log, which says why (ask answers it as the test's error). runs is one root's, named per main by its caller: a root still running there
   is refused, never answered (bin/root start in it would only report that root, and the test
@@ -344,9 +344,9 @@
   (when (zero? (:exit (root-sh root "status" [])))
     (throw (ex-info (str "a root is already running in " runs ": a test's root takes a runs directory of its own")
                     {:seon.error/type :seon.test-store/runs-in-use :runs runs})))
-  (let [started (:out (root-sh root "start" (start-args root)))
-        port (fx/bound-port runs)]
-    (cond-> (assoc root :port port :started (last (clojure.string/split-lines (str started))))
+  (root-sh root "start" (start-args root))
+  (let [port (fx/bound-port runs)]
+    (cond-> (assoc root :port port)
       ;; it died before listening: its log says why, kept with it for the test's error (ask)
       (nil? port) (assoc :log (output (str runs "/root.log"))))))
 

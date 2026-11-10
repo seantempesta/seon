@@ -3,8 +3,7 @@
   boots its fork server, so it runs in a process of its own rather than in the test
   runner's, whose threads and GC sweepers are the runner's."
   (:require [clojure.test :refer [deftest is]] [clojure.java.shell :as sh] [clojure.edn :as edn]
-            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts] [seon.config :as config] [seon.contract :as contract]
-            [seon.root :as root] [seon.program :as program] [my.test :as mt]))
+            [clojure.string :as str] [seon.db :as pdb] [datahike.api :as d] [seon.test-store :as ts] [seon.config :as config] [seon.contract :as contract]))
 
 (defn- test-store "The one store these tests' roots take a branch of (seon.test-store/process-store)." []
   (ts/process-store))
@@ -67,7 +66,7 @@
 (defn- root-answers
   "The output of a built root on the store at path and main (seon.test-store/start-root!: both
   named, never inherited), asked each request in turn on its server: one answer line per
-  request, then STARTED and bin/root start's last line, then EXIT and its log. opts: :args more root arguments, :env more variables."
+  request, then EXIT and its log. opts: :args more root arguments, :env more variables."
   ([path main requests] (root-answers path main requests {}))
   ([path main requests {:keys [args env]}]
    ;; runs: this main's own, beside the store (every root-answers call on the one test store
@@ -78,7 +77,7 @@
          stopped (ts/stop-root! root)]
      (sh/sh "rm" "-rf" runs)
      ;; each answer as the data it is (an error value among them), one per line
-     (str (str/join "\n" (map pr-str answers)) (when (seq answers) "\n") "STARTED " (:started root) "\n" "EXIT " (or (:exit stopped) (pr-str stopped)) "\n" (:log stopped)))))
+     (str (str/join "\n" (map pr-str answers)) (when (seq answers) "\n") "EXIT " (or (:exit stopped) (pr-str stopped)) "\n" (:log stopped)))))
 
 (def ^:private bare
   "Root arguments for a root whose subject is its store, not the program or the wiki: it imports no source and
@@ -269,7 +268,7 @@
               " :program-t (max (t-of :config/form) (t-of :schema/form))"
               " :seed-t (reduce min (map :tx (datahike.api/datoms (datahike.api/history db) :aevt :seon.root/source)))"
               " :fact (dissoc (:seon.root/source (datahike.api/pull db [:seon.root/source] root)) :boot :inputs :ms)"
-              " :stale (mapv (juxt :binary :tree) (get-in (my.root/problems sys) [:classes :stale-binary :rows]))})")})
+              " :stale (mapv (juxt :binary :program) (get-in (my.root/problems sys) [:classes :stale-binary :rows]))})")})
 
 (defn- boots-on-a-tree
   "A store of its own (removed at the end) seeded (./seon seed-program) from a scratch repository under target/ holding
@@ -310,8 +309,7 @@
                      v (read-line probe)]
                  (sh/sh "rm" "-f" (str store "-in"))
                  (if (map? v)
-                   (assoc v :also (mapv read-line (take (count also) more)) :listening? (str/includes? out "ROOT LISTENING") :tree rel
-                          :started (some #(when (str/starts-with? % "STARTED ") (subs % 8)) more))
+                   (assoc v :also (mapv read-line (take (count also) more)) :listening? (str/includes? out "ROOT LISTENING") :tree rel)
                    out))))
        (finally (sh/sh "rm" "-rf" tree store (str store "-agents") (str store "-in") (str store ".log")))))))
 
@@ -334,64 +332,36 @@
     (is (= (inc (config/value :seon.config.web/streams-buf)) (:streams-buf two)) "it holds main's value, not the tree's or the binary's")
     (is (= (:seed-t two) (:program-t two)) "the boot wrote no program fact: main's program is the seed's")
     (is (< (:program-t two) (:boot-t two)))
-    (is (= 1 (count (:stale two))) (str "its binary is of another tree than main's: one stale-binary row " (pr-str (:stale two))))
-    (is (= (second (first (:stale two))) (:tree (:fact two))) "naming the tree main was last brought to")
+    (is (= 1 (count (:stale two))) (str "its binary is another program than main's: one stale-binary row " (pr-str (:stale two))))
+    (is (= (second (first (:stale two))) (:program (:fact two))) "naming main's program as the boot found it")
     (is (= (:seed-t three) (:program-t three)) "the next boot neither")
     (is (= (:stale two) (:stale three)) "and the row stands while the binary does")))
 
-(deftest what-agents-merged-into-main-is-no-stale-binary
-  ;; docs/source.md#a-boot-resumes-from-the-db (the db is the source of truth): root refuses spawns only when its binary was built
-  ;; from another git tree than the one main was last brought to from outside (an import or a landing: :tree on the source
-  ;; fact). Main moved since by what its agents merged is main's own: its program differs from the binary's, its tree does
-  ;; not, and spawns go on. Red before: the refusal compared main's program with the binary's, and refused e2e-loop's root
-  ;; after its agent merged, and a second boot of a store whose agents had worked (2026-11-10, the batch's prove)
-  (let [built (root/binary-program)
-        db0 (mt/world)
-        on (fn [db tree] (d/db-with db [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :tree tree}}]))
-        merged (mt/with db0 (mt/code 'app.merged "(ns app.merged)\n(defn f [x] x)"))]
-    (is (string? (:tree built)) (str "bin/build recorded the tree it was built from: " (pr-str (dissoc built :inputs))))
-    (is (not= (program/program-digest db0) (program/program-digest merged)) "the merge moved main's program")
-    (is (nil? (root/stale-binary (on merged (:tree built)))) "main of the binary's tree with an agent's merge on it: no refusal")
-    (is (= {:binary (:tree built) :tree "another-tree"} (root/stale-binary (on db0 "another-tree")))
-        "a store last brought to another tree: refused, naming both")
-    (is (nil? (root/stale-binary db0)) "a store brought from no tree: nothing known, nothing refused")
-    ;; a landing (a pin bump among them: a gitlink is in the tree id) moves the fact to the landed tree, which the binary
-    ;; bin/update builds from it records: the store last brought to the old tree agrees with the new binary once it lands
-    (let [old (on merged "the-tree-before")
-          landed (d/db-with old (root/landed-tx old {} {} (:tree built) "c1"))]
-      (is (some? (root/stale-binary old)) "before the landing's bridge: the new binary is of another tree")
-      (is (nil? (root/stale-binary landed)) "after it: the landed tree is the binary's, nothing refused"))))
-
-(def ^:private spawn-on-it
-  "A request to root: spawn an agent and answer its id, or the refusal's [type message stale-binary] when the spawn is
-  refused; the agent, if one was made, is ended after."
+(def ^:private registry-of-an-agent
+  "A request to root: the schema entry :seon.config.web/streams-buf as an agent forked now holds it (the registry its
+  eval binds, seon.fork-server/warm-start's, under seon.contract/options): [whether 1 is valid, its :min]; the agent is
+  ended after."
   {:op :eval :agent "root"
-   :code (str "(try (let [ag (seon.root/spawn! sys {})] (seon.root/kill! sys ag) [:spawned ag])"
-              " (catch clojure.lang.ExceptionInfo e (let [d (ex-data e)] [(:seon.error/type d) (ex-message e) (some? (:binary d))])))")})
+   :code (str "(let [ag (seon.root/spawn! sys {})"
+              " r (try @(seon.root/submit! sys ag \"(let [s (malli.core/deref (malli.core/schema :seon.config.web/streams-buf seon.contract/options))] [(malli.core/validate s 1) (:min (malli.core/properties s))])\")"
+              " (finally (seon.root/kill! sys ag)))]"
+              " (or (:value r) r))")})
 
-(deftest a-root-on-a-binary-of-another-program-forks-no-agent
-  ;; task seon.root/a-boot-resumes-from-the-db, the owner's rule (2026-11-10: "dbboot is supposed to resume if the store is
-  ;; already there ... make sure this rule holds"): a store made by tree A (here a schema entry, :seon.config.web/streams-buf
-  ;; with another bound, seeded) under the binary of tree B. Root resumes it and stays up, but forks no agent: an agent
-  ;; would load main's forms over the binary's code and run the two mixed (2026-11-10, Web's and Context's roots: old
-  ;; contracts against new callers, a fork server lost on its first fork). The refusal names the acts that bring them
-  ;; into agreement: erase the store, reindex from disk, or bin/root next. Red before: the agent forked, holding main's entry
+(deftest a-boot-forks-with-mains-schema-registry
+  ;; task seon.root/a-boot-resumes-from-the-db: main holds a schema entry other than the binary's (here
+  ;; :seon.config.web/streams-buf with another bound, seeded) and its tree has the binary's. The fork server forks from main
+  ;; as the boot left it and builds the registry each agent holds from main's schema changes (seon.fork-server/warm), so
+  ;; an agent forked after the boot holds main's entry: the db's, never the tree's (2026-11-08 every model call of the first
+  ;; agent after a restart failed on a registry that disagreed with main). Red before: the boot imported the tree's entry
   (let [file "resources/seon/schemas/seon.config.web.edn"
         form (get contract/forms :seon.config.web/streams-buf)
         merged (pr-str {:seon.config.web/streams-buf form})
         before (pr-str {:seon.config.web/streams-buf (update form 1 assoc :min 2)})
-        [seed two] (boots-on-a-tree file [before merged] {:also [spawn-on-it]})
-        [type message stale?] (first (:also two))]
+        [seed two] (boots-on-a-tree file [before merged] {:also [registry-of-an-agent]})]
     (is (not= before merged))
     (is (str/includes? (str seed) "SEED OK") (str seed))
-    (is (true? (:listening? two)) (str "root resumed the store and listens: " two))
-    (is (= :seon.root/refused type) (str "the spawn is refused: " (pr-str (first (:also two)))))
-    (is stale? "naming the two trees")
-    (doseq [act ["rm -rf runs/store" "bin/root start --reindex" "my.root/import!" "bin/root next"]]
-      (is (str/includes? (str message) act) (str "its message names " act))
-      ;; docs/source.md#files-and-the-db-two-directions: a mismatch is never silent to a person
-      (is (str/includes? (str (:started two)) act) (str "and bin/root start's last line names it too: " (:started two))))
-    (is (str/starts-with? (str (:started two)) "ROOT STALE BINARY") (str "bin/root start ends on the mismatch: " (:started two)))
+    (is (= 1 (:min (second form))) "the binary's bound, which main's moves")
+    (is (= [false 2] (first (:also two))) (str "an agent forked after the boot holds main's entry: " (pr-str two)))
     (is (true? (:schema-changed? two)) "main's entry differs from the binary's")
     (is (= (:seed-t two) (:program-t two)) "and the boot wrote no program fact")))
 

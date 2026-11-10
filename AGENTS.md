@@ -15,7 +15,7 @@ You are in `next/`, **Seon on Jolt, built to replace Seon** (`~/src/seon`, the J
 4. `docs/decisions.md`, for a ruling's own words;
 5. the header comment of a `bin/` script, which is that command's manual.
 
-**The running system:** `bin/root status` (the owner's main tree: server port 7888, dashboard http://127.0.0.1:7777/). The standing root's store (`runs/store`) is evidence: never experiment on it, and send that root only read-only evals unless the owner says yes to the write. The Web session owns servers and demos. Experiments use a worktree's own root and stores (`bin/worktree NAME`). Once a root is up its store is the source of truth: a boot resumes it and reads no file, and files reach it only by a landing, a re-index or `bin/root start --reindex` ([files and the db](docs/source.md#files-and-the-db-two-directions)).
+**The running system:** `bin/root status` (the owner's main tree: server port 7888, dashboard http://127.0.0.1:7777/). The standing root's store (`runs/store`) is evidence: never experiment on it, and send that root only read-only evals unless the owner says yes to the write. The Web session owns servers and demos. Experiments use a worktree's own root and stores (`bin/worktree NAME`).
 
 ## 1. What Seon is for, and what moving forward means
 
@@ -130,8 +130,6 @@ Each checkout runs its own standing root: `bin/root start | status | stop | next
 Reach it through the `seon` MCP server (`bin/mcp`, a stdio relay): every op of `seon.server/ops` is a tool ``seon_<op>`` ([server](docs/server.md#ops)). `seon_context` is what the model reads now; `seon_eval` evaluates in an agent's own REPL or in `root`; `seon_attach` and `seon_done` work a task as a Seon agent.
 
 **A helper in a worktree uses its own root, never the session's:** `bin/mcp call OP KEY=VALUE` is the same tool on this checkout's root ([working a task from a worktree](docs/server.md#working-a-task-from-a-worktree)). Without MCP, one request line: ``printf '{:op :agents}\n' | bin/ask PORT``.
-
-A root whose binary is another program than its main's forks no agent and says so (its problems tile, the last line of `bin/root start` and `bin/update`), naming the acts that bring them into agreement ([files and the db](docs/source.md#files-and-the-db-two-directions)).
 
 ## 7. The wiki is the one home for how the system works
 

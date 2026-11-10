@@ -231,7 +231,7 @@
   being that thing. Presence is one seek
   per (entity, key), so a write costs its touched entities' required keys, never an entity's size or the store's; values
   are each datom's own check (`invalid-datom`). The first refusal by entity id, then schema, and every entity it broke in
-  :entities (each by its identity). See
+  :entities (a deleted var's cites, each a task and the name its text cites). See
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:function [:=> [:cat :map] [:maybe :seon.error/base]] [:=> [:cat :map :map] [:maybe :seon.error/base]]]}
   ([r] (invalid-entity r binary-index))
@@ -261,7 +261,7 @@
              text #(print/text (ident %) (:part print/budgets))
              all (sort-by :at broken)
              {:keys [k broke] :as b} (first all)]
-         ;; every entity the write broke is named, so one turn fixes them all
+         ;; every entity the write broke is named (a var deleted under its cites: each cite, "<task> <name>", one turn's fix)
          (contract/error :seon.db/invalid-entity #'invalid-entity
                          (str (text b) " holds attributes of " k ", which requires "
                               (str/join ", " broke) ": a write that leaves them out breaks it"
@@ -276,44 +276,30 @@
 (defn- checked
   "Transaction tx-data applied to db by apply-fn (Datahike's, given the tx-data: its report), held to both checks: each
   datom's value (`invalid-datom`, with schemas {:forms :registry}, a branch's own) before, a lookup ref to nothing
-  (:seon.db/no-target), each entity it touched (`invalid-entity`, by the branch's `write-index`) after; an entity retracted whole takes the entities that require a ref to it with it.
+  (:seon.db/no-target), each entity it touched (`invalid-entity`, by the branch's `write-index`) after; an entity retracted whole takes the entities named by it with it.
   A refusal throws its typed error, and the value is as it was. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
   [db tx-data schemas apply-fn]
   (let [ix (write-index schemas)
-        ;; ends-with: tx-data with each entity retracted whole followed by the entities that require a ref to it (a vector's
-        ;; identity, :seon.vector/of; a cite's :seon.cite/target; a form's :form/ns): such an entity has no meaning without its
-        ;; target, and the entity check would refuse it left without a key its schema requires, so it ends with it, as Datahike
-        ;; ends a component with its parent; derived from the schema (a ref attribute an entity schema requires), so no writer
-        ;; retracts it by hand. One AVET seek per required ref a retraction names (no attribute is a component, so none of
-        ;; Datahike's own cascade is followed). A cite it ends leaves its task :seon.task/gone, its target's identity value
-        ;; added, in the same write (docs/references.md#task-references): the text that still names it is the task's problem
-        gone-tx (fn [ended cites]
-                  (let [ids (keys (:identity-schemas ix))
-                        by (reduce (fn [m [x e]]
-                                     (let [of (:v (first (d/datoms db :eavt x :seon.cite/of)))
-                                           v (some #(:v (first (d/datoms db :eavt e %))) ids)]
-                                       (if (and of (not (ended of)) (seq (d/datoms db :eavt of :seon.task/id)) (some? v))
-                                         (update m of (fnil conj []) v)
-                                         m)))
-                                   {} cites)]
-                    (for [[t vs] by]
-                      [:db/add t :seon.task/gone (vec (distinct (into (vec (:v (first (d/datoms db :eavt t :seon.task/gone)))) vs)))])))
+        ;; ends-with: tx-data with each entity retracted whole followed by the entities whose identity is a ref to it (a
+        ;; vector, :seon.vector/of): such an entity is named by its target and has no identity without it, so it ends with
+        ;; it, as Datahike ends a component with its parent; derived from the schema (an identity attribute that is a ref),
+        ;; so no writer retracts it by hand. One AVET seek per identity ref a retraction names (no attribute is a component, so
+        ;; none of Datahike's own cascade is followed)
         ends-with (fn [tx-data]
                     (let [whole? (fn [op] (and (vector? op) (#{:db.fn/retractEntity :db/retractEntity} (first op))))]
                       (if-not (some whole? tx-data)
                         tx-data
                         (let [schema (:schema db)
-                              refs (filterv #(= :db.type/ref (get-in schema [% :db/valueType])) (distinct (mapcat val (:required-keys ix))))]
-                          (loop [todo (keep #(when (whole? %) (:db/id (d/entity db (second %)))) tx-data) seen #{} cites [] out (vec tx-data)]
+                              refs (filterv #(= :db.type/ref (get-in schema [% :db/valueType])) (keys (:identity-schemas ix)))]
+                          (loop [todo (keep #(when (whole? %) (:db/id (d/entity db (second %)))) tx-data) seen #{} out (vec tx-data)]
                             (if-let [e (first todo)]
                               (if (seen e)
-                                (recur (rest todo) seen cites out)
+                                (recur (rest todo) seen out)
                                 (let [dependents (for [a refs d (d/datoms db :avet a e)] (:e d))]
                                   (recur (concat (rest todo) dependents) (conj seen e)
-                                         (into cites (for [d (d/datoms db :avet :seon.cite/target e)] [(:e d) e]))
                                          (into out (for [x dependents :when (not (seen x))] [:db.fn/retractEntity x])))))
-                              (into out (gone-tx seen cites))))))))
+                              out))))))
         tx-data (ends-with tx-data)]
     (when-let [e (invalid-datom db tx-data schemas)] (refuse! e))
     ;; Datahike refuses a lookup ref that names no entity (a cite's target, a wiki link: its :entity-id/missing): made the

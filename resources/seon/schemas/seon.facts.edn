@@ -377,7 +377,6 @@
                                  [:api {:optional true} :map]]]
                    [:what {:optional true} :string] [:evidence {:optional true} :map]
                    [:bug? {:optional true} :boolean] [:defect {:optional true} :seon.task/id]]
- :seon.task/gone [:and {:description "What the task's text cites whose cites ended with their targets (each target's identity value), written by the write that ended them and cleared when the text is written again. See docs/references.md#task-references."} [:vector :any] :seon.db/plain]
  :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:agent {:optional true} :string] [:turn {:optional true} :int]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared :string
@@ -393,7 +392,7 @@
                           [:seon.task/model {:optional true} :seon.task/model]
                           [:seon.task/evidence {:optional true} :seon.task/evidence]
                           [:seon.task/gate? {:optional true} :seon.task/gate?]
-                          [:seon.task/failure {:optional true} :seon.task/failure] [:seon.task/gone {:optional true} :seon.task/gone]
+                          [:seon.task/failure {:optional true} :seon.task/failure]
                           [:seon.task/cause {:optional true} :seon.task/cause]
                           [:seon.task/agent {:optional true} :seon.task/agent] [:seon.task/outcome {:optional true} :seon.task/outcome]
                           [:seon.task/started-by {:optional true} :seon.task/started-by] [:seon.task/reason {:optional true} :seon.task/reason] [:seon.task/reasons {:optional true} :seon.task/reasons]
@@ -468,13 +467,11 @@
                     [:pins {:optional true} [:map-of :string :string]] [:digest {:optional true} :string]
                     [:files :int] [:forms :int] [:retracted {:optional true} :int] [:ms number?]
                     [:error {:optional true} :string]
-                    ;; as the last boot states it (seon.root/booted-source): its id, the git tree its binary was built from
-                    ;; (:binary-tree) and that tree's program (:binary); only when that tree is :tree, the one main was last
-                    ;; brought to from outside (an import or a landing; what agents merged since is main's own), the binary's
-                    ;; inputs with no program facts (seon.fx/inputs), what its agents key their test results by, and :program the
-                    ;; binary's, else main's at boot (seon.program/program-digest); two trees are seon.problems/stale-binary's row
-                    [:boot {:optional true} :string] [:binary {:optional true} :string] [:binary-tree {:optional true} :string]
-                    [:program {:optional true} :string]
+                    ;; as the last boot states it (seon.root/booted-source): its id, the program its binary was built from
+                    ;; (:binary) beside main's at boot (:program, seon.program/program-digest), and, only when they are one
+                    ;; program, the binary's inputs with no program facts (seon.fx/inputs), what its agents key their test
+                    ;; results by; two programs are seon.problems/stale-binary's row
+                    [:boot {:optional true} :string] [:binary {:optional true} :string] [:program {:optional true} :string]
                     ;; the build's index only: the code that made it (seon.root/index-code)
                     [:indexed-by {:optional true} :string]
                     [:inputs {:optional true} :seon.program/inputs]]

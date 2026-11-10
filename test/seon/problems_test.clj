@@ -706,27 +706,26 @@
         (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
 
 (deftest a-root-on-a-stale-binary-is-a-problem
-  ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, docs/health.md#a-stale-binary: a boot writes the git tree its
-  ;; binary was built from beside the tree main was last brought to from outside (seon.root/booted-source), and health derives
-  ;; one :stale-binary row while they differ, gone at the next boot on a matching binary: never stored, no clock, never an
-  ;; import. What agents merged into main since (its program moved, its tree not) is main's own and no row
+  ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, as seon.root/a-boot-resumes-from-the-db builds it: a boot
+  ;; writes the program its binary was built from beside main's on root's source fact (seon.root/booted-source), and health
+  ;; derives one :stale-binary row while they differ, gone at the next boot on a matching binary: never stored, no clock,
+  ;; never an import. Red before: no boot wrote the binary's program, and no class read it
   (let [db0 (world)
-        held {:root "/c" :files 1 :forms 1 :ms 1 :tree "t1"}
+        held {:root "/c" :files 1 :forms 1 :ms 1}
         in {:env "e" :tree "t" :config {:seon.config.agent/max-turns "40"}}
         cfg-in {:seon.config.agent/max-turns "41"}
         boot (fn [db b built main] (d/db-with db [{:seon.root/id :root :seon.root/source (root/booted-source held b built main cfg-in)}]))
         source #(:seon.root/source (d/pull % [:seon.root/source] [:seon.root/id :root]))
-        rows #(mapv (juxt :binary :tree) (get-in (problems/health %) [:classes :stale-binary :rows]))
-        stale (boot db0 "b1" {:program "p0" :tree "t0" :inputs in} "p1")]
+        rows #(mapv (juxt :binary :program) (get-in (problems/health %) [:classes :stale-binary :rows]))
+        stale (boot db0 "b1" {:program "p0" :inputs in} "p1")]
     (is (= [] (rows db0)) "no source fact: nothing known, no row")
-    (is (= [["t0" "t1"]] (rows stale)) "a binary of another tree than main's: one row naming both")
+    (is (= [["p0" "p1"]] (rows stale)) "a binary of another program than main's: one row naming both")
     (is (nil? (:inputs (source stale))) "and no inputs to key agents' verdicts by")
-    (is (= [[nil "t1"]] (rows (boot db0 "b1" nil "p1"))) "a binary whose build recorded no tree is no match either")
-    (let [merged (boot stale "b2" {:program "p0" :tree "t1" :inputs in} "p2")]
-      (is (= [] (rows merged)) "a binary of main's tree, main moved by what its agents merged (p2): no row")
-      (is (= (assoc in :config cfg-in) (:inputs (source merged))) "its inputs, with the config in force, are what agents key verdicts by")
-      (is (= ["b2" "p0" "p0" "t1"] ((juxt :boot :binary :program :binary-tree) (source merged)))
-          "and its program the binary's, the one those inputs describe"))))
+    (is (= [[nil "p1"]] (rows (boot db0 "b1" nil "p1"))) "a binary whose build recorded no program is no match either")
+    (let [fresh (boot stale "b2" {:program "p1" :inputs in} "p1")]
+      (is (= [] (rows fresh)) "the next boot on a binary of main's program: gone, nothing written to close it")
+      (is (= (assoc in :config cfg-in) (:inputs (source fresh))) "its inputs, with the config in force, are what agents key verdicts by")
+      (is (= ["b2" "p1" "p1"] ((juxt :boot :binary :program) (source fresh)))))))
 
 (deftest a-pin-the-wiki-states-is-the-recorded-gitlink
   (let [db0 (world)
@@ -1173,33 +1172,6 @@
                                                    :seon.task/plan "The root tile shows what boot loaded."}]))
         rows (into #{} (map (juxt (comp :task :evidence) (comp :reason :evidence))) (get-in (problems/health db) [:classes :uncited-task :rows]))]
     (is (contains? rows ["app/tile" :no-references]) "a ready :whole task whose plan names nothing the context can pull")))
-
-(deftest a-cite-ends-with-its-target-and-its-task-shows-what-is-gone
-  ;; docs/storage.md#the-write-checks-every-entity-it-touches, docs/references.md#task-references: an import that retracts a var
-  ;; a task cites left the cite without its required target, so the write check refused the whole import (2026-11-10:
-  ;; generated slow-test tasks citing tests, and root on main's older code could not boot). The cite ends with its target on
-  ;; the one path, and that write leaves the task :seon.task/gone naming it, which health reads (a datom, no parse)
-  (let [db (t/with (world) (t/task 'app.calc "gone" "Make `app.calc/inc2` add two exactly." #{'app.calc-test/total-sums}))
-        task #(d/pull % [:seon.task/gone] [:seon.task/id "app.calc/gone"])
-        cites #(set (map seon.task/cited-name (seon.task/cites-of % (pdb/eid % :seon.task/id "app.calc/gone"))))
-        files (into {} (for [n ['app.report 'app.calc-test]] [(:ns/file (d/entity db [:ns/name n])) (seon.source/file-text db n)]))
-        calc (str/replace (seon.source/file-text db 'app.calc) #"\n\n\(defn inc2[^\n]*\n" "\n")
-        _ (is (contains? (cites db) 'app.calc/inc2) "the task cites the var")
-        _ (is (not (str/includes? calc "inc2")) "the file the import reads no longer defines it")
-        after (t/with db (seon.source/replace-tx db (assoc files "src/app/calc.clj" calc)))
-        rows (fn [db] (filter #(= "app.calc/gone" (:task %)) (get-in (problems/health db) [:classes :uncited-task :rows])))]
-    (is (nil? (pdb/eid after :var/name 'app.calc/inc2)) "the import is accepted and the var is gone")
-    (is (not (contains? (cites after) 'app.calc/inc2)) "its cite ended with it")
-    (is (empty? (d/datoms after :avet :seon.cite/id "app.calc/gone app.calc/inc2")) "nothing of the cite is left")
-    (is (= ['app.calc/inc2] (:seon.task/gone (task after))) "the write that ended it left the task what is gone")
-    (is (= #{[:gone ['app.calc/inc2]] [:no-references nil]} (set (map (juxt :reason :gone) (rows after))))
-        "the task shows that its plan names what no longer exists (and, its one cite gone, that it cites nothing the context pulls)")
-    (is (empty? (rows db)) "before the import it was no problem")
-    (let [plan "Make ``app.calc/inc2`` add two again, once it is written."
-          fixed (t/with after (into [[:db/add [:seon.task/id "app.calc/gone"] :seon.task/plan plan]]
-                                    (seon.task/rederive-tx after {:seon.task/id "app.calc/gone" :seon.task/plan plan})))]
-      (is (nil? (:seon.task/gone (task fixed))) "the plan rewritten without the name clears the fact")
-      (is (not-any? #(= :gone (:reason %)) (rows fixed)) "and the row"))))
 
 (defn- var-forms
   "db0 with the vars app.cite/v0..: each in a src namespace, its form src, docstring and kind as given
