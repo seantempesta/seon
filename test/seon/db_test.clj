@@ -6,7 +6,7 @@
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
             [datahike.datom :as dd] [datahike.index.persistent-set :as psi] [seon.merge] [org.replikativ.persistent-sorted-set]
-            [jolt.scheme :as scm] [superv.async :as sv]))
+            [jolt.scheme :as scm] [superv.async :as sv] [konserve.metrics :as km] [jolt.ffi :as ffi]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
@@ -80,6 +80,201 @@
           (is (< e (get-in r2 [:tempids "n"])))
           (is (< t (:max-tx (:db-after r2))))))
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(def ^:private stores-made
+  "The paths of the stores on disk branched-store made, removed by the test that measured them."
+  (atom []))
+
+(defn branched-store
+  "The arguments of open-and-release: the path of an LMDB store of its own (seon.db/open!'s, no example
+  program) holding n branches besides :db, each made from :db as a root's main is and given a commit
+  of its own, opened once since, so its ids page is stamped. Its path is kept in stores-made."
+  [n]
+  (let [path (str (seon.config/checkout) "/target/db-test-branched-" (random-uuid))
+        {:keys [conn cfg]} (pdb/open! :lmdb path 0 :db)]
+    (swap! stores-made conj path)
+    (doseq [i (range n) :let [b (keyword (str "b" i))]]
+      (d/branch! conn :db b)
+      (let [c (pdb/connect (assoc cfg :branch b))]
+        (d/transact c {:tx-data [{:note/text (str "n" i) :note/agent :t}] :tx-meta (pdb/tx-meta b)})
+        (d/release c)))
+    (d/release conn)
+    (d/release (:conn (pdb/open! :lmdb path 0 :db)))
+    [path]))
+
+(defn open-and-release
+  "The store at path opened as root opens it (seon.db/open!, :db its main) and released."
+  [path] (d/release (:conn (pdb/open! :lmdb path 0 :db))) nil)
+
+(deftest an-open-reads-no-head-but-its-own
+  ;; docs/storage.md#ids: a store whose ids page is stamped with this boot and its file is opened
+  ;; without reading every branch's head, so an open costs the same at any number of branches. Before
+  ;; (every open moved the page past every head, datahike.writing/set-ids!'s roster walk): 2 reads,
+  ;; 23.7k ticks and 68 KB a branch (0.55 M ticks at 1 branch, 24.2 M at 1,000; this proof read
+  ;; 539k ticks and 2.46 MB at 1 and 753k and 3.06 MB at 10, red). After, measured 2026-11-10: 373k
+  ;; ticks and 1.86 MB at 1, 10, 100 and 1,000 branches (10 reads). Stores on disk of this test's
+  ;; own, the last resort: the page is a file beside data.mdb; removed at the end
+  (try
+    (cost/proof
+      {:of 'seon.db-test/open-and-release :input 'seon.db-test/branched-store
+       :n "branches the store holds besides :db"
+       :work "the store's id read, :db connected, the ids page mapped and its stamp compared, the schema compared: none of it per branch"
+       :growth :constant
+       :fixed {:ticks 400000 :bytes 2000000}
+       :sizes [1 10 100]})
+    (finally (run! #(clojure.java.shell/sh "rm" "-rf" %) @stores-made) (reset! stores-made []))))
+
+(defn- heads-read
+  "[f's value, how many times f folded a store's roster]: the roster fold (konserve's reduce-log) is
+  how datahike.writing/set-ids! reaches every branch's head, and an open makes no other."
+  [f]
+  (let [n (atom 0)]
+    (km/add-sink! ::heads-read (fn [e] (when (= [:api :reduce-log] [(:level e) (:op e)]) (swap! n inc))))
+    (try [(f) @n] (finally (km/remove-sink! ::heads-read)))))
+
+(defn- page-words
+  "The ids page beside the store at path, mapped again here: {:eid :tx} (words 0 and 1, the last ids issued)."
+  [path]
+  (let [[p _] (pdb/c-ids-open (str path "/ids"))] {:eid (ffi/read p :uint64 0) :tx (ffi/read p :uint64 8)}))
+
+(defn- opened
+  "The store at path opened as root opens it: [{:conn :heads (the highest :max-eid and :max-tx over every
+  branch's head, the scan's own answer: the oracle) :page (page-words, read after the open)} roster folds]."
+  [path]
+  (let [[{:keys [conn]} folds] (heads-read #(pdb/open! :lmdb path 0 :db))]
+    [{:conn conn :heads (#'datahike.writing/roster-max (:store @conn)) :page (page-words path)} folds]))
+
+(defn- issues-past-heads
+  "Is the page past every head's ids, and does a transaction on conn take ids past them? Then conn is released."
+  [{:keys [conn heads page]}]
+  (try
+    (let [r (d/transact conn {:tx-data [{:db/id "n" :note/text "after" :note/agent :t}] :tx-meta (pdb/tx-meta :db)})]
+      (and (<= (:max-eid heads) (:eid page)) (<= (:max-tx heads) (:tx page))
+           (< (:max-eid heads) (get-in r [:tempids "n"])) (< (:max-tx heads) (:max-tx (:db-after r)))))
+    (finally (d/release conn))))
+
+(defn- commit-notes!
+  "k transactions of a note each on branch b of the store conn opened, made from :db when the store lacks it."
+  [conn b k]
+  (when-not (pdb/branch? conn b) (d/branch! conn :db b))
+  (let [c (pdb/connect (assoc (:config @conn) :branch b))]
+    (try (dotimes [i k] (d/transact c {:tx-data [{:note/text (str (name b) " " i) :note/agent :t}] :tx-meta (pdb/tx-meta b)}))
+         (finally (d/release c)))))
+
+(deftest a-killed-writer-leaves-the-page-past-its-commits
+  ;; docs/storage.md#ids: a process killed loses nothing of the page, which every writer takes its ids
+  ;; from (both files' pages are in the OS page cache), so the next open trusts it and reads no head. A
+  ;; child commits on two branches, takes ids it never commits, and is SIGKILLed with no sync and no
+  ;; release; the open after it folds no roster, and its page and its next transaction are past every
+  ;; head's ids (found by the scan itself, the oracle). A store on disk of its own, the last resort: the
+  ;; page is a file beside data.mdb; removed at the end
+  (let [path (str (seon.config/checkout) "/target/db-test-killed-" (random-uuid))]
+    (try
+      (d/release (:conn (pdb/open! :lmdb path 0 :db)))
+      (is (= {:signal 9}
+             (lib/fork! {:child #(let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+                                   (commit-notes! conn :killed-a 3)
+                                   (commit-notes! conn :killed-b 3)
+                                   (dotimes [_ 5] (pdb/take-eid @conn))
+                                   (lib/kill! (lib/c-getpid) 9))
+                         :refused (fn [n] {:refused n})
+                         :parent lib/wait-status}))
+          "the writer was killed")
+      (let [[o folds] (opened path)]
+        (is (= 0 folds) "the open read no head: the page is trusted")
+        (is (= 3 (d/q '[:find (count ?n) . :where [?n :note/text]] (pdb/head (:conn o) :killed-b)))
+            "the killed writer's commits are in the store")
+        (is (issues-past-heads o) "the page and the next transaction are past every head's ids"))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-copied-or-new-page-is-moved-past-the-heads
+  ;; docs/storage.md#ids: a page made apart from its store is behind it, and its stamp says so: a store
+  ;; cloned without its ids file (as bin/check takes its stores), one cloned with a copy of an ids file
+  ;; taken before its last commits (cp: another inode), and one whose ids file was removed (a new file is
+  ;; all zero, so a reused inode number is no stamp) each fold the roster at their open, and issue past
+  ;; every head. Stores on disk of this test's own, the last resort; removed at the end
+  (let [base (str (seon.config/checkout) "/target/db-test-copied-" (random-uuid))
+        path (str base "/store")
+        sh (fn [& args] (is (zero? (:exit (apply clojure.java.shell/sh args))) (str/join " " args)))]
+    (try
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)]
+        (commit-notes! conn :copied 2)
+        (d/release conn))
+      ;; the page as it was, then more commits: the copy of it is behind the copy of data.mdb
+      (sh "cp" (str path "/ids") (str base "/ids-before"))
+      (let [{:keys [conn cfg]} (pdb/open! :lmdb path 0 :db)]
+        (commit-notes! conn :copied 3)
+        (pdb/sync! cfg)
+        (d/release conn))
+      (doseq [[case ids] [["no ids file" nil] ["a copied ids file, behind" (str base "/ids-before")]]]
+        (let [to (str base "/" (str/replace case #"\W" "-"))]
+          (sh "mkdir" "-p" to)
+          (sh "cp" "-c" (str path "/data.mdb") (str to "/data.mdb"))
+          (when ids (sh "cp" ids (str to "/ids")))
+          (testing case
+            (let [[o folds] (opened to)]
+              (is (= 1 folds) "the open read the heads")
+              (is (issues-past-heads o) "and issues past them")))))
+      (testing "the ids file removed and made again"
+        (sh "rm" (str path "/ids"))
+        (let [[o folds] (opened path)]
+          (is (= 1 folds) "the open read the heads")
+          (is (issues-past-heads o) "and issues past them")))
+      (testing "the original store, reopened: its page is trusted"
+        (let [[o folds] (opened path)]
+          (is (= 0 folds))
+          (is (issues-past-heads o))))
+      (finally (clojure.java.shell/sh "rm" "-rf" base)))))
+
+(deftest a-page-from-another-boot-is-moved-past-the-heads
+  ;; docs/storage.md#ids: after the OS boots again the page may have lost what it was past (power lost,
+  ;; the OS crashed), so a stamp of another boot is not trusted. A reboot is told to the page by changing
+  ;; its stamp's boot identity (word 2, native/ids.c's layout) through a mapping of the file: the open
+  ;; folds the roster and stamps it again, and the open after that trusts it. A store on disk of its own,
+  ;; the last resort; removed at the end
+  (let [path (str (seon.config/checkout) "/target/db-test-reboot-" (random-uuid))]
+    (try
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (commit-notes! conn :booted 2) (d/release conn))
+      (let [[p _] (pdb/c-ids-open (str path "/ids"))
+            boot (ffi/read p :uint64 16)]
+        (is (= 1 (pdb/c-ids-trusted p (str path "/ids") (pdb/data-file :lmdb path))) "stamped by the open")
+        (ffi/write p :uint64 (inc boot) 16)
+        (is (= 0 (pdb/c-ids-trusted p (str path "/ids") (pdb/data-file :lmdb path))) "another boot's stamp is not trusted")
+        (let [[o folds] (opened path)]
+          (is (= 1 folds) "the open read the heads")
+          (is (issues-past-heads o)))
+        (is (= boot (ffi/read p :uint64 16)) "and stamped this boot")
+        (let [[o folds] (opened path)] (d/release (:conn o)) (is (= 0 folds) "the next open trusts it")))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-page-beside-a-replaced-data-file-is-moved-past-the-heads
+  ;; docs/storage.md#ids: the stamp names the store's data file too, so a data.mdb renamed in under a
+  ;; kept ids file is not trusted: an older copy of the store (its page is ahead, but the open cannot
+  ;; know it), and a copy that went further than the page (a clone that committed on: the kept page is
+  ;; behind it, and trusting it would issue ids the store holds). Each open folds the roster and issues
+  ;; past every head. Stores on disk of this test's own, the last resort; removed at the end
+  (let [base (str (seon.config/checkout) "/target/db-test-replaced-" (random-uuid))
+        path (str base "/store")
+        clone (str base "/clone")
+        sh (fn [& args] (is (zero? (:exit (apply clojure.java.shell/sh args))) (str/join " " args)))]
+    (try
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (commit-notes! conn :replaced 2) (d/release conn))
+      (sh "cp" "-c" (pdb/data-file :lmdb path) (str base "/older.mdb"))
+      (let [{:keys [conn]} (pdb/open! :lmdb path 0 :db)] (commit-notes! conn :replaced 2) (d/release conn))
+      (testing "an older copy of the store renamed over its data file"
+        (sh "mv" (str base "/older.mdb") (pdb/data-file :lmdb path))
+        (let [[o folds] (opened path)]
+          (is (= 1 folds) "the open read the heads")
+          (is (issues-past-heads o) "and issues past them")))
+      (testing "a copy that went further than the page renamed over its data file"
+        (sh "mkdir" "-p" clone)
+        (sh "cp" "-c" (pdb/data-file :lmdb path) (pdb/data-file :lmdb clone))
+        (let [{:keys [conn]} (pdb/open! :lmdb clone 0 :db)] (commit-notes! conn :replaced 5) (d/release conn))
+        (sh "mv" (pdb/data-file :lmdb clone) (pdb/data-file :lmdb path))
+        (let [[o folds] (opened path)]
+          (is (= 1 folds) "the open read the heads")
+          (is (issues-past-heads o) "and issues past them")))
+      (finally (clojure.java.shell/sh "rm" "-rf" base)))))
 
 (deftest the-store-reports-its-map-use
   ;; a store on disk of this test's own, the last resort: what is proved is how an LMDB
