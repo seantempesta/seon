@@ -202,7 +202,9 @@
   ;; with one change (a git index of its own: the repository is not touched)
   (let [db (test-runner/program)
         tree (fx/tree-id here)
-        g (program/reach-graph db (fx/declared-refs seon.system/built-text))
+        ;; the graph the plan kept for this program (test-runner/reach-graph-of: decoded and brought to date, a sixth of
+        ;; building it; docs/source.md#tests-run-by-reach), built only when the kept one is another builder's
+        g (test-runner/reach-graph-of db (fx/declared-refs seon.system/built-text) (ts/kept-program-store))
         git (fn [env & args] (:out (apply sh/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
         built-with (fn [path f]
                      ;; tree with path's text replaced by (f text), or its gitlink moved when f is :pin
