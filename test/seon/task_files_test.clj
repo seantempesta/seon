@@ -111,7 +111,7 @@
              :when (or (nil? (pdb/eid db a v)) (= tg [:seon.task/id id]))]
          [id k tg])))
 
-(deftest the-trees-task-files-and-pages-load-with-no-refusal
+(deftest ^{:seon.test/reads #{:program}} the-trees-task-files-and-pages-load-with-no-refusal
   ;; docs/references.md#an-entity-cites: a cite's target is a ref, so a task file or a wiki page that cites what does not exist
   ;; is refused at its load. Every task file and page of this tree, on its own program (the program store's branch of
   ;; this tree), loads by the checked write with no refusal: the wiki first, then the tasks that cite it. A task file is

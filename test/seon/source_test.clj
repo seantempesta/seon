@@ -196,7 +196,7 @@
         (is (nil? (program/config-refused db0 (source/tx-of db0 (assoc files schema-file schema-text config/shipped-file (str/replace-first conf ":seon.config.zz/k 0" ":seon.config.zz/k 5")) false)))
             "and one valid only under the schema the same import registers is not")))))
 
-(deftest a-binary-is-current-for-a-tree-unless-what-differs-reaches-root
+(deftest ^{:seon.test/reads #{:program}} a-binary-is-current-for-a-tree-unless-what-differs-reaches-root
   ;; docs/source.md#the-binary-records-its-program: the one rule (Point, 2026-11-10) the gate's build, the spawn refusal and the
   ;; stale-binary row ask. db is the checkout's program, so tree is its working tree; each case is the binary's tree made from it
   ;; with one change (a git index of its own: the repository is not touched)

@@ -259,7 +259,7 @@
     (is (= (refs whole 'app.pt-qa/f) (refs alone 'app.pt-qa/f)) "the same facts whether the named namespace was analyzed or not")
     (is (= (refs whole 'app.pt-qa/m) (refs alone 'app.pt-qa/m)) "for a macro's template too")))
 
-(deftest a-name-a-test-hands-over-quoted-is-what-it-reaches
+(deftest ^{:seon.test/reads #{:program}} a-name-a-test-hands-over-quoted-is-what-it-reaches
   ;; root, 2026-10-27: (cost/proof {:of 'seon.program/reach-update ...}) did not reach reach-update,
   ;; so its digest stayed when reach-update changed and a stored green hid a red (17 calls against
   ;; 16). A name quoted in a test's namespace is one the test hands to what runs it by name: a reach
@@ -864,7 +864,7 @@
           (let [st (for [id fr w (adj id) :when (not (contains? from w))] [w id])]
             (recur (vec (distinct (map first st))) (reduce (fn [m [w id]] (if (contains? m w) m (assoc m w id))) from st))))))))
 
-(deftest a-test-that-starts-a-process-reaches-the-program-it-runs
+(deftest ^{:seon.test/reads #{:program}} a-test-that-starts-a-process-reaches-the-program-it-runs
   ;; ctx-atom, 2026-10-27: seon.server-test's in-agent tests kept one reach digest across two fixes to
   ;; code their agent runs (seon.turn/observe, seon.merge/changed-vars), so a stored red and a later
   ;; green shared it and bin/test listed them flaky. The agent's code is reached over a socket and as
@@ -1178,7 +1178,7 @@
        (record-ran! rconn (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
        (is (= [] (:run (run-plan a rconn))) "with each green root's run stored, bin/test's plan of the tree runs nothing")))))
 
-(deftest a-test-digest-takes-only-the-config-keys-it-reads
+(deftest ^{:seon.test/reads #{:program}} a-test-digest-takes-only-the-config-keys-it-reads
   ;; every digest took the whole config in force (seon.fx/config-input), so a key no test reads
   ;; (an agent's max-running a root was --set with) moved all 917 and none was reused: a test's
   ;; digest takes the values of the keys its reach names (seon.program/config-reads)
@@ -1206,7 +1206,7 @@
     (is (false? (#'program/computed-config-reader? '{:ns seon.config :refs #{seon.config/resolve} :keywords #{}})) "seon.config's own readers name none")
     (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader, found by its facts")))
 
-(deftest no-test-takes-the-tree-in-its-digest
+(deftest ^{:seon.test/reads #{:program}} no-test-takes-the-tree-in-its-digest
   ;; owner, 2026-10-27: "no tests should include all of src". A test that reads files (a test of the
   ;; docs, of the task files) or runs the binary was digested by the whole tree, so any edit reran its
   ;; 286; it is digested by what it reaches, like any other test, and a file or a binary outside its
@@ -1346,18 +1346,31 @@
 (deftest a-comment-or-whitespace-edit-moves-no-test
   ;; owner, 2026-11-06: "make sure test reuse is working": a form's own digest was its text's, so a reflowed body or a
   ;; comment reran every test reaching the form. It is the read text less comments and whitespace runs
-  ;; (seon.program/form-ids); a docstring is not left out (it is data some code reads: docs/source.md#what-a-test-takes-of-a-forms-text)
+  ;; (seon.program/form-ids). A docstring is left out too (owner, 2026-11-10: a test's digest takes code, not docstrings):
+  ;; a test that reads docs or the program says so on the test, ^{:seon.test/reads #{:docs}}, and takes the program's
+  ;; text (docs/source.md#what-a-test-takes-of-a-forms-text)
   (let [src "(defn add \"Adds.\" [a b] (+ a b))"
         db (apply record (empty-db) (concat (take 2 calc-srcs)
                                             ['app.pt-calc src
+                                             'app.pt-calc "(defn neg \"Negates.\" [x] (- x))"
                                              'user "(ns app.pt-calc-test (:require [clojure.test :refer [deftest is]] [app.pt-calc :refer [add]]))"
-                                             'app.pt-calc-test "(deftest add-test (is (= 3 (add 1 2))))"]))]
-    (is (= '#{} (selected db (record db 'app.pt-calc "(defn add \"Adds.\"\n  [a b]\n  ;; commutative\n  (+ a   b))"))) "a comment and whitespace")
-    (is (= '#{} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b]\n  (+ a b)) ; tail"))) "a trailing comment")
-    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Sums.\" [a b] (+ a b))"))) "a docstring is data some code reads")
-    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ b a))"))) "a change of code")
-    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ a \"x;y\"))"))) "a string literal holding a ; and spaces is code")
-    (is (= '#{app.pt-calc-test/add-test} (selected db (record db 'app.pt-calc "(defn ^:private add \"Adds.\" [a b] (+ a b))"))) "a visibility")
+                                             'app.pt-calc-test "(deftest add-test (is (= 3 (add 1 2))))"
+                                             'app.pt-calc-test "(deftest ^{:seon.test/reads #{:docs}} docs-test (is (string? (:doc (meta #'add)))))"]))]
+    (is (= '#{app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\"\n  [a b]\n  ;; commutative\n  (+ a   b))")))
+        "a comment and whitespace: only the reader of the program's text, which takes its every byte")
+    (is (= '#{app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b]\n  (+ a b)) ; tail"))) "a trailing comment")
+    (is (= '#{app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Sums.\" [a b] (+ a b))")))
+        "a docstring moves only the test that says it reads docs")
+    (is (= '#{app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn neg \"Flips the sign.\" [x] (- x))")))
+        "and that test takes the whole program's text: a docstring of a form it does not reach")
+    (let [code #(second (program/form-ids 'app.x % 0 (read-string %)))]
+      (is (= (code "(def x \"Doc.\" 5)") (code "(def x \"Other.\" 5)")) "a def's docstring")
+      (is (= (code "(ns app.x \"Doc.\" (:require [a.b]))") (code "(ns app.x \"Other.\" (:require [a.b]))")) "a namespace's")
+      (is (not= (code "(def x \"Doc.\")") (code "(def x \"Other.\")")) "a def's only string is its value")
+      (is (not= (code "(defmethod m \"a\" [x] x)") (code "(defmethod m \"b\" [x] x)")) "a method's dispatch value is code"))
+    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ b a))"))) "a change of code")
+    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ a \"x;y\"))"))) "a string literal holding a ; and spaces is code")
+    (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn ^:private add \"Adds.\" [a b] (+ a b))"))) "a visibility")
     (let [code #(second (program/form-ids 'app.x % 0 (read-string %)))]
       (is (= (code "(def x \"a;b  c\")") (code "(def x   \"a;b  c\"   ; why\n)")) "a string keeps its own ; and spaces, the rest is squeezed")
       (is (not= (code "(def x \"a;b  c\")") (code "(def x \"a;b c\")")) "and its spaces are its own")

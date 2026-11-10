@@ -690,7 +690,7 @@
     (is (some #{'a/slow} (:run-tests (plan false ["a/slow"]))) "named, it runs")
     (is (some #{'a/slow} (:run-tests (plan true nil))) "and the full run runs it")))
 
-(deftest the-program-a-test-judges-is-its-processs-branch
+(deftest ^{:seon.test/reads #{:program}} the-program-a-test-judges-is-its-processs-branch
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a test that walks the program reads test-runner/program. In a process
   ;; that holds a branch (an agent's test child) that is the branch's db itself: nothing is imported, and the test judges
   ;; the agent's change. Red before: such a test composed program-db of the checkout's tree, so in an agent's prove, where

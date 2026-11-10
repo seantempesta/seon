@@ -35,7 +35,7 @@
       (is (nil? (find-ns 'seon.warm)) "its scratch namespace is gone")
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
-(deftest root-boots-without-test-fixtures
+(deftest ^{:seon.test/reads #{:program}} root-boots-without-test-fixtures
   ;; the compiler's facts of the checkout (src and test imported as program facts): the
   ;; release binary compiles what src requires, so no src namespace requires one whose file is
   ;; in test/ (the check driver, the e2e runner, the scripted model's fixtures); a scripted root loads its fixture from the checkout by name
@@ -56,7 +56,7 @@
                    [(clojure.string/starts-with? ?file "src/")]] db)
             (d/q '[:find ?n ?doc :where [?ns :ns/name ?n] [?ns :ns/doc ?doc] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db))))
 
-(deftest no-docstring-carries-a-date
+(deftest ^{:seon.test/reads #{:program}} no-docstring-carries-a-date
   ;; a docstring says what a var or
   ;; namespace is now; when a ruling was made and what a measurement read that day are git's and
   ;; DECISIONS'. Read from the compiler's facts of src (:var/doc, :ns/doc), so a new one is red
@@ -67,7 +67,7 @@
     (is (= [] (sort (for [[n doc] rows :when (dated doc)] [n (dated doc)])))
         "no src docstring holds an ISO date")))
 
-(deftest only-measure-reads-the-tick-counter
+(deftest ^{:seon.test/reads #{:program}} only-measure-reads-the-tick-counter
   ;; task seon.profile/a-call-is-measured-one-way: a call is measured one way, so no src form but
   ;; seon.profile/measure! reads the engine's tick counter (jolt.host/ticks-of or jolt.host/ticks):
   ;; a measurement built beside it is red here. Read from the compiler's facts
@@ -77,7 +77,7 @@
                      db ['jolt.host/ticks-of 'jolt.host/ticks])]
     (is (= ['seon.profile/measure!] (vec callers)))))
 
-(deftest a-tasks-outcomes-are-read-once
+(deftest ^{:seon.test/reads #{:program}} a-tasks-outcomes-are-read-once
   ;; task seon.task/a-runs-lifecycle-is-read-once: a task's outcome sets are declared once, on
   ;; :seon.task/outcome's schema, and read once, by seon.task (finished, judged, failed), which every
   ;; view and judge requires; a second reader is red here. Each src form's recorded source read as
@@ -95,7 +95,7 @@
                                              (read-string {:read-cond :allow :features #{:clj}} src)))))]
     (is (= #{'seon.task} (into #{} (keep (fn [[nsn src]] (when (reads? nsn src) nsn))) forms)))))
 
-(deftest a-key-read-at-load-says-so
+(deftest ^{:seon.test/reads #{:program}} a-key-read-at-load-says-so
   ;; docs/config.md#what-waits-for-a-rebuild: a top-level def of src that reads a config key keeps the value it loaded with whatever a branch states, so its key carries :seon.config/at-load, and seon.config/waiting can say so
   (let [db (runner/program)
         forms (d/q '[:find ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/file ?file]
@@ -109,7 +109,7 @@
     (is (seq read-at-load))
     (is (= [] (vec (remove #(get-in seon.config/schema-forms [% 1 :seon.config/at-load]) read-at-load))))))
 
-(deftest a-bound-is-a-config-key
+(deftest ^{:seon.test/reads #{:program}} a-bound-is-a-config-key
   ;; task seon.config/a-bound-is-a-config-key (docs/config.md#constants, only documented config): every limit,
   ;; bound or default is a config key. Read from the compiler's facts (each src form's recorded
   ;; source, as data): a top-level def of a number, and a literal count over 2 given to take,
@@ -144,14 +144,14 @@
     (is (= #{} (apply disj named sites)) "and every name there is still such a site")))
 
 ;; docs/resolution.md: Jolt compiles a qualified name with no var and fails only when the line runs, so a path no test runs ships it
-(deftest every-name-a-form-uses-is-a-var
+(deftest ^{:seon.test/reads #{:program}} every-name-a-form-uses-is-a-var
   (let [db (runner/program)
         ;; the program's own: a test names what's gone to say it's gone
         acct {:refs (set (d/q '[:find [?r ...] :where [?f :form/refs ?r] [?f :form/ns ?ns] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db))}]
     (run! #(require (symbol (namespace %))) (filter #(and (namespace %) (re-find #"^(seon|my)\." (namespace %))) (:refs acct)))
     (is (= [] (seon.program/unknown-refs acct)))))
 
-(deftest an-edge-asks-one-way
+(deftest ^{:seon.test/reads #{:program}} an-edge-asks-one-way
   ;; task seon.step/an-edge-asks-one-way: an edge asks a proc one way, seon.step/ask-edge, which
   ;; answers a closed channel at once; no src form outside seon.step puts a request carrying its
   ;; promise (:p) on a channel itself. src's forms read as data from the compiler's facts
@@ -171,7 +171,7 @@
                      nsn))]
     (is (= #{'seon.step} puts))))
 
-(deftest an-errors-message-is-read-one-way
+(deftest ^{:seon.test/reads #{:program}} an-errors-message-is-read-one-way
   ;; task seon.step/an-errors-message-is-read-one-way: an exception's message, or its class, is
   ;; seon.step/error-msg; no src form outside seon.step writes (or (ex-message e) (str (type e)))
   ;; again. src's forms read as data from the compiler's facts. Not covered: the same read written
@@ -202,7 +202,7 @@
                                  (map? x) (quoted (get x :seon.error/operation)))))
           (tree-seq coll? seq f))))
 
-(deftest an-error-names-its-raiser-by-its-var
+(deftest ^{:seon.test/reads #{:program}} an-error-names-its-raiser-by-its-var
   ;; root, 2026-10-25 (the a-map design, 0 green in 9 runs): the error a model reproduced first named
   ;; 'seon.render.value/show, a namespace renamed away, and the runs searched for it. An error names
   ;; its raiser by its var (#'ns/f, the function it is built in), so the compile refuses one that is
@@ -219,7 +219,7 @@
     (is (= [] (vec (for [[nsn src] forms op (quoted-operations nsn (read-in nsn src))] [nsn op])))
         "no src error names its operation as a quoted symbol")))
 
-(deftest git-is-read-through-fx
+(deftest ^{:seon.test/reads #{:program}} git-is-read-through-fx
   ;; task seon.fx/git-is-read-through-fx: git runs in one place, seon.fx/git-run (read two ways, git!:
   ;; a failure throws its words, and git-try: git's no is nil), and a checkout is told by its .git
   ;; through checked-out?; no other src form names the git command or a repository's own files (".git").
