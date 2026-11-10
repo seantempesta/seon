@@ -64,7 +64,71 @@ Proofs: two agents with different data read different context with no code chang
 3. seon.ctx's write! refuses an edit of a var through swap! by checking :var/name in code; instead a property on the var's and form's entity schemas says the entity is changed by its definition, and the edit walk reads it."
   :seon.task/proofs #{}
   :seon.task/kind :work}
+ {:seon.task/name "a-proofs-example-is-the-nearest-test-of-what-it-changes"
+  :seon.task/plan "What exists: the status shows an unwritten proof its namespace's shortest test that uses a helper (seon.ctx.status/test-shape), whatever the task changes. In the T3 rerun (seon.render/the-root-tile-counts-the-program-it-loaded, 2026-11-10) the example drew whole page components (eval-html) where the task needed one tile rendered with a plain ctx ({:seon.ctx/ctx {:process value}}), which the agent found by trying.
 
+The change: the example is the shortest test that calls a function the task cites (seon.program's callers of each cited var, tests only), else today's choice; one lookup per cited var.
+
+Proof: an unwritten proof of a task citing seon.render.ui/process-tile shows as its example a test that calls process-tile."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "an-edit-says-when-it-repaired-the-forms"
+  :seon.task/plan "What exists: seon.repl/edit! reads the new text with the forgiving reader (seon.reader/forgive), which inserts or drops delimiters, and says so only in the answer's :repaired key. In the T3 rerun the agent spent an eval re-reading its edit to see what the repair did.
+
+The change: docs/prompt.md's line on edit! says it repairs delimiters and that :repaired names each repair (seon.ctx.search/repaired's shape), and the eval's printed answer leads with the repair when there is one.
+
+Proof: an edit! whose text drops a closing paren answers with its repair named first in the printed text."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "the-system-prompt-holds-what-agents-use"
+  :seon.task/plan "What exists: docs/prompt.md is about 8.6k chars, every agent's first message. Three baseline agents and the T3 rerun (2026-11-10) each named most of it unused: branches and merging, the page's CSS and its edit format; what they used was the tool list, proofs, and the REPL's rules.
+
+The change, by measurement: for each section of docs/prompt.md, count over a set of real runs (the curated tasks) the evals that use what it says (a form it names, a rule it states, a failure it explains) and the tokens it costs per request; a section no run used moves to the wiki page it belongs to, cited from the prompt by its address, so an agent reads it on demand. The prompt keeps what a first turn needs.
+
+Proof: a cost proof of the system message's size, and the curated tasks' turns to green no worse after the cut."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "a-components-change-sends-what-moved-inside-it"
+  :seon.task/plan "What exists: a turn's page message holds editscript edits between the page parts at two bases (seon.ctx.wire/page-edits-between over seon.render/page-edits). In the T3 rerun (on main's page evals, before stage 2b) the agent's own edits to seon.render.ui/process-tile resent the tile whole three times, about 3k chars each.
+
+The change: measure on 2b's page message, for a cited function edited at the REPL, the bytes its turn's page message carries against the bytes that changed in its source; when the whole part is resent for a small change, the edit's path goes into the part (by element key) rather than replacing it, the owner's rule (2026-11-10): what changed is shown in full, a removal is one line.
+
+Proof: a cited var's one-line edit gives a page message under the size of the var's source."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
  {:seon.task/name "ctx-reads-attribute-owners-by-the-one-lookup"
   :seon.task/plan "Owner, 2026-11-10: \"No duplicate implementations\". Which entity schema owns an attribute is read through one function, seon.db/owners (the write check, seon.db/most-specific, seon.render/schema-of and entity-schema call it; Web, jolt/walk-2a). Three readers in seon.ctx still read the entity index's :entity-schemas inline: seon.ctx's time-ordered join test (a reverse join's members by store-issued id) and the patch's new-member identity check and its refusal text. Moved to owners as one call each, seon.ctx-test/a-lookups-patch-costs-its-change went from 31 to 33 contracted calls at n=20 (its bound 31, allowed 1.0x), since owners is contracted and these run a member at a time. The change: read the owners of a patch's attributes once per patch (one call), and of a join's attribute once where the join is built, so the cost proof stays at its bound. Proof: that cost proof unchanged; no (:entity-schemas ix) left in src outside seon.db/owners."
-  :seon.task/kind :work}]
+  :seon.task/kind :work}
+ {:seon.task/name "a-search-hit-shows-why-it-matters"
+  :seon.task/plan "What exists: the page's search part (seon.render.ui/searched) lists each hit by name alone. In curated run 1 (seon.model/a-streamed-reply-test-sleeps-not, 2026-11-10) its top hit, seon.check/named-test-inputs at 60%, was the hand-kept exemption the task also had to remove; the agent shown it did not act on a bare name, and the agent without the part found it through grep's matching line.
+
+The change: each hit shows the line of its text that matched (seon.doc/line-of, which search already computes for the hits it shows as :line), one line, so a hit says why it is there.
+
+Proof: a search hit for a var whose source holds the query's word renders that source line beside the name."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "the-context-shows-how-a-wiki-section-is-edited"
+  :seon.task/plan "What exists: in curated run 1 (2026-11-10) an agent spent four evals learning to edit a wiki section: (seon.repl/edit! \"docs/clocks.md\" ...) failed (\"no file at /private/tmp/seon-agents/docs/clocks.md: write it whole first\"), a search, a doc read, then a whitespace failure; the agent that read (doc seon.repl/edit!) first got the section-address form at once.
+
+The change: the system prompt's edit! line shows the three forms, a var, a file path and a wiki section's address (\"docs/x.md#anchor\"), and the file-path refusal names the section form when the path is a wiki page.
+
+Proof: edit! of a wiki page by path answers an error naming the section-address form."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "a-stale-section-block-says-how-to-clear-it"
+  :seon.task/plan "What exists: a change to a var's contract or docstring stales the wiki sections that cite it, and the done rule blocks the merge on them (seon.problems/stale-sections, seon.reconcile/done-explain). In curated pair 2 (2026-11-10) both agents were blocked on docs/resolution.md#sanctioned and docs/source.md#tests-run-by-reach; one edited the sections, the other found my.doc/reviewed! by trying, and then hit its arity (\\\"it is called as (my.doc/reviewed! address who)\\\").
+
+The change: the status's refusal for a stale section names, per section, its address, the var that changed, and the two forms that clear it, ready to evaluate: (seon.repl/edit! \\\"docs/x.md#y\\\" old new) and (my.doc/reviewed! \\\"docs/x.md#y\\\" \\\"<agent key>\\\"). The block stays.
+
+Proof: an agent whose change stales a section reads, in its status, each section with both forms; evaluating the second clears the refusal."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "doc-of-a-section-answers-small"
+  :seon.task/plan "What exists: (doc x) is a macro taking a literal: (doc addr) in a let or map fails with \\\"Unable to resolve var\\\"; and doc of a wiki address returns a large map that it also prints. In curated pair 2 (2026-11-10) an agent spent about five evals filtering doc's output, one answering 30 KB.
+
+The change: a function form beside the macro, my.agent/section (address -> {:heading :text :address}), that takes a value, so it composes; and doc of a section prints the heading and its text, the section's references and the sections below it by name only, each with the form that reads it.
+
+Proof: (map my.agent/section addresses) answers the sections; (doc \\\"docs/x.md#y\\\") prints the section's text and names its subsections without their text."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+]

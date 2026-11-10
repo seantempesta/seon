@@ -415,21 +415,58 @@
     (is (near :bytes) (str "bytes differ across runs: " (mapv :bytes ms)))
     (is (near :ticks) (str "ticks differ across runs: " (mapv :ticks ms)))))
 
+(defn- with-demo-task
+  "f judged with the one task file entry the demo waiver names (the shipped files' tasks come and go as they complete)."
+  [f] (with-redefs [cost/open-tasks (fn [] #{"seon.cost/demo-overrun"})] (f)))
+
+(deftest the-task-files-declare-tasks-an-overrun-may-name
+  (let [ids (cost/open-tasks)]
+    (is (every? #(re-matches #"[^/\s]+/[^/\s]+" %) ids))
+    (is (contains? ids "seon.cost/cost-tolerances-are-derived"))))
+
 (deftest an-open-overrun-is-accepted-until-it-regresses
-  ;; 200 bytes per integer against a 50 byte estimate: 4x, over the 1.25x slack (2e6 bytes at n=10000)
-  (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :calls (+ 1.0 n)})]
+  ;; 200 bytes per integer against a 50 byte estimate: 4x, over the 1.25x slack (2e6 bytes at n=10000).
+  ;; The waiver names a task a task file declares and the largest size it was taken at (:n)
+  (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :calls (+ 1.0 n)})
+        task "seon.cost/demo-overrun"
+        n (peek (:sizes linear))]
     (testing "within the ratchet (1.5x) of what was measured when its task was filed: green, still reported"
-      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:bytes 1500000.0}})
-            v (cost/judge e (rows e m))]
+      (let [e (assoc linear :overrun {:task task :n n :measured {:bytes 1500000.0}})
+            v (with-demo-task #(cost/judge e (rows e m)))]
         (is (:ok? v))
-        (is (= "seon.cost/demo-overrun" (get-in v [:accepted :task])))
+        (is (= task (get-in v [:accepted :task])))
         (is (seq (get-in v [:accepted :over])))
-        (is (re-find #"OVERRUN accepted while task seon.cost/demo-overrun" (cost/explain e (rows e m) v)))))
+        (is (re-find (re-pattern (str "OVERRUN accepted while task " task)) (cost/explain e (rows e m) v)))))
     (testing "past the ratchet: a regression, red"
-      (let [e (assoc linear :overrun {:task "seon.cost/demo-overrun" :measured {:bytes 1000000.0}})
-            v (cost/judge e (rows e m))]
+      (let [e (assoc linear :overrun {:task task :n n :measured {:bytes 1000000.0}})
+            v (with-demo-task #(cost/judge e (rows e m)))]
         (is (not (:ok? v)))
         (is (re-find #"REGRESSION" (cost/explain e (rows e m) v)))))))
+
+(deftest a-broken-waiver-is-red
+  ;; a waiver within the ratchet is red when its task is in no task file, when it states no size it was
+  ;; taken at, or when that size is not the proof's largest: each says which in its failure line
+  (let [m (fn [n] {:ns (* 60.0 n) :bytes (* 200.0 n) :calls (+ 1.0 n)})
+        task "seon.cost/demo-overrun"
+        n (peek (:sizes linear))
+        broken (fn [overrun] (let [e (assoc linear :overrun overrun) v (with-demo-task #(cost/judge e (rows e m)))] [v (cost/explain e (rows e m) v)]))]
+    (testing "the sound waiver is the control: green"
+      (is (:ok? (first (broken {:task task :n n :measured {:bytes 1500000.0}})))))
+    (testing "a task no file declares"
+      (let [[v text] (broken {:task "seon.cost/no-such-task" :n n :measured {:bytes 1500000.0}})]
+        (is (not (:ok? v)))
+        (is (= :no-task (get-in v [:waiver-fault :fault])))
+        (is (re-find #"BROKEN WAIVER: its :overrun names task seon.cost/no-such-task, which no file" text))))
+    (testing "no size"
+      (let [[v text] (broken {:task task :measured {:bytes 1500000.0}})]
+        (is (not (:ok? v)))
+        (is (= :no-size (get-in v [:waiver-fault :fault])))
+        (is (re-find #"BROKEN WAIVER: .* states no :n" text))))
+    (testing "a size that is not the largest"
+      (let [[v text] (broken {:task task :n (first (:sizes linear)) :measured {:bytes 1500000.0}})]
+        (is (not (:ok? v)))
+        (is (= :wrong-size (get-in v [:waiver-fault :fault])))
+        (is (re-find (re-pattern (str "BROKEN WAIVER: .* not at the largest size, " n)) text))))))
 
 (deftest a-proof-the-cap-leaves-too-few-sizes-is-refused
   ;; root, after [10 1000 2000] measured two points at the cap and said green as if three: a

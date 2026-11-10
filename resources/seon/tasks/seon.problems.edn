@@ -23,4 +23,21 @@
   :seon.task/proofs #{}}
  {:seon.task/name "schema-entries-and-tests-cite-their-section"
   :seon.task/plan "AGENTS.md section 7 says every function, schema entry and deftest cites its wiki section, and only a function's docstring is checked (the :uncited-var class, docs/health.md). An October sweep (40 commits, 1885 behind main, dropped 2026-11-06) filled them by hand and went stale, so check first: extend the class to a schema entry's :description or leading comment and a deftest's leading comment, count what it finds on today's code, then fill those. Done means the check is red on a new uncited entry, so it stays true."
-  :seon.task/kind :work}]
+  :seon.task/kind :work}
+ {:seon.task/name "health-reads-each-part-once-per-class"
+  :seon.task/plan "What exists: seon.problems-test/health-reads-each-part-once bounds the contracted calls of one health read on the test world by one literal total (74, then 86, then 88 on 2026-11-10), so every new problem class turns it red in every combination (dbboot's stale-binary added 2).
+
+The change: bound each class's reader by its own calls at the world's size, so a new class carries its own bound and moves no other's.
+
+Proof: the test names each class and its calls; adding a class adds a row, red only when that class overruns."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "a-plan-goes-stale-when-what-it-cites-changes"
+  :seon.task/plan "What exists: seon.problems/stale-sections names a wiki section whose cited var changed since the section was written; nothing does the same for a task's plan. In curated pair 2 (seon.turn/a-branch-asks-whether-a-test-is-a-process-test, 2026-11-10) both agents spent evals finding that my.agent/process-test? already existed: the plan, written before it did, described it as missing.
+
+The change: a :stale-plan problem class reading each ready task's cites (:seon.cite/_of): a cited var defined or changed since the plan was last written (the transaction of :seon.task/plan against the var's :var/form's) is a row naming the task and the var; and the agent's status shows it on its task, so the agent reads that the plan's premise may have moved. Read from cites and two transaction ids per cite, no hand check.
+
+Proof: a task whose plan cites a var, the var redefined after the plan, is a :stale-plan row naming both; rewriting the plan closes it."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+]
