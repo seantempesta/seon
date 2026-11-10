@@ -542,7 +542,7 @@
      ;; through elements and lists, never into an element's attributes: a :wire/result holds a whole record, and no marker sits there
      ((fn go [x] (cond (and (vector? x) (= ::child (first x))) (resolved w (second x) html?)
                        (vector? x) (mapv go x)
-                       (seq? x) (map go x)
+                       (seq? x) (doall (map go x))
                        :else x))
       (cond-> (:out c) html? (styled (:f c)))))))
 
