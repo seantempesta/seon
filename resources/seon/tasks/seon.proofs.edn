@@ -74,7 +74,7 @@ Proofs, to write red first: a test run writes one fact set per test that ran and
 
 Scoped 2026-10-29 (the owner chose \"Agent runs only\" for step R2a of seon.ctx/the-context-is-the-agents-evals-and-seons): an agent's test runs write these facts on its branch, and the agent's readers (seon.agent/test-plan's reuse, stored-results, my.task/status, the proofs part, the merge check) read them there; bin/test and bin/prove keep the shared file cache for now (reuse across checkouts, no root needed), their move a later step with its own design (a shared store keeps cross-checkout reuse).
 
-Done: All proofs red → green; the readers above read the facts; the file cache and its keys are gone; docs/merging.md#verdicts
+Done: All proofs red → green; the readers above read the facts; the file cache and its keys are gone; docs/merging.md#verdicts-are-a-cache
 and docs/storage.md updated; `bin/prove` green; a one-function prove's result lookup still milliseconds."
   :seon.task/kind :work
   :seon.task/proofs #{}}
