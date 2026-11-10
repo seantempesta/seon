@@ -112,8 +112,8 @@
   "What main changed since base, reduced to what main-line reads and held keyed by the two points
   (commit, t) it is a function of: {:after {program-key (hash of its content on main)}}, from
   seon.merge/delta-changes (declared data left out). The diff itself, whose values carry the forms
-  and so pin the dbs they were read from, is let go at once (AGENTS section 4, a kept db value is a
-  reference); the newest pair is held on the state (:main-changes), evicted by the next and
+  and so pin the dbs they were read from, is let go at once (a kept db value is a
+  reference: docs/storage.md#a-kept-db-value-is-a-reference); the newest pair is held on the state (:main-changes), evicted by the next and
   regenerated from the two dbs. {} when main's point is base's.
   See docs/merging.md#main-moved-is-said-at-every-eval."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map-of :any :int]]}
@@ -728,7 +728,7 @@
 (defn- base-graph
   "The reach graph of base under inputs, with its index ({:graph :index}: seon.program/
   graph-index), reused while base is the point (seon.db/point) it was made for: a value never changes,
-  so neither does its graph (AGENTS §5, results reused by input), and the db itself is not held. A new base (merge-main!, a
+  so neither does its graph (results reused by input: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on), and the db itself is not held. A new base (merge-main!, a
   resumed branch's older one) is the graph held updated to it (seon.program/reach-update, in
   either direction), never built again: the graph held is the one this process was forked
   with, main's, kept by the fork server (:graph) with its index (seon.program/reach-indexed), and built
@@ -771,7 +771,7 @@
 (defn branch-graph
   "The reach graph of branch db under in, the one test-plan selects by: base's graph (base-graph)
   updated to db (seon.program/reach-update), or db's own with no base; reused while db is the point
-  (seon.db/point) it was made for (a value never changes, AGENTS section 5), so a second ask of one db is a
+  (seon.db/point) it was made for (a value never changes: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on), so a second ask of one db is a
   key lookup; a new db is base's graph updated again, at the cost of what the branch changed
   from base (20-45 ms for one form). Holds the point of the newest asked, never its db."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :seon.host/db] :seon.program/inputs] :map]}
@@ -793,7 +793,7 @@
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
   [db]
   (let [{from :db c :commit idx :index} (:index @state)
-        ;; the db it is of, made again from its commit: a db held past its moment pins its index (AGENTS 4)
+        ;; the db it is of, made again from its commit: a db held past its moment pins its index (docs/storage.md#a-kept-db-value-is-a-reference)
         from (or from (some->> c (d/commit-as-db (:store db))))
         v (if idx (r/index idx from db) (r/index db))]
     (swap! state assoc :index {:commit (d/commit-id db) :index v})

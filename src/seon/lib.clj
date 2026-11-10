@@ -237,7 +237,7 @@
   [pid] (let [b (ffi/alloc 4)] (c-waitpid pid b 0) (decode-status (ffi/read b :int))))
 
 (defn fork!
-  "The one spawning skeleton (AGENTS section 2): fork only while this is the one active Chez
+  "The one spawning skeleton (docs/failure-points.md#physics-who-may-run-threads): fork only while this is the one active Chez
   thread (E11/E13: a fork beside a running thread breaks the child), checked once. Then
   (child) in the child, exiting 0 if it returns and 1 however else it ends (a throw, said on
   stderr with the frames it unwound from; a raise or an escape no catch takes): the child holds a copy of the parent's frames,

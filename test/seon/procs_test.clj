@@ -289,7 +289,7 @@
 
 (deftest the-writers-main-notice-holds-no-db
   ;; a queued notice pins its own version of
-  ;; the index (AGENTS section 4), so the notice names the commit and its consumers make the db
+  ;; the index (docs/storage.md#a-kept-db-value-is-a-reference), so the notice names the commit and its consumers make the db
   ;; when they take it
   (ts/test-branch! (fn [cfg conn]
     (let [in (a/chan 16)

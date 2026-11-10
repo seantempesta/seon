@@ -1,5 +1,5 @@
 (ns seon.cron
-  "The cron proc (AGENTS section 4, the one place a schedule may put a message on a queue): at
+  "The cron proc (docs/clocks.md#time-decides-the-owners-exceptions, the one place a schedule may put a message on a queue): at
   the time of day :seon.config.proofs/full-run-at names (UTC, \"hh:mm\"; \"\": never), it puts one
   full-run request for main on the test service's queue (seon.prove, :full mode), and arms the
   next day's. It decides nothing: the service runs the tests, and their verdicts are cached by

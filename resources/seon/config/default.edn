@@ -100,7 +100,7 @@
  :seon.config.root/main #or [#env SEON_MAIN "main"]
  ;; Root's system declaration (owner, 2026-10-20: the definition lives in a file).
  :seon.config.root/system-path #seon/checkout "resources/seon/system.edn"
- ;; The task files (resources/seon/tasks/<owning-ns>.edn, AGENTS.md "How work is handed out").
+ ;; The task files (resources/seon/tasks/<owning-ns>.edn, docs/tasks.md#task-files).
  :seon.config.root/tasks-dir #seon/checkout "resources/seon/tasks"
  ;; Unit: directories of the checkout ("." is its top level, the .md files there: AGENTS.md, BAGGAGE.md,
  ;; README.md). The pages an index (a seed, or my.root/load-docs!) writes into main as wiki sections
@@ -565,7 +565,7 @@
  ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
  ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
  ;; starts at once (seon.proofs/shards), its greens stored by digest when it has run. Provenance:
- ;; worktree session PROVE 2026-10-22 on the 16 GB M1 target (AGENTS section 8): 4 keeps the machine
+ ;; worktree session PROVE 2026-10-22 on the 16 GB M1 target (docs/machine.md#the-target-a-16-gb-macbook-m1): 4 keeps the machine
  ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
  ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
  ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
@@ -619,7 +619,7 @@
  ;; seon.source/refresh-tx, so a plan imports the whole program only into an empty store.
  ;; Provenance: owner via root, 2026-10-23 (option B of docs/source.md).
  ;; Every text is read from the tree's git objects, never the working tree. One writer at a time
- ;; (two runs never share a checkout, AGENTS section 3). Derived data: deleting it costs one
+ ;; (two runs never share a checkout: docs/merging.md#a-worktree-session-works-in-a-checkout-of-its-own). Derived data: deleting it costs one
  ;; import. At the bound: see program-store-max-bytes.
  :seon.config.proofs/program-store #seon/checkout "target/program-store"
  ;; Unit: bytes. The kept program dbs' store on disk (its data.mdb). Measured 2026-10-23: 12 MB

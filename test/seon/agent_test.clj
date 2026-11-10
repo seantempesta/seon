@@ -1238,7 +1238,7 @@
 (deftest the-page-is-shown-again-only-when-it-moved-and-a-broken-render-is-an-error-value
   ;; seon.turn/show-page!: a page shown whole once; nothing moved, no eval; a plan changed with swap! on @ctx, one eval holding the
   ;; task's part alone. A render that throws is that eval's error value, which the request reads, and the turn that asked goes on
-  ;; (AGENTS 4: nothing crashes)
+  ;; (docs/errors.md#nothing-crashes-and-nothing-hangs)
   (let [evals "(let [db (seon.agent/db)] (vec (for [e (sort (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/by \"seon\"]] db)) :let [m (datahike.api/pull db '[:seon.eval/id :seon.eval/code :seon.eval/response :seon.eval/result] e)] ] [(:seon.eval/id m) (:seon.eval/code m) (let [v (:value (seon.db/response-of db m))] (set (concat (map first (:components v)) (map (comp first first) (:edits v))))) (get-in (seon.db/response-of db m) [:ex :seon.error/message])])))"
         rs (in-agent ["(#'seon.turn/show-page!)"
                       "(#'seon.turn/show-page!)"
@@ -1256,7 +1256,7 @@
     (is (= "broken render" (:seon.error/message (:ex (first shown)))) "a render that throws does not stop the one who asked: its response is its error")
     (is (str/includes? (str broken-request) "broken render") "and the request reads its error")))
 
-;; AGENTS.md section 5: the chain holds vars, so what a program defines is what it calls; a delay of fn values kept the old ones, and an edit of wrap-record reached nothing
+;; docs/resolution.md: the chain holds vars, so what a program defines is what it calls; a delay of fn values kept the old ones, and an edit of wrap-record reached nothing
 (deftest an-edit-of-a-middleware-runs-next
   (let [[_ _ marked vars] (in-agent ["(def marks (atom 0)) (in-ns 'seon.repl)"
                                      "(let [old wrap-registry] (alter-var-root #'wrap-registry (fn [_] (fn [h] (let [n (old h)] (fn [req] (swap! @(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\"))) inc) (n req)))))))"
@@ -2363,7 +2363,7 @@
     (is (= {t :error} (:proofs (:value proved))) (pr-str proved))))
 
 (deftest a-gate-that-cant-read-its-candidate-answers
-  ;; AGENTS 4 "every wait ends": a :gate's writer refusal comes back to whoever asked, no test run (seon.root/ext-op)
+  ;; docs/errors.md#nothing-crashes-and-nothing-hangs "every wait ends": a :gate's writer refusal comes back to whoever asked, no test run (seon.root/ext-op)
   (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.root/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]
     (is (= :seon.writer/refused (:value r)) (pr-str r))))
 
@@ -2625,7 +2625,7 @@
 
 (deftest a-failed-call-keeps-what-it-sent
   ;; root, 2026-10-24: a turn whose model call fails still records what it sent (the hash of its bytes, written as the
-  ;; request goes; the request itself is made again from its records) and its typed error (an error is data, AGENTS section 4);
+  ;; request goes; the request itself is made again from its records) and its typed error (an error is data: docs/errors.md#errors);
   ;; the debug page shows both
   (let [[end turn] (in-agent (fn [{:keys [task ns]}]
                               [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
@@ -2911,7 +2911,7 @@
     (is (= 3 (:value (second rs))) "the agent lives")))
 
 (deftest a-refused-write-in-a-proof-runs-finish-answers-the-asker-with-the-error
-  ;; AGENTS.md §4 (nothing hangs), docs/failure-points.md (a refused write): the run's results are
+  ;; docs/errors.md#nothing-crashes-and-nothing-hangs (nothing hangs), docs/failure-points.md (a refused write): the run's results are
   ;; recorded on the branch when the run finishes, which the loop runs, not the asker's eval; a
   ;; write the branch refuses there answers the asker (my.agent/prove) with the error, never leaves it waiting.
   ;; The agent's own REPL makes its writer refuse (its process, its definition of transact!)
@@ -2925,7 +2925,7 @@
 
 (deftest a-commit-the-store-refuses-leaves-the-agent-alive
   ;; task seon.repl/a-commit-that-keeps-failing-ends-no-agent-silently;
-  ;; AGENTS.md section 4 (nothing crashes), docs/storage.md#a-commit-the-store-refuses. A commit the store refuses used
+  ;; docs/errors.md#nothing-crashes-and-nothing-hangs (nothing crashes), docs/storage.md#a-commit-the-store-refuses. A commit the store refuses used
   ;; to throw out of the agent's loop and end the process, the next commit throwing again on the same pending value.
   ;; Now the eval answers what was refused as data under :unrecorded, its writes are dropped, the branch and @ctx are as
   ;; committed, and the next eval and commit are as any. The store's refusing is made in the agent's own REPL (its
