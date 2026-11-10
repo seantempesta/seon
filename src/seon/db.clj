@@ -486,11 +486,12 @@
   {:malli/schema [:=> [:cat [:enum :lmdb :file] :string] :seon.db/cfg]}
   [backend path]
   (let [cfg {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
-                             :default-serializer :FaslSerializer}
+                             ;; how a value becomes bytes, where konserve reads it (konserve.impl.defaults/normalize-store-config)
+                             :config {:encoding {:serializer :FaslSerializer}}}
                       (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
                       ;; konserve's per-value compressor (its header names it, so stored values of either kind read)
-                      (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :compressor] {:type (cfg/value :seon.config.store/compressor)})
-                      (= backend :file) (assoc :config {:defer-immutable-sync? true}))
+                      (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :encoding :compressor] {:type (cfg/value :seon.config.store/compressor)})
+                      (= backend :file) (assoc-in [:config :defer-immutable-sync?] true))
              :schema-flexibility :write
              :store-cache-bytes (cfg/value :seon.config.store/node-cache-bytes)
              :writer writer-cfg
