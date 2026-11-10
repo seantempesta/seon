@@ -2124,7 +2124,10 @@
   then the earlier ones folded, `sessions-by-boot`) and the evals sent to it (c-rows) and its tiles (p-tiles: root's process, then
   main's problems). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :any] :any]}
-  [{db :seon.db/db} _]
+  [{db :seon.db/db :as opts} _]
+  ;; placed where another's pull joins the system entity (root's session's :seon.agent/root): nothing; root's page is drawn by this on
+  ;; root's own walk, until the frame composes it beside root's agent's page (step 3b)
+  (when-not (:seon.render/nested opts)
   [:div {:id "root-ctx"}
    ;; no agents list of its own: every page's is the signed-in user's (seon.render.ui/user, placed by seon.render.proc)
    [:div {:id "p-head"} [#'root-head {}]]
@@ -2138,7 +2141,7 @@
       (when (seq earlier) [#'earlier-sessions {} earlier])
       [#'root-evals {}]])
    [#'rules-list {}]
-   [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}]]])
+   [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}]]]))
 
 (defn page-chrome
   "A page in root's chrome (root's, an agent's): the top bar, then the units its walks drew, each
