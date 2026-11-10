@@ -313,7 +313,7 @@
   ([ix db e branch p]
    (let [m (when e (own db e))
          [tree r] (if (and m (< 1 (count m))) (node db e (render/pattern ix (or p (pattern-of ix m))) [] {:index ix} nil {}) [{} {:index ix}])]
-     {:tree (with-environment tree db branch) :ix r})))
+     {:tree (vary-meta (with-environment tree db branch) assoc :seon.ratom/held (:held r)) :ix r})))
 
 (defn made-by
   "Who made attribute a of entity e as db holds it: the tx-meta of the transaction of its newest
@@ -379,11 +379,11 @@
         root (get-in c [:tree :db/id])
         touched (touched-by r datoms)
         ;; a fresh build shares every subtree it did not change with the record before (share)
-        fresh #(cond-> (update (build (:index r) db root branch) :tree (fn [t] (merge (share (apply dissoc (:tree c) environment-keys) (apply dissoc t environment-keys)) (select-keys t environment-keys)))) (:own-index? r) (assoc-in [:ix :own-index?] true))]
+        fresh #(cond-> (update (build (:index r) db root branch) :tree (fn [t] (with-meta (merge (share (apply dissoc (:tree c) environment-keys) (apply dissoc t environment-keys)) (select-keys t environment-keys)) (meta t)))) (:own-index? r) (assoc-in [:ix :own-index?] true))]
     (cond
       (nil? root) (fresh)
       (some #(and (= root (:e %)) (= :seon.ctx/pattern (:a %))) datoms) (fresh)
-      (empty? touched) (-> c (assoc :ix r) (update :tree with-environment db branch))
+      (empty? touched) (-> c (assoc :ix r) (update :tree #(vary-meta (with-environment % db branch) assoc :seon.ratom/held (:held r))))
       :else
       (let [sites (sort-by (comp count first)
                            (distinct (for [x (keys touched) :let [e (if (vector? x) (first x) x) h (get-in r [:held e])] :when h] [h e])))
@@ -397,8 +397,7 @@
                                 [(:tree c) r] sites)]
         (if (or (:relocate r) (not (seq (dissoc tree :db/id))) (empty? (d/datoms db :eavt root)))
           (fresh)
-          {:tree (with-environment tree db branch)
-           :ix (dissoc r :patching :relocate)}))))))
+          (let [r (dissoc r :patching :relocate)] {:tree (vary-meta (with-environment tree db branch) assoc :seon.ratom/held (:held r)) :ix r})))))))
 
 ;; the record and its index, beside the atom: the agent is one thread, and its state's watch runs
 ;; on it, so each patch follows the one before
@@ -580,7 +579,7 @@
   the atom holds until the next install is what an eval of `@ctx` records the basis of (identical to it, with
   its :t and :branch: seon.repl/record-details); a map made of it is not."
   {:malli/schema [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]]] :nil]}
-  [c] (vreset! held c) (binding [*installing* true] (reset! ctx (with-meta (:tree c) {:seon.render/schema :seon.ctx/ctx}))) nil)
+  [c] (vreset! held c) (binding [*installing* true] (reset! ctx (vary-meta (:tree c) assoc :seon.render/schema :seon.ctx/ctx))) nil)
 
 (defn moved
   "The datoms db moved by from a to b: the last transaction's when b is its db (agent/transact!

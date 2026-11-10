@@ -2921,7 +2921,8 @@
   "The parts of tree's citations drawn by a walk over db, {target text}: each `cited` as the layout places it (seon.render.ui/cite-parts:
   what the agent will do with it, its lookups) and as the model reads it."
   [db tree aid]
-  (into {} (for [[f opts] (#'ui/cite-parts tree) :let [k (:key opts)]]
+  ;; the layout places them from its view of the tree, through which a join ctx holds at another path reads as held there
+  (into {} (for [[f opts] (#'ui/cite-parts (seon.ratom/ref-view (seon.ratom/atom tree) seon.ctx/changes)) :let [k (:key opts)]]
              (let [w (r/walker {:ref (seon.ratom/atom tree) :changes seon.ctx/changes} (fn [] db) [f opts])]
                (try (flush! w nil) [k (r/part-text (r/part-form w @(:out w)))] (finally (r/dispose-walk! w)))))))
 
