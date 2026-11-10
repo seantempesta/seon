@@ -1503,6 +1503,67 @@
             (is (= request page) "the page's chat holds them in the same order")
             (finally (render/dispose-walk! w))))))))
 
+(deftest a-later-point-advances-the-kept-page-walk-and-answers-a-cold-draw
+  ;; docs/render.md#a-page-is-a-kept-walk: page-parts-through keeps its walk at the last point it drew; a later point of the same
+  ;; branch (a commit that reaches the kept one) advances that walk by what moved rather than drawing the page again (a test's context
+  ;; read drew it cold at every read), and its parts are what a cold draw at that point answers
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask! ev! plan!] (parts-session conn)
+            _ (ask! 0)
+            a (pdb/eid @conn :seon.agent/key "a1")
+            point (fn [] (let [db @conn] {:commit (d/commit-id db) :t (:max-tx db)}))
+            kept #(:w @@#'seon.ctx.wire/kept-walk)
+            p1 (point)
+            h1 (wire/page-parts-at @conn a p1)
+            w1 (kept)
+            _ (ev! "e1")
+            _ (plan! "Make f, then g.")
+            p2 (point)
+            h2 (wire/page-parts-at @conn a p2)]
+        (is (some? w1) "the walk is kept after a draw")
+        (is (identical? w1 (kept)) "a later point of its branch advanced the same walk")
+        (is (str/includes? (pr-str h2) "Make f, then g.") "and it shows what moved")
+        (reset! @#'seon.ctx.wire/kept-walk nil)
+        (is (= h2 (wire/page-parts-at @conn a p2)) "what a cold draw at that point answers")
+        (is (not (identical? w1 (kept))) "a point with no kept walk to advance is drawn")
+        (is (not= h1 h2))))))
+
+(deftest a-write-reruns-the-placing-render-and-no-earlier-page-pair
+  ;; docs/render.md#a-page-is-a-kept-walk: a turn's page message reads only db values at fixed past points, so its reads are not
+  ;; recorded and a later write runs no earlier pair again; the render that places them (the agent's model render, turn-entities)
+  ;; reads the current db, tracked as every render read is, so the same write runs it again and the request holds what it wrote
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask! ev!] (parts-session conn)
+            _ (ask! 0) _ (ev! "e1") _ (ask! 1)
+            db0 @conn ix (seon.db/index) a (pdb/eid db0 :seon.agent/key "a1")
+            c0 (ctx/build ix db0 a :b)
+            at (volatile! db0) r (seon.ratom/atom (:tree c0))
+            w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at)
+                                    [(render/render-var-of ix (:tree c0)) {} (seon.ratom/ref-view r ctx/changes)] ix)
+                     :outputs #{:seon.render/openai-compat})
+            pairs (fn [] (into {} (for [[k e] @(:cache w) :when (= #'wire/page-diff-msgs (:f e))] [k e])))
+            evals (fn [] (set (keep (fn [[_ {:keys [args]}]] (:seon.eval/id (some-> (first args) seon.ratom/realize)))
+                                    (render/answer-sources w :seon.render/openai-compat))))]
+        (try
+          (render/flush! w nil)
+          (let [p0 (pairs)
+                _ (ev! "e2")
+                db1 @conn moved (ctx/moved db0 db1 nil) c1 (ctx/patch c0 db1 moved :b)]
+            (vreset! at db1) (reset! r (:tree c1))
+            (render/flush! w moved (:index (:ix c1)))
+            (let [p1 (pairs)]
+              (let [turn-of (fn [e] (last (:args e)))
+                    turns (fn [ps] (into {} (filter #(<= (turn-of (val %)) 2)) ps))]
+                (is (= [1 2 3] (sort (map turn-of (vals p0)))) "the two turns' page messages, and the page of the turn now opening, at the head")
+                (is (and (= 2 (count (turns p0))) (every? #(identical? ((turns p0) %) (p1 %)) (keys (turns p0))))
+                    "the write ran neither turn's pair again: their reads are of fixed points, unrecorded")
+                (is (= (:max-tx db1) (:t (nth (:args (val (first (remove #(<= (turn-of (val %)) 2) p1)))) 2)))
+                    "the opening page is drawn again at the new head, the point it shows having moved"))
+              (is (contains? (evals) "e2") "the placing render read the current db, tracked: the write ran it again, and the request holds the new eval")))
+          (finally (render/dispose-walk! w)))))))
+
 (deftest the-models-page-holds-no-attribute-of-the-pages-alone
   ;; docs/render.md#style: what the page's script and a screen reader read (:data-*, :aria-*) is the page's alone, as class and style
   ;; are; a link's target, a title and an image's text stay, and a component's root keeps its render's name and its id

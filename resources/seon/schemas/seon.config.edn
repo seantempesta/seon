@@ -158,6 +158,7 @@
   [:seon.config.ctx/window {:optional true} :seon.config.ctx/window]
   [:seon.config.ctx/callers {:optional true} :seon.config.ctx/callers]
   [:seon.config.ctx/cited-by {:optional true} :seon.config.ctx/cited-by]
+  [:seon.config.ctx/kept-walk-steps {:optional true} :seon.config.ctx/kept-walk-steps]
   [:seon.config.shrink/form-tokens {:optional true} :seon.config.shrink/form-tokens]
   [:seon.config.render/relevance-weights {:optional true} :seon.config.render/relevance-weights]
   [:seon.config.render/relevance-features {:optional true} :seon.config.render/relevance-features]
