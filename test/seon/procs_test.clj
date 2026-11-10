@@ -1028,3 +1028,27 @@
          (is (= [[:a3 "a3"]] (mapv (juxt :agent :key) spawns)) "forked once, as the same agent, its id's name its key")
          (is (empty? (:seon.root/respawn st2)) "nothing waits to be forked")
          (is (= :spawning (get-in st2 [:view :agents :a3 :status])) "and the view holds the new process, not the old"))))))
+
+(deftest a-failed-standby-is-a-recorded-problem
+  ;; docs/processes.md#a-step-that-throws: the fork server's :standby-failed event reaches root's api,
+  ;; which records a platform problem naming the threads and shows the server has no standby
+  (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {} :fork-server {:status :up :pid 5 :standby true}} :graph (promise)
+                             :system (doto (promise) (deliver {:procs {} :conns []}))})
+        [st2 _] (step #'root/api-proc st :back {:ev :standby-failed :gen 3 :active-threads 7})
+        fold (pr-str (:seon.root/errors st2))]
+    (is (re-find #":seon.fork-server/standby-failed" fold) fold)
+    (is (re-find #"7" fold) fold)
+    (is (= false (get-in st2 [:view :fork-server :standby])) "the view shows the server has no standby")
+    (is (= :up (get-in st2 [:view :fork-server :status])) "the server itself still serves")))
+
+(deftest a-ping-of-a-gone-agent-answers-its-error
+  ;; a ping's answer passes through as itself: an agent that is gone answers a typed error map, never :unknown
+  (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                             :view {:agents {:a1 {:status :dead}}} :graph (promise)
+                             :system (doto (promise) (deliver {:procs {} :conns []}))})]
+    (doseq [id [:a1 :nope]]
+      (let [p (promise)]
+        (step #'root/api-proc st :ext {:op :ping :id id :p p})
+        (is (and (map? @p) (seon.contract/error? @p)) (pr-str id (deref p 0 :unanswered)))
+        (is (not= :unknown @p))))))

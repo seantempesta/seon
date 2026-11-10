@@ -695,7 +695,7 @@
       (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
 
 (deftest a-commit-costs-what-it-writes
-  ;; task seon.db/the-store-grows-with-what-it-keeps. Estimate, from what a commit must
+  ;; docs/storage.md#the-proof-what-a-commit-costs. Estimate, from what a commit must
   ;; write: its own datoms (each value twice, in :eavt and :aevt) and the root-to-leaf path
   ;; it touched in each index, whose nodes hold small datoms: at branching factor 64 about 11
   ;; keys of ~1.5-3 KB (a 1-datom commit measured 16.8-27.7 KB at 5k-225k datoms),
@@ -1081,6 +1081,52 @@
         (let [s (m #(doseq [v values] (stream v))) o (m #(doseq [v values] (direct v)))
               encoded (reduce + (map #(alength (konserve.jolt.fasl-store/serialize %)) values))]
           (is (<= (* 2 encoded) (- s o)) (str "serialized once: " o " bytes against the streams' " s ", " encoded " bytes encoded")))
+        (d/release conn true))
+      (finally (clojure.java.shell/sh "rm" "-rf" path)))))
+
+(deftest a-store-names-its-encoding-where-konserve-reads-it
+  ;; docs/storage.md#compression: seon.db/store-cfg names the serializer and the compressor under :config :encoding,
+  ;; the one place konserve reads them (konserve.impl.defaults/normalize-store-config). An older spelling still
+  ;; worked and made every open log a deprecation, which a script reading a process's output once took for the
+  ;; store's path (bin/check, batch 3). Either backend: no old spelling is handed over, the serializer is ours,
+  ;; and the compressor the config names is the store's (the :file backend's config map once replaced it).
+  (doseq [backend [:lmdb :file]]
+    (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+          seen (atom [])]
+      (try
+        (with-redefs [konserve.impl.defaults/deprecated! (fn [from _] (swap! seen conj from))]
+          (let [{:keys [conn]} (pdb/open! backend path 0 :db)
+                store (:store @conn)]
+            (is (= [] @seen) (str backend ": no deprecated spelling"))
+            (is (= :FaslSerializer (:default-serializer store)) (str backend))
+            (is (= (seon.config/value :seon.config.store/compressor) (get-in store [:config :compressor :type])) (str backend))
+            (d/release conn true)))
+        (finally (clojure.java.shell/sh "rm" "-rf" path))))))
+
+(deftest a-file-store-reads-what-it-wrote-before-it-compressed
+  ;; docs/storage.md#compression: a value's header names its codec, so a store holds values of either kind. A file
+  ;; store's config once dropped its compressor (store-cfg's :file branch replaced :config), so file stores made
+  ;; before hold uncompressed values: such a store, opened by the config that compresses, reads the old values,
+  ;; writes compressed ones beside them, and reads both after another open.
+  (let [path (str (seon.config/checkout) "/target/db-test-" (random-uuid))
+        cfg-of pdb/store-cfg
+        notes (fn [conn] (set (map :v (d/datoms @conn :aevt :note/text))))
+        write! (fn [conn from] (d/transact conn {:tx-data (vec (for [i (range from (+ from 50))] {:note/text (str "note " i) :note/agent :t})) :tx-meta (pdb/tx-meta :db)}))
+        codec (fn [conn] (get-in (:store @conn) [:config :compressor :type]))
+        all (fn [n] (set (map #(str "note " %) (range n))))]
+    (try
+      (with-redefs [pdb/store-cfg (fn [backend p] (update-in (cfg-of backend p) [:store :config :encoding] dissoc :compressor))]
+        (let [{:keys [conn]} (pdb/open! :file path 0 :db)]
+          (is (nil? (codec conn)) "made as before: no compressor")
+          (write! conn 0)
+          (d/release conn true)))
+      (let [{:keys [conn]} (pdb/open! :file path 0 :db)]
+        (is (= :zstd (codec conn)) "opened by the config that compresses")
+        (is (= (all 50) (notes conn)) "the uncompressed values read")
+        (write! conn 50)
+        (d/release conn true))
+      (let [{:keys [conn]} (pdb/open! :file path 0 :db)]
+        (is (= (all 100) (notes conn)) "old and new read from one store")
         (d/release conn true))
       (finally (clojure.java.shell/sh "rm" "-rf" path)))))
 

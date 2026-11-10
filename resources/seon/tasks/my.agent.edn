@@ -1,6 +1,4 @@
 [{:seon.task/name "no-function-does-what-ctx-can"
   :seon.task/plan "Owner, 2026-11-07: less special functions, more Clojure data on the ctx atom. From an audit of ``src/my`` (a scan for writes, then reading): `my.agent/messages` looks like a read but takes, commits and empties `:inbox`: delete it, with `:fx` outcomes moved to the eval that asked. `my.task/update!`: `swap!` on `[:task ...]`, untried for `:seon.task/proofs` and `:seon.task/cause`. `my.task/fail!` writes a failure and ends the turn: data the loop reads. `my.agent/cite!` and `uncite!` work out a cite's id: try `:cites` on ctx. `my.turn/wait` ends the turn through process memory, and its docstring's fresh budget is false (docs/turn.md#the-cap). `seon.agent` isn't covered. Split before release: each gets its own proof. See docs/users.md#messages."
   :seon.task/kind :work}
-{:seon.task/name "grep-resolves-where-an-agent-types-it"
-  :seon.task/plan "Found by curated pair 4 (2026-11-10): an agent's first eval called (grep \"back-op\") and got \"Unable to resolve symbol: grep in this context\"; the error's :seon.error/fix named my.agent/grep, which it used from then on. The prompt names grep as a thing to call (docs/prompt.md). Correct: the names the prompt tells an agent to call resolve in the namespace it starts in, by the one refer the agent's namespace setup makes (seon.repl), never by a second alias. Proof: (grep \"x\") resolves in a fresh agent's first eval."
-  :seon.task/kind :work}]
+]
