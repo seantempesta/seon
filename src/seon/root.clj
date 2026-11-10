@@ -226,6 +226,23 @@
         (contains? m :running) (update ::busy (fnil (if (and (:running m) (not (gone-statuses (:status a))) (not (gone-statuses (:status a')))) conj disj) #{}) id)))
     st))
 
+(defn stall-state
+  "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
+  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-due, ::busy and ::lost, and
+  each agent proc's :inflight (each request's kind), :fx-out, :stall-seen and :last-frame-ms, read by one Flow ping of
+  the graph, with :answered, every proc that answered it. The ping's bound is :seon.config.check/ping-ms: a proc
+  mid-step that long answers nothing and is missing from :answered (an agent in ::busy and not there is mid-step), never
+  read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
+  {:malli/schema [:=> [:cat :seon.root/sys] :map]}
+  [sys]
+  (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
+        state #(::flow/state (get states %))]
+    {:root (select-keys (state :api) [::stall-due ::busy ::lost])
+     :agents (into (sorted-map)
+                   (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
+                     [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms]) :inflight (update-vals (:inflight s) :kind))]))
+     :answered (vec (sort (keys states)))}))
+
 (defn- stall-task
   "Root's task to deal with agent id's stall s, when it works a task (seon.template/stall: one per
   agent and task, so a later stall of the same task writes none): written to main, held, worked by

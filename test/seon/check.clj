@@ -34,13 +34,18 @@
     (out! "WARM-TESTS " (count nss) " namespaces, " (count bad) " that do not load: " (pr-str bad))))
 
 (defn- run-check
-  "One check mode's frame: root booted with opts (seon.root/start!; nil boots none), (body sys)
+  "One check mode's frame: root booted with opts (seon.root/start!; nil boots none) and serving (its port in its store's
+  root.port, for bin/evidence), (body sys)
   answering {:checks {k truthy} :report m :then :stop|:kill}, the report printed with its
   checks, root stopped, then the verdict (verdict!). With :then :kill, phase 1 of a
   kill/reopen pair: the verdict line, then root SIGKILLs itself so nothing but the store
   survives (exit 137), and phase 2 reopens the store in a process of its own."
   [nm opts body]
   (let [sys (when opts (c/start! opts))
+        ;; its root serves, on a port the kernel picks, written beside its store (root.port): what bin/check hands bin/evidence
+        ;; for its Seon state when the step runs past its bound (docs/clocks.md#time-decides-the-owners-exceptions)
+        _ (when sys (spit (str (seon.config/value :seon.config.root/store-path) "/root.port")
+                          (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys 0))))
         {:keys [checks report then]} (body sys)
         checks (into (sorted-map) (for [[k v] checks] [k (boolean v)]))]
     (out! (shown (assoc report :checks checks)))

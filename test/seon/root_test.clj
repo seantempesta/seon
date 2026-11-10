@@ -53,6 +53,17 @@
     (is (pos-int? before))
     (is (= before after) "and nothing was forked: root's fork server is the one it had")))
 
+;; docs/clocks.md#time-decides-the-owners-exceptions: a run ended past its bound takes its Seon state first (bin/evidence asks it of
+;; root's server, read-only): root's stall check (::stall-due ::busy ::lost), each agent proc's (:inflight :fx-out :stall-seen
+;; :last-frame-ms), and which procs answered the ping, so a proc mid-step is seen missing, never read as nil
+(deftest a-hangs-evidence-holds-roots-stall-state
+  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
+        r (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code "(seon.root/stall-state sys)"})))]
+    (is (map? (:root r)) (pr-str r))
+    (is (every? #{:seon.root/stall-due :seon.root/busy :seon.root/lost} (keys (:root r))) "root's stall check, nothing else of its state")
+    (is (map? (:agents r)) "each agent proc's, by pid")
+    (is (some #{:api} (:answered r)) "and the procs that answered, root's api among them")))
+
 (deftest the-sweeper-pool-is-fixed-before-anything-collects
   ;; task seon.root/the-sweeper-pool-is-fixed-before-anything-collects: six threads allocate through 30
   ;; collections in a fresh binary; Chez starts a sweeper per waiting thread and never stops one, so a
