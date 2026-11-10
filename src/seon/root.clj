@@ -1308,7 +1308,10 @@
   "Where a forked child stops running the binary's code and becomes an agent, which loads main's program from the db: the
   body the fork server's :fork hands it, and the agent's process entries (:seon.config.source/process-entry's agent side),
   which the reach graph links from every form that starts a process (seon.lib/fork!'s callers, the fork server's among
-  them). root-reach enters none of them. See docs/source.md#the-binary-records-its-program."
+  them). root-reach enters none of them. Sound because an agent runs main's code, not its binary's: the fork server loads
+  main's program over the binary's image at its start and at every commit (seon.program/load-all!, load-changes!), so every
+  agent it forks inherits main's forms, and a resumed agent loads its branch's difference (seon.program/load-diff!). See
+  docs/source.md#the-binary-records-its-program."
   '[seon.repl/run! seon.repl/serve! seon.turn/work!])
 
 (defn root-roots
