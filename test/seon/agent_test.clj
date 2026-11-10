@@ -2606,7 +2606,8 @@
 
 (deftest an-agent-commits-after-each-eval
   ;; each eval of a turn (the screen's two, then the model's) is committed as it lands, so a page
-  ;; shows it then, not at the turn's end. Walked back from the branch's head, no commit adds more
+  ;; shows it then, not at the turn's end. One model call of three evals (seon.fixtures/three-calls), so a turn whose evals
+  ;; were committed together shows, whatever else the turn records (pages drew no page eval). Walked back from the branch's head, no commit adds more
   ;; than one eval record (one commit at the turn's end added the turn's evals at once: 2 -> 4). Only this agent's evals count, and
   ;; a merge commit is walked back to its parent on this branch (the one holding most of them), never main's: parent-commit-ids
   ;; is a set, and its first was main's at random, whose commits hold root's own evals two at a time (the flake, 2026-11-10)
@@ -2620,7 +2621,7 @@
                                    "  {:counts (vec (distinct (map n dbs)))"
                                    "   :over (vec (for [[a b] (map vector dbs (rest dbs)) :let [added (clojure.set/difference (evs a) (evs b))] :when (< 1 (count added))]"
                                    "                {:t (:max-tx a) :parent-t (:max-tx b) :added (mapv (fn [[i o c]] [i o (subs c 0 (min 60 (count c)))]) added)}))})")])
-                             {:config {:seon.config.ai/script 'seon.fixtures/same-call}})
+                             {:config {:seon.config.ai/script 'seon.fixtures/three-calls}})
         ns (:counts (:value counts))]
     (is (< 3 (count ns)) (pr-str counts))
     (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns) " commits that added more: " (pr-str (:over (:value counts)))))))
