@@ -1633,6 +1633,17 @@
    [#'turn {:at [:seon.agent/ns]}]
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])
 
+(defn steps
+  "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many: the
+  chat shows the messages and a person opens the steps (owner, 2026-11-10); nothing for none. See docs/render.md#the-page."
+  {:seon.render/style ".seon-steps > summary { cursor: pointer; font-size: 0.75rem; color: var(--color-text-500); list-style: none; } .seon-steps > summary::before { content: '▸ '; } .seon-steps[open] > summary::before { content: '▾ '; }"
+   :malli/schema [:=> [:cat :int [:sequential :any]] :any]}
+  [n xs]
+  (when-let [xs (seq xs)]
+    [:details {:class "seon-steps" :id (str "steps-" n)}
+     [:summary (str (count xs) (if (= 1 (count xs)) " step" " steps"))]
+     [:ol {:class "seon-turn flex flex-col"} xs]]))
+
 (defn conversation-turn
   "Turn :key as the chat shows it and the model reads it, found by its model call's id, one seek (agent -> call -> its records, so a record of another turn touches nothing this read and an earlier
   turn never runs again): the messages it took (:messages, [[m id]] as the list placed them: `seon.ctx/placed-messages`), its reply holding the evals it ran, and the evals of other hands after it, each eval and message a component of its own. A turn whose call is not made yet (the one now opening)
@@ -1650,11 +1661,11 @@
         ;; a turn nothing has come of yet (a call its messages or evals have not reached) is no element
         (when-let [kids (seq (remove nil? (concat (for [[m id] messages] (get-in c [:seon.message/_to m]))
                                                   ;; the call by its own view (its schema's render, `model-call-view`, one component for the page and
-                                                  ;; the model), its evals under it; a call that said nothing, ran nothing and is not in flight is no element
-                                                  [(when (or (seq ours) (said? call) (in-flight? call c))
-                                                     [:section {:class "flex w-full flex-col gap-1"} call
-                                                      (when (seq ours) [:ol {:class "seon-turn flex flex-col"} (map item ours)])])]
-                                                  (map item (remove (comp model? first) evals)))))]
+                                                  ;; the model), then the turn's steps, folded: a person reads the messages, and opens the steps when they
+                                                  ;; want them (owner, 2026-11-10: "only show messages by default and have the evals ... not shown unless
+                                                  ;; they are expanded"); a call that said nothing, ran nothing and is not in flight is no element
+                                                  [(when (or (seq evals) (said? call) (in-flight? call c))
+                                                     [:section {:class "flex w-full flex-col gap-1"} call (steps n (map item (concat ours (remove (comp model? first) evals))))])])))]
           (into [:div {:class "seon-stack"}] kids))))
     ;; the turn now opening has no call yet: what was delivered since the last turn's edge reads here, before the turn begins
     (when-let [ms (seq messages)]

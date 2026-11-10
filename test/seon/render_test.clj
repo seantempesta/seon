@@ -2903,10 +2903,13 @@
         eid #(seon.db/eid db :seon.eval/id %)
         call (seon.db/eid db :seon.model-call/id (seon.lib/call-id k 1))
         turn (ui/conversation-turn (assoc opts :key 1))
-        shown (set (for [c (drop 2 turn) :when (not (vector? c))] (get c :seon.eval/id)))
-        reply (some #(when (= :section (first %)) %) (drop 2 turn))]
-    (is (= #{"e2" "e4"} shown) "an eval of another hand, Seon's among them, is a line after the reply")
-    (is (= ["e3"] (map #(get % :seon.eval/id) (last (last reply)))) "the agent's eval is its reply's step")
+        reply (some #(when (= :section (first %)) %) (drop 2 turn))
+        fold (last reply)
+        ids (map #(get % :seon.eval/id) (last (last fold)))]
+    (is (not-any? #(and (map? %) (get % :seon.eval/id)) (drop 2 turn)) "the chat is messages: no step stands beside them")
+    (is (and (= :details (first fold)) (not (:open (second fold))) (= "3 steps" (last (nth fold 2)))) "the turn's steps fold, closed, under one line saying how many")
+    (is (= "e3" (first ids)) "the agent's own step first")
+    (is (= #{"e2" "e3" "e4"} (set ids)) "then those of other hands, Seon's among them")
     (let [t (h/html (ui/model-call-view {} (d/pull db '[*] call)))]
       (is (str/includes? t "Found <strong>it</strong>") "what it said, its Markdown drawn")
       (is (not (str/includes? t "of context")) "its tokens are for whoever opens a step"))
@@ -3404,7 +3407,7 @@
                            :seon.eval/intent "Run the proofs." :seon.eval/code "(prove-it)" :seon.eval/response {:handle 'result/e3 :value 1}}])
         turn (ui/conversation-turn {:seon.ctx/ctx (:tree (seon.ctx/build (seon.db/index) db aid :b)) :seon.db/db db :key 1})
         reply (some #(when (= :section (first %)) %) (drop 2 turn))]
-    (is (some #(and (vector? %) (= :ol (first %)) (= ["e3"] (map #(get % :seon.eval/id) (second (rest %))))) reply)
+    (is (= ["e3"] (map #(get % :seon.eval/id) (last (last (last reply)))))
         (str "its eval is the reply's step: " (pr-str reply)))
     (let [w (draw (:tree (seon.ctx/build (seon.db/index) db aid :b)) seon.ctx/changes db #'ui/agent)
           page (try (apply str (map :html (r/placed-units w))) (finally (r/dispose-walk! w)))]
