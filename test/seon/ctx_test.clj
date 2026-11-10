@@ -501,10 +501,17 @@
   ;; (the owner, 2026-10-30: "deliver all messages and errors"): an
   ;; agent's own record, pulled by its schema's pattern, holds every message and every turn it has,
   ;; never the newest :seon.config.ctx/window of them (100), which only root's own record keeps for its copies
-  (let [n 2400 db (seeded n nil) c (ctx/build (seon.db/index) db (aid db) :b)]
-    (is (< (seon.config/value :seon.config.ctx/window) (quot n 20)) "more of each than the window")
-    (is (= (quot n 20) (count (:seon.message/_to (:tree c)))) "every message to the agent")
-    (is (= (quot n 3) (count (:seon.model-call/_agent (:tree c)))) "every model call it has")))
+  ;; n messages and n model calls, the turns' own entities, and no eval: the claim is of those two (a session of 2,400
+  ;; evals made the 120 messages and 800 calls before, most of the test's work)
+  (let [n 120
+        db (d/db-with (seeded 0 nil) (vec (mapcat (fn [i] [(seon.task/call-ref k i)
+                                                           {:seon.message/id (str "m" i) :seon.message/from "user"
+                                                            :seon.message/to [[:seon.agent/key k]] :seon.message/body "How is it going?"}])
+                                                  (range 1 (inc n)))))
+        c (ctx/build (seon.db/index) db (aid db) :b)]
+    (is (< (seon.config/value :seon.config.ctx/window) n) "more of each than the window")
+    (is (= n (count (:seon.message/_to (:tree c)))) "every message to the agent")
+    (is (= n (count (:seon.model-call/_agent (:tree c)))) "every model call it has")))
 
 (deftest the-patch-costs-the-change-not-the-session
   ;; a new eval's transaction patches the record in the work of its datoms, whatever the session's
