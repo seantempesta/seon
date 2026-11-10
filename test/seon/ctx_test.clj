@@ -385,7 +385,7 @@
               ;; every member path held before and after that is not at, under or above a changed path
               related? (fn [p q] (let [n (min (count p) (count q))] (= (subvec p 0 n) (subvec q 0 n))))
               moved (map second (ctx/changes c c'))
-              kept (for [p (vals (:held (:ix c))) :when (and (seq p) (not-any? #(related? p %) moved)
+              kept (for [p (keys (:spec (:ix c))) :when (and (seq p) (not-any? #(related? p %) moved)
                                                            (some? (get-in (:tree c') p)))] p)]
           (recur db' c' (inc i)
                  (cond-> bad (or (not= c' b) (not= (order-of (:tree c')) (order-of (:tree b)))) (conj [i tx]))
@@ -947,9 +947,9 @@
     (is (= "(defn f0 [x] x)" (get-in f0 [:var/form :form/src])) "D2: the cited var's source")
     (is (= #{(id db [:form/id "app.x/c-1"]) (id db [:form/id "app.x-test/t0-1"])} (set (keys (:callers f0)))) "D1: its callers, the test among them")
     (let [t0 (get-in t [:proved (id db [:var/name 'app.x-test/t0]) :var/form])]
-      (is (= "(deftest t0 (is (= 1 (f0 1))))" (:form/src t0)) "D1: the test's source, held whole at its first path (the task's proofs)")
-      (is (= {:db/id (:db/id t0)} (get-in f0 [:callers (id db [:form/id "app.x-test/t0-1"])]))
-          "and {:db/id} among the var's callers, which reach it later (the page fills it from its first path)")
+      (is (= "(deftest t0 (is (= 1 (f0 1))))" (:form/src t0)) "D1: the test's source, whole under the task's proofs")
+      (is (= (:form/src t0) (get-in f0 [:callers (id db [:form/id "app.x-test/t0-1"]) :form/src]))
+          "and whole among the var's callers too, by that path's pattern (docs/ctx.md#the-pattern: an entity at every path the pattern pulls it)")
       (is (= #{'app.x/f0 'clojure.test/is} (:form/refs t0)) "D5: what the proof calls, each var by its name"))))
 
 (deftest an-agents-record-holds-its-proofs-status
@@ -1088,13 +1088,41 @@
         (is (= :seon.ctx/basis (:seon.error/type r)))
         (is (= 1 @calls))))))
 
+;; docs/ctx.md#the-pattern: an entity sits whole at every path the pattern pulls it, and an edit of it is by its :db/id
+(deftest an-edit-at-any-path-writes-the-entity
+  (let [;; the agent's task pulled at two paths, by two sub-patterns
+        pattern '[* {[:seon.agent/task :as :task] [*]} {[:seon.agent/task :as :again] [:seon.task/id :seon.task/reason]}]
+        db (seeded 5 pattern)
+        reason #(:seon.task/reason (d/entity % [:seon.task/id "lab/ctx"]))
+        step (fn [db f] (as-agent! db #(let [r (try (f) (catch clojure.lang.ExceptionInfo e (ex-data e)))] [r @ctx/ctx])))
+        c (:tree (ctx/build (seon.db/index) db (aid db) :b))]
+    (is (= "lab/ctx" (get-in c [:task :seon.task/id]) (get-in c [:again :seon.task/id])) "the task, whole at both paths")
+    (is (contains? (get-in c [:task]) :seon.task/plan) "each by its own path's pattern: all of it at :task")
+    (is (not (contains? (get-in c [:again]) :seon.task/plan)) "and two attributes at :again")
+    (testing "an edit at the second path writes the entity, and the record holds it at both"
+      (let [[[r c'] db'] (step db #(swap! ctx/ctx assoc-in [:again :seon.task/reason] "waiting"))]
+        (is (nil? (:seon.error/type r)) (pr-str r))
+        (is (= "waiting" (reason db')))
+        (is (= "waiting" (get-in c' [:task :seon.task/reason]) (get-in c' [:again :seon.task/reason])))))
+    (testing "the same edit at both paths is one edit"
+      (let [[[r _] db'] (step db #(swap! ctx/ctx (fn [c] (-> c (assoc-in [:task :seon.task/reason] "same") (assoc-in [:again :seon.task/reason] "same")))))]
+        (is (nil? (:seon.error/type r)) (pr-str r))
+        (is (= "same" (reason db')))))
+    (testing "two different edits of the entity in one swap! are refused, nothing written"
+      (doseq [f [#(swap! ctx/ctx (fn [c] (-> c (assoc-in [:task :seon.task/reason] "a") (assoc-in [:again :seon.task/reason] "b"))))
+                 #(swap! ctx/ctx (fn [c] (-> c (assoc-in [:task :seon.task/plan] "Another plan.") (assoc-in [:again :seon.task/reason] "b"))))]]
+        (let [[[r _] db'] (step db f)]
+          (is (= :seon.ctx/invalid (:seon.error/type r)) (pr-str r))
+          (is (some #(re-find #"edited at .* too, differently" (str (:why %))) (:invalid r)) "naming the other path")
+          (is (= (:max-tx db) (:max-tx db')) "the branch is unchanged"))))))
+
 (defn one-write
   "The input of size n: a session of n evals, its record, and a swap! of it changing one attribute:
   [ix db spec old new eid path acc], seon.ctx/edits's (spec, the agent's pattern as the walk takes it)."
   {:malli/schema [:=> [:cat pos-int?] [:vector :any]]}
   [n]
   (let [db (seeded n) c (ctx/build (seon.db/index) db (aid db) :b) t (:tree c)]
-    [(seon.db/index) db (get-in c [:ix :spec (:db/id t)]) t (assoc t :seon.agent/status :busy) (:db/id t) [] {:tx [] :invalid [] :paths []}]))
+    [(seon.db/index) db (get-in c [:ix :spec []]) t (assoc t :seon.agent/status :busy) (:db/id t) [] {:tx [] :invalid [] :paths []}]))
 
 (deftest a-write-costs-its-change-not-the-record
   ;; a swap!'s change found in the work of what differs: a unit identical to its old self (the

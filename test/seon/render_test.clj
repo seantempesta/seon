@@ -2374,9 +2374,9 @@
                             :seon.user/focus [:seon.agent/key "b1/a1"]}])
         tree (seon.ctx/agent-ctx (seon.db/index) db (seon.db/eid db :seon.user/name "sean"))]
     (is (= {:seon.agent/key "b1/a1" :seon.agent/status :running} (select-keys (:seon.user/focus tree) [:seon.agent/key :seon.agent/status])))
-    ;; an entity the record holds once (a1, as the focus) is a bare id in the join
+    ;; an entity at two paths (a1, the focus and one of the agents) is whole at each (docs/ctx.md#the-pattern)
     (is (= #{(seon.db/eid db :seon.agent/key "b1/a1") (seon.db/eid db :seon.agent/key "b1/a2")} (set (keys (:seon.agent/agents tree)))))
-    (is (= [:idle] (keep :seon.agent/status (vals (:seon.agent/agents tree)))))))
+    (is (= #{:running :idle} (set (keep :seon.agent/status (vals (:seon.agent/agents tree))))))))
 
 (deftest roots-session-sees-sessions-started-after-it-forked
   ;; docs/users.md#roots-session: a branch takes main's program, not its data, so a session started on main after root's session forked is

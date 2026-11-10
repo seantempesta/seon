@@ -834,28 +834,7 @@
          (when-let [ins (:seon.task/instructions t)] [:p ins]))
        [:p (str "Task: " id)]])))
 
-(def ^:private cite-joins
-  "Where a cite's joins hold an entity, and the identity attribute that marks it held whole there (an entity
-  is held once in ctx, {:db/id e} at any other path: docs/ctx.md#the-pattern): each join path below a cite,
-  the ones that hold an entity by the cite's own pattern first."
-  (into (mapv (fn [a] [[:seon.cite/target] a]) ref/target-attrs)
-        [[[:seon.cite/target :var/form] :form/id] [[:seon.cite/target :seon.doc/_parent :*] :seon.doc/address]
-         [[:seon.cite/target :callers :*] :form/id] [[:seon.cite/target :callers :* :form/defines :*] :var/name]]))
-
-(defn- fill
-  "Node x with each {:db/id e} held whole at another path of ctx c (held: e to that path) replaced by the node
-  there, at any depth, each entity once: a cite drawn as the walk holds what it joined."
-  {:malli/schema [:=> [:cat :map [:map-of :int [:vector :any]] :any] :any]}
-  [c held x]
-  (let [go (fn go [seen x]
-             (cond (and (map? x) (= [:db/id] (keys x)) (held (:db/id x)) (not (seen (:db/id x))))
-                   (go (conj seen (:db/id x)) (ratom/realize (get-in c (held (:db/id x)))))
-                   (map? x) (into (if (sorted? x) (empty x) {}) (map (fn [[k v]] [k (go seen v)])) x)
-                   (set? x) (into #{} (map #(go seen %)) x)
-                   :else x))]
-    (go #{} x)))
-
-(declare page-cites held-whole)
+(declare page-cites)
 
 (defn help-form
   "The form an agent runs to read more of x, a wiki address (a string), a namespace or a function (a symbol), a schema key: the
@@ -975,22 +954,32 @@
      (:file/path t) [:section [:h3 (:file/path t)] [:p "A file your plan names."] [:p "Read it: " [:code (str "(slurp \"" (:file/path t) "\")")]]])))
 
 (defn cite
-  "Cite c as pulled with its target joined (the declared html render of :seon.cite/cite-fact), by `cite-hiccup`: a wiki section, a
-  function, a schema key, a namespace, a task or a file, at the cite's depth; opts' :lookups and :changing? are what the placement
-  knows of the agent's question (`cited`). A pulled section or var alone is not rendered by this: it prints as the data it is. See
-  docs/references.md#an-entity-cites."
+  "Cite c as pulled with its target and its owner joined (the declared html render of :seon.cite/cite-fact), by `cite-hiccup`: a
+  wiki section, a function, a schema key, a namespace, a task or a file, at the cite's depth. What the agent will do with a function
+  is judged from the cite's own joins, never stored and never the page's: one in its owner task's namespace or reached by the
+  task's proofs (their forms' refs) is one it will change (its source and tests drawn), any other one it calls. ctx holds every
+  entity whole at each path its pattern pulls it (docs/ctx.md#the-pattern), so the cite's joins are all here. A pulled section or
+  var alone is not rendered by this: it prints as the data it is. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
-  [{db :seon.db/db lookups :lookups changing? :changing?} c]
-  (cite-hiccup db (ratom/realize c) {:lookups (or lookups []) :changing? (boolean changing?)}))
+  [{db :seon.db/db} c]
+  (let [c (ratom/realize c)
+        t (:seon.cite/target c)
+        of (:seon.cite/of c)
+        task-ns (some-> (:seon.task/ns of) str)
+        reach (into #{} (for [[_ v] (:proved of) r (get-in v [:var/form :form/refs])] r))
+        sym (:var/name t)
+        id (:seon.task/id of)]
+    (cite-hiccup db c {:lookups (cond-> [] id (conj [:seon.task/id id]) sym (conj [:var/name sym]))
+                       :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))})))
 
 (defn cited
-  "One thing the agent's task or its needs cite (a component over ctx and the db), named by its target k: the cite at ctx path :at
-  as ctx holds it, each entity it joined that ctx holds at another path filled from there (:held, e to that path, which the layout
-  found), drawn by `cite-hiccup`. A part of its own, so a cite that changes is sent alone. See docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]] [:held [:map-of :int [:vector :any]]] [:lookups {:optional true} [:sequential :any]] [:changing? {:optional true} :boolean]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db at :at held :held lookups :lookups changing? :changing?}]
+  "One thing the agent's task or its needs cite (a component over ctx and the db), named by its target k: the cite at ctx path :at,
+  its joins as ctx holds them, drawn by the cite's own render (`cite`). A part of its own, so a cite that changes is sent alone. See
+  docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db at :at}]
   (when-let [x (get-in c at)]
-    (cite {:seon.db/db db :lookups lookups :changing? changing?} (fill c held (ratom/realize x)))))
+    (cite {:seon.db/db db} x)))
 
 (defn citations
   "The heading of what the task and its needs cite (a component over ctx): what it is and why it is here. The cites follow it, each a
@@ -1002,21 +991,11 @@
      [:h2 "What your plan mentions"]]))
 
 (defn- cite-parts
-  "The `cited` components of the agent's page, one for each thing its task and its needs cite (`page-cites`). Each is told what
-  the agent will do with it: a function in the task's own namespace or reached by its proofs is one it will change (its source and
-  tests are drawn), any other one it calls (its signature and doc); and the lookup refs an attribute's real value is taken from
-  (this task's own entity, and the functions the cites name)."
+  "The `cited` components of the agent's page, one for each thing its task and its needs cite (`page-cites`); what the agent will
+  do with each is the cite's own render's to judge, from its joins (`cite`)."
   {:malli/schema [:=> [:cat :map] [:vector :any]]}
   [c]
-  (let [cs (page-cites c)
-        task-ns (some-> (ratom/realize (get-in c [:seon.agent/task :seon.task/ns])) str)
-        reach (into #{} (for [[_ v] (get-in c [:seon.agent/task :proved]) r (ratom/realize (get-in v [:var/form :form/refs]))] r))
-        lookups (into [[:seon.task/id (ratom/realize (get-in c [:seon.agent/task :seon.task/id]))]]
-                      (keep #(when (re-matches #"[^\s:/#]+/[^\s:#]+" %) [:var/name (symbol %)])) (map second cs))]
-    (vec (for [[p k held] cs
-               :let [sym (when (re-matches #"[^\s:/#]+/[^\s:#]+" k) (symbol k))]]
-           [#'cited {:key k :at p :held held :lookups lookups
-                     :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))}]))))
+  (vec (for [[p k] (page-cites c)] [#'cited {:key k :at p}])))
 
 (defn references
   "Where to look for more, beside the task (a component over ctx): the agent's own cites (what every agent cites, the config's
@@ -1025,8 +1004,7 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (let [ks (sort-by #(get-in c [:seon.cite/_of % :seon.cite/order]) (keys (:seon.cite/_of c)))
-        held (held-whole c (for [k ks] [:seon.cite/_of k]))
-        cites (for [k ks] (fill c held (ratom/realize (get-in c [:seon.cite/_of k]))))]
+        cites (for [k ks] (ratom/realize (get-in c [:seon.cite/_of k])))]
     (when (seq cites)
       [:section
        [:h2 "If you need more"]
@@ -1064,30 +1042,12 @@
            ;; (curated pair 1, 2026-11-10) where a line says why it matters
            (into [:ol] (for [{:keys [name line]} hits] [:li [:code (str name)] (when (seq line) (str " " line))]))])))))
 
-(defn- held-whole
-  "Where ctx c holds whole each entity the cites at paths ps joined, {e path}: the agent's task and its needs, the
-  task's proofs (each held first, by the agent's and the task's patterns), a cite's own joins, then a section's below and a var's callers (cite-joins), the first
-  path at which its identity attribute is present (an entity is held once: docs/ctx.md#the-pattern)."
-  {:malli/schema [:=> [:cat :map [:sequential [:vector :any]]] [:map-of :int [:vector :any]]]}
-  [c ps]
-  (let [;; the paths below p that join [steps a] names (a :* step each member of the collection there), with
-        ;; whether ctx holds the entity whole at each (its identity attribute a present) and its id
-        join-paths (fn [p [steps a]]
-                     (let [paths (reduce (fn [qs step] (if (= :* step) (for [q qs k (keys (get-in c q))] (conj q k)) (map #(conj % step) qs))) [p] steps)]
-                       (for [q paths :let [id (get-in c (conj q :db/id))] :when id] [q (some? (get-in c (conj q a))) id])))
-        found (concat (join-paths [] [[:seon.agent/task] :seon.task/id]) (join-paths [] [[:seon.agent/task :seon.task/needs :*] :seon.task/id])
-                      (join-paths [] [[:seon.agent/task :proved :*] :var/name]) (join-paths [] [[:seon.agent/task :proved :* :var/form] :form/id])
-                      (join-paths [] [[:seon.agent/task :seon.task/needs :* :proved :*] :var/name]) (join-paths [] [[:seon.agent/task :seon.task/needs :* :proved :* :var/form] :form/id])
-                      (for [p ps j cite-joins q (join-paths p j)] q))]
-    (reduce (fn [m [q whole? id]] (if (and whole? (not (contains? m id))) (assoc m id q) m)) {} found)))
-
 (defn- page-cites
   "The cites agent record c's page draws, read from ctx alone: its task's (:seon.cite/_of), then each need's (one
   level, a merge task's left out), then the agent's own, each target once at the strongest depth any asks,
   the task's proofs left out (the status shows them), in the order the cites were written. Each
-  [path target held]: the cite's path, its target as text and where ctx holds each entity it joined whole
-  (an entity is held once: docs/ctx.md#the-pattern)."
-  {:malli/schema [:=> [:cat :map] [:vector [:tuple [:vector :any] :string [:map-of :int [:vector :any]]]]]}
+  [path target]: the cite's path and its target as text."
+  {:malli/schema [:=> [:cat :map] [:vector [:tuple [:vector :any] :string]]]}
   [c]
   (let [task (:seon.agent/task c)
         proofs (into (set (get task :seon.task/proofs)) (mapcat (fn [n] (get-in task [:seon.task/needs n :seon.task/proofs]))) (keys (:seon.task/needs task)))
@@ -1097,14 +1057,12 @@
                              :when (not= :merge (get-in task [:seon.task/needs n :seon.task/kind]))] [:seon.agent/task :seon.task/needs n :seon.cite/_of])
                        [])
         paths (for [g groups k (sorted g)] (conj (vec g) k))
-        ;; each entity a cite joined is held once: a target held at another path is read from there
-        held (held-whole c paths)
-        all (for [p paths :let [t (fill c held (ratom/realize (get-in c (conj p :seon.cite/target))))]]
+        all (for [p paths :let [t (ratom/realize (get-in c (conj p :seon.cite/target)))]]
               {:path p :id (:db/id t) :target (str (ref/target-value t)) :name (:var/name t) :rank (ref/strength (get-in c (conj p :seon.cite/depth)))})
         all (remove #(proofs (:name %)) all)
         by (group-by :id all)
         chosen (vec (for [t (distinct (map :id all))] (reduce (fn [a b] (if (> (:rank b) (:rank a)) b a)) (by t))))]
-    (vec (for [{:keys [path target]} chosen] [path target held]))))
+    (vec (for [{:keys [path target]} chosen] [path target]))))
 
 (def ^:private reason-words
   "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page (docs/agent.md#what-you-read: `:refused`)."
