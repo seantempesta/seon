@@ -79,7 +79,7 @@
         ;; bin/update end on it (docs/source.md#files-and-the-db-two-directions)
         ;; the boot view's :stale-binary printed as it is (what it compares is seon.root/stale-binary's to say)
         (when-let [sb (get-in @(c/call! sys {:op :state}) [:boot :stale-binary])]
-          (out! "ROOT STALE BINARY " (pr-str sb) ": its binary is not main's, so root forks no agent. " problems/stale-binary-acts))
+          (out! "ROOT STALE BINARY " (shown sb) ": its binary is not main's, so root forks no agent. " problems/stale-binary-acts))
         (out! "ROOT LISTENING " bound))
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))
