@@ -188,20 +188,22 @@
         (doc/callers db x))))
 
 (defn tests-reaching
-  "The tests whose reach includes var x on this branch, nearest first: the tests a change to
+  "The tests whose reach includes var x on this branch, nearest first, each {:test t :process? whether it reaches a process of its own, so (prove) defers it: my.agent/process-test? says why}: the tests a change to
   x selects, read from the reach graph the test plan reads (seon.agent/branch-graph) by the same
   reverse walk (seon.program/tests-reaching). A cited var's page lists only its direct tests; run
   this on the function you will change, before writing its proof, to find the test that goes red
   first. A test of a scratch namespace is left out, as the plan leaves it (seon.agent/judges?); a
   library's var, which the reach graph holds no form of, answers []. A symbol that names no var
   answers so (:my.agent/no-var)."
-  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector :qualified-symbol] :my.agent/no-var]]}
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :seon.host/var]] [:or [:vector [:map [:test :qualified-symbol] [:process? :boolean]]] :my.agent/no-var]]}
   [x]
   (let [db (agent/db) x (if (var? x) (named x) (asked x))]
     (or (no-var db x)
         (let [[_ in] (agent/test-inputs db)
               g (agent/branch-graph db (:base @agent/state) in)]
-          (filterv agent/judges? (program/tests-reaching g x))))))
+          (let [process (:process (agent/test-plan db (:base @agent/state) #{}))]
+            (into [] (comp (filter agent/judges?) (map (fn [t] {:test t :process? (contains? process t)})))
+                  (program/tests-reaching g x)))))))
 
 (defn cost
   "What contracted function x costs, measured by the test runs, never estimated: :per-call, its
@@ -268,28 +270,46 @@
     (let [r (agent/fx! :embed {:texts [(str vector/query-prompt x)]} {})]
       (if (contract/error? r) r (first (:vectors (:value r))))))))
 
+(defn- hits-of
+  "seon.ctx.search/search's hits for q on this branch, its query's vector asked when meaning ranks (`query-of`), or that
+  embedding's error: what `search` shows as grep's rows and `similar` reads the scores of. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:or :qualified-symbol :qualified-keyword :string] :map] [:or [:vector :map] :map]]}
+  [q opts]
+  (let [db (agent/db)
+        qv (when (contains? (or (:by opts) #{:meaning}) :meaning) (query-of db q))]
+    (if (contract/error? qv) qv (search/search db q opts qv))))
+
+(defn hit-rows
+  "Search hits as grep's rows (`grep`), best first: each {:at \"name:n\" :kind :text :name :relevance}, :at the hit's name and the
+  number of the line :text is (the line of its text holding a word of q, else its first), so a hit reads as a grep line does and
+  (lines name n 20) reads on from it; :relevance where the hit has one; the last {:kind :more} entry as it is. An agent trusts
+  grep because it shows the line (curated runs, 2026-11-10: 7 greps to 0 searches). See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:vector :map]] [:vector :map]]}
+  [hits]
+  (mapv (fn [{:keys [kind name line at relevance] :as h}]
+          (if (= :more kind)
+            h
+            (cond-> {:at (str name (when at (str ":" at))) :kind kind :text (str (or line "")) :name name}
+              relevance (assoc :relevance relevance))))
+        hits))
+
 (defn search
   "The best matches on this branch for q, a text, a var's name or a schema key, over code and wiki
-  sections, and tests, tasks and schema keys when :kinds asks for them: [{:kind :name :score :by :line} ...] best first (seon.ctx.search/search), so a
+  sections, and tests, tasks and schema keys when :kinds asks for them, as grep's rows: [{:at \"name:n\" :kind :text :name :relevance} ...] best first (seon.ctx.search/search, then `hit-rows`), so a
   caller filters it with plain Clojure, e.g. (filter #(= :section (:kind %)) (search \"rrf\")). :kind is
-  one of :var :test :section :task :schema, :name its var, section address, task id or schema key, :by
-  the rankings it came from (:text its exact words, :meaning its embedding, :refs the call graph and the
-  sections naming it), :line the line of its text that holds q. opts, all optional: :kinds (a set of
+  one of :var :test :section :task :schema, :name its var, section address, task id or schema key, :text the line of
+  its text that holds a word of q (else its first) and :at its name and that line's number. opts, all optional: :kinds (a set of
   those kinds), :by (a set of :text :meaning :refs), :ns (a prefix: only vars and tests whose namespace
   starts with it), :k (:seon.config.render/search), :min (a chance: 0.4, the page's cut, unless given). A
   function, section or schema key hit holds :relevance, the chance it is worth reading for q (calibrated
   on a judge's labels: docs/vector.md#relevance), and hits are best first by it; those below :min are
-  counted in the last entry, not shown. Each hit also holds :e, its entity, and :at, the line of its text
-  (doc takes a hit, or its :name, and shows it). Hits left out by :k are counted per kind in a
+  counted in the last entry, not shown. (doc hit) shows a hit whole, and (lines name n 20) reads on from its line. Hits left out by :k are counted per kind in a
   last {:kind :more} entry with the call that returns them. A failed embedding answers its error; a var
   or key with no vector yet is searched without meaning."
   {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :qualified-keyword :string]] [:or [:vector :map] :map]]
                   [:=> [:cat [:or :qualified-symbol :qualified-keyword :string] :map] [:or [:vector :map] :map]]]}
   ([q] (search q {}))
-  ([q opts]
-   (let [db (agent/db)
-         qv (when (contains? (or (:by opts) #{:meaning}) :meaning) (query-of db q))]
-     (if (contract/error? qv) qv (search/search db q opts qv)))))
+  ([q opts] (let [r (hits-of q opts)] (if (contract/error? r) r (hit-rows r)))))
 
 (defn similar
   "What on this branch is nearest x by meaning, [[name score] ...] best first, k of them
@@ -298,7 +318,7 @@
   {:malli/schema [:function [:=> [:cat [:or :qualified-symbol :qualified-keyword :string]] [:or [:vector [:tuple :any number?]] :map]]
                             [:=> [:cat [:or :qualified-symbol :qualified-keyword :string] pos-int?] [:or [:vector [:tuple :any number?]] :map]]]}
   ([x] (similar x (cfg/value :seon.config.render/search)))
-  ([x k] (let [r (search x {:by #{:meaning} :k k})]
+  ([x k] (let [r (hits-of x {:by #{:meaning} :k k})]
            (if (contract/error? r) r (into [] (comp (remove #(= :more (:kind %))) (map (juxt :name :score))) r)))))
 
 (defn prove
