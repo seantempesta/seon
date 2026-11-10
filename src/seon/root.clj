@@ -130,7 +130,7 @@
 
 (declare deliver-rid answer-taken)
 
-(declare answer-spawn insert-evals start-spawn no-room)
+(declare answer-spawn insert-evals start-spawn no-room binary-program binary-current)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -413,12 +413,33 @@
   (cond-> (assoc-in st [::spawning aid] p)
     (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts)))))
 
+(defn stale-binary
+  "Why this root's binary is not current for its main, or nil: binary-current's answer for the tree main was last brought to
+  from outside (db's :seon.root/source :tree, moved only by an import or a landing), {:binary :tree :reaches}, where what differs
+  between the two trees reaches root's own code or a build input. What agents merged into main since is main's own and never a
+  mismatch (the db is the source of truth). Unknown is never current (binary-current's own rule: a main with a source tree on a binary whose build
+  recorded none names :missing :binary-tree), and a diff git cannot make is {:binary :tree :error}. Nil with no source tree
+  (a store seeded with no source: nothing known). Agents of a stale binary would load main's forms over code it was not built
+  from, so no agent is forked (no-room). See docs/source.md#a-boot-resumes-from-the-db."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
+  [db]
+  (let [held (:tree (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root])))
+        built (binary-program)
+        r (binary-current db built held)]
+    ;; a diff git cannot make is no answer of current: held as what the row says
+    (if (contract/error? r) {:binary (get-in built [:inputs :tree]) :tree held :error (:seon.error/message r)} r)))
+
 (defn- no-room
   "Why no agent can be started now, or nil: no fork server to fork it (refused before an agent proc and its socket are made: a socket the lost server closes would end that agent first, as a death), or too many live agents. n: the agents the start would leave, a Back's old one not among them."
   {:malli/schema [:=> [:cat :seon.root/api-state :int] [:maybe :map]]}
   [st n]
   (cond
     (= :lost (get-in st [:view :fork-server :status])) (fs/lost)
+    (get-in st [:view :boot :stale-binary])
+    (refused 'seon.root/spawn!
+             (str "this root's binary was built from another git tree than the one its store's main was last brought to, so no agent is "
+                  "forked: it would run the two mixed. " problems/stale-binary-acts)
+             (get-in st [:view :boot :stale-binary]))
     (> n (cfg/value :seon.config.root/max-agents)) (refused 'seon.root/spawn! "too many live agents" {:max (cfg/value :seon.config.root/max-agents)})))
 
 (defn- spawn-agent
@@ -698,6 +719,13 @@
                    (view! assoc-in [:fork-server :mismatch] (:mismatch m)))
       ;; a throw in a fork server step: an error fact on root, the server serving on (seon.fork-server/server-step)
       :step-failed (problem st (err/occurrence (:error m) :platform {} (System/currentTimeMillis)))
+      ;; the server made no standby (docs/processes.md#a-step-that-throws): a recorded platform problem, and the view shows it has none
+      :standby-failed (-> st
+                          (view! assoc-in [:fork-server :standby] false)
+                          (problem (err/occurrence (contract/error :seon.fork-server/standby-failed #'back-op
+                                                                   (str "the fork server made no standby: " (:active-threads m) " active threads")
+                                                                   {:active-threads (:active-threads m) :gen (:gen m)})
+                                                   :platform {} (System/currentTimeMillis))))
       :load-errors (view! st update-in [:fork-server :load-errors] (fnil into []) (:errors m))
       ;; fork requests the dead server never served fail; agents live on
       ;; the dead server's children are orphans: no server reaps them, so a death waiting
@@ -1236,7 +1264,7 @@
 
 (defn built-program
   "The program of the tree at root as a seed indexes it, and the inputs bin/test keys verdicts by: {:program
-  (seon.program/program-digest of the tree's index) :inputs (seon.fx/inputs)}, or the error of a read or an analysis.
+  (seon.program/program-digest of the tree's index) :inputs (seon.fx/inputs, whose :tree is the tree's git id: what binary-current and the source fact compare)}, or the error of a read or an analysis.
   The index is the build's cache, a store other than the one store because it is regenerable from the tree at any time
   and root never reads it: kept between builds under base (bin/build's target/seon.index, keyed by the schema and layout:
   seon.db/kept-store!, so one of another layout is dropped, never opened), brought to the tree as a seed brings a store
@@ -1259,16 +1287,22 @@
     (when (.isFile f) (sedn/decode (slurp f)))))
 
 (defn booted-source
-  "Root's :seon.root/source fact held, as this boot (id boot) states it: the program the binary was built from (built, `binary-program`'s
-  :program, absent when bin/build recorded none) beside main's (main-digest, seon.program/program-digest of main at boot),
-  and, only when the two are one program, the binary's inputs with the config in force (config-input, seon.fx/config-input),
-  which agents key their test results by (seon.agent/test-inputs). A binary of another program is
-  seon.problems/stale-binary's row, never imported. See docs/source.md#a-boot-resumes-from-the-db."
-  {:malli/schema [:=> [:cat :map :string [:maybe :map] :string :map] :map]}
-  [held boot built main-digest config-input]
-  (cond-> (-> held (dissoc :inputs :binary) (assoc :boot boot :program main-digest))
-    (:program built) (assoc :binary (:program built))
-    (and (:inputs built) (= (:program built) main-digest)) (assoc :inputs (update (:inputs built) :config merge config-input))))
+  "Root's :seon.root/source fact held, as this boot (id boot) states it: the git tree the binary was built from (built,
+  `binary-program`'s :tree, as :binary-tree) and its program (:binary), absent when bin/build recorded none. When that tree is
+  held's :tree, the one main was last brought to from outside (an import, a landing; what agents merged since is main's own and
+  never a mismatch), the binary's inputs with the config in force (config-input, seon.fx/config-input), which agents key their
+  test results by (seon.agent/test-inputs), and :program the binary's, the program those inputs describe; otherwise :program is
+  main's at boot (main-digest, seon.program/program-digest) and no inputs. Another tree is seon.problems/stale-binary's row
+  and refuses spawns: stale, stale-binary's answer at this boot, is held as :stale-binary for the row. Never imported. See docs/source.md#a-boot-resumes-from-the-db."
+  {:malli/schema [:=> [:cat :map :string [:maybe :map] :string :map [:maybe :map]] :map]}
+  [held boot built main-digest config-input stale]
+  (let [one? (and (get-in built [:inputs :tree]) (= (get-in built [:inputs :tree]) (:tree held)))]
+    (cond-> (-> held (dissoc :inputs :binary :binary-tree :stale-binary) (assoc :boot boot :program (if one? (:program built) main-digest)))
+      (:program built) (assoc :binary (:program built))
+      (get-in built [:inputs :tree]) (assoc :binary-tree (get-in built [:inputs :tree]))
+      ;; stale-binary's answer at this boot: what the :stale-binary row shows (seon.problems/stale-binary)
+      stale (assoc :stale-binary stale)
+      (and one? (:inputs built)) (assoc :inputs (update (:inputs built) :config merge config-input)))))
 
 (def root-entries
   "Where the binary's own code starts, the roots of root-reach: its one entry (its modes, root's boot and procs among
@@ -1497,13 +1531,16 @@
                ;; and waits on main asking the reconciler for its next quiet (await-db): one channel,
                ;; so a wait asked after a judge is taken after it
                :judge (a/chan 64)}
+        ;; whether the binary is current for main, asked once: the boot view (no-room's refusal) and the source fact (the row) hold it
+        stale (stale-binary db)
         view {:agents {} :writer {:tx-count 0} :stats {}
               :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
               :boot {:gc-sweepers sweepers :compacted compacted :retained retained :seeded seeded :seed-ms (lib/r2 seed-ms)
                      :config-errors config-errors :digest digest :digest-ms (lib/r2 digest-ms)
-                     :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)}}
+                     :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)
+                     :stale-binary stale}}
         graph-p (promise)
         root-procs-p (promise)
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
@@ -1546,7 +1583,7 @@
                                                                                   (into (root-session-refresh-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
-                                                                         held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (binary-program) digest (fx/config-input cfg/config (cfg/checkout)))})
+                                                                         held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (binary-program) digest (fx/config-input cfg/config (cfg/checkout)) stale)})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))

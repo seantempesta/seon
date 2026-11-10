@@ -1284,6 +1284,21 @@
         "once each, in first-mention order, symbols and keywords together")
     (is (= [] (names-in db "see `no.such/var` and not.a/var")) "a symbol naming no var on db is left out")))
 
+(deftest a-search-answers-as-grep-does
+  ;; curated runs, 2026-11-10: agents grepped 7 times to 0 searches, since grep shows the line; my.agent/search answers its hits in
+  ;; grep's shape (my.agent/hit-rows), each the line holding a word of the query (docs/vector.md#search)
+  (let [db (d/db-with (seon.doc-test/corpus-db)
+                      [{:db/id "c" :var/name 'app/caller} {:form/id "app/caller" :form/src "(defn caller [] (g))" :form/defines ["c"] :form/refs ['app/g]}])
+        hits (search/search db "fusing" {:min 0.0} nil)
+        rows (my.agent/hit-rows hits)
+        shown (remove #(= :more (:kind %)) rows)]
+    (is (seq shown))
+    (is (= (map :name (remove #(= :more (:kind %)) hits)) (map :name shown)) "the same hits, in the same order")
+    (is (every? #(re-matches #".+:\d+" (:at %)) shown) (str "each at its name and line, as grep's :at: " (pr-str (map :at shown))))
+    (is (some #(re-find #"(?i)fus" (:text %)) shown) (str "a hit's :text is the line holding the query's word: " (pr-str (map :text shown))))
+    (is (every? #(= #{:at :kind :text :name} (disj (set (keys %)) :relevance)) shown) "grep's keys, its name, and its relevance where it has one")
+    (is (= (filter #(= :more (:kind %)) hits) (filter #(= :more (:kind %)) rows)) "the count of what was left out, as it was")))
+
 (deftest search-fuses-words-and-references-and-filters-by-plain-data
   ;; task one-index steps 4-5: one search over every kind; the answer is data an agent filters
   (let [db (d/db-with (seon.doc-test/corpus-db)

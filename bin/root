@@ -1,5 +1,5 @@
 #!/bin/zsh
-# bin/root [start [ARGS]|stop|kill|status|next]   this checkout's standing root, on this checkout's own
+# bin/root [start [--reindex] [ARGS]|stop|kill|status|next]   this checkout's standing root, on this checkout's own
 # ports (bin/ports): its server (reached by bin/mcp, or `printf '{:op :agents}\n' | bin/ask
 # PORT`) and its dashboard. `start` (the default) runs it detached: double-forked so it
 # is re-parented to PID 1, because the tool host kills a background task's whole process tree
@@ -14,6 +14,10 @@
 # and main), stops the root, and starts that tree's binary on them. A process never replaces
 # itself: bin/root owns it. Only what cannot load in place needs a new binary (a pin, deps.edn,
 # native code); a merge loads in place, and a restart catches up on main at boot.
+# `start --reindex [ARGS]` is the full outside-in (docs/source.md#files-and-the-db-two-directions): refused while a
+# root of this checkout runs (bin/root stop first); otherwise it erases this checkout's store (SEON_STORE, else
+# <SEON_RUNS>/store, and its -agents dir) and starts, so the fresh store's first boot seeds main from the tree
+# (the program, the wiki and the task files). It stops nothing and touches no other checkout's store.
 # bin/root run CHECKOUT PORT WEB [ARGS]   one root of CHECKOUT's build in the foreground, until
 # stdin closes (what `start` and `next` run).
 #
@@ -59,9 +63,10 @@ read PORT WEB <<< "$("$ROOT/bin/ports")"
 running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
 # launch CHECKOUT [ARGS]: `run` detached (double fork), until its listening line or its death
 launch() {
-  # a binary older than this tree runs its own code under this tree's program: say so, as nothing else does (bin/check refuses it; a root goes on)
   # whether target/seon is main's program is root's boot's fact (:seon.root/source :binary beside :program,
-  # seon.problems/stale-binary), not a tree read here at every start (0.3 s a root, every process test's)
+  # seon.problems/stale-binary), not a tree read here at every start (0.3 s a root, every process test's); when they
+  # differ the root prints ROOT STALE BINARY (the acts that bring them into agreement) before listening, and start's
+  # last line is that line (docs/source.md#files-and-the-db-two-directions)
   : > "$LOG"
   rm -f "$PIDS" "$PORTF" "$READY" "$DONE"; mkfifo "$READY" "$DONE"
   # the one holder (bin/held, detached) owns the root's stdin and output and waits on it: it
@@ -76,6 +81,8 @@ launch() {
   read -r T R P < "$READY"
   rm -f "$READY"
   if [[ -n ${P:-} ]]; then print $P > "$PORTF"; "$ROOT/bin/root" status
+    # a binary of another program than main's: the root said so before listening, and start ends on it (its last line)
+    s=$(grep -m1 '^ROOT STALE BINARY' "$LOG"); [[ -z $s ]] || print -r -- "$s"
   else print -u2 "root failed to start; its log:"; tail -20 "$LOG" >&2; exit 1; fi
 }
 # stop: TERM to the holder (the root's stdin closes, it stops cleanly), answered at the holder's end
@@ -116,6 +123,13 @@ case ${1:-start} in
     running || { print "no root running"; exit 0 }
     kill_root ;;
   start)
+    if [[ ${2:-} == --reindex ]]; then
+      # the full outside-in: this checkout's store erased and a root started on it, so main seeds from the tree
+      if running; then read T R < "$PIDS"; print -u2 "a root of this checkout is running (pid $R): bin/root stop first"; exit 1; fi
+      S=${SEON_STORE:-$SEON_RUNS/store}
+      rm -rf "$S" "$S-agents"; print "erased $S: the root seeds it from $SEON_SOURCE_ROOT"
+      launch "$ROOT" "${@:3}"; exit $?
+    fi
     if running; then "$0" status; exit 0; fi
     launch "$ROOT" "${@:2}" ;;
   next)
@@ -128,5 +142,5 @@ case ${1:-start} in
     (( ${#gen} )) || { print -u2 "no next generation built on the running root's main (my.root/generation)"; exit 1 }
     stop
     launch "${gen[@]}" ;;
-  *) print -u2 "usage: bin/root [start [ARGS]|stop|kill|status|next] | bin/root run CHECKOUT PORT WEB [ARGS]"; exit 2 ;;
+  *) print -u2 "usage: bin/root [start [--reindex] [ARGS]|stop|kill|status|next] | bin/root run CHECKOUT PORT WEB [ARGS]"; exit 2 ;;
 esac
