@@ -1297,6 +1297,22 @@
                                      :seon.eval/code (str "(f " id ")") :seon.eval/response {:handle (symbol "result" id) :value 1} :seon.eval/call-id (str "c-" id) :seon.eval/intent (str "Step " id ".")}]))
      (fn plan! [p] (d/transact conn [{:seon.task/id "demo/f" :seon.task/plan p}]))]))
 
+(deftest a-past-points-page-parts-hold-the-tasks-part
+  ;; docs/render.md#a-change-is-edits-by-name: a turn's diff compares the agent's page parts at two points, each pulled and rendered
+  ;; alone (render-pull with seon.ctx/changes, so a component reading the ctx reads it, and its lists realized before the walk is let go):
+  ;; an agent whose task has a plan has the task's part, and the plan's text is in it
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask!] (parts-session conn)
+            _ (ask! 0)
+            db @conn
+            a (:db/id (d/entity db [:seon.agent/key "a1"]))
+            parts (#'wire/page-parts-at db a {:commit (d/commit-id db)})
+            text (pr-str parts)]
+        (is (str/includes? text "Your task") "the task's part")
+        (is (str/includes? text "Make f.") "and its plan's text")
+        (is (str/includes? text "Your proofs") "the proofs' part beside it")))))
+
 (deftest a-first-request-is-the-system-prompt-and-the-page-as-a-message
   (ts/test-branch!
     (fn [_ conn]
