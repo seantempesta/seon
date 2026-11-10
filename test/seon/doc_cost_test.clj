@@ -201,3 +201,28 @@
      :fixed {:ticks 20000 :bytes 300000 :calls 4}
      :sizes [30 100 300]}))
 
+
+(defn naming-input
+  "search's arguments over a fixed corpus (search-input at 100 texts, ten of each kind holding the word) and n more wiki
+  sections, none holding the word, each naming a var: the part of the wiki a search never answers from, grown."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :string :map :any]]}
+  [n]
+  (let [[db q opts qv] (search-input 100)
+        db (d/db-with db (vec (for [i (range n)] {:seon.doc/address (str "names.md#n" i) :seon.doc/heading (str "N" i)
+                                                  :seon.doc/text (str "Names " i ".") :seon.doc/names #{(symbol "app" (str "g" i))}})))]
+    (doc/text-index db)
+    [db q opts qv]))
+
+;; See docs/vector.md#search
+(deftest a-search-costs-nothing-for-sections-it-does-not-answer-from
+  ;; task seon.ctx.search/a-search-costs-what-it-ranks: relevance read every section's named vars on every search
+  ;; (seon.ctx.search/section-names, 0.64M ticks and 5.4 MB of a 13.2M search on main's program); a name's sections are
+  ;; one seek of :seon.doc/names, so the sections no hit names cost nothing
+  (cost/proof {:of 'seon.ctx.search/search :input 'seon.doc-cost-test/naming-input
+               :n "wiki sections naming a var, none holding the query's word"
+               :work "the fixed corpus's search: FTS5's rows of the word, its hits' names, relevance over a bounded pool"
+               :growth :constant
+               ;; measured 2026-11-10 at 60, 240, 960 sections: before, 2.44, 2.77, 4.20 MB (0.78M, 0.83M, 1.02M ticks), every section's names read;
+               ;; after, 2.00, 2.00, 2.01 MB (0.62M ticks), 190 calls each
+               :fixed {:bytes 2100000 :calls 200}
+               :sizes [60 240 960]}))

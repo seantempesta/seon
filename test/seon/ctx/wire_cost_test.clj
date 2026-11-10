@@ -56,13 +56,13 @@
 (defn ring-of
   "seon.ctx.search/pushed's arguments at n forms in a ring, each calling the next: every node two
   neighbours, so the push's reach is bounded by its threshold, not by n. Seeded at the first."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:set :int] number?]]}
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/fn [:set :int] number?]]}
   [n]
   (let [db (d/db-with (t/world) (vec (mapcat (fn [i] [{:db/id (str "f" i) :form/id (str "demo/r" i) :form/src "(r)"
                                                           :form/refs #{(symbol "demo" (str "r" (mod (inc i) n)))}}
                                                          {:var/name (symbol "demo" (str "r" i)) :var/form (str "f" i)}])
                                                  (range n))))]
-    [db {} #{(pdb/eid db :form/id "demo/r0")} 0.001]))
+    [db (#'seon.ctx.search/section-names db) #{(pdb/eid db :form/id "demo/r0")} 0.001]))
 
 (deftest a-push-reads-what-its-threshold-reaches
   (cost/proof {:of 'seon.ctx.search/pushed :input 'seon.ctx.wire-cost-test/ring-of
@@ -81,12 +81,12 @@
   "seon.ctx.search/pushed's arguments at n forms each naming hub var demo/h, seeded at a form that calls
   h (as a function calls seon.contract/checked): the push's mass reaches h's form, whose callers are
   read to :hub (seon.config.render/relevance-features), so it is never read whole."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :map [:set :int] number?]]}
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/fn [:set :int] number?]]}
   [n]
   (let [db (d/db-with (ts/test-db) (into [{:db/id "h" :form/id "demo/h" :form/src "(defn h [])"} {:var/name 'demo/h :var/form "h"}
                                           {:db/id "s" :form/id "demo/s" :form/src "(defn s [] (h))" :form/refs #{'demo/h}} {:var/name 'demo/s :var/form "s"}]
                                          (for [i (range n)] {:form/id (str "demo/u" i) :form/src "(h)" :form/refs #{'demo/h}})))]
-    [db {} #{(pdb/eid db :form/id "demo/s")} 0.001]))
+    [db (#'seon.ctx.search/section-names db) #{(pdb/eid db :form/id "demo/s")} 0.001]))
 
 (deftest a-push-counts-a-hub-and-reads-it-not
   (cost/proof {:of 'seon.ctx.search/pushed :input 'seon.ctx.wire-cost-test/hub-of
