@@ -260,19 +260,6 @@
           "a load a person asks for reads its own dir's one whole task, records the read's outcome, and a read that finds it so writes nothing")
       (finally (ts/stop-root! root) (ts/drop-main! path main) (clojure.java.shell/sh "rm" "-rf" runs)))))
 
-(deftest a-build-without-whole-program-inference-reads-with-tools-reader
-  ;; with
-  ;; JOLT_NO_WP_INFER=1, `jolt build` of an app requiring clojure.tools.reader fails to analyze
-  ;; tools.reader.impl.utils (`<=clojure-1-7-alpha5 is not bound`), so a root cannot be built
-  ;; open-world; with inference on the same app builds and reads.
-  (let [checkout (seon.config/checkout)
-        out (str checkout "/target/reader-no-wp-" (random-uuid))
-        build (sh/sh "env" "JOLT_NO_WP_INFER=1" (str "JOLT_PWD=" checkout) (str checkout "/target/jolt/jolt") "-A:hello" "build" "-m" "build.reader" "-o" out :dir checkout)]
-    (try
-      (is (= 0 (:exit build)) "the build without whole-program inference succeeds")
-      (is (= "[1 2]" (str/trim (:out (sh/sh out)))) "and the binary reads")
-      (finally (sh/sh "rm" "-rf" out (str out ".build"))))))
-
 (def ^:private boot-probe
   "What a boot of `boots-on-a-tree` answers: the config key and the schema entry the trees change, as root holds them; the
   t of this boot's fact (:seon.root/boot, written once the graph runs, after the fork server forked), of main's

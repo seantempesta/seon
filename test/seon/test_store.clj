@@ -418,7 +418,7 @@
   arguments args, on a main of its own of the process store and a merges branch of its own
   (:seon.config.source/branch, named by that main: the roots of other shards in this checkout commit their
   merges on theirs, so a candidate the merge gate judged is still its branch's head when it is asked
-  again, seon.agent-test/a-real-gate-judges-a-candidate-once); stopped, its main dropped and its branch
+  again, the real gate's case: task seon.agent/a-real-gate-is-proved-in-seconds); stopped, its main dropped and its branch
   deleted when the process ends (a shutdown hook)."
   {:malli/schema [:=> [:cat :string [:vector :string]] :map]}
   [checkout args]
