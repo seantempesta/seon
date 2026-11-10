@@ -1911,7 +1911,7 @@
   from one holding an index answers only for what moved, never for the program), the rest
   computed, all of them when it holds none or holds one under other inputs. The index is
   derived data, a function of the graph and inputs: regenerated whenever it is not held
-  (AGENTS section 5). Read it with index-of. See docs/source.md#tests-run-by-reach."
+  (docs/data-modeling.md#derived-data-is-a-cache-never-relied-on). Read it with index-of. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map :seon.program/inputs] :map]}
   [{:keys [defs tests] :as g} inputs]
   (let [{held :in} (:index g)

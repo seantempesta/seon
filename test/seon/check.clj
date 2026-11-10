@@ -156,7 +156,7 @@
   whose producer died (root stopped, the peer closed) ends, and the caller's check is red naming what it
   awaited. No deadline: a live producer that owes the mark and never sends it is its own defect, fixed
   there (the render proc's keyframe to a stale tab: seon.web/a-tabs-first-keyframe-settles-on-its-own),
-  never by a timeout here (AGENTS.md §4, nothing hangs)."
+  never by a timeout here (docs/errors.md#nothing-crashes-and-nothing-hangs, nothing hangs)."
   [feed pred]
   (await-ref feed #(or (pred %) (:ended %)))
   (boolean (pred @feed)))
@@ -1224,7 +1224,7 @@
                             (doto (Thread. #(do (Thread/sleep 200) (sock/write-line! w "done"))) (.setDaemon true) (.start))
                             (lib/wait-status pid))}))
    "memory-gauge"
-   ;; the largest block a test allocates (one process, no fan-out: AGENTS section 8); Chez keeps a
+   ;; the largest block a test allocates (one process, no fan-out: docs/machine.md#processes); Chez keeps a
    ;; bytevector this large in place (a large object is never copied by a collection)
    #(let [before (lib/real-mb)
           block (byte-array (* 300 1024 1024))]
@@ -1983,7 +1983,7 @@
   (let [path (seon.config/value :seon.config.root/store-path)
         own? (= path (seon.config/value :seon.config.proofs/check-store))
         targets (ts/standing-targets-tx)
-        ;; the checks' own store follows its seed (AGENTS section 5, a cache keyed by its inputs): path is a link to
+        ;; the checks' own store follows its seed (a cache keyed by its inputs: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on): path is a link to
         ;; path-<digest of what the seed writes>, so a changed seed opens a fresh store and the old one is removed
         ;; (seon.test-store/kept-store!), never read
         at (if own?

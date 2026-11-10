@@ -267,7 +267,7 @@
       :spawn (let [{:keys [agent branch]} m
                    resumed? (exists? branch)]
                ;; a fork is an outside effect: what it reads from the store (its session's entries,
-               ;; seon.agent/undelivered) is synced first (AGENTS section 5, durability), the
+               ;; seon.agent/undelivered) is synced first (docs/storage.md#durability-is-continuous-group-commit), the
                ;; batch this op just committed included (:dirty is settled only after the drain)
                (when (:durable? st) (pdb/sync! (:cfg st)))
                (when-not resumed? (d/branch! conn main branch))

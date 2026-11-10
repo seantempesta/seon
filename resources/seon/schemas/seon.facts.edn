@@ -91,7 +91,7 @@
  ;; carries never does). A FILE of the program (:file/path) holds its text as imported: for a resource of entries, the base write-back edits.
  :schema/key [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
  :schema/form :string
- ;; Nothing reads or writes this; a stored attribute leaves at the next store erase (AGENTS section 7a).
+ ;; Nothing reads or writes this; a stored attribute leaves at the next store erase (docs/storage.md#a-renamed-attribute).
  :schema/source :boolean
  :schema/file [:and {:seon.db/index true} :string]
  :file/path [:and {:seon.db/identity true :seon.db/content-id true} :string]
