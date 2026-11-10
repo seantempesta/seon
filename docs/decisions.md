@@ -58,6 +58,10 @@ Asked with the question tool by the managing session, the Tests session's eviden
 
 "All rendering that is pulling new data and processing it should happen at the hiccup render function step. I don't want what's shown on screen to dramatically differ from what the model sees." Then, asked where the history comes from: "Every render function gets the current db, the @ctx full pull data, and I think the current render tree? This allows any function to get whatever data it needs to do the proper render. So where are the messages and other parts that are data? In the @ctx pull data". So a history entity's native messages are made from its own pulled fields by its `:seon.render/openai-compat` render, never converted from hiccup; whatever looks data up or computes does it once, in the hiccup render, which the page shows styled and the model reads stripped. Stated in: docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup.
 
+### Three request cost proofs land waived (owner, 2026-11-10)
+
+Asked whether pages from data (step 1) waits for stage 2b's request cost proofs, red since 2b at its base: "Land now, three waivers". `seon.render-cost-test/a-cold-request-draws-what-the-model-reads`, `seon.render-cost-test/drawing-latest-costs-one-request` and `seon.ctx.wire-cost-test/a-requests-cost-is-its-records` each carry an `:overrun` naming task `seon.render/a-model-render-draws-each-turns-diff`, with what each measured at its largest size; no bound moved, and each waiver comes off with that task. Stated in: docs/cost.md#an-accepted-overrun-and-its-ratchet (the rule), the three proofs' comments (the numbers).
+
 ### An entity is held at every path the pull reaches it (owner, 2026-11-10)
 
 Asked about the stubs ctx held at every place an entity was joined but the first: "I'm pretty sure this is a self inflicted pain point and there's a simple solution please work with web and the other agents and find it". `seon.ctx/build` held each entity once and wrote `{:db/id e}` at every other path, and code across the renders undid it (fill, held-whole, a view resolving stubs was next); now it holds a joined entity whole at every path its pattern pulls it, each by that path's pattern, as `d/pull` does, and a swap! edits an entity by its `:db/id` at any path. Stated in: docs/ctx.md#the-pattern (with stage 2b, jolt/everypath).
@@ -476,7 +480,7 @@ The owner's rulings of 2026-11-01, after the audit of what agents read; they sta
 
 ### An agent's evals on a task are a session; past ones are shown as curated sessions (owner, 2026-11-01)
 
-"Yeah sessions is fine"; "In the instructions I don't think we say the dead ends part. Curated sessions." A session is an agent's evals on a task in order (nREPL's word; still stored as `:seon.run/*`, renamed only by a store erase). A past session shown to an agent as a worked example is a curated session: the session as stored, with the evals that led nowhere marked out, reaching the model as the same tool-call turns its own evals do (`seon.render.ui/eval-hiccup`), never as a text blob and never repeating the system message. No parallel store or renderer; it is evaluated as a measured arm before it is built in (plan.md, where it stands).
+"Yeah sessions is fine"; "In the instructions I don't think we say the dead ends part. Curated sessions." A session is an agent's evals on a task in order (nREPL's word; still stored as `:seon.run/*`, renamed only by a store erase). A past session shown to an agent as a worked example is a curated session: the session as stored, with the evals that led nowhere marked out, reaching the model as the same tool-call turns its own evals do (`seon.ctx.wire/eval-msgs`), never as a text blob and never repeating the system message. No parallel store or renderer; it is evaluated as a measured arm before it is built in (plan.md, where it stands).
 
 ### Context is data a render draws from the db (owner, 2026-11-01)
 

@@ -16,7 +16,7 @@
   breaks its forks; docs/failure-points.md, \"Physics\". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
+  (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.ref :as ref] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
             [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [seon.system :as system] [clojure.repl]
             [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
@@ -1642,12 +1642,14 @@
 (defn begin-run-tx
   "The write that makes task this agent's on db, its branch (begin-run-tx!'s second, and what
   the fork server applies to warm what an agent's start reads: seon.fork-server/warm-start): the task
-  running, naming the agent (key k) and its task."
+  running, naming the agent (key k), its task and what it reads as its system message (seon.doc/system-page)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :string] :seon.db/tx-data]}
   [db task k]
   [{:seon.task/id task :seon.task/execution :running}
    ;; the agent's task, which its record pulls (the agent is the unit, docs/ctx.md#the-pattern)
-   {:db/id k :seon.agent/key k :seon.agent/task {:seon.task/id task}}])
+   ;; what it reads as its system message: the system prompt's page, its top section and all below (seon.ctx.wire/agent-system-text)
+   (let [sys (ref/page-top db doc/system-page)]
+     (cond-> {:db/id k :seon.agent/key k :seon.agent/task {:seon.task/id task}} sys (assoc :seon.agent/system [sys])))])
 
 (defn- begin-run-tx!
   "Task written on this agent's branch (begin-run!'s write): the task as main declares it when the

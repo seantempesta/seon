@@ -20,8 +20,8 @@
 
 (deftest an-outside-context-names-only-the-branchs-own-gaps
   ;; docs/turn.md#the-cap: an outside agent's read of its context is the turn the loop would take, at the run's own max-turns: here 7, apart from the config's, which the read once passed as 1
-  (let [[_ _ bases] (at/in-agent (fn [{:keys [agent]}]
+  (let [[_ ctxr bases] (at/in-agent (fn [{:keys [agent]}]
                                    ["(seon.agent/transact! [{:seon.agent/key (:key @seon.agent/state) :seon.agent/max-turns 7}])"
                                     {:op :context :agent agent}
                                     "(mapv (fn [m] (:max-turns (:seon.model-call/basis (datahike.api/pull (seon.agent/db) [:seon.model-call/basis] m)))) (map first (datahike.api/q '[:find ?m :where [?m :seon.model-call/origin :outside]] (seon.agent/db))))"]))]
-    (is (= [7] (:value bases)) (str "the read's basis names the run's max-turns: " (pr-str bases)))))
+    (is (= [7] (:value bases)) (str "the read's basis names the run's max-turns: " (pr-str bases) (pr-str ctxr)))))
