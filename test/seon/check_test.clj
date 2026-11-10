@@ -257,6 +257,19 @@
     (is (.isDirectory (java.io.File. (str (seon.config/checkout) "/" rel))) "it names the tree's task files under the checkout")
     (is (= rel (seon.config/value :seon.config.source/tasks-dir)) "the tree's layout, not the process's place")))
 
+;; docs/references.md#task-references: a task's citation of nothing is refused at its write (owner, 2026-11-09); the health step loads
+;; the tree's tasks through that one checked write, so a task citing a key no program holds is health's typed refusal, never a lookup
+;; Datahike throws (batch 15: a plan citing :db/contentId in one backtick threw out of health before any row)
+(deftest a-task-citing-nothing-is-the-health-steps-typed-refusal
+  (let [dir (str (System/getProperty "java.io.tmpdir") "/health-cite-" (random-uuid))
+        tasks (str dir "/" (#'test-runner/tasks-dir))
+        _ (clojure.java.shell/sh "mkdir" "-p" tasks (str dir "/docs"))
+        _ (spit (str tasks "/zz.edn") (pr-str [{:seon.task/name "t" :seon.task/plan "Read `:no.such/key` first." :seon.task/kind :work :seon.task/proofs #{}}]))
+        r (#'test-runner/with-wiki (ts/test-db) dir)]
+    (clojure.java.shell/sh "rm" "-rf" dir)
+    (is (seon.contract/error? r) "an answer, not a throw")
+    (is (= {:seon.error/type :seon.db/no-target :target [:schema/key :no.such/key]} (select-keys r [:seon.error/type :target])) (pr-str r))))
+
 (deftest a-problem-the-base-had-is-not-the-branchs
   (let [[base] (catch-db (ts/test-db) 1)
         h (test-runner/branch-health base base nil)]
