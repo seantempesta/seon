@@ -342,14 +342,10 @@
           (and merge? (or (not whole?) (seq (:unmerged s)))) (update :merge-turns inc))))))
 
 (defn context-block
-  "The request of task as a model is sent it on this branch now: a read runs no proof and waits on none (their verdicts are the status's). What an
-  outside agent working the task reads, the system prompt, its conversation and its page, as one text. take?: the read is the
-  run's turn (its model is outside): it makes this process work task as run, so the my.* functions act on it, takes the messages
-  delivered, shows the page as an eval, as before a model's turn, and is recorded as a model call of the agent (origin :outside,
-  id \"<agent key>/read-<k>\", k the agent's own count of reads: a read moves no turn, docs/turn.md#the-turn-is-a-number); else
-  it is an observer's, which writes nothing (owner, 2026-11-10: \"A read never writes\"): its basis is the branch as it is, the
-  messages and the page left for the model's next turn. wire?: the request body as JSON, the bytes a provider is sent
-  (seon.ctx.wire/wire-turn over the read's basis), for the text a person reads. See docs/server.md#working-a-task-from-a-worktree."
+  "The request of task as a model is sent it on this branch now, as one text: the system prompt, its conversation and its page.
+  take?: the read is the run's turn (its model is outside): this process works task, takes the messages delivered, shows the
+  page, and records the read as a model call (id \"<agent key>/read-<k>\"); else an observer's, which writes nothing. wire?:
+  the request body as JSON (seon.ctx.wire/wire-turn). A read runs no proof. See docs/turn.md#an-outside-agent."
   {:malli/schema [:function [:=> [:cat :seon.task/id :boolean] :string] [:=> [:cat :seon.task/id :boolean :boolean] :string]]}
   ([task take?] (context-block task take? false))
   ([task take? wire?]
@@ -375,8 +371,7 @@
          {:keys [messages]} (wire/render db basis {:walk walk})
          ;; as a person reads it: the system prompt, then each record as the call made and its result
          text (wire/read-text db basis messages wire?)]
-     ;; the run's turn read is a model call of this agent, as a model turn's is: what it was built from and what it cost; the
-     ;; agent's own count of reads, from the branch, so a process, a run or a wake does not restart it
+     ;; the run's turn read is a model call, as a model turn's is; its number the agent's own count of reads on the branch
      (when take?
        (let [n (inc (or (d/q '[:find (max ?n) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/origin :outside] [?m :seon.model-call/n ?n]]
                              (agent/db) (pdb/eid (agent/db) :seon.agent/key k))
