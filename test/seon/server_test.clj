@@ -509,7 +509,7 @@
                         {:op :context :agent agent}
                         {:op :eval :agent agent :message-md "Changing my plan." :evals [{:intent "change it" :code "(swap! ctx assoc-in [:seon.agent/task :seon.task/plan] \"A plan that moved.\")"}]}
                         {:op :context :agent agent}]))]
-    (is (clojure.string/includes? (str (:context first-read)) "<page from=\"seon\"") "the page, the first time")
+    (is (clojure.string/includes? (str (:context first-read)) "(my.render/page ") "the page, the first time")
     (is (clojure.string/includes? (str (:context moved-read)) "A plan that moved.") "and what moved, the next time")))
 
 (deftest green-work-behind-main-is-merged-at-done

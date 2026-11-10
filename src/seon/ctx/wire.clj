@@ -15,7 +15,7 @@
             [seon.agent :as agent]
             [seon.ctx :as ctx]
             [seon.ctx.session :as session]
-            [seon.ratom :as ratom]))
+            [seon.ratom :as ratom] [seon.lib :as lib]))
 
 (declare render)
 
@@ -31,15 +31,15 @@
   [db] (doc/page-text db help-page))
 
 (defn system-text
-  "The system prompt as db holds it (seon.doc/page-text): a turn's, at the commit it read. A db
-  without it is refused by this contract, never answered empty."
-  {:malli/schema [:=> [:cat :seon.host/db] :string]}
+  "The system prompt as db holds it (seon.doc/page-text): a turn's, at the commit it read; nil on a db without it, which the
+  request refuses (`request`: :seon.ctx/no-system-message), never answered empty."
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
   [db] (doc/page-text db doc/system-page))
 
 (defn agent-system-text
   "The system message of agent record c on db: the doc sections its :seon.agent/system join names and every section below each, each its heading at its level and its text, in the order the wiki was written; with none, the
-  system prompt (`system-text`). See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :seon.host/db :map] :string]}
+  system prompt (`system-text`), nil when db holds neither. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe :string]]}
   [db c]
   (if-let [es (seq (distinct (mapcat #(doc/subtree db %) (keys (:seon.agent/system c)))))]
     (->> (map #(d/pull db [:seon.doc/address :seon.doc/heading :seon.doc/level :seon.doc/text :seon.doc/position] %) es)
@@ -149,11 +149,14 @@
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.model-call/basis] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]
                   [:=> [:cat :seon.host/db :seon.model-call/basis :map] [:map [:messages [:vector :seon.model/message]] [:parts [:vector :any]]]]]}
   ([db basis] (render db basis {}))
-  ([db {:keys [agent]} {:keys [walk ctx index]}]
+  ([db {:keys [agent commit] :as basis} {:keys [walk ctx index]}]
    (if walk
      (request walk)
      (let [ix (or index (program/index-of-db db))
-           t (or ctx (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key agent)))
+           ;; the point this request is made at, which its newest call's basis will name (written after this commit): a db read
+           ;; as of a t (a commit collection took) holds no commit id of its own
+           t (cond-> (or ctx (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key agent)))
+               commit (assoc ::here {:commit commit :t (or (:t basis) (:max-tx db))}))
            w (render/draw t ctx/changes db (render/render-var-of ix (merge {:seon.agent/key agent} t)) {:model-only true :once true :index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
        (try (request w) (finally (render/dispose-walk! w)))))))
 
@@ -232,21 +235,28 @@
   [{:role "user" :content (print/text (array-map :from (str from) :body (str body)) (:context print/budgets))}])
 
 
+(defn- children
+  "An element's children xs as the tree holds them: a seq a render returned (a `for`) spliced in its place, nils dropped, so
+  the model reads vectors only and a diff names each child (seon.render/keyed). See docs/render.md#style."
+  {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:vector :any]]}
+  [xs] (into [] (comp (mapcat #(if (seq? %) (children %) [%])) (remove nil?)) xs))
+
 (defn- presentation-free
   "Hiccup h without what is the page's alone: each element's class, style and id, but for a component's root (an element the walk
   gave an id), which keeps its render's name, the first word of its class, so the model can look up the function that drew a part
-  (`(source seon.render.ui/task)`) and its CSS on that var's metadata. See docs/render.md#style."
+  (`(source seon.render.ui/task)`) and its CSS on that var's metadata, and its id (seon.render/key-id: the render and what it shows), by which
+  a diff names it (seon.render/keyed); each element's children vectors only (`children`). See docs/render.md#style."
   {:malli/schema [:=> [:cat :any] :any]}
   [h] (clojure.walk/postwalk (fn [x] (if (and (vector? x) (keyword? (first x)) (map? (second x)))
                                        (let [m (second x)
                                              r (when (:id m) (first (str/split (str (:class m)) #"\s+")))
                                              ;; and the page's own marks (:wire/for \"page\"): what the page alone shows says nothing to the model
-                                             a (cond-> (into {} (remove (fn [[k _]] (or (#{:class :style :id} k) (= "wire" (namespace k))))) m) (seq r) (assoc :class r))]
-                                         (if (seq a) (assoc x 1 a) (into [(first x)] (nnext x))))
-                                       x))
+                                             a (cond-> (into {} (remove (fn [[k _]] (or (#{:class :style :id} k) (= "wire" (namespace k))))) m) (seq r) (assoc :class r :id (:id m)))]
+                                         (into (if (seq a) [(first x) a] [(first x)]) (children (nnext x))))
+                                       (if (and (vector? x) (keyword? (first x))) (into [(first x)] (children (next x))) x)))
                              h))
 
-(defn- page-parts-at
+(defn page-parts-at
   "Agent a's page parts at basis b on db's store, as the model reads them: the agent pulled at b's commit by what the parts
   render reads (its :seon.ctx/pattern, not the agent's whole pattern), rendered by its
   page-parts render (seon.render.ui/agent-parts, named here by symbol: seon.render.ui requires this namespace) in one pass
@@ -260,18 +270,21 @@
           ix (program/index-of-db d)]
       (presentation-free (:hiccup (render/render-pull (:tree (ctx/build ix d a branch (:seon.ctx/pattern (meta parts)))) d parts ix #{:seon.render/hiccup} {:seon.render/changes ctx/changes}))))))
 
+(defn- point-text
+  "Basis b as the point it names, written as the agent's code writes it: {:commit #uuid \"..\", :t n}, no branch, with the t the basis kept
+  else the commit's own max-tx, printed by the one printer (seon.print/text), whole. See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
+  {:malli/schema [:=> [:cat :seon.host/db :map] :string]}
+  [db b] (print/text (with-meta (array-map :commit (:commit b) :t (or (:t b) (:max-tx (d/commit-as-db (pdb/store-of db) (:commit b))))) {:seon.print/full true})))
+
 (defn page-message
-  "The user message Seon writes the model before its turn n: `<page from=\"seon\" turn=\"n\">`, the edits that take the
-  agent's page parts from its turn before to this one printed by the one printer, then `</page>`; nothing when nothing moved.
-  Its bytes are a function of n and the edits: no point, commit or t is in it. See docs/render.md#a-change-is-edits-by-name."
-  {:malli/schema [:=> [:cat :map :int :any] [:vector :seon.model/message]]}
-  [ix n edits]
-  (if (empty? edits)
-    []
-    [{:role "user" :content (str "<page from=\"seon\" turn=\"" n "\">\n"
-                                 (render/result-text ix nil {:record {:seon.eval/schema :seon.render/parts
-                                                                   :seon.eval/response {:value (with-meta {:edits edits} {:seon.render/schema :seon.render/parts :seon.print/full true})}}})
-                                 "\n</page>")}]))
+  "The page as the model reads it, a call Seon generated and its result: an assistant message whose one tool call is code (the
+  agent's own `(my.render/page p)` or `(my.render/diff p0 p1)`), and the tool message holding value v printed whole by the one
+  printer, no wrapper. The call's id is a function of the points alone, so the bytes are the same at every render; no eval entity
+  is written for it (docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup)."
+  {:malli/schema [:=> [:cat :string :string :any] [:vector :seon.model/message]]}
+  [id code v]
+  [{:role "assistant" :content "" :tool-calls [{:id id :code code}]}
+   {:role "tool" :tool-call-id id :content (print/text (vary-meta v assoc :seon.print/full true))}])
 
 (defn page-edits-between
   "The edits that take agent a's page parts at basis p0 (nil: nothing before, so the parts whole) to its parts at basis p1, on
@@ -283,14 +296,25 @@
   (render/page-edits ix (render/forms-moved (if p0 {"page" (page-parts-at db a p0)} {}) {"page" (page-parts-at db a p1)})))
 
 (defn page-diff-msgs
-  "What moved of agent a's page parts between basis p0 (nil: nothing before) and basis p1, as the page message of turn n
-  (`page-message`): each point's parts rendered (`page-parts-at`) and compared by seon.render/page-edits over forms-moved,
-  read from the db, never stored. Placed by the agent's model render before turn n's call, [#'page-diff-msgs {} a p0 p1 n],
-  so the walk keeps each pair as a component keyed by its points and a new turn renders only its own pair. See
-  docs/render.md#a-change-is-edits-by-name."
+  "What agent a's page shows the model before its turn n, between basis p0 (nil: nothing before) and basis p1: generated evals,
+  never written to the db. The first page (p0 nil) is the call `(my.render/page p1)` and its result the page parts whole
+  (`page-parts-at`); a later turn where something moved is `(my.render/diff p0 p1)` and its result the edits
+  (`page-edits-between`); nothing moved, or a first page that shows nothing: no messages. Placed by the agent's model render before turn n's call,
+  [#'page-diff-msgs {} a p0 p1 n], so the walk keeps each pair as a component keyed by its points and a new turn renders only its
+  own pair. Each is a function of its points and their renders. See
+  docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :int [:maybe :map] :map :int] [:vector :seon.model/message]]}
-  [{db :seon.db/db ix :seon.render/index} a p0 p1 n]
-  (page-message ix n (page-edits-between db ix a p0 p1)))
+  [{db :seon.db/db ix :seon.render/index} a p0 p1 _n]
+  (let [q0 (some->> p0 (point-text db)) q1 (point-text db p1)
+        id (lib/id (lib/digest (str "[" q0 " " q1 "]")))]
+    (if q0
+      (let [edits (page-edits-between db ix a p0 p1)]
+        (if (empty? edits) [] (page-message id (str "(my.render/diff " q0 " " q1 ")") edits)))
+      ;; the page whole, unless it shows nothing (what moved from nothing to it is no edits: a pull holding no page)
+      (let [parts (page-parts-at db a p1)]
+        (if (empty? (render/page-edits ix (render/forms-moved {} {"page" parts})))
+          []
+          (page-message id (str "(my.render/page " q1 ")") parts))))))
 
 (defn model-call-msgs
   "A model call (:seon.model-call/fact) as the model reads it: what the model said and its reasoning. Whether those are sent is
@@ -319,20 +343,29 @@
   (let [evals (:seon.eval/_agent c) msgs (:seon.message/_to c)
         placed (ctx/placed-messages db c)
         ;; the newest call's basis is written after the commit it names (seon.turn/open-turn!), so read at that commit it holds none:
-        ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message
-        here (when-let [id (d/commit-id db)] {:commit id :t (:max-tx db)})
+        ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message; a pull
+        ;; that leaves bases out (a smaller pattern) shows no page
+        here (or (::here (ratom/untracked c)) (when-let [id (d/commit-id db)] {:commit id :t (:max-tx db)}))
         cs (map val (sort-by (comp :seon.model-call/n val) (filter (comp :seon.model-call/n val) (:seon.model-call/_agent c))))
         newest (:seon.model-call/n (last cs))
-        basis-of (fn [x] (or (:seon.model-call/basis x) (when (= newest (:seon.model-call/n x)) here)))]
-    (vec (for [[prev call] (map vector (reductions (fn [b x] (or (basis-of x) b)) nil cs) cs)
+        ;; a call whose basis the db holds but the pull left out has none here: the pull says what the agent reads
+        basis-of (fn [x] (or (:seon.model-call/basis x)
+                             (when (and (= newest (:seon.model-call/n x))
+                                        (nil? (some->> (:seon.model-call/id x) (pdb/eid db :seon.model-call/id) (d/entity db) :seon.model-call/basis)))
+                               here)))]
+    (into (vec (for [[prev call] (map vector (reductions (fn [b x] (or (basis-of x) b)) nil cs) cs)
                :let [n (:seon.model-call/n call)
                      ms (keep (fn [[m _]] (get msgs m)) (get placed n))
                      es (sort (filter #(contains? evals %) (keys (:seon.eval/_call call))))
                      model? #(:seon.eval/call-id (get evals %))]
                x (concat ms
                          (when-let [b (basis-of call)] [[#'page-diff-msgs {} (:db/id c) prev b n]])
-                         [call] (map evals (filter model? es)) (map evals (remove model? es)))]
-           x))))
+                         ;; a reply with no words whose calls c no longer holds (each unlinked by a swap!) says nothing: none of it stays
+                         (when (or (some model? es) (not (str/blank? (:seon.model-call/reply call)))) [call])
+                         (map evals (filter model? es)) (map evals (remove model? es)))]
+           x))
+          ;; those delivered after the last turn's edge, which the turn now opening takes (:pending): never lost before that turn's call exists
+          (keep (fn [[m _]] (get msgs m)) (get placed :pending)))))
 
 (defn example-session-msgs
   "An example session's agent (its root view in a render-pull of it) as the model reads it, a model output's call: the message
@@ -365,7 +398,8 @@
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
   [{db :seon.db/db} a]
   (let [k (:seon.agent/key a)]
-    (-> [{:role "system" :content (agent-system-text db a)}]
+    ;; no prompt on db: no system message, so the request is refused by its own check (a typed error), not thrown inside the render
+    (-> (if-let [t (agent-system-text db a)] [{:role "system" :content t}] [])
         (into (map (fn [ek] [#'example-msgs {} ek])) (session/session-examples db a))
         (into (when k [{:role "user" :content (session/session-open k)}]))
         (into (turn-entities db a)))))

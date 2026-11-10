@@ -269,11 +269,12 @@
 (defn two-calls
   "The scripted model that proves a turn's rhythm (seon.agent-test): its first call evaluates
   (+ 20 21); each later call adds one to the value the last call's response showed, so its
-  code holds what it saw before it was made. The answers it reads are its own calls', not the page Seon ran as
-  its first eval (docs/render.md#the-render-is-an-eval)."
+  code holds what it saw before it was made. The answers it reads are its own calls', not the page Seon generated as an
+  eval of the agent's (a call of my.render/, docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup)."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [messages]}]
-  (if-let [seen (some #(when (and (= "tool" (:role %)) (not (str/includes? (:content %) "seon.render.ui/"))) (edn/read-string (:content %))) (rseq messages))]
+  (if-let [seen (let [page-ids (set (for [m messages c (:tool-calls m) :when (str/starts-with? (str (:code c)) "(my.render/")] (:id c)))]
+                  (some #(when (and (= "tool" (:role %)) (not (page-ids (:tool-call-id %)))) (edn/read-string (:content %))) (rseq messages)))]
     (calls "Add one to the value the last call showed." (str "(+ 1 " (:value seen) ")"))
     (calls "Add twenty and twenty-one." "(+ 20 21)")))
 
@@ -458,7 +459,7 @@
   [db c] (@(requiring-resolve (quote seon.ctx.wire/model-call-msgs)) {:seon.db/db db} (assoc c :seon.model-call/origin :model)))
 
 (defn tree-parts
-  "The conversation of agent record c on db as the agent's walk answers it for the model, cold: parts [ref messages turn] of the request, its system message and its opening left out. A db that holds no system prompt gets a stub of one, which the walk needs and the parts leave out."
+  "The conversation of agent record c on db as the agent's walk answers it for the model, cold: parts [ref messages turn] of the request, its system message, its opening and the page calls Seon generates (seon.ctx.wire/page-diff-msgs) left out. A db that holds no system prompt gets a stub of one, which the walk needs and the parts leave out."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:vector :any]]}
   [c db]
   (let [doc-load (requiring-resolve 'seon.doc/load-tx)
@@ -466,7 +467,7 @@
         db (if (@(requiring-resolve 'seon.doc/page-text) db @page) db (datahike.api/db-with db (doc-load db "docs" {@page "# A stub of the system prompt\n\nBe brief."})))
         w (seon.render/draw c @(requiring-resolve 'seon.ctx/changes) db #'seon.render.ui/agent
                             {:model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
-    (try (vec (remove (fn [[r]] (or (nil? r) (#{:section :session} (first r)))) (:parts (@(requiring-resolve (quote seon.ctx.wire/request)) w))))
+    (try (vec (remove (fn [[r]] (or (nil? r) (#{:section :session :page} (first r)))) (:parts (@(requiring-resolve (quote seon.ctx.wire/request)) w))))
          (finally (seon.render/dispose-walk! w)))))
 
 (defn tree-messages
