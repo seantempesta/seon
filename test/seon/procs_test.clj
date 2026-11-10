@@ -775,6 +775,41 @@
                          :view {:agents {}} :system (doto (promise) (deliver {:procs {} :conns []}))
                          :graph (doto (promise) (deliver (reify clojure.core.async.flow.impl.graph/Update (update-flow [_ _] {}))))})))))
 
+(deftest a-fork-server-step-that-throws-answers-and-the-server-serves-on
+  ;; task seon.fork-server/a-throwing-fork-server-step-answers-its-asker: a main commit the fork
+  ;; server cannot read (a :tx naming no commit: the replica's d/commit-as-db throws, as a bad
+  ;; entity in a d/with did, 2026-10-29) threw out of its step. Unfixed, the server stayed alive
+  ;; at 0% CPU, root heard nothing, and the spawn asked next waited for good. Now the step's
+  ;; throw is an event naming the op, the server's state is as it was, the next command is
+  ;; served, and root records the error and goes on to spawn.
+  ;; Then task seon.fork-server/every-fork-server-wait-ends-with-the-server: a server lost (dead
+  ;; with no standby, a-lost-fork-server-answers-every-waiter) is heard by root's api, which
+  ;; refuses a spawn with the error naming it, before any agent is made.
+  ;; Both are step functions called in process (docs/processes.md#a-step-that-throws)
+  (ts/test-branch! (fn [cfg conn]
+    (let [st (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil})
+          [st1 outs1] (#'server/server-step st :cmd {:op :tx :t 999999999999 :commit (random-uuid) :ns 0 :tx-data []})
+          m (let [rep (d/transact conn [{:note/text "after" :note/agent :t}])]
+              {:op :tx :t (:max-tx @conn) :commit (d/commit-id @conn) :ns 0 :tx-data (pdb/report->tx rep)})
+          [st2 outs2] (step #'server/server-step st1 :cmd m)]
+      (is (identical? st st1) "the step that threw left the server's state as it was")
+      (is (= [:step-failed] (map :ev (:ev outs1))))
+      (is (= :tx (:op (first (:ev outs1)))) "naming the op it took")
+      (is (= :seon.fork-server/step-failed (get-in (first (:ev outs1)) [:error :seon.error/type])))
+      (is (= [:applied] (map :ev (:ev outs2))) "and the next command is served")
+      (is (= (:max-tx @conn) (:max-tx (:db st2))))
+      (spawning-api (fn [api]
+        (let [[told _] (step #'root/api-proc api :from-fs (first (:ev outs1)))
+              [lost _] (step #'root/api-proc told :from-fs {:ev :fork-server-lost})
+              p (promise)
+              [after _] (step #'root/api-proc lost :ext {:op :spawn :opts {} :p p})
+              refused (answer p)]
+          (is (re-find #"step-failed" (pr-str (:seon.root/errors lost))) "root recorded the error")
+          (is (= :lost (get-in lost [:view :fork-server :status])))
+          (is (= :seon.root/refused (:seon.error/type refused)) (pr-str refused))
+          (is (re-find #"fork server is lost" (str (:seon.error/message refused))) (pr-str refused))
+          (is (= (:agents lost) (:agents after)) "no agent was made for the refused spawn"))))))))
+
 (deftest a-spawn-is-answered-at-its-agents-ready
   ;; task seon.root/a-spawn-answers-at-its-agents-ready: never at once, while the agent is
   ;; :spawning, but at its hello, so what is sent to it next reaches a ready agent
