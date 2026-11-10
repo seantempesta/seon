@@ -51,16 +51,16 @@ Asking the owner, helpers by the shape of the work, briefs and reviews: [session
 
 ## 3. How work moves
 
-**Work is tasks** ([tasks](docs/tasks.md)). A task is an entry in ``resources/seon/tasks/<owning-ns>.edn``: `:seon.task/plan` (what exists, the cause, what it replaces and deletes), `:seon.task/proofs` (the tests that say it is done) and `:seon.task/needs`. The plan is the hard part, written before anything is built. Your brief is your task: what you learn goes back into it or the wiki section it cites, never only into a report. Order: delete first, then foundations, then fixes. A problem outside your task is filed as a task, never fixed in passing.
+**Work is tasks** ([tasks](docs/tasks.md)). A task is an entry in ``resources/seon/tasks/<owning-ns>.edn``: `:seon.task/plan` (what exists, the cause, what it replaces and deletes), `:seon.task/proofs` (the tests that say it is done) and `:seon.task/needs`. The plan is the hard part, written before anything is built. Your brief is your task: what you learn and have verified goes back at once into it or the wiki section it cites, never only into a report. Order: delete first, then foundations, then fixes. A problem outside your task is filed as a task, never fixed in passing.
 
-**Each session in its own worktree; the main tree stays on main.** A session (Claude's or Seon's) works a short branch, ``jolt/<task-name>``, in its own worktree (`bin/worktree NAME`) and lands it itself. Nobody works or checks out a branch in the main tree (owner, 2026-11-08: "That's just wrong"). A parked branch is landed, or retired by the owner.
+**Each session in its own worktree; the main tree stays on main.** A session (Claude's or Seon's) works a short branch, ``jolt/<task-name>``, in its own worktree (`bin/worktree NAME`) and lands it itself. Nobody works or checks out a branch in the main tree (owner, 2026-11-08: "That's just wrong"). A parked branch is landed, or retired by the owner. A session takes the task the owner names, or the first ready task in THE PLAN's order. The end goal (owner, 2026-10-23) is Seon agents doing this work inside the system, with git only to commit what Seon writes back.
 
 **The method:**
-1. **Learn.** List what exists before designing; read the wiki sections, tasks and code for the problem, what v1 did, and the field's best known way.
-2. **Plan in a few lines:** the write set, what it deletes, the tests, its wiki section, and a cost line (what n is, its big-O, the number expected; reality 10 times over stops the work). A special case means the wrong design. A change to a dependency or a design rule waits for the owner's go.
-3. **Prove first:** the idea at the REPL at n ≤ 100, a cost proof for anything whose input grows, and each proof seen failing for the right reason.
+1. **Learn.** List what exists before designing; read the wiki sections, tasks and code for the problem, what v1 did, and the field's best known way. Where a section and the code disagree, the task owes a wiki edit.
+2. **Plan in a few lines:** the write set, what it deletes, the tests, its wiki section, and a cost line (what n is, its big-O, the number expected; reality 10 times over stops the work). A special case means the wrong design. A change to a dependency or a design rule waits for the owner's go. Aim for 90% of the benefit for 10% of the effort.
+3. **Prove first:** work at the REPL as an agent would, since what can't be done from outside can't be done from inside. Prove the idea at n ≤ 100, write a cost proof for anything whose input grows, and see each proof fail for the right reason.
 4. **Act:** the simplest code that passes, at the cause, in the owner of the bad value. **A bug is a class until shown otherwise** (owner, 2026-11-03: "Always be suspicious about bugs. Usually fixing them directly is the wrong solution. Root cause and see if we should be doing something that eliminates the bug class."): find what allowed it (an open schema, a guard, a second way of doing a thing), change that so the class cannot recur, then sweep for its siblings. No hacks: no special case, retry or hand-kept list. Its report says what allowed the bug, why the class is now impossible and what the sweep found.
-5. **Work it as a Seon agent would**, through the server (§6); what the context lacked is a task. A change to what the owner sees is checked in a browser ([checks](docs/checks.md#checking-a-page-in-a-browser)), and a view only renders what exists ([render](docs/render.md#a-view-does-no-work-of-its-own)).
+5. **Work it as a Seon agent would**, through the server (§6); what the context lacked is a task. A change to what the owner sees is checked in a browser ([checks](docs/checks.md#checking-a-page-in-a-browser)), and a render computes nothing the system already computed ([render](docs/render.md#a-render-does-no-work-of-its-own)).
 
 **Land small and often; nothing is run twice** ([merging](docs/merging.md#a-branch-lands-with-binland)):
 1. **Iterate** at the REPL, then with `bin/test NS` or `bin/test NS/TEST`.
@@ -81,7 +81,7 @@ Asking the owner, helpers by the shape of the work, briefs and reviews: [session
 - **A slow test is a bug** (owner, 2026-11-08: "Slow tests should be treated as bugs and fixed"); **a flaky result is a defect** to fix at its cause, never a reason to run again.
 - **Never delete or move a red verdict:** the fix is a new digest ([merging](docs/merging.md#verdicts-are-a-cache)).
 
-**The gate, before any new format, key, layer, namespace, proc or rule** (owner, 2026-10-21): (1) which existing mechanism does this, ours, v1's or the dependency's? (2) what did v1 do here? (3) what is the field's best known way? (4) does it add a format, key, layer or rule, and why can't the existing one do it? No evidence, no approval.
+**The gate, before any new format, key, layer, namespace, proc or rule** (owner, 2026-10-21): (1) which existing mechanism does this, ours, v1's or the dependency's? (2) what did v1 do here? (3) what is the field's best known way? (4) does it add a format, key, layer or rule, and why can't the existing one do it? The session gathers the evidence and shows it to the owner. No evidence, no approval.
 
 ## 4. The principles: everything is data flowing through the system
 
@@ -90,10 +90,10 @@ Asking the owner, helpers by the shape of the work, briefs and reviews: [session
   - a value: immutable Datahike values in one store with many branches ([storage](docs/storage.md));
   - a Flow proc and its channels ([flow](docs/flow.md#the-step-fn-contract-every-proc-follows));
   - a task: desired state on attributes, observed state as facts, one reconciler ([tasks](docs/tasks.md)); an OS child is an effect, and its exit is a fact;
-  - a process: an agent is a forked OS process with a real REPL, on its own branch ([processes](docs/processes.md#the-agent-process));
+  - a process: an agent is a forked OS process with a real REPL, on its own branch, named by role, task and checkout ([processes](docs/processes.md#the-agent-process));
   - a render declared on the entity's schema, `:seon.render/hiccup` for html and `:seon.render/model` for the model's messages ([render](docs/render.md));
   - an error as data, flowing to whoever can fix it ([errors](docs/errors.md)).
-- **Nothing crashes and nothing hangs** (owner, 2026-10-28: "I want our system to be robust and to have it not crash or hang ever."): every wait ends, with its value or a typed error saying why it never will ([errors](docs/errors.md#nothing-crashes-and-nothing-hangs)).
+- **Nothing crashes and nothing hangs** (owner, 2026-10-28: "I want our system to be robust and to have it not crash or hang ever."): every wait ends, with its value or a typed error saying why it never will, and the agent fixes a failure or messages root when it needs another process ([errors](docs/errors.md#nothing-crashes-and-nothing-hangs)).
 - **Never pass or keep a db value:** a kept db value is a reference, `{:branch :commit :t}` ([storage](docs/storage.md#a-kept-db-value-is-a-reference)).
 - **A mechanism is built once, and reused everywhere.** Before building anything that waits, retries, admits, spawns, answers a request or reads config, find its one implementation: the wiki section where it lives names it and its owner. Nobody builds a second one, or a one-off beside it.
 - **Get out of an agent's way:** an agent has a real REPL; write down what happened, never gate what it may do, and put no cut on its context or its evals ([processes](docs/processes.md#an-agent-is-never-gated)).
@@ -104,7 +104,7 @@ The laws every change is held to; a check or a test reads each of them, and its 
 
 - **Data is entities, refs and indexes;** there are no kinds ([data modeling](docs/data-modeling.md)).
 - **Only documented config:** every limit, bound or default is a key read through the one resolver, with no literals and no `System/getenv` outside the loader ([config](docs/config.md#constants)); reaching a bound is a typed error, never a silent cut ([config](docs/config.md#a-bound-fails-loudly)).
-- **One store, many branches,** as in production ([testing](docs/testing.md#testing-in-the-world)).
+- **One store, many branches,** as in production; a separate store is a last resort ([testing](docs/testing.md#testing-in-the-world)).
 - **Every write passes the one path,** checked against the entity's schema ([storage](docs/storage.md#the-write-checks-every-entity-it-touches); `bin/laws transactions`).
 - **Contracts on every function,** and every contract generates ([checks](docs/checks.md#contracts-armed-at-definition)).
 - **No guards:** only a named edge catches ([failure points](docs/failure-points.md); `bin/laws catch`).
@@ -141,7 +141,7 @@ Information has one home by what it is, and a fact found anywhere else is moved 
 - **Every function, schema entry and deftest cites the wiki section that describes its mechanism** (in its docstring, its `:description`, its leading `;;` comment), by its bare address (``docs/<topic>.md#<anchor>``), and never restates it ([references](docs/references.md#the-delimiter-picks-the-depth); an uncited function is a problem, [health](docs/health.md)).
 - **A wiki section links to code, never copies it** (owner, 2026-11-09: "Don't put code into docs if we can link to the code.").
 - **Merging a change updates its section in the same commit.** Before reporting, read your task's context through the server and confirm it pulls what the task needs.
-- **Write the wiki when it is true, not before:** while a design is open, its findings stay out of docs and tasks.
+- **Write the wiki when it is true, not before:** what is verified goes into its section at once; an open design's findings wait until it is settled.
 
 ## 7a. Words
 
@@ -156,8 +156,8 @@ Information has one home by what it is, and a fact found anywhere else is moved 
 - **A root's processes end with it:** kill the root, or its fork server's process group, never a fork server by pid.
 - **Leave nothing running when you finish,** and say so.
 - **Clean up garbage when you see it, whoever left it** (owner, 2026-10-23: "why not kill the leftover processes? why wouldn't you"), after checking that nothing live uses it. Keep what is evidence or someone's work: the standing store, what git or the store holds, a live session's worktree ([machine](docs/machine.md#disk-stays-bounded)).
-- **Git:** commit explicit paths; never bare `git stash`; never `checkout`, `restore` or `reset` on paths you didn't change; never `git submodule` in a worktree (`bin/worktree --sync NAME`); never push this repository's branches. A cause in a dependency is fixed there, on a ``jolt/<topic>`` branch of its fork (``seantempesta/<lib>``), pushed with no ask: no force, never a fork's main.
-- **Secrets are never printed.** Paid model calls spend from the owner's standing $50 budget, with the context checked first ([model](docs/model.md#paid-runs)). Install nothing system-wide. Never write in `~/src/seon`.
+- **Git:** commit explicit paths; never bare `git stash`; never `checkout`, `restore` or `reset` on paths you didn't change; never `git submodule` in a worktree (`bin/worktree --sync NAME`); never push this repository's branches. A cause in a dependency is fixed there, on a ``jolt/<topic>`` branch of its fork (``seantempesta/<lib>``), pushed with no ask: no force, never a fork's main, verified with `gh api` after.
+- **Secrets are never printed.** Paid model calls spend from the owner's standing $50 budget, on productive work only, with the context checked first; past it, the owner's go ([model](docs/model.md#paid-runs)). Install nothing system-wide. Never write in `~/src/seon`.
 
 ## 9. Mistakes we have made, and do not repeat
 
@@ -169,13 +169,13 @@ The rules are above; each mistake links where its incident is told.
 - **A clock standing in for a dependency or a workload** ([clocks](docs/clocks.md#if-nothing-has-changed-we-do-nothing)).
 - **A swallowed error, an ignored answer, a fake default** ([errors](docs/errors.md#unknown-is-never-a-default)).
 - **Routing around a principle:** a fallback instead of an error; a runner or wrapper beside the reconciler; a store per test; an env var instead of config; regex over code instead of the compiler's facts; script order instead of `:needs`; a thread instead of a fiber; stdin as a lifecycle.
-- **A parallel system, or a mechanism built twice** (owner, 2026-11-04: "I don't want agents to keep building parallel systems").
-- **Reinventing what v1 already solved,** or building a half-baked plan.
+- **A parallel system, or a mechanism built twice** (owner, 2026-11-04: "I don't want agents to keep building parallel systems"; [decisions](docs/decisions.md#no-parallel-systems-owner-2026-11-04)).
+- **Reinventing what v1 already solved,** designing before researching, building a half-baked plan, or too many worktrees at once on overlapping work.
 - **A clipping function** ([render](docs/render.md#no-clipping)).
-- **A check that cannot fail,** that only prints, that ran nothing, or that nobody read ([machine](docs/machine.md#reading-a-number)).
+- **A check that cannot fail,** that only prints, that ran nothing, or that nobody read ([machine](docs/machine.md#reading-a-number)); whole files copied over newer changes. When a rule changes, read every step it touches.
 - **Dropping a store, a branch or history:** the owner's act. Only the standing store, while it holds no user's data, is erased when a change needs it, the other sessions warned first ([machine](docs/machine.md#disk-stays-bounded)).
 - **Throwing away good work, or keeping its slow copy** (owner, 2026-10-23: "don't throw away good work have agents learn from it if you want a clean implementation. No crappy slow repetitive code").
 
 ## 10. Done
 
-It runs end to end through the path agents use; you have used it as a person would; the merged result is green; its numbers are in the commit; its wiki section is true; you can watch it work; it moves a step of THE PLAN; and nothing of yours is still running.
+It runs end to end through the path agents use; you have used it as a person would and checked its claims on the real thing; the merged result is green; its numbers are in the commit; its wiki section is true; you can watch it work; it moves a step of THE PLAN; and nothing of yours is still running.

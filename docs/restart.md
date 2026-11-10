@@ -1,6 +1,6 @@
 # Starting a session
 
-How a fresh Claude session picks up the work: the owner and one session work together in one conversation ([AGENTS](../AGENTS.md) §2), and everything the session needs is in git, the wiki and the plan.
+How a fresh Claude session picks up the work: a named session owns an area and works with the owner in its own conversation ([sessions](sessions.md)), and everything the session needs is in git, the wiki and the plan.
 
 ## What carries over
 
@@ -33,5 +33,5 @@ The first steps of a fresh session, in the main tree (`~/src/seon-next`):
 The prompt that starts a fresh session, in full.
 
 ```
-You are working on Seon on Jolt with me, in ~/src/seon-next. First read AGENTS.md (all of it), docs/plan.md and the newest entries of docs/decisions.md, then follow docs/restart.md "The first steps". Do the work yourself; use one-use Haiku and Sonnet helpers (or a fork of yourself) only as AGENTS.md §2 says. Tell me in five lines where things stand before you change anything.
+You are working on Seon on Jolt with me, in ~/src/seon-next. First read AGENTS.md (all of it), docs/plan.md and the newest entries of docs/decisions.md, then follow docs/restart.md "The first steps". Do the work yourself; use one helper at a time (a Sonnet or Haiku agent, or a fork of yourself), as docs/sessions.md says. Tell me in five lines where things stand before you change anything.
 ```
