@@ -162,7 +162,7 @@
                      (if (#{:seon.db/types-differ :seon.db/name-retired} (:seon.error/type (ex-data e)))
                        ;; its env, opened before the refusal, closed first: a removed store's env left open is the one this
                        ;; process reopens (and its semaphore set outlives it)
-                       (do (klmdb/close-env! store) (fx/remove-tree! store) (pdb/open! :lmdb store 0 :db))
+                       (do (klmdb/close-env! store) (seon.lib/remove-tree! store) (pdb/open! :lmdb store 0 :db))
                        (throw e))))
         ;; the bound is the write's: a tree the store keeps is read whatever the store's size (a shard read the plan's tree
         ;; from a store the plan's import had taken past it, removed it, and its first program reader imported the tree

@@ -399,9 +399,9 @@
   (let [a {:seon.message/id "m1" :seon.message/from {:seon.agent/key "owner"} :seon.message/body "Looks right."}
         v {:newest a :count 3}]
     (let [html (h/html (r/hiccup {:seon.render/index (seon.db/index)} v))]
-      (is (str/includes? html "owner: ") "the hiccup: the message's own render, inline")
+      (is (str/includes? html "<a href=\"/agent/owner\">owner</a>: ") "the hiccup: the message's own render, inline, its sender by seon.render.ui/sender")
       (is (str/includes? html "seon-print-keyword\">:count") "around it, the printer's map"))
-    (is (re-find #"seon-note\">owner<" (h/html (r/hiccup {:seon.render/index (seon.db/index)} a))) "the value itself by its render, its sender above its body")))
+    (is (re-find #"seon-note\"><a href=\"/agent/owner\">owner</a><" (h/html (r/hiccup {:seon.render/index (seon.db/index)} a))) "the value itself by its render, its sender above its body")))
 
 ;; ---- the pages: a page is its parts (task seon.render/every-page-is-its-parts) ----
 
