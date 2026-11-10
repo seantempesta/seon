@@ -878,6 +878,55 @@
           (is (re-find #"cannot draw this" (html "ctx-key-lab_2Ectx_2Fboom")) "the render's throw, as its error's render in its component's place")
           (is (re-find #"<ol><li>read the plan" (html "ctx-key-lab_2Ectx_2Fsteps")) "and every other component drawn"))))))
 
+(deftest a-join-added-to-the-agents-pattern-is-a-part-of-its-page
+  ;; docs/render.md#the-page (step 1 of pages from data): what the agent's pull joins is drawn by the joined entity's schema render, a
+  ;; tile of the page the person sees and of the page the model reads, with no ui code naming it. A new attribute (a set of refs to
+  ;; tasks, registered as an agent registers one) joined by the agent's own pattern draws each task it holds by the task's render;
+  ;; held but not joined (its pattern's * pulls it as ids), it is no tile
+  (let [db (seeded 0)
+        reg (my.schema/registration db :lab.ctx/watched '[:set {:seon.db/to [:seon.task/task-fact]} :seon.db/ref] false)
+        world (fn [pattern]
+                (let [db (:db-after (d/with (seeded 0 pattern) (:tx reg)))
+                      db (:db-after (d/with db (task/create-tx db [{:seon.task/ns 'lab :seon.task/name "watched" :seon.task/plan "Watch the other build."}])))]
+                  (:db-after (d/with db [{:seon.agent/key k :lab.ctx/watched [[:seon.task/id "lab/watched"]]}]))))
+        pages (fn [db] (try (enter-agent! {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)] (finally (end-agent!))))
+        id "task-view-lab_2Fwatched"
+        [parts page] (pages (world (conj session-pattern {:lab.ctx/watched :seon.task/task-fact})))
+        tile (some #(when (= id (:id %)) %) (:units parts))]
+    (is (= "#p-task" (:container tile)) "joined: a tile of the page's parts, placed by the walk")
+    (is (str/includes? (:html tile) "Watch the other build.") "drawn by the task's own render (seon.render.ui/task-view)")
+    (is (str/includes? (pr-str (get page id)) "Watch the other build.") "and a part of the page the model reads, the same hiccup")
+    (is (not-any? #(= "ctx-key-lab_2Ectx_2Fwatched" (:id %)) (:units parts)) "drawn once: a key the pattern joins is no added key")
+    (let [[parts page] (pages (world session-pattern))]
+      (is (not-any? #(= id (:id %)) (:units parts)) "held but not joined by the pattern: no tile")
+      (is (not (contains? page id))))))
+
+(deftest the-model-reads-the-agents-own-state
+  ;; docs/render.md#the-page (step 1 of pages from data): the agent's own state, drawn from its own attributes after the tiles, is part
+  ;; of the page the model reads: its turn (the namespace its REPL is in), how its work stands (its proofs), its task's outcome, its
+  ;; open problems and the keys it added; what is the person's alone (agent-state) it is sent none of
+  (let [;; the agent's pattern as its schema declares it, and the key it added: an agent pulls what its own pattern names
+        db (seeded 0 (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern) :lab.ctx/note))
+        reg (my.schema/registration db :lab.ctx/note '[:string {:seon.render/hiccup seon.ctx-test/note}] false)
+        db (:db-after (d/with db (:tx reg)))
+        db (:db-after (d/with db [{:seon.agent/key k :seon.agent/ns 'app.x :lab.ctx/note "halfway there"}
+                                  {:seon.task/id "lab/ctx" :seon.task/outcome :gate :seon.task/proofs #{'app.x-test/f0-test}
+                                   :seon.task/failures {'app.x-test/f0-test [{:type :fail :message "m" :expected "1" :actual "2"}]}}]))
+        page (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
+        text (fn [id] (pr-str (get page id)))]
+    (is (str/includes? (text "turn") "You're in app.x.") (str "its turn: " (pr-str page)))
+    (is (str/includes? (text "status") "Your proofs") "how its work stands")
+    (is (str/includes? (text "task-view-lab_2Fctx") (str "task · lab · " (:text (seon.render.ui/standing nil {:seon.task/outcome :gate}))))
+        (str "its task's outcome, on its task's line: " (text "task-view-lab_2Fctx")))
+    (is (str/includes? (text "own-problems") "[:h3 \"red 1\"]") (str "its open problems, the red proof among them: " (text "own-problems")))
+    (is (str/includes? (text "ctx-keys") "halfway there") (str "the keys it added, each by its render: " (text "ctx-keys")))
+    (is (not (contains? page "agent-state")) "the person's alone: none of it")))
+
+(defn note
+  "A render of a key an agent added: its text as a line."
+  {:malli/schema [:=> [:cat :map :any] :any]}
+  [_ s] [:p (str "Note: " s)])
+
 (defn boom
   "A render that throws, as an agent's unmerged one may."
   {:malli/schema [:=> [:cat :map :any] :any]}

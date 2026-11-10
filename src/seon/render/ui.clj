@@ -1153,21 +1153,27 @@
    [:h2 {:class "kicker"} (kname k)]
    (render/hiccup {:seon.render/index ix :schema k} (ratom/realize (get c k)))])
 
+(declare pattern-joins)
+
 (defn- added-keys
   "The keys the agent added to ctx c: any qualified key outside its own :seon.agent/* attributes,
-  its pattern, the reverse joins its pattern holds (:seon.eval/_agent: an attribute read from the entity it points at) and
-  the environment, in order. It reads ctx's own key set only."
-  {:malli/schema [:=> [:cat :map] [:sequential :qualified-keyword]]}
-  [c] (filter #(and (qualified-keyword? %) (not (#{"seon.agent" "db" "seon.ctx"} (namespace %))) (not (str/starts-with? (name %) "_"))) (sort-by str (keys c))))
+  its pattern, the reverse joins its pattern holds (:seon.eval/_agent: an attribute read from the entity it points at), the joins
+  of its own pattern (seon.render/entity-pattern in the entity index ix: what they join is drawn as tiles, `tiles`) and
+  the environment, in order. It reads ctx's own key set and its pattern only."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] [:sequential :qualified-keyword]]}
+  [ix c]
+  (let [joined (set (map first (pattern-joins (or (when ix (render/entity-pattern ix c)) []))))]
+    (filter #(and (qualified-keyword? %) (not (#{"seon.agent" "db" "seon.ctx"} (namespace %))) (not (str/starts-with? (name %) "_")) (not (joined %)))
+            (sort-by str (keys c)))))
 
 (defn ctx-keys
   "The keys the agent added to its ctx (a component over ctx, placed when there is one), each a
   component of its own (ctx-key). It reads ctx's own key set, so it runs again when ctx's own
   attributes change, and its output is the same unless a key came or went."
   {:seon.render/style ".ctx-keys { display: flex; flex-direction: column; gap: 0.5rem; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
+  [{c :seon.ctx/ctx ix :seon.render/index}]
   [:div
-   (for [k (added-keys c)] [#'ctx-key {} k])])
+   (for [k (added-keys ix c)] [#'ctx-key {} k])])
 
 (declare eval-output)
 
@@ -1542,7 +1548,7 @@
    ;; then the agent's own state, from its own attributes
    (when (:seon.agent/task c) [#'status {:at [:seon.agent/task :proved]}])
    (when (:seon.agent/task c) [#'own-problems {:at [:seon.agent/task]}])
-   (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])
+   (when (seq (added-keys ix c)) [#'ctx-keys {:at [:db/id]}])
    [#'turn {:at [:seon.agent/ns]}]
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])
 
