@@ -79,7 +79,7 @@
       (is (= [::m/invalid-input ::m/invalid-output] @reports)))))
 
 ;; docs/errors.md#an-error-keeps-data: an error root keeps of another process keeps data, never the
-;; value that made it (AGENTS.md section 4: root's *e reached 1.08 GB); what an agent's own error
+;; value that made it (root's *e reached 1.08 GB); what an agent's own error
 ;; or an asker gets is the error whole (owner, 2026-10-29: no cuts on an agent's context or evals).
 (deftest an-error-keeps-bytes-that-do-not-grow-with-its-value
   (let [kept-bytes

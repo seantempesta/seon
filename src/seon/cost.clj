@@ -48,7 +48,7 @@
 (def exact
   "The dimensions a verdict is decided on: counted, so the same code on the same input
   measures the same on any machine at any load, and a green is a function of its reach
-  digest (AGENTS.md section 5, results reused by input digest). Cost is work done: ticks
+  digest (results reused by input digest: docs/data-modeling.md#derived-data-is-a-cache-never-relied-on). Cost is work done: ticks
   (the time dimension: jolt.host/ticks-of, measured by once; judged wherever the estimate states
   them, derived from the unit table's :ops or stated in :per-n), bytes and calls. An estimate with
   none of them both stated and measured is red (:uncounted). CPU time (:ns) moves with load

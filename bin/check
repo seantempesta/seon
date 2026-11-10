@@ -103,7 +103,7 @@ run-embedding() { SEON_EMBED_TEXTS=64 run "$@" }
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
   M=check-$1
   # quiet when it works; a seed or a drop that fails prints its own output and the mode's verdict
-  # line (AGENTS section 9: a step never ends without one)
+  # line (docs/checks.md#modes: a step never ends without one)
   quiet() { local what=$1 o; shift; o=$("$@") || { print -r -- "$o"; echo "$VERDICT FAILED ($what)"; exit 1 } }
   [[ $1 == seed ]] || quiet seed run seed 2000
   quiet drop run drop $M
