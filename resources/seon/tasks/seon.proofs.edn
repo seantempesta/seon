@@ -34,7 +34,7 @@
 history, replacing slice 1's file cache (8564dea1d5, ``target/results``). Owner rulings: \"one writer for sure\"; \"never
 300k new records per test run … just the essentials\" (2026-10-27); \"We want to be able to query things in the db,
 functions, tests, schemas and understand what tests are failing and timings\" (2026-10-28); derived data may be
-cached, always regenerable (AGENTS §5).
+cached, always regenerable (docs/data-modeling.md#derived-data-is-a-cache-never-relied-on).
 
 What is stored (all ``:db/noHistory`` via ``:seon.db/no-history?``, overwritten in place):
 - On the test's var entity (`:var/name`, kind `:test`, resources/seon/schemas/seon.facts.edn ~57-66):

@@ -522,7 +522,7 @@
   message (:rows: each with its class, both kinds; :closed: the rows base had and head has not, the same shape): what the branch's own work broke (:caused: the done rule refuses while any is open,
   seon.reconcile/done-explain :open-problem) and what it changed under the wiki (:attention: the
   sections it made stale, which the agent reads and never a reason to refuse; the classes
-  :seon.problems/attention declares). An evaluation is never refused (AGENTS: get out of an agent's way).
+  :seon.problems/attention declares). An evaluation is never refused (get out of an agent's way: docs/processes.md#an-agent-is-never-gated).
   Base and head are compared by value, never by tx (a branch's tx counter is its own): the
   sections whose citations or dead links differ, the sections citing a name a var or task lost,
   and the forms carrying a law's fact whose catches or text differ are the candidates, and

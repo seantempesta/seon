@@ -3,8 +3,7 @@
 A name resolves at run time, or a Var is defined outside its definition form, only where this page names the function and its reason; `bin/laws resolution` lists every such site in `src/`.
 
 Every definition happens once, where it is defined: code names what it calls through its
-namespace's requires, and behaviour varies through the environment or through data
-([AGENTS.md §5](../AGENTS.md)). A name is resolved at run time only where
+namespace's requires, and behaviour varies through the environment or through data. A name is resolved at run time only where
 data names it (a declaration, a schema's render, a cost estimate) or where the compiler's
 facts are read; a Var's root changes only when its contract is armed.
 
@@ -51,4 +50,4 @@ The sites that resolve a name held in data to a var by design, each with its rea
 
 The sites that fill a gap in another namespace, each owed a fix in that namespace's owner.
 
-- `my.agent` (its last form): interns `source`, `source-fn`, `pst`, `doc` and `dir` into Jolt's `clojure.repl`, in every process (root, a test child and an agent alike), a namespace it does not own ([AGENTS.md §5](../AGENTS.md): a gap in another namespace is fixed in its owner). Jolt's `clojure.repl` carrying them deletes the intern.
+- `my.agent` (its last form): interns `source`, `source-fn`, `pst`, `doc` and `dir` into Jolt's `clojure.repl`, in every process (root, a test child and an agent alike), a namespace it does not own (a gap in another namespace is fixed in its owner). Jolt's `clojure.repl` carrying them deletes the intern.

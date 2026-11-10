@@ -453,7 +453,7 @@
 
 
 (deftest a-feed-that-ends-unsettled-ends-the-wait-that-names-it
-  ;; docs/checks.md#modes (AGENTS section 4: nothing hangs; a live producer that owes a mark is
+  ;; docs/checks.md#modes (nothing hangs: docs/errors.md#nothing-crashes-and-nothing-hangs; a live producer that owes a mark is
   ;; seon.web/a-tabs-first-keyframe-settles-on-its-own): seon.check/idle waits on a feed only its reader thread fills. A stream that
   ;; sends bytes and then ends (or throws on read) without a settled mark answers the wait false, so
   ;; the check's :tab-settled is red, at once; before, the wait had no end. A stream that does settle
