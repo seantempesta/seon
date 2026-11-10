@@ -288,9 +288,8 @@
   :digests {test digest} :tree t}, t the planned tree's id) for bin/test to run, one process each (bin/test
   removes the last run's first), and each measured test's stall bound as out/stall-bounds (\"<test> <ms>\"
   lines, for bin/stalls). Answers the shard count."
-  [out tests digests tree mg jobs]
-  (let [ms (measured-ms tests)
-        sh (proofs/shards tests jobs ms)
+  [out tests digests tree mg jobs ms]
+  (let [sh (proofs/shards tests jobs ms)
         mg-ms (measured-ms (keys mg))
         floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
         dealt (deal-mg sh mg ms mg-ms)]
@@ -431,10 +430,19 @@
         ;; an incremental run (what a change reaches) is one process while four starts would cost more than the few
         ;; seconds of work they split (the owner, 2026-10-30); past that it shards, as a gate of 206 tests took 751 s on
         ;; one; the full run and a merge's verification shard
+        ;; each test's ms, measured or its class's configured estimate (never 1 ms: an unmeasured run dealt itself one shard)
+        ms (proofs/estimated-ms run-tests (measured-ms run-tests) (set process))
+        ;; as many shards as free memory holds, at most the configured jobs (never fewer for the load average: bin/test)
+        avail (long (:available-mb (seon.lib/sysmem)))
+        jobs (proofs/memory-jobs (config/value :seon.config.proofs/jobs) avail
+                                 (config/value :seon.config.proofs/shard-mb) (config/value :seon.config.proofs/free-floor-mb))
+        _ (write! (str out "/jobs") (str jobs))
+        _ (when (< jobs (config/value :seon.config.proofs/jobs))
+            (println (str "prove: " avail " MB free: " jobs " of " (config/value :seon.config.proofs/jobs) " shards at most ("
+                          (config/value :seon.config.proofs/shard-mb) " MB a shard above " (config/value :seon.config.proofs/free-floor-mb) " MB kept free)")))
         n (write-shards! out (if no-test [] run-tests) digests (:tree inputs) (select-keys steps mg-run)
-                         (if all?
-                           (config/value :seon.config.proofs/jobs)
-                           (proofs/worth-shards run-tests (config/value :seon.config.proofs/jobs) (measured-ms run-tests) (config/value :seon.config.proofs/shard-min-ms))))
+                         (if all? jobs (proofs/worth-shards run-tests jobs ms (config/value :seon.config.proofs/shard-min-ms)))
+                         ms)
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
         step-bin (filterv proofs/step-needs-binary? run-steps)
