@@ -59,4 +59,11 @@ Proofs, to write red first: a test run writes one fact set per test that ran and
   :seon.task/plan "Found 2026-11-10 in batch 15 (Deep fixes, the managing session): jolt/deepdocs 5f78ffbd9b cited six dependency names in single backticks in task plans (``:db/contentId`` among them, written as a cite); test-runner/health! threw (Unhandled exception, exit 1: Nothing found for entity id [:schema/key :db/contentId], from datahike.db.utils/entid-strict under with-wiki's db-with) before any row, naming the key but not the task or file. Correct: a citation the program does not hold is a dead citation, a health row naming the task (or page), its line and the name, as a dead wiki citation already is (docs/health.md); the doc and task load never asserts a lookup ref it has not resolved on the db it writes. Proof, red first: a task file whose plan cites a key the program does not hold (``:no.such/key``, in one backtick) gives a dead-citation row naming that task, and health exits on the row, not on an exception."
   :seon.task/kind :work
   :seon.task/proofs #{}}
-]
+ {:seon.task/name "tests-leave-no-scratch-behind"
+  :seon.task/plan "Found 2026-11-10 by the slow-test helpers: tests leave scratch directories they make (target/tmp/prove-* from seon.proofs-test's runs, 25 in one worktree; target/stalls-test-*; a temp dir of seon.fx-test's source-read test). Correct: each removes what it makes in a finally, and the full run's end names any target/tmp entry younger than it (a leak is red, as a thread left running is). Proof: the full run's leak check red on a test that leaves one."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "the-scratch-stores-proof-has-a-mutation"
+  :seon.task/plan "Found 2026-11-10 by a slow-test helper (group B): seon.proofs-test/a-process-plans-on-more-scratch-stores-than-its-undo-entries (now 11 stores, one past the 10 undo entries) went red under no mutation tried: the LMDB fork has held no semaphore since 7b7de38f, so what it guards may be gone. Find the mutation that breaks the claim (a store opened without its semaphore release) or show the claim is the fork's now and move the proof there."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}]
