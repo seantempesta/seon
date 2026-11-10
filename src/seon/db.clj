@@ -478,8 +478,11 @@
 ;; and written per commit (dev/dur.clj: 512 -> 64 cut a small commit 27 -> 16 ms with
 ;; fsync, before the node emitter). LMDB runs MDB_NOSYNC and the flusher syncs the env
 ;; once for every commit so far (sync!), so a commit is at most one drive flush, not one per node.
+;; MDB_SAFENOSYNC (our LMDB fork's): an OS crash rolls the store back to the last sync, never
+;; corrupts it (docs/failure-points.md#lmdb-crash-safety).
 
 (def ^:private MDB_NOSYNC 0x10000)
+(def ^:private MDB_SAFENOSYNC 0x8000)
 
 (defn- stored-id
   "The id the store cfg names was made with, read from its :db head's stored config (0.8 ms),
@@ -507,7 +510,7 @@
   (let [cfg {:store (cond-> {:backend backend :path path :id (hasch/uuid path)
                              ;; how a value becomes bytes, where konserve reads it (konserve.impl.defaults/normalize-store-config)
                              :config {:encoding {:serializer :FaslSerializer}}}
-                      (= backend :lmdb) (assoc :lmdb {:flags MDB_NOSYNC :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
+                      (= backend :lmdb) (assoc :lmdb {:flags (bit-or MDB_NOSYNC MDB_SAFENOSYNC) :map-size (cfg/value :seon.config.store/lmdb-map-bytes)})
                       ;; konserve's per-value compressor (its header names it, so stored values of either kind read)
                       (#{:lz4 :zstd} (cfg/value :seon.config.store/compressor)) (assoc-in [:config :encoding :compressor] {:type (cfg/value :seon.config.store/compressor)})
                       (= backend :file) (assoc-in [:config :defer-immutable-sync?] true))
@@ -526,8 +529,9 @@
   [cfg] (merge cfg layout))
 
 (defn sync!
-  "Make every commit so far durable: one env sync for LMDB (MDB_NOSYNC); the filestore
-  syncs per write itself. nil."
+  "Make every commit so far durable: one env sync for LMDB, which makes the newest commit the
+  store's steady snapshot, the one an OS crash rolls back to (MDB_SAFENOSYNC,
+  docs/storage.md#durability-is-continuous-group-commit); the filestore syncs per write itself. nil."
   {:malli/schema [:=> [:cat :seon.db/cfg] :nil]}
   [cfg]
   (when (= :lmdb (get-in cfg [:store :backend]))

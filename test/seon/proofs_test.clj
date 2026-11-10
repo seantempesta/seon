@@ -117,11 +117,11 @@
         (let [all (fn [roots] (zipmap (keys roots) (map str (keys roots))))
               at (fn [cfg] (:digests (proofs/step-digests all {:env "e" :tree "t" :config cfg :base "b"})))
               before (at {:seon.pin/jolt "j1" :seon.pin/lmdb "l1" :seon.config.agent/max-turns "40"})]
-          (doseq [step ["forks" "lmdb-kill" "lmdb-sem"]]
+          (doseq [step ["forks" "lmdb-kill" "lmdb-lock" "lmdb-crash"]]
             (is (not= (before step) ((at {:seon.pin/jolt "j2" :seon.pin/lmdb "l1" :seon.config.agent/max-turns "40"}) step)) (str step ": jolt's pin moved"))
             (is (= (before step) ((at {:seon.pin/jolt "j1" :seon.pin/lmdb "l1" :seon.config.agent/max-turns "41"}) step)) (str step ": a config key is no pin"))))))
     (testing "a step runs a seon.check mode (the binary, a store branch) exactly when check-steps names functions for it"
-      (is (= #{"laws" "lmdb-kill" "lmdb-sem" "forks" "health"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, lmdb-kill and lmdb-sem have binaries of their own, forks runs Jolt, health reads the program store's kept trees")
+      (is (= #{"laws" "lmdb-kill" "lmdb-lock" "lmdb-crash" "forks" "health"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, the lmdb steps have binaries of their own, forks runs Jolt, health reads the program store's kept trees")
       (is (every? proofs/step-needs-binary? ["smoke" "fx" "durable" "e2e-loop" "mg-check"])))
     (testing "a step whose function the program does not define (renamed) has no digest and is named missing"
       (is (= {} (ts/reach-digests db {:env "e" :tree "t" :config {}} {"gone" '[app.pv-check/renamed]})))
@@ -367,9 +367,9 @@
 
 (defn- close-stores!
   "Close the envs of a test's own scratch stores (store paths). program-db keeps its branch's
-  connection for the process (its db reads the store), so a shard running these tests held one
-  env per scratch store and past nine an open failed with MDB_SEM_UNDO_FULL
-  (docs/failure-points.md#lmdb-robust-locks): a test's own store ends with the test."
+  connection for the process (its db reads the store), so a shard running these tests would hold
+  one env per scratch store for its life: a test's own store ends with the test
+  (docs/failure-points.md#lmdb-locks)."
   [& paths] (run! klmdb/close-env! paths))
 
 (defn- calls-of

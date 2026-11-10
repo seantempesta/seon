@@ -221,8 +221,8 @@
 
 (deftest a-read-after-release-is-a-typed-error
   ;; task seon.db/a-read-after-release-is-a-typed-error: a db value reads its nodes lazily from
-  ;; its store's LMDB env, and the last release closes the env (the process holds few: macOS
-  ;; gives each env SysV semaphores, kern.sysv.semume 10). A read after it was an invalid memory
+  ;; its store's LMDB env, and the last release closes the env (an open env costs descriptors and
+  ;; address space, docs/storage.md#a-value-is-read-before-its-last-release). A read after it was an invalid memory
   ;; reference that killed the process; it answers :lmdb-env-closed naming the store, and the
   ;; value is read before its last release. A store on disk of this test's own, the last
   ;; resort; removed at the end
