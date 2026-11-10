@@ -613,7 +613,9 @@
                    execution (str " · " (kname execution))))]
        [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
        (when instructions [:details [:summary "how the agent works it"] [:p {:class "seon-text"} instructions]])
-       (when plan (markdown plan))])))
+       (when plan (markdown plan))
+       ;; its id, which an agent names its task by (my.task/*)
+       [:p {:class "seon-note"} (str "Task: " id)]])))
 
 (defn- toggle
   "A <details>' attrs that tell the render proc it opened or closed (/open), for the conversation's
@@ -1605,35 +1607,73 @@
                          [#'eval-tile {:key (:seon.eval/id e) :eid (:e dt)}]))]
       (into [:div] ts))))
 
+(defn- tile?
+  "Whether pulled entity e is drawn as a tile of a page: its schema (seon.render/entity-schema in the entity index ix) declares a hiccup
+  render, that render draws the entity from its own value (it takes no :seon.ctx/ctx: a render that takes one draws a whole page, as
+  an agent's, a user's and root's do) and the schema declares no :seon.render/openai-compat (the conversation's entities: the model
+  reads them as its history). Read from the schemas, never a list of names. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map :any] :boolean]}
+  [ix e]
+  (boolean (when-let [s (and (map? e) (:db/id e) (render/entity-schema ix e nil))]
+             (when-let [f (render/declared-var ix s)]
+               (and (nil? (render/render-for ix s :seon.render/openai-compat))
+                    (not (contains? (render/inputs f) :seon.ctx/ctx)))))))
+
+(defn- pattern-joins
+  "Pattern p's joins in its order, [key sub-pattern]: the key ctx holds the join under (its :as when it names one)."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:sequential :any]]}
+  [p]
+  (for [x p :when (map? x) [k sub] x]
+    [(if (vector? k) (let [[a & o] k] (or (:as (apply hash-map o)) a)) k) sub]))
+
+(defn- members
+  "The pulled entities join value v holds, as views: v itself when it is one entity, else each member of a join held as a map."
+  {:malli/schema [:=> [:cat :any] [:sequential :any]]}
+  [v]
+  (let [u (ratom/untracked v)]
+    (cond (and (map? u) (:db/id u)) [v]
+          (map? u) (for [k (keys u) :let [m (get u k)] :when (and (map? m) (:db/id m))] (get v k))
+          :else [])))
+
+(defn tiles
+  "The tiles of pulled entity c, read by pattern p: each entity its joins hold that is a tile (`tile?`), in the pattern's order, each
+  followed by its own tiles (its schema's pattern), depth first; the views themselves, so the walk draws each by its schema's render
+  (seon.render/entity-render) and the model reads the same hiccup stripped. No part is named here. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map :any [:sequential :any]] [:vector :any]]}
+  [ix c p]
+  (vec (mapcat (fn [[k sub]]
+                 (mapcat (fn [m] (when (tile? ix (ratom/untracked m))
+                                   (cons m (tiles ix m (if (keyword? sub) (or (render/schema-property ix sub :seon.ctx/pattern) []) sub)))))
+                         (members (get c k))))
+               (pattern-joins p))))
+
 (defn agent-parts
-  "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists),
-  in the order they are placed here: the task, its proofs, what it cites, each search, the references its agent cites, its added
-  keys, the tiles of its evals' rendered values (`eval-tile`), and last its own problems, its turn and its state; what a turn's diff compares. A piece is here when the pull holds what it
-  shows; :seon.ctx/pattern is what it reads of the agent, so a past point's parts are pulled by that alone (its added keys are
-  the agent's own pattern's, which a point's pull by this one leaves out). See docs/render.md#the-page."
+  "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists): the
+  agent's own state, drawn from its own attributes (how its work stands, its open problems, the keys it added, its turn, its state),
+  then the tiles of what its pull joins (`tiles`, by this render's pattern: no part named here), then the tiles of its evals' rendered
+  values (`eval-tiles`, by the seek). The cites of its task are drawn by `cite-parts` until the cite's own render resolves what it
+  joins (Context, step 1 of docs/users.md's pages from data). See docs/render.md#the-page."
   {:seon.render/list "p-task"
    :seon.ctx/pattern [:seon.agent/key :seon.agent/status :seon.agent/outcome :seon.agent/reason :seon.agent/turn :seon.agent/max-turns
                       :seon.agent/ended-turn :seon.agent/ns {:seon.agent/task :seon.task/task-fact} {:seon.cite/_of :seon.cite/cite-fact}
                       {:seon.search/_of :seon.search/search-fact} {:seon.message/_to [:seon.message/id :seon.message/from]}]
-   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]] :any] :any]}
-  [_ c]
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.render/index :map]]] :any] :any]}
+  [{ix :seon.render/index} c]
   [:div {:id "p-task"}
-   ;; root's sessions, when this record's pull holds root (root's session's pattern does: docs/users.md#roots-session)
-   (when (:seon.agent/root c) [#'sessions {:at [:seon.agent/root]}])
-   (when (:seon.agent/task c)
-     (list [#'task {:at [:seon.agent/task]}] [#'status {:at [:seon.agent/task :proved]}] [#'citations {:at [:seon.agent/task :seon.cite/_of]}]
-           (seq (cite-parts c))
-           ;; each search its task and the agent hold, a part each, drawn on the branch's db
-           (for [p (concat (for [e (keys (get-in c [:seon.agent/task :seon.search/_of]))] [:seon.agent/task :seon.search/_of e])
-                           (for [e (keys (get c :seon.search/_of))] [:seon.search/_of e]))]
-             (get-in c p))))
-   (when (seq (:seon.cite/_of c)) [#'references {:at [:seon.cite/_of]}])
-   (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])
+   ;; the agent's own state, from its own attributes
+   (when (:seon.agent/task c) [#'status {:at [:seon.agent/task :proved]}])
    (when (:seon.agent/task c) [#'own-problems {:at [:seon.agent/task]}])
-   ;; each eval's rendered value a tile of its own (`eval-tile`), newest first; an eval whose value has no render places nothing
-   [#'eval-tiles {} c]
+   (when (seq (added-keys c)) [#'ctx-keys {:at [:db/id]}])
    [#'turn {:at [:seon.agent/ns]}]
-   [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])
+   [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]
+   ;; what its pull joins, each by its own render, in the pull's order (the cites until their render resolves its joins)
+   (seq (remove #(= :seon.cite/cite-fact (render/entity-schema ix (ratom/untracked %) nil)) (tiles ix c (:seon.ctx/pattern (meta #'agent-parts)))))
+   ;; until the cite's own render resolves what it joins (step 1's last piece): the task's cites and the agent's own, as before
+   (when (:seon.agent/task c) (list [#'citations {:at [:seon.agent/task :seon.cite/_of]}] (seq (cite-parts c))))
+   (when (seq (:seon.cite/_of c)) [#'references {:at [:seon.cite/_of]}])
+   ;; until root's page is root's agent drawn by this render (step 3): root's session reads every agent here
+   (when (:seon.agent/root c) [#'sessions {:at [:seon.agent/root]}])
+   [#'eval-tiles {} c]])
 
 (defn steps
   "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many: the

@@ -1588,10 +1588,11 @@
         eid #(seon.db/eid branch %1 %2)]
     ;; a cited var is a component of its own when the db holds it (ctx joins the task's references by
     ;; :var/name: seon.ctx.wire-test/a-cited-var-redefined-shows-in-the-next-view); this db holds none
-    (is (= ["task" "status" "citations"] (vec (take 3 (mapv :id task))))
-        "the task, how its work stands, what its plan mentions (open problems and added keys only when there are some)")
-    (is (= ["turn" "agent-state"] (vec (take-last 2 (mapv :id task)))) "the turn and the agent's state are placed last")
-    (is (every? #(str/starts-with? % "cited-") (drop 3 (drop-last 2 (mapv :id task)))) "between them a part for each thing the plan cites")
+    (is (= ["status" "turn" "agent-state"] (vec (take 3 (mapv :id task))))
+        "first the agent's own state, from its own attributes (open problems and added keys only when there are some)")
+    (is (= "task-view-demo_2Ff" (nth (mapv :id task) 3)) "then what its pull joins, by its own schema's render: its task (seon.render.ui/tiles)")
+    (is (= "citations" (nth (mapv :id task) 4)) "then what its plan mentions")
+    (is (every? #(str/starts-with? % "cited-") (drop 5 (mapv :id task))) "a part for each thing the plan cites")
     (let [h (:html (unit-of task "status"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
       (is (str/includes? h "demo/f-test</code> fails") "the failing proof's verdict is the status's")
@@ -1841,7 +1842,7 @@
         [st _] (pass-view (proc-state main branch) [:chat :a3])
         skel (get-in st [:views [:chat :a3] :skeleton])]
     (is (str/includes? skel "id=\"p-task\"") "the page has the task's list's place")
-    (is (str/includes? skel "<!--s:task-->") "and the task's component in it")))
+    (is (str/includes? skel "<!--s:task-view-demo_2Ff-->") "and the task's component in it, its own render's")))
 
 (deftest a-working-agents-page-follows-its-branch
   ;; owner, 2026-11-08: "the user message doesn't show up until the agent has finished their turn". A live agent draws its own
@@ -3735,3 +3736,4 @@
     (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "40"))
     (is (str/includes? (tile {:boot {:program {:loaded 0 :ms 5}}}) "image held main's program"))
     (is (str/includes? (tile {}) "program load not measured"))))
+
