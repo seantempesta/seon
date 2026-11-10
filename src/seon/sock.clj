@@ -315,7 +315,7 @@
   {:malli/schema [:=> [:cat :seon.lib/fd :any] :seon.sock/sent]}
   [fd s]
   (let [^bytes b (.getBytes (str s "\n") "UTF-8") n (alength b)]
-    (with-mem [p n] (ffi/write-array p b 0 n) (write-all! fd p n))))
+    (with-mem [p n] (ffi/write-array p :byte b 0 0 n) (write-all! fd p n))))
 
 (defn line-reader
   "A fn of no arguments that answers the complete lines that arrived on fd (a vector, maybe
@@ -352,7 +352,7 @@
   ([fd ^bytes f pass-fd]
    (let [n (alength f)]
     (with-mem [p (max 1 n)]
-     (ffi/write-array p f 0 n)
+     (ffi/write-array p :byte f 0 0 n)
      (if-not pass-fd
        (write-all! fd p n)
        (with-mem [m 80]
