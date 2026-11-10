@@ -1094,6 +1094,15 @@
  ;; transaction: the two measured apart), :off (no wrapper, no recording: the same binary
  ;; measured with instrumentation off; test/r3's benches).
  :seon.config.contract/instrument #keyword #or [#env SEON_INSTRUMENT "on"]
+ ;; Unit: boolean. Is a private function's contract (defn-) checked on each call in this process?
+ ;; A public function's always is, while the contracts are on. Provenance: the owner, 2026-11-10,
+ ;; "Private helpers: tests only" (docs/decisions.md): a contracted call costs about 70 engine ticks
+ ;; to check, and a small value's print was 25.8k ticks checked and 12.9k unchecked, nearly all of it
+ ;; private per-node helpers. True under --profile scripted (bin/test's shards, a test's root and its
+ ;; agents, bin/check's binaries); an agent's test child turns it on at its fork whatever its agent's
+ ;; value (seon.contract/check-private!). False otherwise: the standing root and its agents
+ ;; (docs/checks.md#contracts-armed-at-definition).
+ :seon.config.contract/private-checked? #profile {:default false :scripted true}
 
  ;; native/probe.c's library (bin/build native): Mach memory probes and qfork. T5 points it at
  ;; next's build from a snapshot that has none.

@@ -1475,3 +1475,20 @@
     (is (moved? "in-map-test") "a var named in a string in a map")
     (is (not (moved? "not-code-test")) "a string that is no code names nothing and does not throw (reader/forgive makes \"app.pt-sn/f is not code\" a comment; unbalanced text reads as nil)")
     (is (not (moved? "pure-test")) "a test naming nothing keeps its digest")))
+
+(deftest a-kept-tree-is-read-whatever-its-stores-size
+  ;; found 2026-11-10 (Context, the Tests session): the plan imported a tree past the store's bound,
+  ;; then a shard found the store over it, removed it, and its first program reader imported the tree again inside its own
+  ;; tick budget (1.57 G of 4 G: red, then green on a rerun). The bound is the write's (a tree to import), never a read's
+  (let [d (checkout! "kept-size" {"deps.edn" "{}" "src/app/ks.clj" "(ns app.ks)\n(defn f [x] x)\n"})
+        store (scratch-dir "kept-size-store")
+        tree (fx/tree-id d)
+        _ (runner/program-db d store tree 1)
+        marker (java.io.File. (str store "/kept-marker"))
+        _ (spit marker "kept")]
+    (runner/program-db d store tree 1)
+    (is (.isFile marker) "a tree the store keeps is read from it, the store past its bound: nothing removed, nothing imported")
+    (spit (str d "/src/app/ks2.clj") "(ns app.ks2)\n")
+    (sh/sh "git" "-C" d "add" ".")
+    (runner/program-db d store (fx/tree-id d) 1)
+    (is (not (.isFile marker)) "a new tree past the bound starts the store again")))
