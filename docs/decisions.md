@@ -1147,7 +1147,7 @@ Owner, 2026-10-23: "no automatic retries, send it to root to decide if it should
 
 ### The standing store is test data: erase it, no migration; history within a store is kept
 
-Owner, 2026-10-23: "why are you migrating 6 facts? isn't it just test data just nuke it and move on". Stated in: AGENTS §9 (the exception to "Runs are kept"); docs/machine.md#disk-stays-bounded; docs/storage.md#history (history kept).
+Owner, 2026-10-23: "why are you migrating 6 facts? isn't it just test data just nuke it and move on". Stated in: AGENTS §9 (dropping a store: the standing store alone is erased); docs/machine.md#disk-stays-bounded; docs/storage.md#history (history kept).
 
 ### Agents share greens: a test green at its digest never runs again
 
@@ -1219,7 +1219,7 @@ Owner, 2026-10-22: "if the context is dog shit and we know it's fucked do not wa
 
 ### One store holds the whole system; branches are experiments at every layer
 
-Owner, 2026-10-22: quote not recorded. Stated in: AGENTS §4 (A value), §5 (One store, many branches); docs/storage.md.
+Owner, 2026-10-22: quote not recorded. Stated in: AGENTS §4 (a value), §5 (one store, many branches); docs/storage.md.
 
 ### Our Datahike is Jolt-first, and storage is tuned for our workload
 
@@ -1231,7 +1231,7 @@ Owner, 2026-10-22: "Agents shouldn't be editing their own source code files dire
 
 ### Tasks are unrestricted; behaviour follows the data; a task's branch, model and config are derived along `:needs`
 
-Owner, 2026-10-22: "tasks shouldn't be restricted in what they can do". Stated in: AGENTS §4 (A task). Proof protection is deferred.
+Owner, 2026-10-22: "tasks shouldn't be restricted in what they can do". Stated in: AGENTS §4 (a task), docs/tasks.md. Proof protection is deferred.
 
 ### A request becomes design, implement, merge; templates are held tasks in the task EDN; one proofs field; every agent gets `(help)` and its task
 
@@ -1299,7 +1299,7 @@ Owner, 2026-10-21: "The recursive code self improvement loop is the goal." (2026
 
 ### Loading code is an effect, typed at the edge
 
-Owner, 2026-10-21: "Make anything like this an effect and we treat it as strongly typed at the edges." Stated in: AGENTS §5 (Effects go through their owner).
+Owner, 2026-10-21: "Make anything like this an effect and we treat it as strongly typed at the edges." Stated in: AGENTS §5 (effects go through their owner), docs/flow.md#effects-one-owner-and-its-workers-per-kind.
 
 ### Every definition happens once, where it is defined
 
@@ -1315,7 +1315,7 @@ Owner, 2026-10-21: "keep it so we have a perfect record frozen in time." Stated 
 
 ### Agents stay forked processes, each named by role, task and checkout
 
-Owner, 2026-10-21: "But fucking name the processes if they really have to be different." Stated in: AGENTS §4 (A process).
+Owner, 2026-10-21: "But fucking name the processes if they really have to be different." Stated in: AGENTS §4 (a process), docs/processes.md#the-agent-process.
 
 ### Work is admitted by its measured workload, through flows
 
@@ -1335,7 +1335,7 @@ Owner, 2026-10-21: "yeah no clocks or timers." Stated in: AGENTS §4; docs/clock
 
 ### A failure goes to whoever can fix it
 
-Owner, 2026-10-21: "An fatal error needs to be addressed a runtime fix that can be applied needs the error to apply the fix." Stated in: AGENTS §4 (An error is data); docs/failure-points.md.
+Owner, 2026-10-21: "An fatal error needs to be addressed a runtime fix that can be applied needs the error to apply the fix." Stated in: AGENTS §4 (an error as data); docs/errors.md, docs/failure-points.md.
 
 ### Only documented config
 
@@ -1363,7 +1363,7 @@ Owner, 2026-10-20: "How long should something really take." Stated in: AGENTS §
 
 ### Scheduling is reconciliation over task attributes; no chain entity, no separate scheduler
 
-Owner, 2026-10-20: quote not recorded. Stated in: AGENTS §4 (A task).
+Owner, 2026-10-20: quote not recorded. Stated in: AGENTS §4 (a task), docs/tasks.md.
 
 ### Effects go over channels to their owner procs; whoever asked records the outcome
 
@@ -1379,7 +1379,7 @@ Owner, 2026-10-20: "make this the universal thing that we hone and fix." Stated 
 
 ### Each agent writes its own branch, in its own process; root writes only main
 
-Owner, 2026-10-20: "Agents just take care of their own shit if they are in different branches". Stated in: AGENTS §4 (A value); docs/storage.md.
+Owner, 2026-10-20: "Agents just take care of their own shit if they are in different branches". Stated in: AGENTS §4 (a value); docs/storage.md#who-writes-a-branch.
 
 ### It's a REPL into a real session; branches are true branches, merged per definition, never replayed
 

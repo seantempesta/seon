@@ -1,6 +1,6 @@
 # Tasks and templates
 
-All work is task entities on main, linked by `:needs`; a template turns what someone asked into the linked set that works it, and root writes the whole set in one transaction before any agent of it forks.
+All work is task entities on main, linked by `:needs`; a template turns what someone asked into the linked set that works it, and root writes the whole set in one transaction before any agent of it forks. Merges, checks and builds are tasks too.
 
 ## A request is one transaction
 

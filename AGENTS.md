@@ -32,6 +32,8 @@ Run, then right, then fast. The demo is the spec: if you can't show it running, 
 
 ## 2. Who does what
 
+Who decides, who owns which area, and what a helper may do.
+
 - **The owner (Sean)** sets direction and makes the rulings. Bring him one decision at a time with its evidence, through the question tool, your pick first; a well-scoped task or a clear defect needs no asking.
 - **Named sessions each own an area** (Context, Web, Optimization), and one managing session keeps the landing order (`docs/plan.md`). A session knows its whole area and never answers for code it has not read (owner, 2026-11-08: "We are moving away from monolithic orchestrators who don't know anything and implementation agents who don't know the big picture").
 - **Sessions work together, with no fixed ceremony** (owner, 2026-11-06: "I don't want the work done twice. If you do it well merge it... No more ceremony and mandated fixed policies"): each says by message what it is taking.
@@ -43,6 +45,8 @@ Run, then right, then fast. The demo is the spec: if you can't show it running, 
 Asking the owner, helpers by the shape of the work, briefs and reviews: [sessions](docs/sessions.md).
 
 ### A session's working rules
+
+What a session does from its first command to its last.
 
 - **On start:** read §0's list and the newest entries of `docs/decisions.md`; run `git log --oneline --first-parent -10`, `uptime` and `bin/root status`; tell the owner in a few lines what you will do.
 - **Root follows main through `bin/update`**, never `bin/root stop/start` ([merging](docs/merging.md#a-branch-lands-with-binland)).
@@ -59,7 +63,7 @@ Asking the owner, helpers by the shape of the work, briefs and reviews: [session
 1. **Learn.** List what exists before designing; read the wiki sections, tasks and code for the problem, what v1 did, and the field's best known way. Where a section and the code disagree, the task owes a wiki edit.
 2. **Plan in a few lines:** the write set, what it deletes, the tests, its wiki section, and a cost line (what n is, its big-O, the number expected; reality 10 times over stops the work). A special case means the wrong design. A change to a dependency or a design rule waits for the owner's go. Aim for 90% of the benefit for 10% of the effort.
 3. **Prove first:** work at the REPL as an agent would, since what can't be done from outside can't be done from inside. Prove the idea at n ≤ 100, write a cost proof for anything whose input grows, and see each proof fail for the right reason.
-4. **Act:** the simplest code that passes, at the cause, in the owner of the bad value. **A bug is a class until shown otherwise** (owner, 2026-11-03: "Always be suspicious about bugs. Usually fixing them directly is the wrong solution. Root cause and see if we should be doing something that eliminates the bug class."): find what allowed it (an open schema, a guard, a second way of doing a thing), change that so the class cannot recur, then sweep for its siblings. No hacks: no special case, retry or hand-kept list. Its report says what allowed the bug, why the class is now impossible and what the sweep found.
+4. **Act:** the simplest code that passes, at the cause, in the owner of the bad value. **A bug is a class until shown otherwise** (owner, 2026-11-03: "Always be suspicious about bugs. Usually fixing them directly is the wrong solution. Root cause and see if we should be doing something that eliminates the bug class."): find what allowed it (an open schema, a guard, a second way of doing a thing), change that so the class cannot recur, then sweep for its siblings. No hacks: no special case, retry or hand-kept list. Its landing message says what allowed the bug, why its class is now impossible and what the sweep found ([merging](docs/merging.md#a-landing-message-carries-its-audit)).
 5. **Work it as a Seon agent would**, through the server (§6); what the context lacked is a task. A change to what the owner sees is checked in a browser ([checks](docs/checks.md#checking-a-page-in-a-browser)), and a render computes nothing the system already computed ([render](docs/render.md#a-render-does-no-work-of-its-own)).
 
 **Land small and often; nothing is run twice** ([merging](docs/merging.md#a-branch-lands-with-binland)):
@@ -84,6 +88,8 @@ Asking the owner, helpers by the shape of the work, briefs and reviews: [session
 **The gate, before any new format, key, layer, namespace, proc or rule** (owner, 2026-10-21): (1) which existing mechanism does this, ours, v1's or the dependency's? (2) what did v1 do here? (3) what is the field's best known way? (4) does it add a format, key, layer or rule, and why can't the existing one do it? The session gathers the evidence and shows it to the owner. No evidence, no approval.
 
 ## 4. The principles: everything is data flowing through the system
+
+The principles a design is held to; each links the section that states it in full.
 
 - **If nothing has changed, we do nothing,** and no clock or timer decides anything, outside three exceptions the owner allowed ([clocks](docs/clocks.md#if-nothing-has-changed-we-do-nothing)).
 - **Every need is met by one of six things.** If none fits, stop and say so; never route around them:
@@ -149,6 +155,8 @@ Information has one home by what it is, and a fact found anywhere else is moved 
 
 ## 8. The machine
 
+The machine Seon is built on and for, and the rules that keep it from being flooded.
+
 - **Seon's target is a 16 GB MacBook M1** (`:seon.config.machine/memory-mb`; `bin/check scale` fails past it). The machine the sessions build on has 18 cores and 128 GB.
 - **Heavy runs** (`bin/build`, `bin/prove`) run under `nice -n 15`, in parallel while nothing is starved, judged by the cores and free memory (owner, 2026-11-10: "I have 18 cores and load is 8"). Nothing tracked is edited in a tree while a run reads it ([machine](docs/machine.md#builds-and-checks)).
 - **Never flood it:** anything that makes threads or processes starts at n ≤ 100; kill your own process past 200 threads; one experiment at a time; never make load to reproduce something ([machine](docs/machine.md#processes)).
@@ -169,7 +177,7 @@ The rules are above; each mistake links where its incident is told.
 - **A clock standing in for a dependency or a workload** ([clocks](docs/clocks.md#if-nothing-has-changed-we-do-nothing)).
 - **A swallowed error, an ignored answer, a fake default** ([errors](docs/errors.md#unknown-is-never-a-default)).
 - **Routing around a principle:** a fallback instead of an error; a runner or wrapper beside the reconciler; a store per test; an env var instead of config; regex over code instead of the compiler's facts; script order instead of `:needs`; a thread instead of a fiber; stdin as a lifecycle.
-- **A parallel system, or a mechanism built twice** (owner, 2026-11-04: "I don't want agents to keep building parallel systems"; [decisions](docs/decisions.md#no-parallel-systems-owner-2026-11-04)).
+- **A parallel system, or a mechanism built twice** (owner, 2026-11-04: "I don't want agents to keep building parallel systems"; a second cache, two producers of one render; [decisions](docs/decisions.md#no-parallel-systems-owner-2026-11-04)).
 - **Reinventing what v1 already solved,** designing before researching, building a half-baked plan, or too many worktrees at once on overlapping work.
 - **A clipping function** ([render](docs/render.md#no-clipping)).
 - **A check that cannot fail,** that only prints, that ran nothing, or that nobody read ([machine](docs/machine.md#reading-a-number)); whole files copied over newer changes. When a rule changes, read every step it touches.

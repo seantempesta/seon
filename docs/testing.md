@@ -45,7 +45,7 @@ store, where the world costs about a millisecond and nothing (the owner, 2026-10
    `t/cost` readings ([cost](cost.md); the tests in seon.ref-test are examples).
 
 **Every test runs under a ceiling of work**, `:seon.config.agent/test-ticks` engine ticks; a test
-past it is red. Write tests far under it: a world test usually costs a few million ticks (a few
+past it is red (owner, 2026-10-30: tests "that run over a configured time [are] rejected"), ours and every Seon agent's alike. Write tests far under it: a world test usually costs a few million ticks (a few
 ms), and the ceiling is coming down to about a second of work (2e8 ticks) once the suite's heavy
 tests run on the world. Keep a test's input the smallest that still shows the error it guards. Run the tests your
 change reaches with `(my.agent/prove)`: its answer gives each test's verdict and cost (`bin/test`'s

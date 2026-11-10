@@ -40,7 +40,8 @@ Every branch is audited for hand-wired code before it lands, by the session that
 - its `src` line delta, and what it replaces or deletes: a branch that grows `src` names what it deletes, and one that needed heroics goes back to the design;
 - for each function, key, proc or path it adds, which of the reused pieces it is ([users](users.md#one-system-of-agents-the-design-agreed-2026-11-09): an entity and its schema, a pull, a render, a request over Flow, the one merge, the reconciler);
 - every place it recognizes data by keys checked in code rather than by its schema, or treats one entity or role apart: found and removed, or named and owed;
-- its algorithmic estimate (what n is, its big-O, the number expected) beside the number measured (turns to green, ticks, bytes, wall time), and main's number before it.
+- its algorithmic estimate (what n is, its big-O, the number expected) beside the number measured (turns to green, ticks, bytes, wall time), and main's number before it;
+- for a fix: what allowed the bug, why the change makes its class impossible, and which siblings the sweep checked ([a bug is a class](decisions.md#a-bug-is-a-class-remove-what-allowed-it-owner-2026-11-03)).
 
 What the audit holds a branch to:
 - **Every change earns its place.** A merge that grows `src` with no measured value, or adds a namespace, a config key, a schema attribute, a proc, a route or a second way to do something, waits for the gate's four questions ([AGENTS.md §3](../AGENTS.md)) with its evidence; "nothing reads it yet" is a reason to wait, not to merge.
@@ -52,7 +53,7 @@ What the audit holds a branch to:
 
 ## A branch that grows src or adds a mechanism is reviewed
 
-When `src` grows or a mechanism is new (AGENTS §3), a reviewer reads the branch's diff against main for AGENTS §9's mistakes (a guard, a fake default, a clock deciding, a second mechanism, a fix at the reader instead of the producer, a test that cannot fail, an ignored answer), each finding with its file:line and its right fix. The worktree session fixes them before its branch merges; the proof it reports is the run after the fixes. The review is for value too, not only for mistakes: it rates the branch worth it, questionable or overbuilt, and for the last two says what to cut; overbuilt goes back. Deleting is preferred to adding, and a fix that adds a layer to work around another layer is the wrong fix.
+When `src` grows or a mechanism is new (AGENTS §3), a reviewer reads the branch's diff against main for the mistakes the laws rule out: a guard ([failure points](failure-points.md)), a fake default or an ignored answer ([errors](errors.md#unknown-is-never-a-default)), a clock deciding ([clocks](clocks.md#if-nothing-has-changed-we-do-nothing)), a second mechanism or a fix at the reader instead of the producer (AGENTS §4, §9), a test that cannot fail ([testing](testing.md#a-proof-is-focused)). Each finding carries its file:line and its right fix. The worktree session fixes them before its branch merges; the proof it reports is the run after the fixes. The review is for value too, not only for mistakes: it rates the branch worth it, questionable or overbuilt, and for the last two says what to cut; overbuilt goes back. Deleting is preferred to adding, and a fix that adds a layer to work around another layer is the wrong fix.
 
 ## Main goes first
 
