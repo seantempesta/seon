@@ -7,7 +7,7 @@
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
             [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
-            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.task] [seon.template] [seon.cost :as cost] [seon.doc]))
+            [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.task] [seon.template] [seon.cost :as cost] [seon.doc] [seon.edn :as sedn] [my.root] [clojure.java.shell :as sh]))
 
 (defn- world
   "The world these tests run on: my.test's, keeping history, since stale sections are read from d/history
@@ -463,6 +463,7 @@
                  :leadless-section #(problems/leadless-sections db ans) :uncited-task #(problems/uncited-tasks db ans)
                  :unnamed-site #(problems/unnamed-sites db ans) :stale-section #(problems/stale-sections db ans)
                  :stale-plan #(problems/stale-plans db ans) :waived-proof #(problems/waived-proofs db ans)
+                 :unsynced #(problems/unsynced-tasks db ans (#'problems/task-reads db))
                  ;; the remainder: answers, report-with, health-with (and problem-unlinked inside it, over the derived rows as health hands them), and the folds
                  :fixed (let [derived (#'problems/other-derived db ans)]
                           #(let [a (problems/answers db)]
@@ -479,6 +480,7 @@
                 :stale-section 2       ; the read datoms and the vars' forms, one scan each
                 :stale-plan 3          ; task-reads, and a seon.db/eid per cited var of a ready task
                 :waived-proof 1        ; the test forms' cost proofs passing by :overrun, one scan (Deep fixes' class)
+                :unsynced 2            ; task-reads (a seek a declared task), and its own contract (Optimization's class, 2026-11-10)
                 :fixed 50              ; answers, report-with (every recorded class), health-with (problem-unlinked over all of them, the derived rows as health hands them)
                 :wrappers 2}]         ; health's and other-derived's own contracts
     (is (seq rows) "the db has unlinked classes to judge")
@@ -486,8 +488,8 @@
     (is (= :problem-unlinked (:class (peek rows))) "the unlinked class's own missing section is the last row")
     (doseq [[c bound] (dissoc bounds :wrappers)]
       (is (<= (measured c) bound) (str c " reads " (measured c) " contracted calls, bound " bound)))
-    ;; task-reads is in both uncited-task's row and stale-plan's (each measured alone makes it), and health makes it once (other-derived)
-    (is (<= (:calls m) (dec (apply + (vals bounds)))) (str "one health read makes " (:calls m) " contracted calls: the classes' bounds sum to " (apply + (vals bounds)) ", less task-reads counted twice"))))
+    ;; task-reads is in uncited-task's, stale-plan's and unsynced's rows (each measured alone makes it), and health makes it once (other-derived)
+    (is (<= (:calls m) (- (apply + (vals bounds)) 2)) (str "one health read makes " (:calls m) " contracted calls: the classes' bounds sum to " (apply + (vals bounds)) ", less task-reads counted three times"))))
 
 (deftest problems-lists-every-class-with-what-a-declaration-needs
   (let [db (seeded 3 5)
@@ -596,7 +598,8 @@
                :fixed {:ticks 650000 :bytes 3000000 :calls (+ 54   ; the read before 2026-11-10 (with :waived-proof's one)
                                                               1    ; seon.problems/task-reads: the tasks' readiness and cites, once
                                                               1    ; seon.problems/stale-plans' own contract
-                                                              1)}  ; and its seon.db/eid of the var the world's ready task cites
+                                                              1    ; and its seon.db/eid of the var the world's ready task cites
+                                                              1)}  ; seon.problems/unsynced-tasks' own contract (Optimization, 2026-11-10: a seek a declared task, no call)
                :sizes [10 30 100]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
@@ -701,6 +704,47 @@
            (:unread (first (rows (att {:seon.task/deferred-results {'seon.root-test/boots :error 'seon.check-test/clean :error}
                                        :seon.task/gate-unread [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]})))))
         "a gate that could not read a changed namespace names it, and why, on the open row")))
+
+;; docs/source.md#a-merged-task-reaches-mains-files: a merged task whose entry main's files still declare is one :unsynced row naming
+;; the files its changes touch, until a reviewed sync lands; the sync (my.root/sync-req, committed by the :git effect on a scratch
+;; repository) puts those files from main and the task file without its entry on a branch from git's main, so the work is in git
+;; whatever becomes of the store; the landing's seon.task/load-tx of that file (the entry gone) closes the row
+(deftest a-merged-task-is-unsynced-until-its-reviewed-sync-lands
+  (let [db0 (world)
+        [fid path] (first (sort (for [[id] (d/q '[:find ?id :where [_ :form/id ?id]] db0)
+                                      :let [p (seon.source/ns-file db0 (symbol (first (str/split id #"/" 2))))] :when p]
+                                  [id p])))
+        decl {:seon.task/ns 't :seon.task/name "m" :seon.task/plan "p"}
+        changed #{(sedn/encode [:form fid])}
+        db (d/db-with db0 [(ended "t/m" {:seon.task/outcome :merged :seon.task/merged-t 7 :seon.task/declared (sedn/encode decl) :seon.task/changed changed})
+                           (ended "t/n" {:seon.task/outcome :merged :seon.task/changed changed})
+                           (ended "t/k" {:seon.task/outcome :done :seon.task/declared (sedn/encode (assoc decl :seon.task/name "k"))})])
+        rows #(get-in (problems/health %) [:classes :unsynced :rows])]
+    (is (some? path) "the world holds a form whose namespace has a file")
+    (is (= [["t/m" [path] true 't]] (mapv (juxt :task :paths :open? :owner-ns) (rows db)))
+        "one row, naming its files; a merged task no file declares (made in the store) and a declared task not merged have none")
+    (testing "the sync: main's text of its files and its task file without its entry, on a branch from git's main"
+      (let [d (str (doto (java.io.File/createTempFile "seon-sync" "") (.delete) (.mkdirs)))
+            git (fn [& args] (:out (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)))
+            entries "[{:seon.task/name \"k\" :seon.task/plan \"keep\"}\n {:seon.task/name \"m\"\n  :seon.task/plan \"p\"}]\n"
+            tasks-dir (str d "/root-tasks")]
+        (.mkdirs (java.io.File. tasks-dir)) (spit (str tasks-dir "/t.edn") entries)
+        (git "init" "-q" "-b" "main") (spit (str d "/README") "r") (git "add" "README") (git "commit" "-q" "-m" "main")
+        (git "checkout" "-q" "-b" "jolt/seon-merges") (spit (str d "/other") "o") (git "add" "other") (git "commit" "-q" "-m" "merges")
+        (let [{:keys [tasks paths req not-unsynced]} (my.root/sync-req db ["t/m" "t/k"] tasks-dir)
+              r (fx/git-commit {:req (assoc req :dir d)})]
+          (is (= [["t/m"] [path]] [tasks paths]))
+          (is (= [[:seon.root/nothing-to-sync "t/k"]] (mapv (juxt :seon.error/type :task) not-unsynced)) "a task not merged is named, not synced")
+          (is (string? (get-in r [:value :sha])) (pr-str r))
+          (is (= "jolt/sync-m" (:branch req)))
+          (is (= (str/trim (git "rev-parse" "main")) (str/trim (git "rev-parse" "jolt/sync-m^"))) "its parent is git's main, not the checkout's HEAD")
+          (is (= (get (seon.doc/files db [path]) path) (git "show" (str "jolt/sync-m:" path))) "the file as main holds it")
+          (is (= "[{:seon.task/name \"k\" :seon.task/plan \"keep\"}]\n" (git "show" "jolt/sync-m:resources/seon/tasks/t.edn"))
+              "the task file without its entry, every other byte kept")
+          (is (str/includes? (git "log" "-1" "--format=%B" "jolt/sync-m") "Completes: t/m"))
+          (is (= "" (git "show" "jolt/sync-m:other")) "nothing of the checkout's own branch"))))
+    (is (= [] (rows (d/db-with db (seon.task/load-tx db {'t []}))))
+        "landed, its file declares it no more: the row closes")))
 
 (declare catch-forms)
 
@@ -1119,7 +1163,8 @@
                ;; 49: :flaky (seon.proofs/flaky) one more
                ;; 52: :long-form one more class to look up
                ;; 54: :stale-plan one more (its seon.db/eid and derived-row), 2026-11-10
-               :fixed {:ns 3000000 :bytes 4000000 :calls 54}
+               ;; 56: :unsynced one more (its seon.db/eid and derived-row), 2026-11-10
+               :fixed {:ns 3000000 :bytes 4000000 :calls 56}
                :sizes [10 30 100]}))
 
 (deftest attention-survives-a-store-write
