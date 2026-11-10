@@ -1,9 +1,13 @@
 #!/bin/zsh
-# bin/evidence DIR PID: what PID and the processes under it are doing, into DIR, as a run is stopped: a stuck run ended at its limit
-# otherwise takes its evidence with it. The tree (ps), each process's sample, its files, and last a fiber dump asked of each Jolt
-# process (kill -INFO, on its stderr, as docs/machine.md#reading-a-hang asks), since that signal can free a hang. Reads only; ends in about 2 s a process.
-D=$1 ROOTP=$2
+# bin/evidence DIR PID [PORT]: what PID and the processes under it are doing, into DIR, as a run is stopped: a stuck run ended at its
+# bound otherwise takes its evidence with it (docs/clocks.md#time-decides-the-owners-exceptions). First, with PORT, the Seon state
+# of the root serving there (seon.root/stall-state, asked of its server: root's stall check and each agent proc's, read-only), in
+# DIR/seon-state.edn; then the tree (ps), each process's sample, its files, and last a fiber dump asked of each Jolt process (kill
+# -INFO, on its stderr, as docs/machine.md#reading-a-hang asks), since that signal can free a hang. Reads only; ends in about 2 s a
+# process (the state's ping waits at most :seon.config.check/ping-ms for a proc mid-step).
+D=$1 ROOTP=$2 PORT=${3:-}
 mkdir -p "$D"
+[[ -n $PORT ]] && print -r -- '{:op :eval :agent "root" :code "(seon.root/stall-state sys)"}' | "${0:h}/ask" "$PORT" > "$D/seon-state.edn" 2>&1
 ps -axo pid,ppid,pgid,etime,%cpu,rss,stat,command > "$D/ps.txt"
 KIDS=($(awk -v r="$ROOTP" 'NR>1{p[$1]=$2; o[NR]=$1} END{for(i in o){x=o[i]; while(x in p){if(x==r){print o[i]; break} x=p[x]}}}' "$D/ps.txt"))
 for k in $KIDS; do

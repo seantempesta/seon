@@ -19,6 +19,24 @@
     (is (= 0 (:exit r)) (pr-str r))
     (is (= "0" (clojure.string/trim (:out left))) "nothing it left is running")))
 
+;; docs/clocks.md#time-decides-the-owners-exceptions: a step that runs past its bound (the plan's step-bounds) is ended after its
+;; evidence is captured, and is red with its typed reason, never run again by the run. laws at a bound of 1 ms: ended at once
+(deftest a-step-past-its-bound-is-ended-red-with-its-evidence
+  (let [sel (str (System/getProperty "java.io.tmpdir") "/step-bound-" (random-uuid))
+        _ (clojure.java.shell/sh "mkdir" "-p" sel)
+        _ (doseq [[f t] {"steps" "laws\n" "steps-binary" "" "step-bounds" "laws 1\n"}] (spit (str sel "/" f) t))
+        r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/check") "--steps" sel)
+        ev (second (re-find #"evidence in (\S+)" (:out r)))
+        out (second (re-find #"(?m)^outputs: (\S+)" (:out r)))
+        ms (slurp (str sel "/step-ms"))]
+    (clojure.java.shell/sh "rm" "-rf" sel)
+    (is (= 1 (:exit r)) (pr-str r))
+    (is (re-find #"FAILED laws: STEP-OVERRAN, ran past its bound of 1 ms" (:out r)) (:out r))
+    (is (and ev (.isFile (java.io.File. (str ev "/ps.txt")))) "its process tree was captured before it was ended")
+    (is (not (re-find #"(?m)^laws OK" (:out r))) "and it did not run on to its own end")
+    (is (re-find #"^laws \d+\n$" ms) "its time is kept for its verdict, as a green step's is")
+    (some->> out (clojure.java.shell/sh "rm" "-rf"))))
+
 (deftest steps-are-branches-of-one-store
   ;; a store on disk of this test's own, the last resort: what is proved is how bin/check
   ;; opens its LMDB store from separate roots and reopens it after a kill; removed at the end
