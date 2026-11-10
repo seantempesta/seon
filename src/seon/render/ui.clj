@@ -1555,8 +1555,8 @@
 (defn- tile?
   "Whether pulled entity e is placed on a page by the walk: its schema (seon.render/entity-schema in the entity index ix) declares a
   hiccup render and is not the conversation's (seon.render/history?: the model reads those as its messages). A tile draws itself from
-  its own value; a page entity (an agent: its render takes :seon.ctx/ctx) is placed too, and its render answers nested with its entry
-  (seon.render/entity-render marks it). Read from the schemas, never a list of names. See docs/render.md#the-page."
+  its own value; an agent (an entity with a page of its own) is placed too, and its render answers nested with its entry
+  (seon.render/entity-render marks every placed entity nested; a tile's render draws itself the same either way). Read from the schemas, never a list of names. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :any] :boolean]}
   [ix e]
   (boolean (when-let [s (and (map? e) (:db/id e) (render/entity-schema ix e nil))]

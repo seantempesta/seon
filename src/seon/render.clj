@@ -245,14 +245,6 @@
   {:malli/schema [:=> [:cat :any] [:set :qualified-keyword]]}
   [v] (into #{} (filter #{:seon.ctx/ctx :seon.db/db :seon.render/drawn}) (tree-seq vector? seq (opts-form v))))
 
-(defn page-render?
-  "Whether render var v draws a whole page: its opts contract REQUIRES :seon.ctx/ctx (an entry [:seon.ctx/ctx schema] not marked
-  {:optional true}), as an agent's, a user's and root's do. A render that may take ctx (an eval's, drawn in the chat or alone) is no
-  page. See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [v] (boolean (some #(and (vector? %) (= :seon.ctx/ctx (first %)) (not (and (map? (second %)) (:optional (second %)))))
-                     (tree-seq vector? seq (opts-form v)))))
-
 (defn- inputs-in
   "The inputs render var f asks for (`inputs`), as walk w found them: kept by f with the value its root held then, so
   each call of a render in a draw costs a lookup, and a redefinition (a defn sets a new root with its new
@@ -1110,14 +1102,13 @@ components (the model's parts, which nest their children themselves). See docs/r
         (get (:targets ix) a)))))
 
 (defn history?
-  "Whether entity schema s (in the entity index ix) is the conversation's: it declares :seon.render/openai-compat (the model reads
-  its entities as its native messages) and its hiccup render draws the entity from its own value (`page-render?` false). An agent
-  declares a model render too, but its hiccup render draws a whole page: it is a page, drawn nested as its entry, not history. Read
-  from the schemas, never a list of names. See docs/render.md#the-page."
+  "Whether entity schema s (in the entity index ix) is the conversation's: it declares :seon.render/openai-compat (the model reads its
+  entities as its native messages) and no :seon.ctx/pattern of its own (eval, message, model call). An agent declares a model render
+  and a pattern of its own: it has a page, and is drawn nested by its render's nested form, never as history. Read from the schemas'
+  data, never a list of names nor a render's signature (Point's ruling for the owner, 2026-11-10). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] :boolean]}
   [ix s]
-  (boolean (and s (render-for ix s :seon.render/openai-compat)
-                (not (some-> (declared-var ix s) page-render?)))))
+  (boolean (and s (render-for ix s :seon.render/openai-compat) (nil? (schema-property ix s :seon.ctx/pattern)))))
 
 (defn page-pattern
   "Pattern p as a page's parts read it: p without the joins whose target schema is history (`history?`: the conversation, which the
