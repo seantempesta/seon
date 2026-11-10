@@ -899,7 +899,7 @@
       (cond-> (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (if unread {} found) proofs)
                   (update :selected into (keys removed))
                   (update :run into (keys removed))
-                  (assoc :digests cd :graph g :removed removed
+                  (assoc :digests cd :base-digests (some-> b :index (update-vals :digest)) :graph g :removed removed
                          :process (into (program/process-tests idx) removed-process)))
         unread (assoc :unread unread))))))
 
@@ -1351,6 +1351,10 @@
         (update :reports into reused-reports)
         (as-> r (merge-with + r (select-keys (frequencies (map :type reused-reports)) [:pass :fail :error])))
         (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
+        (as-> r (let [reds (proofs/results r) bd (:base-digests plan)
+                      stored (when (seq bd) (fx/stored-results (into {} (keep (fn [[t s]] (when (and (#{:fail :error} s) (bd t)) [t (bd t)]))) reds)))]
+                  ;; a cache that cannot be read excuses nothing: the red stays the branch's
+                  (assoc r :main-red (proofs/main-red reds digests bd (if (or (nil? stored) (contract/error? stored)) {} stored)))))
         (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
                :selected selected :deferred deferred :at-judge (count judge))
         ;; why each was left out: the process it reaches and the calls to it (seon.program/process-path)

@@ -126,7 +126,9 @@
                              ;; a :design task's accumulated plan now and as its branch began (its merge base's)
                              [:plan {:optional true} :seon.task/plan] [:plan-before {:optional true} :seon.task/plan]
                              ;; the process tests the work left to root's gate (neither red nor unknown)
-                             [:deferred {:optional true} [:set :qualified-symbol]]]
+                             [:deferred {:optional true} [:set :qualified-symbol]]
+                             ;; the red tests that are main's, not this branch's change (red as base holds them): never a stray red
+                             [:main-red {:optional true} [:set :qualified-symbol]]]
  :seon.reconcile/not-done [:map {:closed true}
                           [:reason [:enum :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind]]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]

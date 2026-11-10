@@ -283,6 +283,18 @@
                (judgment-of db "b" {:end {:outcome :green} :results {(t "a") :fail (t "b") :pass}})))
         (is (= [(spawn "c")] (actions-for db)) "and c, which needs a only, starts beside it")))))
 
+(deftest a-done-counts-only-the-reds-its-change-reaches
+  ;; docs/tasks.md#the-done-rule: base holds demo-test/other red and the branch's change does not reach it (main-red:
+  ;; its digest is base's, or base's verdict at it is red), the task's proof green: the task is done; the same red
+  ;; reached by the change (not main's) holds it, and a main red that the task names as a proof still holds it
+  (let [db (db-of diamond :extra (work "a" :running))
+        j (fn [facts] (judgment-of db "a" (merge {:end {:outcome :green} :results {(t "a") :pass 'demo-test/other :error}} facts)))]
+    (is (= {:outcome :done :reasons []} (j {:main-red #{'demo-test/other}})) "main's red is not this task's")
+    (is (= :told (:outcome (j {:main-red #{}}))) "reached by the change: it holds the task")
+    (is (= [{:reason :stray-red :symbol 'demo-test/other}] (:reasons (j {:main-red #{'demo-test/x}}))) "another test's main red excuses nothing")
+    (is (= [{:reason :proof-red :symbol (t "a")}]
+           (:reasons (j {:results {(t "a") :fail} :main-red #{(t "a")}}))) "a proof the task names always counts")))
+
 (deftest an-agent-with-no-end-records-no-fake-spend
   ;; task seon.model/budgets-are-data-and-spend-is-measured: the agent wrote no end (it died
   ;; or was killed before write-end!), so its turns, tokens and time are unknown: absent, never 0

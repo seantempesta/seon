@@ -48,8 +48,8 @@
   no proofs (never proven); open (an agent working for a person, whom no rule finishes: it parks between their messages, docs/agent.md#working-for-a-person); a proof not passing (red), or with no result (unknown: it
   never ran); a regression (a test green on main, the
   proofs of merged tasks, red here); a stray red (a red test that is no task's open
-  proof);
-  nor a stray red: red before and red after, whatever the work did to it (docs/render.md#how-the-work-stands); a contract gap (a function its branch defined without a contract); an
+  proof), and not main's red (main-red: red as base holds it, its digest the branch's own or base's verdict at it red: the change did not make it, so it is told to its area, seon.prove/a-red-in-the-daily-full-test-is-a-task, and never closes
+  this task; a task's own proof still counts); a contract gap (a function its branch defined without a contract); an
   unmerged entry on the branch (a merge conflict not resolved); an open problem the
   branch's work made true (seon.problems/caused: a citation of a var it deleted). A :design task readies
   the interface and plan for its implement step, so its own proofs may stay red but not
@@ -60,7 +60,7 @@
   at the merge gate on a checkout, seon.reconcile's :gate) is neither red nor unknown
   here; while unrun it is the merge's open :unrun problem."
   {:malli/schema [:=> [:cat :seon.reconcile/done-input] [:vector :seon.reconcile/not-done]]}
-  [{:keys [proofs results main-green allowed-red uncontracted unmerged caused kind plan plan-before deferred behind]}]
+  [{:keys [proofs results main-green allowed-red main-red uncontracted unmerged caused kind plan plan-before deferred behind]}]
   (let [red? (fn [t] (#{:fail :error} (get results t)))
         design? (= :design kind)]
     (vec (concat
@@ -75,7 +75,7 @@
              {:reason (if s :proof-red :proof-unknown) :symbol p})
            (for [t (sort-by str main-green) :when (and (not (proofs t)) (red? t))] {:reason :regression :symbol t})
            (for [t (sort-by str (keys results))
-                 :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)))]
+                 :when (and (red? t) (not (proofs t)) (not (main-green t)) (not (allowed-red t)) (not (contains? main-red t)))]
              {:reason :stray-red :symbol t})
            (for [s (sort-by str uncontracted)] {:reason :contract-gap :symbol s})
            (for [k (sort unmerged)] {:reason :unmerged :key k})
@@ -394,7 +394,7 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id :map]
                   [:map [:outcome :seon.task/outcome] [:reasons [:vector :seon.reconcile/not-done]]
                    [:hold {:optional true} :string] [:verdict {:optional true} [:vector :seon.reconcile/not-done]]]]}
-  [idx id {:keys [end died results uncontracted unmerged caused behind plan plan-before basis deferred behinds told]}]
+  [idx id {:keys [end died results main-red uncontracted unmerged caused behind plan plan-before basis deferred behinds told]}]
   (let [t (get-in idx [:tasks id]) kind (:seon.task/kind t) merge? (task/merges? kind) oc (:outcome end) execution (:seon.task/execution t)
         outside (outside? (:seon.agent/env (task-agent idx id)))]
     (cond
@@ -402,7 +402,7 @@
       died {:outcome :dead :reasons [] :hold (str "its agent died" (some->> (:seon.error/message died) (str ": ")))}
       :else
       (let [rs (done-explain (cond-> (cond-> (assoc (done-input idx id results uncontracted unmerged basis plan-before (set deferred))
-                                              :caused (set caused))
+                                              :caused (set caused) :main-red (set main-red))
                                 (and plan (= :design kind)) (assoc :plan plan))
                                ;; behind is the work's own to fix only when no merge task follows it: a merge task
                                ;; merges main into the branch and the gate tests what it writes (seon.template's
@@ -855,7 +855,7 @@
   for root (seon.task/carry-tx); and a failure the agent marked (my.task/fail!) carried with the task held.
   Answers {:tx :outcome :kept?}: kept? when the agent's process is to stay."
   {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:map [:tx [:vector :any]] [:outcome :seon.task/outcome]]]}
-  [st {:keys [act run-problems worked-error deferred]} results {:keys [db base base-t] :as diff}]
+  [st {:keys [act run-problems worked-error deferred main-red]} results {:keys [db base base-t] :as diff}]
   (let [main (:db st) idx (:idx st)
         id (:task act)
         t (get-in idx [:tasks id])
@@ -871,7 +871,7 @@
         marked? (and failure end (= k (:agent failure)) (= (:turn failure) (:ended-turn end)))
         kind (:seon.task/kind t)
         unmerged (mapv sedn/encode (:unmerged diff))
-        j (judgment idx id {:end end :results results :uncontracted (set (:uncontracted diff)) :unmerged unmerged :caused (set (:caused diff))
+        j (judgment idx id {:end end :results results :main-red main-red :uncontracted (set (:uncontracted diff)) :unmerged unmerged :caused (set (:caused diff))
                             :behind (when (pos? (:theirs diff 0)) (:theirs diff)) :basis (or base-t (:max-tx main)) :deferred (set deferred)
                             :plan (when (= :design kind) (some-> (task/task db id) :seon.task/accumulated :plan))
                             :plan-before (when (= :design kind) (some-> (task/task base id) :seon.task/accumulated :plan))
@@ -1021,6 +1021,7 @@
       :tested (if (contract/error? r)
                 (dead st r)
                 (one (request (-> st (assoc-in [:flights id :results] (proofs/results r))
+                                  (assoc-in [:flights id :main-red] (:main-red r))
                                   (assoc-in [:flights id :deferred] (:deferred r))
                                   (assoc-in [:flights id :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
                               ;; the branch read once: its head, its merge base, and what it changed

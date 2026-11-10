@@ -675,3 +675,13 @@
     (is (= '[a/quick] (:run-tests (plan :merge nil))) "a merge's run leaves it out too")
     (is (some #{'a/slow} (:run-tests (plan false ["a/slow"]))) "named, it runs")
     (is (some #{'a/slow} (:run-tests (plan true nil))) "and the full run runs it")))
+
+(deftest a-red-at-bases-digest-or-red-at-base-is-mains
+  ;; docs/tasks.md#the-done-rule: of the reds of a run, those the branch's change did not make
+  (let [results {'t/same :error 't/based :fail 't/mine :error 't/new :error 't/ok :pass}
+        cand {'t/same "d1" 't/based "d2x" 't/mine "d3x" 't/new "d4" 't/ok "d5x"}
+        base {'t/same "d1" 't/based "d2" 't/mine "d3" 't/ok "d5"}
+        found {"d2" {:fail 1} "d3" {:pass 1}}]
+    (is (= #{'t/same 't/based} (proofs/main-red results cand base found))
+        "its digest is base's, or base's verdict at it is red; green at base, new on the branch, or passing: the branch's")
+    (is (= #{} (proofs/main-red results cand nil {})) "with no base nothing is main's")))
