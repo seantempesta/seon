@@ -122,6 +122,8 @@
         k [(at base) (at main)]
         {held :key after :after} (:main-changes @state)]
     (cond (= (k 0) (k 1)) {}
+          ;; main's content mark is base's: only records moved main (docs/storage.md#mains-content-mark)
+          (pm/same-content? base main) {}
           (= k held) after
           :else (let [after (into {} (map (fn [[pk [_ b]]] [pk (hash b)])) (pm/delta-changes base main #{}))]
                   (swap! state assoc :main-changes {:key k :after after})
@@ -531,8 +533,9 @@
   the other way: another session's design, root's edit) comes in the same commit, since the
   base moves to main's head and a member main changed would otherwise read, at the run's end,
   as this branch reverting it (live finding F3); one both changed keeps the branch's and is
-  answered in :task-conflicts. data-attrs: the data that merges beside the program. Answers
-  {:ok :applied :conflicts :task-conflicts :t}."
+  answered in :task-conflicts. data-attrs: the data that merges beside the program. When main's
+  content mark is the base's (seon.merge/same-content?), only records moved main: nothing is
+  diffed and nothing merges. Answers {:ok :applied :conflicts :task-conflicts :t}."
   {:malli/schema [:=> [:cat :seon.merge/data-attrs] [:map [:ok :boolean]]]}
   [data-attrs]
   (commit!)
@@ -540,10 +543,13 @@
         main-b (pdb/main-branch (:cfg @state))
         main (heard-main)
         head @conn
+        ;; main's content mark is the base's: only records moved main, so nothing merges and nothing is diffed; declared data
+        ;; moves no mark, so a merge that declares some reads the diff (docs/storage.md#mains-content-mark)
+        same? (and (= #{} data-attrs) (pm/same-content? (:base @state) main))
         ;; git's merge base: the main last merged, unless main has since merged a commit of this branch (its own merge up), which
         ;; is then the base; read from the commit graph only when main moved, over the commits since (docs/sharing.md#a-merge)
-        base (if (= (d/commit-id main) (d/commit-id (:base @state))) (:base @state) (pdb/branch-base conn main-b (:branch @state)))
-        r (pm/delta-three-way base head main data-attrs)]
+        base (if (or same? (= (d/commit-id main) (d/commit-id (:base @state)))) (:base @state) (pdb/branch-base conn main-b (:branch @state)))
+        r (if same? {:theirs {}} (pm/delta-three-way base head main data-attrs))]
     (if (empty? (:theirs r))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
       (let [carried (task/carry-tx base main head)
@@ -1189,7 +1195,7 @@
                       st (:status read)]
                   (swap! state dissoc :test-child)
                   (lib/c-close r) (swap! fds disj r)
-                  (fx/remove-tree! (fx/run-dir pid))
+                  (seon.lib/remove-tree! (fx/run-dir pid))
                   (if (contract/error? read)
                     read
                     (-> (select-keys @lines [:streamed :ended :fns :heap :measured]) (assoc :answer (test-run-answer (:line read) st (:held? read)) :pid pid :exit st)))))})))

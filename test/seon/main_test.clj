@@ -1,7 +1,7 @@
 (ns seon.main-test
   "A root holds no program it was not given (GUARDS #50): a fresh store, as seon.root/start!
   opens it by default, holds the schema and nothing else; root's warm-up needs no seed."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [seon.lib] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
             [seon.db :as pdb] [seon.program] [seon.root :as root] [seon.test-store :as ts] [test-runner :as runner]))
 
@@ -22,7 +22,7 @@
       (is (= [] (pdb/seed-tx 0)) "no example program unless one is asked for")
       (is (= [] (program-datoms @conn)))
       (is (contains? (d/schema @conn) :var/name) "the schema is there")
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 (deftest warm-needs-no-seed
   (let [[path {:keys [conn]}] (fresh-store)
@@ -33,7 +33,7 @@
       (is (= t (:max-tx @conn)) "warm-up commits nothing")
       (is (= [] (program-datoms @conn)))
       (is (nil? (find-ns 'seon.warm)) "its scratch namespace is gone")
-      (finally (d/release conn) (clojure.java.shell/sh "rm" "-rf" path)))))
+      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 (deftest root-boots-without-test-fixtures
   ;; the compiler's facts of the checkout (src and test imported as program facts): the

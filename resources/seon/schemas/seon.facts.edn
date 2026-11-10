@@ -497,6 +497,10 @@
  :seon.root/retained [:map [:swept :int] [:ms number?] [:generation :int]]
  ;; no history: only the last collection is read (seon.db/collect!), and its history cost 4 nodes a write
  :seon.root/collected [:and {:seon.db/no-history? true} [:map [:swept :int] [:ms number?] [:branches [:set :keyword]] [:gone :int]]]
+ ;; main's content mark: a t past every t main held before the commit that last moved main's content (a datom of an
+ ;; attribute a program key's content reads, or carried task content: seon.merge/moves-content?); the writer moves it in that
+ ;; same commit, and at its start, so two commits of main with one mark hold the same content (docs/storage.md#mains-content-mark)
+ :seon.root/content-t :int
  ;; how a root ended: its boot, why (:stop! a caller's stop, :stdin-eof its owner closed its
  ;; stdin (bin/root stop), :signal SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks), :unclean
  ;; no stop fact at all: SIGKILL or a crash, found by the next boot) and when
@@ -522,7 +526,8 @@
                           [:seon.root/source {:optional true} :seon.root/source]
                           [:seon.root/tasks {:optional true} :seon.root/tasks]
                           [:seon.root/generation {:optional true} :seon.root/generation]
-                          [:seon.root/collected {:optional true} :seon.root/collected] [:seon.root/retained {:optional true} :seon.root/retained]]
+                          [:seon.root/collected {:optional true} :seon.root/collected] [:seon.root/retained {:optional true} :seon.root/retained]
+                          [:seon.root/content-t {:optional true} :seon.root/content-t]]
  ;; ---- on every transaction Seon makes, in its tx-meta (seon.db/tx-meta) ----
  ;; the runtime that made it, as its compiled units are keyed (jolt.host/runtime-fingerprint:
  ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)

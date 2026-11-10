@@ -605,7 +605,12 @@
   as Markdown. The agent's own task part is `task`. See docs/render.md#a-component-answers-hiccup."
   {:seon.render/style ":is(.task-view, .cited, .citations, .references, .searched, .status) { display: flex; flex-direction: column; gap: 0.5rem; border: 1px solid var(--color-base-800); border-radius: 0.375rem; padding: 0.5rem; }
 :is(.task-view, .cited, .citations, .references, .searched, .status) > h2 { text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.625rem; color: var(--color-text-400); }
-.task-view h3 { font-size: 0.75rem; color: var(--color-text-300); }"
+.task-view h3 { font-size: 0.75rem; color: var(--color-text-300); }
+:is(.cite, .searched) details > summary { cursor: pointer; list-style: none; color: var(--color-text-400); }
+:is(.cite, .searched) details > summary::before { content: '▸ '; color: var(--color-text-500); }
+:is(.cite, .searched) details[open] > summary::before { content: '▾ '; }
+.searched ol { display: flex; flex-direction: column; gap: 0.25rem; }
+.searched li > details > p { margin: 0.25rem 0 0 1rem; font-size: 0.75rem; color: var(--color-text-400); }"
    :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:seon.task/keys [id kind execution instructions] :as t}]
   ;; what the task joins (its cites, searches, needs), each by its own render inside it, nested like the pull
@@ -916,14 +921,26 @@
   [_ {:file/keys [path] :seon.script/keys [says usage]}]
   [:section [:h3 path] (when (seq says) [:p says]) (when (seq usage) [:pre usage])])
 
+(defn- folded
+  "Tile hiccup [tag heading lead & body] with its body folded under its lead (a <details> whose summary is the lead's content), so a
+  person reads the tile's heading and one line and opens the rest; nothing for nil. Folding is presentation: the model reads the folded
+  content whole (docs/render.md#style). See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [[tag heading lead & body :as h]]
+  (cond (nil? h) nil
+        (empty? (remove nil? body)) h
+        :else [tag heading (into [:details {:data-preserve-attr "open"} (into [:summary] (if (and (vector? lead) (= :p (first lead))) (rest lead) [lead]))]
+                                 (remove nil? body))]))
+
 (defn cite-hiccup
   "A cite as pulled (and filled) with its target joined, as one hiccup by what the target is: a wiki section (`section-hiccup`),
   a function (`var-hiccup`), a schema key or setting (`key-hiccup`), a namespace (its doc and how to read it), a task (its plan)
-  or a file (how to read it). The page and the model read it alike; `doc` answers it on demand. See
-  docs/references.md#an-entity-cites."
+  or a file (how to read it), its body folded under its first line (`folded`). The page and the model read it alike; `doc` answers
+  it on demand. See docs/references.md#an-entity-cites."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] :any] [:=> [:cat :seon.host/db :map :map] :any]]}
   ([db c] (cite-hiccup db c {}))
   ([db {depth :seon.cite/depth t :seon.cite/target} {:keys [lookups changing?]}]
+   (folded
    (cond
      (:seon.doc/address t) (section-hiccup t depth)
      (:seon.task/id t) [:section [:h3 (:seon.task/id t)] [:p "Another task your plan names."]
@@ -931,7 +948,7 @@
      (:var/name t) (var-hiccup (:var/name t) t (boolean changing?))
      (:schema/key t) (key-hiccup db (:schema/key t) t (or lookups []))
      (:ns/name t) [:section [:h3 (str (:ns/name t))] [:p (str "A namespace your plan names." (when (:ns/doc t) (str " " (:ns/doc t))))] [:p "Read it: " [:code (help-form (:ns/name t))]]]
-     (:file/path t) [:section [:h3 (:file/path t)] [:p "A file your plan names."] [:p "Read it: " [:code (str "(slurp \"" (:file/path t) "\")")]]])))
+     (:file/path t) [:section [:h3 (:file/path t)] [:p "A file your plan names."] [:p "Read it: " [:code (str "(slurp \"" (:file/path t) "\")")]]]))))
 
 (defn cite
   "Cite c as pulled with its target and its owner joined (the declared html render of :seon.cite/cite-fact), by `cite-hiccup`: a
@@ -983,7 +1000,11 @@
           [:section [:h3 (if (= q (:seon.task/plan (:seon.search/of (d/pull db [{:seon.search/of [:seon.task/plan]}] e)))) "search: this task's request" (str "search: " q))]
            ;; each hit with the line of its text that holds a word of the query, as grep shows a hit: a bare name was passed over
            ;; (curated pair 1, 2026-11-10) where a line says why it matters
-           (into [:ol] (for [{:keys [name line]} hits] [:li [:code (str name)] (when (seq line) (str " " line))]))])))))
+           ;; each hit its name, the line folded under it: a person reads the names and opens one (folding is presentation)
+           (into [:ol] (for [{:keys [name line]} hits]
+                         (if (seq line)
+                           [:li [:details {:data-preserve-attr "open"} [:summary [:code (str name)]] [:p line]]]
+                           [:li [:code (str name)]])))])))))
 
 (def ^:private reason-words
   "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page (docs/agent.md#what-you-read: `:refused`)."
@@ -1476,13 +1497,14 @@
 (defn eval-tiles
   "The tiles of agent pull c's evals whose value has a render (their record names its schema, :seon.eval/schema), each a component of its
   own (`eval-tile`), read by the seek that answers it: the evals holding :seon.eval/schema, by that attribute's index, this agent's of
-  them; an eval added with no schema touches no read of this, so it reruns nothing; nothing when none has. See
-  docs/render.md#a-value-draws-itself."
+  them whose schema declares a render (`eval-tile` draws nothing for any other, so none is placed: no empty list); an eval added
+  with no schema touches no read of this, so it reruns nothing; nothing when none has. See docs/render.md#a-value-draws-itself."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
-  [{db :seon.db/db} c]
+  [{db :seon.db/db ix :seon.render/index} c]
   (let [aid (ratom/realize (:db/id c))]
     (when-let [ts (seq (for [dt (d/datoms db :aevt :seon.eval/schema)
-                             :let [e (d/entity db (:e dt))] :when (= aid (:db/id (:seon.eval/agent e)))]
+                             :let [e (d/entity db (:e dt))] :when (= aid (:db/id (:seon.eval/agent e)))
+                             :when (render/declared ix (:v dt))]
                          [#'eval-tile {:key (:seon.eval/id e) :eid (:e dt)}]))]
       (into [:div] ts))))
 
@@ -1753,8 +1775,9 @@
   "What an entry of the agents list reads of an agent on main: its identity, its process's status, its branch and turns, and its task."
   [:seon.agent/key :seon.agent/started-ms :seon.agent/status :seon.agent/branch :seon.agent/max-turns
    {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure :seon.task/plan {:seon.task/started-by [:seon.user/name]}]}
-   ;; the agents doing the tasks it started (a request's work agents), shown under its tile and its entry
-   {:seon.task/_started-by [{:seon.task/agent [:db/id :seon.agent/key]}]}])
+   ;; the agents it started (a request's work agents), shown under its tile and its entry: :seon.agent/agents, the one path, read
+   ;; forward from the agent (seon.task's agent-tx writes it from the task's :seon.task/started-by)
+   {:seon.agent/agents [:db/id :seon.agent/key]}])
 
 (defn session-address
   "The name of an agent's page: its key (:seon.agent/key, its id's name), the one name of a session that survives a root's restart,
@@ -1791,7 +1814,7 @@
   "A session of main in the agents list (a component over the db, its agent's entity id: every agent on main, of any boot, a
   process or none): lit while it works, what it works on (its task in words, else its branch; else its id), how its work stands
   (standing), the whole pill one link to its page by its stable address (session-address), the whole name in its title; under it,
-  by this same render, the agents doing the tasks it started (a request's work), so the list is the tree of what each started.
+  by this same render, the agents it started (its :seon.agent/agents: a request's work), so the list is the tree of what each started.
   See docs/render.md#a-sessions-address-and-the-agents-list."
   {:seon.render/style ".agent-side:has(> .seon-nest) { flex-direction: column; align-items: stretch; } .agent-side > .seon-nest { margin-left: 0.75rem; padding-left: 0.5rem; border-left: 1px solid var(--color-base-800); }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :int] :any]}
@@ -1808,7 +1831,7 @@
            ;; named by what it works on (its task in words), its key in the title: a person tells agents apart by their work
            [:span {:class "min-w-0 truncate font-semibold text-text-100"} (or what (kname id))]
            (when (:seon.agent/status a) [:span {:class (str "shrink-0 text-2xs " (tone-class (:tone stands)))} (:text stands)])]]
-     (when-let [kids (seq (distinct (keep #(get-in % [:seon.task/agent :db/id]) (:seon.task/_started-by a))))]
+     (when-let [kids (seq (distinct (keep :db/id (:seon.agent/agents a))))]
        [:ul {:class "seon-nest"} (for [k (sort-by #(session-order db %) kids)] [#'agent-side {} k])])]))
 
 (defn- session-order
@@ -1964,7 +1987,7 @@
        (when asked [:p {:class "asked"} [#'markdown asked {:inline? true}]])
        (when reply [#'markdown reply {:inline? true}])]]
      ;; the agents doing what it started, each its own tile under it, so a request and its work read as one tree
-     (when-let [ks (seq (distinct (keep #(get-in % [:seon.task/agent :seon.agent/key]) (:seon.task/_started-by a))))]
+     (when-let [ks (seq (distinct (keep :seon.agent/key (:seon.agent/agents a))))]
        (into [:div {:class "started"}] (for [k ks] [#'session-card {} k])))]))
 
 (defn- sessions-by-standing

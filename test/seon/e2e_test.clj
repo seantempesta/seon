@@ -13,7 +13,7 @@
 (deftest await-quiet-ends-on-a-recorded-defect
   (ts/test-branch! (fn [_ c] (let [sys {:conn c}
         t (:max-tx @c)
-        start (System/currentTimeMillis)
+        start 0
         waiting (future (await/await-quiet sys t))]
     (d/transact c {:tx-data [{:seon.error/signature "0123456789abcdef" :seon.error/class :eval :seon.error/count 1 :seon.error/agents 1
                               :seon.error/first-ms start :seon.error/last-ms start}]})
