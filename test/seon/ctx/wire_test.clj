@@ -1734,6 +1734,21 @@
         (is (not-any? #(str/includes? (:content %) "kind=\"example\"") (:messages none)))
         (is (not-any? #(= :example (ffirst %)) (:parts none)))))))
 
+(deftest an-example-of-a-session-recorded-with-string-senders-writes-refs
+  ;; docs/tasks.md#a-task-names-example-sessions: a store kept from before senders were refs holds them as strings; an example
+  ;; exported from it writes each as the ref it names (seon.ctx.session's who): an agent's key that agent, "root" and "seon" the system,
+  ;; the session's own agent the example's
+  (let [rekey #'seon.ctx.session/example-rekey
+        msg (fn [from] (:seon.message/from (rekey "example/x" "a1" {:seon.message/id "m" :seon.message/from from :seon.message/body "b" :turn 1}
+                                              [:seon.message/id :seon.message/to nil])))
+        by (fn [b] (:seon.eval/by (rekey "example/x" "a1" {:seon.eval/id "e" :seon.eval/by b :seon.eval/code "(f)" :turn 1}
+                                         [:seon.eval/id :seon.eval/agent :seon.eval/call])))]
+    (is (= {:seon.agent/key "user"} (msg "user")) "a string sender: the agent it names")
+    (is (= seon.task/system-sender (msg "root")) "root's name: the system")
+    (is (= {:seon.agent/key "example/x"} (by "a1")) "the session's own agent: the example's")
+    (is (= seon.task/system-sender (by "seon")) "Seon's: the system")
+    (is (= {:seon.agent/key "user"} (msg {:seon.agent/key "user"})) "a joined sender, as a store kept since reads it")))
+
 (deftest an-example-session-is-data-that-recreates-the-session
   (ts/test-branch!
     (fn [_ conn]
