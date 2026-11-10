@@ -9,7 +9,7 @@
     --store-steps OUT                 the steps bin/check ran green stored at their digests
   bin/test runs each shard in a process of its own, at once. The program the plan reads is kept
   per git tree in a store of its own (program-db)."
-  (:require [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
+  (:require [konserve.jolt.lmdb :as klmdb] [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts] [seon.agent]
             [seon.edn :as sedn] [seon.error :as error] [seon.lib :as lib] [seon.contract :as contract] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]
             [seon.doc :as doc] [seon.task :as task] [seon.problems :as problems] [my.root]))
@@ -154,7 +154,16 @@
   ([root store tree] (program-db root store tree nil))
   ([root store tree max-bytes]
   (let [b (tree-branch tree)
-        open #(pdb/open! :lmdb store 0 :db)
+        ;; the store is output keyed by the program's attributes alone (seon.test-store/program-schema-digest), and its open checks
+        ;; every attribute's value type: one the open refuses (another attribute's type changed since it was made, a retired name)
+        ;; is made again, never a refusal every checkout must clear by hand (2026-11-10: two message attributes made refs)
+        open #(try (pdb/open! :lmdb store 0 :db)
+                   (catch clojure.lang.ExceptionInfo e
+                     (if (#{:seon.db/types-differ :seon.db/name-retired} (:seon.error/type (ex-data e)))
+                       ;; its env, opened before the refusal, closed first: a removed store's env left open is the one this
+                       ;; process reopens (and its semaphore set outlives it)
+                       (do (klmdb/close-env! store) (fx/remove-tree! store) (pdb/open! :lmdb store 0 :db))
+                       (throw e))))
         ;; the bound is the write's: a tree the store keeps is read whatever the store's size (a shard read the plan's tree
         ;; from a store the plan's import had taken past it, removed it, and its first program reader imported the tree
         ;; again inside its own tick budget); only a tree to import starts a store past it again

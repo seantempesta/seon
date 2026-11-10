@@ -1501,6 +1501,21 @@
     (is (not (moved? "not-code-test")) "a string that is no code names nothing and does not throw (reader/forgive makes \"app.pt-sn/f is not code\" a comment; unbalanced text reads as nil)")
     (is (not (moved? "pure-test")) "a test naming nothing keeps its digest")))
 
+;; docs/source.md#tests-run-by-reach: the plan's program store is output, keyed by the program's attributes alone, so it outlives a
+;; change to any other attribute; opening it checks every attribute's value type (seon.db/install-missing!), so a change of one that is
+;; not the program's (two message attributes made refs, 2026-11-10) left every checkout's store refusing until removed by hand. A store
+;; whose schema the open refuses is output to make again: removed and imported fresh, never a refusal
+(deftest a-kept-program-store-another-schema-refuses-is-made-again
+  (let [d (checkout! "kept-types" {"deps.edn" "{}" "src/app/kt.clj" "(ns app.kt)\n(defn f [x] x)\n"})
+        store (scratch-dir "kept-types-store")
+        made (pdb/made-cfg (pdb/store-cfg :lmdb store))
+        old (mapv #(if (= :seon.model-call/basis (:db/ident %)) (assoc % :db/valueType :db.type/string) %) pdb/schema)
+        _ (d/create-database made)
+        _ (let [c0 (pdb/connect made)] (d/transact c0 {:tx-data old}) (d/release c0))
+        db (runner/program-db d store (fx/tree-id d))]
+    (is (some? (d/entity db [:var/name 'app.kt/f])) "the tree is read: the store was made again and the program imported")
+    (is (= :db.type/data (get-in (:schema db) [:seon.model-call/basis :db/valueType])) "on a store of this schema")))
+
 (deftest a-kept-tree-is-read-whatever-its-stores-size
   ;; found 2026-11-10 (Context, the Tests session): the plan imported a tree past the store's bound,
   ;; then a shard found the store over it, removed it, and its first program reader imported the tree again inside its own
