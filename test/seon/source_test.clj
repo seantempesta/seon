@@ -313,7 +313,7 @@
 
 (deftest a-landing-through-the-bridge-is-a-zero-diff
   ;; task seon.root/a-boot-resumes-from-the-db: a Claude session's landing enters main as data, the changed files' facts
-  ;; (seon.root/changed-tx, what bin/land's bridge evaluates on an outside agent's branch before the ordinary merge).
+  ;; (seon.root/changed-tx, what bin/land's bridge has root write on main).
   ;; Main indexed so from tree A, then from what A -> B changed (a form changed, a namespace added, a script's text and
   ;; mode, a page changed and one removed, a task file added), holds B: the program a seed of B holds (its program
   ;; digest, so a binary built from B is no stale binary), written back byte for byte (seon.doc/files), so the main

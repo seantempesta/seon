@@ -1101,7 +1101,7 @@
   seon.source/modes-tx), then on the db those make the wiki's pages
   (seon.doc/load-tx; a removed page loads empty, so its sections go) and the task files (seon.task/load-tx of tasks-of; a
   removed file declares none, so its tasks are cancelled). A path of none of these (native code, deps.edn, system.edn, a
-  gitlink) is a build input, which the binary's build takes. What a Claude session's landing evaluates on its branch
+  gitlink) is a build input, which the binary's build takes. What root writes on main for a Claude session's landing
   (bin/land's bridge, a temporary one). See docs/source.md#a-landing-enters-main-as-data."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]] [:map-of :string :string]] :seon.db/tx-data]}
   [db changed modes]

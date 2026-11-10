@@ -39,23 +39,17 @@ tidy() {
     print "removed worktree $HERE and its branch $B" || print "worktree kept: removing $HERE failed"
   fi
 }
-# bridge REPO OLD NEW PORT: a temporary bridge (owner, 2026-11-09: "We have to accommodate you and your agents who
-# primarily write the updates in files, but this is a temporary system -- I want seon agents writing updates inside the
-# system and pushing them to disk"). The change git landed (OLD..NEW in REPO) enters the main of the root serving PORT as
-# data, as an outside agent's work does, with no op and no merge path of its own: a task is made and attached (:create,
-# :attach), its agent evaluates the changed files' facts on its branch (seon.root/changed-tx, every changed text file's
-# text, a removed one's nil, and modes), and :done hands it to the judge and the reconciler, whose ordinary merge brings
-# it into main and writes main's files back. Root reads no file for it. It goes when Seon agents write the system's
-# updates themselves (docs/source.md#a-landing-enters-main-as-data). The last line names the task and its verdict.
+# bridge REPO OLD NEW PORT: what git landed (OLD..NEW in REPO) enters the main of the root serving PORT as data (owner,
+# 2026-11-09: "We have to accommodate you and your agents who primarily write the updates in files, but this is a
+# temporary system -- I want seon agents writing updates inside the system and pushing them to disk"): root writes on
+# main, through its writer, the changed files' facts (seon.root/changed-tx: every changed text file's text, a removed
+# one's nil, and modes), as a seed indexes them. No task, agent or judge: the change was proved before git landed it.
+# Root reads no file for it. It goes when Seon agents write the system's updates themselves
+# (docs/source.md#a-landing-enters-main-as-data). The last line says it landed or why not.
 bridge() {
-  local repo=$1 old=$2 new=$3 port=$4 name="land-${3[1,12]}" client="bin-land-$$" r agent
-  r=$(print -r -- "{:op :create :ns \"land\" :name \"$name\" :plan \"The landing of $new, entered as data by bin/land's bridge: its changed files' facts on this branch, merged as any task's work. See docs/source.md#a-landing-enters-main-as-data.\"}" | "$MAIN/bin/ask" $port)
-  [[ $r == *':task "land/'* ]] || { print "bridge: the task was not made: $r"; return 1 }
-  r=$(print -r -- "{:op :attach :task \"land/$name\" :client \"$client\"}" | "$MAIN/bin/ask" $port)
-  agent=$(print -r -- "$r" | sed -nE 's/.*:agent :([^ ,}]+).*/\1/p' | head -1)
-  [[ -n $agent ]] || { print "bridge: land/$name was not attached: $r"; return 1 }
+  local repo=$1 old=$2 new=$3 port=$4 r
   r=$(git -C "$repo" diff --raw --no-renames -z "$old" "$new" | perl -e '
-    my ($repo, $agent, $client, $new) = @ARGV; local $/; my @f = split /\0/, <STDIN>; my (%text, %mode);
+    my ($repo, $new) = @ARGV; local $/; my @f = split /\0/, <STDIN>; my (%text, %mode);
     sub edn { my $s = shift; $s =~ s/\\/\\\\/g; $s =~ s/"/\\"/g; $s =~ s/\n/\\n/g; $s =~ s/\r/\\r/g; $s =~ s/\t/\\t/g; "\"$s\"" }
     while (@f) {
       my ($meta, $path) = (shift @f, shift @f);
@@ -68,12 +62,11 @@ bridge() {
       ($text{$path}, $mode{$path}) = ($t, $nm) }
     my $ch = join " ", map { edn($_) . " " . (defined $text{$_} ? edn($text{$_}) : "nil") } sort keys %text;
     my $md = join " ", map { edn($_) . " " . edn($mode{$_}) } sort keys %mode;
-    my $code = "(do (seon.agent/transact! (seon.root/changed-tx (seon.agent/db) {$ch} {$md})) :landed)";
-    print "{:op :eval :agent " . edn($agent) . " :client " . edn($client) . " :message-md \"\" :evals [{:intent " . edn("the landing of $new, as data") . " :code " . edn($code) . "}]}\n";
-  ' "$repo" "$agent" "$client" "$new" | "$MAIN/bin/ask" $port)
-  [[ $r == *':landed'* ]] || { print "bridge: land/$name's eval did not land: $r"; return 1 }
-  r=$(print -r -- "{:op :done :agent \"$agent\" :client \"$client\"}" | "$MAIN/bin/ask" $port)
-  print "bridge: land/$name $r"
+    my $code = "(let [r @(seon.root/transact-main! sys (seon.root/changed-tx @(:conn sys) {$ch} {$md}))] (if (seon.contract/error? r) r :landed))";
+    print "{:op :eval :agent \"root\" :code " . edn($code) . "}\n";
+  ' "$repo" "$new" | "$MAIN/bin/ask" $port)
+  [[ $r == *':landed'* ]] || { print "bridge: $new did not enter main: $r"; return 1 }
+  print "bridge: $new entered main"
 }
 MSG=
 [[ ${1:-} == --bridge ]] && { MAIN=$(git rev-parse --path-format=absolute --git-common-dir)/..; MAIN=${MAIN:A}; bridge "${@:2}"; exit }
