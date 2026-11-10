@@ -8,12 +8,6 @@
   (:require [seon.contract :refer [defn defn-]] [datahike.core] [datahike.api :as d] [seon.db :as pdb]
             [seon.source :as source] [seon.doc :as doc] [seon.task :as task] [seon.profile :as profile]))
 
-(defn- empty-db
-  "An empty db value with Seon's schema (seon.db/schema), in memory, keeping history when history?. See docs/testing.md#testing-in-the-world."
-  {:malli/schema [:=> [:cat :boolean] :seon.host/db]}
-  [history?] (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) pdb/schema)
-                                     {:keep-history? history? :schema-flexibility :write}))
-
 (defn with
   "db with each fixture applied, in order: a fixture is tx-data, or a function of the db answering
   tx-data (what `code`, `page` and `task` answer). A value, nothing written.
@@ -81,7 +75,7 @@
 
 (def ^:private the-worlds
   "The world and the world that keeps history, each built once a process from base (`world` answers them). See docs/testing.md#testing-in-the-world."
-  {false (delay (apply with (empty-db false) base)) true (delay (apply with (empty-db true) base))})
+  {false (delay (apply with (pdb/empty-db false) base)) true (delay (apply with (pdb/empty-db true) base))})
 
 (defn world
   "The base world, a db value: Seon's schema and a small program shaped like production:

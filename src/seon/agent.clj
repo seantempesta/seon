@@ -17,7 +17,7 @@
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
-            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [clojure.repl]
+            [clojure.string :as str] [seon.program :as program] [seon.proofs :as proofs] [seon.fx :as fx] [seon.task :as task] [seon.intr :as intr] [seon.render :as render] [seon.template :as template] [seon.system :as system] [clojure.repl]
             [malli.registry :as mr] [malli.core] [jolt.analyzer] [clojure.core.async :as a] [jolt.io-poller :as poller]))
 
 ;; One state map per agent process (this process is the agent). Fields:
@@ -758,14 +758,15 @@
 
 (defn test-inputs
   "The reach inputs of db's tests: [shared in], shared the :inputs root's binary was built with
-  (:seon.root/source, its boot's), or nil; in those, else none of the tree's ({:env \"\" :tree \"\" :config {}} and
-  system.edn's declared refs)."
+  (:seon.root/source, its boot's: seon.root/booted-source, present only when the binary is main's program), or nil; in
+  those, else none of the tree's ({:env \"\" :tree \"\" :config {}} and the binary's system.edn's declared refs).
+  See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :seon.host/db] [:tuple [:maybe :map] :seon.program/inputs]]}
   [db]
   (let [root (d/entity db [:seon.root/id :root])
         source (:seon.root/source root)
         shared (when (= (:boot source) (:seon.root/boot root)) (:inputs source))]
-    [shared (or shared {:env "" :tree "" :config {} :data-refs (fx/declared-refs (cfg/value :seon.config.root/system-path))})]))
+    [shared (or shared {:env "" :tree "" :config {} :data-refs (fx/declared-refs system/built-text)})]))
 
 (defn branch-graph
   "The reach graph of branch db under in, the one test-plan selects by: base's graph (base-graph)
@@ -834,8 +835,8 @@
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/graph-index) against base's (main at its merge base), the greens stored at
   those digests (the verdict cache, greens and reds, whoever ran them: seon.fx/stored-results) and proofs. The digests' inputs with no program facts are this boot's
-  :inputs on root's :seon.root/source fact (seon.root/import-source!: present only when root's
-  binary is built from its source tree), so an agent's results are kept by digest in the one
+  :inputs on root's :seon.root/source fact (seon.root/booted-source: present only when root's
+  binary was built from main's program), so an agent's results are kept by digest in the one
   verdict cache (seon.fx/write-verdicts!;
   DECISIONS, Agents share greens: a test green at its digest never runs again, \"especially
   when freshly branched\"; every eval is a recorded form, so the digest covers what ran); a

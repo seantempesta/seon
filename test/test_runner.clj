@@ -199,6 +199,8 @@
         db (program-db root store tree)
         in (fx/inputs root config/config (config/checkout) tree)
         g (reach-graph-of db (:data-refs in) store)
+        ;; the process store a process test's root takes is indexed by this tree's code: its key is an input of theirs
+        in (seon.root/with-index-code g in)
         all (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))
         ;; a name of the form ns/test selects that one deftest (bin/test NS/TEST); a bare ns selects its tests
         whole (if (seq names) (set (keep #(when-not (str/includes? % "/") (symbol %)) names)) nss)
@@ -390,7 +392,7 @@
     (do (println (str "TEST FAILED: " bad)) 1)
   (let [t0 (profile/now-ns)
         ;; the selection's time is the plan's: program db, reach graph, digests and the results read
-        plan (plan-of (source-tree) what all? names (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
+        plan (plan-of (source-tree) what all? names (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
   (if-let [u (:unread plan)]
     ;; a read that failed is not zero greens: nothing runs, and the run says why
     (do (println (str "TEST FAILED: " (:seon.error/message u)))
@@ -430,7 +432,7 @@
         ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms)
         _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) "\n"))
         ;; the process tests' store, made here before any shard starts (shards' roots that each made
-        ;; it raced: seon.test-store/process-store), for this schema (seon.test-store/kept-store!)
+        ;; it raced: seon.test-store/process-store), for this schema (seon.db/kept-store!)
         _ (when (seq (filter binary run-tests)) (write! (str out "/process-store") (str (ts/make-process-store! (.getCanonicalPath (io/file (config/checkout)))) "\n")))
         _ (write! (str out "/steps-binary") (str (str/join " " step-bin) (when (seq step-bin) "\n")))
         ;; each candidate test's digest: where its verdict is read (seon.fx/test-results, the merge gate)
@@ -523,7 +525,7 @@
   ;; lacks are added to this value first, as seon.db/install-missing! adds them to a store a root opens
   (let [db (d/db-with db (vec (remove #(contains? (:schema db) (:db/ident %)) pdb/schema)))
         db (d/db-with db (doc/load-dir-tx db dir (config/value :seon.config.root/wiki-dirs) {}))
-        tx (task/load-tx db (my.root/task-files (str dir "/" (tasks-dir))))
+        tx (task/load-tx db (seon.root/task-files (str dir "/" (tasks-dir))))
         _ (when (contract/error? tx) (throw (ex-info (:seon.error/message tx) tx)))]
     (d/db-with db tx)))
 
@@ -540,7 +542,7 @@
         base (fx/base-commit root)]
     (if-not base
       (do (println (str "HEALTH FAILED: no base: " root " has no commit before this one on " (config/value :seon.config.source/main))) 1)
-      (let [store (ts/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest)
+      (let [store (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest)
             head (with-wiki (program-db root store) root)
             ;; the base's tasks and wiki, as git holds them, in a directory of this run's own, removed once read
             dir (str root "/target/tmp/health-base-" base "-" (random-uuid))

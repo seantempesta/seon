@@ -39,6 +39,8 @@ Before killing a process stuck at 0% CPU, capture `kill -INFO PID` (the fiber du
 
 Seon is built to run well on a 16 GB MacBook M1: it stays within `:seon.config.machine/memory-mb` (4096: root, the fork server and the default number of agents), and `bin/check scale` fails past it. A cost that grows with something other than the work (a probe walking a 64 GiB address-space reservation took 100 agents from 0.6 s to 18 s) is found by a cost proof sized by what it walks ([storage](storage.md#the-map-is-address-space)). A process's memory is what macOS charges it, its `phys_footprint` (`seon.lib/real-mb`): a forked child is charged every inherited page it touches, though only what it writes is a real copy, and the parent keeps its own charge, so `bin/check scale` charges each agent the machine's drop in free plus inactive memory (`seon.lib/sysmem`, `host_statistics64`) and root and the fork server their footprints, never the sum of the agents' footprints ([cost](cost.md#how-we-measure)). Like every bound, the key lives in `resources/seon/config/default.edn` ([config](config.md)).
 
+**The machine Seon is built on is larger than the target.** The owner's development Mac has 18 cores (2026-11-10: "I have 18 cores and load is 8"). AGENTS.md section 8's "load under ~8" is the 16 GB M1 target's number: on this machine a load under about 8 is not busy, so a prove, a landing or a timing is not held for it. Runs stay niced, a heavy run is judged by the free cores and the free memory, and every timing says the load it ran at.
+
 ## The clock
 
 Seon has one clock: `seon.profile/now-ns`, the machine's monotonic CLOCK_UPTIME_RAW read by a Chez foreign procedure (9.5 ns a read, nothing allocated, 41 ns resolution), and `seon.profile/ms-since` for "milliseconds since t0". Every process reads the same timeline, so a stamp one process sends (the writer's `:main` commit, a message's `:ns`) is a t0 another can subtract from. The profiler's samples use the same read. `System/nanoTime` (Jolt's, 1 µs and counted from the process's start) and Chez's `current-time` are not used; a new reading of time goes through `seon.profile`. A cost proof measures the calling thread alone ([cost](cost.md)): `seon.profile/cpu-ns`, its CPU time (CLOCK_THREAD_CPUTIME_ID), and `seon.profile/alloc-bytes`, the bytes it allocated (Chez's per-thread count on our branch ``jolt/thread-bytes``), so another thread's work and a scheduler pause are never the measured call's, and neither is a collection's copying in its bytes; a collection that runs on the measured thread is in its time. Time is measured and recorded, never acted on ([clocks](clocks.md#if-nothing-has-changed-we-do-nothing)); [clocks](clocks.md) names every function that reads it.
@@ -175,7 +177,19 @@ Measured 2026-10-29 on this checkout, an idle-ish machine (load 5-7; at load 13 
 
 The import and the wiki are the two phases that grow with the program, and a main made from `:db` repeated both for every root. `seon.root/seed-program!` (`bin/root seed STORE`, which `bin/test` runs once after it builds the binary, on the process store its plan made, `seon.test-store/process-store`) brings `:db` up to the tree: the program and the `:seon.root/source` fact with the tree's digest, imported as a boot imports (`seon.root/import-tree!`: only what the tree changed since the fact's tree), then the wiki, loaded until it states nothing more (its citations resolve to the program, and a root's second boot reached that by itself). A root whose main is a branch of that `:db` finds the digest equal and imports nothing. The seed costs 22 s a tree (the whole tree is analysed; an edit to one file is not yet incremental: 9.6 s) and saves 7.3 s a first boot, so it pays from the fourth root a run boots; a test with a store of its own (`seon.root-test/root-answers` and the restart tests) does not take it. With the wiki baseline on (a standing root's, `SEON_WIKI_BASELINE` unset) a store's second boot also spent 41 s and 8.6 GB in `seon.fx/wiki-history` (`git blame` of every page, `git show` of every old file the sections cite, parsed by `seon.source/defining-ids`), once per store; the seed pays it once in the process store when it is on.
 
-What is left in a seeded boot: the image (2.3 s, fixed), the program loaded from the store (1 s) and the wiki computed to nothing (1.3 s: every page parsed and every section compared, to find that the tree's wiki is the one stored; a digest of the wiki dirs on main would skip it).
+A boot now resumes its main and reads no file ([source](source.md#a-boot-resumes-from-the-db)): no import, no `load-all!`, no wiki, no read of the tree after start. Measured 2026-11-09 on one seeded store of this checkout (5,152 forms), the same machine at load 1.5-2.2, `bin/root start` to `ROOT LISTENING`, warm:
+
+| phase | before | after |
+|---|---|---|
+| store open | 13 ms | 6-9 ms |
+| the tree's import and `load-all!` (`:program`, read 234 ms, `load-all!` 270 ms of it) | 908-934 ms | 0 |
+| seed check (a main with a source fact) | | 1-3 ms |
+| main's config held and its program digested | (in `:program`) | 55-105 ms |
+| contracts armed | 52 ms | 10-11 ms |
+| the tree read again after start (`import-source!`, its inputs 420-480 ms) | ~650 ms | 0 |
+| `bin/root start` to `ROOT LISTENING` | 2,619-3,222 ms (5,331 cold) | 1,047-1,135 ms |
+
+What is left is the image and a digest of main's program (one read of five attributes' datoms, O(program) with a small constant: 5 ms at the REPL, 55-105 ms at boot with the config held). A seed (`bin/root seed`, or the first boot of a fresh store) pays the import, the wiki and the task files once; `bin/build` records the program its binary was built from by an incremental index it keeps (1.8-2.0 s a build of a changed tree, [source](source.md#the-binary-records-its-program)).
 
 ### The restart tests
 
@@ -183,10 +197,8 @@ The tests whose subject is a restart or a resume keep a store of their own, and 
 
 | test | before | after | what moved |
 |---|---|---|---|
-| `seon.source-test/main-s-program-follows-the-checkout-while-root-runs-and-across-a-restart` | 72 s | 5 s (2026-11-08) | an empty store of its own and a scratch repository of one file, no wiki: its claim is the program following the checkout, which one file shows |
 | ``seon.root-test/every-end-of-a-root-is-a-fact`` (gone) | 84 s | 0 (2026-11-08) | folded into `seon.root-test/a-second-boot-resumes-the-same-main`, whose two boots it reads |
 | `seon.root-test/a-second-boot-resumes-the-same-main` | 80 s | not changed | a clone gave 67 s `:ms` against 81-94 s, inside the noise, so it keeps its empty store: its attach forks an agent, which waits behind the fork server's compile of the program the clone now holds |
-| `seon.root-test/main-follows-its-source-tree-across-restarts` | 26 s (74 s median by 2026-11-08) | 5 s (2026-11-08) | an empty store of its own, no wiki: three resumes of a tree that holds only what its claim reads |
 | `seon.agent-test/a-branch-that-deletes-mains-test-it-breaks-is-not-merged` | 100 s (18.6 s fastest green by 2026-11-10) | 0.8 s (2026-11-10) | not a restart: its claim is the judge's decision, so it is the judge's functions on two db values of the world (`seon.agent/test-plan`, the runner, `seon.reconcile/done-explain`), with no root, agent or gate |
 
 The phases of the restart test, solo, before: boot 15 s, `load-all!` of the test namespaces in root 10 s, the first loop turn 137 s (its gate ~110 s, the turn itself ~25 s), the second 2.6 s, SIGKILL 0.8 s, second boot 8.7 s, `my.root/build!` 35 s (`bin/worktree --at` 9 s, `bin/build seon` 30 s of Jolt's whole-program link: with every compile cache warm and the tree unchanged a second build there took the same 31 s, since the stamp is the generation's own), the generation's boot 0.8 s. The build is not a lookup: the shared caches (`target/cache`, bin/env) already serve it, and the tree it builds is new (the two merges change it). A no-op `bin/build seon` of a built tree is 1 s.
