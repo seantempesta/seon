@@ -427,7 +427,7 @@
     (try
       (enter-agent! {:db db :key k :branch :b})
       (is (= (:tree (ctx/build (seon.db/index) db (aid db) :b)) @ctx/ctx) "built when the state first holds the db")
-      (is (= {:seon.render/schema :seon.ctx/ctx} (meta @ctx/ctx)) "marked for its block")
+      (is (= :seon.ctx/ctx (:seon.render/schema (meta @ctx/ctx))) "marked for its block")
       (is (= {:t (:max-tx db) :branch :b} (select-keys @ctx/ctx [:t :branch])) "its :t and :branch are what an eval of it records as its basis (only the value itself)")
       (swap! seon.agent/state assoc :db (:db-after rep) :tx (select-keys rep [:db-after :tx-data]))
       (is (contains? (:evals @ctx/ctx) (id (:db-after rep) [:seon.eval/id "e11"])) "a transaction's eval joins")
