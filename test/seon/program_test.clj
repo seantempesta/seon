@@ -259,6 +259,12 @@
     (is (= (refs whole 'app.pt-qa/f) (refs alone 'app.pt-qa/f)) "the same facts whether the named namespace was analyzed or not")
     (is (= (refs whole 'app.pt-qa/m) (refs alone 'app.pt-qa/m)) "for a macro's template too")))
 
+(defn kept-graph
+  "The reach graph of the checkout's own program, as bin/test's plan keeps it (test-runner/reach-graph-of over the kept
+  program store): decoded and brought to date, a sixth of what building it costs (docs/source.md#tests-run-by-reach)."
+  [here]
+  (runner/reach-graph-of (runner/program) (:data-refs (fx/inputs here)) (ts/kept-program-store)))
+
 (deftest a-name-a-test-hands-over-quoted-is-what-it-reaches
   ;; root, 2026-10-27: (cost/proof {:of 'seon.program/reach-update ...}) did not reach reach-update,
   ;; so its digest stayed when reach-update changed and a stored green hid a red (17 calls against
@@ -279,7 +285,7 @@
                 ((ts/reach-digests f2 {:env "e" :tree "t" :config {}}) 'app.pt-hq-test/by-name))
           "the quoted var changed: the test's digest moved"))
     (is (some #{'seon.program-cost-test/a-change-re-folds-only-what-reaches-it}
-              (program/tests-reaching (program/reach-graph (runner/program) nil) 'seon.program/reach-update))
+              (program/tests-reaching (kept-graph (seon.config/checkout)) 'seon.program/reach-update))
         "Seon's own cost proof reaches the function it names")))
 
 (deftest a-namespace-gaining-its-first-test-is-updated-not-rebuilt
@@ -463,12 +469,6 @@
   (let [d (str (seon.config/checkout) "/target/tmp/reach-" label "-" (random-uuid))]
     (.mkdirs (java.io.File. d))
     d))
-
-(defn kept-graph
-  "The reach graph of the checkout's own program, as bin/test's plan keeps it (test-runner/reach-graph-of over the kept
-  program store): decoded and brought to date, a sixth of what building it costs (docs/source.md#tests-run-by-reach)."
-  [here]
-  (runner/reach-graph-of (runner/program) (:data-refs (fx/inputs here)) (ts/kept-program-store)))
 
 (defn- sampled-repo
   "A new git repository (its path) holding every nth file of the checkout's src, test and schemas as
