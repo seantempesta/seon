@@ -262,19 +262,47 @@
                                        (if (and (vector? x) (keyword? (first x))) (into [(first x)] (children (next x))) x)))
                              h)))
 
-(defn page-parts-at
-  "Agent a's page parts at basis b on db's store, as the model reads them: the agent pulled at b's commit by what the parts
-  render reads (its :seon.ctx/pattern, not the agent's whole pattern), rendered by its
-  page-parts render (seon.render.ui/agent-parts, named here by symbol: seon.render.ui requires this namespace) in one pass
-  (seon.render/render-pull, the hiccup output alone, so no model render nests) with the index of the point's own schemas,
-  and stripped of presentation. The branch is the db's own (Datahike's config)."
-  {:malli/schema [:=> [:cat :seon.host/db :int :map] :any]}
-  [db a b]
-  (let [d (db-at db {:commit (:commit b) :t (or (:t b) (:max-tx (d/commit-as-db (pdb/store-of db) (:commit b))))})
-        branch (get-in (or (:origin-db d) d) [:config :branch])]
+(defn page-parts-through
+  "Agent a's page parts at each point of chain, a vector of points ({:commit :t}, in order on one branch; a first of nil: nothing
+  before the second, answered nil), on db's store, as the model reads them: one walk of its page-parts render
+  (seon.render.ui/agent-parts, named here by symbol: seon.render.ui requires this namespace) over the agent pulled by what that
+  render reads (its :seon.ctx/pattern), drawn once at the first point and advanced to each later one as a kept walk moves
+  (seon.ctx/moved, seon.ctx/patch, seon.render/flush! of what those datoms reach: docs/render.md#a-page-is-a-kept-walk), each
+  point's hiccup stripped of presentation (`presentation-free`). So a chain costs one draw and what moved between its points,
+  never a draw a point. The branch is the db's own (Datahike's config). See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :seon.host/db :int [:vector [:maybe :map]]] [:vector :any]]}
+  [db a chain]
+  (if-let [p (some identity chain)]
     (let [parts (requiring-resolve 'seon.render.ui/agent-parts)
-          ix (program/index-of-db d)]
-      (presentation-free (:hiccup (render/render-pull (:tree (ctx/build ix d a branch (:seon.ctx/pattern (meta parts)))) d parts ix #{:seon.render/hiccup} {:seon.render/changes ctx/changes}))))))
+          d0 (db-at db p)
+          branch (get-in (or (:origin-db d0) d0) [:config :branch])
+          c0 (assoc-in (ctx/build (program/index-of-db d0) d0 a branch (:seon.ctx/pattern (meta parts))) [:ix :own-index?] true)
+          at (volatile! d0) c (volatile! c0) r (ratom/atom (:tree c0))
+          w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [parts {} (ratom/ref-view r ctx/changes)] (:index (:ix c0)))
+                   :outputs #{:seon.render/hiccup})
+          hiccup #(presentation-free (render/resolved w @(:out w) false))]
+      ;; a walk of its own, read by no reaction of the caller's: a render calling this (`turn-entities`) runs in its component's
+      ;; reaction, which the walk's own atom and reactions would otherwise join, running it again for each
+      (binding [ratom/*ratom-context* nil]
+      (try
+        (render/flush! w nil)
+        (let [h0 (hiccup)]
+          ;; the first point drawn, each later one the walk advanced to: the datoms between the two values, ctx patched by them
+          ;; and the components they reach flushed
+          (into (mapv (constantly nil) (take-while nil? chain))
+                (cons h0 (for [q (rest (drop-while nil? chain))]
+                           (let [d1 (db-at db q) moved (ctx/moved @at d1 nil) c1 (ctx/patch @c d1 moved branch)]
+                             (vreset! at d1) (vreset! c c1) (reset! r (:tree c1))
+                             (render/flush! w moved (:index (:ix c1)))
+                             (hiccup))))))
+        (finally (render/dispose-walk! w)))))
+    (mapv (constantly nil) chain)))
+
+(defn page-parts-at
+  "Agent a's page parts at basis b on db's store, as the model reads them: the chain of b alone drawn (`page-parts-through`).
+  See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
+  {:malli/schema [:=> [:cat :seon.host/db :int :map] :any]}
+  [db a b] (first (page-parts-through db a [b])))
 
 (defn- point-text
   "Basis b as the point it names, written as the agent's code writes it: {:commit #uuid \"..\", :t n}, no branch, with the t the basis kept
@@ -294,33 +322,51 @@
 
 (defn page-edits-between
   "The edits that take agent a's page parts at basis p0 (nil: nothing before, so the parts whole) to its parts at basis p1, on
-  db's store, schemas read in index ix: each point's parts rendered (`page-parts-at`) and compared by seon.render/page-edits over
-  forms-moved, read from the db, never stored. What a turn's page message prints (`page-diff-msgs`) and what an agent asks
-  at its REPL (my.render/diff). See docs/render.md#a-change-is-edits-by-name."
+  db's store, schemas read in index ix: the chain [p0 p1] drawn by one walk (`page-parts-through`) and its two pages compared by
+  seon.render/page-edits over forms-moved, read from the db, never stored. What an agent asks at its REPL (my.render/diff), and
+  what a turn's page message prints (`page-diff-msgs`). See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat :seon.host/db :map :int [:maybe :map] :map] [:vector :any]]}
   [db ix a p0 p1]
-  (render/page-edits ix (render/forms-moved (if p0 {"page" (page-parts-at db a p0)} {}) {"page" (page-parts-at db a p1)})))
+  (let [[h0 h1] (page-parts-through db a [p0 p1])]
+    (render/page-edits ix (render/forms-moved (if p0 {"page" h0} {}) {"page" h1}))))
+
+(defn- pages-from
+  "Agent a's page parts along chain (a first of nil: nothing before the second), drawn when asked: a function of a pair's index i
+  answering [parts at point i, parts at point i+1]. The first pair asked draws the chain from its own point on by one walk
+  (`page-parts-through`), whose later pairs read what that walk drew; a pair before it draws again from its own point. So a
+  request whose pairs all run (a cold request) draws the chain once, and one whose earlier pairs the walk holds (a live walk, a
+  new turn) draws its new pair alone. Asked by each turn's page message (`page-diff-msgs`). See docs/render.md#a-change-is-edits-by-name."
+  {:malli/schema [:=> [:cat :seon.host/db :int [:vector [:maybe :map]]] :seon.host/fn]}
+  [db a chain]
+  (let [drawn (volatile! nil)]
+    (fn [i]
+      (let [[from hs] @drawn]
+        (if (and from (<= from i))
+          [(hs (- i from)) (hs (- (inc i) from))]
+          (let [hs (page-parts-through db a (subvec chain i))]
+            (vreset! drawn [i hs])
+            [(hs 0) (hs 1)]))))))
 
 (defn page-diff-msgs
   "What agent a's page shows the model before its turn n, between basis p0 (nil: nothing before) and basis p1: generated evals,
-  never written to the db. The first page (p0 nil) is the call `(my.render/page p1)` and its result the page parts whole
-  (`page-parts-at`); a later turn where something moved is `(my.render/diff p0 p1)` and its result the edits
-  (`page-edits-between`); nothing moved, or a first page that shows nothing: no messages. Placed by the agent's model render before turn n's call,
-  [#'page-diff-msgs {} a p0 p1 n], so the walk keeps each pair as a component keyed by its points and a new turn renders only its
-  own pair. Each is a function of its points and their renders. See
-  docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
+  never written to the db. The first page (p0 nil) is the call `(my.render/page p1)` and its result the page parts whole; a later
+  turn where something moved is `(my.render/diff p0 p1)` and its result the edits between the parts at the two points
+  (seon.render/page-edits over forms-moved, as `page-edits-between` makes them); nothing moved, or a first page that shows nothing:
+  no messages. Placed by the agent's model render before turn n's call, [#'page-diff-msgs opts a p0 p1 n], so the walk keeps each
+  pair as a component keyed by its points and a new turn runs only its own pair. The parts come from the draw of all the turns'
+  bases the placing render shares (`turn-entities`): opts' metadata :seon.ctx.wire/parts, a function answering this pair's two
+  (`pages-from`), metadata so the component's opts compare by what they say, never by that function; without it, the pair's own
+  chain is drawn (`page-parts-through`). See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :int [:maybe :map] :map :int] [:vector :seon.model/message]]}
-  [{db :seon.db/db ix :seon.render/index} a p0 p1 _n]
+  [{db :seon.db/db ix :seon.render/index :as opts} a p0 p1 _n]
   (let [q0 (some->> p0 (point-text db)) q1 (point-text db p1)
-        id (lib/id (lib/digest (str "[" q0 " " q1 "]")))]
-    (if q0
-      (let [edits (page-edits-between db ix a p0 p1)]
-        (if (empty? edits) [] (page-message id (str "(my.render/diff " q0 " " q1 ")") edits)))
-      ;; the page whole, unless it shows nothing (what moved from nothing to it is no edits: a pull holding no page)
-      (let [parts (page-parts-at db a p1)]
-        (if (empty? (render/page-edits ix (render/forms-moved {} {"page" parts})))
-          []
-          (page-message id (str "(my.render/page " q1 ")") parts))))))
+        id (lib/id (lib/digest (str "[" q0 " " q1 "]")))
+        [h0 h1] (if-let [f (::parts (meta opts))] (f) (page-parts-through db a [p0 p1]))
+        edits (render/page-edits ix (render/forms-moved (if q0 {"page" h0} {}) {"page" h1}))]
+    (cond (empty? edits) []
+          ;; the page whole, unless it shows nothing (what moved from nothing to it is no edits: a pull holding no page)
+          q0 (page-message id (str "(my.render/diff " q0 " " q1 ")") edits)
+          :else (page-message id (str "(my.render/page " q1 ")") h1))))
 
 (defn model-call-msgs
   "A model call (:seon.model-call/fact) as the model reads it: what the model said and its reasoning. Whether those are sent is
@@ -341,7 +387,8 @@
 (defn- turn-entities
   "Agent record c's turns as the entities the model reads, ordered from its pull: its model calls by number, each turn's
   messages as it read them (seon.ctx/placed-messages: those delivered by its basis, so one delivered mid-turn reads at the next
-  turn), its page message between the basis of the call before that holds one and its own (`page-diff-msgs`, a placed call),
+  turn), its page message between the basis of the call before that holds one and its own (`page-diff-msgs`, a placed call
+  whose parts come from one walk along the bases, drawn when a pair first asks: `pages-from`),
   the call, the call's evals of the model's, then those of other hands; a member c no longer holds (unlinked by a swap!) is
   none. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
@@ -358,14 +405,19 @@
         basis-of (fn [x] (or (:seon.model-call/basis x)
                              (when (and (= newest (:seon.model-call/n x))
                                         (nil? (some->> (:seon.model-call/id x) (pdb/eid db :seon.model-call/id) (d/entity db) :seon.model-call/basis)))
-                               here)))]
+                               here)))
+        ;; the page parts at the turns' bases, drawn by one walk along them when a pair first asks (`pages-from`): the i-th call
+        ;; holding a basis reads the pair i, i+1 of them
+        withb (filter basis-of cs)
+        parts (pages-from db (:db/id c) (into [nil] (map basis-of) withb))
+        pair (zipmap (map :seon.model-call/n withb) (range))]
     (into (vec (for [[prev call] (map vector (reductions (fn [b x] (or (basis-of x) b)) nil cs) cs)
                :let [n (:seon.model-call/n call)
                      ms (keep (fn [[m _]] (get msgs m)) (get placed n))
                      es (sort (filter #(contains? evals %) (keys (:seon.eval/_call call))))
                      model? #(:seon.eval/call-id (get evals %))]
                x (concat ms
-                         (when-let [b (basis-of call)] [[#'page-diff-msgs {} (:db/id c) prev b n]])
+                         (when-let [b (basis-of call)] (let [i (pair n)] [[#'page-diff-msgs (with-meta {} {::parts #(parts i)}) (:db/id c) prev b n]]))
                          ;; a reply with no words whose calls c no longer holds (each unlinked by a swap!) says nothing: none of it stays
                          (when (or (some model? es) (not (str/blank? (:seon.model-call/reply call)))) [call])
                          (map evals (filter model? es)) (map evals (remove model? es)))]
