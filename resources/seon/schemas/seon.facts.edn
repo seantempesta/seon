@@ -271,7 +271,7 @@
                      [:seon.eval/response :seon.eval/response] [:seon.eval/result {:optional true} :seon.eval/result] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.agent/branch :seon.agent/status :seon.agent/description :seon.agent/max-turns :seon.agent/turn :seon.agent/test-error :seon.agent/outcome :seon.agent/reason :seon.agent/ended-turn :seon.ctx/pattern :seon.agent/main-commit :seon.agent/main-program :seon.agent/base-commit :seon.agent/ns {:seon.agent/agents [:db/id]} {:seon.agent/task :seon.task/task-fact} {:seon.agent/system [:db/id]} {:seon.model-call/_agent [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {:seon.eval/_call [:db/id]}]} {:seon.eval/_agent [:seon.eval/id :seon.eval/agent :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/page :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]} {:seon.message/_to [:seon.message/id :seon.message/from :seon.message/to :seon.message/call :seon.message/body]} {:seon.cite/_of :seon.cite/cite-fact} {:seon.search/_of :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent :seon.render/layout :seon.render/render-ctx}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.agent/branch :seon.agent/status :seon.agent/description :seon.agent/max-turns :seon.agent/turn :seon.agent/test-error :seon.agent/outcome :seon.agent/reason :seon.agent/ended-turn :seon.ctx/pattern :seon.agent/main-commit :seon.agent/main-program :seon.agent/base-commit :seon.agent/ns {:seon.agent/agents [:db/id]} {:seon.agent/task :seon.task/task-fact} {:seon.agent/system [:db/id]} {:seon.model-call/_agent [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {:seon.eval/_call [:db/id]}]} {:seon.eval/_agent [:seon.eval/id :seon.eval/agent :seon.eval/by :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/page :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]} {:seon.message/_to [:seon.message/id :seon.message/from :seon.message/to :seon.message/body]} {:seon.cite/_of :seon.cite/cite-fact} {:seon.search/_of :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent :seon.render/layout :seon.render/render-ctx}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/agents {:optional true} :seon.agent/agents] [:seon.agent/system {:optional true} :seon.agent/system]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]
@@ -571,7 +571,7 @@
  ;; ---- a process: one spawn of an agent, its telemetry on its own entity pointing at the agent
  ;; (seon.ctx/the-record-is-facts-about-the-work, move 2), so the agent's pull holds its work and no more; an agent's
  ;; current process is its newest (seon.task/current-process); root's agents card joins them
- ;; (docs/ctx.md#the-record-is-the-agents-work) ----
+ ;; (docs/ctx.md#the-agents-entity-holds-its-work) ----
  ;; the agent's key and the process's pid (seon.task/agent-tx)
  :seon.process/id [:and {:seon.db/identity true} :string]
  :seon.process/agent [:and {:seon.db/to [:seon.db/agent-fact] :seon.db/index true} :seon.db/ref]
@@ -593,7 +593,7 @@
  ;; ---- a model call: one request to the model, on its own entity pointing at its agent (the turn is a
  ;; number on each record, docs/turn.md#the-turn-is-a-number: what a turn entity held is the model call's). Its reply, its
  ;; reasoning and how it stopped are the model's words; its tokens, sent-hash and split are bookkeeping, which the agent's
- ;; pull leaves out (docs/ctx.md#the-record-is-the-agents-work); the debug page and the turn's header read it ----
+ ;; pull leaves out (docs/ctx.md#the-agents-entity-holds-its-work); the debug page and the turn's header read it ----
  ;; "<agent key>/<n>", n the agent's turn it answers; an outside read of the context (seon.turn/context-block) "<agent key>/read-<k>"
  :seon.model-call/id [:and {:seon.db/identity true} :string]
  ;; the agent whose request it is, and the turn it answers (a model's: :seon.agent/turn when it started) or the read's own

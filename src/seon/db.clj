@@ -484,7 +484,7 @@
   "The tx-meta of every transaction Seon makes: the runtime that made it
   (:seon.tx/runtime, jolt.host/runtime-fingerprint) and the branch it is written on; and, given
   them, the eval whose code made it (:seon.tx/eval) and the branch a catch-up merged
-  (:seon.tx/merged): provenance is a query on these (docs/ctx.md#provenance). A runtime Jolt
+  (:seon.tx/merged): provenance is a query on these (docs/ctx.md#provenance-who-made-each-fact). A runtime Jolt
   cannot identify (nil) is refused by this contract, never recorded as no runtime."
   {:malli/schema [:function [:=> [:cat :seon.db/branch] [:map [:seon.tx/runtime :string] [:seon.tx/branch :seon.db/branch]]]
                   [:=> [:cat :seon.db/branch [:map [:seon.tx/eval {:optional true} :seon.tx/eval] [:seon.tx/merged {:optional true} :seon.tx/merged]]]
