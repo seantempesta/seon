@@ -3213,7 +3213,9 @@
         ev (fn [id value] (seon.repl/record-tx {:seon.agent/key k} id "a3"
                                                {:seon.eval/call (seon.task/call-ref k 5) :seon.eval/code "(page)" :seon.eval/response {:handle (symbol "result" id) :value value}}))
         db (d/db-with branch (vec (concat [{:seon.agent/key k :seon.agent/turn 6}]
-                                          (ev "g1" {:points [1 2] :seon.render/hiccup [:svg {:width 10} [:circle {:r 3}]]})
+                                          ;; as the REPL records a value that draws itself: its schema :seon.render/drawn
+                                          (map #(cond-> % (:seon.eval/id %) (assoc :seon.eval/schema :seon.render/drawn))
+                                               (ev "g1" {:points [1 2] :seon.render/hiccup [:svg {:width 10} [:circle {:r 3}]]}))
                                           (ev "g2" {:plain-value 41}))))
         w (a3-walk db)]
     (try
@@ -3221,6 +3223,7 @@
             tiles (apply str (map :html (filter #(= "#p-task" (:container %)) (r/placed-units w))))
             ;; what the model reads of the eval: its model render's messages (seon.ctx.wire/eval-msgs), never the chat's elements
             read (pr-str (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "g2"])))]
+        (is (str/includes? tiles "<svg") "a value drawing itself is a tile too (its record names :seon.render/drawn)")
         (is (not (str/includes? tiles "plain-value")) "a value with no render is no tile")
         (is (str/includes? html "<svg") "and inline in its step, drawn when the step is opened")
         (is (not (str/includes? html "<svg height=\"0")) "drawn as it is")
