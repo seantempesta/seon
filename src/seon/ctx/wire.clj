@@ -235,6 +235,14 @@
   [{:role "user" :content (print/text (array-map :from (str from) :body (str body)) (:context print/budgets))}])
 
 
+(defn defect-msgs
+  "A component whose model render threw (:seon.render/component-defect, seon.render/render!'s failure point) as the model reads it:
+  one user message naming the render that threw and what it said, printed by the one printer, in the place its messages would
+  have been, so the model is told its context lost a part, never left to read around a gap. See docs/errors.md#nothing-crashes-and-nothing-hangs."
+  {:malli/schema [:=> [:cat :map :map] [:vector :seon.model/message]]}
+  [_ {:seon.error/keys [in message]}]
+  [{:role "user" :content (print/text (array-map :render-threw (some-> in str) :message (str message)) (:context print/budgets))}])
+
 (defn- children
   "An element's children xs as the tree holds them: a seq a render returned (a `for`) spliced in its place, nils dropped, so
   the model reads vectors only and a diff names each child (seon.render/keyed). See docs/render.md#style."
