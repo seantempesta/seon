@@ -1362,8 +1362,6 @@
 (deftest the-rules-move-only-when-a-rule-does
   ;; docs/render.md#style: the page draws the CSS and the model's request holds none (owner, 2026-11-08); a rule edited moves the page's rules, never the model's page
   (let [db (seeded 3 nil)
-        ;; the request has a system message: a stub of the prompt
-        db (d/db-with db (seon.doc/load-tx db "docs" {seon.doc/system-page "# A stub of the system prompt\n\nBe brief."}))
         v #'seon.render.ui/task
         was-style (:seon.render/style (meta v))
         was-f (var-get v)

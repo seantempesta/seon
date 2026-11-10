@@ -1831,7 +1831,10 @@
 
 (deftest a-request-with-no-system-message-is-refused
   ;; an error is data, and a request does not silently lose its system message: a db without the prompt is refused, typed, as seon.ctx.wire/system-text's contract did
-  (let [db (d/db-with (ts/test-db) (ts/turn-tx "a1" 1 {}))
+  (let [db0 (ts/test-db)
+        ;; the store's stub prompt taken away
+        db (d/db-with db0 (concat (for [d (d/datoms db0 :avet :seon.doc/address) :when (str/starts-with? (:v d) doc/system-page)] [:db/retractEntity (:e d)])
+                                  (ts/turn-tx "a1" 1 {})))
         e (try (wire-of-world db) nil (catch Throwable e (ex-data e)))]
     (is (= :seon.ctx/no-system-message (:seon.error/type e)) (pr-str e))
     (is (str/includes? (:seon.error/message e) "the agent's render answered none") "and says that the agent's render answered no message")))
