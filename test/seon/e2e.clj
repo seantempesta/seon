@@ -355,7 +355,8 @@
                first? (and (nil? more) (= {:task "calc/add" :cause cause :agent k :blocks blocks} row)
                            (= :cap (:seon.task/outcome (get ts "calc/add")))
                            (= :running (:seon.task/execution (get ts "calc/add")))
-                           (= #{"calc/add" "calc/add-merge" "calc/twice" "calc/twice-merge"} (set (keys ts)))
+                           ;; the scenario's tasks: root's own session's task (request/root, made at every boot) is beside them
+                           (= #{"calc/add" "calc/add-merge" "calc/twice" "calc/twice-merge"} (set (filter #(str/starts-with? % "calc/") (keys ts))))
                            (= 1 (count (task/agents d))))
                turns1 (turn-of (:db @(c/branch-db sys (task/default-branch "calc/add"))))
                ;; the owner raises the budget, holds the task and releases it: the same agent works on
@@ -374,7 +375,7 @@
                turns2 (turn-of (:db @(c/branch-db sys (task/default-branch "calc/add"))))
                second? (and (= :cap (:seon.task/outcome (get ts2 "calc/add")))
                             (= k (:seon.task/agent (get ts2 "calc/add")))
-                            (= 1 (count (task/agents d2))) (= 4 (count ts2))
+                            (= 1 (count (task/agents d2))) (= 4 (count (filter #(str/starts-with? % "calc/") (keys ts2))))
                             (= 2 turns1) (= 4 turns2)
                             (= [{:task "calc/add" :cause cause :agent k :blocks blocks}] (:root-causes q2)))]
            {:ok (and first? second?)

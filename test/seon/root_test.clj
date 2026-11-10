@@ -194,8 +194,9 @@
       (is (= "main" (printed (first second-boot))) "the second boot resumes the same main")
       (let [[tasks-1 agents-1] (printed (nth first-boot 3))
             [tasks-2 agents-2] (printed (second second-boot))]
-        (is (= [1 1] [tasks-1 (count agents-1)]) "the first boot holds the one task it loaded (a file task is one whole task) and the agent it started")
-        (is (= 1 tasks-2) "the second boot still holds the task")
+        ;; two tasks: the one it loaded (a file task is one whole task) and root's session's, made at its boot (seon.root/root-session-boot-tx)
+        (is (= [2 1] [tasks-1 (count agents-1)]) "the first boot holds the task it loaded, root's session's, and the agent it started")
+        (is (= 2 tasks-2) "the second boot still holds both, its boot making no second session")
         (is (every? agents-2 agents-1) "and the first boot's agent (its task is reaped, and started again by the next agent of the session)"))
       (let [b1 (printed (nth first-boot 4))
             [prev killed by2 resume] (map printed (drop 2 second-boot))]

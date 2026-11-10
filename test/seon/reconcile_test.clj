@@ -1525,7 +1525,14 @@
       (is (= [] (actions-for (db-of [(decl "a")] :extra (parked :parked)))))
       (is (= [{:task "demo/a" :cause "parked: cap, waiting for a message" :agent (akey "a") :blocks ["demo/b"]}]
              (r/root-causes (r/index (db-of [(decl "a") (decl "b" :needs ["a"])] :extra (parked :cap)))))
-          "quiet names it, with what it blocks"))
+          "quiet names it, with what it blocks")
+      ;; a session parked for its person (outcome :parked) is a root cause only while it holds up other work: one that blocks nothing is
+      ;; at rest (root's own session, made at every boot, parks so). Red before: every parked session was listed, root's included
+      (is (= [] (r/root-causes (r/index (db-of [(decl "a")] :extra (parked :parked)))))
+          "a parked session that blocks nothing is no cause")
+      (is (= [{:task "demo/a" :cause "parked: parked, waiting for a message" :agent (akey "a") :blocks ["demo/b"]}]
+             (r/root-causes (r/index (db-of [(decl "a") (decl "b" :needs ["a"])] :extra (parked :parked)))))
+          "and one that holds up released work is"))
     (testing "a wake in flight: more wakes start nothing more, since one process runs one work! (flow-lab's hazard 4)"
       (is (= [] (actions-for (db-of [(decl "a")] :extra (work "a" :running)) :woken [(akey "a") (akey "a")]))))
     (testing "woken: a wake on its process"
