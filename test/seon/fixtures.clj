@@ -459,7 +459,7 @@
   [db c] (@(requiring-resolve (quote seon.ctx.wire/model-call-msgs)) {:seon.db/db db} (assoc c :seon.model-call/origin :model)))
 
 (defn tree-parts
-  "The conversation of agent record c on db as the agent's walk answers it for the model, cold: parts [ref messages turn] of the request, its system message and its opening left out. A db that holds no system prompt gets a stub of one, which the walk needs and the parts leave out."
+  "The conversation of agent record c on db as the agent's walk answers it for the model, cold: parts [ref messages turn] of the request, its system message, its opening and the page calls Seon generates (seon.ctx.wire/page-diff-msgs) left out. A db that holds no system prompt gets a stub of one, which the walk needs and the parts leave out."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:vector :any]]}
   [c db]
   (let [doc-load (requiring-resolve 'seon.doc/load-tx)
@@ -467,7 +467,7 @@
         db (if (@(requiring-resolve 'seon.doc/page-text) db @page) db (datahike.api/db-with db (doc-load db "docs" {@page "# A stub of the system prompt\n\nBe brief."})))
         w (seon.render/draw c @(requiring-resolve 'seon.ctx/changes) db (seon.render/declared-var (seon.db/index) :seon.render/render-ctx)
                             {:model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
-    (try (vec (remove (fn [[r]] (or (nil? r) (#{:section :session} (first r)))) (:parts (@(requiring-resolve (quote seon.ctx.wire/request)) w))))
+    (try (vec (remove (fn [[r]] (or (nil? r) (#{:section :session :page} (first r)))) (:parts (@(requiring-resolve (quote seon.ctx.wire/request)) w))))
          (finally (seon.render/dispose-walk! w)))))
 
 (defn tree-messages

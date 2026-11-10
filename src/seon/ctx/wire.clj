@@ -352,7 +352,9 @@
                      model? #(:seon.eval/call-id (get evals %))]
                x (concat ms
                          (when-let [b (basis-of call)] [[#'page-diff-msgs {} (:db/id c) prev b n]])
-                         [call] (map evals (filter model? es)) (map evals (remove model? es)))]
+                         ;; a reply with no words whose calls c no longer holds (each unlinked by a swap!) says nothing: none of it stays
+                         (when (or (some model? es) (not (str/blank? (:seon.model-call/reply call)))) [call])
+                         (map evals (filter model? es)) (map evals (remove model? es)))]
            x))))
 
 (defn example-session-msgs
