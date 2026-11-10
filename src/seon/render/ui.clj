@@ -811,7 +811,6 @@
   {:seon.render/list "p-rules" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_] [:div {:id "p-rules"} [#'page-rules {:wire/for "page"}]])
 
-(declare page-cites)
 
 (defn help-form
   "The form an agent runs to read more of x, a wiki address (a string), a namespace or a function (a symbol), a schema key: the
@@ -949,46 +948,6 @@
                  {:lookups (cond-> [] id (conj [:seon.task/id id]) sym (conj [:var/name sym]))
                   :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))})))
 
-(defn cited
-  "One thing the agent's task or its needs cite (a component over ctx and the db), named by its target k: the cite at ctx path :at,
-  its joins read as ctx holds them (a join held at another path reads as held there: seon.ratom, a source's held entities), drawn by
-  the cite's own render (`cite`). A part of its own, so a cite that changes is sent alone. See docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:at [:vector :any]]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db at :at}]
-  (when-let [x (get-in c at)]
-    (cite {:seon.db/db db} x)))
-
-(defn citations
-  "The heading of what the task and its needs cite (a component over ctx): what it is and why it is here. The cites follow it, each a
-  `cited` part of its own (`cite-parts`). Nothing when there is none. See docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  (when (seq (page-cites c))
-    [:section
-     [:h2 "What your plan mentions"]]))
-
-(defn- cite-parts
-  "The `cited` components of the agent's page, one for each thing its task and its needs cite (`page-cites`); what the agent will
-  do with each is the cite's own render's to judge, from its joins (`cite`)."
-  {:malli/schema [:=> [:cat :map] [:vector :any]]}
-  [c]
-  (vec (for [[p k] (page-cites c)] [#'cited {:key k :at p}])))
-
-(defn references
-  "Where to look for more, beside the task (a component over ctx): the agent's own cites (what every agent cites, the config's
-  :seon.config.agent/cites, and what it adds with my.agent/cite!), each as one line: what it is, what it answers (the section's
-  stored lead) and the form that reads it. Not shown whole: an agent reads one when it needs it. Nothing when it has none."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
-  [{c :seon.ctx/ctx}]
-  (let [ks (sort-by #(get-in c [:seon.cite/_of % :seon.cite/order]) (keys (:seon.cite/_of c)))
-        cites (for [k ks] (assoc (ratom/realize (get-in c [:seon.cite/_of k])) :seon.cite/target (ratom/realize (get-in c [:seon.cite/_of k :seon.cite/target]))))]
-    (when (seq cites)
-      [:section
-       [:h2 "If you need more"]
-       (into [:ul]
-             (for [{t :seon.cite/target} cites :let [x (ref/target-value t)]]
-               [:li (or (:seon.doc/heading t) (str x)) ": " (:seon.doc/lead t) " " [:code (help-form x)]]))])))
-
 (defn searched
   "Search s (the declared html render of :seon.search/search-fact, a component over the db), drawn as one compact hiccup that the
   page shows and the model is sent as it is: its query searched on the branch's
@@ -1018,29 +977,6 @@
            ;; each hit with the line of its text that holds a word of the query, as grep shows a hit: a bare name was passed over
            ;; (curated pair 1, 2026-11-10) where a line says why it matters
            (into [:ol] (for [{:keys [name line]} hits] [:li [:code (str name)] (when (seq line) (str " " line))]))])))))
-
-(defn- page-cites
-  "The cites agent record c's page draws, read from ctx alone: its task's (:seon.cite/_of), then each need's (one
-  level, a merge task's left out), then the agent's own, each target once at the strongest depth any asks,
-  the task's proofs left out (the status shows them), in the order the cites were written. Each
-  [path target]: the cite's path and its target as text."
-  {:malli/schema [:=> [:cat :map] [:vector [:tuple [:vector :any] :string]]]}
-  [c]
-  (let [task (:seon.agent/task c)
-        proofs (into (set (get task :seon.task/proofs)) (mapcat (fn [n] (get-in task [:seon.task/needs n :seon.task/proofs]))) (keys (:seon.task/needs task)))
-        sorted (fn [p] (sort-by #(get-in c (conj p % :seon.cite/order)) (keys (get-in c p))))
-        groups (concat (when task [[:seon.agent/task :seon.cite/_of]])
-                       (for [n (sort-by #(str (get-in task [:seon.task/needs % :seon.task/id])) (keys (:seon.task/needs task)))
-                             :when (not= :merge (get-in task [:seon.task/needs n :seon.task/kind]))] [:seon.agent/task :seon.task/needs n :seon.cite/_of])
-                       [])
-        paths (for [g groups k (sorted g)] (conj (vec g) k))
-        ;; a target ctx holds at another path reads as held there (seon.ratom, a source's held entities)
-        all (for [p paths :let [t (ratom/realize (get-in c (conj p :seon.cite/target)))]]
-              {:path p :id (:db/id t) :target (str (ref/target-value t)) :name (:var/name t) :rank (ref/strength (get-in c (conj p :seon.cite/depth)))})
-        all (remove #(proofs (:name %)) all)
-        by (group-by :id all)
-        chosen (vec (for [t (distinct (map :id all))] (reduce (fn [a b] (if (> (:rank b) (:rank a)) b a)) (by t))))]
-    (vec (for [{:keys [path target]} chosen] [path target]))))
 
 (def ^:private reason-words
   "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page (docs/agent.md#what-you-read: `:refused`)."
@@ -1592,8 +1528,8 @@
   "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists): the
   agent's own state, drawn from its own attributes (how its work stands, its open problems, the keys it added, its turn, its state),
   then the tiles of what its pull joins (`tiles`, by the agent's own pattern less its conversation, seon.render/page-pattern: no part named here), then the tiles of its evals' rendered
-  values (`eval-tiles`, by the seek). The cites of its task are drawn by `cite-parts` until the cite's own render resolves what it
-  joins (Context, step 1 of docs/users.md's pages from data). See docs/render.md#the-page."
+  values (`eval-tiles`, by the seek). Each cite, the task's and the agent's own, is a tile like any
+  (seon.render.ui/cite judges from its own pull). See docs/render.md#the-page."
   {:seon.render/list "p-task"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.render/index :map]]] :any] :any]}
   [{ix :seon.render/index} c]
@@ -1605,11 +1541,7 @@
    [#'turn {:at [:seon.agent/ns]}]
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]
    ;; what its pull joins, each by its own render, in the pull's order (the cites until their render resolves its joins)
-   (seq (remove #(= :seon.cite/cite-fact (render/entity-schema ix (ratom/untracked %) nil))
-                (tiles ix c (render/page-pattern ix (or (render/entity-pattern ix (ratom/untracked c)) [])))))
-   ;; until the cite's own render resolves what it joins (step 1's last piece): the task's cites and the agent's own, as before
-   (when (:seon.agent/task c) (list [#'citations {:at [:seon.agent/task :seon.cite/_of]}] (seq (cite-parts c))))
-   (when (seq (:seon.cite/_of c)) [#'references {:at [:seon.cite/_of]}])
+   (seq (tiles ix c (render/page-pattern ix (or (render/entity-pattern ix (ratom/untracked c)) []))))
    ;; until root's page is root's agent drawn by this render (step 3): root's session reads every agent here
    (when (:seon.agent/root c) [#'sessions {:at [:seon.agent/root]}])
    [#'eval-tiles {} c]])

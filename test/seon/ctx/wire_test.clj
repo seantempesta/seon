@@ -288,7 +288,7 @@
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
                                                :seon.task/plan "Read `demo.calc`, `:x.s/block` and `bin/env`."}]))
         t (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.task/id "demo/n") :b))
-        m (into {} (for [c (vals (:seon.cite/_of t))] [(task/cited-name c) (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db c)])]))]
+        m (into {} (for [c (vals (:seon.cite/_of t))] [(task/cited-name c) (seon.render/part-text [(quote seon.render.ui/cite) {} (seon.render.ui/cite-hiccup db c)])]))]
     (is (str/includes? (m 'demo.calc) "Adds.") "a namespace: the first sentence of its doc")
     (is (str/includes? (m 'demo.calc) "(doc 'demo.calc)") "and the form that reads it")
     (is (str/includes? (m :x.s/block) ":int") "a schema key: what it holds")
@@ -453,9 +453,9 @@
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou're at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "user" "assistant" "tool"] (mapv :role r0)) "the first request: the system prompt, what opens the session, then the page whole as a generated eval and its result")
         (is (str/starts-with? (page-code r0) "(my.render/page {:commit #uuid \"") "the page is the call (my.render/page p)")
-        (is (every? #(re-find % (:content (peek r0))) [#":class \"cited\"" #"Doubles\." #":class \"status\""]) "the page whole, each part by the function that drew it: how the work stands too")
+        (is (every? #(re-find % (:content (peek r0))) [#":class \"cite\"" #"Doubles\." #":class \"status\""]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (str/starts-with? (page-code r1) "(my.render/diff {:commit #uuid \"") "what moved is a generated eval of its own at the end, after turn 1's own eval")
-        (is (str/includes? (:content (peek r1)) "[\"page\" \"cited-demo_2Ff\"") "the cited var's edit, at its part: the id names the function that drew it and what it shows")
+        (is (re-find #"\[\"page\" \"cite-[^\"]*demo_2Ff\"" (:content (peek r1))) "the cited var's edit, at its part: the id names the function that drew it and what it shows")
         (is (not (str/includes? (:content (peek r1)) "Your proofs")) "one edit at the part that moved, never the page whole")
         (is (str/includes? (:content (peek r1)) "Triples."))
         (is (not (re-find #"seon\.render\.ui/task-view\b" (:content (peek r1)))) "a component that did not change is not told again")
@@ -531,7 +531,7 @@
         r (seon.doc/resolve-ref db 'ctx-big/big :code)
         ;; the task's cite as ctx holds it: the var it names, with its form
         part {:seon.cite/depth :code :seon.cite/target {:var/name 'ctx-big/big :var/form {:form/src src}}}
-        model (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db part {:changing? true})])]
+        model (seon.render/part-text [(quote seon.render.ui/cite) {} (seon.render.ui/cite-hiccup db part {:changing? true})])]
     (is (= {:symbol 'ctx-big/big :source (print/code src)} (select-keys r [:symbol :source])) "the source whole as code, never swapped for its doc by size")
     (is (str/includes? model src) "the part holds it whole, in a fence: a function cited to be changed is read whole")
     (is (str/includes? model "```clojure") "fenced")))
@@ -675,7 +675,7 @@
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))
         ;; the page's part: the cite's target is the task, drawn by its plan
         cite (some #(when (= "demo.other/g" (get-in % [:seon.cite/target :seon.task/id])) %) (vals (:seon.cite/_of (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.task/id "demo/f") :b)))))
-        part (seon.render/part-text [(quote seon.render.ui/cited) {} (seon.render.ui/cite-hiccup db cite)])]
+        part (seon.render/part-text [(quote seon.render.ui/cite) {} (seon.render.ui/cite-hiccup db cite)])]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")
     (is (= "demo.other/g" (get-in cite [:seon.cite/target :seon.task/id])) "the cite's target is the task")
@@ -1126,14 +1126,15 @@
   ;; one again (its db reads touched) and the task's not
   (let [[db _] (sections-near "Make ```demo/g``` say one thing.")
         [w _ _ _ rid :as walk] (walked db)
-        cited "cited-demo_2Fg"
+        ;; the cite's own component, keyed by the cite (seon.render.ui/cite: its owner and what it names)
+        cited (some #(when (and (str/starts-with? % "cite-") (str/ends-with? % "demo_2Fg")) %) (map :id (render/placed-units w)))
         html #(:html (some (fn [u] (when (= % (:id u)) u)) (render/placed-units w)))]
     (is (some? (html cited)) "the cited var, a component of its own")
     (is (not (str/includes? (html cited) ":redefined")))
     (let [changed (step! walk [{:db/id "f2" :form/id "demo/g-2" :form/src "(defn g [] :redefined)"} [:db/add [:var/name 'demo/g] :var/form "f2"]])]
       (is (str/includes? (html cited) "(defn g [] :redefined)") "the next view: the new source")
       (is (some #{cited} changed) "the edit's page diff holds the cited var's part")
-      (is (not-any? #(= % "task") changed) "and not the task's, which cites it"))
+      (is (not-any? #(str/starts-with? % "task-view") changed) "and not the task's, which cites it"))
     (render/dispose-walk! w)))
 
 ;; docs/references.md#an-entity-cites: a section a cite joins, changed (main's datoms patched into ctx), redraws that
@@ -1141,7 +1142,7 @@
 (deftest a-cited-section-main-changed-is-its-part-alone
   (let [[db _] (sections-near "Make ```demo/g``` say one thing; see [the model](docs/vector.md#the-model).")
         [w _ cell _ rid :as walk] (walked db)
-        part "cited-docs_2Fvector_2Emd_23the-model"
+        part (some #(when (and (str/starts-with? % "cite-") (str/ends-with? % "docs_2Fvector_2Emd_23the-model")) %) (map :id (render/placed-units w)))
         html (fn [w] (into {} (map (juxt :id :html)) (render/placed-units w)))]
     (is (some? ((html w) part)) "the cited section, a part of its own")
     (let [changed (step! walk [[:db/add [:seon.doc/address "docs/vector.md#the-model"] :seon.doc/lead "The model, as main now says it."]])
@@ -1164,8 +1165,8 @@
         [w _ _ _ rid] (walked db)
         units (render/placed-units w)
         html #(:html (some (fn [u] (when (str/starts-with? (:id u) %) u)) units))
-        task (html "task")
-        cites (apply str (map :html (filter #(str/starts-with? (:id %) "cited-") units)))]
+        task (html "task-view")
+        cites (apply str (map :html (filter #(str/starts-with? (:id %) "cite-") units)))]
     (is (str/includes? task "Make ```demo/g``` say one thing") "D4: the whole plan")
     (is (not (str/includes? task "(deftest g-test")) "D1: the proof's source is the status's, the task's part does not repeat it")
     (is (str/includes? (html "status") "demo-test/g-test") "D1: the proof written is the status's, by name")
@@ -1986,7 +1987,7 @@
   ;; (vars-history spent turns 4-8 finding it out)
   (let [db (d/db-with (db-with-program) [{:schema/key :var/form :schema/form ":seon.db/ref"}
                                          {:schema/key :var/name :schema/form ":symbol"}])
-        text (fn [k] (seon.render/part-text ['seon.render.ui/cited {} (seon.render.ui/cite-hiccup db {:seon.cite/depth :doc :seon.cite/target (d/pull db '[*] [:schema/key k])})]))
+        text (fn [k] (seon.render/part-text ['seon.render.ui/cite {} (seon.render.ui/cite-hiccup db {:seon.cite/depth :doc :seon.cite/target (d/pull db '[*] [:schema/key k])})]))
         t (text :var/form)]
     (is (str/includes? t "An attribute your plan names.") t)
     (is (str/includes? t ":form/src") "a ref followed: what the form entity holds")

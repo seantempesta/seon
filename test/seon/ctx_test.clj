@@ -743,7 +743,7 @@
                                   {:db/id "gv" :var/name 'app.x/g :var/meta #{:arglists} :var/form "g"}])
         page (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
         ;; every cite is a part of its own inside the one citations part: found by what its text holds
-        cites (filter #(and (vector? %) (= 'seon.render.ui/cited (first %))) (tree-seq coll? seq page))
+        cites (filter #(and (vector? %) (= 'seon.render.ui/cite (first %))) (tree-seq coll? seq page))
         part (fn [x] (some #(let [t (seon.render/part-text %)] (when (str/includes? t x) t)) cites))
         cited (part "tests reach it")]
     (is (some? (part "2 tests reach it: (callers 'app.x/f0) lists them.")) (str "the cited var's tests, by their count and the form that lists them: " (pr-str cites)))
@@ -759,7 +759,7 @@
                                   {:db/id "f1v" :var/name 'app.x/f1 :var/meta #{:arglists} :var/form "f1"}
                                   {:seon.cite/id "lab/ctx app.x/f1" :seon.cite/of [:seon.task/id "lab/ctx"] :seon.cite/target "f1v" :seon.cite/depth :doc :seon.cite/order 1}])
         page (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
-        cites (filter #(and (vector? %) (= 'seon.render.ui/cited (first %))) (tree-seq coll? seq page))
+        cites (filter #(and (vector? %) (= 'seon.render.ui/cite (first %))) (tree-seq coll? seq page))
         part (fn [x] (some #(let [t (seon.render/part-text %)] (when (str/includes? t x) t)) cites))
         f0 (part "(defn f0 [x] x)")]
     (is (str/includes? (part "(defn f1 [] (f0 1))") "(defn f1 [] (f0 1))")
@@ -797,7 +797,7 @@
                                  (range 3)))])
         part #(let [page (try (enter-agent! {:db % :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))]
                 (some (fn [f] (let [t (seon.render/part-text f)] (when (str/includes? t "(defn f0 [x] x)") t)))
-                      (filter #(and (vector? %) (= 'seon.render.ui/cited (first %))) (tree-seq coll? seq page))))]
+                      (filter #(and (vector? %) (= 'seon.render.ui/cite (first %))) (tree-seq coll? seq page))))]
     (is (str/includes? (str (part db)) "4 tests reach it") (str "every test among its pulled callers: " (part db)))
     (let [db (d/db-with db (vec (mapcat (fn [i] [{:db/id (str "c" i) :form/id (str "app.y/c" i "-1") :form/src (str "(defn c" i " [] (f0 1))") :form/refs #{'app.x/f0} :form/defines [(str "cv" i)]}
                                                  {:db/id (str "cv" i) :var/name (symbol "app.y" (str "c" i)) :var/meta #{:arglists} :var/form (str "c" i)}])

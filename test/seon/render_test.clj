@@ -1591,8 +1591,7 @@
     (is (= ["status" "turn" "agent-state"] (vec (take 3 (mapv :id task))))
         "first the agent's own state, from its own attributes (open problems and added keys only when there are some)")
     (is (= "task-view-demo_2Ff" (nth (mapv :id task) 3)) "then what its pull joins, by its own schema's render: its task (seon.render.ui/tiles)")
-    (is (= "citations" (nth (mapv :id task) 4)) "then what its plan mentions")
-    (is (every? #(str/starts-with? % "cited-") (drop 5 (mapv :id task))) "a part for each thing the plan cites")
+    (is (every? #(str/starts-with? % "cite-") (drop 4 (mapv :id task))) "then a tile for each thing the task and the agent cite, by the cite's own render")
     (let [h (:html (unit-of task "status"))]
       (is (str/includes? h "demo/f-test") "each proof as its var entity holds its verdict, (my.task/status)'s")
       (is (str/includes? h "demo/f-test</code> fails") "the failing proof's verdict is the status's")
@@ -2916,13 +2915,14 @@
 ;; the instructions cite how a task is worked (docs/agent.md#working-a-task) at full depth: the agent is sent the
 ;; section's text, as the wiki holds it, not its address alone (a cite resolved at summary would show its heading)
 (defn- cite-text
-  "The parts of tree's citations drawn by a walk over db, {target text}: each `cited` as the layout places it (seon.render.ui/cite-parts:
-  what the agent will do with it, its lookups) and as the model reads it."
+  "The cites on agent aid's page drawn by a walk over db, {target text}: each cite the walk places (seon.render.ui/tiles), by its own
+  render (seon.render.ui/cite), as the model reads it."
   [db tree aid]
-  ;; the layout places them from its view of the tree, through which a join ctx holds at another path reads as held there
-  (into {} (for [[f opts] (#'ui/cite-parts (seon.ratom/ref-view (seon.ratom/atom tree) seon.ctx/changes)) :let [k (:key opts)]]
-             (let [w (r/walker {:ref (seon.ratom/atom tree) :changes seon.ctx/changes} (fn [] db) [f opts])]
-               (try (flush! w nil) [k (r/part-text (r/part-form w @(:out w)))] (finally (r/dispose-walk! w)))))))
+  (let [w (draw tree seon.ctx/changes db #'seon.render.ui/agent)]
+    ;; a cite's component is keyed by the cite: its owner, a space, what it names (seon.render.ui/cite's identity)
+    (try (into {} (for [[k _] @(:cache w) :when (= 'seon.render.ui/cite (first k))]
+                    [(last (str/split (str (second k)) #" " 2)) (r/part-text (r/part-form w k))]))
+         (finally (r/dispose-walk! w)))))
 
 (deftest a-work-task-is-sent-how-a-task-is-worked
   (let [k "b1/a1"
@@ -2945,12 +2945,13 @@
   (let [[db aid] (cited-world)
         tree (:tree (seon.ctx/build (seon.db/index) db aid :b))
         drawn (cite-text db tree aid)]
-    (is (= #{"demo/g" "docs/x.md#the-x"} (set (keys drawn)))
-        "a part per cite of the task (its proof's left to the status), each target once; the agent cites nothing by default")
+    (is (every? (set (keys drawn)) ["demo/g" "docs/x.md#the-x"]) "a tile per cite of the task (its proof's left to the status), each target once")
+    (is (contains? (set (keys drawn)) "docs/agent.md#working-a-task") "and per cite of the agent's own (its config's), by the same render")
+    (is (not (contains? (set (keys drawn)) "")) "every cite names what it cites")
     (is (every? #(re-find #"\[:h3 \"" %) (vals drawn)) "every cite is headed")
     (is (str/includes? (drawn "docs/x.md#the-x") "What x does. And more.") "a section at doc depth: its lead")
     (is (str/includes? (drawn "docs/x.md#the-x") "(doc \"docs/x.md#the-x\")") "and how to read the rest")
-    (let [sec (r/part-text ['seon.render.ui/cited {} (ui/cite-hiccup (ts/test-db) {:seon.cite/depth :doc
+    (let [sec (r/part-text ['seon.render.ui/cite {} (ui/cite-hiccup (ts/test-db) {:seon.cite/depth :doc
                                                                           :seon.cite/target {:seon.doc/address "docs/testing.md#testing" :seon.doc/heading "Testing" :seon.doc/lead "How a test is written."
                                                                                     :seon.doc/_parent {1 {:seon.doc/address "docs/testing.md#testing-in-the-world" :seon.doc/heading "Testing in the world"}}}})])]
       (is (str/includes? sec "Testing in the world (docs/testing.md#testing-in-the-world)") "a page cited whole: its top section, the headings below it joined"))
