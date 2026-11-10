@@ -1894,12 +1894,69 @@
           (seq redo) (assoc (reach-step g' db redo (reach-rows db (set (map live redo)) false) #{}) :live live)
           :else g')))
 
+(def root-entries
+  "Where the binary's own code starts, the roots of root-reach: its one entry (its modes, root's boot and procs among
+  them: system.edn's procs are edges of seon.system/read-decl, the reach graph's :data-refs). See
+  docs/source.md#the-binary-records-its-program."
+  '[seon.main/-main])
+
+(def agent-body
+  "Where a forked child stops running the binary's code and becomes an agent, which loads main's program from the db: the
+  body the fork server's :fork hands it, and the agent's process entries (:seon.config.source/process-entry's agent side),
+  which the reach graph links from every form that starts a process (seon.lib/fork!'s callers, the fork server's among
+  them). root-reach enters none of them. Sound because an agent runs main's code, not its binary's: the fork server loads
+  main's program over the binary's image at its start and at every commit (seon.program/load-all!, load-changes!), so every
+  agent it forks inherits main's forms, and a resumed agent loads its branch's difference (seon.program/load-diff!). See
+  docs/source.md#the-binary-records-its-program."
+  '[seon.repl/run! seon.repl/serve! seon.turn/work!])
+
+(defn root-roots
+  "Every name root's binary runs code from, as the data that names it says: root-entries, system.edn's procs and effects
+  (g's :data-refs, seon.fx/declared-refs), the renders schema entries name (a schema row's :refs: :seon.render/hiccup,
+  :model and their kin) and the qualified symbols the config in force holds (cfg), less any in a test namespace (a
+  scripted model's fixture is the agent's, loaded from main). requiring-resolve's run-time names are these: seon.system's
+  procs, seon.render's renders, seon.model's script; seon.cost's are a cost proof's own (a test's), seon.main's
+  seon.check/-main a test driver. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :map :map] [:vector :qualified-symbol]]}
+  [{:keys [data-refs rows test-nss]} cfg]
+  (vec (distinct (for [s (concat root-entries (mapcat val data-refs) (mapcat :refs (filter :schema (vals rows)))
+                                 (for [v (vals cfg) x (if (coll? v) v [v]) :when (qualified-symbol? x)] x))
+                       :when (and (qualified-symbol? s) (not (contains? test-nss (symbol (namespace s))))) ] s))))
+
+(defn root-forms
+  "The forms of reach graph g that root's process runs from its binary: the closure of root-roots (cfg the config in
+  force) over g's edges, never entering agent-body. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :map :map] [:set :string]]}
+  [{:keys [defs adj] :as g} cfg]
+  (let [cut (set (mapcat #(get defs %) agent-body))
+        start (vec (remove cut (mapcat #(get defs %) (root-roots g cfg))))]
+    (into (set start) (closure start #(remove cut (get adj %))))))
+
+(defn root-reach
+  "The vars of reach graph g that root's process runs from its binary (root-forms' definitions). A change to one of them
+  is judged only by a binary built with it (seon.root/binary-current), and by every test that starts a root (root-digest).
+  See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :map :map] [:set :qualified-symbol]]}
+  [{:keys [rows] :as g} cfg]
+  (into #{} (for [f (root-forms g cfg) [k s] (:defines (rows f)) :when (= :var k)] s)))
+
+(defn root-digest
+  "The digest of what root runs (root-forms), by the Merkle digests of their components in g (:cd): it moves when a form
+  root runs changes or its reach does. Every test that starts a root or runs the binary takes it (index-answer): the owner's
+  ruling reversing \"a root's boot is no entry\" (docs/decisions.md) (a change to root's writer reused 226 of 233 process
+  tests' greens). Cost: one closure of root-roots (~1,500 forms) and one digest. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map :map] :string]}
+  [{:keys [comp-of cd] :as g} cfg]
+  (lib/digest (str/join " " (sort (map cd (distinct (keep comp-of (root-forms g cfg))))))))
+
 (defn- index-answer
   "The function of a key and its starting forms' ids that answers {:digest :process? :binary?} (graph-index)
   over graph g under inputs: the config lines and env keys it shares are made once here, for every key asked."
   {:malli/schema [:=> [:cat :map :seon.program/inputs :boolean] :seon.host/fn]}
-  [{:keys [rows plain comp-of cd flags]} {:keys [env tree code config]} roots?]
+  [{:keys [rows plain comp-of cd flags] :as g} {:keys [env tree code config]} roots?]
   (let [line (into {} (for [[ck v] config] [ck (str "\n" ck " " v)]))
+        ;; what root runs, taken by every test that starts a root or runs the binary (root-digest): made once, when one asks
+        root (delay (root-digest g cfg/config))
         ;; :seon.env/src is a direct reader's (kept-program-store): a process test runs a program it names
         env-keys (filterv #(and (= "seon.env" (namespace %)) (not= % :seon.env/src)) (keys config))]
     (fn [k ids]
@@ -1917,6 +1974,7 @@
             src? (and roots? (some #(contains? (:config (flags %)) :seon.env/src) cs))
             ks (if roots? (disj ks :seon.env/src) ks)]
         {:digest (lib/digest (apply str k "\n" env "\n" (when (some #(:scans (flags %)) cs) tree)
+                                      (when (and (not roots?) (some #(let [f (flags %)] (or (:proc f) (:bin f))) cs)) (str "\nroot " @root))
                                       (when (and roots? (or src? (some #(:reads (flags %)) cs))) code)
                                       (concat (sort (map cd cs)) (map line (sort ks)))))
          :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))))
@@ -1952,14 +2010,20 @@
   {:malli/schema [:=> [:cat :map :seon.program/inputs] :map]}
   [{:keys [defs tests] :as g} inputs]
   (let [{held :in} (:index g)
-        fresh? (or (identical? inputs held) (= inputs held))]
-    (if (and fresh? (empty? (:stale g)))
-      g
+        fresh? (or (identical? inputs held) (= inputs held))
+        ;; a change to what root runs moves every test that starts a root, whatever it reaches (root-digest)
+        ;; kept with the index while the graph's component digests are the same value (a graph unchanged costs nothing)
+        root (if (identical? (:cd g) (:root-cd (:index g))) (:root (:index g)) (root-digest g cfg/config))]
+    (if (and fresh? (empty? (:stale g)) (= (:root (:index g)) root))
+      (if (identical? (:cd g) (:root-cd (:index g))) g (assoc-in g [:index :root-cd] (:cd g)))
       (let [var-form #(peek (get defs %))
             answer (index-answer g inputs false)
-            answers (into (if fresh? (:answers (:index g)) {})
-                          (for [t (if fresh? (:stale g) tests) :let [id (var-form t)] :when id] [t (answer t [id])]))]
-        (assoc g :index {:in inputs :answers answers} :stale #{}
+            held (when fresh? (:answers (:index g)))
+            rerooted (when (and held (not= root (:root (:index g))))
+                       (for [[t a] held :when (or (:process? a) (:binary? a))] t))
+            answers (into (or held {})
+                          (for [t (if fresh? (into (set (:stale g)) rerooted) tests) :let [id (var-form t)] :when id] [t (answer t [id])]))]
+        (assoc g :index {:in inputs :answers answers :root root :root-cd (:cd g)} :stale #{}
                :tests-by-ns (or (:tests-by-ns g) (group-by (comp symbol namespace) tests)))))))
 
 (defn index-of

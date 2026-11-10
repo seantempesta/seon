@@ -6,6 +6,10 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-10, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
 
+### A test that starts a root takes what root runs (owner, 2026-11-10)
+
+Asked with the question tool by the managing session, the Tests session's evidence beside it: on main's reach graph, of 233 process tests 7 reached `seon.writer/commit-batch`, 9 `seon.reconcile/start` and 10 `seon.fork-server/main`, though each starts a root that runs all three; a change to root's writer reused 226 of their greens, and five of them were red in the batch. The owner chose to reverse 2026-10-27's "a root's boot is no entry" ("no test includes all of src"): a process test's digest takes what root runs. Now stated in: [source](source.md#tests-run-by-reach) (a test that starts a root takes what root runs).
+
 ### The test system runs inside Seon; the outside is thin wrappers (owner, 2026-11-10)
 
 "I want the test system focused on seon agents running it from the inside. I want a better system than our confusing worktrees and agents churning the codebase and re-running everything all the time. I want maximum test reuse across all branches. If it's the same code and the seed is the same don't re-run shit. How can we take our fragmented system and fix it in seon and then have thin wrappers calling into it from the outside? ... minimal duplication in infrastructure just what we need for our agents to run the system efficiently." Two rules with it (owner, 2026-11-10, asked with the Tests session's picks): a worktree session's changed files are written as a branch of the standing store (deleted when it lands or is dropped), and root proves that branch as it proves an agent's, so `bin/prove` and `bin/land` are thin wrappers over the one service; and a test's digest takes the code of the forms it reaches without their docstrings and comments, the tests that read docs or the whole program taking them explicitly, so the same code is the same digest on every branch. Now stated in: [what a test takes of a form's text](source.md#what-a-test-takes-of-a-forms-text) (digests of code); [merging](merging.md#a-merge-runs-what-the-change-reaches) (the rest, as each step lands).
@@ -708,7 +712,7 @@ Worktrees run plain `bin/prove` and report ready; the merge session merges a bat
 
 ### No test digests the whole tree; the daily full run is the net (owner, 2026-10-27)
 
-"I don't care if it's perfect and if it's possible a test could be doing other work we don't know of. no tests should include all of src." A test's digest is what it reaches: forms, the config keys and schema entries it names, the pins of the libraries it reaches, and for a process test the process entry; the cron's daily `bin/test --all` on main catches what reach misses. Stated: docs/merging.md, docs/source.md#tests-run-by-reach.
+"I don't care if it's perfect and if it's possible a test could be doing other work we don't know of. no tests should include all of src." A test's digest is what it reaches: forms, the config keys and schema entries it names, the pins of the libraries it reaches, and for a process test the process entry (since 2026-11-10 also what root runs: [a test that starts a root takes what root runs](#a-test-that-starts-a-root-takes-what-root-runs-owner-2026-11-10)); the cron's daily `bin/test --all` on main catches what reach misses. Stated: docs/merging.md, docs/source.md#tests-run-by-reach.
 
 ### A lock-free system (owner, 2026-10-27)
 

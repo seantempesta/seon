@@ -1492,3 +1492,32 @@
     (sh/sh "git" "-C" d "add" ".")
     (runner/program-db d store (fx/tree-id d) 1)
     (is (not (.isFile marker)) "a new tree past the bound starts the store again")))
+
+(deftest a-change-to-what-root-runs-moves-every-test-that-starts-a-root
+  ;; owner, 2026-11-10, reversing 2026-10-27's "a root's boot is no entry": a change to root's writer reused the greens of
+  ;; 226 of 233 process tests (7 reached seon.writer/commit-batch), five of them red in the batch. A test that starts a root
+  ;; takes what root runs (seon.program/root-digest over root-forms: root-roots' closure, here a proc system.edn names)
+  (let [form (fn [nsym nm kind refs src]
+               (fn [db] (program/record-tx db {:id (str nsym "/" nm "/" (hash src)) :src src :ns nsym :ns-form? false
+                                               :defs [{:var (symbol (str nsym) nm) :meta (case kind :test #{:test} #{:arglists})}]
+                                               :declares #{} :methods [] :impls [] :refs refs :requires #{} :banned #{} :inline-defs #{}})))
+        data-refs {:procs '[app.rt/writer]}
+        db (mt/with (mt/world)
+             (form 'app.rt "writer" :fn '#{} "(defn writer [] 1)")
+             (form 'app.rt "helper" :fn '#{} "(defn helper [] 1)")
+             (form 'app.rt-test "boots" :test '#{seon.lib/fork!} "(deftest boots)")
+             (form 'app.rt-test "reaches-helper" :test '#{app.rt/helper} "(deftest reaches-helper)"))
+        in {:env "e" :tree "t" :config {}}
+        dg (fn [db] (update-vals (program/graph-index (program/reach-graph db data-refs) in nil) :digest))
+        a (dg db)
+        moved (fn [db'] (let [b (dg db')] (set (for [t '[app.rt-test/boots app.rt-test/reaches-helper] :when (not= (a t) (b t))] (symbol (name t))))))]
+    (is (= '#{boots} (moved (mt/with db (form 'app.rt "writer" :fn '#{} "(defn writer [] 2)"))))
+        "a one-line change to what root runs moves the test that starts a root, which names none of it, and no other")
+    (is (= '#{reaches-helper} (moved (mt/with db (form 'app.rt "helper" :fn '#{} "(defn helper [] 2)"))))
+        "a change to code no root runs moves only what reaches it: not the test that starts a root")
+    (let [g (program/reach-graph db data-refs)
+          held (program/reach-indexed g in)
+          g' (program/reach-update held (mt/with db (form 'app.rt "writer" :fn '#{} "(defn writer [] 2)")))]
+      (is (not= (get-in (program/index-of held) ['app.rt-test/boots :digest])
+                (get-in (program/index-of (program/reach-indexed g' in)) ['app.rt-test/boots :digest]))
+          "and a held index answers it anew, though the test reaches nothing that changed"))))
