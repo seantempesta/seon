@@ -132,7 +132,7 @@
 
 ;;; --- the tracking view: an inferred cursor ---------------------------------------------------
 
-(declare view sorted-view held-at)
+(declare view sorted-view)
 
 (defmacro ^:private view?*
   "`view?`, inline where the ratom asks it of every value it walks (unwrap, untracked, realize). See docs/render.md#reactive-renders."
@@ -161,7 +161,7 @@
   [src m path es]
   (map (fn [e] (let [k (key e) v (val e)]
                  (if (map? v)
-                   (clojure.lang.MapEntry. k (let [p (conj path k) [v p] (or (when (and (= 1 (count v)) (contains? v :db/id)) (held-at src v p)) [v p])] (if (sorted? v) (sorted-view src v p) (view src v p))))
+                   (clojure.lang.MapEntry. k (let [p (conj path k)] (if (sorted? v) (sorted-view src v p) (view src v p))))
                    e)))
        es))
 
@@ -187,56 +187,13 @@
         (vector? x) (if (some #(view?* %) x) (mapv realize x) x)
         :else x))
 
-(defn whole
-  "View x's real value with each entity in it that is held at another path ({:db/id e}, its source saying where: `held-at`) the
-  entity as held there, once each (a second meeting stays {:db/id e}), each read recorded at its held path; any other x realized.
-  What a render asks of a value it draws whole with its joins (a cite's target, its callers' forms), which ctx holds once each: a
-  render that reads by lookups reads the held entity anyway, and `realize` leaves the stubs. See docs/render.md#reactive-renders."
-  {:malli/schema [:=> [:cat :any] :any]}
-  [x]
-  (if-not (view?* x)
-    (realize x)
-    (let [v (unwrap x) src (.-src x)
-          root (binding [*ratom-context* nil] @(:ref src))
-          held (:seon.ratom/held (meta root))
-          seen (volatile! #{})
-          ;; a local fn, no contracted call a node
-          go (fn go [y]
-               (cond (and (map? y) (= 1 (count y)) (contains? y :db/id))
-                     (let [e (:db/id y) h (get held e)]
-                       (if (and h (not (@seen e)))
-                         (do (vswap! seen conj e) (captured! [src h :deep]) (go (get-in root h)))
-                         y))
-                     (map? y) (do (when-let [e (:db/id y)] (vswap! seen conj e))
-                                  (reduce-kv (fn [m k w] (let [w' (go w)] (if (identical? w w') m (assoc m k w')))) y y))
-                     (set? y) (into (empty y) (map go) y)
-                     (vector? y) (mapv go y)
-                     :else y))]
-      (if (empty? held) v (go v)))))
-
-(defn- held-at
-  "Where source src holds whole the entity m is held as at another path ({:db/id e} alone): [its value there, that path], read from
-  the source's value's metadata :seon.ratom/held {e path} (seon.ctx's record names where each entity is held, docs/ctx.md#the-pattern),
-  not tracked; nil when m is no such stub or the source says none. So a render placed on an entity reads its joins whole whatever
-  path the walk reached them by. See docs/render.md#reactive-renders."
-  {:malli/schema [:=> [:cat :map :any [:vector :any]] [:maybe [:tuple :map [:vector :any]]]]}
-  [src m p]
-  (when (and (map? m) (= 1 (count m)) (contains? m :db/id))
-    (let [root (binding [*ratom-context* nil] @(:ref src))
-          h (get (:seon.ratom/held (meta root)) (:db/id m))]
-      (when (and h (not= h p))
-        (let [hv (get-in root h)] (when (and (map? hv) (< 1 (count hv))) [hv h]))))))
-
 (defmacro ^:private wrapped
   "`wrap`, inline in a view's lookups: value v at path p of src, a view of it when it is a map, else v, read as kind. See
   docs/render.md#reactive-renders."
   [src v p kind]
   `(let [v# ~v p# ~p]
      (if (map? v#)
-       (if-let [[hv# h#] (when (and (= 1 (count v#)) (contains? v# :db/id)) (held-at ~src v# p#))]
-         ;; a stub: the entity where the source holds it, its reads there
-         (do (captured! [~src h# :shallow]) (if (sorted? hv#) (sorted-view ~src hv# h#) (view ~src hv# h#)))
-         (do (captured! [~src p# :shallow]) (if (sorted? v#) (sorted-view ~src v# p#) (view ~src v# p#))))
+       (do (captured! [~src p# :shallow]) (if (sorted? v#) (sorted-view ~src v# p#) (view ~src v# p#)))
        (do (captured! [~src p# ~kind]) v#))))
 
 (defmacro ^:private defview

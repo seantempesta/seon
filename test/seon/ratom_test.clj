@@ -354,28 +354,3 @@
     (is (nil? (get v :seon.render/hiccup)) "an absent key answers nil")
     (is (identical? (:task @a) (rv/unwrap (:task v))) "unwrap: the real value")
     (is (= {:t (:task @a)} (rv/realize {:t (:task v)})) "realize: every view in it")))
-
-(deftest a-join-held-at-another-path-reads-as-held-there
-  ;; docs/render.md#reactive-renders: ctx holds each entity once, a join to it elsewhere {:db/id e}; the source's value says where each
-  ;; is held (:seon.ratom/held on its metadata, seon.ctx's record), so a read through a view meets the entity whole, its read recorded
-  ;; where it is held: a render placed on a cite reads its owner task as the task's own render does, and reruns when the task changes
-  (let [runs (running)
-        tree (with-meta {:db/id 1 :task {:db/id 2 :seon.task/ns 'demo :plan "p"}
-                         :cites (#'seon.ctx/members-map [[3 {:db/id 3 :of {:db/id 2} :target {:db/id 9}}]])}
-               {:seon.ratom/held {2 [:task] 3 [:cites 3]}})
-        a (rv/atom tree)
-        v #(rv/ref-view a ctx/changes)
-        ns-read (rv/atom 0)
-        r (run! (swap! ns-read inc) (get-in (v) [:cites 3 :of :seon.task/ns]))]
-    (is (= 'demo (get-in (v) [:cites 3 :of :seon.task/ns])) "the owner, read through the cite, as held at its own path")
-    (is (= {:db/id 9} (rv/realize (get-in (v) [:cites 3 :target]))) "an entity no path holds stays as the join wrote it")
-    (is (= {:db/id 2} (:of (rv/realize (get-in (v) [:cites 3])))) "realize leaves a join as written")
-    (is (= 'demo (get-in (rv/whole (get-in (v) [:cites 3])) [:of :seon.task/ns])) "whole draws each join as held")
-    (swap! a assoc-in [:task :seon.task/ns] 'other)
-    (flush!)
-    (is (= 2 @ns-read) "a change where it is held reruns the read made through the join")
-    (swap! a assoc-in [:task :plan] "q")
-    (flush!)
-    (is (= 2 @ns-read) "and nothing it did not read")
-    (dispose! r)
-    (is (= runs (running)))))

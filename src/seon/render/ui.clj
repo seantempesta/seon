@@ -933,20 +933,21 @@
   "Cite c as pulled with its target and its owner joined (the declared html render of :seon.cite/cite-fact), by `cite-hiccup`: a
   wiki section, a function, a schema key, a namespace, a task or a file, at the cite's depth. What the agent will do with a function
   is judged from the cite's own joins, never stored and never the page's: one in its owner task's namespace or reached by the
-  task's proofs (their forms' refs) is one it will change (its source and tests drawn), any other one it calls. A join ctx holds
-  at another path reads as held there (seon.ratom, a source's held entities). A pulled section or var alone is not rendered by this:
-  it prints as the data it is. See docs/references.md#an-entity-cites."
+  task's proofs (their forms' refs) is one it will change (its source and tests drawn), any other one it calls. ctx holds every
+  entity whole at each path its pattern pulls it (docs/ctx.md#the-pattern), so the cite's joins are all here. A pulled section or
+  var alone is not rendered by this: it prints as the data it is. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
   [{db :seon.db/db} c]
-  (let [t (ratom/whole (get c :seon.cite/target))
-        of (get c :seon.cite/of)
-        task-ns (some-> (get of :seon.task/ns) ratom/realize str)
-        reach (into #{} (for [[_ v] (get of :proved) r (ratom/realize (get-in v [:var/form :form/refs]))] r))
+  (let [c (ratom/realize c)
+        t (:seon.cite/target c)
+        of (:seon.cite/of c)
+        task-ns (some-> (:seon.task/ns of) str)
+        reach (into #{} (for [[_ v] (:proved of) r (get-in v [:var/form :form/refs])] r))
         sym (:var/name t)
-        id (some-> (get of :seon.task/id) ratom/realize)]
-    (cite-hiccup db (assoc (ratom/realize c) :seon.cite/target t)
-                 {:lookups (cond-> [] id (conj [:seon.task/id id]) sym (conj [:var/name sym]))
-                  :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))})))
+        id (:seon.task/id of)]
+    (cite-hiccup db c {:lookups (cond-> [] id (conj [:seon.task/id id]) sym (conj [:var/name sym]))
+                       :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))})))
+
 
 (defn searched
   "Search s (the declared html render of :seon.search/search-fact, a component over the db), drawn as one compact hiccup that the
