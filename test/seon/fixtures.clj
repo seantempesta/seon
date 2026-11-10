@@ -7,7 +7,7 @@
   task's agent redefines its function). The proofs namespace sorts after the subjects, so a boot that
   loads main's program in name order loads a subject before its proof."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader] [seon.config :as config] [seon.render]))
+  (:require [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.edn :as edn] [seon.template :as tpl] [seon.source :as source] [seon.reader :as reader] [seon.config :as config] [seon.render] [clojure.test :refer [is]]))
 
 (def calc
   "The six-task graph: add; twice and square need add; sum-sq needs both; neg (the one the demo
@@ -458,6 +458,39 @@
   {:malli/schema [:=> [:cat :any :map] [:vector :map]]}
   [db c] (@(requiring-resolve (quote seon.ctx.wire/model-call-msgs)) {:seon.db/db db} (assoc c :seon.model-call/origin :model)))
 
+(defn no-error-render
+  "Asserts that defects ds (a walk's `:seon.render/component-defect`s, read with @(:defects w): `seon.render/take-defects!` is the
+  reader that drains them) hold no component's error drawn in a page: each that `:expects` does not name is a failed assertion naming
+  the render and its message. `:expects` is a set of strings, each matched exactly against a defect's `:seon.error/message` or the
+  name of the render that threw (`:seon.error/in`, as a string): a test that renders an error on purpose names it, and nothing else
+  passes. Answers the defects not expected (empty when the assertion held). A page built in an agent's own process (a forked one, as
+  seon.agent-test's in-agent tests build) has no walk here: those tests check the agent's page themselves. See
+  docs/render.md#a-component-answers-hiccup and docs/testing.md#a-proof-is-focused."
+  {:malli/schema [:function [:=> [:cat [:sequential :map]] [:vector :map]]
+                  [:=> [:cat [:sequential :map] [:map [:expects {:optional true} [:set :string]]]] [:vector :map]]]}
+  ([ds] (no-error-render ds {}))
+  ([ds {:keys [expects]}]
+   (let [ok (set expects)
+         unexpected (into [] (remove (fn [d] (or (ok (:seon.error/message d)) (ok (str (:seon.error/in d)))))) ds)]
+     (is (empty? unexpected) (str "a page drew an error in a component's place: " (pr-str (mapv #(select-keys % [:seon.error/in :seon.error/message]) unexpected))))
+     unexpected)))
+
+(defn flush!
+  "`seon.render/flush!` of walk w (what it ran), and `no-error-render` of w: a test that flushes a walk through this checks, each time, that no
+  component drew an error. A test that renders an error on purpose calls `seon.render/flush!` and checks its defects itself."
+  {:malli/schema [:function [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]]] :map]
+                  [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]] [:maybe :map]] :map]]}
+  ([w datoms] (flush! w datoms nil))
+  ([w datoms ix] (let [ran (seon.render/flush! w datoms ix)] (no-error-render @(:defects w)) ran)))
+
+(defn draw
+  "`seon.render/draw` of ctx tree c (the walk), and `no-error-render` of that walk: a test that draws a page through this checks that no
+  component drew an error."
+  {:malli/schema [:function [:=> [:cat :map :any :any :any] :map]
+                  [:=> [:cat :map :any :any :any :map] :map]]}
+  ([c changes db f] (draw c changes db f nil))
+  ([c changes db f opts] (let [w (if opts (seon.render/draw c changes db f opts) (seon.render/draw c changes db f))] (no-error-render @(:defects w)) w)))
+
 (defn tree-parts
   "The conversation of agent record c on db as the agent's walk answers it for the model, cold: parts [ref messages turn] of the request, its system message, its opening and the page calls Seon generates (seon.ctx.wire/page-diff-msgs) left out. A db that holds no system prompt gets a stub of one, which the walk needs and the parts leave out."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:vector :any]]}
@@ -465,7 +498,7 @@
   (let [doc-load (requiring-resolve 'seon.doc/load-tx)
         page (requiring-resolve 'seon.doc/system-page)
         db (if (@(requiring-resolve 'seon.doc/page-text) db @page) db (datahike.api/db-with db (doc-load db "docs" {@page "# A stub of the system prompt\n\nBe brief."})))
-        w (seon.render/draw c @(requiring-resolve 'seon.ctx/changes) db #'seon.render.ui/agent
+        w (draw c @(requiring-resolve 'seon.ctx/changes) db #'seon.render.ui/agent
                             {:model-only true :once true :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
     (try (vec (remove (fn [[r]] (or (nil? r) (#{:section :session :page} (first r)))) (:parts (@(requiring-resolve (quote seon.ctx.wire/request)) w))))
          (finally (seon.render/dispose-walk! w)))))
@@ -479,5 +512,5 @@
   "The parts of agent record c ({:tree}) on db as the model reads them, drawn cold: {id form}."
   {:malli/schema [:=> [:cat :seon.host/db [:map [:tree :map]]] :map]}
   [db c]
-  (let [w (seon.render/draw (:tree c) @(requiring-resolve 'seon.ctx/changes) db #'seon.render.ui/agent {:model-only true})]
+  (let [w (draw (:tree c) @(requiring-resolve 'seon.ctx/changes) db #'seon.render.ui/agent {:model-only true})]
     (try (seon.render/placed-hiccup w (seon.render/page-lists w)) (finally (seon.render/dispose-walk! w)))))

@@ -6,6 +6,10 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 The owner's rulings of 2026-11-10, on how the machine's load is judged and on what an agent reads.
 
+### The test system runs inside Seon; the outside is thin wrappers (owner, 2026-11-10)
+
+"I want the test system focused on seon agents running it from the inside. I want a better system than our confusing worktrees and agents churning the codebase and re-running everything all the time. I want maximum test reuse across all branches. If it's the same code and the seed is the same don't re-run shit. How can we take our fragmented system and fix it in seon and then have thin wrappers calling into it from the outside? ... minimal duplication in infrastructure just what we need for our agents to run the system efficiently." Two rules with it (owner, 2026-11-10, asked with the Tests session's picks): a worktree session's changed files are written as a branch of the standing store (deleted when it lands or is dropped), and root proves that branch as it proves an agent's, so `bin/prove` and `bin/land` are thin wrappers over the one service; and a test's digest takes the code of the forms it reaches without their docstrings and comments, the tests that read docs or the whole program taking them explicitly, so the same code is the same digest on every branch. Now stated in: [merging](merging.md#a-merge-runs-what-the-change-reaches) (as each step lands).
+
 ### Load is judged by cores and free memory (owner, 2026-11-10)
 
 "I have 18 cores and load is 8". The "load under ~8" number came from the 16 GB target and was holding landings and proves at load 8-11 for nothing. Heavy runs go niced and in parallel while nothing is starved, judged by the machine's cores and its free memory (owner, 2026-11-06: "do dynamic balancing"); the 16 GB MacBook stays the target Seon must fit. Stated in: AGENTS.md section 8, docs/machine.md#builds-and-checks.
@@ -428,7 +432,7 @@ The owner's rulings of 2026-11-01, after the audit of what agents read; they sta
 
 ### An agent's evals on a task are a session; past ones are shown as curated sessions (owner, 2026-11-01)
 
-"Yeah sessions is fine"; "In the instructions I don't think we say the dead ends part. Curated sessions." A session is an agent's evals on a task in order (nREPL's word; still stored as `:seon.run/*`, renamed only by a store erase). A past session shown to an agent as a worked example is a curated session: the session as stored, with the evals that led nowhere marked out, reaching the model as the same tool-call turns its own evals do (`seon.render.ui/eval-hiccup`), never as a text blob and never repeating the system message. No parallel store or renderer; it is evaluated as a measured arm before it is built in (plan.md, where it stands).
+"Yeah sessions is fine"; "In the instructions I don't think we say the dead ends part. Curated sessions." A session is an agent's evals on a task in order (nREPL's word; still stored as `:seon.run/*`, renamed only by a store erase). A past session shown to an agent as a worked example is a curated session: the session as stored, with the evals that led nowhere marked out, reaching the model as the same tool-call turns its own evals do (`seon.ctx.wire/eval-msgs`), never as a text blob and never repeating the system message. No parallel store or renderer; it is evaluated as a measured arm before it is built in (plan.md, where it stands).
 
 ### Context is data a render draws from the db (owner, 2026-11-01)
 

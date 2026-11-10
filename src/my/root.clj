@@ -151,6 +151,45 @@
     (cond-> (if (contract/error? r) r {:written lost :paths (vec (keys files)) :sha (get-in r [:value :sha])})
       (seq not-lost) (assoc :not-lost not-lost)))))
 
+(defn sync-req
+  "What a reviewed sync of the merged tasks ids commits, read from db: each task's changed files (seon.problems/changed-paths) as
+  db holds them now, and its task file, read under tasks-dir (where root reads its tasks), with its entry removed
+  (seon.source/task-file-text), as the :git effect's request for root's source dir: on jolt/sync-<the first task's name>, a new
+  branch starting at git's main (:seon.config.source/main), its message naming each task as Completes:. A task that is no
+  merged task its files still declare (seon.problems/unsynced?) is :seon.root/nothing-to-sync under :not-unsynced. Answers
+  {:tasks :paths :req :not-unsynced}. See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id] :string] :map]}
+  [db ids tasks-dir]
+  (let [ts (filterv #(some->> (pdb/eid db :seon.task/id %) (problems/unsynced? db)) ids)
+        es (mapv #(pdb/eid db :seon.task/id %) ts)
+        paths (vec (sort (distinct (mapcat #(problems/changed-paths db %) es))))
+        entries (into {} (for [[nsym names] (group-by #(:seon.task/ns (d/pull db [:seon.task/ns] %)) es)]
+                           [(str (config/value :seon.config.source/tasks-dir) "/" nsym ".edn")
+                            (source/task-file-text (slurp (io/file tasks-dir (str nsym ".edn")))
+                                                   (set (map #(:seon.task/name (d/pull db [:seon.task/name] %)) names)))]))
+        files (merge (doc/files db paths) entries)]
+    {:tasks ts :paths paths
+     :not-unsynced (vec (for [id ids :when (not-any? #{id} ts)]
+                          (contract/error :seon.root/nothing-to-sync #'my.root/sync-req (str "task " id " is no merged task main's files still declare") {:task id})))
+     :req {:branch (str "jolt/sync-" (some-> (first ts) (str/split #"/" 2) second)) :base (config/value :seon.config.source/main)
+           :files files :modes (source/modes db (keys files))
+           :message (str "Sync: " (str/join ", " ts) "\n\n" (str/join (for [id ts] (str "Completes: " id "\n"))))}}))
+
+(defn sync!
+  "Write the merged tasks ids' work onto a branch for a session to review and land (sync-req), in one :git effect on root's source
+  dir (:seon.config.source/root). Landing it (bin/land) brings main's files the work and retracts each entry
+  (seon.task/load-tx), which closes its :unsynced row. Answers {:branch :sha :tasks :paths} with :not-unsynced when any, the git
+  effect's error, or :seon.root/no-source-root. See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
+  [sys ids]
+  (let [{:keys [tasks paths req not-unsynced]} (sync-req @(:conn sys) ids (config/value :seon.config.root/tasks-dir))
+        root (config/value :seon.config.source/root)
+        r (cond (empty? tasks) {:value {:sha nil}}
+                (nil? root) (contract/error :seon.root/no-source-root #'my.root/sync! "no source root declared (:seon.config.source/root): nothing is written here" {:tasks tasks})
+                :else @(root/effect! sys :git (assoc req :dir root)))]
+    (cond-> (if (contract/error? r) r {:branch (when (seq tasks) (:branch req)) :sha (get-in r [:value :sha]) :tasks tasks :paths paths})
+      (seq not-unsynced) (assoc :not-unsynced not-unsynced))))
+
 (defn gate!
   "The process tests each of tasks ids' change reaches (a fork, a root, the binary) run on the
   gate checkout (:seon.config.source/gate-checkout). A merge's gate runs them before it merges

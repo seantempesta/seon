@@ -256,8 +256,8 @@
   [s] (apply str (map #(if (or (Character/isLetterOrDigit ^char %) (= \- %)) % (format "_%02X" (int %))) s)))
 
 (defn key-id
-  "Key k as its component's root element id, one to one: its render's name and the name of what it shows (seon.render.ui/eval-item of eval e12 ->
-  \"eval-item-e12\"; a var cited, seon.render.ui/cited of demo/g -> \"cited-demo_2Fg\"), never an entity id, since the model reads ids and does not guess
+  "Key k as its component's root element id, one to one: its render's name and the name of what it shows (seon.render.ui/evaluation of eval e12 ->
+  \"evaluation-e12\"; a var cited, seon.render.ui/cited of demo/g -> \"cited-demo_2Fg\"), never an entity id, since the model reads ids and does not guess
   them."
   {:malli/schema [:=> [:cat [:vector :any]] :string]}
   [k]

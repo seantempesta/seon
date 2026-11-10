@@ -51,7 +51,7 @@ A number far off its line is a defect to find. n is what the operation is about,
 | An insert in a file | O(1) places | 1 place |
 | Analyzing a merged tree, one file | O(that file) | under 0.1 s a file |
 | `bin/prove` deciding which deftests to run, after a body edit | O(changed forms) | 165 M ticks, 1.5 s |
-| The same, after an edit to `seon/source.clj` or `seon/program.clj` | O(changed forms) | 5,271 M: the kept analyzed form tree is dropped and every form read again, **off** (task ``seon.program/a-kept-tree-is-keyed-by-the-text-of-two-files``) |
+| The same, after an edit to `seon/source.clj` or `seon/program.clj` | O(changed forms) | 5,271 M: the kept analyzed form tree is dropped and every form read again, **off** (task ``seon.source/the-test-runners-kept-programs-are-keyed-by-their-indexing-code``) |
 | `d/schema` | O(1) once per db value | 241 k ticks a call, rebuilt each time: **off**, 14 calls in `src`; the fork change is approved (owner, 2026-11-08; task ``seon.db/the-schema-map-is-read-once-a-value``) |
 | A diff of two commits m datoms apart (`d/datoms-diff`) | O(the leaves the m datoms sit in), flat in the store's size | 21 datoms over 10 scattered entities, LMDB (2026-11-08): 0.33 M ticks warm at 2,500 entities, 0.56 M at 10,000 and at 20,000; cold 0.87 M and 1.36 M, decoding the ~20 leaves the two commits hold apart. Every shared subtree is skipped. On the in-memory test store nothing has an address, so the same diff walks the whole index (3.5 M at 2,500, 14.7 M at 20,000): measure it on disk ([how we measure](cost.md#how-we-measure)) |
 | A small write (a few datoms, committed) | about 0.1 M ticks | 0.3 M: **off** about 3× (task ``seon.db/a-small-write-costs-its-minimum``) |

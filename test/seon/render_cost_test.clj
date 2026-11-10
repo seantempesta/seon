@@ -5,7 +5,7 @@
   root: a cost proof for the recursion). Run: bin/test seon.render-cost-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest]] [seon.contract :refer [defn defn-]] [seon.cost :as cost] [seon.web.html] [seon.db :as pdb]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.ctx] [seon.ctx] [seon.ratom] [seon.program] [seon.ctx.wire]))
+            [seon.test-store :as ts] [datahike.api :as d] [seon.render.proc] [seon.render] [seon.render.ui] [seon.config] [seon.task] [seon.repl] [seon.doc] [seon.ctx] [seon.ctx] [seon.ratom] [seon.program] [seon.ctx.wire] [seon.fixtures]))
 
 (def ^:private fan "Children per node: a tree as deep as log3 n (10,000 nodes: 9 levels)." 3)
 
@@ -308,7 +308,7 @@
         at (volatile! db)
         a (seon.ratom/atom (:tree c))
         w (seon.render/walker {:ref a :changes seon.ctx/changes} (fn [] @at) [#'seon.render.ui/agent {} (seon.ratom/ref-view a seon.ctx/changes)])]
-    (seon.render/flush! w nil)
+    (seon.fixtures/flush! w nil)
     (swap! kept-walks conj w)
     [{:w w :a a :c c :at at} db (with-turn db (dec n))]))
 
@@ -388,7 +388,7 @@
   [n]
   (let [a (seon.ratom/atom {:db/id 1 :ids (vec (range n))})
         w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'gone-list {}] (seon.db/index))]
-    (seon.render/flush! w nil)
+    (seon.fixtures/flush! w nil)
     [w a]))
 
 (defn member-gone-and-back!

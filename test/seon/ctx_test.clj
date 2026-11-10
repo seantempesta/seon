@@ -41,14 +41,21 @@
   enter-agent! found it (a test that left it empty broke the next one reading the process's own db: seon.render-test/
   markdown-reads-no-text-again in a test child). A walk left behind makes every later write of the record in
   this process cost its reactions (seon.ctx-test/a-swap-costs-what-it-changed read 52 calls after this test, not 39)."
-  {:malli/schema [:=> [:cat] :nil]}
-  []
-  (some-> (:walk @seon.agent/state) seon.render/dispose-walk!)
-  (remove-watch seon.agent/state :seon.ctx/ctx)       ; the record the test drew stays @ctx's (the test reads it after), as with an empty state
-  (reset! seon.agent/state (when (not= ::unset @found) @found))
-  (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)
-  (reset! found ::unset)
-  nil)
+  {:malli/schema [:function [:=> [:cat] :nil] [:=> [:cat :map] :nil]]}
+  ([] (end-agent! {}))
+  ([opts]
+   ;; no page this test drew drew an error in a component's place (seon.fixtures/no-error-render): the walk's own defects and the ones
+   ;; seon.repl/page-walk took into the agent's errors; a test that draws an error on purpose names it in :expects
+   (seon.fixtures/no-error-render (into (vec (some-> (:walk @seon.agent/state) :defects deref))
+                                        (comp (map :error) (filter #(= :seon.render/component-defect (:seon.error/type %))))
+                                        (vals (:errors @seon.agent/state)))
+                                  opts)
+   (some-> (:walk @seon.agent/state) seon.render/dispose-walk!)
+   (remove-watch seon.agent/state :seon.ctx/ctx)       ; the record the test drew stays @ctx's (the test reads it after), as with an empty state
+   (reset! seon.agent/state (when (not= ::unset @found) @found))
+   (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)
+   (reset! found ::unset)
+   nil))
 
 (defn- aid "The test agent's entity on db." {:malli/schema [:=> [:cat :seon.host/db] [:maybe pos-int?]]}
   [db] (:db/id (d/entity db [:seon.agent/key k])))
@@ -847,8 +854,8 @@
           (is (str/includes? (pr-str (get page "ctx-keys")) "read the plan") "as the render returned it")))
       (testing "the page rebuilds the value from the branch at its basis"
         (let [db (:db-after (d/with db [(into {:seon.eval/id "e9" :seon.eval/agent [:seon.agent/key k]} rec)]))
-              h (seon.web.html/html (seon.render.ui/evaluation {:seon.render/index (seon.db/index) :db db} (d/pull db '[*] [:seon.eval/id "e9"])))]
-          (is (re-find (re-pattern (str "ctx · :b · t " (:t tree))) h) "the block of the record at t")
+              h (seon.web.html/html (seon.render.ui/eval-output {:seon.render/index (seon.db/index) :seon.db/db db} (d/pull db '[*] [:seon.eval/id "e9"])))]
+          (is (re-find (re-pattern (str "ctx · :b · t " (:t tree))) h) "opened, the step shows the record at t (seon.render.ui/eval-output)")
           (let [text (fn [db] (:content (first (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "e9"])))))
                 later (:db-after (d/with db [{:seon.eval/id "e10" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/code "(f)" :seon.eval/response {:value 1}}]))]
             (is (re-find #":lab.ctx/steps" (text db)) "the model's text is the one printer's, of the value rebuilt from the branch at its basis")
@@ -857,7 +864,7 @@
       (testing "a render that throws in the agent is answered as its error, and the agent goes on"
         (let [db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/boom '[:vector {:seon.render/hiccup seon.ctx-test/boom} :any] false))))
               db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/boom []}]))
-              r (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent!)))
+              r (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent! {:expects #{"seon.render.ui/ctx-key threw: cannot draw this"}})))
               keys-html (:html (some #(when (= "ctx-keys" (:id %)) %) (:units r)))]
           (is (re-find #"cannot draw this" keys-html) "the render's throw, as its error's render in its component's place")
           (is (re-find #"<ol><li>read the plan" keys-html) "and every other component drawn"))))))
@@ -1332,7 +1339,7 @@
                                               [p u (ledger) pg]))
         whole (as #(do (seon.repl/render-ctx-hiccup) (let [w (seon.repl/page-walk)] (seon.render/placed-hiccup w (seon.render/page-lists w)))))]
     (is (unwatched 'seon.render.ui/agent-parts) "the model's list is drawn")
-    (is (every? unwatched '[seon.render.ui/conversation-list seon.render.ui/eval-item]) "and the conversation, which it reads as messages")
+    (is (every? unwatched '[seon.render.ui/conversation-list seon.render.ui/evaluation]) "and the conversation, which it reads as messages")
     (is (not-any? unwatched '[seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) (pr-str unwatched))
     (is (every? watched '[seon.render.ui/eval-output seon.render.ui/chat-end seon.render.ui/agent-state]) "a person's page draws what is its alone")
     (is (some #(str/starts-with? % "conversation-turn") (keys page)) "the conversation is on the page, a component for each turn")
