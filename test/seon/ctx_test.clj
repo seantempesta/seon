@@ -78,7 +78,7 @@
 (defn- eval-tx
   "Eval i of the agent, as the REPL records it."
   {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
-  [i] [{:seon.eval/id (str "e" i) :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1"
+  [i] [{:seon.eval/id (str "e" i) :seon.eval/agent [:seon.agent/key k] :seon.eval/by {:seon.agent/key "a1"}
         :seon.eval/code (str "(app.x/f" (mod i 3) " " i ")") :seon.eval/response (response i) :seon.eval/call-id (str "c" i)
         ;; each takes the number in force when it is written (docs/turn.md#the-turn-is-a-number): here the turn is its own i
         :seon.eval/call (seon.task/call-ref k (max 3 (* 3 (quot i 3))))}])
@@ -119,7 +119,7 @@
     (reduce (fn [db part]
               (:db-after (d/with db (vec (mapcat (fn [i] (cond-> (eval-tx i)
                                                             (zero? (mod i 3)) (conj (seon.task/call-ref k i))
-                                                            (zero? (mod i 20)) (conj {:seon.message/id (str "m" i) :seon.message/from "user"
+                                                            (zero? (mod i 20)) (conj {:seon.message/id (str "m" i) :seon.message/from {:seon.agent/key "user"}
                                                                                       :seon.message/to [[:seon.agent/key k]] :seon.message/body "How is it going?"})))
                                                  part)))))
             db (partition-all 100 (range 1 (inc n)))))))
@@ -145,7 +145,7 @@
       0 (eval-tx (+ 10000 i))
       1 (calls-tx (str "lab/ctx/n" i) 2)
       2 [{:seon.model-call/id (str "lab/ctx/x" i) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n i}]
-      3 [{:seon.message/id (str "mx" i) :seon.message/from "user" :seon.message/to [[:seon.agent/key k]] :seon.message/body (str "note " i)}]
+      3 [{:seon.message/id (str "mx" i) :seon.message/from {:seon.agent/key "user"} :seon.message/to [[:seon.agent/key k]] :seon.message/body (str "note " i)}]
       4 [[:db/add [:seon.task/id "lab/ctx"] :seon.task/outcome (nth [:running :parked :done] (.nextInt r 3))]]
       5 [[:db/add [:seon.task/id "lab/ctx"] :seon.task/plan (str "plan " i)]]
       6 [[(if (.nextBoolean r) :db/add :db/retract) [:seon.task/id "lab/ctx"] :seon.task/proofs (symbol "app.x-test" (str "t" (.nextInt r 3)))]]
@@ -222,7 +222,7 @@
                                       :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
                                     (concat (mapcat eval-tx (range 1 6))
                                             (for [t (range 3)] {:seon.model-call/id (str "lab/ctx#1/" t) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n t})
-                                            [{:seon.message/id "m1" :seon.message/from "user" :seon.message/body "How is it going?"
+                                            [{:seon.message/id "m1" :seon.message/from {:seon.agent/key "user"} :seon.message/body "How is it going?"
                                               :seon.message/to [[:seon.agent/key k]]}]))))
         t (:tree (ctx/build (seon.db/index) db (aid db) :b))]
     (is (= "lab/ctx" (get-in t [:seon.agent/task :seon.task/id])) "the task, pulled whole by the agent's own ref")
@@ -309,7 +309,7 @@
                                      {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
                                       :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
                                     (concat (mapcat eval-tx (range 1 4))
-                                            [{:seon.message/id "m1" :seon.message/from "user" :seon.message/body "How is it going?"
+                                            [{:seon.message/id "m1" :seon.message/from {:seon.agent/key "user"} :seon.message/body "How is it going?"
                                               :seon.message/to [[:seon.agent/key k]]}]))))
         t (dissoc (:tree (ctx/build (seon.db/index) db (aid db) :b)) :branch :commit :t)
         ;; the schema made once and its validator compiled once, for both checks: compiling it is seconds (malli's ref
@@ -342,7 +342,7 @@
                                 :seon.model-call/sent-hash "0123456789abcdef"}
                                {:seon.process/id (str k "/77") :seon.process/agent [:seon.agent/key k] :seon.process/pid 77
                                 :seon.process/forked-ms 5.0}
-                               {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1"}
+                               {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by {:seon.agent/key "a1"}}
                                {:seon.vector/of [:seon.eval/id "e1"] :seon.vector/model "m"}]))
         t (:tree (ctx/build (seon.db/index) db (aid db) :b))
         keys-in (fn keys-in [x] (cond (map? x) (concat (keys x) (mapcat keys-in (vals x))) (coll? x) (mapcat keys-in x)))]
@@ -372,7 +372,8 @@
       (let [db (seeded 60) t (:tree (ctx/build (seon.db/index) db (aid db) :b))]
         (is (= 60 (count (:evals t))))
         (let [e7 (id db [:seon.eval/id "e7"])]
-          (is (= {:seon.eval/id "e7" :by "a1"} {:seon.eval/id (get-in t [:evals e7 :seon.eval/id]) :by (get-in t [:evals e7 :seon.eval/by])}))
+          (is (= {:seon.eval/id "e7" :by {:db/id (id db [:seon.agent/key "a1"])}} {:seon.eval/id (get-in t [:evals e7 :seon.eval/id]) :by (get-in t [:evals e7 :seon.eval/by])})
+              "who ran it, a ref to the agent")
           (is (= "lab/ctx" (get-in t [:task :seon.task/id])))
           (is (= #{'app.x-test/t0} (get-in t [:task :seon.task/proofs])))
           (is (= 20 (count (:calls t))))
@@ -512,7 +513,7 @@
   ;; evals made the 120 messages and 800 calls before, most of the test's work)
   (let [n 120
         db (d/db-with (seeded 0 nil) (vec (mapcat (fn [i] [(seon.task/call-ref k i)
-                                                           {:seon.message/id (str "m" i) :seon.message/from "user"
+                                                           {:seon.message/id (str "m" i) :seon.message/from {:seon.agent/key "user"}
                                                             :seon.message/to [[:seon.agent/key k]] :seon.message/body "How is it going?"}])
                                                   (range 1 (inc n)))))
         c (ctx/build (seon.db/index) db (aid db) :b)]
@@ -649,7 +650,7 @@
     (testing "a member retracted and made again under its key within the turn: the end's"
       (let [db0 (seeded 30)
             db1 (-> db0 (d/with [[:db/retractEntity [:seon.eval/id "e7"]]]) :db-after
-                    (d/with [{:seon.eval/id "e7" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/code "(again)" :seon.eval/response {:value 1}}]) :db-after)
+                    (d/with [{:seon.eval/id "e7" :seon.eval/agent [:seon.agent/key k] :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(again)" :seon.eval/response {:value 1}}]) :db-after)
             c0 (ctx/build (seon.db/index) db0 (aid db0) :b)
             c1 (ctx/advance c0 db0 db1 :b)]
         (is (= c1 (ctx/build (seon.db/index) db1 (aid db1) :b)))
@@ -877,7 +878,7 @@
               h (seon.web.html/html (seon.render.ui/eval-output {:seon.render/index (seon.db/index) :seon.db/db db} (d/pull db '[*] [:seon.eval/id "e9"])))]
           (is (re-find (re-pattern (str "ctx · :b · t " (:t tree))) h) "opened, the step shows the record at t (seon.render.ui/eval-output)")
           (let [text (fn [db] (:content (first (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "e9"])))))
-                later (:db-after (d/with db [{:seon.eval/id "e10" :seon.eval/agent [:seon.agent/key k] :seon.eval/by "a1" :seon.eval/code "(f)" :seon.eval/response {:value 1}}]))]
+                later (:db-after (d/with db [{:seon.eval/id "e10" :seon.eval/agent [:seon.agent/key k] :seon.eval/by {:seon.agent/key "a1"} :seon.eval/code "(f)" :seon.eval/response {:value 1}}]))]
             (is (re-find #":lab.ctx/steps" (text db)) "the model's text is the one printer's, of the value rebuilt from the branch at its basis")
             (is (= (text db) (text later)) "the same bytes read cold after the branch moved as live: the cached prefix depends on it"))
           (is (re-find #":lab.ctx/steps" h))))
@@ -1110,7 +1111,7 @@
     (testing "a member's attribute, and a new member, written under its parent by the unit's ref"
       (let [[[_ same] db'] (step db #(swap! ctx/ctx (fn [c] (-> c (assoc-in [:task :seon.task/reason] "waiting for you")
                                                                 (assoc-in [:messages "m-new"]
-                                                                          {:seon.message/id "m-new" :seon.message/from "agent" :seon.message/body "a note to myself"})))))]
+                                                                          {:seon.message/id "m-new" :seon.message/from {:db/id (aid db)} :seon.message/body "a note to myself"})))))]
         (is (= "waiting for you" (:seon.task/reason (d/entity db' [:seon.task/id "lab/ctx"]))))
         (is (= #{(aid db)} (set (map :db/id (:seon.message/to (d/entity db' [:seon.message/id "m-new"]))))) "the new message is the agent's")
         (is same)
@@ -1284,7 +1285,7 @@
   [es] (#'seon.ctx/members-map (mapv (juxt :db/id identity) es)))
 
 (defn- an-eval {:malli/schema [:=> [:cat nat-int? pos-int?] :map]} [i len]
-  {:db/id (+ 1000 i) :seon.eval/id (str "e" i) :seon.eval/by "a1"
+  {:db/id (+ 1000 i) :seon.eval/id (str "e" i) :seon.eval/by {:seon.agent/key "a1"}
    :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "e" i)) :value (vec (range (mod i 9)))} :seon.eval/intent (text (inc i) len)})
 
 (defn- record-of
@@ -1454,7 +1455,7 @@
                          (seon.repl/record-details "x" {:handle 'result/e9 :value v} {})
                          (finally (binding [ctx/*installing* true] (reset! ctx/ctx nil)) (end-agent!))))
         text (fn [r] (try (enter-agent! {:db db :key k :branch :b})
-                          (:content (first (seon.fixtures/eval-messages {:db db} (assoc r :seon.eval/id "e9" :seon.eval/by "a1"))))
+                          (:content (first (seon.fixtures/eval-messages {:db db} (assoc r :seon.eval/id "e9" :seon.eval/by {:seon.agent/key "a1"}))))
                           (finally (end-agent!))))
         part (select-keys c [:seon.agent/key])
         more (assoc c :x 1)]

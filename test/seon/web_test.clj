@@ -101,7 +101,7 @@
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
           e (some #(when (:seon.eval/response %) %) (get-in w [:req :req :tx-data]))]
       (is (= "(seon.root/kill! :a1)" (:seon.eval/code e)))
-      (is (= "user" (:seon.eval/by e)))
+      (is (= "user" (:seon.agent/key (:seon.eval/by e))) "by the user, a ref to the user's agent")
       (is (str/includes? (seon.print/record-text (assoc e :seon.eval/response (seon.db/response-of nil e))) ":killed :a1") "what root answered"))))
 
 (deftest an-eval-opened-on-a-page-is-no-eval-of-roots

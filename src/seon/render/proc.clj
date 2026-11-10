@@ -972,7 +972,7 @@
         detail (print/text r)]
     (when form
       (let [rec (repl/record-details form (if err {:ex r} {:value r}) {})]
-        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) "user" rec)}}
+        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) (task/sender (config/value :seon.config.root/user-name)) rec)}}
                               :route [:render :answers] :tag [:web-record]})))
     (ask-state (cond-> (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail})
                  ;; an eval opened is a fact on main the agent takes when it draws: ask it to draw again

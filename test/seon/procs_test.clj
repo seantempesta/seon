@@ -458,7 +458,16 @@
         (is (= [9] (map :pid (:to-api outs))))))
     (testing "EOF of an older server is ignored"
       (let [[st2 outs] (step #'server/fork-server-proc st :ev {:ev :eof :pid 2})]
-        (is (= st st2)) (is (nil? outs))))))
+        (is (= st st2)) (is (nil? outs))))
+    ;; docs/processes.md#a-stop-reaps-every-child: root's side keeps each forked pid until the server reaps it (its :exit), the pids
+    ;; a stop kills and awaits (seon.fork-server/release!), so no agent outlives a stop that killed its server's group. Red before:
+    ;; no pid was kept, and a killed agent was left to launchd (batch 21's lifecycle step, :left)
+    (testing "a forked pid is kept until the server reaps it"
+      (let [[st _] (step #'server/fork-server-proc st :ev {:ev :forked :agent :a1 :slot 0 :pid 41})
+            [st _] (step #'server/fork-server-proc st :ev {:ev :forked :agent :a2 :slot 1 :pid 42})
+            [st outs] (step #'server/fork-server-proc st :ev {:ev :exit :pid 41 :status {:exit 0}})]
+        (is (= #{42} (:forked st)) "the one not reaped is the stop's to end")
+        (is (= [41] (map :pid (:to-api outs))) "and the exit goes on to the api")))))
 
 (deftest a-lost-fork-server-answers-every-waiter
   ;; the server died with no standby to take its place (it died at boot, before its first
@@ -557,10 +566,10 @@
        (let [[_ outs] (ask {:op :ask :text "do a thing"})]
          (is (some #{[:db/add [:seon.task/id "request/do-a-thing"] :seon.task/started-by [:seon.agent/key "sean"]]} (txs outs)) "the signed-in user started it"))
        (let [[_ outs] (ask {:op :message :id :a1 :body "hi"})]
-         (is (some #(and (map? %) (= "sean" (:seon.message/from %))) (txs outs)) "from the signed-in user"))
+         (is (some #(and (map? %) (= {:seon.agent/key "sean"} (:seon.message/from %))) (txs outs)) "from the signed-in user"))
        ;; a sender the caller names is kept: root's own (the reconciler's stage boundary sends :from :root), never the person
        (let [[_ outs] (ask {:op :message :id :a1 :from :root :body "the design is done"})]
-         (is (some #(and (map? %) (= "root" (:seon.message/from %))) (txs outs)) "from root, as the caller named"))))))
+         (is (some #(and (map? %) (= {:seon.root/id :root} (:seon.message/from %))) (txs outs)) "from the system, as root names itself"))))))
 
 (deftest root-moves-the-signed-in-users-focus-and-refuses-an-unknown-agent-or-no-user
   ;; docs/users.md#whats-on-screen: root's focus! request writes the signed-in user's :seon.user/focus to the agent named by key
@@ -1082,9 +1091,9 @@
     (d/branch! conn main ab)
     (let [[st r] (union-of st)
           _ (is (true? (:ok r)))
-          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from "root" :seon.message/body "from main"}] :dest {:rid 1}})
+          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from {:seon.root/id :root} :seon.message/body "from main"}] :dest {:rid 1}})
           bc (pdb/connect (assoc cfg :branch ab))
-          _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from "a1" :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
+          _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from {:seon.agent/key "a1"} :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
           _ (d/release bc)
           [st _] (step #'writer/writer-proc st :in {:op :agent-commit :branch :a1})
           [_ r2] (union-of st)]

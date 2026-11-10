@@ -211,7 +211,7 @@
 (deftest the-program-digest-moves-with-the-program-and-not-with-data
   (let [db (record (empty-db) 'app.pt-pd "(defn f [x] x)")
         dg (program/program-digest db)]
-    (is (= dg (program/program-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from "root" :seon.message/body "hello"}])))
+    (is (= dg (program/program-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from {:seon.root/id :root} :seon.message/body "hello"}])))
         "a write of data (a message) leaves it")
     (is (not= dg (program/program-digest (record db 'app.pt-pd "(defn f [x] (inc x))"))) "a replaced form moves it")
     (is (not= dg (program/program-digest (record db 'app.pt-pd "(defn g [x] x)"))) "an added form moves it")
@@ -223,7 +223,7 @@
   ;; them, "green: ran 0"; a run selects the task's proofs, so its key moves with them
   (let [db (d/db-with (record (empty-db) 'app.pt-rd "(defn f [x] x)\n(defn g [x] x)") [{:seon.task/id "app.pt-rd/t"}])
         dg (program/run-digest db)]
-    (is (= dg (program/run-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from "root" :seon.message/body "hello"}])))
+    (is (= dg (program/run-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from {:seon.root/id :root} :seon.message/body "hello"}])))
         "a write of other data leaves it")
     (is (not= dg (program/run-digest (record db 'app.pt-rd "(defn f [x] (inc x))"))) "the program moves it")
     (let [proved (d/db-with db [{:seon.task/id "app.pt-rd/t" :seon.task/proofs ['app.pt-rd/f]}])]
@@ -1500,6 +1500,21 @@
     (is (moved? "in-map-test") "a var named in a string in a map")
     (is (not (moved? "not-code-test")) "a string that is no code names nothing and does not throw (reader/forgive makes \"app.pt-sn/f is not code\" a comment; unbalanced text reads as nil)")
     (is (not (moved? "pure-test")) "a test naming nothing keeps its digest")))
+
+;; docs/source.md#tests-run-by-reach: the plan's program store is output, keyed by the program's attributes alone, so it outlives a
+;; change to any other attribute; opening it checks every attribute's value type (seon.db/install-missing!), so a change of one that is
+;; not the program's (two message attributes made refs, 2026-11-10) left every checkout's store refusing until removed by hand. A store
+;; whose schema the open refuses is output to make again: removed and imported fresh, never a refusal
+(deftest a-kept-program-store-another-schema-refuses-is-made-again
+  (let [d (checkout! "kept-types" {"deps.edn" "{}" "src/app/kt.clj" "(ns app.kt)\n(defn f [x] x)\n"})
+        store (scratch-dir "kept-types-store")
+        made (pdb/made-cfg (pdb/store-cfg :lmdb store))
+        old (mapv #(if (= :seon.model-call/basis (:db/ident %)) (assoc % :db/valueType :db.type/string) %) pdb/schema)
+        _ (d/create-database made)
+        _ (let [c0 (pdb/connect made)] (d/transact c0 {:tx-data old}) (d/release c0))
+        db (runner/program-db d store (fx/tree-id d))]
+    (is (some? (d/entity db [:var/name 'app.kt/f])) "the tree is read: the store was made again and the program imported")
+    (is (= :db.type/data (get-in (:schema db) [:seon.model-call/basis :db/valueType])) "on a store of this schema")))
 
 (deftest a-kept-tree-is-read-whatever-its-stores-size
   ;; found 2026-11-10 (Context, the Tests session): the plan imported a tree past the store's bound,

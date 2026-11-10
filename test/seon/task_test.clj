@@ -254,11 +254,11 @@
        (let [bc (pdb/connect (assoc cfg :branch b))]
          (try
            (d/transact conn (task/start-tx @conn "demo/f" "b1" :a3 {:branch b :model "m" :max-turns 8} 0))
-           (d/transact conn (task/message-tx "m-1" "owner" [k] "check g" 1000))
+           (d/transact conn (task/message-tx "m-1" (seon.task/sender "owner") [k] "check g" 1000))
            ;; on the branch, which forked before main held the task's start or the message
            (d/transact bc (ts/turn-tx k 1 {}))
-           (d/transact bc (task/message-tx "m-1" "owner" [k] "check g" 1000))
-           (d/transact bc (repl/record-tx {:seon.agent/key k} "e1" "a3" {:seon.eval/code "(f 2)" :seon.eval/response {:handle 'result/e1 :value 4}}))
+           (d/transact bc (task/message-tx "m-1" (seon.task/sender "owner") [k] "check g" 1000))
+           (d/transact bc (repl/record-tx {:seon.agent/key k} "e1" (seon.task/sender "a3") {:seon.eval/code "(f 2)" :seon.eval/response {:handle 'result/e1 :value 4}}))
            (testing "from root on main: its agents, each agent's task"
              (is (= [{:seon.agent/key "a3" :seon.agent/status :idle :seon.process/_agent [{:seon.process/pid 77 :seon.process/running "(f 2)"}]
                       :seon.task/_agent [{:seon.task/id "demo/f"}]}]
@@ -344,7 +344,7 @@
 
 (deftest a-message-on-the-branch-is-delivered
   ;; docs/users.md#messages (owner, 2026-11-09): the entity on the agent's branch is the proof of delivery: one a fork inherited is delivered at the fork, one removed (its ref retracted, the entity kept) stays so
-  (let [main (d/db-with (ts/test-db) (into [{:seon.agent/key "a"}] (task/message-tx "m1" "sean" ["a"] "first" 1)))
+  (let [main (d/db-with (ts/test-db) (into [{:seon.agent/key "a"}] (task/message-tx "m1" (seon.task/sender "sean") ["a"] "first" 1)))
         away (d/db-with (ts/test-db) [{:seon.agent/key "a"}])
         removed (d/db-with main [[:db/retract (:db/id (d/entity main [:seon.message/id "m1"])) :seon.message/to (:db/id (d/entity main [:seon.agent/key "a"]))]])]
     (is (= ["m1"] (map :id (task/undelivered main away "a"))) "a branch that does not hold it is owed it")

@@ -6,7 +6,7 @@
             [datahike.api :as d]
             [seon.render :as render] [seon.program :as program]
             [clojure.data.json :as json]
-            [seon.db :as pdb]
+            [seon.db :as pdb] [seon.task :as task]
             [seon.print :as print]
             [seon.print.select :as select]
             [seon.doc :as doc]
@@ -225,14 +225,15 @@
       [(cond-> {:role "assistant" :content "" :tool-calls [(cond-> {:id id :code code} said? (assoc :intent intent))]}
          (and call-id (reply-of db e)) (assoc :reply (reply-of db e)))
        {:role "tool" :tool-call-id id :content (render/result-text ix db mark)}]
-      [{:role "user" :content (render/result-text ix db (assoc mark :with (array-map :by by :code code)))}])))
+      [{:role "user" :content (render/result-text ix db (assoc mark :with (array-map :by (task/sender-name (ratom/realize by)) :code code)))}])))
 
 (defn message-msgs
-  "A message to the agent (:seon.message/fact) as the model reads it: one user message, who sent it and its body. See
+  "A message to the agent (:seon.message/fact) as the model reads it: one user message, who sent it (by name: seon.task/sender-name of the
+  sender its pull joins) and its body. See
   docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat :map :map] [:vector :seon.model/message]]}
   [_ {:seon.message/keys [from body]}]
-  [{:role "user" :content (print/text (array-map :from (str from) :body (str body)) (:context print/budgets))}])
+  [{:role "user" :content (print/text (array-map :from (str (task/sender-name (ratom/realize from))) :body (str body)) (:context print/budgets))}])
 
 
 (defn defect-msgs

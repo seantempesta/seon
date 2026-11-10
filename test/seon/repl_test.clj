@@ -1154,7 +1154,7 @@
                            (finally (reset! agent/state old))))]
     (doseq [code ["#'clojure.core/inc" "(fn [x] x)" "{:a 1 :b [1 2 3] :c \"text\"}" "(throw (ex-info \"boom\" {:k 1}))"]]
       (let [r (ev code)
-            rec (assoc (repl/record-details code r {:call-id "c1"}) :seon.eval/id "e1" :seon.eval/by "a1")
+            rec (assoc (repl/record-details code r {:call-id "c1"}) :seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1"})
             msg (second (seon.fixtures/eval-messages {} rec))]
         (is (string? (:text r)) code)
         (is (= (:text r) (:content msg)) (str "the outside text is the model's message for " code))))
@@ -1351,7 +1351,7 @@
                                            nil)"
                                       "[id before]"
                                       "(do (seon.repl/again id \"(swap! tick + 10)\") (seon.agent/commit!) [(eid-of id) (code-of id)])"
-                                      "(do (seon.agent/transact! [{:seon.eval/id \"e1\" :seon.eval/agent [:seon.agent/key (:key @seon.agent/state)] :seon.eval/by \"agent\" :seon.eval/code \"(+ 5 5)\" :seon.eval/response {:value 10}}])
+                                      "(do (seon.agent/transact! [{:seon.eval/id \"e1\" :seon.eval/agent [:seon.agent/key (:key @seon.agent/state)] :seon.eval/by {:seon.agent/key \"agent\"} :seon.eval/code \"(+ 5 5)\" :seon.eval/response {:value 10}}])
                                            (def was (eid-of \"e1\"))
                                            (seon.repl/again \"e1\" \"(+ 5 6)\")
                                            (seon.agent/commit!)

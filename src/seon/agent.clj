@@ -182,7 +182,7 @@
   "The messages main holds to this agent that its branch does not hold yet (seon.task/undelivered, which says how). Main is read only
   here, through `heard-main`: where messages live is this one read. Delivery is the fact, read here, not a frame root pushes to a
   live process: a process spawned again reads what came while none lived. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:from :string] [:body :string] [:sent-ms :int]]]]}
+  {:malli/schema [:=> [:cat] [:vector [:map [:id :string] [:from :map] [:body :string] [:sent-ms :int]]]]}
   [] (task/undelivered (heard-main) (db) (:key @state)))
 
 (defn untaken-facts
@@ -206,9 +206,10 @@
   [] (or (:seon.agent/turn (d/entity (db) [:seon.agent/key (:key @state)])) 0))
 
 (defn own-message-tx
-  "Message mid from from, sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
-  took it is derived from the transaction that wrote it (seon.ctx/turn-members). See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :string :string :any :int] :seon.db/tx-data]}
+  "Message mid from from (its sender's lookup, seon.task/sender), sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
+  took it is derived from the transaction that wrote it (seon.ctx/turn-members). Its sender is written by its identity (seon.task/sender),
+  an upsert, so a sender made after this branch forked resolves here too. See docs/users.md#messages."
+  {:malli/schema [:=> [:cat :string :map :any :int] :seon.db/tx-data]}
   [mid from body sent-ms]
   (task/message-tx mid from [(:key @state)] body sent-ms))
 
@@ -430,10 +431,11 @@
 (defn messages
   "The messages to this agent not yet delivered, delivered (deliver!, as a turn delivers them: the entities on
   main to it, another agent's sends included), then the effect outcomes of the inbox. Delivered, a message stays in `@ctx` until the agent
-  removes it (`(swap! ctx update :seon.message/_to dissoc e)`), and is not delivered again. See docs/users.md#messages."
+  removes it (`(swap! ctx update :seon.message/_to dissoc e)`), and is not delivered again. Each delivered one's :from is its sender's name
+  (seon.task/sender-name: an agent's key, \"seon\" for the system), what the agent reads of who sent it; the entity is the ref. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
-  (let [es (deliver!)]
+  (let [es (mapv #(update % :from task/sender-name) (deliver!))]
     (let [[old _] (swap-vals! state assoc :inbox [])] (into es (:inbox old)))))
 
 (def ^:dynamic *fx-stub*
