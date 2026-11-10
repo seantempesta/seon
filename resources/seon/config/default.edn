@@ -100,8 +100,10 @@
  :seon.config.root/main #or [#env SEON_MAIN "main"]
  ;; Root's system declaration (owner, 2026-10-20: the definition lives in a file).
  :seon.config.root/system-path #seon/checkout "resources/seon/system.edn"
- ;; The task files (resources/seon/tasks/<owning-ns>.edn, docs/tasks.md#task-files).
- :seon.config.root/tasks-dir #seon/checkout "resources/seon/tasks"
+ ;; The task files (resources/seon/tasks/<owning-ns>.edn, docs/tasks.md#task-files). bin/check sets SEON_TASKS
+ ;; to its run's own (none), so every root a check step starts, and every process it starts, indexes no task file of
+ ;; the checkout's: they cite the checkout's program, which a check's example program does not hold.
+ :seon.config.root/tasks-dir #or [#env SEON_TASKS #seon/checkout "resources/seon/tasks"]
  ;; Unit: directories of the checkout ("." is its top level, the .md files there: AGENTS.md, BAGGAGE.md,
  ;; README.md). The pages an index (a seed, or my.root/load-docs!) writes into main as wiki sections
  ;; (seon.root/wiki-tx), so one search and one view reach them (owner, 2026-10-27: "everything of
