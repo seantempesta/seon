@@ -525,26 +525,25 @@
       (is (false? @(:seon.root/stall-timer st')) "and no stall timer was armed"))))
 
 (deftest a-step-that-throws-after-a-stall-check-leaves-the-check-armed
-  ;; docs/failure-points.md: root's stall check is a timer to itself (seon.step/timer). A step that took :stall-check
-  ;; and then threw is undone by Flow (its state from before the step is kept); the timer's armed flag is a host object,
-  ;; so the next step with an eval in flight arms it again. Red before: the flag was in the state (::stall-due), kept
-  ;; true by the undo, and no check was armed for the life of root (batch 15's problems step: a held eval never seen
-  ;; as a stall, 14.5 min). No load: the timer (1 ms) is read off :back, the wait bounded at 2 s.
-  (let [back (a/chan 4)
-        st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back back :to-writer (a/chan 4) :events (a/chan 4)
+  ;; docs/clocks.md: root's stall check is a timer to itself (seon.step/timer). A step that took :stall-check and then
+  ;; threw is undone by Flow (its state from before the step is kept); the timer's armed flag is a host object, so the
+  ;; next step with an eval in flight arms it again. Red before: the flag was in the state (::stall-due), kept true by
+  ;; the undo, and no check was armed for the life of root. No clock: each arm's put is recorded as it is asked for
+  ;; (seon.step/put-after! redefined), never waited on.
+  (let [puts (atom [])
+        st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                              :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
-        st (assoc st :stall-ms 2 :seon.root/busy #{:a1})
-        ;; a step arms the check (an eval in flight)
-        [st _] (#'root/api-proc st :ext {:op :noop})
-        armed (a/alt!! back ([m] m) (a/timeout 2000) ::none)]
-    (is (= {:op :stall-check} armed) "an eval in flight arms the check")
-    ;; the step that takes it throws after taking it: Flow keeps the state from before it
-    (let [before st]
-      (is (thrown? Throwable (with-redefs [root/record-agents (fn [& _] (throw (ex-info "after the take" {})))]
-                               (#'root/api-proc st :back armed))))
-      (let [[_ _] (#'root/api-proc before :ext {:op :noop})]
-        (is (= {:op :stall-check} (a/alt!! back ([m] m) (a/timeout 2000) ::none))
-            "the next step arms it again")))))
+        st (assoc st :stall-ms 2 :seon.root/busy #{:a1})]
+    (with-redefs [step/put-after! (fn [_ _ m] (swap! puts conj m) nil)]
+      (let [[st _] (#'root/api-proc st :ext {:op :noop})]
+        (is (= [{:op :stall-check}] @puts) "an eval in flight arms the check")
+        (let [[st _] (#'root/api-proc st :ext {:op :noop})]
+          (is (= 1 (count @puts)) "armed once: a second step arms nothing more")
+          ;; the step that takes it throws after the take: Flow keeps the state from before it
+          (is (thrown? Throwable (with-redefs [root/record-agents (fn [& _] (throw (ex-info "after the take" {})))]
+                                   (#'root/api-proc st :back {:op :stall-check}))))
+          (#'root/api-proc st :ext {:op :noop})
+          (is (= [{:op :stall-check} {:op :stall-check}] @puts) "the next step arms it again"))))))
 
 (deftest root-records-what-it-observes-of-its-agents
   ;; what root observes of an agent is facts on the
