@@ -717,3 +717,19 @@
     (is (= #{'t/same 't/based} (proofs/main-red results cand base found))
         "its digest is base's, or base's verdict at it is red; green at base, new on the branch, or passing: the branch's")
     (is (= #{} (proofs/main-red results cand nil {})) "with no base nothing is main's")))
+
+(deftest a-run-runs-a-sample-of-its-reused-greens-again
+  ;; the owner's plan, 2026-11-10: a writer change reused 226 of 233 process tests' greens and five were red. Whatever the
+  ;; next missed input is, a run runs n reused greens of each class again, chosen by the tree (seon.proofs/reuse-audit)
+  (let [green {:pass 1 :fail 0 :error 0}
+        reused (merge (into {} (for [i (range 30)] [(symbol "app.ra-test" (str "p" i)) green]))
+                      (into {} (for [i (range 30)] [(symbol "app.ra-test" (str "q" i)) green]))
+                      {'app.ra-test/red {:pass 0 :fail 1 :error 0} 'app.ra-test/flaky (assoc green :flaky true) "a-step" green})
+        process (set (for [i (range 30)] (symbol "app.ra-test" (str "p" i))))
+        a (proofs/reuse-audit reused process "tree-a" 10)]
+    (is (= 20 (count a)) "n of each class")
+    (is (= 10 (count (filter process a))) "ten that start a process, ten that do not")
+    (is (not-any? #{'app.ra-test/red 'app.ra-test/flaky "a-step"} a) "never a red, a flaky one or a check step")
+    (is (= a (proofs/reuse-audit reused process "tree-a" 10)) "the same tree, the same ones")
+    (is (not= a (proofs/reuse-audit reused process "tree-b" 10)) "another tree, others")
+    (is (= [] (proofs/reuse-audit reused process "tree-a" 0)) "none at 0")))

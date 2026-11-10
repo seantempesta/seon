@@ -433,7 +433,7 @@
         1)
   (let [dir (str "the verdict cache " (config/value :seon.config.proofs/results-dir))
         tests? (not= what "checks") checks? (not= what "tests")
-        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived binary-current]} plan
+        {:keys [run-tests run-steps reused cand left slow digests steps missing inputs binary no-test process flaky waived binary-current audit]} plan
         ;; a merge runs these last, once all else is green (bin/prove): out/slow, names, one line
         ;; the proofs of the tree that pass by a waiver (an :overrun in the form: seon.problems/waived-proofs), for bin/prove's last lines
         _ (write! (str out "/waived") (str waived "\n"))
@@ -497,6 +497,11 @@
                       ran " in this plan, " late " the slow ones run last (the process plan after it)"))))
     ;; a key green and red at one digest: red, never run again until a change moves its digest;
     ;; out/flaky names each, and bin/test ends red on it after its shards ran
+    ;; the reuse audit (seon.proofs/plan-of): reused greens run again; out/audit names them, and bin/test calls a red among
+    ;; them a reuse mismatch: a digest that missed an input
+    (write! (str out "/audit") (apply str (map #(str % "\n") audit)))
+    (when (seq audit)
+      (println (str "prove: reuse audit: " (count audit) " reused greens run again (chosen by the tree): " (str/join " " (map str audit)))))
     (let [flaky (for [[k r] flaky]
                   (str "FLAKY " k " " (:digest r) ": green and red at this digest, red until a change moves it (seon.proofs/flaky)"))]
       (write! (str out "/flaky") (apply str (map #(str % "\n") flaky)))

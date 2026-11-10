@@ -570,6 +570,12 @@
  ;; (4.2 s) after every shard's write, freeing only that write's room (2026-11-06, commit message). At the
  ;; bound: this share of the cache's least recently used verdicts goes at once, each running again if asked for.
  :seon.config.proofs/results-evict-percent 10
+ ;; Unit: tests. How many reused greens of each class (that start a process, that do not) every run runs again, chosen by
+ ;; the tree, so a rerun of one tree audits the same ones (seon.proofs/plan-of's :audit): a reuse the digest should not
+ ;; have made shows as a red at a green's digest, REUSE MISMATCH. Provenance: the owner's plan, 2026-11-10 (a writer
+ ;; change reused 226 of 233 process tests' greens; five were red): 10 a class, ~12 s CPU a run. At the bound: the
+ ;; other reused greens are not run again this run.
+ :seon.config.proofs/reuse-audit 10
  ;; Unit: tests. How many tests the agent-tests check runs through an agent, the lowest digests (seon.proofs/agent-tests-sample). A fault that
  ;; hits 3 percent of tests shows in 100 with 95 percent odds. Provenance: all 1,154 cost 136 to 166 s of each wide prove and ran again what
  ;; bin/test had just run; the owner chose a sample, 2026-11-06. At the bound: the other tests are not run this way in that run.
