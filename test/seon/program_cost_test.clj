@@ -498,7 +498,7 @@
      ;; measured: 14.0 / 21.3 / 49.2 / 134.7 MB and 5.2 / 8.7 / 22.2 / 63.7 M ticks at 10 / 30 / 100 / 300; with the schema read per datom, 285.8 MB at 10
      :per-n {:bytes 400000.0}
      :fixed {:bytes 10000000.0}
-     :sizes [10 30 100]}))
+     :sizes [3 10 30]}))
 
 (defn digested-of
   "program-digest's argument: a branch db holding n forms (branch-of's)."
@@ -603,6 +603,6 @@
          :fixed {:calls 102 :bytes 1000000 :ticks 340000} ; 83 until the write checked every datom (the owner, 2026-11-06); 102
          ;; since the check is a function, seon.db/checked, not a macro shaped to the count (the audit of 2026-11-09; the owner's
          ;; validation at transaction time, 2026-11-08). 380k ticks and 1.12 MB measured then, under the shared load of a full prove
-         :sizes [100 300 1000]})
+         :sizes [30 100 300]})
       (finally (reset! seon.agent/state was)
                (add-watch seon.agent/state :seon.ctx/ctx @#'seon.ctx/on-state)))))
