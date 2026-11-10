@@ -4,7 +4,7 @@
   store (its agent caches its verdicts by digest: seon.results-test).
   Run: bin/test seon.prove-test"
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.test-store :as ts] [clojure.java.shell :as sh] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config]))
+            [seon.test-store :as ts] [clojure.java.shell :as sh] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.step :as step] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config]))
 
 (defn- feed
   "State st after the messages ([in m] ...) in order, with every output it made (the :to-api messages)."
@@ -373,3 +373,56 @@
     (is (not= (dir (first rs)) (dir (second rs))) "each run has a directory of its own")
     (doseq [r rs]
       (is (not (.exists (java.io.File. ^String (dir r)))) "and a green run's directory is gone with it"))))
+
+;; ---- items: the service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2) ----------------------------
+
+(defn- items-st [slots] (assoc (prove/prove-proc {:conn nil}) :slots slots))
+(defn- batches [outs] (filterv #(= :tests (get-in % [:req :op])) outs))
+(defn- answers [outs] (into {} (for [o outs :when (= :prove-answer (:op o))] [(:rid o) (:r o)])))
+(def ^:private green-of (fn [& ts] {:pass (count ts) :fail 0 :error 0 :reports (mapv #(hash-map :type :pass :var (str "#'" %)) ts)}))
+
+;; docs/merging.md#the-test-service: ten askers of one item run it once, and each is answered when its last item is green
+(deftest an-item-many-ask-runs-once-and-answers-each
+  (let [it {:agent :a1 :ms 50}
+        [st o1] (prove/ask-items (items-st 4) 1 :batch {['app.x-test/t "d1"] it})
+        [st o2] (prove/ask-items st 2 :batch {['app.x-test/t "d1"] it})
+        _ (is (= 1 (count (batches (into o1 o2)))) "the second asker joins the item: one batch, not two")
+        _ (is (= {} (answers (into o1 o2))) "nobody is answered before it ends")
+        [st m] (step/answered st (:tag (first (batches o1))))
+        [st o3] (prove/batch-ended st (parse-long (second m)) (green-of 'app.x-test/t))]
+    (is (= {1 true 2 true} (update-vals (answers o3) :green)) "both answered green from the one run")
+    (is (= {} (:items st)) "and the item has left the service: its verdict is the cache's")
+    (is (= 4 (:slots st)) "its slot free again")))
+
+;; an asker wants to know whether its tests pass: its first red answers it at once, and the work only it wanted is dropped
+(deftest a-red-answers-its-asker-at-once-and-drops-what-only-it-wanted
+  (let [[st o1] (prove/ask-items (items-st 1) 1 :batch {['app.a-test/t "da"] {:agent :a1 :ms 10} ['app.b-test/u "db"] {:agent :a1 :ms 10}})
+        b (first (batches o1))
+        [st v] (step/answered st (:tag b))
+        red {:pass 0 :fail 1 :error 0 :reports [{:type :fail :var (str "#'" (first (get-in b [:req :items]))) :message "no"}]}
+        [st o2] (prove/batch-ended st (parse-long (second v)) red)]
+    (is (= 1 (count (batches o1))) "one slot: one batch at a time")
+    (is (false? (:green (get (answers o2) 1))) "the first red answers its asker, red")
+    (is (= [] (batches o2)) "the other item, which only it wanted, is never run")
+    (is (= {} (:items st)) "and has left the queue")))
+
+;; an agent's turn waits to act: its items go ahead of a batch's, however the batch's are valued
+(deftest a-turns-item-goes-ahead-of-a-batchs
+  (let [[st _] (prove/ask-items (items-st 0) 1 :batch {['app.cheap-test/t "dc"] {:agent :a1 :ms 1}})
+        [st _] (prove/ask-items st 2 :turn {['app.slow-test/u "ds"] {:agent :a2 :ms 100000}})
+        [st outs] (#'prove/grant (assoc st :slots 1))]
+    (is (= [:a2 ['app.slow-test/u]] ((juxt #(get-in % [:req :id]) #(get-in % [:req :items])) (first (batches outs))))
+        "the free slot goes to the turn's item")
+    (is (= 1 (get-in st [:items ['app.cheap-test/t "dc"] :skips])) "and the batch's item passed over ages a skip")))
+
+;; every wait ends: a batch whose run errored (a test child that died) answers each of its askers with that error, never silence
+(deftest a-batch-that-died-answers-its-askers-with-the-error
+  (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :a1 :ms 5}})
+        b (first (batches o1))
+        [st v] (step/answered st (:tag b))
+        died {:seon.error/type :seon.test/fork-refused :seon.error/message "the test child could not be forked"}
+        [st o2] (prove/batch-ended st (parse-long (second v)) died)
+        r (get (answers o2) 7)]
+    (is (false? (:green r)))
+    (is (seon.contract/error? (get-in r [:results 'app.x-test/t])) "the asker holds the typed error for the item")
+    (is (= 1 (:slots st)))))

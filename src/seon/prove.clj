@@ -66,6 +66,115 @@
                  (step/ask st [:prove :answers] [:spawn (:key req)] {:op :spawn :opts {:branch :tests}}))]
     [(assoc-in st [:running :stage] (if (:agent req) :tests :spawn)) [m]]))
 
+;; ---- items: a (test, digest) pair, run once whoever asks ------------------------------------
+;; The test service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2): an asker names the items its plan
+;; has no verdict for; each item is queued once with every asker waiting on it, granted in batches to the agent holding
+;; its branch while a slot is free (the machine's test children: the one bound), and each asker is answered at its first
+;; red or its last green. State: :items {[test digest] {:status :waiters :agent :ms :risk :skips}}, :askers {rid {:left
+;; :prio :results}}, :batches {bid #{item}}, :slots n. No clock: an item passed over is aged in skips.
+
+(defn item-value
+  "What running queued item it next is worth: the askers waiting on it, plus the times it was passed over (:skips, an age
+  counted in grants, never a clock), times one plus its chance of being red (:risk, 0-1: a test its branch changed, one red
+  lately), over its measured ms (a cheap item many need first: weighted shortest job first, the least mean time to an
+  answer). See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] :double]}
+  [{:keys [waiters skips risk ms]}]
+  (double (/ (* (+ (count waiters) (or skips 0)) (+ 1.0 (or risk 0.0))) (max 1 (or ms 1)))))
+
+(defn- turn?
+  "Does an asker of a :turn (an agent's turn: someone is waiting to act) wait on item it? Such items go ahead of a batch's."
+  {:malli/schema [:=> [:cat :map :map] :boolean]}
+  [st it] (boolean (some #(= :turn (get-in st [:askers % :prio])) (:waiters it))))
+
+(defn- answer-asker
+  "Asker rid answered with its verdict (:green true, or the reds and errors it met first), and gone from every item's
+  waiters; a queued item no one waits on any more leaves the queue (no work for an answer already given)."
+  {:malli/schema [:=> [:cat :map :int :map] [:tuple :map [:vector :map]]]}
+  [st rid r]
+  (let [left (get-in st [:askers rid :left])
+        st (reduce (fn [st k]
+                     (let [st (update-in st [:items k :waiters] disj rid)
+                           it (get-in st [:items k])]
+                       (cond-> st (and it (empty? (:waiters it)) (= :queued (:status it))) (update :items dissoc k))))
+                   (update st :askers dissoc rid) left)]
+    [st (reply [] [rid] r)]))
+
+(defn- grant
+  "While a slot is free and an item is queued: the most valuable queued item (a :turn asker's first, then item-value)
+  with every queued item of its namespace and agent (one fork of the agent, one fixture run), asked of that agent as
+  {:op :tests :id agent :items [test ...]} tagged [:batch bid]; each queued item passed over ages a skip.
+  Answers [st outputs]."
+  {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
+  [st]
+  (loop [st st outs []]
+    (let [queued (filter #(= :queued (:status (val %))) (:items st))]
+      (if (or (empty? queued) (< (:slots st 0) 1))
+        [st outs]
+        (let [[k it] (apply max-key (fn [[_ it]] (+ (if (turn? st it) 1e12 0) (item-value it))) queued)
+              ns-of (comp namespace first)
+              batch (into #{} (comp (filter (fn [[k2 it2]] (and (= (ns-of k2) (ns-of k)) (= (:agent it2) (:agent it))))) (map key)) queued)
+              bid (inc (:bid st 0))
+              st (reduce (fn [st k2] (if (batch k2) (assoc-in st [:items k2 :status] :running) (update-in st [:items k2 :skips] (fnil inc 0))))
+                         (-> st (assoc :bid bid) (update :slots dec) (assoc-in [:batches bid] batch))
+                         (map key queued))
+              [st m] (step/ask st [:prove :answers] [:batch (str bid)] {:op :tests :id (:agent it) :items (vec (sort (map first batch)))})]
+          (recur st (conj outs m)))))))
+
+(defn- item-ended
+  "Item k ended with result r ({:pass :fail :error} counts, its :failures; an error: its batch died): each asker waiting on
+  it loses it; one that met a red or an error is answered so at once; one with nothing left is answered green. The item
+  leaves the state: its verdict is the cache's now (its runner wrote it as it ended). Answers [st outputs]."
+  {:malli/schema [:=> [:cat :map :any :any] [:tuple :map [:vector :map]]]}
+  [st k r]
+  (let [waiters (get-in st [:items k :waiters])
+        st (update st :items dissoc k)
+        red? (or (contract/error? r) (not (proofs/green? r)))]
+    (reduce (fn [[st outs] rid]
+              (let [st (-> st (update-in [:askers rid :left] disj k) (assoc-in [:askers rid :results (first k)] r))
+                    {:keys [left results]} (get-in st [:askers rid])]
+                (cond red? (let [[st o] (answer-asker st rid {:green false :results results
+                                                               :red (vec (sort-by str (keep (fn [[t r]] (when (or (contract/error? r) (not (proofs/green? r))) t)) results)))})]
+                             [st (into outs o)])
+                      (empty? left) (let [[st o] (answer-asker st rid {:green true :results results})] [st (into outs o)])
+                      :else [st outs])))
+            [st []] waiters)))
+
+(defn ask-items
+  "Asker rid (prio :turn or :batch) waits on items ({[test digest] {:agent :ms :risk}}, what its plan holds no verdict
+  for): an item queued or running gains it as a waiter, the rest are queued once; then slots are granted (grant).
+  With no item it is answered green at once. Answers [st outputs]. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map :int [:enum :turn :batch] [:map-of :any :map]] [:tuple :map [:vector :map]]]}
+  [st rid prio items]
+  (if (empty? items)
+    [st (reply [] [rid] {:green true :results {}})]
+    (let [st (reduce (fn [st [k m]]
+                       (if (get-in st [:items k])
+                         (update-in st [:items k :waiters] conj rid)
+                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :risk]) :status :queued :waiters #{rid} :skips 0))))
+                     (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}}) items)]
+      (grant st))))
+
+(defn batch-ended
+  "Batch bid's answer r (the agent's :tests answer: its :reports by test var, its :failures; or the error its run answered,
+  a died child among them): each of its items ended with its own result, one the answer does not name with the typed
+  :seon.prove/no-verdict (never silence), every item of a batch that errored with that error; its slot is free again and
+  the next is granted. Answers [st outputs]."
+  {:malli/schema [:=> [:cat :map :int :any] [:tuple :map [:vector :map]]]}
+  [st bid r]
+  (let [batch (get-in st [:batches bid])
+        st (-> st (update :batches dissoc bid) (update :slots inc))
+        fails (when-not (contract/error? r) (proofs/failures r))
+        reported (when-not (contract/error? r) (into #{} (keep #(some-> (:var %) (subs 2) symbol)) (:reports r)))
+        result (fn [[t _]] (cond (contract/error? r) r
+                                 (fails t) {:pass 0 :fail 1 :error 0 :failures (fails t)}
+                                 (reported t) {:pass 1 :fail 0 :error 0}
+                                 :else (contract/error :seon.prove/no-verdict #'seon.prove/batch-ended
+                                                       (str t "'s batch answered no verdict for it") {:test t})))
+        [st outs] (reduce (fn [[st outs] k] (let [[st o] (item-ended st k (result k))] [st (into outs o)])) [st []] (sort-by str batch))
+        [st more] (grant st)]
+    [st (into outs more)]))
+
 ;; ---- the daily full run: a run of its own ------------------------------------------------
 
 (defn- full-request
