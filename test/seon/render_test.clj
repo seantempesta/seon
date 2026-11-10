@@ -207,13 +207,14 @@
   ;; an eval's cost as recorded, each number with its unit; a turn's header says which of how many
   (let [ev (h/html (ui/evaluation {:seon.render/index (seon.db/index)} {:seon.eval/code "(f 2)" :seon.eval/intent "f doubles?" :seon.eval/response {:handle 'result/e1 :value 4 :ms 1.5 :bytes 2048 :ticks 120}
                                       :seon.eval/by "a3"}))
-        turn (h/html (ui/model-call-view {} {:seon.model-call/n 1 :seon.model-call/tokens 1200 :seon.model-call/basis {:max-turns 8}}))]
+        call {:seon.model-call/n 1 :seon.model-call/reply "Done." :seon.model-call/tokens 1200 :seon.model-call/basis {:max-turns 8}}
+        turn (h/html (ui/model-call-view {:as :inline} call))]
     (is (str/includes? ev "f doubles?") "the text beside the call")
     (is (str/includes? ev "1.5 ms · 120 ticks · 2.0 KB") "its cost as recorded, in the one wording")
     (is (str/includes? (h/html (#'ui/cost-line {:ticks 1200 :ms 1.5})) "1.5 ms · 1.2k ticks") "ticks too, when recorded; nothing not recorded")
     (is (str/includes? (h/html (#'ui/cost-line {})) "not run") "an eval never run says so")
     (is (str/includes? turn "turn 1 of 8"))
-    (is (str/includes? turn "1,200 tokens"))))
+    (is (not (str/includes? (h/html (ui/model-call-view {} call)) "tokens")) "its tokens are the debug tab's (debug-turn), not the chat's")))
 
 ;;; --- the law, from the compiler's facts: one printer, and no cut before it -------------
 
@@ -2675,12 +2676,12 @@
            :seon.message/_to {4 {:seon.message/from "user" :seon.message/body "Is the premise right?"}}}
         h #(h/html %)]
     (testing "a model turn is its reply, its thinking folded"
-      (let [t (h (ui/reply-hiccup (get-in c [:seon.model-call/_agent 2]) false []))]
+      (let [t (h (ui/model-call-view {} (get-in c [:seon.model-call/_agent 2])))]
         (is (str/includes? t "I'll <strong>reproduce</strong> it first."))
         (is (str/includes? t "<details") "its thinking folded")
         (is (str/includes? t "Read select first."))
         (is (not (str/includes? t "turn 1")) "its turn and tokens are for the debug tab"))
-      (is (nil? (ui/reply-hiccup (get-in c [:seon.model-call/_agent 3]) false [])) "a turn that said nothing draws no bubble"))
+      (is (nil? (ui/model-call-view {} (get-in c [:seon.model-call/_agent 3]))) "a turn that said nothing draws no bubble"))
     (testing "a message is a bubble with its sender"
       (let [m (h (ui/message {} (get-in c [:seon.message/_to 4])))]
         (is (str/includes? m "user"))
@@ -2906,7 +2907,7 @@
         reply (some #(when (= :section (first %)) %) (drop 2 turn))]
     (is (= #{"e2" "e4"} shown) "an eval of another hand, Seon's among them, is a line after the reply")
     (is (= ["e3"] (map #(get % :seon.eval/id) (last (last reply)))) "the agent's eval is its reply's step")
-    (let [t (h/html (ui/reply-hiccup (d/pull db '[*] call) false []))]
+    (let [t (h/html (ui/model-call-view {} (d/pull db '[*] call)))]
       (is (str/includes? t "Found <strong>it</strong>") "what it said, its Markdown drawn")
       (is (not (str/includes? t "of context")) "its tokens are for whoever opens a step"))
     (let [e (h/html (ui/evaluation opts (get-in (:seon.ctx/ctx opts) [:seon.eval/_agent (eid "e3")])))]
@@ -3368,24 +3369,27 @@
   (let [[db aid] (cited-world)
         k (:seon.agent/key (d/pull db [:seon.agent/key] aid))
         cid (seon.lib/call-id k 1)
-        turn (fn [db] (ui/conversation-turn {:seon.ctx/ctx (:tree (seon.ctx/build (seon.db/index) db aid :b)) :seon.db/db db :key 1}))
-        at (fn [db] (h/html (turn db)))
+        ;; the agent's page as the walk draws it: the turn places the call's view, drawn by its own render (ui/model-call-view)
+        at (fn [db] (let [w (draw (:tree (seon.ctx/build (seon.db/index) db aid :b)) seon.ctx/changes db #'ui/agent)]
+                      (try (apply str (map :html (r/placed-units w))) (finally (r/dispose-walk! w)))))
         open (d/db-with db [{:db/id aid :seon.agent/turn 1}
                             {:seon.model-call/id cid :seon.model-call/agent aid :seon.model-call/n 1 :seon.model-call/origin :model}])
         busy (at open)
-        sel (seon.render/key-id [cid])]
+        sel (seon.render/key-id [cid])
+        ;; the in-flight element, by its id (the page holds other busy elements: its agent's state)
+        streaming (str "id=\"" sel "\"")]
     (is (str/includes? busy (str "id=\"" sel "\"")) (str "the in-flight element, its id the call's: " busy))
     (is (str/includes? busy "aria-busy=\"true\"") "busy while the model answers")
     (is (str/includes? busy "data-ignore-morph") "kept as it is through the turn's redraws")
     (is (= [] (seon.ctx.wire/model-call-msgs {:seon.db/db open} (d/pull open '[*] [:seon.model-call/id cid]))) "the model reads nothing of it")
     (let [replied (d/db-with open [{:seon.model-call/id cid :seon.model-call/reply "Found it."}])]
       (is (str/includes? (at replied) "Found it.") "the committed reply draws while its evals run")
-      (is (str/includes? (at replied) "aria-busy") "beside the element, until its evals have run")
-      (is (not (str/includes? (at (d/db-with replied [{:seon.model-call/id cid :seon.model-call/forms 1}])) "aria-busy"))
+      (is (str/includes? (at replied) streaming) "beside the element, until its evals have run")
+      (is (not (str/includes? (at (d/db-with replied [{:seon.model-call/id cid :seon.model-call/forms 1}])) streaming))
           ":forms ends it"))
-    (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/error {:seon.error/type :seon.model/transport :seon.error/message "gone"}}]))) "aria-busy"))
+    (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/error {:seon.error/type :seon.model/transport :seon.error/message "gone"}}]))) streaming))
         "an error committed ends it too")
-    (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/origin :outside}]))) "aria-busy"))
+    (is (not (str/includes? (str (at (d/db-with open [{:seon.model-call/id cid :seon.model-call/origin :outside}]))) streaming))
         "an outside agent's call streams nothing")))
 
 (deftest a-call-in-flight-keeps-its-committed-evals
@@ -3402,8 +3406,10 @@
         reply (some #(when (= :section (first %)) %) (drop 2 turn))]
     (is (some #(and (vector? %) (= :ol (first %)) (= ["e3"] (map #(get % :seon.eval/id) (second (rest %))))) reply)
         (str "its eval is the reply's step: " (pr-str reply)))
-    (is (str/includes? (pr-str turn) "aria-busy") "beside the in-flight element")
-    (is (some #(and (vector? %) (map? (second %)) (= "seon-stream" (:class (second %)))) (tree-seq coll? seq turn)) "the element is in the turn the page draws")
+    (let [w (draw (:tree (seon.ctx/build (seon.db/index) db aid :b)) seon.ctx/changes db #'ui/agent)
+          page (try (apply str (map :html (r/placed-units w))) (finally (r/dispose-walk! w)))]
+      (is (str/includes? page "aria-busy") "beside the in-flight element")
+      (is (< (str/index-of page "seon-stream") (str/index-of page "id=\"evaluation-e3\"")) "the element is in the turn the page draws, its call's, above the step"))
     (is (not-any? #(str/includes? (pr-str %) "seon-stream")
                   (concat (seon.ctx.wire/model-call-msgs {:seon.db/db db} (d/pull db '[*] [:seon.model-call/id (seon.lib/call-id k 1)]))
                           (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "e3"]))))

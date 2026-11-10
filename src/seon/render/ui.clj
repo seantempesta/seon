@@ -536,30 +536,49 @@
                               [:td {:class "tabular-nums"} (str (group3 ticks) " ticks")] [:td {:class "tabular-nums"} (str (group3 self-ticks) " own")]
                               [:td {:class "tabular-nums"} (str (group3 bytes) " B")]])]]])]]))))
 
+(declare stream-container)
+
+(defn- in-flight?
+  "Whether model call view call, of the agent whose ctx is c, is in flight: the model's call until its evals have all run
+  (:seon.model-call/forms, written by seon.turn after the last) or it failed (:seon.model-call/error), of an agent whose process lives
+  (none when there is no ctx: an example session drawn as of its end). See docs/render.md#in-flight-output-streams."
+  {:malli/schema [:=> [:cat :any :any] :boolean]}
+  [call c]
+  (boolean (and c (= :model (ratom/realize (get call :seon.model-call/origin)))
+                (nil? (ratom/realize (get call :seon.model-call/forms))) (nil? (ratom/realize (get call :seon.model-call/error)))
+                (not (gone (ratom/realize (get c :seon.agent/status)))))))
+
+(defn- said?
+  "Whether model call view call holds words or thinking to show."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [call] (not (and (str/blank? (ratom/realize (get call :seon.model-call/reply))) (str/blank? (ratom/realize (get call :seon.model-call/reasoning))))))
+
 (defn model-call-view
-  "A model turn's header (the declared html render of :seon.model-call/fact), above the evaluations
-  it ran: which turn of how many, its tokens and the share its provider served from cache, how
-  its reply stopped and its model; its reply and reasoning as text, all of its model call
-  (:seon.model-call/*). Nothing it did not record is shown."
-  {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
-  [opts {:seon.model-call/keys [n origin reply reasoning finish truncated tokens cache-hit-tokens cache-miss-tokens model errors forms basis]}]
-  (let [prompt (when (and cache-hit-tokens cache-miss-tokens) (+ cache-hit-tokens cache-miss-tokens))
-        head (str (if (= :outside origin) (str "context read " n) (str "turn " n (when-let [m (:max-turns basis)] (str " of " m)))))]
-    (if (= :inline (:as opts))
-      [:span head]
-      [:div {:class "seon-stack"}
-       [:div {:class "flex flex-wrap items-baseline gap-3 text-xs"}
-        [:b {:class "text-signal"} head]
-        (when tokens [:span {:class "tabular-nums text-text-400"} (str (group3 tokens) " tokens")])
-        (when (and prompt (pos? prompt)) [:span {:class "tabular-nums text-text-400" :title "the share of the prompt its provider served from its prefix cache"}
-                      (str (long (* 100 (/ cache-hit-tokens prompt))) "% of the prompt cached")])
-        (when finish [:span {:class "muted" :title "how its reply stopped"} (str "stopped: " finish)])
-        (when model [:span {:class "muted"} model])
-        (when truncated [:span {:class "text-error"} "cut at the token limit"])
-        (when (and errors (pos? errors)) [:span {:class "text-error"} (str errors " of " forms " forms failed")])]
-       (when-not (str/blank? reply) [:p {:class "seon-text"} (plain reply (part))])
-       (when-not (str/blank? reasoning)
-         [:details [:summary {:class "seon-note"} "its reasoning"] [:p {:class "seon-text text-text-300"} (plain reasoning (part))]])])))
+  "A model call (the declared html render of :seon.model-call/fact), one render wherever it is placed: in the conversation the walk
+  places the call's own view, so this one component answers the page and, by the schema's model render beside it, the model
+  (seon.ctx.wire/model-call-msgs). What the agent said, in Markdown, its thinking folded, and whether it was cut at the token limit;
+  its turn's tokens, cache and envelope are the debug tab's (`debug-turn`). While it is in flight (`in-flight?`, the agent's status read
+  from the walk's ctx), the element its stream's parts are appended into. Nothing said and nothing in flight, nothing. :as :inline,
+  its turn in one line. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx {:optional true} :map]]] :map] :any]}
+  [{c :seon.ctx/ctx :as opts} call]
+  (let [{:seon.model-call/keys [id n origin reply reasoning truncated basis]} (ratom/realize call)
+        head (str (if (= :outside origin) (str "context read " n) (str "turn " n (when-let [m (:max-turns basis)] (str " of " m)))))
+        flying? (in-flight? call c)]
+    (cond
+      (= :inline (:as opts)) [:span head]
+      (or (said? call) flying?)
+      (cond->
+        [:section {:class "flex w-full flex-col gap-1"}
+         (when-not (str/blank? reasoning)
+           [:details [:summary {:class "text-xs text-text-500"} "thinking"]
+            [:div {} [#'markdown reasoning {:inline? true}]]])
+         (when-not (str/blank? reply)
+           [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"} [#'markdown reply {:inline? true}]])
+         (when truncated [:span {:class "text-2xs text-error"} "cut at the token limit"])]
+        ;; kept as it is through the turn's redraws (data-ignore-morph: the reply's commit leaves an eval still running its intent, code
+        ;; and output) and gone at the redraw that no longer draws it; the model never reads it (docs/render.md#in-flight-output-streams)
+        flying? (conj (stream-container id []))))))
 
 (defn message
   "A message to an agent (the declared html render of :seon.message/fact), one render wherever it is placed: in a conversation the
@@ -1418,32 +1437,6 @@
   {:malli/schema [:=> [:cat [:maybe :map]] [:set :any]]}
   [m] (cond (nil? m) #{} (instance? java.util.Map m) (set (.keySet ^java.util.Map m)) :else (set (keys m))))
 
-(declare stream-container)
-
-(defn reply-hiccup
-  "A model turn's reply and the steps it holds (children) as the chat shows it and the model reads it, one hiccup: what the agent said, in Markdown, its thinking folded, then each eval it ran. What the
-  model is sent of it is what it said and its reasoning as returned (a reply cut at the token limit is no message unless its calls were kept: called?). Nothing to say and nothing run, nothing. See
-  docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :map :boolean [:sequential :any]] :any]}
-  [{:seon.model-call/keys [id n origin reply reasoning truncated] :as call} called? children]
-  (let [spoke? (not (str/blank? reply))
-        sent? (and (= :model origin) (or called? (and (not truncated) spoke?)) (or spoke? (some? reasoning)))]
-    ;; in flight (the model's call until its evals have all run: :seon.model-call/forms or its error), one element its stream's
-    ;; parts are appended into, kept as it is through the turn's redraws (data-ignore-morph: the reply's commit leaves an eval
-    ;; still running its intent, code and output) and gone at the redraw that no longer draws it; the model never reads it
-    ;; (docs/render.md#in-flight-output-streams)
-    (when (or spoke? (not (str/blank? reasoning)) (seq children) (::in-flight call))
-      (cond->
-      [:section (cond-> {:class "flex w-full flex-col gap-1"} (pos? (or n 0)) (assoc))
-       (if (str/blank? reasoning)
-         (when (and sent? (some? reasoning)) [:span {} reasoning])
-         [:details [:summary {:class "text-xs text-text-500" :wire/for "page"} "thinking"]
-          [:div {} [#'markdown reasoning {:inline? true}]]])
-       (when spoke? [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"} [#'markdown reply {:inline? true}]])
-       (when (seq children) [:ol {:class "seon-turn flex flex-col"} (seq children)])]
-        (::in-flight call) (conj (stream-container id []))))))
-
-
 (defn stream-part
   "One part of an effect's in-flight text, part one of reasoning, content, message, intent, code, out or err: the element the
   web proc draws in its call's (or eval's) in-flight element (stream-container) with all its text so far (its id the
@@ -1456,7 +1449,7 @@
 (defn stream-container
   "Entity in's in-flight element with its parts, [[id part text] ...] (stream-part each): busy, kept as it is through the
   page's redraws (data-ignore-morph) and found by the web proc (data-stream-in), for the page alone. The turn draws it
-  empty while its call is in flight (reply-hiccup); the web proc draws it whole, the text so far, in its place at each
+  empty while its call is in flight (`model-call-view`); the web proc draws it whole, the text so far, in its place at each
   message. See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :string [:sequential [:tuple :string :string :string]]] :any]}
   [in parts]
@@ -1569,7 +1562,8 @@
                         step #(evaluation {:seon.db/db db :seon.render/index ix} (get-in c [:seon.eval/_agent %]))]]
               (into [:div {}]
                     (concat (for [[m] messages] (message {} (get-in c [:seon.message/_to m])))
-                            [(reply-hiccup (get-in c [:seon.model-call/_agent cid]) (boolean (seq (filter model? evals))) (map step (filter model? evals)))]
+                            [[:section {} (model-call-view {} (get-in c [:seon.model-call/_agent cid]))
+                              (when-let [ss (seq (map step (filter model? evals)))] [:ol {:class "seon-turn flex flex-col"} ss])]]
                             (map step (remove model? evals)))))
             [[:p {} "</session>"]]))))
 
@@ -1655,17 +1649,11 @@
       (when call
         ;; a turn nothing has come of yet (a call its messages or evals have not reached) is no element
         (when-let [kids (seq (remove nil? (concat (for [[m id] messages] (get-in c [:seon.message/_to m]))
-                                                  [(reply-hiccup (cond-> (into {} (for [k [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]
-                                                                                        :let [v (ratom/realize (get call k))] :when (some? v)] [k v]))
-                                                                   ;; in flight: the model's call until its evals have all run (:seon.model-call/forms, written by seon.turn after
-                                                                   ;; the last) or it failed (:seon.model-call/error), of an agent whose process lives; its committed reply and
-                                                                   ;; evals draw beside it all the while
-                                                                   (and (= :model (ratom/realize (:seon.model-call/origin call)))
-                                                                        (nil? (ratom/realize (:seon.model-call/forms call)))
-                                                                        (nil? (ratom/realize (:seon.model-call/error call)))
-                                                                        (not (gone (ratom/realize (:seon.agent/status c)))))
-                                                                   (assoc ::in-flight true))
-                                                                 (boolean (seq ours)) (map item ours))]
+                                                  ;; the call by its own view (its schema's render, `model-call-view`, one component for the page and
+                                                  ;; the model), its evals under it; a call that said nothing, ran nothing and is not in flight is no element
+                                                  [(when (or (seq ours) (said? call) (in-flight? call c))
+                                                     [:section {:class "flex w-full flex-col gap-1"} call
+                                                      (when (seq ours) [:ol {:class "seon-turn flex flex-col"} (map item ours)])])]
                                                   (map item (remove (comp model? first) evals)))))]
           (into [:div {:class "seon-stack"}] kids))))
     ;; the turn now opening has no call yet: what was delivered since the last turn's edge reads here, before the turn begins
