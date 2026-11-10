@@ -1968,8 +1968,11 @@
   {:malli/schema [:=> [:cat :map :seon.program/inputs :boolean] :seon.host/fn]}
   [{:keys [rows plain comp-of cd flags] :as g} {:keys [env tree code config]} roots?]
   (let [line (into {} (for [[ck v] config] [ck (str "\n" ck " " v)]))
-        ;; what root runs, taken by every test that starts a root or runs the binary (root-digest): made once, when one asks
+        ;; what root runs, taken by every test that starts a root or runs the binary (root-digest): made once, when one asks;
+        ;; a test running the binary takes its check driver's too (a mode it names runs seon.check's code, which no reach of
+        ;; the test names: seon.lib-test's fork cases kept one flaky digest across a fix to seon.check/fork-cases)
         root (delay (root-digest g (first (roots-of g (:index g)))))
+        binary (delay (root-digest g (conj (first (roots-of g (:index g))) 'seon.check/-main)))
         ;; :seon.env/src is a direct reader's (kept-program-store): a process test runs a program it names
         env-keys (filterv #(and (= "seon.env" (namespace %)) (not= % :seon.env/src)) (keys config))]
     (fn [k ids]
@@ -1988,6 +1991,7 @@
             ks (if roots? (disj ks :seon.env/src) ks)]
         {:digest (lib/digest (apply str k "\n" env "\n" (when (some #(:scans (flags %)) cs) tree)
                                       (when (and (not roots?) (some #(let [f (flags %)] (or (:proc f) (:bin f))) cs)) (str "\nroot " @root))
+                                      (when (and (not roots?) (some #(:bin (flags %)) cs)) (str "\nbinary " @binary))
                                       (when (and roots? (or src? (some #(:reads (flags %)) cs))) code)
                                       (concat (sort (map cd cs)) (map line (sort ks)))))
          :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))))
@@ -2029,8 +2033,10 @@
         ;; The digest is asked only when one is held, and kept while the graph's component digests are the same value
         rooted (if fresh? (:rooted index #{}) #{})
         root-now (delay (let [[roots k] (roots-of g index)]
-                          {:root (if (identical? (:cd g) (:root-cd index)) (:root index) (root-digest g roots)) :roots roots :roots-key k}))
-        moved? (and (seq rooted) (not= (:root @root-now) (:root index)))
+                          (if (identical? (:cd g) (:root-cd index))
+                            (select-keys index [:root :binary :roots :roots-key])
+                            {:root (root-digest g roots) :binary (root-digest g (conj roots 'seon.check/-main)) :roots roots :roots-key k})))
+        moved? (and (seq rooted) (not= (select-keys @root-now [:root :binary]) (select-keys index [:root :binary])))
         keep-root (fn [ix] (if (realized? root-now) (merge ix @root-now {:root-cd (:cd g)}) ix))]
     (if (and fresh? (empty? (:stale g)) (not moved?))
       (if (realized? root-now) (update g :index keep-root) g)

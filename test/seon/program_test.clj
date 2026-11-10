@@ -1525,3 +1525,23 @@
       (is (not= (get-in (program/index-of held) ['app.rt-test/boots :digest])
                 (get-in (program/index-of (program/reach-indexed g' in)) ['app.rt-test/boots :digest]))
           "and a held index answers it anew, though the test reaches nothing that changed"))))
+
+(deftest a-change-to-a-check-mode-moves-every-test-that-runs-the-binary
+  ;; seon.lib-test/a-wait-for-a-line-parks-the-fiber runs `./seon forks line-parks` (seon.test-store/binary-sh): the mode's
+  ;; code (seon.check/fork-cases) is the binary's, which no reach of the test names, and its flaky verdict kept its digest
+  ;; across the fix (batch 13). A test that runs the binary takes its check driver's reach (index-answer)
+  (let [form (fn [nsym nm kind refs src]
+               (fn [db] (program/record-tx db {:id (str nsym "/" nm "/" (hash src)) :src src :ns nsym :ns-form? false
+                                               :defs [{:var (symbol (str nsym) nm) :meta (case kind :test #{:test} #{:arglists})}]
+                                               :declares #{} :methods [] :impls [] :refs refs :requires #{} :banned #{} :inline-defs #{}})))
+        db (mt/with (mt/world)
+             (form 'seon.check "-main" :fn '#{seon.check/fork-cases} "(defn -main [& args] fork-cases)")
+             (form 'seon.check "fork-cases" :fn '#{} "(def fork-cases {:line-parks 1})")
+             (form 'app.rb-test "runs-the-binary" :test '#{seon.test-store/binary-sh} "(deftest runs-the-binary)")
+             (form 'app.rb-test "starts-a-process" :test '#{seon.lib/fork!} "(deftest starts-a-process)"))
+        in {:env "e" :tree "t" :config {}}
+        dg (fn [db] (update-vals (program/graph-index (program/reach-graph db nil) in nil) :digest))
+        a (dg db)
+        b (dg (mt/with db (form 'seon.check "fork-cases" :fn '#{} "(def fork-cases {:line-parks 2})")))]
+    (is (not= (a 'app.rb-test/runs-the-binary) (b 'app.rb-test/runs-the-binary)) "a change to a check mode's code moves the test running the binary")
+    (is (= (a 'app.rb-test/starts-a-process) (b 'app.rb-test/starts-a-process)) "and not a test that only starts a process (root runs no check mode)")))
