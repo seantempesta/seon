@@ -53,7 +53,7 @@
  :ns/doc :string
  :ns/form [:and {:seon.db/to [:seon.db/form-fact]} :seon.db/ref]
  ;; the file it was imported from, relative to the source tree's root (seon.source)
- :ns/file :string
+ :ns/file [:string {:seon.db/index true}]
  ;; the text after its file's last form
  :ns/tail :string
  :var/name [:and {:seon.db/identity true :seon.db/content-id true} :symbol]

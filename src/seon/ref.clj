@@ -694,13 +694,10 @@
   [m] (when (map? m) (some #(get m %) target-attrs)))
 
 (defn- path-namespace
-  "The namespace whose file db holds as path (its :ns/file), named by Clojure's load-path rule from path (src/a/b_c.clj
-  is a.b-c, below its first directory), or nil."
+  "The namespace whose file db holds as path (its :ns/file, one seek of its index), or nil."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :symbol]]}
   [db path]
-  (when-let [[_ rel] (re-matches #"[^/]+/(.+)\.clj[cs]?" path)]
-    (let [n (symbol (-> rel (str/replace "/" ".") (str/replace "_" "-")))]
-      (when (= path (some->> (pdb/eid db :ns/name n) (d/entity db) :ns/file)) n))))
+  (some->> (first (d/datoms db :avet :ns/file path)) :e (d/entity db) :ns/name))
 
 (defn target
   "What citation c names, as the lookup of its identity on db ([attribute value], `target-attrs`), whether db holds it or
