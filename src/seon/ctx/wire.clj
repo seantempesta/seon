@@ -243,26 +243,24 @@
   [_ {:seon.error/keys [in message]}]
   [{:role "user" :content (print/text (array-map :render-threw (some-> in str) :message (str message)) (:context print/budgets))}])
 
-(defn- children
-  "An element's children xs as the tree holds them: a seq a render returned (a `for`) spliced in its place, nils dropped, so
-  the model reads vectors only and a diff names each child (seon.render/keyed). See docs/render.md#style."
-  {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:vector :any]]}
-  [xs] (into [] (comp (mapcat #(if (seq? %) (children %) [%])) (remove nil?)) xs))
-
 (defn- presentation-free
   "Hiccup h without what is the page's alone: each element's class, style and id, but for a component's root (an element the walk
   gave an id), which keeps its render's name, the first word of its class, so the model can look up the function that drew a part
   (`(source seon.render.ui/task)`) and its CSS on that var's metadata, and its id (seon.render/key-id: the render and what it shows), by which
   a diff names it (seon.render/keyed); each element's children vectors only (`children`). See docs/render.md#style."
   {:malli/schema [:=> [:cat :any] :any]}
-  [h] (clojure.walk/postwalk (fn [x] (if (and (vector? x) (keyword? (first x)) (map? (second x)))
+  [h]
+  ;; an element's children as the tree holds them: a seq a render returned (a `for`) spliced in its place, nils dropped, so the
+  ;; model reads vectors only and a diff names each child (seon.render/keyed). A local fn: no contracted call an element
+  (letfn [(children [xs] (into [] (comp (mapcat #(if (seq? %) (children %) [%])) (remove nil?)) xs))]
+  (clojure.walk/postwalk (fn [x] (if (and (vector? x) (keyword? (first x)) (map? (second x)))
                                        (let [m (second x)
                                              r (when (:id m) (first (str/split (str (:class m)) #"\s+")))
                                              ;; and the page's own marks (:wire/for \"page\"): what the page alone shows says nothing to the model
                                              a (cond-> (into {} (remove (fn [[k _]] (or (#{:class :style :id} k) (= "wire" (namespace k))))) m) (seq r) (assoc :class r :id (:id m)))]
                                          (into (if (seq a) [(first x) a] [(first x)]) (children (nnext x))))
                                        (if (and (vector? x) (keyword? (first x))) (into [(first x)] (children (next x))) x)))
-                             h))
+                             h)))
 
 (defn page-parts-at
   "Agent a's page parts at basis b on db's store, as the model reads them: the agent pulled at b's commit by what the parts
