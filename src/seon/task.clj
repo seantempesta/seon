@@ -378,16 +378,17 @@
   [k n] {:seon.model-call/id (lib/call-id k n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n})
 
 (def system-sender
-  "The sender of a message no agent sent: the system entity (:seon.root/root-fact), which every branch holds from root's boot. The
-  reconciler's notices, a verdict, a stage boundary, the turn's own note (owner, 2026-11-10: mechanical messages come from the system,
-  not an agent). See docs/users.md#messages."
-  [:seon.root/id :root])
+  "The sender of a message no agent sent: the system entity (:seon.root/root-fact) by its identity. The reconciler's notices, a verdict,
+  a stage boundary, the turn's own note (owner, 2026-11-10: mechanical messages come from the system, not an agent). See docs/users.md#messages."
+  {:seon.root/id :root})
 
 (defn sender
-  "Who sent a message as the lookup of its entity: an agent (a user is an agent) by its key, k, else the system (`system-sender`) for nil.
-  See docs/users.md#messages."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:tuple :keyword :any]]}
-  [k] (if k [:seon.agent/key k] system-sender))
+  "Who sent a message or ran an eval, as the ref's value a write gives it: the entity by its identity alone, an agent (a user is an agent)
+  by its key k, else the system (`system-sender`) for nil. A ref written as an entity map is an upsert by identity, so it resolves on any
+  branch, one that forked before the sender was made included, and an agent's key is a content id, the same entity everywhere: a merge
+  makes no second (step 2's ruling, Optimization 2026-11-10). See docs/users.md#messages."
+  {:malli/schema [:=> [:cat [:maybe :string]] :map]}
+  [k] (if k {:seon.agent/key k} system-sender))
 
 (defn sender-name
   "The name a sender is read by, from its entity as a pull or an entity holds it: an agent's key (a user's is its name), \"seon\" for the
@@ -399,26 +400,26 @@
   "Message mid from from (the sender's lookup, `sender`) to the agents with keys tos, its body, sent at sent-ms: the one message entity (mid in seon.lib/id's form: a fresh unique id for a message sent, seon.lib/unique-id, or a content id where the same facts must make the one message, as the reconciler's ask of a task at a t), `to` naming each
   recipient's agent entity by key. Written by root's writer on main at the send, and by the recipient on its branch, with its own ref only,
   when its next act delivers it (seon.agent/deliver!). See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :string [:tuple :keyword :any] [:sequential :string] :any :int] [:vector :map]]}
+  {:malli/schema [:=> [:cat :string :map [:sequential :string] :any :int] [:vector :map]]}
   [mid from tos body sent-ms]
   [{:seon.message/id mid :seon.message/from from :seon.message/body body :seon.message/sent-ms sent-ms
     :seon.message/to (mapv #(vector :seon.agent/key %) tos)}])
 
 (defn undelivered
-  "The messages main holds to the agent with key k that branch-db, its branch, does not hold: each {:id :from :body :sent-ms}, :from its sender's lookup (`sender`), in main's
+  "The messages main holds to the agent with key k that branch-db, its branch, does not hold: each {:id :from :body :sent-ms}, :from its sender as a ref's value (`sender`), in main's
   order (by transaction, then id). The agent's ref on main is the fact (a seek of :seon.message/to on its entity, never a scan of the
   messages), and the message entity on the branch (one lookup of its id) is its delivery (docs/users.md#messages), written there by seon.agent/deliver! or brought down
   by a merge or sync of main: a message the agent removed (its ref retracted, the entity kept) stays delivered, and one already on main when the branch forked is
   delivered at the fork. The one reading of it: the agent's next act (seon.agent/undelivered) and root's check that a
   parked agent is owed one. O(m) seeks on main and O(m) id lookups on the branch, m the messages to the agent. See docs/users.md#messages."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :string] [:vector [:map [:id :string] [:from [:tuple :keyword :any]] [:body :string] [:sent-ms :int]]]]}
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :string] [:vector [:map [:id :string] [:from :map] [:body :string] [:sent-ms :int]]]]}
   [main branch-db k]
   (if-let [me (pdb/eid main :seon.agent/key k)]
     (->> (d/datoms main :avet :seon.message/to me)
          (map (fn [dt] [(:tx dt) (d/entity main (:e dt))]))
          (remove (fn [[_ m]] (pdb/eid branch-db :seon.message/id (:seon.message/id m))))
          (sort-by (fn [[tx m]] [tx (:seon.message/id m)]))
-         ;; its sender as the lookup of its entity (`sender`): an agent's key, else the system's
+         ;; its sender as a ref's value (`sender`): an agent's key, else the system's
          (mapv (fn [[_ m]] {:id (:seon.message/id m) :from (sender (:seon.agent/key (:seon.message/from m))) :body (:seon.message/body m) :sent-ms (:seon.message/sent-ms m)})))
     []))
 

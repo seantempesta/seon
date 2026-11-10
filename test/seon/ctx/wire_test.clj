@@ -698,7 +698,7 @@
                                                             :seon.eval/code code :seon.eval/response {:handle (symbol "result" id) :value 1} :seon.eval/call (seon.task/call-ref "a1" turn)}]))
             _ (d/transact conn [{:seon.task/id "demo/f" :seon.task/agent {:seon.agent/key "a1" :seon.agent/turn 2 :seon.agent/task {:seon.task/id "demo/f"}}}])
             _ (ev! "e1" "a1" "(f 1)" 1)
-            _ (d/transact conn (task/message-tx "m1" "user" ["a1"] "use g" 1000))
+            _ (d/transact conn (task/message-tx "m1" (seon.task/sender "user") ["a1"] "use g" 1000))
             _ (ev! "e2" "a1" "(f 2)" 2)
             _ (ev! "x1" "b/a9" "(other)" 1)
             db @conn
@@ -734,7 +734,7 @@
             first-stage (turn! b0)
             boundary "demo/d is done. Your task now is demo/i, in this same session: what you did so far stays above.\n\nIts plan: Implement d."
             _ (work! "demo/i")
-            _ (d/transact conn (task/message-tx "m1" "root" ["a1"] boundary 1000))
+            _ (d/transact conn (task/message-tx "m1" seon.task/system-sender ["a1"] boundary 1000))
             second-stage (turn! (basis "demo/i" 2))
             ms0 (:messages first-stage) ms1 (:messages second-stage)
             refs (mapv first (:parts second-stage))
@@ -1101,7 +1101,7 @@
         db (d/db-with db (doc/load-tx db "docs" {doc/system-page "# A stub of the system prompt\n\nBe brief."}))
         [w :as walk] (walked db #{:seon.render/hiccup :seon.render/openai-compat})
         says #(pr-str (:messages (wire/request w)))
-        take! (fn [id body] (seon.task/message-tx id "owner" ["demo/a1"] body 1000))]
+        take! (fn [id body] (seon.task/message-tx id (seon.task/sender "owner") ["demo/a1"] body 1000))]
     (is (not (str/includes? (says) "Before the turn.")))
     (step! walk (take! "m1" "Before the turn."))
     (is (str/includes? (says) "Before the turn.") "delivered for the turn after the one in force, 0")
@@ -1585,7 +1585,7 @@
          (is (= 0 (agent/turn-now)) "before its first turn")
          (reset! agent/state {:key "a1" :db db3})
          (is (= 3 (agent/turn-now)))
-         (is (= [["a1"] false] ((juxt (comp #(mapv second %) :seon.message/to) #(contains? % :seon.message/call)) (first (agent/entries-tx [{:id "m" :from "owner" :body "x" :sent-ms 1000}]))))
+         (is (= [["a1"] false] ((juxt (comp #(mapv second %) :seon.message/to) #(contains? % :seon.message/call)) (first (agent/entries-tx [{:id "m" :from (seon.task/sender "owner") :body "x" :sent-ms 1000}]))))
              "a message delivered to the agent carries its agent, and no turn: the turn that reads it is derived from when it was delivered")
          (finally (reset! agent/state old)))))
 
@@ -1947,7 +1947,7 @@
   (let [db (d/db-with (ts/test-db) (doc/load-tx (ts/test-db) "docs" {doc/system-page "# You are a Seon agent\n\nThe rules.\n\n## The small one\n\nBe brief."}))
         db (d/db-with db (into (ts/turn-tx "a1" 1 {:seon.model-call/reply "I look."})
                                (for [{:keys [id call-id by]} evs]
-                                 (cond-> {:seon.eval/id id :seon.eval/by (or by "a1") :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
+                                 (cond-> {:seon.eval/id id :seon.eval/by (seon.task/sender (or by "a1")) :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
                                           :seon.eval/code (str "(" id ")") :seon.eval/response {:handle (symbol "result" id) :value 1}}
                                    call-id (assoc :seon.eval/call-id call-id :seon.eval/intent (str "Run " id "."))))))]
     [db (pdb/eid db :seon.agent/key "a1")]))

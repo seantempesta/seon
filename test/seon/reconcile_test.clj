@@ -458,7 +458,7 @@
         (is (= {:reasons red :results fail} (select-keys (sedn/decode (:seon.message/body v)) [:reasons :results])))))
     (testing "told, its process gone: the next start is a spawn, never a wake (a told task is not parked)"
       (let [told (db-of [(decl "a")] :extra (concat (work "a" :told :members {:seon.task/reasons red})
-                                                    (task/message-tx "v-demo/a-1" "root" [(akey "a")] (sedn/encode {:reasons red}) 1000)))]
+                                                    (task/message-tx "v-demo/a-1" seon.task/system-sender [(akey "a")] (sedn/encode {:reasons red}) 1000)))]
         (is (= [(spawn "a")] (actions-for told :woken [(akey "a")])))
         (is (= [] (actions-for told)) "until it is woken")))
     (testing "the same reasons again: held for root, saying so, and no message"
@@ -692,7 +692,7 @@
   ;; carries, not only for the one tell-tx adds, so a verdict the judge writes to the agent itself (:told) wakes it as a person's message
   ;; does (a refused green waited for a restart: an audit, 2026-11-08)
   (let [db (db-of [(decl "a")] :extra (work "a" :running))
-        verdict (task/message-tx "m-verdict" "root" [(akey "a")] "The done rule refused it: make the proof green." 1)
+        verdict (task/message-tx "m-verdict" seon.task/system-sender [(akey "a")] "The done rule refused it: make the proof green." 1)
         [st _] (#'r/write (st-of db) "demo/a" :done verdict)]
     (is (contains? (get-in st [:idx :late]) (akey "a")) "the agent the verdict is to is held for waking")
     (let [e (:db/id (d/entity db [:seon.agent/key (akey "a")]))
@@ -745,7 +745,7 @@
            _ (d/transact conn (into (task/execution-tx ["demo/a"] :running) (booted-tx "boot-1" 4)))
            _ (d/transact conn (work "a" :running))
            _ (d/branch! conn (:branch cfg) sb)
-           _ (d/transact conn (task/message-tx "m1" "owner" [k] "carry on" 1000))
+           _ (d/transact conn (task/message-tx "m1" (seon.task/sender "owner") [k] "carry on" 1000))
            at (fn [late] (let [db @conn] {:db db :conn conn :idx (assoc (r/index db) :late late :woken #{}) :boot "boot-1" :rid 0 :pending {} :flights {}}))
            running (at #{})
            held (r/wake (:idx running) (:db running) k)]
@@ -758,7 +758,7 @@
            (is (= ["demo/a"] (mapv :task (r/actions (:idx st)))))))
        (testing "parked with the message on its branch (kept there, or removed): not woken, nothing starts"
          (let [bc (pdb/connect (assoc cfg :branch sb))]
-           (try (d/transact bc (task/message-tx "m1" "owner" [k] "carry on" 1000))
+           (try (d/transact bc (task/message-tx "m1" (seon.task/sender "owner") [k] "carry on" 1000))
                 (let [st (#'r/settle-late (at #{k}))]
                   (is (= [#{} #{}] [(get-in st [:idx :woken]) (get-in st [:idx :late])]))
                   (is (= [] (r/actions (:idx st)))))

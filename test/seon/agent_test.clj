@@ -1606,7 +1606,7 @@
   (delivery-world
    (fn [{:keys [conn as ka kb heads]}]
      (let [body (str "to both " (random-uuid))
-           _ (d/transact conn (task/message-tx "m-both" "owner" [ka kb] body 1000))
+           _ (d/transact conn (task/message-tx "m-both" (seon.task/sender "owner") [ka kb] body 1000))
            ref-of (fn [db k] (set (map :seon.agent/key (:seon.message/to (d/entity db [:seon.message/id "m-both"])))))]
        (is (= #{ka kb} (ref-of @conn nil)) "main holds the one entity, to both")
        (as ka #(agent/deliver!))
@@ -1625,7 +1625,7 @@
   (delivery-world
    (fn [{:keys [conn as ka cfg]}]
      (let [body (str "once " (random-uuid))
-           _ (d/transact conn (task/message-tx "m-once" "owner" [ka] body 1000))
+           _ (d/transact conn (task/message-tx "m-once" (seon.task/sender "owner") [ka] body 1000))
            says (fn [] (let [db (agent/db) a (pdb/eid db :seon.agent/key ka)]
                          (pr-str (seon.fixtures/tree-messages (:tree (seon.ctx/build (seon.db/index) db a (:branch @agent/state))) db))))]
        (as ka #(do (is (= [{:id "m-once" :from "owner" :body body :sent-ms 1000}] (agent/undelivered)) "main holds it for this agent")
@@ -1655,7 +1655,7 @@
   ;; docs/users.md#messages (owner, 2026-11-09: the message on the agent's branch is the proof of delivery): a's taking it writes a's branch alone
   (delivery-world
    (fn [{:keys [conn as ka kb heads]}]
-     (d/transact conn (task/message-tx "m-two" "owner" [ka kb] "to both" 1000))
+     (d/transact conn (task/message-tx "m-two" (seon.task/sender "owner") [ka kb] "to both" 1000))
      (is (= ["m-two"] (as ka #(mapv :id (agent/undelivered)))) "owed to a")
      (as ka #(agent/deliver!))
      (is (= [] (as ka #(agent/undelivered))) "a took it")
@@ -1666,11 +1666,11 @@
   ;; docs/users.md#messages: a merge or sync of main brings the message entity onto the branch, and that is its delivery: no longer owed, read once, by the first turn whose basis is at or after it
   (delivery-world
    (fn [{:keys [conn as kb]}]
-     (d/transact conn (task/message-tx "m-sync" "owner" [kb] "synced" 1000))
+     (d/transact conn (task/message-tx "m-sync" (seon.task/sender "owner") [kb] "synced" 1000))
      (as kb #(do (is (= ["m-sync"] (mapv :id (agent/undelivered))) "owed before the sync")
                  (turn-at! 1)
                  ;; what a merge of main writes onto the branch: the entity as main holds it
-                 (agent/transact! (task/message-tx "m-sync" "owner" [kb] "synced" 1000))
+                 (agent/transact! (task/message-tx "m-sync" (seon.task/sender "owner") [kb] "synced" 1000))
                  (agent/commit!)
                  (is (= [] (agent/undelivered)) "on the branch: delivered, though no turn marked it")
                  (is (= [] (agent/deliver!)) "so a turn's delivery brings nothing again")
@@ -1684,7 +1684,7 @@
   ;; docs/users.md#messages: nothing merged from main: owed until seon.agent/deliver! writes it on the branch; read by the next turn; one delivered after a turn's basis reads at the turn after
   (delivery-world
    (fn [{:keys [conn as kb]}]
-     (d/transact conn (task/message-tx "m-own" "owner" [kb] "own" 1000))
+     (d/transact conn (task/message-tx "m-own" (seon.task/sender "owner") [kb] "own" 1000))
      (as kb #(do (turn-at! 1)
                  (is (= ["m-own"] (mapv :id (agent/undelivered))) "owed: nothing of main's is on the branch")
                  (is (= ["m-own"] (mapv :id (agent/deliver!))))
@@ -1693,7 +1693,7 @@
                  (is (= [] (read-at 1)))
                  (is (= ["m-own"] (read-at 2)) "read at the next turn")
                  (testing "delivered mid-turn, after the turn's basis: read at the next turn's start, not the turn in force"
-                   (d/transact conn (task/message-tx "m-mid" "owner" [kb] "mid" 2000))
+                   (d/transact conn (task/message-tx "m-mid" (seon.task/sender "owner") [kb] "mid" 2000))
                    (agent/deliver!)
                    (is (= ["m-own"] (read-at 2)) "turn 2 is as it was")
                    (turn-at! 3)
@@ -1704,7 +1704,7 @@
   (delivery-world
    (fn [{:keys [conn as ka kb heads]}]
      (let [body (str "for b " (random-uuid))
-           _ (d/transact conn (task/message-tx "m-b" "owner" [kb] body 1000))
+           _ (d/transact conn (task/message-tx "m-b" (seon.task/sender "owner") [kb] body 1000))
            [v nsx] (d/q '[:find [?v ?n] :where [?v :var/name app.m0/f1] [?v :var/form ?f] [?f :form/ns ?n]] @conn)
            _ (d/transact conn [{:db/id "f1'" :form/id "app.m0/f1-moved" :form/ns nsx :form/order 100 :form/defines [v]
                                 :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
@@ -1730,7 +1730,7 @@
                                       [{:seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key ka} :seon.eval/code "(+ 1 2)" :seon.eval/call (task/call-ref ka 1)
                                         :seon.eval/response {:handle 'result/e1 :value 3}}])))
        (let [before (as ka #(texts (says)))
-             _ (d/transact conn (task/message-tx "m-late" "owner" [ka kb] body 1000))
+             _ (d/transact conn (task/message-tx "m-late" (seon.task/sender "owner") [ka kb] body 1000))
              _ (as ka #(agent/deliver!))
              after (as ka #(texts (says)))
              at (fn [ms] (first (keep-indexed (fn [i m] (when (str/includes? m body) i)) ms)))]

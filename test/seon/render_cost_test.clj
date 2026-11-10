@@ -160,7 +160,7 @@
   (let [db (reduce d/db-with (ts/test-db)
                    [[{:seon.root/id :root :seon.root/boot "b1"}]
                     (seon.task/agent-tx :a1 {:status :idle})
-                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key "b1/a1"} (str "e" %) "a1"
+                    (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key "b1/a1"} (str "e" %) (seon.task/sender "a1")
                                                            {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}))
                           (range n))])]
     [[db] (:db/id (d/entity db [:seon.agent/key "b1/a1"]))]))
@@ -218,7 +218,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any]]}
   [n]
   (let [k "a1"
-        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k} id "a1" {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/call (seon.task/call-ref k turn) :seon.eval/call-id (str "c-" id)}))
+        ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k} id (seon.task/sender "a1") {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/call (seon.task/call-ref k turn) :seon.eval/call-id (str "c-" id)}))
         db0 (reduce d/db-with (ts/test-db)
                     [[{:seon.root/id :root :seon.root/boot "b1"}]
                      (seon.task/agent-tx :a1 {:status :busy :branch :task-x})])
@@ -299,11 +299,11 @@
                         [{:seon.agent/key k :seon.agent/turn (inc i)}
                          {:seon.model-call/id (seon.lib/call-id k (inc i)) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n (inc i) :seon.model-call/origin :model
                           :seon.model-call/reply (str "Checking step " i ".") :seon.model-call/ms 1}]
-                        (seon.repl/record-tx {:seon.agent/key k} id "a1"
+                        (seon.repl/record-tx {:seon.agent/key k} id (seon.task/sender "a1")
                                              {:seon.eval/call-id (str "c-" id) :seon.eval/call (seon.task/call-ref k (inc i)) :seon.eval/code (str "(inc " i ")")
                                               :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
                         (when (zero? (mod i 3))
-                          (seon.task/message-tx (str "mm-" i) "owner" [k] (str "How is step " i "?") 1000)))))
+                          (seon.task/message-tx (str "mm-" i) (seon.task/sender "owner") [k] (str "How is step " i "?") 1000)))))
         base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :b})])
         ;; a turn, then its basis at the branch's t as the loop writes it (seon.turn/basis!), which places a message delivered before it
         with-turn (fn [db i] (let [db (d/db-with db (vec (turn i)))]
@@ -553,7 +553,7 @@
     (doseq [i (range n)]
       ;; a message is delivered before the turn that reads it, so it comes before that turn's call is made
       (when (even? i)
-        (d/transact conn (seon.task/message-tx (str "p" n "m" i) "user" [k] (str "note " i) 1000)))
+        (d/transact conn (seon.task/message-tx (str "p" n "m" i) (seon.task/sender "user") [k] (str "note " i) 1000)))
       (d/transact conn [{:seon.eval/id (str "p" n "e" i) :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key k}
                          :seon.eval/call (assoc (seon.task/call-ref k (inc i)) :seon.model-call/origin :model :seon.model-call/reply (str "Trying " i "."))
                          :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str "p" n "e" i)) :value (vec (range 5)) :ns 'user} :seon.eval/call-id (str "c" i) :seon.eval/intent (str "Step " i ".")}])

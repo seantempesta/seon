@@ -75,7 +75,7 @@
 (defn- example-rekey
   "Record m of one of `session-kinds` (its id, agent and model call attributes id-k, agent-k and call-k) as example ek keeps it: its db
   attributes dropped, its id the example's (`in-example`; a model call's seon.lib/call-id of ek and its turn), its agent ek's, its model call ek's of its turn, an eval as `example-record` has it. See
-  docs/tasks.md#a-task-names-example-sessions. Its sender or evaluator (:seon.message/from, :seon.eval/by, as its pull joins them) is the lookup of that entity (seon.task/sender): the
+  docs/tasks.md#a-task-names-example-sessions. Its sender or evaluator (:seon.message/from, :seon.eval/by, as its pull joins them) is that entity by its identity (seon.task/sender, an upsert, so it resolves where the example is loaded): the
   original agent itself, orig, is ek; another agent (a user) keeps its key; the system stays the system."
   {:malli/schema [:=> [:cat :string :string :map [:tuple :qualified-keyword :qualified-keyword [:maybe :qualified-keyword]]] :map]}
   [ek orig m [id-k agent-k call-k]]
@@ -145,11 +145,6 @@
           ;; its turn is the last its records carry (docs/turn.md#the-turn-is-a-number): the page draws a component for each
           :else (into [[{:seon.agent/key ek :seon.agent/status :ended :seon.agent/description request
                          :seon.agent/turn (reduce max 0 (map (fn [[v]] (or (:turn v) (:seon.model-call/n v) 0)) rs))}]]
-                      (for [[v k] rs
-                            :let [r (example-rekey ek key v (session-kinds k))
-                                  ;; an agent that sent or ran it, other than the example's own, written by its identity alone: its ref
-                                  ;; resolves where the example is loaded (its key a content id, the same entity everywhere)
-                                  other (some #(let [x (get r %)] (when (and (= :seon.agent/key (first x)) (not= ek (second x))) (second x)))
-                                              [:seon.message/from :seon.eval/by])]]
-                        (cond-> [r] other (conj {:seon.agent/key other}))))))))
+                      (for [[v k] rs]
+                        [(example-rekey ek key v (session-kinds k))])))))
 
