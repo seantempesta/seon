@@ -124,15 +124,8 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
     fi
     UARGS=(${=SEON_UPDATE_ARGS:---profile deepseek})
     nice -n 15 "$MAIN/bin/update" $UARGS | tail -1
-    # the net under every landing (docs/merging.md#the-full-run-is-the-net): how many landings main is past the last full run
-    # that ended, as bin/test --all recorded it beside the verdict cache (a store erase keeps it), and what it found
-    FR=${SEON_RESULTS_DIR:-$MAIN/target/results}/full-run.edn
-    if [[ -s $FR ]]; then
-      FC=$(sed -n 's/.*:commit "\([0-9a-f]*\)".*/\1/p' "$FR" | head -1)
-      print "full run: $(git rev-list --count --first-parent "$FC..$NEW" 2>/dev/null || print '?') landings ago, $(grep -o ':status :[a-z]*' "$FR" | cut -d' ' -f2), at ${FC:0:10}"
-    else
-      print "full run: none recorded: the net under this landing never ran (bin/test --all)"
-    fi
+    # the net under every landing (docs/merging.md#the-full-run-is-the-net)
+    "$MAIN/bin/full-run" "$NEW"
     tidy; print LANDED; exit 0
   fi
 done

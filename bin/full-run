@@ -1,0 +1,16 @@
+#!/bin/zsh
+# bin/full-run [HEAD]   one line: how many landings HEAD (default main) is past the last full run that ended, as bin/test --all
+#                       recorded it beside the verdict cache (full-run.edn in :seon.config.proofs/results-dir), and what it found:
+#                       "full run: N landings ago, :green|:red, at <commit>", or "full run: none recorded". What bin/land prints
+#                       before LANDED and bin/root status after its own line (docs/merging.md#the-full-run-is-the-net). A count of
+#                       landings, never a time: no clock decides anything.
+emulate -L zsh
+ROOT=${0:A:h:h}
+FR=${SEON_RESULTS_DIR:-$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/../target/results}/full-run.edn
+HEAD_=${1:-main}
+if [[ -s $FR ]]; then
+  FC=$(sed -n 's/.*:commit "\([0-9a-f]*\)".*/\1/p' "$FR" | head -1)
+  print "full run: $(git -C "$ROOT" rev-list --count --first-parent "$FC..$HEAD_" 2>/dev/null || print '?') landings ago, $(grep -o ':status :[a-z]*' "$FR" | cut -d' ' -f2), at ${FC:0:10}"
+else
+  print "full run: none recorded (bin/test --all)"
+fi
