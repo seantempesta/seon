@@ -353,7 +353,13 @@
     (is (nil? (root/stale-binary (on merged (:tree built)))) "main of the binary's tree with an agent's merge on it: no refusal")
     (is (= {:binary (:tree built) :tree "another-tree"} (root/stale-binary (on db0 "another-tree")))
         "a store last brought to another tree: refused, naming both")
-    (is (nil? (root/stale-binary db0)) "a store brought from no tree: nothing known, nothing refused")))
+    (is (nil? (root/stale-binary db0)) "a store brought from no tree: nothing known, nothing refused")
+    ;; a landing (a pin bump among them: a gitlink is in the tree id) moves the fact to the landed tree, which the binary
+    ;; bin/update builds from it records: the store last brought to the old tree agrees with the new binary once it lands
+    (let [old (on merged "the-tree-before")
+          landed (d/db-with old (root/landed-tx old {} {} (:tree built) "c1"))]
+      (is (some? (root/stale-binary old)) "before the landing's bridge: the new binary is of another tree")
+      (is (nil? (root/stale-binary landed)) "after it: the landed tree is the binary's, nothing refused"))))
 
 (def ^:private spawn-on-it
   "A request to root: spawn an agent and answer its id, or the refusal's [type message stale-binary] when the spawn is
