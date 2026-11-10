@@ -51,14 +51,10 @@
   "The digest (8 hex digits) of the declarations in `decls` (seon.db/schema's form) of the attributes
   that hold the program (seon.program/attr-namespaces), with the store's layout (seon.db/layout): what the test runner's program store is named
   by, so a change to any other attribute (a run's, a task's, a config key) keeps the store and its
-  imported program, where the whole schema's digest (seon.db/schema-digest) made a full import. It also takes every attribute's value
-  type and cardinality: opening the store installs the whole schema and refuses an attribute stored as another type (seon.db/open!), so a
-  store made before such a change (step 2's :seon.message/from, a string, then a ref) is one this schema cannot open."
+  imported program, where the whole schema's digest (seon.db/schema-digest) made a full import."
   {:malli/schema [:=> [:cat [:sequential :map]] :string]}
   [decls]
-  (subs (clojure.string/replace (str (hasch/uuid [(filterv #(some-> (:db/ident %) namespace program/attr-namespaces) decls)
-                                                  (into (sorted-map) (for [d decls :when (:db/ident d)] [(:db/ident d) [(:db/valueType d) (:db/cardinality d)]]))
-                                                  pdb/layout])) "-" "") 0 8))
+  (subs (clojure.string/replace (str (hasch/uuid [(filterv #(some-> (:db/ident %) namespace program/attr-namespaces) decls) pdb/layout])) "-" "") 0 8))
 
 (def kept-program-digest
   "program-schema-digest of this process's schema."
