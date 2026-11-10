@@ -108,11 +108,17 @@
         ;; a namespace the kept tree holds whose file the checkout lacks (another tree's, e.g. one since
         ;; renamed) is read again from this tree with the change, so a changed file requiring it finds it
         ;; analyzed in this process (seon.source's read-nss marks it loaded), never a load from disk that cannot
+        ;; and every file where tree differs from the checkout this process runs (fx/tree-id): analysis resolves a name the
+        ;; changed files use against what this process has loaded, so a file left unread because the kept tree holds it as tree
+        ;; does is still this process's text, not tree's (health's base, main, read by a branch that deleted a var main's tests
+        ;; use: `Unable to resolve var`). Nothing for the checkout's own tree; for another, the files the two differ by
         paths (if from
-                (into (set paths) (for [dt (d/datoms parent :aevt :ns/file) :let [p (:v dt)]
-                                        :when (not (.exists (io/file root p)))
-                                        :when (zero? (:exit (sh/sh "git" "-C" root "cat-file" "-e" (str tree ":" p))))]
-                                    p))
+                (-> (set paths)
+                    (into (for [dt (d/datoms parent :aevt :ns/file) :let [p (:v dt)]
+                                :when (not (.exists (io/file root p)))
+                                :when (zero? (:exit (sh/sh "git" "-C" root "cat-file" "-e" (str tree ":" p))))]
+                            p))
+                    (into (let [running (fx/tree-id root)] (when (not= running tree) (changed-paths root running tree)))))
                 paths)
         tx (if from
              (source/refresh-tx parent (tree-files root tree paths))

@@ -77,7 +77,7 @@ To find what your work touches, in this order:
 
 This conversation is drawn from your record, `@ctx`, by render functions. Each part names the function that drew it and the path it read. `@ctx` is an atom, and changing it changes what you are sent: ``(swap! ctx update :seon.eval/_agent dissoc <id>)``.
 
-Seon runs an eval that shows you your task and your proofs at the start, `(my.render/render-ctx)`, and another when something changes, `(my.render/render-changes)`. Each is in your conversation like your own evals, and `(my.render/render-ctx)` shows you your page whole at any time.
+Before each of your turns Seon shows you your page as a call it made: ``(my.render/page p)`` at your first turn, your task and your proofs whole, and then ``(my.render/diff p0 p1)``, what moved since your last turn, as edits. Each is in your conversation like your own evals, and you can call either yourself with any point it printed.
 
 The first answers your page: `{:components [["status" [seon.render.ui/status {:ctx [:seon.agent/task :proved]} ...]] ...]}`, each component under its id. The second answers only what changed since you were last shown it, as edits, each `[path op value]`:
 

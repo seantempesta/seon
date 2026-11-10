@@ -899,6 +899,12 @@
  ;; and the ones that explain it. Provenance: root's coverage gap 7 (2026-10-27): wiki sections reached the
  ;; agent only through the task's own citations. At the bound: 0 shows none.
  :seon.config.ctx/cited-by 3
+ ;; Unit: commits. How far back from a request's point seon.ctx.wire/page-parts-through looks for the commit its kept
+ ;; page walk is at (Datahike's commit graph records, a read a step), to advance that walk by what moved rather than draw
+ ;; the page again (about 17M ticks on Seon's program). Provenance: a test's context read drew the page cold at every
+ ;; read, 2026-11-10; between two requests of one agent there are a few commits (its evals', its read's). At the bound:
+ ;; the page is drawn again, never advanced across another lineage.
+ :seon.config.ctx/kept-walk-steps 16
  ;; Unit: tokens of a form's :form/src as the model reads it (seon.print.emit/chars-tokens, the printer's
  ;; one estimate), src and test alike: about a printed page. A live form longer than this is an open
  ;; :long-form problem row (seon.problems/long-forms), shown to a branch that adds one (attention, never
