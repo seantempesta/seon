@@ -413,6 +413,23 @@
     (is (= 1 (count (:value (sqlite/using ix2 #(sqlite/fts-match % "\"qqzz\"" #{}))))) "found by its word")
     (is (= [(:hash (:db-after r2)) (:max-tx (:db-after r2))] (first @@#'seon.doc/indexes)) "keyed to the db it was carried to")))
 
+(deftest a-move-counts-again-only-the-texts-it-wrote
+  ;; docs/vector.md#search: a text's term counts are kept beside its row of the text index (seon.doc/text-terms), counted the
+  ;; first time they are read; a move carried into the index (seon.doc/carry-index!) drops the counts of the texts it wrote alone,
+  ;; so the next read counts those again, with their new words, and every other text's are the ones kept
+  (let [db0 (d/db-with (mt/world) [{:seon.doc/address "k.md#a" :seon.doc/heading "A" :seon.doc/text "Alpha beta beta."}
+                                   {:seon.doc/address "k.md#b" :seon.doc/heading "B" :seon.doc/text "Gamma."}])
+        a (pdb/eid db0 :seon.doc/address "k.md#a") b (pdb/eid db0 :seon.doc/address "k.md#b")
+        [ta0 tb0] (doc/text-terms db0 [[a :seon.doc/text] [b :seon.doc/text]])
+        r (d/with db0 [[:db/add a :seon.doc/text "Delta."]])
+        _ (doc/carry-index! db0 (:db-after r) (map (juxt :e :a) (:tx-data r)))
+        db1 (:db-after r)
+        counted @(nth @@#'seon.doc/indexes 2)]
+    (is (= [{"alpha" 1 "beta" 2} 3] ta0) "a text's terms counted, and how many it holds")
+    (is (= #{[b :seon.doc/text]} (set (keys counted))) "the move dropped the counts of the text it wrote, and kept the other's")
+    (is (identical? tb0 (first (doc/text-terms db1 [[b :seon.doc/text]]))) "the text it did not write is read from what was kept")
+    (is (= [[{"delta" 1} 1]] (doc/text-terms db1 [[a :seon.doc/text]])) "the text it wrote is counted again, with its new words")))
+
 (deftest a-written-plan-is-brought-into-the-index-without-a-rebuild
   ;; docs/vector.md#search: a move that writes a text has that text's row replaced in the held index
   ;; (seon.doc/carry-index!), reading it alone: a task's plan written on main must not read every form again

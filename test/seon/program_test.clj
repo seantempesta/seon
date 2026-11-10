@@ -1488,7 +1488,60 @@
         _ (spit marker "kept")]
     (runner/program-db d store tree 1)
     (is (.isFile marker) "a tree the store keeps is read from it, the store past its bound: nothing removed, nothing imported")
+    (spit (str d "/src/app/ks3.clj") "(ns app.ks3)\n")
+    (sh/sh "git" "-C" d "add" ".")
+    (runner/program-db d store (fx/tree-id d))
+    (is (.isFile marker) "a caller with no bound (a test, the health step's base tree beside the shards) imports beside what is kept, never removing it")
     (spit (str d "/src/app/ks2.clj") "(ns app.ks2)\n")
     (sh/sh "git" "-C" d "add" ".")
     (runner/program-db d store (fx/tree-id d) 1)
-    (is (not (.isFile marker)) "a new tree past the bound starts the store again")))
+    (is (not (.isFile marker)) "the plan's bound, at a new tree, starts the store again")))
+
+(deftest a-change-to-what-root-runs-moves-every-test-that-starts-a-root
+  ;; owner, 2026-11-10, reversing 2026-10-27's "a root's boot is no entry": a change to root's writer reused the greens of
+  ;; 226 of 233 process tests (7 reached seon.writer/commit-batch), five of them red in the batch. A test that starts a root
+  ;; takes what root runs (seon.program/root-digest over root-forms: root-roots' closure, here a proc system.edn names)
+  (let [form (fn [nsym nm kind refs src]
+               (fn [db] (program/record-tx db {:id (str nsym "/" nm "/" (hash src)) :src src :ns nsym :ns-form? false
+                                               :defs [{:var (symbol (str nsym) nm) :meta (case kind :test #{:test} #{:arglists})}]
+                                               :declares #{} :methods [] :impls [] :refs refs :requires #{} :banned #{} :inline-defs #{}})))
+        data-refs {:procs '[app.rt/writer]}
+        db (mt/with (mt/world)
+             (form 'app.rt "writer" :fn '#{} "(defn writer [] 1)")
+             (form 'app.rt "helper" :fn '#{} "(defn helper [] 1)")
+             (form 'app.rt-test "boots" :test '#{seon.lib/fork!} "(deftest boots)")
+             (form 'app.rt-test "reaches-helper" :test '#{app.rt/helper} "(deftest reaches-helper)"))
+        in {:env "e" :tree "t" :config {}}
+        dg (fn [db] (update-vals (program/graph-index (program/reach-graph db data-refs) in nil) :digest))
+        a (dg db)
+        moved (fn [db'] (let [b (dg db')] (set (for [t '[app.rt-test/boots app.rt-test/reaches-helper] :when (not= (a t) (b t))] (symbol (name t))))))]
+    (is (= '#{boots} (moved (mt/with db (form 'app.rt "writer" :fn '#{} "(defn writer [] 2)"))))
+        "a one-line change to what root runs moves the test that starts a root, which names none of it, and no other")
+    (is (= '#{reaches-helper} (moved (mt/with db (form 'app.rt "helper" :fn '#{} "(defn helper [] 2)"))))
+        "a change to code no root runs moves only what reaches it: not the test that starts a root")
+    (let [g (program/reach-graph db data-refs)
+          held (program/reach-indexed g in)
+          g' (program/reach-update held (mt/with db (form 'app.rt "writer" :fn '#{} "(defn writer [] 2)")))]
+      (is (not= (get-in (program/index-of held) ['app.rt-test/boots :digest])
+                (get-in (program/index-of (program/reach-indexed g' in)) ['app.rt-test/boots :digest]))
+          "and a held index answers it anew, though the test reaches nothing that changed"))))
+
+(deftest a-change-to-a-check-mode-moves-every-test-that-runs-the-binary
+  ;; seon.lib-test/a-wait-for-a-line-parks-the-fiber runs `./seon forks line-parks` (seon.test-store/binary-sh): the mode's
+  ;; code (seon.check/fork-cases) is the binary's, which no reach of the test names, and its flaky verdict kept its digest
+  ;; across the fix (batch 13). A test that runs the binary takes its check driver's reach (index-answer)
+  (let [form (fn [nsym nm kind refs src]
+               (fn [db] (program/record-tx db {:id (str nsym "/" nm "/" (hash src)) :src src :ns nsym :ns-form? false
+                                               :defs [{:var (symbol (str nsym) nm) :meta (case kind :test #{:test} #{:arglists})}]
+                                               :declares #{} :methods [] :impls [] :refs refs :requires #{} :banned #{} :inline-defs #{}})))
+        db (mt/with (mt/world)
+             (form 'seon.check "-main" :fn '#{seon.check/fork-cases} "(defn -main [& args] fork-cases)")
+             (form 'seon.check "fork-cases" :fn '#{} "(def fork-cases {:line-parks 1})")
+             (form 'app.rb-test "runs-the-binary" :test '#{seon.test-store/binary-sh} "(deftest runs-the-binary)")
+             (form 'app.rb-test "starts-a-process" :test '#{seon.lib/fork!} "(deftest starts-a-process)"))
+        in {:env "e" :tree "t" :config {}}
+        dg (fn [db] (update-vals (program/graph-index (program/reach-graph db nil) in nil) :digest))
+        a (dg db)
+        b (dg (mt/with db (form 'seon.check "fork-cases" :fn '#{} "(def fork-cases {:line-parks 2})")))]
+    (is (not= (a 'app.rb-test/runs-the-binary) (b 'app.rb-test/runs-the-binary)) "a change to a check mode's code moves the test running the binary")
+    (is (= (a 'app.rb-test/starts-a-process) (b 'app.rb-test/starts-a-process)) "and not a test that only starts a process (root runs no check mode)")))

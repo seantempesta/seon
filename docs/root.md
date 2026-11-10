@@ -30,7 +30,7 @@ In order: the store is opened and main resumed as it is, reading no file and no 
 
 Tasks of an earlier boot still `:running` are reaped as `:lost` ("root restarted") by the reconciler's first pass.
 
-`seon.root/stop!` drains the graph and first writes `:seon.root/stopped` (`{:boot :cause :at-ms}`), so every clean end says why. `bin/root start` runs a root detached on this checkout's ports; `bin/root next` stops it and starts the next generation's binary on the same store and main ([source](source.md#the-next-generation)).
+`seon.root/stop!` drains the graph and first writes `:seon.root/stopped` (`{:boot :cause :at-ms}`), so every clean end says why. Its drain ends the boot fork server's process group at once (```seon.fork-server/release!```), never waiting for the server to read its socket's EOF: a server still warming (its indexes decoded, its tests loaded, ~35 s on a loaded machine) reads nothing until it is done, and every stop of a young root waited for that (26-32 s, 2026-11-10); a stop is now its close and joins (0.13-0.35 s measured). Its answer says how the server ended (`:drained :ended`, `:group-ended`). `bin/root start` runs a root detached on this checkout's ports; `bin/root next` stops it and starts the next generation's binary on the same store and main ([source](source.md#the-next-generation)).
 
 ## Runs and judging
 

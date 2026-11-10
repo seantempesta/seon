@@ -4,7 +4,35 @@ This file holds the owner's standing rulings, one entry each: the rule, the owne
 
 ## 2026-11-10 rulings
 
-The owner's rulings of 2026-11-10, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
+The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
+
+### The best known way, improved (owner, 2026-11-10)
+
+"You do things the best known way until someone comes up with a better way and that becomes the standard 'best known way' of doing things." "Pain points can become well polished and intentional features." "We can iterate and on each run the system gets a little better." The wiki and AGENTS.md are the way, written down; a pain is a finding whose fix changes the way itself (a script, a check, a wiki section) and deletes the old one. Stated in AGENTS.md §1 and docs/sessions.md#the-way-improves.
+
+### Small changes land in batches, proved once (owner, 2026-11-10)
+
+"Can we batch them together? ... Can we force merge the fixes into all the branches and have them at least run better code?"; "I don't want 100% separated work separately running all the tests for each little change." Sessions check their change and hand the tip over; the managing session merges the ready tips, proves once and lands. Stated in AGENTS.md §3 and docs/merging.md#the-managing-session-lands-a-batch.
+
+### A task a Seon agent finished reaches main by its owner's review (owner, 2026-11-10)
+
+"If the task is done well integrate it and merge to disk and remove the task." "I want the results reviewed by a competent agent in their speciality so they know the quality is good and if it's almost done right just fix it and sync it to disk and remove the task." A merged task whose files main does not hold is an `:unsynced` problem; the session owning its area reviews it and brings it to a branch with its entry removed; `bin/update` lands nothing of the standing root's own. Of the first six reviewed, three were not done as merged (a proof red by name, a tile drawing data nothing produced, a proof that could not fail). Stated in docs/source.md#a-merged-task-reaches-mains-files and AGENTS.md §3.
+
+### A root catches up with its checkout at start (owner, 2026-11-10)
+
+"I think I may have introduced chaos into the system with the boot resume from db and not re indexing from disk. While most development is happening with claude agents from the outside if it makes more sense change the default to always be building the latest binary off the code and indexing it ... This should be done efficienty too so if very littel has changed it doesn't take forever to start"; then "don't let this decision cause even more chaos. Address the issues you are seeing your agents facing." A small step on the one importer: a resumed boot indexes the files that changed since main last indexed them; nothing was deleted. Stated in docs/source.md#a-boot-catches-up-with-its-checkout.
+
+### Pages are built from data by one walk (owner, 2026-11-10)
+
+"No more hand drawn lists and custom shit. If I come up with a new agent type and I attach a bunch of data to it's entity and there are render functions it should just work everywhere. ... Root, the user, and normal agents should be different based on their data and their connections, not separate special code." "Why can't we write render functions that recognize 'this is a top level render it's not a leaf so it's not going to be rendered as a tile'"; "don't flatten, the location in the pull pattern has meaning"; on the chat's order, "Sort them by time?". One walk over the pull, nested like the pull; each entity drawn by its own schema's render, which knows only whether it is on top or nested; the chat is its entities in the order they were made; no declared places, no kinds, no read mark. With it, the same day: root's agent is made at boot (reversing 2026-11-08's "made by the first message"); an example session is sent to the model as real user, assistant and tool messages and drawn by the same renders ("not learn a text exampled but see exactly how to structure the tool calls"); a mechanical message's sender is the system entity, not an agent ("Why do we need a full agent for this?"). In flight on branch jolt/pages; the task is seon.render/a-model-render-draws-each-turns-diff until its own are landed.
+
+### Every session proves its branch before handing it over (owner, 2026-11-10)
+
+"Please task the test agent with coming up with a solution where we can catch these bugs more reliably. They are to ideally make the entire suite run very fast so every agent can fully check their work." Relayed by the managing session with the day's escapes (five changes handed over "green" on hand-picked namespaces turned whole proves red); the Tests session's plan, approved: one command checks a branch, the whole suite at the cost of what changed. That command is `bin/prove` (it runs what a change reaches, every check step a `src` change reaches, and reuses every green at its digest), not a second script beside it. Replaces "nobody proves a small change alone". Now stated in: AGENTS.md section 3 (the one way, item 2), [plan](plan.md).
+
+### A test that starts a root takes what root runs (owner, 2026-11-10)
+
+Asked with the question tool by the managing session, the Tests session's evidence beside it: on main's reach graph, of 233 process tests 7 reached `seon.writer/commit-batch`, 9 `seon.reconcile/start` and 10 `seon.fork-server/main`, though each starts a root that runs all three; a change to root's writer reused 226 of their greens, and five of them were red in the batch. The owner chose to reverse 2026-10-27's "a root's boot is no entry" ("no test includes all of src"): a process test's digest takes what root runs. Now stated in: [source](source.md#tests-run-by-reach) (a test that starts a root takes what root runs).
 
 ### The test system runs inside Seon; the outside is thin wrappers (owner, 2026-11-10)
 
@@ -21,6 +49,18 @@ The owner's rulings of 2026-11-10, on how the machine's load is judged, on what 
 ### Private helpers: tests only (owner, 2026-11-10)
 
 "Private helpers: tests only" (asked with the question tool). Every function still has a contract and every contract still generates; a private function's contract (`seon.contract/defn-`, a var with `:private`) is checked at its definition, in tests and in the gate, and not on each production call, while a public function's stays checked on every call. Measured: a contracted call costs about 70 engine ticks to check; a small value's print was 25.8k ticks with the contracts on and 12.9k with them off, nearly all of it private per-node helpers; a whole cold request is about 3% contract checking on the in-memory store (3-10% by request). Stated in: [checks](checks.md#contracts-armed-at-definition).
+
+### A read never writes (owner, 2026-11-10)
+
+"A read never writes." Reading an agent's context to look at it commits nothing, records no model call and no eval of the read; the outside model's own read is its turn and is recorded as one. Stated in: docs/turn.md#an-outside-agent (proof seon.server-test/a-context-read-that-only-looks-writes-nothing).
+
+### The model's history is the pull's data; what is computed is computed in the hiccup render (owner, 2026-11-10)
+
+"All rendering that is pulling new data and processing it should happen at the hiccup render function step. I don't want what's shown on screen to dramatically differ from what the model sees." Then, asked where the history comes from: "Every render function gets the current db, the @ctx full pull data, and I think the current render tree? This allows any function to get whatever data it needs to do the proper render. So where are the messages and other parts that are data? In the @ctx pull data". So a history entity's native messages are made from its own pulled fields by its `:seon.render/openai-compat` render, never converted from hiccup; whatever looks data up or computes does it once, in the hiccup render, which the page shows styled and the model reads stripped. Stated in: docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup.
+
+### An entity is held at every path the pull reaches it (owner, 2026-11-10)
+
+Asked about the stubs ctx held at every place an entity was joined but the first: "I'm pretty sure this is a self inflicted pain point and there's a simple solution please work with web and the other agents and find it". `seon.ctx/build` held each entity once and wrote `{:db/id e}` at every other path, and code across the renders undid it (fill, held-whole, a view resolving stubs was next); now it holds a joined entity whole at every path its pattern pulls it, each by that path's pattern, as `d/pull` does, and a swap! edits an entity by its `:db/id` at any path. Stated in: docs/ctx.md#the-pattern (with stage 2b, jolt/everypath).
 
 ## 2026-11-09 rulings
 
@@ -708,7 +748,7 @@ Worktrees run plain `bin/prove` and report ready; the merge session merges a bat
 
 ### No test digests the whole tree; the daily full run is the net (owner, 2026-10-27)
 
-"I don't care if it's perfect and if it's possible a test could be doing other work we don't know of. no tests should include all of src." A test's digest is what it reaches: forms, the config keys and schema entries it names, the pins of the libraries it reaches, and for a process test the process entry; the cron's daily `bin/test --all` on main catches what reach misses. Stated: docs/merging.md, docs/source.md#tests-run-by-reach.
+"I don't care if it's perfect and if it's possible a test could be doing other work we don't know of. no tests should include all of src." A test's digest is what it reaches: forms, the config keys and schema entries it names, the pins of the libraries it reaches, and for a process test the process entry (since 2026-11-10 also what root runs: [a test that starts a root takes what root runs](#a-test-that-starts-a-root-takes-what-root-runs-owner-2026-11-10)); the cron's daily `bin/test --all` on main catches what reach misses. Stated: docs/merging.md, docs/source.md#tests-run-by-reach.
 
 ### A lock-free system (owner, 2026-10-27)
 

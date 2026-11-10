@@ -414,7 +414,7 @@
 
 (defn problems-check
   "Provoke every class of problem through the paths agents and root use (:stall-ms 1000
-  for the stall), then read my.root/problems: an eval error and a contract's error, an
+  for the stall, the eval held on a fifo until main holds it, so it comes at any load), then read my.root/problems: an eval error and a contract's error, an
   effect's io error, a platform defect in the api, a stall, an agent's death with its exit
   status and stderr, a red proof's assertions and a cost proof's verdict. It reads them
   once main holds each (seon.root/await-db over seon.problems/report)."
@@ -426,12 +426,25 @@
         ;; one error each: a request stops at its first
         r1 [@(c/submit! sys a "(/ 1 0)") @(c/submit! sys a "(defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")")
             @(c/submit! sys a "(my.fx/call :file {:path \"/nonexistent-d2/x\" :text \"x\"})")]
-        ;; a stall (1,000 ms bound): an open :stalled problem while it sleeps, closed once it answers
+        ;; a stall (1,000 ms bound): an open :stalled problem while the eval is held, closed once it answers. Held on a
+        ;; fifo the step writes only once main holds the stall: a sleep let root's stall timer come after the eval
+        ;; answered under load (or its assert and retract share one commit), and the wait for a stall that never was
+        ;; ran 77 minutes (batch 9, load 26-32; task seon.check/the-problems-step-holds-its-stall-until-it-sees-it)
         stalled-rows #(get-in (seon.problems/health %) [:classes :stalled :rows])
-        r2p (c/submit! sys a "(Thread/sleep 2500) :awake")
-        during (seon.root/await-db sys #(seq (stalled-rows %)))
+        hold (str (System/getProperty "java.io.tmpdir") "/problems-stall-" (random-uuid) ".fifo")
+        made (clojure.java.shell/sh "mkfifo" hold)
+        _ (when-not (zero? (:exit made)) (throw (ex-info (str "mkfifo " hold ": " (:err made)) made)))
+        held (str "(slurp " (pr-str hold) ") :awake")
+        r2p (c/submit! sys a held)
+        ;; it ends, too, if the eval answers first (no stall came): the step then fails on :stalled, never waits on
+        during (seon.root/await-db sys #(or (seq (stalled-rows %)) (realized? r2p)))
         stall (first (some-> during stalled-rows))
+        ;; the release, written here to the fifo itself (spit writes a file beside it and renames it over the fifo, which
+        ;; the reader never sees): the held eval is blocked opening the read end, so the write end opens at once; an eval
+        ;; that answered already (no stall came) reads nothing, and nothing is written
+        _ (when-not (realized? r2p) (with-open [w (java.io.FileOutputStream. ^String hold)] (.write w (.getBytes "go"))))
         r2 @r2p
+        _ (clojure.java.shell/sh "rm" "-f" hold)
         after (seon.root/await-db sys #(empty? (stalled-rows %)))
         _ (a/>!! (:back sys) {:op :writer :tx-count 1 :batch-ms 1 :n-tx "not a number" :commits 1})
         r3 @(c/submit! sys b "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)")
@@ -464,7 +477,7 @@
        :checks {:eval (every? (types :eval) [:seon.agent/eval-error :seon.instrument/contract-error])
                 :effect (contains? (types :effect) :seon.fx/io-error)
                 :platform (contains? (types :platform) :seon.root/proc-defect)
-                :stalled (and (= a (:agent stall)) (re-find #"Thread/sleep 2500" (str (:message stall))) (not (contract/error? after)))
+                :stalled (and (= a (:agent stall)) (clojure.string/includes? (str (:message stall)) "problems-stall-") (not (contract/error? after)))
                 :died (and died (= {:exit 3} (get-in died [:example :exit])) (re-find #"D2 boom" (str (get-in died [:example :stderr]))))
                 :red (and red (seq (:assertions red)) (= ['app.proofs/p1-test] (:proofs red)))
                 :cost (and cost-row (false? (get-in cost-row [:verdict :ok?])) (seq (:rows cost-row)))}}))))
@@ -1218,21 +1231,29 @@
   server, an agent): a fork beside live runtime threads is refused whenever one is active at
   that instant. Each answers the data its test asserts."
   {"line-parks"
-   ;; on the child's own fiber: the reader's wait must be that fiber's park, not a thread's. The line
-   ;; comes from a thread of the parent, 200 ms on (no fiber of the child could write it while its
-   ;; carrier is held): it was a future in the child, and a thread started in a forked child made
-   ;; collections that copied ever larger continuations (35 GB, minutes at 99% CPU, the reader's main
-   ;; thread waiting on the collector; Jolt's, filed). The verdict is which happened first, never how long.
-   #(let [[r w] (sock/socketpair)]
+   ;; on the child's own fiber: the reader's wait must be that fiber's park, not a thread's. A fiber
+   ;; queued before the wait says "ran" to the parent, and a thread of the parent answers "done" only
+   ;; then: the reader's line is caused by the fiber having run, so the reader was parked when it came,
+   ;; however slow the machine (the line came 200 ms after the fork before, and a loaded machine had
+   ;; it there before the child's first read: nothing parked, the fiber had not run, red). A reader
+   ;; that holds its carrier lets no fiber run, so "ran" never comes; a second thread of the parent
+   ;; ends that wait at in-child-bounded's 5 s with the same line, and the child answers 1. The line
+   ;; is the parent's to write (no fiber of the child could while its carrier is held; a thread
+   ;; started in a forked child made collections that copied ever larger continuations: 35 GB, Jolt's, filed).
+   #(let [[r w] (sock/socketpair) [r2 w2] (sock/socketpair)
+          daemon (fn [f] (doto (Thread. f) (.setDaemon true) (.start)))]
       (lib/fork! {:child (fn []
                            (let [ran (volatile! false)
-                                 _ (a/go (vreset! ran true))
+                                 _ (a/go (vreset! ran true) (sock/write-line! w2 "ran"))
                                  rd (sock/line-reader r)
                                  lines (loop [] (let [ls (rd)] (if (seq ls) ls (recur))))]
                              (lib/c-exit (if (and (= ["done"] lines) @ran) 0 1))))
                   :refused (fn [n] {:refused n})
                   :parent (fn [pid]
-                            (doto (Thread. #(do (Thread/sleep 200) (sock/write-line! w "done"))) (.setDaemon true) (.start))
+                            (daemon #(let [rd (sock/line-reader r2)]
+                                       (loop [] (when (= [] (rd)) (recur)))
+                                       (sock/write-line! w "done")))
+                            (daemon #(do (Thread/sleep 5000) (sock/write-line! w "done")))
                             (lib/wait-status pid))}))
    "memory-gauge"
    ;; the largest block a test allocates (one process, no fan-out: docs/machine.md#processes); Chez keeps a
