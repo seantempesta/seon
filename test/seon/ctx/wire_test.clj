@@ -1739,12 +1739,15 @@
 (defn- recorded-form
   "A request's messages as the recording holds them: the wire's messages (seon.model/wire-messages, what the provider is sent),
   the system prompt's text out (the wiki's own, moving with its edits) and each number of three digits or more renumbered by
-  first appearance (a test branch's eids and ts differ run to run), everything else the bytes."
+  first appearance (a test branch's eids and ts differ run to run), and so is each commit's uuid and each 16-character id, everything else the bytes."
   [ms]
-  (let [seen (volatile! {})]
-    (clojure.string/replace (pr-str (mapv #(if (= "system" (:role %)) (assoc % :content "<system>") %) (seon.model/wire-messages true ms)))
-                            #"(?<![0-9.])[0-9]{3,}(?![0-9.])"
-                            (fn [n] (or (get @seen n) (let [k (str "N" (count @seen))] (vswap! seen assoc n k) k))))))
+  (let [seen (volatile! {})
+        renumber (fn [s re prefix] (clojure.string/replace s re (fn [n] (or (get @seen n) (let [k (str prefix (count @seen))] (vswap! seen assoc n k) k)))))]
+    (-> (pr-str (mapv #(if (= "system" (:role %)) (assoc % :content "<system>") %) (seon.model/wire-messages true ms)))
+        ;; a commit's uuid, and the id of a page call made from its point (seon.lib/id of a digest), differ run to run
+        (renumber #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" "U")
+        (renumber #"(?<![0-9a-zA-Z])[a-z][0-9a-f]{15}(?![0-9a-zA-Z])" "I")
+        (renumber #"(?<![0-9.])[0-9]{3,}(?![0-9.])" "N"))))
 
 (defn- sent-turns
   "Two model turns as seon.turn records them, with the task's plan changed after turn 0 and again after turn 1: each turn's model call with the hash of the bytes it sent. Answers [db [r0 r1] [e0 e1]]: the requests' messages
