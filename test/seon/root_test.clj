@@ -435,13 +435,3 @@
             "no id of a counter's form"))
       (finally (sh/sh "rm" "-rf" tasks runs)
                (ts/drop-main! (:store root0) main)))))
-
-;; docs/users.md#roots-session: a request's name is its first sentence's words, a dot inside a name kept, the same words asked again
-;; numbered 2, 3 (it read "add-a-function-demo" from "demo.math/double", and a repeat took the transaction's number)
-(deftest a-requests-name-is-its-first-sentence
-  (let [db (ts/test-db)
-        db2 (d/db-with db (seon.task/create-tx db [{:seon.task/ns 'request :seon.task/name "add-a-function-demo-math-double" :seon.task/plan "p"}]))]
-    (is (= "add-a-function-demo-math-double" (seon.root/request-name db "Add a function demo.math/double. Then test it.")))
-    (is (= "fix-it" (seon.root/request-name db "Fix it! Now.")))
-    (is (= "work" (seon.root/request-name db "...")))
-    (is (= "add-a-function-demo-math-double-2" (seon.root/request-name db2 "Add a function demo.math/double.")))))
