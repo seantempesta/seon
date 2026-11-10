@@ -130,7 +130,8 @@ mkdir -p "$OUT/stores"
 # want STEP: is STEP one this run runs? A step seon.proofs/check-steps does not name is FAILED.
 # (a selected run's steps were named by the plan from the same table: no binary asked)
 KNOWN= ONLY=
-if [[ -n $SEL ]]; then ONLY=$(cat "$SEL/steps"); else KNOWN=" $(run steps) "; fi
+# the selection's names split on any whitespace, one a line or several on one (one a line ran none and said OK, 2026-11-10)
+if [[ -n $SEL ]]; then ONLY=${(j: :)${=$(<"$SEL/steps")}}; else KNOWN=" $(run steps) "; fi
 # failed WHY / green STEP / is-green STEP: the run's record, one line each in OUT/failed and
 # OUT/green, appended by the steps running at once (a line is one write)
 failed() { print -r -- "$*" >> "$OUT/failed" }
@@ -317,6 +318,13 @@ UNITS=(laws lmdb-kill lmdb-sem forks health contracts test-inputs mg-check fx co
        e2e-sibling swarm e2e-loop e2e-held resume vectors)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):
 # what orders the queue, never what a step proves
+# a selection that names a step this script has no unit for, or that names none, ran nothing it was asked for: CHECK FAILED, naming it
+if [[ -n $SEL ]]; then
+  [[ -z $ONLY ]] && { failed "the selection $SEL/steps names no step"; echo "FAILED: the selection names no step" }
+  for n in ${=ONLY}; do
+    (( $+functions[u-$n] )) || [[ $n == scale ]] || { failed "$n (no step of that name: nothing ran it)"; echo "FAILED $n: no step of that name in bin/check" }
+  done
+fi
 # the last full run: the latest that ran scale (a selected run's times cover only its steps)
 PREVS=("$ROOT"/target/check/2*/scale.time(N)); PREVS=(${PREVS:h}); PREVS=(${PREVS:#$OUT}); PREV=${PREVS[-1]:-}
 secs() { local f r t=0 seen=0; for f in "$PREV/$1".time(N) "$PREV/$1"-*.time(N); do seen=1; r=$(sed -n 's/^real \([0-9.]*\).*/\1/p' "$f" | head -1); t=$(( t + ${r:-0} )); done; (( seen )) && print $t || print 1e9 }
