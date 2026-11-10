@@ -253,7 +253,14 @@
   character _ and its code in hex (a.b/c -> a_2Eb_2Fc, a_b -> a_5Fb). A . is escaped too: #id selectors read it as a
   class (Datastar's patches select by #id). See docs/render.md#in-flight-output-streams."
   {:malli/schema [:=> [:cat :string] :string]}
-  [s] (apply str (map #(if (or (Character/isLetterOrDigit ^char %) (= \- %)) % (format "_%02X" (int %))) s)))
+  ;; one pass into one builder: a format a character cost 1k ticks and 10 KB an id (a component placed, 2026-11-10 profile)
+  [s] (let [sb (StringBuilder.)]
+        (dotimes [i (count s)]
+          (let [c (.charAt ^String s i)]
+            (if (or (Character/isLetterOrDigit c) (= \- c))
+              (.append sb c)
+              (let [h (Integer/toHexString (int c))] (.append sb "_") (when (< (count h) 2) (.append sb "0")) (.append sb (.toUpperCase ^String h))))))
+        (.toString sb)))
 
 (defn key-id
   "Key k as its component's root element id, one to one: its render's name and the name of what it shows (seon.render.ui/evaluation of eval e12 ->
