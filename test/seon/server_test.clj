@@ -16,6 +16,8 @@
   (ts/test-branch!
    (fn [_ conn]
      (let [before (:others (seon.server/live-tasks @conn))
+           ;; the index :agents keeps, made now and brought forward by what changes below (seon.server/index-now)
+           _ (#'seon.server/index-now conn @conn)
            decls (for [n ["a" "b" "c" "d" "e"]] {:seon.task/ns 'demo :seon.task/name n :seon.task/plan "Work." :seon.task/proofs #{}})
            _ (d/transact conn (task/create-tx @conn (vec decls)))
            env {:branch :demo :model nil :max-turns 4}
@@ -26,7 +28,9 @@
        (is (= ["demo/d" "demo/b"] (filterv #(= "demo" (namespace (symbol %))) (keys tasks))) "the running tasks, newest start first, and no held one")
        (is (= [:running :a2] ((juxt :outcome :agent) (get tasks "demo/d"))) "each with its outcome and agent")
        (is (= (merge-with + before {:held 2 :cancelled 1}) others) "the others counted by execution: demo/a and demo/c held, demo/e cancelled")
-       (is (= '(seon.server/task-summaries @(:conn sys)) all) "with the form that lists every task")))))
+       (is (= '(seon.server/task-summaries @(:conn sys)) all) "with the form that lists every task")
+       (is (= (seon.server/live-tasks @conn) (seon.server/live-tasks @conn (#'seon.server/index-now conn @conn)))
+           "the index kept by change answers as a whole one: what :agents reads (docs/server.md#ops)")))))
 
 (deftest a-root-eval-replies-like-an-agent-eval
   ;; task seon.server/root-evals-through-the-one-repl: an eval as root goes through the

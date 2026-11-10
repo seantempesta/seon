@@ -13,7 +13,7 @@
   forks must never have started Chez's parallel-collector sweeper threads, which start at
   the first collection that finds a second thread; a child of such a process hangs in its
   first multi-threaded collection (session RC1). Adding pump or worker threads to an agent
-  breaks its forks; docs/failure-points.md, "Physics". Agent code calls the functions of my.db and my.agent,
+  breaks its forks; docs/failure-points.md, \"Physics\". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.ref :as ref] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
@@ -1166,6 +1166,9 @@
                ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's
                ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
                (intr/forked!)
+               ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
+               ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
+               (contract/check-private! true)
                ;; nor the agent's walk: a fork holds its reactions on @ctx, which would run at a test's every write of a
                ;; record of its own (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent)
                (some-> (:walk @state) render/dispose-walk!)

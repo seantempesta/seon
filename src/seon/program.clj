@@ -378,11 +378,17 @@
   [nsym src k]
   (str nsym "/" (hasch/uuid [nsym src]) (when (pos? k) (str "#" k))))
 
+(def ^:private docstring-heads
+  "The heads of the definitions whose third element is a docstring when more follows it (clojure.core's): form-ids leaves
+  it out of a form's code. defmethod's third is a dispatch value, which is code."
+  '#{def defn defn- defmacro defmulti defprotocol ns})
+
 (defn form-ids
   "A form's [id code] for its namespace, exact text, occurrence k and the form as the reader read it: its id
   (form-id's: the hash of the namespace and the exact text) and the digest of its namespace and code, which is
   the form's EDN as seon.edn/encode makes it (printed here, named in docs/render.md#printing-beside-the-printer-the-wire):
-  the reader has dropped its comments and whitespace, and the encoding leaves out its :line and :column. Two things the print does not hold are made to: the numbers the reader gives a gensym (`p1__12#`,
+  the reader has dropped its comments and whitespace, a definition's docstring is left out (docstring-heads: a test whose namespace
+  reads a docstring takes the src class, reach-step's :docs), and the encoding leaves out its :line and :column. Two things the print does not hold are made to: the numbers the reader gives a gensym (`p1__12#`,
   `x__3__auto`, counted over the process) are renumbered by first appearance, and the name's metadata
   (`^:private`) follows. Stored with the form (:form/code), what a test's reach digest takes of it
   (docs/source.md#what-a-test-takes-of-a-forms-text). Across all of src and test (3,831 forms) a form read twice
@@ -390,6 +396,10 @@
   {:malli/schema [:=> [:cat :symbol :string :int :any] [:tuple :string :string]]}
   [nsym src k form]
   (let [id (str nsym "/" (hasch/uuid [nsym src]) (when (pos? k) (str "#" k)))
+        ;; a definition's docstring is no code: the string after its name, when more follows
+        form (if (and (seq? form) (docstring-heads (first form)) (symbol? (second form)) (string? (nth form 2 nil)) (< 3 (count form)))
+               (with-meta (apply list (first form) (second form) (drop 3 form)) (meta form))
+               form)
         ;; seon.edn/encode's own print, inline: a contracted call more is the account proof's call count
         printed (binding [*print-length* nil *print-level* nil *print-meta* false] (pr-str form))
         counts (volatile! {})
@@ -1366,6 +1376,16 @@
   bin/check: what such a test proves is the whole program the binary is built from."
   '#{clojure.core/slurp clojure.core/file-seq clojure.java.io/resource seon.test-store/binary-sh})
 
+(def ^:private doc-readers
+  "The vars a test calls to read a docstring: clojure.repl's doc. A var's metadata read for its :doc is no reader here:
+  clojure.core/meta is in every deftest's expansion, and :doc is no qualified keyword a form's facts hold, so a test reading
+  (:doc (meta v)) is the full run's to catch. See docs/source.md#what-a-test-takes-of-a-forms-text."
+  '#{clojure.repl/doc})
+
+(def ^:private doc-attrs
+  "The attributes holding a docstring as a fact. See docs/source.md#what-a-test-takes-of-a-forms-text."
+  #{:var/doc :ns/doc})
+
 (def file-readers
   "The vars a test calls to read the checkout's files: the tree-readers but binary-sh (which runs
   the binary: its tests are digested by what they reach), and src's readers of a checkout
@@ -1634,6 +1654,8 @@
         added (vec (for [f added] (-> f (assoc :sedges (if ((:refs f) 'seon.config/baked-schema-forms)
                                                          []
                                                          (vec (for [k (:keywords f) :when (contains? (:schemas g) k)] (str "schema " k)))))
+                                      ;; a docstring fact it names is kept, for :docs
+                                      (cond-> (some doc-attrs (:keywords f)) (assoc :doc-attr? true))
                                       (dissoc :keywords))))
         rows (into (apply dissoc old removed) (map (juxt :id identity)) added)
         defs (if bulk? (indexed (for [f added a (defined f :var)] [a (:id f)]) false) (by (:defs g) :var))
@@ -1706,6 +1728,9 @@
         ;; the tests reaching it take the tree (one-printer-and-no-cut-before-it
         ;; was reused over edits to what it read, and read as flaky)
         scans (flag :scans #(and (test-nss (:ns %)) (some file-readers (:refs %)) (not (env-reader-form? %))))
+        ;; a test namespace's form reading a docstring (clojure.repl/doc, a var's or namespace's doc fact) judges docs,
+        ;; which a form's code leaves out (form-ids): it reads the src class, the program's text, as kept-program-store's readers do
+        docs (flag :docs #(and (test-nss (:ns %)) (or (some doc-readers (:refs %)) (:doc-attr? %))))
         adj (into (apply dissoc (:adj g) gone-ids) (for [id dirty] [id (edges (rows id))]))
         rev (if bulk?
               (indexed (for [id dirty t (adj id)] [t id]) true)
@@ -1745,7 +1770,7 @@
                                        (assoc! fl n {:reads (any :reads reads) :scans (any :scans scans) :proc (any :proc proc) :bin (any :bin bin)
                                                     ;; the config keys it and what it reaches read, its largest
                                                     ;; kid's set grown by the rest
-                                                    :config (let [own (map #(let [cf (cond-> (:config (rows %)) (walks %) (-> (or #{}) (conj :seon.env/schemas)))]
+                                                    :config (let [own (map #(let [cf (cond-> (:config (rows %)) (walks %) (-> (or #{}) (conj :seon.env/schemas)) (docs %) (-> (or #{}) (conj :seon.env/src)))]
                                                                          (if (computed %) (into (or cf #{}) (:schema-config g)) cf))
                                                                      c)
                                                                   ks (keep #(get-in fl [% :config]) kids)]
@@ -1758,7 +1783,7 @@
                                    (:next g)]
                                   (components (vec affected) (fn [id] (filter affected (adj id)))))]
     (cond-> (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :test-nss test-nss :refd refd :adj adj :rev rev
-           :reads reads :scans scans :proc proc :bin bin :walks walks :plain plain :own own :computed computed
+           :reads reads :scans scans :docs docs :proc proc :bin bin :walks walks :plain plain :own own :computed computed
            :comp-of (persistent! comp-of) :cd (persistent! cd) :flags (persistent! fl) :next n :affected (count affected))
       held (assoc :tests-by-ns tests-by-ns
                   :index (update held :answers #(apply dissoc % (concat stale dead)))
@@ -1795,7 +1820,7 @@
         live (live-ids db)
         {config :keys listed :listed} (config-facts schemas)]
     (reach-step {:rows {} :defs {} :methods {} :impls {} :contract {} :tests #{} :refd {} :adj {} :rev {}
-                 :reads #{} :scans #{} :proc #{} :bin #{} :walks #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0 :computed #{}
+                 :reads #{} :scans #{} :docs #{} :proc #{} :bin #{} :walks #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0 :computed #{}
                  :data-refs data-refs :schemas schemas :schema-config config :listed listed :live live}
                 db []
                 (into (reach-rows db (set (vals live)) true) (for [[k text] schemas] (schema-row k text (contains? listed k))))

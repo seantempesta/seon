@@ -141,6 +141,48 @@
   (is (every? contract/armed? (for [n contract/boot-nss v (vals (ns-interns (the-ns n))) :when (contract/contract v)] v))
       "every contracted var of the boot namespaces is armed"))
 
+;; docs/checks.md#contracts-armed-at-definition: the owner, 2026-11-10, "Private helpers: tests only"
+(defn- private-str
+  "A private helper whose body takes any value, so an unchecked wrong call answers instead of throwing."
+  {:malli/schema [:=> [:cat :int] :string]}
+  [x] (str x))
+
+(defn public-str
+  "private-str's public twin."
+  {:malli/schema [:=> [:cat :int] :string]}
+  [x] (str x))
+
+(clojure.core/defn- armed-private-str
+  "private-str, armed afterwards (seon.contract/arm!) as a REPL definition is."
+  {:malli/schema [:=> [:cat :int] :string]}
+  [x] (str x))
+
+(clojure.core/defn- refused?
+  "Did (f) throw a contract error?"
+  {:malli/schema [:=> [:cat :seon.host/fn] :boolean]}
+  [f] (try (f) false (catch clojure.lang.ExceptionInfo e (= :seon.instrument/contract-error (:seon.error/type (ex-data e))))))
+
+(deftest a-private-contract-is-checked-in-tests-and-not-in-production
+  (is (contract/private-checked?) "a test process checks private contracts")
+  (is (= :armed (contract/arm! #'armed-private-str)))
+  (is (refused? #(private-str :k)) "in a test, a private helper's wrong call is refused")
+  (is (refused? #(armed-private-str :k)) "and one armed afterwards")
+  (is (= "1" (private-str 1)) "a right call answers")
+  ;; the production setting, in this process: the same wrappers with private-checks false, as root and its agents
+  ;; hold them from :seon.config.contract/private-checked? (asserted per profile below)
+  (try
+    (contract/check-private! false)
+    (is (= ":k" (private-str :k)) "with the production setting the private call is not checked")
+    (is (= ":k" (armed-private-str :k)) "nor the armed one")
+    (is (contract/armed? #'armed-private-str) "though its wrapper is in place, for a test child to turn on")
+    (is (refused? #(public-str :k)) "a public function's contract is checked on every call")
+    (finally (contract/check-private! true)))
+  (is (refused? #(private-str :k)) "turned on again, as an agent's test child turns it on at its fork")
+  (let [under #(:seon.config.contract/private-checked? (:config (seon.config/layered (seon.config/load-layers (seon.config/checkout) %))))]
+    (is (false? (under [])) "root and its agents, with no profile, do not check them")
+    (is (false? (under ["--profile" "deepseek"])) "nor under another profile")
+    (is (true? (under ["--profile" "scripted"])) "bin/test's shards and a test's root and agents do")))
+
 (defrecord Row [id name])
 
 ;; docs/storage.md#plain-data: a value that is not plain data is made plain as data, never as its print.
