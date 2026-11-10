@@ -1338,7 +1338,7 @@
 
 (defn eval-tile
   "Eval eid's rendered value as a tile of the agent's page parts (a component over the db): its value drawn whole by the render its
-  record's schema (:seon.eval/schema) names, the same tile the person sees and the model reads (owner, 2026-11-10: \"the rendered tile is
+  record's schema (:seon.eval/schema) names, the same tile the person sees and the model reads (owner: \"the rendered tile is
   the only version of the rendered value that is seen by the model\"). See docs/render.md#a-value-draws-itself."
   {:seon.render/style ".eval-tile { min-width: 0; overflow-x: auto; font-size: 0.75rem; }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db] [:eid :int]]]] :any]}
@@ -1637,7 +1637,7 @@
 
 (defn steps
   "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many: the
-  chat shows the messages and a person opens the steps (owner, 2026-11-10); nothing for none. See docs/render.md#the-page."
+  chat shows the messages and a person opens the steps; nothing for none. See docs/render.md#the-page."
   {:seon.render/style ".seon-steps > summary { cursor: pointer; font-size: 0.75rem; color: var(--color-text-500); list-style: none; } .seon-steps > summary::before { content: '▸ '; } .seon-steps[open] > summary::before { content: '▾ '; }"
    :malli/schema [:=> [:cat :int [:sequential :any]] :any]}
   [n xs]

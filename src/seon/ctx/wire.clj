@@ -214,7 +214,7 @@
 (defn eval-msgs
   "An eval (:seon.db/eval-fact) as the model reads it: the model's call (its code, and its intent when it said one) and the
   tool message its result is, printed by the one printer, within its budget, or whole once a person opened it (:seon.eval/opened); an eval of another hand, one user message of who ran what and what
-  came of it. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  came of it. See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :map] [:vector :seon.model/message]]}
   [{db :seon.db/db ix :seon.render/index} {:seon.eval/keys [id by code intent call-id opened] :as e}]
   (let [mark (cond-> (result-mark db e)
@@ -229,7 +229,7 @@
 
 (defn message-msgs
   "A message to the agent (:seon.message/fact) as the model reads it: one user message, who sent it and its body. See
-  docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat :map :map] [:vector :seon.model/message]]}
   [_ {:seon.message/keys [from body]}]
   [{:role "user" :content (print/text (array-map :from (str from) :body (str body)) (:context print/budgets))}])
@@ -372,7 +372,7 @@
   "A model call (:seon.model-call/fact) as the model reads it: what the model said and its reasoning. Whether those are sent is
   today's rule, reproduced: a model's reply only (origin :model), when it made calls or was not cut at the token limit, and
   only with words or reasoning to send. Its turn's page message (`page-diff-msgs`) and its evals are their own. See
-  docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :seon.model/message]]}
   [{db :seon.db/db} {:seon.model-call/keys [n origin reply reasoning truncated] :as c}]
   (let [called? (boolean (some #(let [e (d/entity db %)] (and (:seon.eval/call-id e) (:seon.eval/agent e))) (keys (:seon.eval/_call c))))
@@ -423,7 +423,13 @@
                          (map evals (filter model? es)) (map evals (remove model? es)))]
            x))
           ;; those delivered after the last turn's edge, which the turn now opening takes (:pending): never lost before that turn's call exists
-          (keep (fn [[m _]] (get msgs m)) (get placed :pending)))))
+          (concat (keep (fn [[m _]] (get msgs m)) (get placed :pending))
+                  ;; the turn now opening, whose call is not written yet (a read made as a model's request would be: seon.turn/context-block):
+                  ;; its page, from the last call's basis to the request's own point, after what it took, as the model's turn reads it
+                  (let [last-b (last (keep basis-of cs))]
+                    ;; a pull that leaves the bases out (a smaller pattern) shows no page: only one with no call yet, or one holding bases
+                    (when (and here (not= (:t here) (:t last-b)) (or (empty? cs) last-b))
+                      [[#'page-diff-msgs {} (:db/id c) last-b here (inc (or newest 0))]]))))))
 
 (defn example-session-msgs
   "An example session's agent (its root view in a render-pull of it) as the model reads it, a model output's call: the message
@@ -452,7 +458,7 @@
 (defn agent-msgs
   "An agent (:seon.db/agent-fact) as the model reads it: its system message (`agent-system-text`: the doc sections
   :seon.agent/system names, else the system prompt; a placed example is answered by its own call, so it has none), each example session its task names as a placed call of `example-msgs`, what opens its own session, then its turns'
-  entities (`turn-entities`). The task is read in the page parts alone, never here. See docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09."
+  entities (`turn-entities`). The task is read in the page parts alone, never here. See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
   [{db :seon.db/db} a]
   (let [k (:seon.agent/key a)]

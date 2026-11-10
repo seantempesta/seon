@@ -216,7 +216,8 @@
                                                       "  :key (datahike.api/q '[:find ?k . :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db)})")}]))
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
-    (is (re-find #"(?m)^\s*\[seon\.render\.ui/task\b" text) "the render of ctx, each part headed by the function that drew it, as the call Seon made and its answer")
+    (is (clojure.string/includes? text "(my.render/page {:commit") "the page, as the call Seon made and its answer")
+    (is (re-find #":class \"task\"" text) "each part headed by the render that drew it (its class's first word: seon.ctx.wire/presentation-free)")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:ns (:value sent))) "and the read records the hash of what it sent, as a model turn does (the debug page compares its redraw with it)")

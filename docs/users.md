@@ -38,7 +38,7 @@ Nothing here is a new concept: every part of Seon is the same few pieces, and wh
 - **To the browser:** root's web proc writes the user agent's hiccup as html and sends Datastar patches on one deflate-compressed event stream per tab ([render](render.md#in-flight-output-streams)); what is still being produced streams on `[:web :streams]`.
 - **From the browser:** a person's click or typing posts to the web proc, which sends it to the user agent (stage 4) as a request; the user agent sends requests to root or an agent.
 
-**Gone, because each was a special case:** root's render walks of pages (`root-walk`, `user-walk`, `branch-walk!`, the cold draw); every layout, ```seon.render/layout-of``` and `:seon.render/layout`; an entity's second render; root's session as a thing apart (```seon.root/root-session-pattern```, its refresh, the special message path); `:seon.agent/root`; an opened eval written on main (opening is an eval with origin `:context` the user agent sends the agent); `:as` and `*` in patterns.
+**Gone, because each was a special case:** root's render walks of pages (`root-walk`, `user-walk`, `branch-walk!`, the cold draw); every layout, ``seon.render/layout-of`` and `:seon.render/layout`; an entity's second render; root's session as a thing apart (```seon.root/root-session-pattern```, its refresh, the special message path); `:seon.agent/root`; an opened eval written on main (opening is an eval with origin `:context` the user agent sends the agent); `:as` and `*` in patterns.
 
 ## The data model: schemas, refs and pulls
 
