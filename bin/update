@@ -1,10 +1,12 @@
 #!/bin/zsh
 # bin/update [ARGS]   bring the standing root up to date with main, from the main tree, in one go:
-#   1. merge Seon's own merges (jolt/merges: what the standing root's merges committed in
-#      the write-back tree that config/local.edn's :seon.config.source/root names) into main;
-#   2. bring the write-back tree to main and move both trees' submodules to main's pins (bin/worktree --sync for it);
-#   3. build (bin/build: each step skips what is up to date);
-#   4. restart the standing root on its store (bin/root stop, start): it boots on main's build and resumes its
+#   1. bring main into the write-back tree (jolt/merges: what the standing root's merges committed in the tree that
+#      config/local.edn's :seon.config.source/root names) and move both trees' submodules to main's pins (bin/worktree
+#      --sync for it). Nothing of jolt/merges enters main here: a merged task's files reach main by the reviewed sync
+#      (my.root/sync! onto a branch a session reviews and lands; docs/source.md#a-merged-task-reaches-mains-files),
+#      and until then the task is an :unsynced problem;
+#   2. build (bin/build: each step skips what is up to date);
+#   3. restart the standing root on its store (bin/root stop, start): it boots on main's build and resumes its
 #      main, catching up the files its checkout changed since main last indexed it (docs/source.md#a-boot-catches-up-with-its-checkout).
 # ARGS go to the restarted root (bin/root start ARGS): the standing root's profile is one of them
 #   (bin/update --profile deepseek), as it is on every root's command line (docs/config.md#layers).
@@ -29,22 +31,16 @@ idx=$(git write-tree) || fail "the main tree's index has unmerged entries"
 # submodules are left out: a merge that bumps a pin leaves the checkout behind it, and the
 # submodule step below moves every submodule to main's pins
 git diff --quiet --ignore-submodules && git diff --cached --quiet --ignore-submodules || fail "the main tree has uncommitted changes"
-if git rev-parse -q --verify jolt/merges >/dev/null; then
-  n=$(git rev-list --count main..jolt/merges)
-  if (( n > 0 )); then
-    git merge --no-ff -q jolt/merges -m "Merge jolt/merges: the standing root's merges ($n commits)" || fail "merging jolt/merges into main"
-    print "merged $n commits of jolt/merges into main"
-  fi
-fi
 if [[ -d $MERGES ]]; then
-  # the write-back tree is brought to main here, after the merge above: a boot reads no tree
+  # main is brought into the write-back tree here: a boot reads no tree
   # a submodule behind main's new pin is not a change: --sync moves it, and names one that has changes
   # refused, it names the files. The index is refreshed first: a file whose stat alone moved reads as changed to
   # git diff, which refused the first update after a merge and passed the next, once git status had refreshed it
   git -C "$MERGES" update-index -q --refresh --ignore-submodules || true
   git -C "$MERGES" diff --quiet --ignore-submodules || fail "$MERGES has uncommitted changes: $(git -C "$MERGES" status --short --ignore-submodules | tr '\n' ' ')"
-  # --sync moves to the pins its HEAD records, so the write-back tree holds main's pins before the build. Its branch holds no commit main lacks: step 1 merged them
-  git -C "$MERGES" merge --ff-only -q main || fail "fast-forwarding $MERGES to main"
+  # --sync moves to the pins its HEAD records, so the write-back tree holds main's pins before the build. Its branch may hold
+  # the standing root's merges main does not (unsynced tasks): main is merged into it, never it into main
+  git -C "$MERGES" merge -q --no-edit main || fail "merging main into $MERGES (a merged task's files and main's differ: sync or resolve it there)"
   "$MAIN/bin/worktree" --sync "$MERGES" >/dev/null || fail "syncing $MERGES's submodules"
 fi
 git -c protocol.file.allow=always submodule update --init -q || fail "main's submodules"

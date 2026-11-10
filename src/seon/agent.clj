@@ -13,7 +13,7 @@
   forks must never have started Chez's parallel-collector sweeper threads, which start at
   the first collection that finds a second thread; a child of such a process hangs in its
   first multi-threaded collection (session RC1). Adding pump or worker threads to an agent
-  breaks its forks; docs/failure-points.md, "Physics". Agent code calls the functions of my.db and my.agent,
+  breaks its forks; docs/failure-points.md, \"Physics\". Agent code calls the functions of my.db and my.agent,
   referred into its namespace. From proto/flow f2-final proto.agent (session F2)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.doc :as doc] [seon.merge :as pm] [seon.config :as cfg] [seon.reconcile :as r] [seon.vector :as vector] [seon.lib :as lib] [seon.print :as print] [seon.sock :as sock] [jolt.scheme :as scm] [clojure.test :as t]
