@@ -584,7 +584,9 @@
  ;; about twice that on each side. At the bound: a run of less work than this runs in one shard, as the owner ruled 2026-10-30.
  :seon.config.proofs/shard-min-ms 30000
  ;; Unit: MB. What one shard of a run takes at its peak, its own process and the roots and agents its tests start
- ;; (seon.proofs/memory-jobs). Provenance: PROVISIONAL, to be measured (the summed RSS of a shard's process tree).
+ ;; (seon.proofs/memory-jobs). Provenance: measured 2026-11-10, the summed RSS of one shard's process tree sampled every 2 s
+ ;; (the shard, its roots and agents: 9 processes at the peak) over seon.root-test's 12 process tests, 64 s: peak 2,046 MB. A
+ ;; 2 s sample can miss a shorter peak, and another namespace's tests may boot more: a floor, not a ceiling.
  :seon.config.proofs/shard-mb 2048
  ;; Unit: MB. The free memory a run leaves the machine (seon.proofs/memory-jobs): below it a run takes one shard. Provenance:
  ;; a quarter of Seon's target machine (:seon.config.machine/memory-mb, 16 GB), the share other work keeps.
