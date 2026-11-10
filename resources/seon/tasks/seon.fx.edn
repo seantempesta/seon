@@ -18,5 +18,6 @@
   :seon.task/proofs #{seon.fx-test/redirects-are-bounded seon.fx-test/search-key-stays-in-root}}
  {:seon.task/name "a-tree-run-is-one-function"
   :seon.task/plan "Found by the one-offs survey (the archived paper one-offs-2026-10-23.md (git history); owner, 2026-10-23: src resists growth so agents reuse and improve the core parts rather than making one-offs, DECISIONS). Item 5. What exists: `seon.fx/build` and `seon.fx/run-on-checkout` (the :tests effect's run, `seon.fx/run-tests`) repeat one mechanism (the `child-env-scrub` env, `bin/worktree --at`, a log file, a niced command in that tree, the cleanup). Done since: `seon.fx/test-results` reads the stored results at each test's digest (`seon.fx/stored-results`, seon.proofs' verdicts), no longer prove's stdout. Correct: one private in-tree runner both call. Risk: the two differ in where the tree lives (generations-dir against tests-dir) and in what they keep after (a build's tree stays, a test run's is removed)."
-  :seon.task/kind :work}
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.fx-test/seon-fx-build-run-checkout-call-private-tree}}
  ]
