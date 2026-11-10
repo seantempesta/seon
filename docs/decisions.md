@@ -22,6 +22,18 @@ The owner's rulings of 2026-11-10, on how the machine's load is judged, on what 
 
 "Private helpers: tests only" (asked with the question tool). Every function still has a contract and every contract still generates; a private function's contract (`seon.contract/defn-`, a var with `:private`) is checked at its definition, in tests and in the gate, and not on each production call, while a public function's stays checked on every call. Measured: a contracted call costs about 70 engine ticks to check; a small value's print was 25.8k ticks with the contracts on and 12.9k with them off, nearly all of it private per-node helpers; a whole cold request is about 3% contract checking on the in-memory store (3-10% by request). Stated in: [checks](checks.md#contracts-armed-at-definition).
 
+### A read never writes (owner, 2026-11-10)
+
+"A read never writes." Reading an agent's context to look at it commits nothing, records no model call and no eval of the read; the outside model's own read is its turn and is recorded as one. Stated in: docs/turn.md#an-outside-agent (proof seon.server-test/a-context-read-that-only-looks-writes-nothing).
+
+### The model's history is the pull's data; what is computed is computed in the hiccup render (owner, 2026-11-10)
+
+"All rendering that is pulling new data and processing it should happen at the hiccup render function step. I don't want what's shown on screen to dramatically differ from what the model sees." Then, asked where the history comes from: "Every render function gets the current db, the @ctx full pull data, and I think the current render tree? This allows any function to get whatever data it needs to do the proper render. So where are the messages and other parts that are data? In the @ctx pull data". So a history entity's native messages are made from its own pulled fields by its `:seon.render/openai-compat` render, never converted from hiccup; whatever looks data up or computes does it once, in the hiccup render, which the page shows styled and the model reads stripped. Stated in: docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup.
+
+### An entity is held at every path the pull reaches it (owner, 2026-11-10)
+
+Asked about the stubs ctx held at every place an entity was joined but the first: "I'm pretty sure this is a self inflicted pain point and there's a simple solution please work with web and the other agents and find it". `seon.ctx/build` held each entity once and wrote `{:db/id e}` at every other path, and code across the renders undid it (fill, held-whole, a view resolving stubs was next); now it holds a joined entity whole at every path its pattern pulls it, each by that path's pattern, as `d/pull` does, and a swap! edits an entity by its `:db/id` at any path. Stated in: docs/ctx.md#the-pattern (with stage 2b, jolt/everypath).
+
 ## 2026-11-09 rulings
 
 The owner's rulings of 2026-11-09, on one system of agents, rendering from data, the user and root. Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09, staged in docs/users.md#the-stages-agreed-2026-11-09.

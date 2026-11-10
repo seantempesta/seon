@@ -61,6 +61,8 @@ test store (`seon.test-store/test-branch!`); say why in its comment.
 
 A proof decides one thing: whether a behaviour is correct, and with it whether the work is done; more proofs are not better ones. It makes one claim, statable in a sentence, about what the behaviour does and not how it is done. It fails when the behaviour is broken, which you have seen by breaking the source it guards with no green result to reuse, and its failure says what is wrong. An assertion that decides neither correctness nor done is removed; a proof another already makes is merged into it; a process test whose claim a world can show moves to the world.
 
+Its failure message is built only on a failure: `clojure.test` evaluates an `is` message whether the assertion passes or not, so a diagnosis that reads (dead links, dead cites, a whole transaction printed) is built inside `(when-not ...)` of the claim, or it runs on every green (the task files' law spent 150M ticks a green run on its messages).
+
 Its input is the smallest that still shows the claim (owner, 2026-10-22: "Shrink the tests down to sizes that capture the error class they are looking for"; 2026-10-31: "question what is being tested rather than how fast can we make it. Algorithmic improvements often can be found by rethinking the problem."). To make a test cheaper, state its claim first and find the input that shows exactly that; cutting sizes is the last resort. A helper once shrank sizes until five cost proofs spanned 1.5 to 6 times and could no longer judge growth; rethought by claim, the same tests went from 175 to 21 M ticks, 171 to 11 M and 116 to 68 M, with real spans. A growth claim is a cost proof at small sizes ([cost](cost.md)).
 
 ## A root costs what it boots
