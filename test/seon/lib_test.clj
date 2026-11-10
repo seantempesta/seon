@@ -69,11 +69,10 @@
   ;; on the main carrier (the agent's one thread) a poll(2) of the pipe held every other fiber
   ;; of the agent for that long. The wait parks through the io poller: a fiber queued before the
   ;; wait runs while the reader waits (the carrier is free only then), so it ran before the line
-  ;; came. A poll(2) holding the carrier lets it run only after the read returns: false. The
-  ;; line comes from a thread of the parent process (no fiber could write it while the carrier is
-  ;; held; a thread started in the forked child grew it to 35 GB), 200 ms on, the end of a held
-  ;; carrier's wait; the verdict is which happened first, never how long it took. In a child forked
-  ;; from a main carrier, the reader on the child's own fiber
+  ;; came. A poll(2) holding the carrier lets none run. The fiber's own word to the parent is what
+  ;; makes the parent write the line (seon.check/fork-cases "line-parks"), so the verdict is which
+  ;; caused which, never how long anything took: a loaded machine cannot turn it red. In a child
+  ;; forked from a main carrier, the reader on the child's own fiber
   (is (= {:exit 0} (fork-case "line-parks")) "a fiber ran while the reader waited"))
 
 (deftest a-process-ends-with-what-it-watches-and-so-does-what-it-forks
