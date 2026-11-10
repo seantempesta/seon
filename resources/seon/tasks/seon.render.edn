@@ -1,5 +1,9 @@
 [{:seon.task/name "the-root-tile-counts-the-program-it-loaded"
-  :seon.task/plan "What exists: the root tile reads program 0 defs beside the main tile's 1,233 vars on a root that loaded main's program (its boot numbers' :program :loaded is absent or zero). Correct: the tile shows what boot loaded, measured, or says it was not measured."
+  :seon.task/plan "What exists: root's boot measures what it loaded and keeps it in root's view, :boot {:program {:loaded n :ms m} ...} (seon.root/start!; n from seon.program/load-all!, the forms the image did not already hold, so 0 when the binary was built from main's program). Nothing shows it: root's process tile, seon.render.ui/process-tile, renders seon.render.proc/process-value (schema :seon.render/process), which reads the view's writer, fork server and store numbers (seon.root/view-numbers) and not :boot.
+
+The change: seon.render.proc/process-value carries the view's :boot (its :seon.render/process schema gains it, optional), and seon.render.ui/process-tile shows the forms boot loaded and its ms, or that none were loaded because the image held main's program. Nothing new is measured.
+
+Proof: seon.render-test/the-root-tile-shows-the-defs-boot-loaded (a process value with :boot {:program {:loaded 1233}} shows 1233 forms loaded; with 0, says the image held them; with none, says not measured)."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/the-root-tile-shows-the-defs-boot-loaded}}
  {:seon.task/name "a-merge-conflict-shows-on-the-page"
@@ -11,7 +15,11 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/the-agent-page-shows-what-its-merge-will-carry}}
  {:seon.task/name "spend-has-a-render"
-  :seon.task/plan "What exists: what the effect owner spent (the fx proc's :spent per budget key) is shown nowhere; the page sums run tokens only. Correct: a named spend value with ai and html renders, on the page and at root's REPL."
+  :seon.task/plan "What exists: the effect owner, seon.fx (its proc's state), keeps what each budget key has spent, :spent {budget-key amount}, and refuses a request past its budget (:seon.fx/budget-spent); its ping map carries :spent. Nothing shows it: the page sums the run's tokens only.
+
+The change: a spend value, {budget-key {:spent n :budget b}}, with its own schema whose :seon.render/hiccup render draws it on root's page and whose model render prints it for an agent, the way :seon.render/process is drawn by seon.render.ui/process-tile (a schema naming its renders: docs/render.md#one-rendering-system-drawn-from-the-data). Read at root's REPL as the same value.
+
+Proof: seon.render-test/spend-reads-by-its-render (a spend value of two keys renders each key's spent and budget in the hiccup and in what the model reads). A render is tested as seon.render-test/the-problem-report-reads-by-class tests the problem report's."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/spend-reads-by-its-render}}
  {:seon.task/name "namespace-agent-debug-and-data-pages"

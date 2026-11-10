@@ -533,18 +533,15 @@
        (every? #(task/done? db (:v %)) (d/datoms db :eavt te :seon.task/needs))))
 
 (defn uncited-tasks
-  "Each ready :implement task, which holds its design step's plan along :needs (seon.task/accumulate),
-  whose accumulated plan cites no program var (no cite of one along its needs, seon.task/cites-of: the
-  context pulls no var for it), that names no proof, or one of whose proofs is still the placeholder
-  seon.ctx writes, as an :uncited-task row with its reason (:no-references, :no-proofs,
-  :placeholder-proof). A design step's plan is text, its input: design writes the cited plan,
-  so only the implement step is judged. Closed when the design step's plan cites a name, the
-  proofs are named and written. Cost: the task, kind, reference and proof datoms once, then a
-  walk of each implement task's needs."
+  "Each ready task, which holds the plans along its :needs (seon.task/accumulate), whatever its kind, whose
+  accumulated plan cites no program var (no cite of one along its needs, seon.task/cites-of: the context pulls
+  no var for it), that names no proof, or one of whose proofs is still the placeholder seon.ctx writes, as an
+  :uncited-task row with its reason (:no-references, :no-proofs, :placeholder-proof). Closed when its plan
+  cites a name and its proofs are named and written. Cost: the task, reference and proof datoms once, then a
+  walk of each ready task's needs."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
-  (let [kinds (into {} (map (juxt :e :v)) (d/datoms db :aevt :seon.task/kind))
-        chain (fn chain [seen e]
+  (let [chain (fn chain [seen e]
                 (if (seen e) seen
                     (reduce chain (conj seen e) (map :v (d/datoms db :eavt e :seon.task/needs)))))
         vals-of (fn [es a] (into #{} (mapcat #(map :v (d/datoms db :eavt % a))) es))
@@ -555,7 +552,7 @@
         placeholder? (fn [sym] (some-> (pdb/eid db :var/name sym) (->> (d/entity db)) :var/form :form/src
                                       (str/includes? task/placeholder-assertion)))]
     (vec (for [{:keys [e v]} (sort-by :v (d/datoms db :aevt :seon.task/id))
-               :when (and (= :implement (kinds e)) (task-ready? db e))
+               :when (task-ready? db e)
                :let [es (chain #{} e)
                      proofs (vals-of es :seon.task/proofs)
                      reasons (cond-> []
