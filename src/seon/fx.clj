@@ -1186,15 +1186,14 @@
 (defn- wake-later
   "The clock (session R3's :tick): when the head request waits on the bucket alone (a worker is
   free), one :tick is due on the owner's :tick port once the bucket refills to its estimate.
-  Answers st, marked :tick-due until that tick arrives."
+  Answers st; the tick's timer (seon.step/timer) is armed until that tick arrives, whatever state a step that threw left."
   {:malli/schema [:=> [:cat :map :map :int] :map]}
   [st m now]
-  (if (and (:bucket st) (:tick st) (not (:tick-due st)) (< (:busy st) (:workers st)))
+  (when (and (:bucket st) (:tick st) (< (:busy st) (:workers st)))
     (let [b (refill (:bucket st) now)
           ms (long (Math/ceil (/ (max 1 (- (or (:est m) 0) (:tokens b))) (:per-ms b))))]
-      (step/put-after! (:tick st) ms {})
-      (assoc st :tick-due true))
-    st))
+      (step/arm! (:tick-timer st) (:tick st) ms {})))
+  st)
 
 (defn- batch
   "With the head request m admitted, the requests queued behind it that ride in its worker's
@@ -1251,6 +1250,7 @@
                  :bucket (when-let [r (:rate args)]
                            {:tokens (double r) :cap (double r) :per-ms (/ r 1000.0) :rate-ms (/ r 1000.0) :at (quot (profile/now-ns) 1000000)})
                  :tick (:tick args)
+                 :tick-timer (step/timer)
                  ::flow/in-ports (if (:tick args) {:tick (:tick args)} {})
                  ::flow/out-ports {:to-workers (:work args) :out (:back args)}))
   ([st _] st)
@@ -1269,7 +1269,7 @@
                  (when (and (:close? st) (zero? (:busy st)) (empty? (:queue st)) (not-any? #(get-in % [:request :req :more]) (or (:batch m) [m])))
                    (step/out! o :to-workers {:idle true}))
                  [st @o])
-         :tick [(bound (dispatch (dissoc st :tick-due) o)) @o])))))
+         :tick (do (step/fired! (:tick-timer st)) [(bound (dispatch st o)) @o]))))))
 
 (defn- done-of
   "The owner's :done item for request m answered r, taken at t0 and answered at t1 (ns): the outcome with its
