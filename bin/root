@@ -8,6 +8,9 @@
 # output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT"); the server port it was started
 # bound (what bin/mcp relays to; the root's ROOT LISTENING line names it): runs/root.port, while
 # it runs.
+# `start`'s root catches its main up with the files this checkout changed since main last indexed them (ROOT CAUGHT UP;
+# docs/source.md#a-boot-catches-up-with-its-checkout); when what changed reaches the binary (ROOT STALE BINARY on main's tree,
+# this checkout's), start runs bin/build seon and starts it again, once.
 # `next` restarts the next generation (owner, 2026-10-21; docs/source.md#the-next-generation):
 # it asks the running root for the generation main records (my.root/next-generation: the tree
 # my.root/build! built from the last merges commit, and the arguments resuming this root's store
@@ -131,7 +134,19 @@ case ${1:-start} in
       launch "$ROOT" "${@:3}"; exit $?
     fi
     if running; then "$0" status; exit 0; fi
-    launch "$ROOT" "${@:2}" ;;
+    launch "$ROOT" "${@:2}"
+    # the boot caught main up with this checkout (docs/source.md#a-boot-catches-up-with-its-checkout); when what changed reaches
+    # the binary's own code or a build input (seon.root/binary-current, the ROOT STALE BINARY line after a ROOT CAUGHT UP one), it
+    # is built and the root started again, once: a second stale line is reported (start's last line), never built again; a root
+    # that caught up nothing (a test's: no catch-up) is never built here
+    # built only when main's tree is this checkout's (a root on another source tree, a test's, is never built from this one)
+    mt=$(sed -nE "s/^ROOT STALE BINARY binary [^,]*, main's tree ([0-9a-f]+).*/\1/p" "$LOG" | head -1)
+    if grep -q '^ROOT CAUGHT UP ' "$LOG" && [[ -n $mt && $mt == $("$ROOT/bin/tree") ]]; then
+      print "building target/seon: what changed reaches the binary (bin/build seon, $SEON_RUNS/root-build.log)"
+      stop >/dev/null
+      nice -n 15 "$ROOT/bin/build" seon > "$SEON_RUNS/root-build.log" 2>&1 || { print -u2 "bin/build seon failed: $SEON_RUNS/root-build.log"; exit 1 }
+      launch "$ROOT" "${@:2}"
+    fi ;;
   next)
     running || { print -u2 "no root running: next restarts a running root's next generation"; exit 1 }
     # its answer {:items [{:printed "[\"CHECKOUT\" \"--set\" ...]"}]}: the vector's strings, NUL-separated

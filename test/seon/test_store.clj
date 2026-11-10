@@ -295,14 +295,18 @@
 
 (defn start-args
   "bin/root start's arguments for a test's root in runs (start-root!): root-profile, its task files
-  and verdict cache its own, the test running it as --started-by, then args, whose --profile wins."
+  and verdict cache its own, no catch-up with the checkout at boot, the test running it as --started-by, then args, whose
+  --profile and --set win."
   {:malli/schema [:=> [:cat [:map [:runs :string] [:args {:optional true} [:sequential :string]]]] [:vector :string]]}
   [{:keys [runs args]}]
   (-> ["--profile" root-profile
        "--set" (str ":seon.config.root/tasks-dir=" (pr-str (str runs "/tasks")))
        ;; its verdict cache is its own too, so no verdict an earlier test run cached is
        ;; reused (the store's results were per main; the cache outlives a run)
-       "--set" (str ":seon.config.proofs/results-dir=" (pr-str (str runs "/results")))]
+       "--set" (str ":seon.config.proofs/results-dir=" (pr-str (str runs "/results")))
+       ;; its main is the seeded store's, the tree its run indexed: a session's edits since are no test's subject, and a boot
+       ;; reads no git (docs/source.md#a-boot-catches-up-with-its-checkout); a test of the catch-up sets it again
+       "--set" ":seon.config.root/catch-up-on-boot=false"]
       ;; the test running now started this root: its merge gate leaves it out (:seon.root/started-by)
       (into (when-let [{:keys [ns name]} (meta (first clojure.test/*testing-vars*))]
               ["--started-by" (str (ns-name ns) "/" name)]))

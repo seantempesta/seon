@@ -1223,6 +1223,60 @@
         (when @root (ts/stop-root! @root))
         (sh/sh "rm" "-rf" dir)))))
 
+;; docs/source.md#a-boot-catches-up-with-its-checkout: the default boot of a root with a source tree indexes what its checkout changed
+;; since main last indexed it, through bin/root, end to end: an untracked new file reaches main; a file that does not read is named
+;; and left out; with nothing changed the boot indexes nothing; a file a merged task main holds unsynced also changed is left out,
+;; naming the task, and main keeps the merge's text. Red before: every restart resumed main as it was (the test above's rule,
+;; now the explicit :seon.config.root/catch-up-on-boot false)
+(deftest a-boot-catches-up-with-what-its-checkout-changed
+  (let [dir (scratch-dir "catchup")
+        co (str dir "/co")
+        git (fn [d & args] (let [r (apply sh/sh "git" "-C" d "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                             (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        probe! (fn [n v] (spit (str co "/src/seon/catchup_probe_" n ".clj") (str "(ns seon.catchup-probe-" n ")\n\n(defn probe [] " v ")\n")))
+        root0 {:store (str dir "/runs/store") :main "main" :runs (str dir "/runs") :env {"SEON_RESULTS_PORT" "0"}
+               :args ["--set" (str ":seon.config.source/root=" (pr-str co)) "--set" ":seon.config.source/dirs=[\"src\"]"
+                      "--set" ":seon.config.root/wiki-dirs=[]" "--set" ":seon.config.root/catch-up-on-boot=true"]}
+        root (atom nil)
+        log #(ts/output (str dir "/runs/root.log"))
+        start! #(do (reset! root (ts/start-root! root0))
+                    (is (some? (:port @root)) (str "the root started: " (log))))
+        restart! #(do (ts/stop-root! @root) (%) (start!))
+        ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
+                         (if (:error a) a (ts/value-of (:response a)))))
+        src-of (fn [n] (ask (str "(some-> (datahike.api/entity @(:conn sys) [:var/name 'seon.catchup-probe-" n "/probe]) :var/form :form/src)")))
+        caught "(get-in @(seon.root/call! sys {:op :state}) [:boot :caught-up])"]
+    (try
+      (.mkdirs (java.io.File. (str co "/src/seon")))
+      (spit (str co "/deps.edn") "{:deps {}}")
+      (git co "init" "-q" "-b" "main")
+      (probe! 0 0)
+      (git co "add" ".") (git co "commit" "-q" "-m" "zero")
+      (start!)
+      (is (str/includes? (str (src-of 0)) "0") "a fresh store is seeded at its first boot")
+      (restart! #(do (probe! 1 1) (spit (str co "/src/seon/catchup_broken.clj") "(ns seon.catchup-broken)\n(defn f [")))
+      (is (str/includes? (str (src-of 1)) "(defn probe [] 1)") "an untracked new file, written while root was down, is on main")
+      (is (re-find #"(?m)^ROOT CAUGHT UP \d+ files" (log)) (log))
+      (is (re-find #"(?m)^ROOT CATCH-UP LEFT OUT src/seon/catchup_broken.clj: " (log)) "a file that does not read is named and left out")
+      (is (false? (ask "(some? (seon.db/eid @(:conn sys) :ns/name 'seon.catchup-broken))")))
+      (restart! #(.delete (java.io.File. (str co "/src/seon/catchup_broken.clj"))))
+      (restart! (fn []))
+      (is (= {:paths []} (ask caught)) "nothing changed: the boot indexed nothing")
+      (is (not (re-find #"(?m)^ROOT CAUGHT UP" (log))))
+      ;; the read the boot made, made here too, so this test's digest takes it (the boot's own code is the full run's: process-vars)
+      (is (= {} (:value (fx/changed-since co (ask "(:tree (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))"))))
+          "the tree main holds is the checkout's: nothing differs, untracked files included")
+      ;; a merged task main holds unsynced (its entry declared) whose change is probe 1's file
+      (is (map? (ask (str "@(seon.root/transact-main! sys [{:seon.task/id \"t/m\" :seon.task/ns 't :seon.task/name \"m\" :seon.task/plan \"p\""
+                          " :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work :seon.task/outcome :merged"
+                          " :seon.task/declared \"{}\" :seon.task/changed #{\"[:form \\\"seon.catchup-probe-1/x\\\"]\"}}])"))))
+      (restart! #(probe! 1 11))
+      (is (re-find #"(?m)^ROOT CATCH-UP LEFT OUT src/seon/catchup_probe_1.clj: merged task t/m " (log)) (log))
+      (is (str/includes? (str (src-of 1)) "(defn probe [] 1)") "main keeps the merge's text, never the checkout's over it")
+      (finally
+        (when @root (ts/stop-root! @root))
+        (sh/sh "rm" "-rf" dir)))))
+
 (defn tree-of
   "read-source's request for one changed file in a tree of n source files (a new directory under
   target/, no git repository): the :paths of the file that changed, the others never asked."

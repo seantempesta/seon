@@ -199,6 +199,35 @@
                                         [p (if (.canExecute (java.io.File. (str base "/" p))) "100755" "100644")]))))
     (catch Throwable e (error #'seon.fx/read-source :seon.fx/io-error (step/error-msg e) {:path root}))))
 
+(defn changed-since
+  "The files of the tree at root as it is on disk that differ from tree (a tree id seon.fx/tree-id made): git's diff of tree
+  against the files, submodules left out (a pin is a build input, which seon.root/binary-current judges), and each untracked
+  file git does not ignore whose content tree does not hold at its path, less :seon.config.source/tree-excludes' top-level paths. Each with its text (nil when gone), the mode
+  of each the allow-list names, and, when any differs, the tree id now and HEAD's commit. About 40 ms on this checkout when
+  nothing differs, where tree-id is ~0.4 s (git checking each submodule's files). Answers {:value {path text} :modes {path mode}
+  :tree :commit}, or :seon.fx/io-error (git cannot find tree). See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat :string :string] :map]}
+  [root tree]
+  (try
+    (let [lines #(remove str/blank? (str/split-lines %))
+          out? (fn [p] (some #(or (= p %) (str/starts-with? p (str % "/"))) (cfg/value :seon.config.source/tree-excludes)))
+          untracked (vec (remove out? (lines (git! {} root ["ls-files" "-o" "--exclude-standard"] nil))))
+          ;; an untracked file differs when tree holds no blob of its content at its path (one ls-tree and one hash-object for all)
+          held (when (seq untracked)
+                 (into {} (for [l (lines (git! {} root (into ["ls-tree" tree "--"] untracked) nil)) :let [[m p] (str/split l #"\t" 2)]]
+                            [p (nth (str/split m #" ") 2)])))
+          hashes (when (seq untracked) (zipmap untracked (lines (git! {} root (into ["hash-object" "--"] untracked) nil))))
+          ;; git's diff of a tree against the files names an untracked file the tree holds as changed whatever its content: those are
+          ;; judged by content above; a file the tree holds that is gone from disk is no untracked file, so it stays a removal
+          ps (sort (distinct (concat (remove (some-fn out? (set untracked)) (lines (git! {} root ["diff" "--name-only" "--no-renames" "--ignore-submodules=all" tree "--"] nil)))
+                                     (filter #(not= (held %) (hashes %)) untracked))))
+          texts (into (sorted-map) (for [p ps :let [f (java.io.File. (str root "/" p))]] [p (when (.isFile f) (slurp f))]))]
+      (cond-> {:value texts
+               :modes (into {} (for [[p t] texts :when (and t (cfg/file-kind p))]
+                                 [p (if (.canExecute (java.io.File. (str root "/" p))) "100755" "100644")]))}
+        (seq ps) (assoc :tree (tree-id root) :commit (git-try root ["rev-parse" "--verify" "--quiet" "HEAD"]))))
+    (catch Throwable e (error #'seon.fx/changed-since :seon.fx/io-error (step/error-msg e) {:path root}))))
+
 (defn- env-input?
   "Is the file at relative path p an input of every test: everything git tracks or would
   track but the source program facts carry (.clj under src and test), task files (data

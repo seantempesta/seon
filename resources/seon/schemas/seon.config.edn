@@ -80,6 +80,7 @@
   ;; Seon's own source
   [:seon.config.source/root {:optional true} :seon.config.source/root]
   [:seon.config.source/write-back-on-merge {:optional true} :seon.config.source/write-back-on-merge]
+  [:seon.config.root/catch-up-on-boot {:optional true} :seon.config.root/catch-up-on-boot]
   [:seon.config.source/gate-checkout {:optional true} :seon.config.source/gate-checkout]
   [:seon.config.source/dirs {:optional true} :seon.config.source/dirs]
   [:seon.config.source/tasks-dir {:optional true} :seon.config.source/tasks-dir]
