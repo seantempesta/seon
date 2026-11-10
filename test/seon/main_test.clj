@@ -180,9 +180,13 @@
   ;; seon.step/error-msg; no src form outside seon.step writes (or (ex-message e) (str (type e)))
   ;; again. src's forms read as data from the compiler's facts. Not covered: the same read written
   ;; another way ((.getMessage e), (str (class e)), the two in the other order)
+  ;; Only the forms whose references (:form/refs, the analyzer's) name an ex-message are read: the shape calls one, so
+  ;; no other form can hold it (every src form read was most of the test's work; a query joining the refs to a
+  ;; predicate cost more than the reads)
   (let [db (runner/program)
-        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
-                     [(clojure.string/starts-with? ?file "src/")]] db)
+        calling (into #{} (keep #(when (= "ex-message" (name (:v %))) (:e %))) (d/datoms db :aevt :form/refs))
+        forms (d/q '[:find ?nsn ?src :in $ [?f ...] :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
+                     [(clojure.string/starts-with? ?file "src/")]] db (vec calling))
         read-in (fn [nsn src] (require nsn)
                   (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
         shape? (fn [x] (and (seq? x) (= 'or (first x))
