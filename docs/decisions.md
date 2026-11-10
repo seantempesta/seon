@@ -2,9 +2,33 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-10 rulings
+
+The owner's ruling of 2026-11-10, on how the machine's load is judged.
+
+### Load is judged by cores and free memory (owner, 2026-11-10)
+
+"I have 18 cores and load is 8". The "load under ~8" number came from the 16 GB target and was holding landings and proves at load 8-11 for nothing. Heavy runs go niced and in parallel while nothing is starved, judged by the machine's cores and its free memory (owner, 2026-11-06: "do dynamic balancing"); the 16 GB MacBook stays the target Seon must fit. Stated in: AGENTS.md section 8, docs/machine.md#builds-and-checks.
+
 ## 2026-11-09 rulings
 
 The owner's rulings of 2026-11-09, on one system of agents, rendering from data, the user and root. Stated in: docs/users.md#one-system-of-agents-the-design-agreed-2026-11-09, staged in docs/users.md#the-stages-agreed-2026-11-09.
+
+### No hacks: adjust the system (owner, 2026-11-09)
+
+"I don't want hacks I want to adjust the system so it works properly". A fix removes the cause: never a special case, a retry, a hand-kept list or a moved verdict, and its report tells what was verified from what is inferred. Stated in: AGENTS.md section 3 (the method, step 4).
+
+### Understand before writing (owner, 2026-11-09)
+
+"don't write data until you understand it". While a design is open, its findings stay out of docs and tasks; the wiki is written when it is true, and then in the commit that makes it true. Stated in: AGENTS.md section 7.
+
+### Questions go through the question tool (owner, 2026-11-09)
+
+"ask questions you are awaiting answers for with your questions tool"; before it, 2026-11-06: "lets do a round of using your questions tool and give me background". One round, each question with its background, the session's pick first. Stated in: AGENTS.md section 2, docs/sessions.md#asking-the-owner.
+
+### A red verdict is never deleted or moved (owner, 2026-11-09)
+
+The owner's ruling, relayed by the Optimization session after two stale reds were deleted by hand: a fixed tree gets a new digest, and a red that stays at a digest that cannot move is a gap in the digest. Stated in: AGENTS.md section 3, docs/merging.md#verdicts-are-a-cache.
 
 ### One system of agents, and no new concepts (owner, 2026-11-09)
 
@@ -77,6 +101,22 @@ The owner's rulings of 2026-11-09, on one system of agents, rendering from data,
 ## 2026-11-08 rulings
 
 The owner's rulings of 2026-11-08, on what the model knows, erasing the store, and how a reply's evals run.
+
+### A session knows its whole area; review is never delegated (owner, 2026-11-08)
+
+"We are moving away from monolithic orchestrators who don't know anything and implementation agents who don't know the big picture"; "Well spec'ed tasks can be handed to sonnet, but the opus agents are responsible for reviewing the code"; "I want you to review all core code". A helper commits on its branch and stops; the session reads every line and lands it. Stated in: AGENTS.md section 2, docs/sessions.md#the-session-reviews-every-line.
+
+### The Web session owns servers and demos (owner, 2026-11-08)
+
+"Okay just take over all responsibility for servers and demos for me"; "yes you own web so you are in control of ports for web". The Web session keeps the standing root and any demo root up and on main; other sessions send the standing root only read-only evals unless the owner says yes to a write. Stated in: AGENTS.md section 0, docs/sessions.md#sessions-own-their-areas.
+
+### What a new design replaces goes with it (owner, 2026-11-08)
+
+"I want this shit gone so it doesn't keep coming back". The tasks, wiki text, decisions pointers and session notes of what a design replaces leave in the same change. Stated in: AGENTS.md section 3, docs/merging.md#a-landing-message-carries-its-audit.
+
+### An estimate that is exceeded stops the work (owner, 2026-11-08)
+
+"estimates that if we exceed them we stop and fix them". A plan carries its cost line (what n is, its big-O, the number expected) before code is written, and reality ten times over it stops the work. Stated in: AGENTS.md section 3 (the method, step 2).
 
 ### Entity schemas are sets of keys written together, checked on write; one definition each (owner, 2026-11-08)
 
@@ -205,6 +245,10 @@ Owner, 2026-11-07: "I generally want to start with a simple proof like respond t
 ## 2026-11-06 rulings
 
 The owner's rulings of 2026-11-06, on one tree for the model and the page, on data the model can read precisely, and on sessions working with no fixed ceremony; they stand over earlier entries where they differ.
+
+### A well-scoped task is done without asking (owner, 2026-11-06)
+
+"If you have a well scoped task please do it without asking". A clear defect is fixed the same way. Stated in: AGENTS.md section 2, docs/sessions.md#asking-the-owner.
 
 ### Old work retired, not left halfway
 
@@ -398,6 +442,14 @@ On batch 58 (swarm red once, green alone at the same tree, the change unable to 
 
 The owner's rulings of 2026-10-30 morning, after the overnight md-scan runs; they stand over earlier entries where they differ.
 
+### Limits fail loudly (owner, 2026-10-30)
+
+"Please don't put any artificially low limits that will bite us in our asses and especially if they won't loudly crash"; "The limits should always fail loudly btw. That budget is useful to catch problems IF we use it right." A bound is removed or derived from measurements, and reaching it is a typed error that names it. Stated in: AGENTS.md section 5, docs/config.md#a-bound-fails-loudly.
+
+### A timed wait means the wrong design (owner, 2026-10-30)
+
+"timeouts just mean we have the wrong design (most of the time)". A wait ends on its value or on a typed error from the producer that owed it, never on a clock. Stated in: AGENTS.md section 4, docs/clocks.md.
+
 ### There are no runs: an agent has an env, a branch and its evals (owner, 2026-10-30)
 
 "there is no concept of a \"run\" agents have an env a branch and are doing evals. Attach data only to real things"; "please correct whatever is saying that runs exist it's a bad design"; "Agents have envs and run evals and take steps and we have max steps that we can increase if they hit their limit." At :seon.agent/max-turns an agent parks with its process and context; raising it, or a message, wakes the same agent, its turns counting on. A message wake raises the limit by a config amount ("nothing hard coded and we can override it on the agent's record ... defaults are properly inherited automatically"). Every message, the owner's, root's or another agent's, is a fact on main addressed to the agent, which root delivers and which wakes a parked agent. The standing store is erased when the run records are deleted. Stated in: task seon.agent/the-agent-is-the-unit-not-the-run.
@@ -433,6 +485,10 @@ Budgets should be under 90%+ of the time and an overrun mostly a case worth inte
 ## 2026-10-29 rulings
 
 The owner's rulings of 2026-10-29, each with where it is now stated; they stand over earlier entries where they differ.
+
+### A link the owner is given survives a restart (owner, 2026-10-29)
+
+"I can't see the changes. Always give me links or give me a stable way to find links on a stable server". An agent is linked by its branch, and the link names the commit the root was built from. Stated in: docs/sessions.md#stable-links.
 
 ### The page is a friendly chat; what the model was sent is shown whole (owner, 2026-10-29)
 
@@ -512,7 +568,7 @@ Chose V2b of three measured builds over `--opt` (-419 MB, but library stack line
 
 ### Use the machine while nothing is starved (owner, 2026-10-29)
 
-"Load isn't too bad, you can run as long as we aren't starved for anything which just slows down everything." Heavy runs may run in parallel past load 8 while no run is starved (a timing-sensitive step that goes red under load is a defect of that step, not a reason to stop). Stated in: this entry (AGENTS section 2's "load under ~8" is the default when the owner has not said otherwise).
+"Load isn't too bad, you can run as long as we aren't starved for anything which just slows down everything." Heavy runs may run in parallel past load 8 while no run is starved (a timing-sensitive step that goes red under load is a defect of that step, not a reason to stop). Stated in: docs/machine.md#builds-and-checks; the "load under ~8" default is gone ([load is judged by cores and free memory](#load-is-judged-by-cores-and-free-memory-owner-2026-11-10)).
 
 ### No artificial limits or cuts on an agent's context or evals (owner, 2026-10-29)
 
@@ -570,9 +626,13 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 "Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T." A derived value (a score, a selection, a render, a diff) may be kept, in memory or in the store, as a cache keyed by its inputs, never by a clock; it may be evicted at any time, and its reader regenerates it from the db as of t. What a turn showed is derived this way: the scores recorded per turn are a cache of the scorer over the db at that turn, never the record. Refines "No derived data in the db or in ctx" (2026-10-26): ctx still holds the db's data only. Stated: AGENTS §5, docs/ctx.md.
 
-### One session works with the owner; helpers are one-use (owner, 2026-10-28)
+### Focused sessions; no fan-out (owner, 2026-10-28)
 
-"let's stick with just you and me"; "It would be good to have you mostly be working on the details of plans with me so we have less ambiguity too"; "We won't need all these separate worktrees anymore either". The owner and one Claude session work in the main tree; plans are written into task entries; long well-planned work goes to a fresh Sonnet agent, short context-heavy work to a fork, lookups to Haiku. claude_scratch/ and the merge session are retired. Stated: AGENTS §2, §3, §7, §9.
+"This system of launching 10+ agents just burned my tokens and was not productive"; "let's stick with just you and me"; "It would be good to have you mostly be working on the details of plans with me so we have less ambiguity too". A session does its work itself in one conversation, starts no other session unless the owner asks, and uses one helper at a time: long well-planned work to a fresh Sonnet agent, short context-heavy work to a fork, lookups to Haiku. Plans are written into task entries. The one session in the main tree of this ruling became named sessions that each own an area, each in a worktree of its own (2026-11-06, 2026-11-08); the rule against fanning out stands. Stated: AGENTS §2, docs/sessions.md#no-fan-out.
+
+### Build the product, not infrastructure (owner, 2026-10-28)
+
+"we built out a lot of infrastructure thinking it would speed things up and it really hasn't". A merge session, a worktree with its own root per lane, shared test roots, a test service, wake pipes and orders files were all built for parallel work: a one-function prove took 113 s, hangs and orphans came from the tooling itself, and no agent finished a real task. Before building tooling, ask whether it moves an agent finishing a real task; prefer deleting what served parallel work. Stated: AGENTS §9, docs/sessions.md#no-fan-out.
 
 ### Test results are a few facts per test and per function, with no history (owner, 2026-10-28)
 
@@ -602,6 +662,14 @@ A reply's text heads its block of evals; each eval is one tool call with `intent
 
 The owner's rulings of 2026-10-27, each with where it is now stated; they stand over earlier entries where they differ.
 
+### Unused is not dead (owner, 2026-10-27)
+
+"Just because things aren't in use doesn't mean I haven't worked hard on the design". Code with no caller is cut only with the owner's go. Stated in: AGENTS.md section 3, docs/merging.md#a-landing-message-carries-its-audit.
+
+### An inventory before a plan (owner, 2026-10-27)
+
+"a new agent already has a plan? that can't be well thought out". A session taking over an area lists what exists (its file and line, its job, keep, extend or delete) before it designs. Stated in: AGENTS.md section 3 (the method, step 1), docs/sessions.md#sessions-own-their-areas.
+
 ### A merge runs the process tests its change reaches, automatically (owner, 2026-10-27)
 
 `bin/prove --merge` runs every test and step the change reaches with no green at its digest, process tests included, so no one names them by hand. Stated: AGENTS §3, docs/merging.md#a-merge-runs-what-the-change-reaches.
@@ -616,7 +684,7 @@ An agent redefines a function in its own REPL with `(in-ns ...)` and `defn`, Clo
 
 ### No lock on main's verification (owner, 2026-10-27: "Remove it")
 
-Supersedes "main first, as a fact" (2026-10-26 night) and "Keep the lock for tests and checks": main's verification rarely runs (a branch that holds main and proved its tip merges with no run), and a hung run on main stalled every worktree for 48 minutes. Stated: docs/merging.md#main-goes-first, AGENTS §2.
+Supersedes "main first, as a fact" (2026-10-26 night) and "Keep the lock for tests and checks": main's verification rarely runs (a branch that holds main and proved its tip merges with no run), and a hung run on main stalled every worktree for 48 minutes. Stated: docs/merging.md#main-goes-first, AGENTS §8.
 
 ### A branch proves its in-process tests; main's batch runs the process tests once (owner, 2026-10-27: "Get rid of the double testing")
 
@@ -632,7 +700,7 @@ Worktrees run plain `bin/prove` and report ready; the merge session merges a bat
 
 ### A lock-free system (owner, 2026-10-27)
 
-"I want a lock free system. This worktrees hack is temporary." No lock orders heavy runs; load stays down by not running the same work twice. Stated: AGENTS §2, docs/merging.md.
+"I want a lock free system. This worktrees hack is temporary." No lock orders heavy runs; load stays down by not running the same work twice. Stated: AGENTS §8, docs/merging.md.
 
 ### The wiki is the one home; every function, schema entry and test cites its section (owner, 2026-10-27)
 
@@ -834,7 +902,7 @@ Owner, 2026-10-25 night: "$30 overnight. triage and move forward the good ideas 
 
 ### Overnight: all cylinders
 
-Owner, 2026-10-25 evening: "I approved highlight.js. launch all fixes. I'm not playing any games I'm going to bed. You can work on all cylinders overnight." The one-run machine rule is lifted (AGENTS §2: up to three heavy runs while load stays under ~8); every ready fix runs and merges as verified; highlight.js approved in agent view's session. Stated in: this entry.
+Owner, 2026-10-25 evening: "I approved highlight.js. launch all fixes. I'm not playing any games I'm going to bed. You can work on all cylinders overnight." The one-run machine rule is lifted (then: up to three heavy runs while load stayed under ~8; since 2026-11-10 load is judged by cores and free memory); every ready fix runs and merges as verified; highlight.js approved in agent view's session. Stated in: this entry.
 
 ### The value view: highlight.js, agent hiccup unrestricted, built after the printer
 
@@ -1203,7 +1271,7 @@ Owner, 2026-10-21: "EDN for offline compiled into program and register at the re
 
 ### Minimal code: extend the existing systems
 
-Owner, 2026-10-21: "If we are building shit we don't need to build and not using the existing systems or extending them for minimal code we are doing the wrong thing." Stated in: AGENTS §3 (Integrate small and often); docs/merging.md#every-merges-src-diff-stat-is-read.
+Owner, 2026-10-21: "If we are building shit we don't need to build and not using the existing systems or extending them for minimal code we are doing the wrong thing." Stated in: AGENTS §3 (Land small and often); docs/merging.md#every-merges-src-diff-stat-is-read.
 
 ### Disk stays bounded; regenerable output is deleted
 
