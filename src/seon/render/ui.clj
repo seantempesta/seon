@@ -1637,15 +1637,22 @@
 
 (defn tiles
   "The tiles of pulled entity c, read by pattern p: each entity its joins hold that is a tile (`tile?`), in the pattern's order, each
-  followed by its own tiles (its schema's pattern), depth first; the views themselves, so the walk draws each by its schema's render
-  (seon.render/entity-render) and the model reads the same hiccup stripped. No part is named here. See docs/render.md#the-page."
+  followed by its own tiles (its schema's pattern), depth first; each entity once, at its first place (the pull holds an entity at
+  every path that reaches it: a task its agent joins and a cite's :seon.cite/of; the cite's render reads its owner there, the page
+  draws the task once), so a pattern that reaches back is no cycle; the views themselves, so the walk draws each by its schema's
+  render (seon.render/entity-render) and the model reads the same hiccup stripped. No part is named here. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :any [:sequential :any]] [:vector :any]]}
   [ix c p]
-  (vec (mapcat (fn [[k sub]]
-                 (mapcat (fn [m] (when (tile? ix (ratom/untracked m))
-                                   (cons m (tiles ix m (if (keyword? sub) (or (render/schema-property ix sub :seon.ctx/pattern) []) sub)))))
-                         (members (get c k))))
-               (pattern-joins p))))
+  (let [seen (volatile! #{})
+        go (fn go [c p]
+             (mapcat (fn [[k sub]]
+                       (mapcat (fn [m] (let [e (ratom/untracked m)]
+                                         (when (and (tile? ix e) (not (contains? @seen (:db/id e))))
+                                           (vswap! seen conj (:db/id e))
+                                           (cons m (go m (if (keyword? sub) (or (render/schema-property ix sub :seon.ctx/pattern) []) sub))))))
+                               (members (get c k))))
+                     (pattern-joins p)))]
+    (vec (go c p))))
 
 (defn agent-parts
   "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists): the
