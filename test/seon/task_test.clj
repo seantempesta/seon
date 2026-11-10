@@ -74,8 +74,10 @@
 ;; docs/references.md#an-entity-cites: a cite names what exists; a name that does not is the write's refusal, naming it
 (deftest a-cite-of-nothing-is-refused-naming-its-target
   (let [db (db-with-program)]
-    (is (= {:seon.error/type :seon.db/no-target :target [:var/name 'demo/nope]}
-           (select-keys (refusal db (task/create-tx db [(decl "Make `demo/f` and `demo/nope` pass.")])) [:seon.error/type :target])))
+    (is (= {:seon.error/type :seon.db/no-target :target [:var/name 'demo/nope] :by "demo/t"}
+           (select-keys (refusal db (task/create-tx db [(decl "Make `demo/f` and `demo/nope` pass.")])) [:seon.error/type :target :by]))
+        "naming the task that cites it, so whoever meets the refusal can say which text to fix")
+    (is (= [:schema/key :no.such/key] (:target (refusal db (task/create-tx db [(decl "Set `:no.such/key`.")])))) "a schema key no entry holds: the same refusal")
     (is (= [:seon.doc/address "docs/vector.md#nowhere"] (:target (refusal db (task/create-tx db [(decl "Read [n](docs/vector.md#nowhere).")])))))
     (is (= [:file/path "docs/nowhere.md"] (:target (refusal db (task/create-tx db [(decl "Read [n](docs/nowhere.md).")]))))
         "a page the db holds no section of, and no file: nothing")))
