@@ -1130,46 +1130,20 @@
       (throw (ex-info (str "the landed task files were refused: " (:seon.error/message tasks)) tasks))
       (vec (concat code docs tasks)))))
 
-(defn platform-tx
-  "Error e, observed at ms outside root's procs (a boot's wiki load the store refused: wiki-boot!), as the transaction
-  recording it on main db: a :platform error by its signature (seon.error), what my.root/problems shows."
-  {:malli/schema [:=> [:cat :seon.host/db :map :int] [:vector :any]]}
-  [db e ms] (second (err/flush-tx (err/fold {} (err/occurrence e :platform {} ms)) db)))
-
-(defn- wiki-boot!
-  "The wiki of a main this boot seeded (seed! with no wiki), written through root's writer after its boot fact, with its
-  baseline, until it states nothing more: a page the write refuses (a link to no section, :seon.db/no-target) never
-  stops the boot, it is a :platform error on main naming :seon.root/source as its subject, open until a load of the fixed
-  page (my.root/load-docs!). A resumed main reads no page. See docs/root.md#boot."
-  {:malli/schema [:=> [:cat :seon.root/sys] :nil]}
-  [sys]
-  (loop []
-    (let [db @(:conn sys)
-          tx (wiki-tx db (cfg/checkout) (wiki-baseline sys (cfg/checkout) "docs"))]
-      (when (seq tx)
-        (let [r @(call! sys {:op :write :req {:op :tx :branch :db :tx-data tx}})]
-          (if (contract/error? r)
-            @(call! sys {:op :write :req {:op :tx :branch :db
-                                          :tx-data (platform-tx @(:conn sys) (assoc r :seon.error/subject :seon.root/source) (System/currentTimeMillis))}})
-            ;; a load whose citations name what the previous load wrote states more, until it states nothing (seed!'s loop)
-            (recur))))))
-  nil)
-
 (defn- seed!
   "Index the checkout into conn's branch while this is the store's only process: the source tree {:root :dirs}'s program
-  (import-tree!; none when source is nil), then, with wiki?, the wiki with its baseline (wiki-tx) until it states nothing more
-  (its citations resolve to the program), then the task files (task-files, seon.task/load-tx). A boot seeds with no wiki and
-  loads it through its writer after its boot fact (wiki-boot!), where a link to no section is a refusal recorded, not a
-  boot that dies; bin/root seed (seed-program!) loads it here, where a refusal fails the seed. A branch whose fact already
+  (import-tree!; none when source is nil), then the wiki with its baseline (wiki-tx) until it states nothing more (its
+  citations resolve to the program; a link to no section refuses the seed, :seon.db/no-target naming it), then the task
+  files (task-files, seon.task/load-tx). A branch whose fact already
   holds the tree's digest is left as it is. Answers {:imported? :digest :forms}, with :tasks when the task files were
   refused, or :error. See docs/source.md#indexing-a-tree."
-  {:malli/schema [:=> [:cat :seon.host/conn [:maybe [:map [:root :string] [:dirs [:sequential :string]]]] :int :boolean] :map]}
-  [conn source t0 wiki?]
+  {:malli/schema [:=> [:cat :seon.host/conn [:maybe [:map [:root :string] [:dirs [:sequential :string]]]] :int] :map]}
+  [conn source t0]
   (let [r (if source (import-tree! conn source t0) {:imported? true})]
     (if-not (:imported? r)
       r
       (let [db (loop [db @conn]
-                 (let [w (if wiki? (wiki-tx db (cfg/checkout) (baseline-of db #(fx/wiki-history {:req %}) (cfg/checkout) "docs")) [])]
+                 (let [w (wiki-tx db (cfg/checkout) (baseline-of db #(fx/wiki-history {:req %}) (cfg/checkout) "docs"))]
                    (if (empty? w) db (recur (:db-after (d/transact conn {:tx-data w}))))))
             tasks (task/load-tx db (task-files))
             db (if (or (contract/error? tasks) (empty? tasks)) db (:db-after (d/transact conn {:tx-data tasks})))]
@@ -1254,7 +1228,7 @@
   [path]
   (let [t0 (profile/now-ns)
         root (get cfg/config :seon.config.source/root)
-        r (kept-index! path #(seed! % {:root root :dirs (cfg/value :seon.config.source/dirs)} t0 true) (fx/inputs root) index-roots)
+        r (kept-index! path #(seed! % {:root root :dirs (cfg/value :seon.config.source/dirs)} t0) (fx/inputs root) index-roots)
         out (if (:error r) (assoc (:error r) :imported? false) r)]
     (assoc out :ms (lib/r2 (profile/ms-since t0)))))
 
@@ -1337,7 +1311,7 @@
             t1 (profile/now-ns)
             ;; a main nothing was ever indexed into or booted on is indexed now, once; every other boot resumes it
             seeded (when (every? nil? (vals (d/pull @conn [:seon.root/source :seon.root/boot] [:seon.root/id :root])))
-                     (seed! conn source t1 false))
+                     (seed! conn source t1))
             seed-ms (profile/ms-since t1)
             t2 (profile/now-ns)
             ;; main's own config, before anything below reads one and before the fork server inherits it
@@ -1476,8 +1450,6 @@
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
-    ;; a main this boot seeded takes the wiki now, through the writer (a refused page is recorded, the boot goes on)
-    (when seeded (wiki-boot! sys))
     ;; what the first agent's fork would wait for is done now, as main stands (seon.fork-server/preload); nothing waits on its answer
     (call! sys {:op :fs :req {:op :preload :t (:max-tx @conn)}})
     sys))
