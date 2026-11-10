@@ -1056,9 +1056,9 @@
                                               :seon.task/config {:seon.config.render/relevance-summary 0.0}}]))
         te (pdb/eid db :seon.task/id "demo/r")
         es (into [te] (for [i (range 5)] (pdb/eid db :seon.doc/address (anchors i))))
-        db (d/db-with db (vector/tx-data es (repeat 6 1) (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) "m"))
+        db (d/db-with db (vector/tx-data es (repeat 6 "1") (into [(dir 1.0)] (for [i (range 5)] (dir 1.0 (* 0.1 (inc i))))) "m"))
         f (pdb/eid db :form/id "demo/g")]
-    [(d/db-with db (vector/tx-data [f] [1] [(dir 1.0 0.05)] "m")) te dir]))
+    [(d/db-with db (vector/tx-data [f] ["1"] [(dir 1.0 0.05)] "m")) te dir]))
 
 (deftest relevance-is-a-chance-that-follows-the-context
   ;; seon.ctx.search/relevance (docs/vector.md#relevance): each item near a context scored as a chance,
@@ -1330,7 +1330,7 @@
     (mapv #(/ % n) raw)))
 
 (deftest search-ranks-meaning-across-kinds-by-score
-  (let [with-vec (fn [m i] [m (vector/fact (:db/id m) 0 (unit-vec i) "m")])
+  (let [with-vec (fn [m i] [m (vector/fact (:db/id m) "0" (unit-vec i) "m")])
         db (d/db-with (ts/test-db)
                       (into [] cat
                             [(with-vec {:db/id "s0" :seon.doc/address "m.md#a" :seon.doc/heading "a" :seon.doc/text "about a"} 0)

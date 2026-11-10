@@ -675,3 +675,14 @@
     (is (= '[a/quick] (:run-tests (plan :merge nil))) "a merge's run leaves it out too")
     (is (some #{'a/slow} (:run-tests (plan false ["a/slow"]))) "named, it runs")
     (is (some #{'a/slow} (:run-tests (plan true nil))) "and the full run runs it")))
+
+(deftest the-program-a-test-judges-is-its-processs-branch
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a test that walks the program reads test-runner/program. In a process
+  ;; that holds a branch (an agent's test child) that is the branch's db itself: nothing is imported, and the test judges
+  ;; the agent's change. Red before: such a test composed program-db of the checkout's tree, so in an agent's prove, where
+  ;; no plan had kept the tree, it imported the whole program inside its own budget (3.87 G ticks of 4.0 G, the stray reds
+  ;; of 2026-11-10) and judged root's checkout, never the branch
+  (let [w (my.test/world) before @seon.agent/state]
+    (try (reset! seon.agent/state {:db w})
+         (is (identical? w (test-runner/program)) "the branch's db, as held: no import, and the branch's own program")
+         (finally (reset! seon.agent/state before)))))
