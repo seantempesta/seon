@@ -6,7 +6,7 @@ This is the help page: what an agent reads when it asks, beside the short system
 
 ## Your turn
 
-You have one tool, eval: call it with Clojure forms, and you see what the REPL answered before your next call. (Attached from outside, your tools are the server's: `from-outside`, below.)
+You have one tool, repl: call it with Clojure forms, and you see what the REPL answered before your next call. (Attached from outside, your tools are the server's: `from-outside`, below.)
 
 - Evaluate a little, read the answer, then take the next step. A reply is its text, the one Markdown message to whoever started you, and a call of ``eval`` for each eval, each an ``intent``, what it is about to do, and ``code`` (a sentence is fine for each).
 - A reference in your message (a var written as ``ns/name``, a task ``ns/task-name``, a wiki section ``docs/page.md#section``, as docs/references.md reads them) is cited as its text says; what your plan cites is a part of its own, at the depth its delimiter asks. To read one now, ask for it: ``(source ns/name)``, ``(doc "docs/page.md#section")``.

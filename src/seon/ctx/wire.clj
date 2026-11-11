@@ -307,15 +307,30 @@
                                   :else nil))]
     (into [:div {:id "model-parts"}] (lists out))))
 
+(defn- page-ctx
+  "Agent a's record at db d0 on branch, pulled by what its page reads: its own pattern without the conversation's joins (seon.render/page-pattern:
+  the model reads those as its messages), the ctx the page parts are drawn over (what the model is shown of @ctx is `ctx-at`, whole)."
+  {:malli/schema [:=> [:cat :seon.host/db :int :any] :map]}
+  [d0 a branch]
+  (let [ix0 (program/index-of-db d0)]
+    (assoc-in (ctx/build ix0 d0 a branch (render/page-pattern ix0 (or (render/entity-pattern ix0 (d/pull d0 '[*] a)) []))) [:ix :own-index?] true)))
+
+(defn ctx-at
+  "Agent a's record at point p of its branch, on db's store, as data: exactly what `@ctx` held there (seon.ctx/agent-ctx, its own pattern
+  whole, its conversation's joins included: the same thing the agent reads, never a filtered copy). What the model is shown whole at
+  its first point, before its page (`page-diff-msgs`), and what my.render/ctx answers. See
+  docs/ctx.md#what-the-model-reads-and-what-the-page-renders."
+  {:malli/schema [:=> [:cat :seon.host/db :int :map] :map]}
+  [db a p]
+  (let [d0 (db-at db p)] (ctx/agent-ctx (program/index-of-db d0) d0 a)))
+
 (defn- parts-walk
   "Agent a's page-parts walk drawn at db d0 (its branch's own, at t), cold: {:id :t :at :c :r :w}, the walk the model reads (:model-only:
-  what is the page's alone is not drawn) over the agent pulled by what the parts read (seon.render/page-pattern of its own pattern)."
+  what is the page's alone is not drawn) over the agent pulled by what the parts read (`page-ctx`)."
   {:malli/schema [:=> [:cat :seon.host/db :int :int [:tuple :any :any :int]] :map]}
   [d0 t a id]
   (let [parts #'model-parts
-        branch (nth id 1)
-        ix0 (program/index-of-db d0)
-        c0 (assoc-in (ctx/build ix0 d0 a branch (render/page-pattern ix0 (or (render/entity-pattern ix0 (d/pull d0 '[*] a)) []))) [:ix :own-index?] true)
+        c0 (page-ctx d0 a (nth id 1))
         at (volatile! d0) r (ratom/atom (:tree c0))
         w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [parts {} (ratom/ref-view r ctx/changes)] (:index (:ix c0)))
                  :outputs #{:seon.render/hiccup} :model-only true)]
@@ -398,14 +413,21 @@
   [db b] (print/text (with-meta (array-map :commit (:commit b) :t (or (:t b) (:max-tx (d/commit-as-db (pdb/store-of db) (:commit b))))) {:seon.print/full true})))
 
 (defn page-message
-  "The page as the model reads it, a call Seon generated and its result: an assistant message whose one tool call is code (the
-  agent's own `(my.render/page p)` or `(my.render/diff p0 p1)`), and the tool message holding value v printed whole by the one
-  printer, no wrapper. The call's id is a function of the points alone, so the bytes are the same at every render; no eval entity
-  is written for it (docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup)."
-  {:malli/schema [:=> [:cat :string :string :any] [:vector :seon.model/message]]}
-  [id code v]
-  [{:role "assistant" :content "" :tool-calls [{:id id :code code}]}
-   {:role "tool" :tool-call-id id :content (print/text (vary-meta v assoc :seon.print/full true))}])
+  "The page as the model reads it, a call Seon generated and its result, written as a reply the agent is asked to write: an assistant
+  message whose text is the reply (`:seon.model-call/reply`) and whose one tool call is (f & args) with its intent (`:seon.eval/intent`),
+  both read from the metadata of f's var (my.render/ctx, my.render/page, my.render/diff: the words are a fact about the function called,
+  where the agent reads it, so constant per function and the prefix holds), and the tool message holding value v printed whole by the
+  one printer, no wrapper. The call's id is a function of the points alone, so the bytes are the same at every render; no eval entity is
+  written for it. A function whose var lacks either word is :seon.ctx/unworded, never an empty message
+  (docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup)."
+  {:malli/schema [:=> [:cat :string :qualified-symbol [:sequential :string] :any] [:vector :seon.model/message]]}
+  [id f args v]
+  (let [{:seon.model-call/keys [reply] :seon.eval/keys [intent]} (meta (requiring-resolve f))]
+    (when-not (and (string? reply) (seq reply) (string? intent) (seq intent))
+      (throw (ex-info (str f " has no :seon.model-call/reply and :seon.eval/intent on its var: a call Seon writes for the model is a whole reply")
+                      (contract/error :seon.ctx/unworded #'page-message (str "add both to " f "'s metadata") {:function f}))))
+    [{:role "assistant" :content reply :tool-calls [{:id id :intent intent :code (str "(" (str/join " " (cons f args)) ")")}]}
+     {:role "tool" :tool-call-id id :content (print/text (vary-meta v assoc :seon.print/full true))}]))
 
 (defn page-edits-between
   "The edits that take agent a's page parts at basis p0 (nil: nothing before, so the parts whole) to its parts at basis p1, on
@@ -458,8 +480,10 @@
               edits (render/page-edits ix (render/forms-moved (if q0 {"page" h0} {}) {"page" h1}))]
           (cond (empty? edits) []
                 ;; the page whole, unless it shows nothing (what moved from nothing to it is no edits: a pull holding no page)
-                q0 (page-message id (str "(my.render/diff " q0 " " q1 ")") edits)
-                :else (page-message id (str "(my.render/page " q1 ")") h1)))))
+                q0 (page-message id 'my.render/diff [q0 q1] edits)
+                ;; the first point: the record whole as data (Sean, 2026-11-11: "the @ctx and the hiccup displayed in full"), then the page
+                :else (into (page-message (lib/id (lib/digest (str "ctx " q1))) 'my.render/ctx [q1] (ctx-at db a p1))
+                            (page-message id 'my.render/page [q1] h1))))))
 
 (defn model-call-msgs
   "A model call (:seon.model-call/fact) as the model reads it: what the model said and its reasoning. Whether those are sent is

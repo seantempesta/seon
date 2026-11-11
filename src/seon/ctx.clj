@@ -451,12 +451,22 @@
                                                                   acc)))
                                                             acc (get-in r [:at e]))))
                                                 [] touched)))
+            ;; the key under which the join holding path h asks its member's link transaction (a pattern's :tx option), else nil: h a
+            ;; member of a collection ([... join-key id]) or of a join of one ([... join-key])
+            link-tx-key (fn [h] (let [n (count h) tx-of (fn [pp k] (some #(when (= k (:key %)) (:tx %)) (:joins (get specs pp))))]
+                                  (or (when (>= n 2) (tx-of (subvec h 0 (- n 2)) (nth h (- n 2))))
+                                      (when (>= n 1) (tx-of (subvec h 0 (dec n)) (peek h))))))
             [tree r] (reduce (fn [[tree r] [h e]]
                                   (let [o (if (empty? h) tree (get-in tree h))]
                                     ;; a path an earlier site's rebuild took away is no site
                                     (if (or (nil? o) (not (contains? (get-in r [:at e]) h)) (not= e (:db/id o)))
                                       [tree r]
-                                      (let [[n r] (node db e (get-in r [:spec h]) h r o touched)]
+                                      (let [[n r] (node db e (get-in r [:spec h]) h r o touched)
+                                            ;; the transaction of its link, which its parent join asks (:tx) and node does not make: its link
+                                            ;; is what it was (a link that moved is the join's to rebuild, `linked`), so the same transaction
+                                            n (if-let [k (when-not (identical? o n) (link-tx-key h))]
+                                                (if (and (contains? o k) (not (contains? n k))) (let [n' (assoc n k (get o k))] (if (= n' o) o n')) n)
+                                                n)]
                                         ;; a rebuild that changed nothing is the node it was (node): the tree as it was
                                         [(if (identical? o n) tree (if (empty? h) n (assoc-in tree h n))) r]))))
                                 [(:tree c) r] sites)]
@@ -973,10 +983,13 @@
           [(or (get-in c [:seon.model-call/_agent e :seon.model-call/n]) 0) e])))
 
 (defn agent-ctx
-  "Agent a's ctx value as db holds it, drawn cold (seon.ctx/build, schemas read in the entity index ix): a read of a session with no live @ctx. See
-  docs/ctx.md#the-pattern."
+  "Agent a's ctx value as db holds it, drawn cold (seon.ctx/build, schemas read in the entity index ix): a read of a session with no live @ctx,
+  the same value the live one holds at db's point, its :branch the one its point's last transaction was written on (:seon.tx/branch, seon.db/tx-meta, the branch the agent's
+  state names), a fact of the point, so the same whichever process reads it (the db's config names the reader's branch: root
+  reading an agent's point saw its own), else the db's own; never the agent's :seon.agent/branch, which main holds and a branch
+  db read at an earlier point may not. See docs/ctx.md#the-pattern."
   {:malli/schema [:=> [:cat :map :seon.host/db :int] :map]}
-  [ix db a] (:tree (build ix db a (:seon.agent/branch (d/pull db [:seon.agent/branch] a)))))
+  [ix db a] (:tree (build ix db a (or (:seon.tx/branch (d/entity db (:max-tx db))) (get-in (or (:origin-db db) db) [:config :branch])))))
 
 (defn revalued
   "Eval record e on db with value as its value: its result another entity, the content hash of what it now answers, the rest of its response as it was. See docs/users.md#what-each-thing-is."

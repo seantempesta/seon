@@ -8,7 +8,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.ctx.wire :as wire] [seon.source :as source]
             [seon.reader :as reader] [seon.doc :as doc] [seon.step :as step] [seon.ref :as ref] [seon.edn :as sedn] [seon.config :as config]
-            [seon.task :as task] [seon.program :as program] [seon.db :as pdb] [datahike.api :as d]))
+            [seon.task :as task] [seon.program :as program] [seon.db :as pdb] [seon.ctx :as ctx] [clojure.string :as str] [datahike.api :as d]))
 
 (defn request
   "Task t's first-turn model request on db, as seon.turn/act! sends it at turn 1: the
@@ -18,7 +18,8 @@
   not written reads :undefined, so the judge's tasks are ones whose proofs are not written.
   :key, what makes it the same context (`digest`): the messages with each page call Seon made (its request's parts
   [:page n], seon.ctx.wire/page-diff-msgs) as its turn and the page it answered, never the point it names: that point is
-  main's commit, which the pass's own score moves, so keyed by it a request was scored again at every pass."
+  main's commit, which the pass's own score moves, so keyed by it a request was scored again at every pass; the record shown at the
+  first point by its value without the point its keys hold."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/task] [:map [:messages [:vector :seon.model/message]] [:model :string] [:thinking :any] [:key :any]]]}
   [db t]
   (let [id (:seon.task/id t)
@@ -27,7 +28,16 @@
         {:keys [messages parts]} (wire/render db {:commit (d/commit-id db) :task id :turn 1
                                                   :max-turns (config/value :seon.config.agent/max-turns) :origin :model :agent k})]
     {:messages messages
-     :key (into [] (mapcat (fn [[ref ms]] (if (= :page (first ref)) [[:page (second ref) (mapv :content (filter #(= "tool" (:role %)) ms))]] ms))) parts)
+     :key (let [a (pdb/eid db :seon.agent/key k)
+                ;; the record shown at the first point, (my.render/ctx p), prints @ctx whole, its point (:t :commit :branch) among
+                ;; its keys: the key holds its value without them, as it holds no page call's point
+                record (delay (dissoc (ctx/agent-ctx (program/index-of-db db) db a) :t :commit :branch))
+                rec-ids (set (for [m messages c (:tool-calls m) :when (str/starts-with? (str (:code c)) "(my.render/ctx ")] (:id c)))]
+            (into [] (mapcat (fn [[ref ms]]
+                               (if (= :page (first ref))
+                                 [[:page (second ref) (mapv #(if (rec-ids (:tool-call-id %)) @record (:content %)) (filter #(= "tool" (:role %)) ms))]]
+                                 ms)))
+                  parts))
      :model (:value (config/resolve :seon.config.ai/model {:task t}))
      :thinking (:value (config/resolve :seon.config.ai/thinking {:task t}))}))
 

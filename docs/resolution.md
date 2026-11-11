@@ -29,6 +29,7 @@ The sites that resolve a name held in data to a var by design, each with its rea
 - `seon.render/render-of`: a schema's declared render is a symbol in data, resolved when the value is shown.
 - `seon.contract/function-var?`: a type's positional factory (`->T`) is known by its type `T` beside it in its namespace, looked up by name.
 - `seon.render/declared-var`: the same, as its var: a layout drawn by the walk is a component, whose var's contract says what it reads.
+- `seon.ctx.wire/page-message`: a call Seon writes for the model names its function as a symbol (`my.render/ctx`, `my.render/page`, `my.render/diff`), whose var holds the reply and the intent the call carries (`:seon.model-call/reply`, `:seon.eval/intent`, [the render is an eval](render.md#the-render-is-an-eval)); `my.render` requires `seon.ctx.wire`, so the var is resolved by name when the message is made.
 - `seon.repl/undo-definition!`: a var an agent's definition just changed, put back as it was when recording that definition threw with it in place: the agent's own eval undone, in the process that ran it.
 - `seon.cost/run`: a cost estimate names its function and its input as symbols in data.
 - `seon.cost/bound`, `seon.cost/cases`: a generated estimate names its function (whose contract carries its bound) and its generator as symbols in data.
