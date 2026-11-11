@@ -4397,7 +4397,8 @@
     (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "1233 forms loaded"))
     (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "40"))
     (is (str/includes? (tile {:boot {:program {:loaded 0 :ms 5}}}) "image held main's program"))
-    (is (str/includes? (tile {}) "program load not measured"))))
+    (is (str/includes? (tile {:boot {}}) "image held main's program") "a boot that loaded nothing over its image")
+    (is (not (str/includes? (tile {}) "program")) "no boot read yet: nothing said")))
 
 
 (deftest a-sender-is-drawn-by-who-it-is
@@ -4454,7 +4455,7 @@
 ;; docs/render.md#the-page: a number the system's process tile shows says what it measures (Point and Web, 2026-11-11: "fork lag 23952 ms"
 ;; read as broken, "program load not measured" read as a gap): fork lag carries its meaning, and a boot that loaded no forms says so
 (deftest the-process-tile-says-what-fork-lag-is
-  (let [html (h/html (ui/process-tile {:seon.ctx/ctx {:process {:fork-server {:lag-ms 23952}} :seon.root/boot "b1"}}))]
+  (let [html (h/html (ui/process-tile {:seon.ctx/ctx {:process {:fork-server {:lag-ms 23952} :boot {}} :seon.root/boot "b1"}}))]
     (is (str/includes? html "how long a commit takes to reach the fork server") html)
     (is (not (str/includes? html "not measured")) "no gap where the boot loaded nothing")
     (is (str/includes? html "the image held main") html)))

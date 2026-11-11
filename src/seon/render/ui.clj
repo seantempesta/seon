@@ -2281,8 +2281,10 @@
       (stat "defects" root-errors-total)]
      [:p {:class "text-xs text-text-400"}
       (let [{:keys [loaded ms]} (:program boot)]
-        ;; nil: the boot loaded no forms over its image, so it recorded no load (Optimization), as for a load of none
-        (cond (or (nil? loaded) (zero? loaded)) "the image held main's program: no forms loaded"
+        ;; a boot with no :program loaded no forms over its image, so it recorded no load (Optimization), as for a load of none;
+        ;; no boot read yet says nothing
+        (cond (nil? boot) nil
+              (or (nil? loaded) (zero? loaded)) "the image held main's program: no forms loaded"
               :else (str loaded " forms loaded" (when ms (str " in " ms " ms")))))]
      (when (seq sick)
        [:ul {:class "text-xs"} (for [[pid {:keys [defects newest]}] sick]
