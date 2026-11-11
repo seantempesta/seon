@@ -564,6 +564,13 @@
                           (vreset! kept nil)
                           ;; health sees it (`take-defects!`)
                           (vswap! (:defects w) conj defect)
+                          ;; a call placed to answer an output (opts' :seon.render/as: wire's task-msgs in the request) answers that output
+                          ;; with the error, as an entity's model render that throws does above: by the render the error's schema names for
+                          ;; it, so the model reads that its context lost a part, never a gap
+                          (when-let [as (:seon.render/as opts)]
+                            (vswap! outs assoc as (if-let [ef (some-> (render-for ix :seon.render/component-defect as) requiring-resolve)]
+                                                    (place as (assoc env :children kids :self k) (ef {:seon.db/db ((:db w)) :seon.render/index ix} defect))
+                                                    [])))
                           ;; its line first, as text (what threw and where), then the error as data
                           (with-id [:section [:p (:seon.error/message defect)]
                                     [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index @(:index w)} defect]]
