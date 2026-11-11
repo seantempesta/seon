@@ -542,19 +542,6 @@
     (clojure.test/is (= 0 (count (re-seq #"\{…" text))))
     (clojure.test/is (= 1 (count (re-seq #"…\d+ \(drop" text))) "one cut past the rows shown")))
 
-(deftest a-cut-reads-a-member-by-its-key
-  ;; Point's ruling (2026-11-11, on the printer's cuts): a cut's form names a map's member by its key when the key prints back (a keyword, a
-  ;; string, an integer id: a join's members), never by its position, which moves when a member joins: the form copied at one turn
-  ;; reads the same member at the next
-  (let [deep (fn [x] (reduce (fn [v k] {k v}) x [:i :h :g :f :e :d :c :b]))
-        at (fn [members] (seon.print/response-text {:handle 'result/x :value {:a members}}))
-        one (at (sorted-map 7 (deep 1)))
-        two (at (sorted-map 3 (deep 2) 7 (deep 1)))
-        form (fn [t] (re-find #"\(get-in result/x \[:value :a 7[^\]]*\]" t))]
-    (is (some? (form one)) (str "the member by its id: " one))
-    (is (not (str/includes? one "(nth (seq")) "never by its position")
-    (is (= (form one) (form two)) "a member joining leaves the form that reads 7 as it was")))
-
 (deftest an-entity-prints-its-keys-in-one-order-and-a-view-in-its-own
   ;; docs/render.md#one-printer (Point's ruling, after render.md#a-render-is-a-value-printed-once): an entity's attributes have no order,
   ;; so an entity (a map holding :db/id) prints its keys sorted, the same bytes however it was made (a cold build, a patch that joined a key

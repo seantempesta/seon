@@ -254,7 +254,7 @@
       (map-classes c)
       (let [lift (lifted-namespace x (:max-name context))]
         {:kind :map :face :seon.print/map :open (if lift (str "#:" lift "{") "{") :lift lift :close "}" :total (count x) :indexed? true
-         :sorted? (sorts? x key) :members (held-order x key)})
+         :lookup? (keyword-lookup? x) :sorted? (sorts? x key) :members (held-order x key)})
       (set-classes c)
       {:kind :coll :face :seon.print/set :open "#{" :close "}" :total (count x) :ordered? true :indexed? true
        :sorted? (sorts? x identity) :members (held-order x identity)}
@@ -437,7 +437,7 @@
     :string (cond-> (assoc (placed context depth path indent) :kind :string :value (:value c) :total (:total c) :breaks (line-breaks (:value c)))
               (:code? c) (assoc :code? (:code? c)))
     (merge (placed context depth path indent)
-           (select-keys c [:kind :face :open :lift :close :total :pending? :prefix :ordered? :indexed? :sorted?])
+           (select-keys c [:kind :face :open :lift :close :total :pending? :prefix :ordered? :indexed? :sorted? :lookup?])
            {:pending (:members c)})))
 
 (defn- make-node
@@ -552,13 +552,9 @@
                   :leaf v
                   :scalar (node-of context v depth nil (+ indent 2))
                   (node-of context v depth
-                           ;; by its key when the key prints back as itself (a keyword, a string, an integer id: a join's
-                           ;; members by id), so a form copied at one turn reads the same member at the next, where a
-                           ;; position moves when a member joins; by position only for a key that does not
-                           (conj path (let [k (key member)]
-                                        (if (or (keyword? k) (string? k) (integer? k))
-                                          k
-                                          [:seon.render.data/entry index :seon.render.data/val])))
+                           (conj path (if (and (:lookup? parent) (keyword? (key member)))
+                                        (key member)
+                                        [:seon.render.data/entry index :seon.render.data/val]))
                            (+ indent 2)))]))
       ;; `get-in` reads an index of a vector only: a seq's member is read with `nth`
       (let [c (classify member context)]
