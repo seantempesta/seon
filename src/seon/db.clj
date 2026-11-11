@@ -7,7 +7,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-] :as contract] [seon.print :as print] [clojure.string :as str] [malli.core :as m] [malli.registry] [seon.schema.datahike :as sd] [seon.config :as cfg]
             [datahike.connections] [datahike.writing] [datahike.config] [datahike.store] [konserve.store] [hasch.core :as hasch] [datahike.api :as d] [org.replikativ.persistent-sorted-set :as pss] [konserve.core :as k] [konserve.jolt.store] [konserve.jolt.lmdb :as klmdb]
-            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core] [datahike.db.transaction]))
+            [konserve.jolt.lmdb-ffi :as lmdb-ffi] [konserve.jolt.posix :as posix] [seon.lib :as lib] [jolt.ffi :as ffi] [datahike.ids] [datahike.core]))
 
 (def schema
   "The Datahike schema, derived from the registry's entity schemas (resources/seon/schemas,
@@ -424,9 +424,7 @@
         v (:value r)
         v (if (and (map? v) (not (record? v)) (contains? v :handle)) (dissoc v :handle :ms :ticks :bytes :fns :record) v)]
     (cond-> (assoc e :seon.eval/response (apply dissoc r (keys result-parts)))
-      (seq parts) (assoc :seon.eval/result (into (let [h (str (hasch/uuid [v (:ex r) (:out r) (:err r) (:forms r)]))]
-                                                   ;; its content eid by name: a transaction gives one only to a top-level map, so a nested one would be another entity on each branch
-                                                   {:db/id (datahike.db.transaction/content-eid :seon.result/hash h) :seon.result/hash h})
+      (seq parts) (assoc :seon.eval/result (into {:seon.result/hash (str (hasch/uuid [v (:ex r) (:out r) (:err r) (:forms r)]))}
                                                  (keep (fn [[k a]] (when (some? (get parts k)) [a (get parts k)])))
                                                  result-parts)))))
 
