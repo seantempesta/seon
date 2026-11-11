@@ -1946,7 +1946,9 @@
         p (promise)
         ;; the watch first, then the value: a commit between reading main and adding the watch
         ;; was seen by neither, and the wait went on until a later commit that never came (a
-        ;; 48-minute hang of seon.e2e-test/await-quiet-ends-on-a-recorded-defect under load)
+        ;; 48-minute hang of seon.e2e-test/await-quiet-ends-on-a-recorded-defect under load). The order holds
+        ;; because the atom orders the two: a watch added and a value set are never both missed (Jolt's gate
+        ;; atomwatchorder, docs/forks.md#jolt; before it this very order could still miss on AArch64)
         _ (add-watch a k (fn [_ _ _ db] (when (pred db) (deliver p db))))
         db0 @(:conn sys)
         _ (when what (step/ask-edge (:judge sys) {:op :quiet :after (:max-tx db0)} {:stopped true} p))]
