@@ -13,7 +13,7 @@
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt] [seon.stage :as stage] [seon.root :as root] [seon.doc] [seon.system] [test-runner]))
+            [seon.program-test :as pt] [seon.stage :as stage] [seon.root :as root] [seon.doc] [seon.system] [seon.agent] [test-runner]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -448,7 +448,17 @@
     (is (re-find #"git said no" (why held "t1" {:binary "t0" :tree "t1" :error "git said no"} inputs)) "a diff git could not make is no answer of current")
     (is (re-find #"stale at its boot" (why (assoc held :stale-binary {:binary "t0"}) "t1" nil inputs)) "a binary stale since its boot: restart")
     (is (re-find #"no inputs" (why held "t1" nil nil)) "no inputs written for the files: restart")
-    (is (re-find #"no source fact" (why nil "t1" nil inputs)) "main never brought to a tree: restart")))
+    (is (re-find #"no source fact" (why nil "t1" nil inputs)) "main never brought to a tree: restart"))
+  ;; kept, root writes its source fact again for this boot (my.root/landed!, booted-source): an agent's plan keys its tests by
+  ;; the landed files' inputs once its db holds that fact (a fork of main, or a merge of main), with no restart
+  (let [db0 (pdb/empty-db false)
+        old {:root "/r" :dirs ["src"] :tree "t1" :commit "c1" :files 1 :forms 0 :ms 1.0 :inputs {:tree "t0m" :env "e" :code "c" :config {}}}
+        db (:db-after (pdb/with db0 [{:seon.root/id :root :seon.root/boot "b1" :seon.root/source (assoc old :boot "b1")}]))
+        landed {:tree "t1m" :env "e" :code "c2" :config {}}
+        src (root/booted-source old "b1" nil "p1" {} nil landed)
+        db1 (:db-after (pdb/with db [{:seon.root/id :root :seon.root/source src}]))]
+    (is (= "t0m" (:tree (first (seon.agent/test-inputs db)))) "before: the boot's inputs")
+    (is (= "t1m" (:tree (first (seon.agent/test-inputs db1)))) "after the kept landing, the landed files' inputs, under the same boot")))
 
 (deftest a-landing-through-the-bridge-is-a-zero-diff
   ;; task seon.root/a-boot-resumes-from-the-db: a Claude session's landing enters main as data, the changed files' facts
