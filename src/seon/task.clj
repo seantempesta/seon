@@ -40,7 +40,7 @@
   `default-branch` of its id). So a work task a merge task follows on its branch leaves the merge to that task, and a lone one
   merges itself (a trial, Data model's rule: rung 1's plain task finished green and never merged). See
   docs/merging.md#a-branch-lands-with-binland."
-  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:sequential :map]] :boolean]}
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:sequential [:map [:seon.task/id :seon.task/id]]]] :boolean]}
   [t needers]
   (let [br (fn [x] (or (:seon.task/branch x) (default-branch (:seon.task/id x))))]
     (not-any? #(= (br %) (br t)) needers)))
