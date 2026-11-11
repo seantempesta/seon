@@ -504,3 +504,31 @@
         r (cost/run (assoc estimate :sizes [10 100 cap (* 10 cap)]))]
     (is (= [(* 10 cap)] (:left-out r)) "the size past the cap, named")
     (is (= [10 100 cap] (mapv :n (:rows r))) "and three measured")))
+
+(def ^:private first-call-ever (atom true))
+(def ^:private surcharge (vec (range 130)))
+
+(defn cold-once
+  "The digits of each of xs, counted; on the first call in this process those of 130 more: a function whose first call
+  fills what later ones read, as a cache does (seon.doc/citing-sections in a shard). See docs/cost.md#how-we-measure."
+  {:malli/schema [:=> [:cat [:vector :int]] :int]}
+  [xs]
+  (let [digits (fn [ys] (reduce (fn [a y] (+ a (count (str y)))) 0 ys))]
+    (when (compare-and-set! first-call-ever true false) (digits surcharge))
+    (digits xs)))
+
+(defn cold-once-input
+  "cold-once's argument at n. See docs/cost.md#how-we-measure."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :int]]]}
+  [n] [(vec (range n))])
+
+;; docs/cost.md#how-we-measure: a size measured by one call passes its own slack cold (its first call's extra work under 3x
+;; of the ticks it states) and still bends the growth fit, which takes increments over the smallest size; the curve is then
+;; judged on each size measured again warm, so a verdict never rests on what ran before it in the process. Red before:
+;; seon.doc-cost-test/a-cited-var-finds-its-sections-by-the-names-sections-hold in a shard, 1.57x at n=30 and n^1.68
+(deftest a-curve-is-judged-on-warm-sizes
+  (let [{:keys [rows verdict]} (cost/run {:of 'seon.cost-test/cold-once :input 'seon.cost-test/cold-once-input
+                                          :n "elements" :work "each element printed and its digits counted (linear)" :growth :linear
+                                          :per-n {:ticks 20} :fixed {:ticks 2000} :sizes [100 300 1000]})]
+    (is (:ok? verdict) (pr-str verdict))
+    (is (:calls (first rows)) (str "the smallest size, cold, was measured again warm: " (pr-str (mapv #(select-keys % [:n :measured :expected :calls]) rows))))))

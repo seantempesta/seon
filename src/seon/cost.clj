@@ -395,7 +395,20 @@
                    (map (fn [n] [n (delay (vec (input n))) #(expected e units n)]) ns)))]
     (loop [[[n args allowed] & more] points rows []]
       (if (nil? n)
-        {:rows rows :verdict (judge e rows) :left-out left-out}
+        ;; every row passed alone, but their curve may not: a size measured by one call can read its first call's cold work
+        ;; (a cache it fills), which passes its own slack and still bends the growth fit (seon.doc/citing-sections in a
+        ;; shard: 1.57x at n=30, 0.85x at 100, read as n^1.68). Then each such row is measured again warm, as an over row
+        ;; is, and the curve judged on those: a verdict never rests on what ran before it in the process
+        (let [v (judge e rows)]
+          (if (or (:ok? v) (every? :calls rows))
+            {:rows rows :verdict v :left-out left-out}
+            (let [rows (mapv (fn [[_ args] row]
+                               (if (:calls row)
+                                 row
+                                 (let [m (measure f (force args) (config/value :seon.config.proofs/cost-max-samples))]
+                                   (assoc row :measured m :calls (:calls (meta m))))))
+                             points rows)]
+              {:rows rows :verdict (judge e rows) :left-out left-out})))
         (let [args (force args)
               row (cond-> {:n n :measured (measure f args) :expected (allowed)} (:cases e) (assoc :args args))
               ;; one call, unless it is over its estimate: then the calls a warm-up needs, up to the cap, the least of them judged
