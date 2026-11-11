@@ -1,16 +1,14 @@
 [
- {:seon.task/name "a-context-is-ordered-by-a-sort-key"
-  :seon.task/plan "What exists: the order of a context's items rests on Datahike issuing ids and transactions in order on one branch, and nothing states it: seon.ctx/first-delivered and seon.ctx/turn-members order messages by the transaction that delivered them and evals by eid; seon.repl/again reads the eval before by eid; seon.render.ui's agent render sorts :evals by key; seon.root takes the newest agent of a key by :db/id; the :limit :reverse windows in the root fact's pattern and the callers join take the newest n by eid. A merge, a copy or content-hashed ids break each silently. Neither Datahike nor Datomic orders a many-ref result.
+ {:seon.task/name "a-context-is-ordered-by-when-each-item-was-written"
+  :seon.task/plan "Owner, 2026-11-11: \"I want all IDs to be unique among all the branches and for us to use time for ordering not TX-ids\" (docs/decisions.md). This replaces the sort-key plan of 2026-11-08 (one stored :seon.ctx/sort-key a process wrote): nothing is stored; a pattern asks the transaction that wrote each member's link ({[:ns/_attr :tx :at] ..}, docs/ctx.md#the-pattern) and a reader orders by its time, ties (two branches in one millisecond) by the store-wide transaction id.
 
-The change (owner, 2026-11-08: \"put it in everywhere we need them and remove all the fragile hacks\"; the key optional: \"This isn't a datahike thing it's a seon thing\"): one attribute, :seon.ctx/sort-key, indexed, optional in every schema, written by the context's process on each item whose order matters (a model call, an eval, a delivered message on the branch), one key sequence per process from seon.program/stable-places (an insert moves no other, a re-run keeps its key). A list whose members carry it is held in that order by seon.ctx; a list whose members carry none is a set, held in eid order for stable bytes only. A window seeks the key newest first, keeping members whose existing ref names the owner. No new owner link, no tuple, nothing added to the pull syntax.
+Done: the agent's pattern asks :at on its messages, model calls and evals; seon.ctx/placed-messages orders messages by it and reads no db (seon.ctx/first-delivered and turn-members deleted); recorded requests unchanged by a byte.
 
-Who: Optimization the schema entry, the window seek and its cost proof; Context the writers and the readers above in seon.ctx, seon.repl and seon.ctx.wire; Web seon.render.ui and seon.root.
+Left, each a reader that still orders by entity id, moved to (comp :db/txInstant :at): seon.ctx/turn-evals (a turn's evals by eid); seon.repl/again (the eval before, by eid); seon.render.ui's agent render sorting :evals by key; seon.root taking the newest agent of a key by :db/id; the :limit :reverse windows in the root fact's pattern and the callers join (newest n by eid). Then the conversation as one sequence by time, the per-turn grouping in seon.ctx.wire/turn-entities and seon.render.ui/conversation-list replaced by one sort with the one rule that a call and its own evals are one block (with Web).
 
-Deletes: every eid or transaction order of context items listed above.
-
-Proofs, red first: a reply's evals in key order with their eids scrambled; a message sent mid-turn placed after that turn's evals; two agents' items on one branch each in its own order; a window of 10 over 1,000 items, its cost flat (seon.cost/proof); test/seon/recorded_requests.edn unchanged."
+Proof to write, red first: seon.ctx-test/a-contexts-items-sort-by-when-they-were-written (a reply's evals and a mid-turn message in time order with their ids scrambled); recorded_requests unchanged."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.ctx-test/reply-s-evals-read-seon-ctx-sort-key}}
+  :seon.task/proofs #{seon.ctx-test/a-contexts-items-sort-by-when-they-were-written}}
  {:seon.task/name "the-turn-shows-how-main-diverged"
   :seon.task/plan "What exists: :will-merge (seon.merge/divergence against the agent's merge base) shows what the branch carries; nothing shows what main changed since that base, so a coming conflict is met only at the merge. Stage 5 of docs/users.md#the-stages-agreed-2026-11-09 (seon.merge/a-session-syncs-with-main-unless-private) takes main in at each turn for a syncing session and shows what holds a change as unmerged entries on the page parts; this task is what a private session, which syncs only when saved, reads instead.
 
