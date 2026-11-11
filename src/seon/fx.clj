@@ -136,7 +136,7 @@
 
 (def child-env-scrub
   "The `env -u` argv that gives a child process the tree's own environment (docs/source.md#the-next-generation):
-  bin/env and bin/root export names for this root's checkout, runs and home, and a child inheriting
+  bin/env and bin/system export names for this root's checkout, runs and home, and a child inheriting
   SEON_SOURCE_ROOT listed its test namespaces from that checkout, not the tree it ran in (a full run's plan
   named a test of the root's working tree that main does not hold, and its shard died at once). Used by build, run-tests
   and the health step's base (test-runner/base-program)."
@@ -202,7 +202,7 @@
 
 (defn changed-since
   "The files of the tree at root as it is on disk that differ from tree (a tree id seon.fx/tree-id made): git's diff of tree
-  against the files, submodules left out (a pin is a build input, which seon.root/binary-current judges), and each untracked
+  against the files, submodules left out (a pin is a build input, which seon.system/binary-current judges), and each untracked
   file git does not ignore whose content tree does not hold at its path, less :seon.config.source/tree-excludes' top-level paths. Each with its text (nil when gone), the mode
   of each the allow-list names, and, when any differs, the tree id now and HEAD's commit. About 40 ms on this checkout when
   nothing differs, where tree-id is ~0.4 s (git checking each submodule's files). Answers {:value {path text} :modes {path mode}
@@ -254,7 +254,7 @@
   (cond (= p "resources/seon/system.edn") :seon.env/system
         (or (str/starts-with? p "resources/public/") (str/starts-with? p "web/")) :seon.env/web
         (= p "deps.edn") :seon.env/deps
-        ;; the wiki and the task files, each read whole by its own reader (seon.doc/pages, seon.root/task-files): a class, so a
+        ;; the wiki and the task files, each read whole by its own reader (seon.doc/pages, seon.system/task-files): a class, so a
         ;; wiki edit moves the tests that read the wiki and no other (a 4-line edit to docs/decisions.md ran 117 tests, 2026-11-11).
         ;; A .md file at the checkout's root (AGENTS.md, README.md) is the wiki's too, its top page (seon.doc): as the bin class,
         ;; which every process test and step takes, batch 77's AGENTS.md edit reran 463 of 1,785 tests and 36 of 40 steps
@@ -293,14 +293,14 @@
                     (str/replace (sedn/encode v) checkout "<checkout>"))]))))
 
 (defn declared-refs
-  "{seon.system/read-decl #{symbol}}: every qualified symbol the system declaration's text names
+  "{seon.graph/read-decl #{symbol}}: every qualified symbol the system declaration's text names
   (its procs' step-fns, its effects' performers), which root resolves by name at boot: reach
   edges of the function that reads the declaration (seon.program/graph-index' :data-refs),
   so a test booting root reaches its procs. None when there is no text (a tree with no system.edn)."
   {:malli/schema [:=> [:cat [:maybe :string]] [:map-of :qualified-symbol [:set :qualified-symbol]]]}
   [text]
   (let [decl (when text (edn/read-string {:default tagged-literal} text))]
-    {'seon.system/read-decl (set (filter qualified-symbol? (tree-seq #(or (coll? %) (tagged-literal? %))
+    {'seon.graph/read-decl (set (filter qualified-symbol? (tree-seq #(or (coll? %) (tagged-literal? %))
                                                                      #(if (tagged-literal? %) [(:form %)] (seq %)) decl)))}))
 
 (defn tree-diff
@@ -417,7 +417,7 @@
 
 (defn inputs
   "The one producer of the checkout at root's inputs that have no program facts, for bin/test
-  and for the binary's build record (seon.root/built-program, which a boot hands its agents):
+  and for the binary's build record (seon.system/built-program, which a boot hands its agents):
   {:tree (tree-id: every file and pin, for a test reading files) :code (the digest of the program's source and the shipped config, for a check step, which runs them whatever its reach names; the wiki, the tasks and the tests are not in it) :env
   (every test's: the tree's env-input? entries of no env-class, among them the runtime's pins
   (:seon.config.source/runtime-pins: Jolt and Chez, a bump re-runs every test), and the per-test
@@ -979,7 +979,7 @@
       (git-try repo ["rev-parse" "--verify" "--quiet" "HEAD^{commit}"])))
 
 (defn bound-port
-  "The port the root whose runs directory is runs bound, as bin/root recorded it from its ROOT
+  "The port the root whose runs directory is runs bound, as bin/system recorded it from its ROOT
   LISTENING line (runs/root.port), or nil when no root there has listened: a root on a port the
   kernel assigns (:seon.config.root/server-port -1) has it nowhere else. See docs/server.md."
   {:malli/schema [:=> [:cat :string] [:maybe :int]]}
@@ -1021,7 +1021,7 @@
       (error #'seon.fx/uncommitted :seon.fx/io-error (str "git status in " dir ": " (:err r)) {:path dir}))))
 
 (defn gate-answer
-  "The system's answer a to the gate's run of tests (seon.root/prove-tree!'s, the run-tests-forked shape: :reports, :red,
+  "The system's answer a to the gate's run of tests (seon.system/prove-tree!'s, the run-tests-forked shape: :reports, :red,
   :digests) as run-on-checkout answers it: {:results {test :pass|:fail} :failures {test [failure ...]} :digests}. A test
   the run never reached (it is answered at its first red) is in none, so its branch keeps it deferred and asks again: never a
   red it did not show. See docs/merging.md#a-merge-runs-what-the-change-reaches."
@@ -1039,7 +1039,7 @@
   "One run of the :tests effect (run-tests) on a checkout of the merge candidate: a detached worktree of repo at
   branch's head (bin/worktree --at, as a generation's), files ({relative path text}, the candidate's changed files)
   written over it, root's binary and kept stores cloned into it; the worktree removed after. The gate (tests, qualified
-  names) is proved by the system through prove (seon.root/prove-tree!, mode :judge, named by exactly those tests): its
+  names) is proved by the system through prove (seon.system/prove-tree!, mode :judge, named by exactly those tests): its
   process tests run as items on the checkout (docs/merging.md#a-session-proves-through-root), and its answer is read by
   gate-answer: {:value {:results {test status} :failures {test [failure ...]} :digests {test digest} :ms :log}}, or the
   run's typed error. With :built? (the fallback route: a branch's program judged on a binary built from its own source, never
@@ -1081,14 +1081,14 @@
               _ (when (and (empty? files) (.isFile (java.io.File. (str slot "/seon"))))
                   (doseq [n kept-build] (lib/sh "cp" "-c" (str slot "/" n) (str dir "/target/" n))))
               ;; the binary root runs, with its build record, over the clone bin/worktree --at took of the main tree's: what a gate's
-              ;; runner judges current for the candidate's tree (seon.root/binary-current) is the binary that is running
+              ;; runner judges current for the candidate's tree (seon.system/binary-current) is the binary that is running
               _ (when-not all?
                   (doseq [n ["seon" "seon.stamp" "seon.tree" "seon.program"]
                           :let [f (java.io.File. (str (cfg/checkout) "/target/" n))] :when (.isFile f)]
                     (lib/sh "cp" "-cf" (.getPath f) (str dir "/target/" n)))
                   ;; and root's kept stores, so the candidate's plan and seed import only what it changed: the plan's program
                   ;; store (a branch per tree, keyed by the importer: seon.test-store/kept-program-store) and the process
-                  ;; tests' store (its source fact keyed by the indexing code, seon.root/kept-index!: a clone whose code moved
+                  ;; tests' store (its source fact keyed by the indexing code, seon.system/kept-index!: a clone whose code moved
                   ;; is indexed again from nothing, so the clone decides the cost, never the answer); a store's data file
                   ;; (as seon.test-store/clone-process-store! takes it) and the plan's kept reach graph, keyed by its builder
                   (doseq [^java.io.File d (concat (.listFiles (java.io.File. (str (cfg/checkout) "/target")))
@@ -1101,7 +1101,7 @@
                       (doseq [n ["data.mdb" "reach-graph.fasl"] :when (.isFile (java.io.File. d n))]
                         (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))))
               ;; a gate's run builds only through its runner, when the binary is not current for the candidate's tree
-              ;; (bin/test's plan: seon.root/binary-current, rule (a)); the full run builds main's tree here, into its kept slot
+              ;; (bin/test's plan: seon.system/binary-current, rule (a)); the full run builds main's tree here, into its kept slot
               b (if (or all? built?) (apply lib/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])) {:exit 0})
               _ (when (and all? (empty? files) (zero? (:exit b)))
                   (.mkdirs (java.io.File. ^String slot))
@@ -1110,7 +1110,7 @@
             (do (spit log (str (:out b) (:err b)))
                 (error #'seon.fx/run-on-checkout :seon.fx/io-error (str (build-failure (str (:out b) (:err b)) files) "; its log: " log) {:path dir}))
             (if-not (or all? built?)
-              ;; the gate: the system proves the candidate's checkout (prove, seon.root/prove-tree!, which root binds to this
+              ;; the gate: the system proves the candidate's checkout (prove, seon.system/prove-tree!, which root binds to this
               ;; effect's :ctx), named by exactly the deferred tests; its process tests run as items on dir, by the :item owner
               (let [a (if prove
                         (prove {:checkout dir :tree (tree-id dir) :names (set tests) :mode :judge})
@@ -1201,7 +1201,7 @@
 
 (defn run-tests
   "The :tests effect: tests on a checkout of the merge candidate (run-on-checkout), proved by the system through its :ctx's
-  :prove-tree (seon.root/prove-tree!, which root binds), its answer {:value {:results :ms :log :digests :failures :kept}} or
+  :prove-tree (seon.system/prove-tree!, which root binds), its answer {:value {:results :ms :log :digests :failures :kept}} or
   its declared error; a named run reuses what this candidate already answered (run-held). With :base (each test's digest as
   main held it at the task's base, seon.task's :seon.task/deferred), the answer's :main-red names its reds that are main's,
   not the change's (seon.proofs/main-red: the change does not reach the test, or main's verdict at that digest is red,
@@ -1324,9 +1324,9 @@
                                             (when (:binary? req) "(cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-) && ")
                                             "HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test -e \"" prog "\""
                                             ;; and the process tests' store gets this tree's program on :db, as bin/test seeds it before its
-                                            ;; shards (bin/root seed): a process item's root clones it, and one seeded at an earlier tree was a
+                                            ;; shards (bin/system seed): a process item's root clones it, and one seeded at an earlier tree was a
                                             ;; binary built from this tree over a store of that one, every spawn refused (Tests' trial, step 2b)
-                                            (when (:binary? req) " && bin/root seed \"$(<target/process-store.path)\""))))
+                                            (when (:binary? req) " && bin/system seed \"$(<target/process-store.path)\""))))
                 ;; with a :bound (seon.prove's plan-items, from its measured ms) it runs through bin/bounded: past the bound its
                 ;; evidence is kept and its whole process group ended, never left to hold a worker
                 :process (apply sh (concat (when bound ["bin/bounded" (str bound) (str dir "/evidence")])
@@ -1704,7 +1704,7 @@
     {} kinds))
 
 (defn stall-evidence
-  "A stalled agent's evidence, captured while it is stuck (seon.root's stall task asks it at the
+  "A stalled agent's evidence, captured while it is stuck (seon.system's stall task asks it at the
   stall's first write): its fiber dump (SIGINFO: Jolt writes every fiber's stack to the process's
   stderr, read from its stderr file after the sample), `sample` of pid for 5 s, `lsof` of pid, and
   `ps` of its process group, each a file in dir. A hang is evidence, kept by the system rather than

@@ -3,7 +3,7 @@
   run tests, whoever asks (a Claude session through the `prove` server op / seon_prove, an agent's
   turn), so a change is proved once.
 
-  - A request names a branch, its tx (t) and the digest of what its run reads (seon.root/prove!,
+  - A request names a branch, its tx (t) and the digest of what its run reads (seon.system/prove!,
     seon.agent/prove!); its key (run-key) is \"branch@digest\", so a write that changes nothing
     the run reads (its own facts, the eval that asked) never makes a second run. A run is shared by its key, and the key
     holds the mode and the names asked: a session's tree run (mode judge, with a checkout, on its tree's branch) never joins
@@ -57,11 +57,11 @@
 (defn- remember
   "st with run's green answer r remembered at its slot, and every slot of a branch that can no longer be asked dropped:
   the run's branch's slots at another digest (a key holds its digest, so an ask of the branch's code as it now is never
-  matches them), and, for an answer :seon.root/ended, every slot of the branch (its agent ended). :done so holds the slots
+  matches them), and, for an answer :seon.system/ended, every slot of the branch (its agent ended). :done so holds the slots
   at each live branch's latest digest, a few each."
   {:malli/schema [:=> [:cat :map :map :any] :map]}
   [st run r]
-  (let [ended? (= :seon.root/ended (:seon.error/type r))
+  (let [ended? (= :seon.system/ended (:seon.error/type r))
         keep? (fn [[[b] v]] (not (and (= b (:branch run)) (or ended? (not= (:digest v) (:digest run))))))
         st (update st :done #(into {} (filter keep?) %))]
     (if (or (contract/error? r) (some :exit (:reports r)) (seq (:red r)))
@@ -407,13 +407,13 @@
 (defn- finish
   "Run k ended with answer r: every waiter answered once. A run answered green with nothing died is remembered under its
   slot (a key asked again gets that answer, nothing runs); an error, a death or a red is not, so asking again runs it
-  again. An error is a :platform problem too, but :seon.root/ended (the agent it asked ended: a cancel, its run's end).
+  again. An error is a :platform problem too, but :seon.system/ended (the agent it asked ended: a cancel, its run's end).
   Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :string :any] [:tuple :map [:vector :map]]]}
   [st k r]
   (let [{:keys [waiters] :as run} (get-in st [:runs k])
         err? (contract/error? r)
-        ended? (= :seon.root/ended (:seon.error/type r))
+        ended? (= :seon.system/ended (:seon.error/type r))
         ;; a run's items name their own reds (run-answer: a step's among them); any other answer, by its failing reports
         r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (keys (proofs/failures r))))))))
         ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
@@ -533,7 +533,7 @@
 
 (defn- state-view
   "What the service holds, as data: the runs in flight (each key's stage and waiters), the queue (items queued and running),
-  the free workers, the load it last read (when a max-load is set), and the api's asks it has open. A hang in the chain is read from it (seon.root's stall task records it)."
+  the free workers, the load it last read (when a max-load is set), and the api's asks it has open. A hang in the chain is read from it (seon.system's stall task records it)."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (cond-> {:runs (into (sorted-map) (for [[k r] (:runs st)] [k {:stage (:stage r) :waiting (count (:waiters r))}]))

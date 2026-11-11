@@ -49,10 +49,10 @@
     (if-let [{c :config srcs :sources} (cfg/moved db ops)] (update st :pend (fnil conj []) {:tx-data (task/config-tx c srcs)}) st)))
 
 (defn- mark-tx
-  "The tx-data that moves main's content mark (:seon.root/content-t) past every t db, main before the commit, holds, so a
+  "The tx-data that moves main's content mark (:seon.system/content-t) past every t db, main before the commit, holds, so a
   commit that moves the content never shares a mark with one before it (docs/storage.md#mains-content-mark)."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.db/tx-data]}
-  [db] [{:seon.root/id :root :seon.root/content-t (inc (:max-tx db))}])
+  [db] [{:seon.system/id :root :seon.system/content-t (inc (:max-tx db))}])
 
 (defn- mark!
   "The report of main's content mark moved, applied on the connection after ops (resolved datoms applied and not yet
@@ -265,7 +265,7 @@
         ;; every branch named in a request is root's name for it, under root's main
         m (cond-> m
             (:branch m) (update :branch #(pdb/on-main main %))
-            ;; :from a branch's name, or a commit's id (a branch from a point: seon.root/back!), which no main qualifies
+            ;; :from a branch's name, or a commit's id (a branch from a point: seon.system/back!), which no main qualifies
             (keyword? (:from m)) (update :from #(pdb/on-main main %))
             (:branches m) (update :branches #(mapv (fn [b] (pdb/on-main main b)) %)))
         exists? (fn [b] (pdb/branch? conn b))
@@ -309,7 +309,7 @@
                                                   :cfg (:cfg st) :resumed resumed?
                                                   :commit (d/commit-id @conn) :t (:max-tx @conn)})
                    (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))))
-      ;; a session's files as a branch of main, keyed by their tree (seon.root/prove-tree!): made once, from main's head, with
+      ;; a session's files as a branch of main, keyed by their tree (seon.system/prove-tree!): made once, from main's head, with
       ;; the catch-up of the checkout written on it; a second asker of one tree finds it made (:exists), never makes it again
       :branch-for-tree (reply st (if (exists? (:branch m))
                                    {:ok true :exists true}
@@ -318,7 +318,7 @@
                                          (let [bc (pdb/connect (assoc (:cfg st) :branch (:branch m)))]
                                            (try (d/transact bc (vec (:tx m))) (finally (d/release bc)))))
                                        {:ok true :exists false})))
-      ;; a tree's branch dropped once no proof of it runs (seon.root/prove-tree!; the owner's ruling, 2026-11-11): only a tree-<id>
+      ;; a tree's branch dropped once no proof of it runs (seon.system/prove-tree!; the owner's ruling, 2026-11-11): only a tree-<id>
       ;; branch, never another; one already gone answers so
       :drop-tree-branch (reply st (cond (not (pdb/tree-branch? (:branch m))) (refused (str "not a tree's branch: " (:branch m)) {})
                                         (exists? (:branch m)) (do (d/delete-branch! conn (:branch m)) {:ok true :dropped true})
@@ -363,7 +363,7 @@
       ;; heap collected in full, which returns its free pages past the reserve to the OS
       ;; (docs/machine.md#what-a-process-owns-in-memory)
       :collect (let [r (pdb/collect! conn (cfg/value :seon.config.store/sole-writer?))]
-                 (reply (if (:skipped r) st (commit-batch (update st :pend (fnil conj []) {:tx-data [{:seon.root/id :root :seon.root/collected r}]}) o))
+                 (reply (if (:skipped r) st (commit-batch (update st :pend (fnil conj []) {:tx-data [{:seon.system/id :root :seon.system/collected r}]}) o))
                         (do (lib/non-static-live!) {:ok true :collected r})))
       (reply st (refused (str "unknown op " op) {})))))
 

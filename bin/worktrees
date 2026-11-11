@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/worktrees   what is running and what it costs, across every checkout: each worktree's branch and
-# how far it is from main, its root (bin/root status), the processes under it (count, CPU %,
+# how far it is from main, its root (bin/system status), the processes under it (count, CPU %,
 # memory, threads), its stores' size; then seon processes no checkout claims (orphans: parent 1,
 # or a checkout that is gone), the heaviest processes, and the machine's load and free memory.
 # Read-only. `bin/worktrees -w` repeats it every 5 s (a view for a person, not a decision).
@@ -15,7 +15,7 @@ show() {
   git -C "$COMMON" worktree list --porcelain | awk '/^worktree /{print $2}' | while read wt; do
     br=$(git -C "$wt" branch --show-current 2>/dev/null)
     if [[ $br == main ]]; then ahead=-; else ahead=$(git -C "$COMMON" rev-list --count main..$br 2>/dev/null); fi
-    root=$( (cd "$wt" && [[ -x bin/root ]] && bin/root status 2>/dev/null | tail -1 | sed -E 's/^root ([0-9]+) up: server ([0-9]+).*/up \1 :\2/; s/^no root running.*/-/') )
+    root=$( (cd "$wt" && [[ -x bin/system ]] && bin/system status 2>/dev/null | tail -1 | sed -E 's/^root ([0-9]+) up: server ([0-9]+).*/up \1 :\2/; s/^no root running.*/-/') )
     # its own executables (the shared compile cache under the main tree's target/ is not a claim)
     pids=$(awk -v w="$wt/" 'index($5, w) == 1 {print $1}' /tmp/worktrees.$$)
     # a checkout's root runs as ./seon from its target/: count the descendants of its root too
@@ -31,7 +31,7 @@ show() {
   awk '/\.\/seon|bin\/root run/ && !/awk/ {print $1, $2, $4, $0}' /tmp/worktrees.$$ | while read pid ppid rss rest; do
     [[ $claimed == *" $pid "* ]] && continue
     cwd=$(lsof -a -p $pid -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}')
-    # bin/root's holder (parent 1 by design: it keeps a root's stdin open) is claimed while its root lives
+    # bin/system's holder (parent 1 by design: it keeps a root's stdin open) is claimed while its root lives
     pgrep -P $pid -f '\./seon' >/dev/null && continue
     [[ $ppid == 1 || ( -n $cwd && ! -d $cwd ) ]] && printf '  pid %s parent %s group %s %dMB cwd %s\n' $pid $ppid $(ps -o pgid= -p $pid | tr -d ' ') $((rss/1024)) ${cwd:-?}
   done

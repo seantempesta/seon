@@ -2,7 +2,7 @@
 # bin/full-run [HEAD]   one line: how many landings HEAD (default main) is past the last full run that ended, as bin/test --all
 #                       recorded it beside the verdict cache (full-run.edn in :seon.config.proofs/results-dir), and what it found:
 #                       "full run: N landings ago, :green|:red, at <commit>", or "full run: none recorded". What bin/land prints
-#                       before LANDED and bin/root status after its own line (docs/merging.md#the-full-run-is-the-net). A count of
+#                       before LANDED and bin/system status after its own line (docs/merging.md#the-full-run-is-the-net). A count of
 #                       landings, never a time: no clock decides anything.
 emulate -L zsh
 ROOT=${0:A:h:h}
