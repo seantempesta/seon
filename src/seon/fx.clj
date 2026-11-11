@@ -288,15 +288,22 @@
 (defn tree-diff
   "What changed between git trees from and to of the repository at root: [[path old-mode new-mode] ...] (git diff --raw, no
   renames: a mode 160000 is a pin), or :seon.fx/io-error with git's words when git cannot diff them (a tree it does not
-  hold). See docs/source.md#the-binary-records-its-program."
+  hold). Two tree ids' diff never changes, so it is kept beside the checkout's builds (target/tree-diffs/FROM-TO.edn, derived
+  data, read before git is asked): the plan that judged a binary current computed it, and root's boot reads it as a file,
+  running no git (clojure.java.shell's futures are threads root does not declare). See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :string :string :string] [:or [:vector [:tuple :string :string :string]] :seon.error/base]]}
   [root from to]
-  (let [r (git-run {} root ["diff" "--raw" "--no-renames" from to] nil)]
-    (if (zero? (:exit r))
-      (vec (for [l (str/split-lines (:out r)) :when (not (str/blank? l))
-                 :let [[meta p] (str/split l #"\t" 2) [om nm] (str/split (subs meta 1) #" ")]]
-             [p om nm]))
-      (error #'seon.fx/tree-diff :seon.fx/io-error (str "git diff " from " " to ": " (str/trim (str (:err r)))) {:path root}))))
+  (let [f (java.io.File. (str root "/target/tree-diffs/" from "-" to ".edn"))]
+    (if (.isFile f)
+      (sedn/decode (slurp f))
+      (let [r (git-run {} root ["diff" "--raw" "--no-renames" from to] nil)]
+        (if (zero? (:exit r))
+          (let [d (vec (for [l (str/split-lines (:out r)) :when (not (str/blank? l))
+                             :let [[meta p] (str/split l #"\t" 2) [om nm] (str/split (subs meta 1) #" ")]]
+                         [p om nm]))]
+            (write-file {:req {:path (.getPath f) :text (sedn/encode d)}})
+            d)
+          (error #'seon.fx/tree-diff :seon.fx/io-error (str "git diff " from " " to ": " (str/trim (str (:err r)))) {:path root}))))))
 
 (defn tree-file
   "The text of path in git tree tree of the repository at root (git show TREE:PATH), or nil when the tree holds no such
