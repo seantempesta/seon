@@ -67,7 +67,7 @@
     (if (or (contract/error? r) (some :exit (:reports r)) (seq (:red r)))
       st
       (assoc-in st [:done (slot run)] {:key (:key r) :digest (:digest run)
-                                       :r (-> r (dissoc :measured) (assoc :ran 0)
+                                       :r (-> r (dissoc :measured :verdicts) (assoc :ran 0)
                                               (update :reports (partial mapv #(assoc % :reused true)))
                                               (as-> x (assoc x :reused (count (distinct (keep :var (:reports x)))))))}))))
 
@@ -134,11 +134,14 @@
           st ks))
 
 (defn- answer-asker
-  "Asker rid answered with its verdict (:green true, or the reds and errors it met first), and gone from every item's
-  waiters; a queued item no one waits on any more leaves the queue (no work for an answer already given)."
+  "Asker rid answered with its verdict (:green true, or the reds and errors it met first) and :verdicts, every verdict it
+  was told as it landed (item-ended), so a client streaming them can write the ones it has not yet: the answer, not the
+  events' order, says what it is owed (docs/server.md#ops); and gone from every item's waiters; a queued item no one
+  waits on any more leaves the queue (no work for an answer already given)."
   {:malli/schema [:=> [:cat :map :any :map] [:tuple :map [:vector :map]]]}
   [st rid r]
   (let [left (get-in st [:askers rid :left])
+        r (assoc r :verdicts (get-in st [:askers rid :verdicts] []))
         st (reduce (fn [st k]
                      (let [st (update-in st [:items k :waiters] disj rid)
                            it (get-in st [:items k])]
@@ -240,7 +243,7 @@
                   kind (assoc :kind kind)
                   ms (assoc :ms ms))
         [st outs] (reduce (fn [[st outs] rid]
-                            (let [st (cond-> (update-in st [:askers rid :left] disj k)
+                            (let [st (cond-> (-> st (update-in [:askers rid :left] disj k) (update-in [:askers rid :verdicts] (fnil conj []) verdict))
                                        signal? (update-in [:askers rid :signals] (fnil conj []) (select-keys verdict [:test :digest :kind :signal :ms]))
                                        (not signal?) (assoc-in [:askers rid :results t] r))
                                   {:keys [left results signals]} (get-in st [:askers rid])]
@@ -431,7 +434,7 @@
                   ;; that could not run answers; the verdicts that did land are the cache's
                   (let [rs (:results (:r o))
                         [st more] (finish st k (or (some (fn [[_ r]] (when (contract/error? r) r)) (sort-by (comp str key) rs))
-                                                   (run-answer (:base run) rs (:signals (:r o)))))]
+                                                   (assoc (run-answer (:base run) rs (:signals (:r o))) :verdicts (:verdicts (:r o) []))))]
                     [st (into acc more)])
                   [st acc]))
               [st (conj acc o)]))

@@ -222,7 +222,8 @@
         db (:db-after (d/with (ts/test-db)
                               (into [{:seon.agent/key k :seon.agent/task {:seon.task/id "lab/ctx"}}
                                      {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
-                                      :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
+                                      :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx
+                                      :seon.task/reasons [{:reason :proof-red :symbol 'app.x-test/f0-passes} {:reason :behind :behind 3}]}]
                                     (concat (mapcat eval-tx (range 1 6))
                                             (for [t (range 3)] {:seon.model-call/id (str "lab/ctx#1/" t) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n t})
                                             [{:seon.message/id "m1" :seon.message/from {:seon.agent/key "user"} :seon.message/body "How is it going?"
@@ -230,6 +231,9 @@
         t (:tree (ctx/build (seon.db/index) db (aid db) :b))]
     (is (= "lab/ctx" (get-in t [:seon.agent/task :seon.task/id])) "the task, pulled whole by the agent's own ref")
     (is (= "Make app.x/f0 pass." (get-in t [:seon.agent/task :seon.task/plan])))
+    ;; docs/tasks.md#the-done-rule: what the judge said was not done is data the agent's pull holds, each reason a map its schema names
+    (is (= [{:reason :proof-red :symbol 'app.x-test/f0-passes} {:reason :behind :behind 3}] (get-in t [:seon.agent/task :seon.task/reasons]))
+        "the task's judged reasons, as the maps the done rule answers")
     (is (= 4 (count (:seon.model-call/_agent t))) "every model call, those its records name among them")
     (is (= 5 (count (:seon.eval/_agent t))) "every eval")
     (is (= ["m1"] (names (:seon.message/_to t) :seon.message/id)) "the messages it holds")
@@ -1654,9 +1658,9 @@
     (is (= [{:seon.agent/task [:a :b] :seon.agent/key2 [:c]} :seon.agent/key]
            (render/expanded (seon.db/index) [{:seon.agent/task [:a] :seon.agent/key2 [:c]} :seon.agent/key {:seon.agent/task [:b :a]}]))
         "merged at the first clause that asked it, key by key, each clause once")
-    (is (str/includes? (str (try (render/expanded (seon.db/index) [{:seon.agent/agents [:seon.agent/key]} {:seon.agent/agents 2}]) nil
+    (is (str/includes? (str (try (render/expanded (seon.db/index) [{:seon.agent/agents 3} {:seon.agent/agents 2}]) nil
                                  (catch clojure.lang.ExceptionInfo e (ex-data e))))
-                       "asked twice")
+                       "asked twice and one of them is a depth")
         "a join asked twice where one is a depth is refused, never guessed")))
 
 (deftest the-documented-form-names-the-role-and-stores-two-clauses
@@ -1672,6 +1676,36 @@
     (is (= [:seon.db/agent-fact {:my.ns/_of [:my.ns/text]}] stored (:seon.ctx/pattern (d/pull db' [:seon.ctx/pattern] [:seon.agent/key k])))
         "two clauses: the role's name and the join added")
     (is (= "lab/ctx" (:seon.task/id task)) "and its pull still holds its task")))
+
+(deftest a-depth-join-asks-its-below-option-under-its-last-level
+  ;; docs/ctx.md#the-pattern: a depth join's :below option is what it asks below its last level (seon.render's again): entries to the
+  ;; depth, and below the last of them only what :below asks, here their ids, so an entry says how many are below it and nothing is cut
+  ;; silently. A :below on a join that is no depth is refused, as is a plain join added beside a depth of the same key
+  (let [ks ["depth/a" "depth/b" "depth/c" "depth/d" "depth/e"]
+        db (:db-after (d/with (ts/test-db) (into (mapv (fn [x] {:seon.agent/key x :seon.agent/turn 1}) ks)
+                                                 (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/agents #{{:seon.agent/key y}}}))))
+        ix (seon.db/index)
+        down #(first (vals (:seon.agent/agents %)))
+        tree (fn [p] (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "depth/a") :b p)))
+        refused (fn [p] (str (try (render/pattern ix p) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))))
+        n (seon.config/value :seon.config.render/agent-tree-depth)]
+    (let [t (tree [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2}])
+          last-full (down t)]
+      (is (= ["depth/a" "depth/b"] (mapv :seon.agent/key [t last-full])) "entries to the depth: the entity and one level more")
+      (is (= (pdb/eid db :seon.agent/key "depth/c") (:db/id (down last-full))) "the last full level holds the ids below it")
+      (is (nil? (:seon.agent/key (down last-full))) "and nothing else of them"))
+    (is (= (render/pattern ix [:seon.agent/key {:seon.agent/agents [:seon.agent/key {:seon.agent/agents [:db/id]}]}])
+           (render/pattern ix [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2}]))
+        "the joins written out, each asked by its key without :below")
+    (let [t (tree [:seon.agent/key {[:seon.agent/agents :below [:db/id]] :seon.config.render/agent-tree-depth}])
+          levels (take-while some? (iterate down t))]
+      (is (= (subvec ks 0 n) (vec (keep :seon.agent/key levels))) "a config key's value, the same way")
+      (is (nil? (:seon.agent/key (last levels))) "below the last, ids alone"))
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :below [:db/id]] [:seon.agent/key]}]) "it takes a depth")
+        "a :below on a join that is no depth: refused, never ignored")
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2} {:seon.agent/agents [:seon.agent/status]}])
+                       "asked twice and one of them is a depth")
+        "a plain join added beside a depth of the same key: refused, saying why")))
 
 (deftest a-join-asks-its-enclosing-pattern-again-to-a-depth
   ;; docs/ctx.md#the-pattern: a join's sub-pattern may be a depth, a positive integer or a config key naming one: the enclosing pattern
@@ -1703,3 +1737,4 @@
                                         (catch clojure.lang.ExceptionInfo e (pr-str (ex-data e))))))]
     (is (str/includes? (str said) "no member is held at") said)
     (is (str/includes? (str said) (str "at their entity ids: " m)) "and it names the keys the join holds")))
+
