@@ -576,7 +576,7 @@
                                               [{:seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
                                                 :seon.eval/code "(f 3)" :seon.eval/response {:value 9} :seon.eval/call-id "c1" :seon.eval/intent "f triples."}]))
         ;; the call as ctx holds it: its pull, with the evals that name it
-        call (assoc (d/pull db '[*] [:seon.model-call/id (seon.lib/call-id "a1" 1)]) :seon.eval/_call {(pdb/eid db :seon.eval/id "e1") {}})
+        call (assoc (d/pull db '[*] [:seon.model-call/id (seon.lib/call-id "a1" 1)]) :seon.eval/_call {(pdb/eid db :seon.eval/id "e1") (d/pull db [:db/id :seon.eval/call-id :seon.eval/agent] [:seon.eval/id "e1"])})
         reply (seon.fixtures/turn-messages db call)
         evals (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "e1"]))
         ms (into reply evals)]

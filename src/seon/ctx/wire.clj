@@ -434,8 +434,9 @@
   only with words or reasoning to send. Its turn's page message (`page-diff-msgs`) and its evals are their own. See
   docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
   {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :seon.model/message]]}
-  [{db :seon.db/db} {:seon.model-call/keys [n origin reply reasoning truncated] :as c}]
-  (let [called? (boolean (some #(let [e (d/entity db %)] (and (:seon.eval/call-id e) (:seon.eval/agent e))) (keys (:seon.eval/_call c))))
+  [_ {:seon.model-call/keys [n origin reply reasoning truncated] :as c}]
+  ;; read from the pull: the call's evals are joined with the two attributes this asks (the agent's pattern), never looked up
+  (let [called? (boolean (some (fn [e] (and (:seon.eval/call-id e) (:seon.eval/agent e))) (vals (:seon.eval/_call c))))
         spoke? (not (str/blank? reply))
         sent? (and (= :model origin) (or called? (and (not truncated) spoke?)) (or spoke? (some? reasoning)))]
     (if sent?
