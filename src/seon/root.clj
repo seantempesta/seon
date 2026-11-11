@@ -1994,6 +1994,18 @@
   {:malli/schema [:=> [:cat :string] :keyword]}
   [tree] (keyword (str "tree-" tree)))
 
+(defn baked-paths
+  "Of a checkout's changed paths, those a build bakes into the binary, so a process forked from the system's binary holds the
+  system's value of them however the tree's branch states it: the schema resources (seon.config/baked-schema-forms), the
+  shipped config (baked-shipped-text), system.edn (seon.system/baked-decl-text) and deps.edn (seon.fork-server/baked-deps-text).
+  A tree's run that changes one says so (prove-tree!'s :baked): its in-process verdicts read main's bake for them, until the
+  one call holds the runtime invariant for bakes. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat [:sequential :string]] [:vector :string]]}
+  [paths]
+  (filterv #(or (str/starts-with? % "resources/seon/schemas/") (= % cfg/shipped-file)
+                (= % "resources/seon/system.edn") (= % "deps.edn"))
+           paths))
+
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
   their branch (tree-branch), made once from main with the checkout's catch-up written on it (catch-up :fact? false, as the writer's
@@ -2029,7 +2041,10 @@
               _ (vreset! ag-of ag)]
           (cond (contract/error? w) w
                 (nil? ag) s
-                :else @(prove! sys ag (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})))
+                ;; a verdict partly another program's says so: the baked files the tree changed (baked-paths), never silence
+                :else (let [r @(prove! sys ag (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
+                            baked (baked-paths (:paths c))]
+                        (cond-> r (and (seq baked) (map? r) (not (contract/error? r))) (assoc :baked baked)))))
          (finally (tree-leave! sys b @ag-of))))))))
 
 (defn store-clean!

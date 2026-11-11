@@ -448,7 +448,8 @@
       r
       (cond-> (select-keys r [:key :ran :pass :fail :error :red :reused :ms])
         (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
-        (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))
+        (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))
+        (seq (:baked r)) (assoc :baked (:baked r))))))
 
 (defmethod op-answer :done [sys ag _]
   (if-let [{:keys [task env]} (work-of sys ag)]
