@@ -39,17 +39,18 @@
 ;; docs/source.md): kept as a branch named by the tree's id, a content key
 ;; that is never updated, in one LMDB store per checkout (:seon.config.proofs/program-store).
 
-(def ^:private importer
-  "The text of the code that derives a program's facts from its files (seon.source, seon.program): a form's :form/refs
-  are its answer, and a kept tree's unchanged files are not read again, so facts another importer wrote are not
-  this one's."
-  (delay (lib/digest (str/join "\n" (map #(slurp (io/file (config/checkout) %)) ["src/seon/source.clj" "src/seon/program.clj"])))))
+(defn- prefix-of
+  "The prefix of the branches a tree's program is kept on, as :seon.config.source/dirs and an importer import it: text, a function
+  of a relative path, answers the importer's files, the code that derives a program's facts from its files (seon.source,
+  seon.program), since a form's :form/refs are its answer and a kept tree's unchanged files are not read again, so a store's
+  branches made under other dirs or other code (another import) are none of this one's. See docs/source.md#tests-run-by-reach."
+  [text]
+  (str "tree-" (lib/digest (str (pr-str (config/value :seon.config.source/dirs))
+                                (lib/digest (str/join "\n" (map text ["src/seon/source.clj" "src/seon/program.clj"]))))) "-"))
 
-(defn- tree-prefix
-  "The prefix of the branches keeping a tree's program as :seon.config.source/dirs and this importer import it:
-  a store's branches made under other dirs or other code (another import) are none of this one's. See
-  docs/source.md#tests-run-by-reach."
-  [] (str "tree-" (lib/digest (str (pr-str (config/value :seon.config.source/dirs)) @importer)) "-"))
+(def ^:private own-prefix "prefix-of this process's checkout, read once." (delay (prefix-of #(slurp (io/file (config/checkout) %)))))
+
+(defn- tree-prefix "The prefix of the branches this process's code keeps a tree's program on (prefix-of, docs/source.md#tests-run-by-reach)." [] @own-prefix)
 
 (defn tree-branch "The branch keeping the program of git tree id tree." [tree] (keyword (str (tree-prefix) tree)))
 
@@ -672,11 +673,76 @@
           (contract/error? tx) tx
           :else (write db tx))))
 
+(defn remove-checkout!
+  "Remove the checkout base-program made at at, its submodule worktrees with it (bin/worktree --remove-at), when there is one.
+  See docs/health.md#checks-are-callers-of-seon."
+  [at]
+  (when (.isDirectory (io/file at))
+    (let [r (lib/sh (str (config/checkout) "/bin/worktree") "--remove-at" at)]
+      (when-not (zero? (:exit r)) (seon.lib/remove-tree! at)))))
+
+(defn- read-branch
+  "The db of branch b in the LMDB store at path, read only (no seon.db/open!, which would install this code's schema there), or
+  nil when the store or the branch is not there. Its connection stays open for the process, as program-db's does. See
+  docs/health.md#checks-are-callers-of-seon."
+  [path b]
+  (when (pdb/store? path)
+    (let [cfg (pdb/store-cfg :lmdb path)
+          c (pdb/connect cfg)]
+      (when (try (pdb/branch? c b) (finally (d/release c)))
+        @(pdb/connect (assoc cfg :branch b))))))
+
+(defn- make-base-tree!
+  "Make the base's tree's branch in the base store at path (base-program) by the base's own code: a checkout of commit base of the
+  repository at root at at (bin/worktree --at, its built products cloned from this checkout's), whose runner plans its tests
+  (bin/test --plan tests) with its program store set to stem, path's (stem-<program schema digest>); path seeded from store, this checkout's kept program store,
+  when it is not there, so the base's import refreshes the nearest kept tree. The checkout is removed after. Answers nil, or
+  :seon.fx/io-error naming the step that failed and the end of what it said. See docs/health.md#checks-are-callers-of-seon."
+  [root base tree store stem path at]
+  (when-not (pdb/store? path)
+    (.mkdirs (io/file path))
+    (lib/sh "cp" "-c" (str store "/data.mdb") (str path "/data.mdb")))
+  (try
+    (let [fail (fn [msg r] (contract/error :seon.fx/io-error #'test-runner/make-base-tree! (str msg ": " (fx/runner-end (str (:err r) "\n" (:out r)))) {:path at}))
+          made (lib/sh (str (config/checkout) "/bin/worktree") "--at" at base root (str (config/checkout)))
+          out (str at "/target/prove/health-base")
+          r (when (zero? (:exit made))
+              (apply lib/sh (concat fx/child-env-scrub [(str at "/bin/test") "--plan" "tests" out
+                                                        "--set" (str ":seon.config.proofs/program-store=" (pr-str stem))
+                                                        :dir at])))
+          planned (let [f (io/file out "tests.edn")] (when (.isFile f) (:tree (edn/read-string (slurp f)))))]
+      (cond (not (zero? (:exit made))) (fail (str "bin/worktree --at " at " " base " exited " (:exit made)) made)
+            (nil? planned) (fail (str "the base's runner made no plan in " out " (exit " (:exit r) ")") r)
+            (not= tree planned) (fail (str "the base's runner planned tree " planned ", not the base's " tree) r)))
+    (finally (remove-checkout! at))))
+
+(defn base-program
+  "The program db of commit base of the repository at root, for the health step (docs/health.md#checks-are-callers-of-seon): its
+  tree's branch in store, this checkout's kept program store, when it keeps it; else its branch in the base store, stem-<program
+  schema digest> as store is keyed (health!'s stem: :seon.config.proofs/program-store's with -health-base), which the base's own
+  code makes when it is not there (make-base-tree!, a process of its own in a checkout at at), read here as facts. Never analyzed
+  in this image: analysis runs each file's ns form in the live namespace, so a base's ns form that aliases a namespace
+  this image holds under another target retargets this image's alias (across the rename of seon.root to seon.system,
+  seon.server's `c`), and a macro there expands with this checkout's code. Answers the db, or :seon.fx/io-error: a base whose
+  program schema (seon.test-store/program-schema-digest) is not this code's keeps no branch this code reads."
+  [root base store stem at]
+  (let [;; the base's tree as a plan of its checkout names it (seon.fx/tree-id: less :seon.config.source/tree-excludes), by bin/tree
+        tree (let [r (lib/sh (str (config/checkout) "/bin/tree") root base)]
+               (if (zero? (:exit r)) (str/trim (:out r)) (throw (ex-info (str "bin/tree " root " " base ": " (:err r)) {}))))
+        b (keyword (str (prefix-of #(fx/tree-file root base %)) tree))
+        path (str stem "-" ts/kept-program-digest)]
+    (or (read-branch store (tree-branch tree))
+        (read-branch path b)
+        (make-base-tree! root base tree store stem path at)
+        (read-branch path b)
+        (contract/error :seon.fx/io-error #'test-runner/base-program
+                        (str "the base's program store " path " keeps no branch " b ": the base's program schema or importer is not this code's") {:path path}))))
+
 (defn- health!
   "The health step (docs/health.md#checks-are-callers-of-seon): what this checkout caused since its
-  base (seon.fx/base-commit), branch-health of classes. The head is the working tree's program db
-  and the base the base tree's, both kept in the program store (program-db: a tree it never saw is
-  the nearest kept tree with the changed files refreshed), each with its tasks and wiki (with-wiki):
+  base (seon.fx/base-commit), branch-health of classes. The head is the working tree's program db, kept in the
+  program store (program-db: a tree it never saw is the nearest kept tree with the changed files refreshed), and the
+  base the base tree's, made by the base's own code in a process of its own (base-program), each with its tasks and wiki (with-wiki):
   it costs what the trees differ by and two wiki loads, never a root booted or the program imported
   whole. One line per row the branch caused, one per attention row, the report, and HEALTH OK or
   HEALTH FAILED. Answers the exit status."
@@ -687,14 +753,16 @@
       (do (println (str "HEALTH FAILED: no base: " root " has no commit before this one on " (config/value :seon.config.source/main))) 1)
       (let [store (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest)
             head (with-wiki (program-db root store) root)
-            ;; the base's tasks and wiki, as git holds them, in a directory of this run's own, removed once read
+            ;; the base's tasks and wiki, as git holds them, in a directory of this run's own, removed once read; and where the base's
+            ;; checkout is made when its program must be (base-program), removed once its runner ran
             dir (str root "/target/tmp/health-base-" base "-" (random-uuid))
-            based (try (with-wiki (program-db root store (fx/tree-of root base))
-                                  (fx/checkout-at root base ["docs" (tasks-dir) "*.md"] dir))
+            based (try (let [db (base-program root base store (str (config/value :seon.config.proofs/program-store) "-health-base")
+                                              (str root "/target/tmp/health-checkout-" base "-" (random-uuid)))]
+                         (if (contract/error? db) db (with-wiki db (fx/checkout-at root base ["docs" (tasks-dir) "*.md"] dir))))
                        (finally (seon.lib/remove-tree! dir)))
             refused (first (filter contract/error? [head based]))
             _ (when refused
-                (println (str "HEALTH FAILED: the " (if (contract/error? head) "tree's" (str "base " base "'s")) " wiki and tasks were refused by their write: "
+                (println (str "HEALTH FAILED: the " (if (contract/error? head) "tree's" (str "base " base "'s")) " program, wiki or tasks were refused: "
                               (:seon.error/message refused) " " (pr-str (dissoc refused :seon.error/message)))))
             {:keys [caused attention checks]} (when-not refused (branch-health based head classes))
             h (when-not refused (problems/health head))
