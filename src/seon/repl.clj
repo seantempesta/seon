@@ -1454,6 +1454,10 @@
       (agent/init! fd m db0 serve!)
       (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
                                 (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
+                                ;; the sections its config cites and its store holds no entity for (a store older than its wiki): it was
+                                ;; made citing the rest (seon.task/agent-cites-tx), and says which are missing, never silently
+                                (seq (seon.task/agent-cites-missing (agent/db) (:key @agent/state)))
+                                (assoc :missing-cites (seon.task/agent-cites-missing (agent/db) (:key @agent/state)))
                                 (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
                                 (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state))))
       (serve!))))
