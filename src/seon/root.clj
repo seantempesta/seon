@@ -206,7 +206,12 @@
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :map] :seon.root/api-state]}
   [st o id m]
   (if-let [a (get-in st [:view :agents id])]
-    (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
+    (let [;; its hello names what of the program it was forked with did not load: the agent runs, and that is its first fact and its spawn's answer
+          swp (when (and (:ready m) (seq (:load-errors m)))
+                (contract/error :seon.agent/started-without-program #'seon.root/set-agent
+                                (str "this agent started without part of its program: " (str/join ", " (distinct (map :ns (:load-errors m)))) " did not load")
+                                {:errors (vec (:load-errors m))}))
+          a' (cond-> (merge a (dissoc m :ready :evals-add))
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
                ;; a stall ends with the process
                (and (:stalled a) (gone-statuses (:status m))) (assoc :stalled nil)
@@ -219,7 +224,15 @@
         e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))
         ;; its hello: the spawn is answered now, the agent ready
         ;; its hello answers the spawn, whatever a request sent before it made its status
-        (:ready m) (answer-spawn o id {:id id})
+        (:ready m) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)))
+        ;; and it is the agent's first fact: a message from Seon (the system entity) to it, in its conversation as any message is, written
+        ;; as a plain write (it wakes nothing): the agent's page and context show it from the pull they already make
+        swp ((fn [st] (step/out! o :to-writer {:op :tx :branch :db
+                                                :tx-data (task/message-tx (lib/unique-id) {:seon.root/id :root} [(name id)]
+                                                                          (str (:seon.error/message swp) "; each error: "
+                                                                               (str/join "; " (map (fn [{:keys [ns message]}] (str ns ": " message)) (:errors swp))))
+                                                                          (System/currentTimeMillis))})
+                       st))
         ;; and the evals given at its spawn are the first things its REPL queue holds, before any request the answer makes
         (:ready m) (insert-evals o id)
         ;; the agents with an eval in flight: the stall check's set (a gone one never)

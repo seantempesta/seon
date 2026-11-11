@@ -447,6 +447,40 @@
             (v st3 ::flow/stop)
             (is (= {:stopped true} (deref p 0 ::unanswered))))))))))
 
+(deftest an-agent-forked-from-a-program-that-did-not-load-is-told
+  ;; docs/processes.md#an-agent-that-starts-without-its-program (owner, 2026-11-11: run, never silently): the fork server holds its program's
+  ;; load errors while they stand, by namespace, and gives them to every agent it forks (fork-args' :program-errors), whose hello makes each a
+  ;; recorded :seon.agent/load-failed problem of that agent. Red before: they went out once as an event, beside one fork, and were forgotten,
+  ;; so the next agents started without their program and said nothing (an eval stopped at its third form)
+  (let [stood #'server/stood
+        e {:ns 'app.t :message "Unable to resolve symbol: deftest"}
+        st (stood {} [e] #{'app.t})]
+    (is (= [e] (:program-errors (server/fork-args st {:agent :a1} []))) "a fork after the failed load is told")
+    (is (= [e] (:program-errors (server/fork-args st {:agent :a2} []))) "and so is the next one: forking forgets nothing")
+    (is (= [] (:program-errors (server/fork-args (stood st nil #{'app.t}) {:agent :a3} []))) "a later load of that namespace that succeeds clears it")
+    (is (= [e] (:program-errors (server/fork-args (stood st nil #{'app.other}) {:agent :a4} []))) "one of another namespace does not")
+    (is (= [] (:program-errors (server/fork-args (stood st nil :all) {:agent :a5} []))) "and a whole load that loads it all replaces what stood")
+    (testing "the agent's hello carries them, and each is a recorded problem of that agent"
+      (let [ap0 (#'ap/agent-proc {:id :a1 :end {:out (a/chan 4) :in (a/chan)} :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+            [_ outs] (step #'ap/agent-proc ap0 :from {:op :hello :t 1 :start-ms 1.0 :mem-mb 1.0 :interrupt-ok true :load-errors [e]})
+            pr (filter #(= :problem (:op %)) (:to-api outs))]
+        (is (= [[:a1 :seon.agent/load-failed 'app.t]] (mapv (juxt :agent (comp :seon.error/type :error) (comp :ns :error)) pr)))))
+    (testing "root answers its spawn with the typed error, and it is a fact of the agent's (written with its view: record-agents)"
+      (let [p (promise)
+            st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                                 :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+            st (-> st (assoc-in [:view :agents :a1] {:status :spawning}) (assoc-in [:seon.root/spawning :a1] p))
+            o (volatile! {})
+            st' (#'root/set-agent st o :a1 {:ready true :load-errors [e]})
+            swp (:started-without-program (deref p 0 ::unanswered))]
+        (is (= :seon.agent/started-without-program (:seon.error/type swp)) (pr-str (deref p 0 ::unanswered)))
+        (is (= [e] (:errors swp)) "naming every load error")
+        (is (= :idle (get-in st' [:view :agents :a1 :status])) "the agent runs")
+        (let [msg (some #(when (= :tx (:op %)) (first (:tx-data %))) (:to-writer @o))]
+          (is (= {:seon.root/id :root} (:seon.message/from msg)) "and its first fact is a message from Seon to it")
+          (is (= [[:seon.agent/key "a1"]] (:seon.message/to msg)))
+          (is (clojure.string/includes? (:seon.message/body msg) "app.t") "naming what did not load"))))))
+
 (deftest fork-server-events
   (let [st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :log []}]
     (testing "a stats event answers the oldest waiter, by rid"
