@@ -190,6 +190,12 @@
 (defn- p1 "The response of forms evaluated in agent id, as [printed recorded]." [sys id forms]
   ((juxt printed :recorded) @(c/submit! sys id forms)))
 
+(defn- p1-ex
+  "The response of forms evaluated in agent id, as [printed recorded ex]: ex its error, nil when the eval answered, so a
+  check fails where its eval did (durable-write said OK with its evals failed: task seon.check/a-selection-derives-what-it-needs-from-its-steps)."
+  [sys id forms]
+  ((juxt printed :recorded :ex) @(c/submit! sys id forms)))
+
 ;; ---- the modes --------------------------------------------------------------------------
 
 (defn smoke []
@@ -1059,13 +1065,13 @@
    (fn [sys]
     (let [path (str (seon.db/agents-dir (:cfg sys)) "/durable")
         [a b k] (spawn-ready! sys {:task "make f1 multiply" :branch :dur-a} {:task "unmerged work" :branch :dur-b} {:task "parent" :branch :dur-c})
-        ra (p1 sys a "(in-ns 'app.m0) (defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (* x 10)) (deftest f1-test (is (= 20 (f1 2)))) (f1 2)")
+        ra (p1-ex sys a "(in-ns 'app.m0) (defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (* x 10)) (deftest f1-test (is (= 20 (f1 2)))) (f1 2)")
         m (merge-in! sys a)
-        rb (p1 sys b "(in-ns 'app.m1) (defn f2 {:malli/schema [:=> [:cat :int] :string]} [x] (str \"b:\" x)) (deftest f2-test (is (= \"b:1\" (f2 1))))
+        rb (p1-ex sys b "(in-ns 'app.m1) (defn f2 {:malli/schema [:=> [:cat :int] :string]} [x] (str \"b:\" x)) (deftest f2-test (is (= \"b:1\" (f2 1))))
                              (in-ns 'agent.a2) (transact! [{:note/text \"b's unmerged note\" :note/agent :b}]) (app.m1/f2 1)")
         cl (ready! sys #(deref (c/clone! sys k {:branch :dur-clone})))
         ev (c/events sys)
-        rc (p1 sys (:id cl) "(transact! [{:note/text \"the clone's note\" :note/agent :clone}]) (count (q '[:find ?n :where [?n :note/text]]))")
+        rc (p1-ex sys (:id cl) "(transact! [{:note/text \"the clone's note\" :note/agent :clone}]) (count (q '[:find ?n :where [?n :note/text]]))")
         ;; an agent's write is answered when applied, committed when the agent is idle (its
         ;; run-ahead writer) and durable at root's next flush: the kill waits for the
         ;; clone's commit event, then for a flush after it (a :flush? write's answer comes after
@@ -1079,7 +1085,9 @@
                 :linked (vec (for [dt (d/datoms @(:conn sys) :aevt :seon.agent/root)] (:seon.agent/key (d/entity @(:conn sys) (:e dt)))))}]
       (spit (str path ".expect.edn") (sedn/encode expect))
       {:report {:store (:store st) :a ra :merge (dissoc m :ops) :b rb :clone [(:id cl) rc] :expect expect :store-bytes (dir-bytes (:store-path sys))}
-       :checks {:merged (:merged? m)} :then :kill}))))
+       :checks {:merged (:merged? m)
+                 ;; every write it makes durable was made: an eval that failed is red here, at its cause, not two phases later
+                 :evals-answered (every? #(nil? (nth % 2)) [ra rb rc])} :then :kill}))))
 
 (defn durable-read
   "Phase 2 (a new process): reopen the same store on the same main and check main, the
