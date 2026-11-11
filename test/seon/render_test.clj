@@ -742,6 +742,20 @@
     (is (empty? (added root root0)) "and no other but its layout's own")
     (r/dispose-walk! (get-in st2 [:root-walk :w]))))
 
+(deftest a-branchs-own-schema-property-is-read-from-its-index
+  ;; docs/render.md#one-rendering-system-drawn-from-the-data: a schema's properties are read from the entity index alone (seon.render/props),
+  ;; so a schema registered on a branch, as an agent registers one, is read whole there: its pattern as well as its render
+  (let [reg (fn [db k form] (let [r (my.schema/registration db k form false)]
+                              (when (seon.contract/error? r) (is false (str k " registers: " (pr-str r))))
+                              (d/db-with db (:tx r))))
+        db (-> (ts/test-db)
+               (reg :lab.props/name :string)
+               (reg :lab.props/thing-fact [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render.ui/evaluation :seon.ctx/pattern [:db/id :lab.props/name]}
+                                           [:lab.props/name :lab.props/name]]))
+        ix (seon.program/index-of-db db)]
+    (is (= 'seon.render.ui/evaluation (r/render-for ix :lab.props/thing-fact :seon.render/hiccup)) "its render, read from the index")
+    (is (= [:db/id :lab.props/name] (r/schema-property ix :lab.props/thing-fact :seon.ctx/pattern)) "and its pattern, from the same index")))
+
 (deftest every-page-says-which-system-it-is
   ;; docs/render.md#the-page: the system's source (root's :seon.root/source, as an index of the checkout writes it) is drawn by its
   ;; schema's render in the top bar of every page, an agent's and root's alike, from the system walk once
@@ -758,6 +772,36 @@
       (is (str/includes? (str (line html)) "frame · jolt/frame · <span class=\"commit\">4a74777e2a0123456789abcdef0123456789abcd</span>") (str v ": the checkout, its branch and its commit, in the top bar"))
       (is (= 1 (count (re-seq #"class=\"[^\"]*\bsource-line\b" html))) (str v ": once")))
     (r/dispose-walk! (get-in st2 [:root-walk :w]))))
+
+(deftest a-turns-steps-say-what-each-was-for
+  ;; docs/render.md#the-page: a turn's steps fold their code and output, and the fold's line says what each was for (its intent), so a
+  ;; person reading the chat sees what the agent did, and a run that repeats a step reads as one
+  (let [summary (fn [h] (second (re-find #"(?s)<summary>(.*?)</summary>" h)))
+        two (h/html (ui/steps 3 [[:li "e1"] [:li "e2"]] ["Read the plan." "Write the test."]))
+        none (h/html (ui/steps 4 [[:li "e3"]] []))]
+    (is (str/includes? (summary two) "2 steps") "how many")
+    (is (re-find #"Read the plan\..*Write the test\." (summary two)) "and each step's intent, in order, on the line")
+    (is (not (str/includes? (summary two) "e1")) "never its code or output, which stay folded")
+    (is (= "1 step" (summary none)) "a step with no intent names none")))
+
+(deftest each-proof-state-says-what-helps-it
+  ;; docs/render.md#how-the-work-stands: a proof with no verdict is told the one thing that helps its state (Data model, 2026-11-11: four
+  ;; facts, never one word); a red proof shows every assertion it failed, its source and what it calls (the physics audit's high 1-3)
+  (let [html (fn [s] (h/html (ui/status-hiccup {} s)))
+        red (html {:proofs [{:test 'demo-test/r :status :fail :source "(deftest r (is (= 1 (f))) (is (= 2 (g))))"
+                             :calls [{:var 'demo/f} {:var 'demo-test/helper :source "(defn helper [] 3)"}]
+                             :failures [{:assert '(= 1 (f)) :got 0} {:assert '(= 2 (g)) :got 5}]}]})
+        st (html {:proofs [{:test 'demo-test/d :status :not-run} {:test 'demo-test/p :status :deferred} {:test 'demo-test/u :status :unknown}]})]
+    (is (str/includes? red "(= 1 (f))") "the first assertion that failed")
+    (is (str/includes? red "(= 2 (g))") "and the second, never a count in its place")
+    (is (not (str/includes? red "more assertion")) "no count of the rest")
+    (is (not (str/includes? red "(deftest r")) "the test's own source is not repeated (owner, 2026-11-05)")
+    (is (str/includes? red "`demo/f`") "what it calls")
+    (is (str/includes? red "(defn helper [] 3)") "a helper of its own namespace, with its source")
+    (is (re-find #"test run failed[^<]*`demo-test/d`" st) "a proof the dead run left: the run is what to fix")
+    (is (re-find #"merges[^<]*`demo-test/p`[^<]*Nothing to do" st) "a deferred proof: it runs at the merge, nothing to do now")
+    (is (re-find #"Not judged yet[^<]*`demo-test/u`" st) "a proof not judged yet: (prove) runs it")
+    (is (= 1 (count (re-seq #"\(prove\)" st))) "(prove) is offered for that one alone")))
 
 (deftest a-location-names-root-an-agent-or-an-entity
   (is (= [:root :root [:chat :a3] :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "a3/ctx" "474"])) "an agent's path is its chat; /debug every render of its ctx"))
@@ -2783,7 +2827,8 @@
     (is (str/includes? front "its own (:seon.ctx/pattern on the entity)") "its pattern is its own")
     (is (str/includes? front ":seon.agent/key") "a clause it asks")
     (is (str/includes? front ":seon.agent/_agents") "a join it asks, with its members: who started it")
-    (is (str/includes? front "does not ask") "what its schema names beside")))
+    (is (str/includes? front "does not ask") "what its schema names beside")
+    (is (str/includes? front "Your own render: the function your page is drawn by") "a clause says what its attribute is, in the attribute's own words")))
 
 (deftest an-entity-as-its-data-model-has-one-producer
   ;; docs/render.md#an-entity-may-name-its-own-render: seon.render/pulled is the one reading of a pulled entity as its data model, which the
@@ -3390,7 +3435,7 @@
         fold (last reply)
         ids (map #(get % :seon.eval/id) (last (last fold)))]
     (is (not-any? #(and (map? %) (get % :seon.eval/id)) (drop 2 turn)) "the chat is messages: no step stands beside them")
-    (is (and (= :details (first fold)) (not (:open (second fold))) (= "3 steps" (last (nth fold 2)))) "the turn's steps fold, closed, under one line saying how many")
+    (is (and (= :details (first fold)) (not (:open (second fold))) (= "3 steps" (second (nth fold 2)))) "the turn's steps fold, closed, under one line saying how many (then what each was for)")
     (is (= "e3" (first ids)) "the agent's own step first")
     (is (= #{"e2" "e3" "e4"} (set ids)) "then those of other hands, Seon's among them")
     (let [t (h/html (ui/model-call-view {} (d/pull db '[*] call)))]
