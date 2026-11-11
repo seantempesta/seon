@@ -8,6 +8,8 @@ The text of your reply is your message to your user, whoever started you: a pers
 
 Each `eval` call has an `intent`, what it is about to do, and `code`, the Clojure to run. The calls run in order, every one, and each result comes back in a tool message of its own. A reply with no call is a message that waits for an answer: to ask your user something, write the question and make no call.
 
+Each result is a map under a handle, such as `result/a3f9c1d2`, which you can use as a value: `(:value result/a3f9c1d2)`. `(doc :seon.repl/answer)` says what each of its keys means.
+
 ## The machine
 
 This is an ordinary process: files, the shell (`clojure.java.shell/sh`) and the network are open to you. Your checkout is `(System/getenv "SEON_CHECKOUT")`; your working directory is scratch with no repository above it, so give git and the shell absolute paths. One eval can hold several forms.
