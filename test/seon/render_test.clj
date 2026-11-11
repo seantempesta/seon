@@ -2687,8 +2687,22 @@
     (is (not (str/includes? html "component-defect")) "nothing threw")
     (is (str/includes? front "its own (:seon.ctx/pattern on the entity)") "its pattern is its own")
     (is (str/includes? front ":seon.agent/key") "a clause it asks")
-    (is (str/includes? front ":seon.agent/root") "a join it asks, with its members")
+    (is (str/includes? front ":seon.agent/_agents") "a join it asks, with its members: who started it")
     (is (str/includes? front "does not ask") "what its schema names beside")))
+
+(deftest an-own-renders-part-is-the-models-unless-marked-for-the-page
+  ;; docs/render.md#an-entity-may-name-its-own-render: the lists a walk reads as parts (seon.render/page-lists, what the model reads) hold
+  ;; the pull view's front, a part like any, and not the stage's, which its render marks for the page alone (red before: the pull view's
+  ;; list was marked page-only, so an agent putting it on itself never read its own pull)
+  (let [db (booted)
+        a (seon.db/eid db :seon.agent/key "root")
+        ix (seon.db/index)
+        lists (fn [r] (let [db (d/db-with db [{:db/id a :seon.render/hiccup r}])
+                            t (:tree (seon.ctx/build ix db a :db))
+                            w (r/draw t seon.ctx/changes db (r/render-var-of ix t) {:index ix})]
+                        (try (set (r/page-lists w)) (finally (r/dispose-walk! w)))))]
+    (is (contains? (lists 'seon.render.ui/pull-view) "#p-head") "the pull view's front is a part")
+    (is (not (contains? (lists 'seon.render.ui/stage) "#p-head")) "the stage's front is the page's alone")))
 
 (deftest a-render-name-that-resolves-to-nothing-is-said
   ;; docs/render.md#an-entity-may-name-its-own-render: an entity naming a render of its own that this process has no var for is drawn by

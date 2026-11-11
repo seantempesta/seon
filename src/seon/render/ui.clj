@@ -1805,16 +1805,17 @@
      [:details {:data-as "conversation" :data-preserve-attr "open"} [:summary [:span {:data-when "closed"} "Show as the conversation"] [:span {:data-when "open"} "Show as data"]]]]))
 
 (defn pull-list
-  "The pull view's own list (p-head), for the page alone: `pull-front` over the entity's pull. See docs/render.md#an-entity-may-name-its-own-render."
+  "The pull view's own list (p-head): `pull-front` over the entity's pull, read by the person and the model. See docs/render.md#an-entity-may-name-its-own-render."
   {:seon.render/list "p-head" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_] [:div {:id "p-head"} [#'pull-front {}]])
 
 (defn pull-view
   "An entity's page as its data model, a render it names as its own (:seon.render/hiccup) as it would a stage (`stage`): the same lists over
-  the same pull, so the model reads what it reads by `agent`, and in front, for the person, `pull-front`. See
+  the same pull, and in front `pull-front`, a part the model reads too (its list's call holds no :wire/for \"page\"), so an agent that
+  puts it on itself reads its own pull in its request. See
   docs/render.md#an-entity-may-name-its-own-render."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
-  [opts c] (if (:seon.render/nested opts) (agent opts c) (conj (agent opts c) [#'pull-list {:wire/for "page"}])))
+  [opts c] (if (:seon.render/nested opts) (agent opts c) (conj (agent opts c) [#'pull-list {}])))
 
 (defn stage
   "An agent's page as a stage, a render an agent names as its own (:seon.render/hiccup) in place of its schema's `agent`: the same lists
