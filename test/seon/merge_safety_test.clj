@@ -5,8 +5,9 @@
   merge-main! do (seon.merge/delta-three-way, merge-tx, unmerged-tx over datahike.api/merge-db), and the result is held
   to: ids issued once, no silent overwrite (a true conflict is an unmerged entry and the merge up is refused), main
   equal to the branch after, nothing else on main moved, a second merge changes nothing, every carried datom keeps its
-  ids, and every entity the merge touched passes the write check. The deftests whose names end in -broken are
-  findings, red on the code as it is: each is the smallest reproduction of one assumption that does not hold. See
+  ids, and every entity the merge touched passes the write check. The same claims on the one merge (task
+  seon.merge/a-merge-replays-the-sources-net-change: seon.merge/plan, then the source's transactions replayed, replay-up!)
+  are the tests after it, each the smallest reproduction of one assumption, the broken writes' property among them. See
   docs/storage.md#merges-read-what-changed and docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   (:require [clojure.test :refer [deftest is testing]] [clojure.set :as set]
             [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.program :as program]
@@ -41,7 +42,7 @@
    :redefine-shared])
 
 (def ^:private broken-ops
-  "The writes whose merge breaks an assumption (each a -broken deftest below): a base entity retracted whole, a ref to a
+  "The writes whose merge broke an assumption of the old merge (each now a test on the one merge below): a base entity retracted whole, a ref to a
   var made only on the branch, two sides making one task name, a task retracted whole on one side and extended on the other,
   one task's plan changed on both sides (:both-plan, and :plan-any when the sides meet)."
   [:retract-base :retract-task :nested-new :both-task :both-plan :plan-any])
@@ -253,10 +254,6 @@
 (deftest any-branch-merges-to-main-safely
   (doseq [seed (seeds)] (property seed safe-ops)))
 
-;; docs/storage.md#merges-read-what-changed: the same property with every write, the broken ones included: red while any -broken deftest below is
-(deftest any-branch-with-any-write-merges-to-main-safely-broken
-  (doseq [seed (seeds)] (property seed (into safe-ops broken-ops))))
-
 ;; ---- the findings, each its smallest reproduction ---------------------------------------
 
 (defn- branched
@@ -267,172 +264,6 @@
      (d/transact conn {:tx-data [{:task/name :gen/t :task/plan "p" :task/status :held} {:note/text "n" :note/agent :base}]})
      (let [br (keyword (str (name (:branch cfg)) "-b")) _ (d/branch! conn (:branch cfg) br) bc (pdb/connect (assoc cfg :branch br))]
        (try (f conn bc br) (finally (d/release bc) (d/delete-branch! conn br)))))))
-
-;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: both sides changed one task's plan, each to its own value: the
-;; three-way names the conflict and the merge of main writes its unmerged entry, but seon.merge/unmerged reads the branch's
-;; content at the entry's key with no data attributes (program-of with #{}), so a datum's content reads nil, the entry reads as
-;; resolved, and the merge up is not refused: main's value is replaced by the branch's, silently
-(deftest a-data-conflict-holds-the-merge-up-broken
-  (branched
-   (fn [conn bc br]
-     (let [t (pdb/eid @conn :task/name :gen/t)]
-       (d/transact conn [[:db/add t :task/plan "main's plan"]])
-       (d/transact bc [[:db/add t :task/plan "the branch's plan"]])
-       (let [r (merge-main-into! bc (pdb/branch-base conn (:branch (:config @conn)) br) @conn)]
-         (is (= [[:datum t :task/plan]] (mapv :key (:conflicts r))) "the three-way names the conflict")
-         (is (seq (pm/unmerged @bc)) "the branch holds it unmerged")
-         (merge-up! conn br)
-         (is (= "main's plan" (v-of @conn t :task/plan)) "main keeps its value until the conflict is resolved"))))))
-
-(defn- refused-by-transact?
-  "Whether conn's checked 'transact! (seon.db/transact-checked) refuses tx, speculated: the write check's answer."
-  [db tx] (some? (error-of #(pdb/with db tx))))
-
-;; docs/storage.md#the-write-checks-every-entity-it-touches: a merge is a transaction on a connection, so the write check holds it.
-;; Datahike's 'merge! (datahike.writing/merge-writer!) calls datahike.writing/transact! itself, never the connection's 'transact!
-;; (seon.db/connect sets only that one), so seon.db/transact-checked never sees a merge. Main gave a task a ref, the branch
-;; retracted the task whole: no key conflicts, and both merges write a task holding only a ref, which the check refuses
-(deftest a-merge-passes-the-write-check-broken
-  (branched
-   (fn [conn bc br]
-     (let [t (pdb/eid @conn :task/name :gen/t) v (first (es @conn :var/form))]
-       (d/transact conn [[:db/add t :task/refs v]])
-       (d/transact bc [[:db/retractEntity t]])
-       (let [base (pdb/branch-base conn (:branch (:config @conn)) br) head @bc main @conn
-             r (pm/delta-three-way base head main :all)
-             tx (pm/merge-tx head base main (:apply r) :all)]
-         (is (empty? (:conflicts r)) "no key conflicts")
-         (is (refused-by-transact? head tx) "the write check refuses main's change on the branch as a transaction...")
-         (let [rep (d/merge-db bc #{(d/commit-id main)} tx)]
-           (is (nil? (pdb/invalid-entity rep)) "...and refuses it as a merge"))
-         (let [{:keys [rep refused]} (merge-up! conn br)]
-           (is (nil? refused))
-           (is (nil? (some-> rep pdb/invalid-entity)) "main holds no task broken by a merge")))))))
-
-;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: main retracted a task whole, the branch gave it a ref: two keys,
-;; no conflict, and main's merge into the branch retracts the entity whole (merge-tx's retractEntity of an identity main retracted),
-;; so the branch's own write is dropped with no unmerged entry
-(deftest a-branchs-write-to-an-entity-main-retracted-is-kept-or-a-conflict-broken
-  (branched
-   (fn [conn bc br]
-     (let [t (pdb/eid @conn :task/name :gen/t) v (first (es @conn :var/form))]
-       (d/transact conn [[:db/retractEntity t]])
-       (d/transact bc [[:db/add t :task/refs v]])
-       (let [r (merge-main-into! bc (pdb/branch-base conn (:branch (:config @conn)) br) @conn)]
-         (is (or (seq (:conflicts r)) (has? @bc t :task/refs v)) "the branch's ref stays, or the two writes are an unmerged entry"))))))
-
-;; docs/storage.md#ids: two entities each side made with one unique identity (a counter id each) are no conflict to the
-;; three-way (two keys, [:datum e1 :task/name] and [:datum e2 :task/name]); Datahike refuses the carried datom :transact/unique,
-;; thrown from the merge, never an unmerged entry
-(deftest two-entities-claiming-one-identity-are-a-conflict-broken
-  (branched
-   (fn [conn bc br]
-     (doseq [c [conn bc]] (d/transact c [{:task/name :gen/same :task/plan "p" :task/status :held}]))
-     (let [base (pdb/branch-base conn (:branch (:config @conn)) br)
-           r (pm/delta-three-way base @bc @conn :all)]
-       (is (seq (:conflicts r)) "the three-way names the identity both sides claim")
-       (is (nil? (error-of #(merge-main-into! bc base @conn))) "and the merge answers, never throws")))))
-
-;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: a ref the branch writes to an entity only it holds (a var
-;; named by its content id, with no form, so no program key) is carried, the entity is not: main holds a ref to nothing
-(deftest a-carried-ref-names-an-entity-main-holds-broken
-  (branched
-   (fn [conn bc br]
-     (let [t (pdb/eid @conn :task/name :gen/t)]
-       (d/transact bc [{:db/id t :task/refs [{:var/name 'gen.only/v}]}])
-       (let [{:keys [rep]} (merge-up! conn br) v (pdb/eid @bc :var/name 'gen.only/v)]
-         (is (has? @conn t :task/refs v) "the ref is carried")
-         (is (seq (d/datoms @conn :eavt v)) "and names an entity main holds"))))))
-
-;; docs/storage.md#history: a carried datom keeps the t it was written at on the branch, so main as of a t it held before the
-;; merge reads the branch's datoms: a state main never held. seon.db/at takes that t as main's own
-(deftest main-as-of-a-t-reads-what-main-held-then-broken
-  (branched
-   (fn [conn bc br]
-     (d/transact bc [{:note/text "branch note" :note/agent :branch}])
-     (d/transact conn [{:note/text "main note" :note/agent :main}])
-     (let [t-main (:max-tx @conn) held (pdb/head conn (:branch (:config @conn)))]
-       (merge-main-into! bc (pdb/branch-base conn (:branch (:config @conn)) br) held)
-       (let [{:keys [refused]} (merge-up! conn br)
-             then (pdb/at conn @conn {:t t-main})]
-         (is (nil? refused))
-         (is (= (set (map :v (d/datoms held :avet :note/agent :branch)))
-                (set (map :v (d/datoms then :avet :note/agent :branch))))
-             "main as of t holds the branch's note only if main held it at t"))))))
-
-;; docs/storage.md#history, datahike.db.transaction/next-tx-instant: a branch's instants are max(clock, its previous + 1 ms); a merge carries the
-;; branch's transactions with their instants, so main's instants no longer rise with its t, and the merge's own instant
-;; (previous: main's last before it) can precede a carried one
-(deftest mains-instants-rise-with-its-t-after-a-merge-broken
-  (branched
-   (fn [conn bc br]
-     (let [c (java.util.Date. (+ (System/currentTimeMillis) (* 1000 60 60 24 365))) t0 (:max-tx @conn)]
-       (with-redefs [datahike.tools/get-date (constantly c)]
-         (dotimes [i 3] (d/transact bc [{:note/text (str "b" i) :note/agent :branch}]))
-         (d/transact conn [{:note/text "m" :note/agent :main}])
-         (merge-main-into! bc (pdb/branch-base conn (:branch (:config @conn)) br) @conn)
-         (merge-up! conn br))
-       (let [db @conn
-             txs (sort (map :e (d/datoms db :aevt :db/txInstant)))
-             at (fn [t] (.getTime ^java.util.Date (v-of db t :db/txInstant)))]
-         (is (apply < (map at (filter #(> % t0) txs)))
-             "main's transactions' instants rise with their t")
-         (is (every? #(< (at %) (at (:max-tx db))) (butlast txs)) "the last transaction is the latest"))))))
-
-;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program, the data model session's case 3 (data-model-merge-conflict-2026-11-11): a retraction on one side against a change on the other is a
-;; conflict. Main retracted a note whole, the branch changed its text: the three-way names it, but the entry reads as resolved
-;; (a-data-conflict-holds-the-merge-up-broken), so the merge up carries the text onto main, a note holding only its text
-(deftest a-retraction-against-a-change-is-a-conflict-broken
-  (branched
-   (fn [conn bc br]
-     (let [n (first (notes-of @conn :base))]
-       (d/transact conn [[:db/retractEntity n]])
-       (d/transact bc [[:db/add n :note/text "changed on the branch"]])
-       (let [r (merge-main-into! bc (pdb/branch-base conn (:branch (:config @conn)) br) @conn)]
-         (is (some #(= [:datum n :note/text] (:key %)) (:conflicts r)) "the three-way names the retraction against the change")
-         (merge-up! conn br)
-         (is (empty? (d/datoms @conn :eavt n)) "main keeps the note retracted until the conflict is resolved"))))))
-
-;; docs/storage.md#ids, case 2 with a ref identity (:seon.vector/of, a vector's identity is the entity it embeds, not a content id): each side made
-;; its own vector of one form. Seon's merge never carries it (seon.vector/* is a platform record, seon.merge/platform-record?),
-;; and the store's merge of the branch's datoms as they are (datahike.api/merge-db) throws :transact/unique
-;; (datahike.db.transaction/validate-datom-upsert); inside one transaction a map naming the second entity is a "Conflicting
-;; upsert" (:transact/upsert, check-upsert-conflict), and a map naming none upserts onto main's entity
-(deftest one-ref-identity-on-two-entities-is-a-conflict-broken
-  (branched
-   (fn [conn bc br]
-     (let [f (first (es @conn :form/id))
-           vec-of (fn [x] {:seon.vector/of f :seon.vector/model "m" :seon.vector/text (str "text " x)
-                           :seon.vector/f16 (byte-array [1 2]) :seon.vector/coarse (byte-array [3])})]
-       (d/transact conn [(vec-of "main")])
-       (d/transact bc [(vec-of "branch")])
-       (let [base (pdb/branch-base conn (:branch (:config @conn)) br) head @bc main @conn
-             e-main (pdb/eid main :seon.vector/of f) e-branch (pdb/eid head :seon.vector/of f)
-             r (pm/delta-three-way base head main :all)]
-         (is (not= e-main e-branch) "two entities, one identity")
-         (is (some #(= :seon.vector/of (nth (:key %) 2 nil)) (:conflicts r)) "Seon's three-way names the identity both sides claim")
-         (is (nil? (error-of #(pdb/speculate main (added-by base head)))) "the store's merge of the branch's datoms answers, never throws")
-         (is (nil? (error-of #(pdb/speculate main [(assoc (vec-of "branch") :db/id e-branch)]))) "a map naming the second entity answers too")
-         (let [rep (pdb/speculate main [(vec-of "branch")])]
-           (is (= #{e-main} (set (map :e (remove #(= (:max-tx (:db-after rep)) (:e %)) (:tx-data rep)))))
-               "a map naming no entity upserts onto main's entity (the outcome today, a fact, not the conflict)")))))))
-
-;; docs/storage.md#merges-read-what-changed, the data model session's ask: a value compares by its content. A vector's embedding is a byte array; Datahike's index compares
-;; two by content (datahike.datom, compare-arrays), and Seon's three-way and Datahike's same-value check use = (seon.merge/same?,
-;; datahike.db.transaction/transact-report's not=)
-(deftest byte-values-compare-by-content-broken
-  (is (= (seq (byte-array [1 2])) (seq (byte-array [1 2]))) "the same bytes")
-  (is (= (byte-array [1 2]) (byte-array [1 2])) "= on two byte arrays of one content, on Jolt")
-  (let [k [:datum 1 :seon.vector/f16]]
-    (is (empty? (:conflicts (pm/three-way {k (byte-array [0])} {k (byte-array [1 2])} {k (byte-array [1 2])})))
-        "the same bytes written on both sides are no conflict"))
-  (branched
-   (fn [conn _ _]
-     (let [f (first (es @conn :form/id))]
-       (d/transact conn [{:seon.vector/of f :seon.vector/model "m" :seon.vector/text "t" :seon.vector/f16 (byte-array [1 2]) :seon.vector/coarse (byte-array [3])}])
-       (let [e (pdb/eid @conn :seon.vector/of f)
-             rep (pdb/speculate @conn [[:db/add e :seon.vector/f16 (byte-array [1 2])]])]
-         (is (empty? (remove #(= (:e %) (:max-tx (:db-after rep))) (:tx-data rep))) "writing the bytes an entity holds is a no-op"))))))
 
 ;; ---- the one merge's conflicts, computed from the two sides' net change (task seon.merge/a-merge-replays-the-sources-net-change) ----
 
@@ -533,7 +364,7 @@
 
 ;; ---- the merge up as the writer's op makes it: the plan, then the source's transactions (task seon.merge/a-merge-replays-the-sources-net-change) ----
 
-;; a-data-conflict-holds-the-merge-up-broken, by the plan: both sides changed one task's plan to two ends, so nothing is written
+;; by the plan: both sides changed one task's plan to two ends, so nothing is written
 (deftest a-data-conflict-holds-the-merge-up
   (branched
    (fn [conn bc br]
@@ -545,7 +376,7 @@
          (is (= "main's plan" (v-of @conn t :task/plan)) "main keeps its value until the conflict is resolved")
          (is (= t0 (:max-tx @conn)) "and nothing is written"))))))
 
-;; a-retraction-against-a-change-is-a-conflict-broken, by the plan, on an entity with an identity (a note has none: its change is
+;; by the plan, on an entity with an identity (a note has none: its change is
 ;; named as :unidentified and never carried, an-entity-with-no-identity-is-named-not-carried): main retracted a task whole, the
 ;; branch changed its plan
 (deftest a-retraction-against-a-change-is-a-conflict
@@ -568,7 +399,7 @@
          (is (seq (:unidentified r)) "a note bears no identity: its change is named")
          (is (and (= t1 (:max-tx @conn)) (empty? (d/datoms @conn :eavt n))) "and main keeps the note retracted, nothing written"))))))
 
-;; two-entities-claiming-one-identity-are-a-conflict-broken, by the plan: each side made one task name with one value, each a
+;; by the plan: each side made one task name with one value, each a
 ;; counter id of its own. The net changes meet with one end (no conflict by key), and the branch's transaction, replayed on
 ;; main, claims the identity main's entity holds: the write check refuses it, the merge answers that as data, and nothing is written
 (deftest two-entities-claiming-one-identity-are-a-conflict
@@ -583,7 +414,7 @@
          (is (= t0 (:max-tx @conn)) "and nothing is written")
          (is (= [e-main] (mapv :e (d/datoms @conn :avet :task/name :gen/same))) "main's one entity holds the name"))))))
 
-;; a-branchs-write-to-an-entity-main-retracted-is-kept-or-a-conflict-broken, merged up by the plan: main retracted a task whole,
+;; merged up by the plan: main retracted a task whole,
 ;; the branch gave it a ref
 (deftest a-branchs-write-to-an-entity-main-retracted-is-kept-or-a-conflict
   (branched
@@ -594,3 +425,175 @@
          (is (= [[[:task/name :gen/t :task/refs] true :seon.merge/gone]] (mapv (juxt #(subvec (:key %) 0 3) :theirs :ours) (:conflicts r)))
              "the branch's ref to a task main retracted is the conflict")
          (is (and (= t0 (:max-tx @conn)) (empty? (d/datoms @conn :eavt t))) "and nothing is written: main keeps the task retracted"))))))
+
+;; docs/storage.md#the-write-checks-every-entity-it-touches: a merge is a transaction on a connection, so the write check holds it.
+;; Main gave a task a ref, the branch retracted the task whole: the one merge names that a conflict (a write to an entity the other
+;; side retracted) and writes nothing; and a merge transaction ({:op 'merge!}, datahike.writer/apply!) that would leave a task
+;; holding only a ref is refused by the check, as any transaction is
+(deftest a-merge-passes-the-write-check
+  (branched
+   (fn [conn bc br]
+     (let [t (pdb/eid @conn :task/name :gen/t) v (first (es @conn :var/form))]
+       (d/transact conn [[:db/add t :task/refs v]])
+       (d/transact bc [[:db/retractEntity t]])
+       (let [t0 (:max-tx @conn) r (replay-up! conn br)]
+         (is (seq (:conflicts r)) "the ref main wrote to the task the branch retracted is a conflict")
+         (is (= t0 (:max-tx @conn)) "and nothing is written: main holds no task broken by a merge"))
+       (let [rep (dw/apply! conn {:parents #{(d/commit-id @bc)} :tx-data [[:db/retract t :task/name :gen/t] [:db/retract t :task/plan "p"]]
+                                  :tx-meta (pdb/tx-meta (:branch (:config @conn)))}
+                            {:op 'merge!})]
+         (dw/abandon-pending! conn)
+         (is (not (map? rep)) "a merge transaction that leaves a task holding only a ref is refused by the write check")
+         (is (= :seon.db/invalid-entity (:seon.error/type (ex-data rep))) (pr-str (ex-data rep))))))))
+
+;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: a ref the branch writes to an entity only it holds (a var
+;; named by its content id, with no form, so no program key) is carried, and so is the entity: main holds what the ref names
+(deftest a-carried-ref-names-an-entity-main-holds
+  (branched
+   (fn [conn bc br]
+     (let [t (pdb/eid @conn :task/name :gen/t)]
+       (d/transact bc [{:db/id t :task/refs [{:var/name 'gen.only/v}]}])
+       (let [r (replay-up! conn br) v (pdb/eid @bc :var/name 'gen.only/v)]
+         (is (seq (:groups r)) (pr-str r))
+         (is (has? @conn t :task/refs v) "the ref is carried")
+         (is (seq (d/datoms @conn :eavt v)) "and names an entity main holds"))))))
+
+;; docs/storage.md#history: main as of a t it held before the merge reads only what main held then: a merge writes the
+;; branch's transactions as new transactions of main, so a t main held before it never reads the branch's facts
+(deftest main-as-of-a-t-reads-what-main-held-then
+  (branched
+   (fn [conn bc br]
+     (d/transact bc [{:task/name :gen/branch :task/plan "made on the branch" :task/status :held}])
+     (d/transact conn [{:task/name :gen/main :task/plan "made on main" :task/status :held}])
+     (let [t-main (:max-tx @conn) held (pdb/head conn (:branch (:config @conn)))
+           r (replay-up! conn br)
+           then (pdb/at conn @conn {:t t-main})]
+       (is (seq (:groups r)) (pr-str r))
+       (is (some? (pdb/eid @conn :task/name :gen/branch)) "main holds the branch's task after the merge")
+       (is (= (some? (pdb/eid held :task/name :gen/branch)) (some? (pdb/eid then :task/name :gen/branch)))
+           "main as of t holds the branch's task only if main held it at t")))))
+
+;; docs/storage.md#history, datahike.db.transaction/next-tx-instant: main's instants rise with its t after a merge, and the last
+;; transaction is the latest: a merge writes the branch's transactions as new ones of main, each stamped after main's last
+(deftest mains-instants-rise-with-its-t-after-a-merge
+  (branched
+   (fn [conn bc br]
+     (let [c (java.util.Date. (+ (System/currentTimeMillis) (* 1000 60 60 24 365))) t0 (:max-tx @conn)]
+       (with-redefs [datahike.tools/get-date (constantly c)]
+         (dotimes [i 3] (d/transact bc [{:task/name (keyword "gen" (str "b" i)) :task/plan "p" :task/status :held}])))
+       (d/transact conn [{:task/name :gen/m :task/plan "p" :task/status :held}])
+       (is (seq (:groups (replay-up! conn br))))
+       (let [db @conn
+             txs (sort (map :e (d/datoms db :aevt :db/txInstant)))
+             at (fn [t] (.getTime ^java.util.Date (v-of db t :db/txInstant)))]
+         (is (apply < (map at (filter #(> % t0) txs))) "main's transactions' instants rise with their t")
+         (is (every? #(< (at %) (at (:max-tx db))) (butlast txs)) "the last transaction is the latest"))))))
+
+;; docs/storage.md#ids, case 2 with a ref identity (:seon.vector/of, a vector's identity is the entity it embeds): each side made
+;; its own vector of one form. The one merge names the identity both sides claim (its key by :seon.vector/of), answers, never
+;; throws, and writes nothing
+(deftest one-ref-identity-on-two-entities-is-a-conflict
+  (branched
+   (fn [conn bc br]
+     (let [f (first (es @conn :form/id))
+           vec-of (fn [x] {:seon.vector/of f :seon.vector/model "m" :seon.vector/text (str "text " x)
+                           :seon.vector/f16 (byte-array [1 2]) :seon.vector/coarse (byte-array [3])})]
+       (d/transact conn [(vec-of "main")])
+       (d/transact bc [(vec-of "branch")])
+       (is (not= (pdb/eid @conn :seon.vector/of f) (pdb/eid @bc :seon.vector/of f)) "two entities, one identity")
+       (let [t0 (:max-tx @conn) r (error-of #(replay-up! conn br))]
+         (is (nil? r) "the merge answers, never throws")
+         (let [r (replay-up! conn br)]
+           (is (some #(= :seon.vector/of (first (:key %))) (:conflicts r)) "the one merge names the identity both sides claim")
+           (is (= t0 (:max-tx @conn)) "and writes nothing")))))))
+
+;; docs/storage.md#merges-read-what-changed, the data model session's ask: a value compares by its content. A vector's embedding
+;; is a byte array: the same bytes written on both sides are no conflict (seon.merge/conflicts, datahike.datom/value=), and
+;; writing the bytes an entity holds is a no-op
+(deftest byte-values-compare-by-content
+  (let [k [:seon.vector/of 1 :seon.vector/f16]]
+    (is (= [] (pm/conflicts {:keys {k (byte-array [1 2])}} {:keys {k (byte-array [1 2])}})) "the same bytes written on both sides are no conflict")
+    (is (seq (pm/conflicts {:keys {k (byte-array [1 2])}} {:keys {k (byte-array [1 3])}})) "and two contents are"))
+  (branched
+   (fn [conn bc br]
+     (let [f (first (es @conn :form/id))]
+       (d/transact conn [{:seon.vector/of f :seon.vector/model "m" :seon.vector/text "t" :seon.vector/f16 (byte-array [0]) :seon.vector/coarse (byte-array [3])}])
+       (d/branch! conn (:branch (:config @conn)) (keyword (str (name br) "-v")))
+       (let [vb (keyword (str (name br) "-v")) vc (pdb/connect (assoc (:config @conn) :branch vb)) e (pdb/eid @conn :seon.vector/of f)]
+         (try
+           (doseq [c [conn vc]] (d/transact c [[:db/add e :seon.vector/f16 (byte-array [1 2])]]))
+           (let [rep (pdb/speculate @conn [[:db/add e :seon.vector/f16 (byte-array [1 2])]])]
+             (is (empty? (remove #(= (:e %) (:max-tx (:db-after rep))) (:tx-data rep))) "writing the bytes an entity holds is a no-op"))
+           (let [r (replay-up! conn vb)]
+             (is (empty? (:conflicts r)) (str "the same bytes on both sides merge: " (pr-str (:conflicts r)))))
+           (finally (d/release vc) (d/delete-branch! conn vb))))))))
+
+;; ---- the property on the one merge: a branch merged up as the writer's op makes it (replay-up!) ----
+
+(defn- check-round-up
+  "The assertions of one round on the one merge (replay-up!), msg naming the seed and round: the claims of check-round,
+  each as the one merge states it (it merges up only; main into the branch is a later piece)."
+  [conn br base main0 head0 msg seen]
+  (let [own-b (added-by base head0) own-m (added-by base main0)
+        counter (fn [ds] (into #{} (comp (map :e) (filter #(and (< % tx0) (empty? (d/datoms base :eavt %))))) ds))]
+    (testing "ids are issued once across branches: no entity or transaction the two sides made shares an id"
+      (is (empty? (set/intersection (counter own-b) (counter own-m))) msg)
+      (is (empty? (set/intersection (set (map :tx own-b)) (set (map :tx own-m)))) msg))
+    (let [ks (touched-keys base head0 main0)
+          conflict? (fn [k] (let [b (value base k) o (value head0 k) t (value main0 k)] (and (not= o b) (not= t b) (not= o t))))
+          expected (into {} (for [k ks] [k (let [b (value base k) o (value head0 k) t (value main0 k)] (if (= o b) t o))]))
+          up (replay-up! conn br)
+          refused? (not (and (:groups up) (nil? (:refused up))))
+          after @conn]
+      (testing "a true conflict (both sides changed one card-one value differently) refuses the merge up"
+        (doseq [k ks :when (conflict? k)] (is refused? (str msg " refused " k))))
+      (swap! seen conj (if refused? :refused :merged))
+      (if refused?
+        (testing "a refused merge leaves main as it was"
+          (is (= (d/commit-id main0) (d/commit-id after)) msg))
+        (let [nb (:keys (pm/net-change base head0)) na (:keys (pm/net-change base after))]
+          (testing "no silent overwrite: each datum is the side that changed it, or both sides' one value"
+            (doseq [k ks] (is (= (expected k) (value after k)) (str msg " datum " k))))
+          (testing "the branch's net change, data included, is main's after the merge, and main moved nowhere else"
+            (is (every? (fn [[k v]] (= v (get na k ::none))) nb) msg)
+            (is (every? #(contains? nb %) (keys (:keys (pm/net-change main0 after)))) msg))
+          (testing "every datom main gained is one the branch wrote, its e kept (its transaction is main's own, new)"
+            (let [wrote (into #{} (map (juxt :e :a :v :added)) (second (d/datoms-diff (d/history base) (d/history head0) :eavt [])))
+                  tx? (fn [e] (seq (d/datoms after :eavt e :db/txInstant)))]
+              (is (every? #(wrote ((juxt :e :a :v :added) %)) (remove #(tx? (:e %)) (second (d/datoms-diff (d/history main0) (d/history after) :eavt [])))) msg)))
+          (testing "every ref the merge wrote names an entity main holds"
+            (is (every? #(seq (d/datoms after :eavt (:v %))) (filter #(many-attrs (:a %)) (added-by main0 after))) msg))
+          (testing "merging the same branch again changes nothing"
+            (let [t1 (:max-tx @conn) again (replay-up! conn br)]
+              (is (empty? (:groups again)) msg)
+              (is (= t1 (:max-tx @conn)) msg))))))))
+
+(defn- property-up
+  "Rounds of the merge property on the one merge from seed, ops the writes drawn: as property, each round's branch merged
+  up by replay-up! and checked (check-round-up)."
+  [seed ops]
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [rng (java.util.Random. seed) seen (atom [])]
+       (d/transact conn {:tx-data (vec (for [i (range 4)] {:note/text (str "base note " i) :note/agent :base}))})
+       (dotimes [round 8]
+         (let [br (keyword (str (name (:branch cfg)) "-r" round))
+               _ (d/branch! conn (:branch cfg) br)
+               bc (pdb/connect (assoc cfg :branch br))]
+           (try
+             (let [base @conn]
+               (doseq [k (range (+ 2 (.nextInt rng 9)))
+                       :let [k (+ (* 100 round) k) op (pick rng ops)]]
+                 (if (#{:both-nested :both-defn :both-refs :both-same :both-plan :both-task} op)
+                   (both! conn bc k op)
+                   (let [[c side] (pick rng [[conn :main] [bc :branch]])]
+                     (some->> (write @c rng side k op) (write! c side)))))
+               (let [msg (str "seed " seed " round " round)
+                     thrown (error-of #(check-round-up conn br base @conn @bc msg seen))]
+                 (is (nil? thrown) (str msg ": the merge threw"))))
+             (finally (d/release bc) (d/delete-branch! conn br)))))
+       (is (= #{:refused :merged} (set @seen)) (str "seed " seed " reached " (frequencies @seen)))))))
+
+;; docs/storage.md#merges-read-what-changed: the same property with every write, the broken ones included, on the one merge
+(deftest any-branch-with-any-write-merges-to-main-safely
+  (doseq [seed (seeds)] (property-up seed (into safe-ops broken-ops))))
