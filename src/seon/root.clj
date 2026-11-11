@@ -227,11 +227,15 @@
         (:ready m) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)))
         ;; and it is the agent's first fact: a message from Seon (the system entity) to it, in its conversation as any message is, written
         ;; as a plain write (it wakes nothing): the agent's page and context show it from the pull they already make
-        swp ((fn [st] (step/out! o :to-writer {:op :tx :branch :db
-                                                :tx-data (task/message-tx (lib/unique-id) {:seon.root/id :root} [(name id)]
+        ;; once per standing set of errors: its id is the agent's and the errors', so a resume or a second hello that meets the same
+        ;; errors finds it on main and writes nothing
+        swp ((fn [st] (let [mid (lib/id (lib/digest (pr-str [:started-without-program (name id) (sort-by str (:errors swp))])))]
+                        (when-not (pdb/eid @(:conn st) :seon.message/id mid)
+                          (step/out! o :to-writer {:op :tx :branch :db
+                                                :tx-data (task/message-tx mid {:seon.root/id :root} [(name id)]
                                                                           (str (:seon.error/message swp) "; each error: "
                                                                                (str/join "; " (map (fn [{:keys [ns message]}] (str ns ": " message)) (:errors swp))))
-                                                                          (System/currentTimeMillis))})
+                                                                          (System/currentTimeMillis))})))
                        st))
         ;; and the evals given at its spawn are the first things its REPL queue holds, before any request the answer makes
         (:ready m) (insert-evals o id)
