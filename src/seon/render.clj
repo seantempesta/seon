@@ -216,6 +216,18 @@
             [f (let [id (some #(get v %) (keep #(get (:schema-identities ix) %) (tree-seq (constantly true) #(parents ix %) s)))]
                  (cond-> {:seon.render/nested true} (some? id) (assoc :key id)))]))))))
 
+(defn- prose?
+  "Whether attribute k (in the entity index ix) holds prose with no render of its own: its form a plain string ([:string] or :string,
+  with properties at most), no identity (an id is no prose) and no render declared. Such a string is Markdown by default (owner:
+  \"if it is a text field it is assumed to be markdown\"); a string that is code, an id or an address opts out by its schema. See
+  docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] :boolean]}
+  [ix k]
+  (let [f (when k (get (:forms ix) k))
+        p (when (and (vector? f) (map? (second f))) (second f))]
+    (boolean (and (or (= :string f) (and (vector? f) (= :string (first f)) (<= (count f) 2)))
+                  (not (:seon.db/identity p)) (nil? (render-for ix k :seon.render/hiccup))))))
+
 (defn hiccup
   "v rendered: (render-fn opts v), the function its override or schema names, else the printer's
   (print-hiccup); a value's own key holding hiccup answers that hiccup. opts' :seon.render/index is the entity index its
@@ -226,8 +238,12 @@
   (let [own (own-key v :seon.render/hiccup) ix (:seon.render/index opts)]
     (if (and (some? own) (not (symbol? own)))
       own
-      ;; a producer's schema a stored value no longer fits: it is drawn as the data it is
-      ((or (when (or (nil? (:schema opts)) (contract/fits? (:schema opts) v)) (render-of ix v (:schema opts))) print-hiccup) opts v))))
+      ;; a producer's schema a stored value no longer fits: it is drawn as the data it is; a string whose attribute's schema names no
+      ;; render and is plain prose is Markdown, by :seon.db/text's own render (`prose?`: a branch forked before its attribute became
+      ;; :seon.db/text draws it as main does)
+      ((or (when (or (nil? (:schema opts)) (contract/fits? (:schema opts) v)) (render-of ix v (:schema opts)))
+           (when (and (string? v) (prose? ix (:schema opts))) (render-of ix v :seon.db/text))
+           print-hiccup) opts v))))
 
 ;;; --- the walk: a render of components (docs/render.md#components) -------------------------------
 
@@ -1247,13 +1263,21 @@
   {:malli/schema [:=> [:cat :any] [:maybe :int]]}
   [sub] (cond (int? sub) sub (depth? sub) (config/value sub)))
 
+(defn- without-below
+  "Join key k without its :below option (`again`): what the join is asked by at its depth's last level, and what tells one join from
+  another when a pattern asks it twice (`expanded`). Called only for a key that holds :below. See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [k] (if (vector? k)
+        (let [[a & opts] k kept (into [a] (mapcat identity) (remove #(= :below (first %)) (partition 2 opts)))]
+          (if (= 1 (count kept)) a kept))
+        k))
+
 (defn expanded
   "Raw pattern p with each top-level clause that names an entity schema (in the entity index ix) spliced in its place by the pattern
-  that schema declares (`schema-property`), itself expanded; every other clause as it stands, and a clause the splice repeats once.
-  So [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}] is the agent schema's pattern and that join. A join asked twice
-  by the exact same key (the role's {:seon.agent/task :seon.task/task-fact} and an agent's own {:seon.agent/task [...]}) is one join,
-  at the first clause that asked it, whose sub-pattern is both (a schema's name read as its declared pattern), expanded; key by key
-  for a clause holding several. What every reader of a raw pattern reads; the stored :seon.ctx/pattern stays raw. Throws
+  that schema declares (`schema-property`), itself expanded, and a clause the splice repeats once: [:seon.db/agent-fact
+  {:seon.agent/_agents :seon.db/user-fact}] is the agent schema's pattern and that join. A join asked more than once by the same key
+  (its :below aside) is one join at the first clause that asked it, whose sub-pattern is all of theirs (a schema's name read as its
+  declared pattern), expanded. What every reader of a raw pattern reads; the stored :seon.ctx/pattern stays raw. Throws
   :seon.ctx/invalid-pattern naming the clause when a schema it names declares no pattern, its pattern reaches itself (seen: the
   schemas spliced on the way), or a join asked twice is a depth in one of them. See docs/ctx.md#the-pattern."
   {:malli/schema [:function [:=> [:cat :map [:sequential :any]] [:vector :any]]
@@ -1269,41 +1293,50 @@
                                                                       (conj seen x)))))
                                 (distinct))
                        p)
+         ;; the key that tells one join from another: its :below aside (a local check, so a key without it costs no call)
+         id-of (fn [k] (if (and (vector? k) (some #{:below} k)) (without-below k) k))
          as-pattern (fn [sub] (if (keyword? sub) (or (schema-property ix sub :seon.ctx/pattern) (bad (str sub " declares no pattern") sub)) sub))
-         ;; join k's two sub-patterns as one
-         both (fn [k a b] (if (or (depth? a) (depth? b))
-                            (bad (str "the join " k " is asked twice and one of them is a depth: ask it once") {k b})
-                            (expanded ix (vec (concat (as-pattern a) (as-pattern b))) seen)))]
-     ;; out: the clauses so far; at: each join key asked so far, at the index of the clause that asked it first
-     (:out (reduce (fn [{:keys [out at] :as acc} x]
-                     (if-not (map? x)
-                       (update acc :out conj x)
-                       (let [{out :out fresh :fresh} (reduce (fn [r [k sub]] (if-let [i (at k)] (update-in r [:out i k] #(both k % sub)) (assoc-in r [:fresh k] sub)))
-                                                             {:out out :fresh {}} x)]
-                         (if (seq fresh)
-                           {:out (conj out fresh) :at (into at (for [k (keys fresh)] [k (count out)]))}
-                           {:out out :at at}))))
-                   {:out [] :at {}} spliced)))))
+         ;; a join's sub-patterns, asked more than once, as one; a depth is asked once
+         merged (fn [k ss] (if (some depth? ss)
+                             (bad (str "the join " k " is asked twice and one of them is a depth: ask it once") {k ss})
+                             (expanded ix (vec (mapcat as-pattern ss)) seen)))
+         ;; out: the clauses, each join in the first clause that asked it; subs: every sub-pattern each join was asked with
+         {:keys [out subs]} (reduce (fn [{:keys [subs] :as acc} x]
+                                      (if-not (map? x)
+                                        (update acc :out conj x)
+                                        (let [fresh (into {} (remove #(contains? subs (id-of (key %)))) x)]
+                                          (cond-> (assoc acc :subs (reduce (fn [s [k sub]] (update s (id-of k) (fnil conj []) sub)) subs x))
+                                            (seq fresh) (update :out conj fresh)))))
+                                    {:out [] :subs {}} spliced)]
+     (if (every? #(= 1 (count %)) (vals subs))
+       out
+       (mapv (fn [x] (if (map? x)
+                       (into {} (for [[k sub] x :let [ss (subs (id-of k))]] [k (if (= 1 (count ss)) sub (merged k ss))]))
+                       x))
+             out)))))
 
 (defn- again
   "Pattern p with each of its joins whose sub-pattern is a depth n (`depth`) written out as ordinary nested joins: p again under the
-  join, with that join at n-1 in it, and at n = 1 p without that join. So [:a {:j 2}] is [:a {:j [:a {:j [:a]}]}]. One level of p: a
-  depth inside a sub-pattern is written out when that sub-pattern is read. Throws :seon.ctx/invalid-pattern for a depth below 1. The
-  one reading of a depth, for `pattern` and `pulled`. See docs/ctx.md#the-pattern."
+  join, with that join at n-1 in it, and at n = 1 p without that join, so [:a {:j 2}] is [:a {:j [:a {:j [:a]}]}]; a join whose key
+  names :below asks that pattern at n = 1 instead, so [:a {[:j :below [:id]] 2}] is [:a {:j [:a {:j [:id]}]}]. Each written-out join
+  is asked by its key without :below (`without-below`). One level of p: a depth inside a sub-pattern is written out when that
+  sub-pattern is read. Throws :seon.ctx/invalid-pattern for a depth below 1, or a :below on a join that is no depth (it would be
+  read by nothing). The one reading of a depth, for `pattern` and `pulled`. See docs/ctx.md#the-pattern."
   {:malli/schema [:=> [:cat [:sequential :any]] [:vector :any]]}
   [p]
   (let [p (vec p)
+        bad (fn [why x] (throw (ex-info (str "pattern: " why) (contract/error :seon.ctx/invalid-pattern #'again why {:clause x}))))
         ;; p with clause i's join k at v, or without that join when v is nil (and without the clause when it held no other)
-        at (fn [i k v] (into [] (keep-indexed (fn [j y] (if (= i j) (not-empty (if (nil? v) (dissoc y k) (assoc y k v))) y))) p))]
+        at (fn [i k v] (into [] (keep-indexed (fn [j y] (if (= i j) (not-empty (if (nil? v) (dissoc y k) (assoc y k v))) y))) p))
+        ;; [the :below pattern] of key k, or nil: a local check, so a key without it costs no call
+        below (fn [k] (when (and (vector? k) (some #{:below} k)) (some (fn [[o v]] (when (= :below o) [v])) (partition 2 (rest k)))))]
     (vec (map-indexed (fn [i x]
                         (if (map? x)
-                          (into {} (for [[k sub] x]
-                                     [k (if-let [n (when-not (coll? sub) (depth sub))]
-                                          (cond (< n 1) (throw (ex-info "pattern: a join's depth is 1 or more"
-                                                                        (contract/error :seon.ctx/invalid-pattern #'again "a join's depth is 1 or more" {:clause x})))
-                                                (= n 1) (again (at i k nil))
-                                                :else (again (at i k (dec n))))
-                                          sub)]))
+                          (into {} (for [[k sub] x :let [n (when-not (coll? sub) (depth sub)) b (below k)]]
+                                     (cond (nil? n) (if b (bad "a join's :below is what a depth asks below its last level: it takes a depth" x) [k sub])
+                                           (< n 1) (bad "a join's depth is 1 or more" x)
+                                           (= n 1) (if b [(without-below k) (first b)] [(without-below k) (again (at i k nil))])
+                                           :else [(without-below k) (again (at i k (dec n)))])))
                           x))
                       p))))
 
@@ -1373,8 +1406,8 @@
   "A join's options: Datahike's pull's (:as, :limit; :reverse, our fork's newest first) and ctx's two
   beside them: :by, the identity attribute a symbol value names (forward: each value read as [by v];
   reverse: the entities whose attribute holds this entity's by); :tx k, each member holding under k the transaction
-  that wrote its link (docs/ctx.md#the-pattern)."
-  #{:as :limit :reverse :by :tx})
+  that wrote its link; :below, what a depth join asks below its last level, read by `again` alone (docs/ctx.md#the-pattern)."
+  #{:as :limit :reverse :by :tx :below})
 
 (defn pulled
   "Pulled entity node as its data model, a plain map a render lays out and an agent reads at its REPL: {:schema the entity schema
@@ -1422,7 +1455,8 @@
   every attribute, else the attributes it names; a top-level entity schema's name, its declared pattern
   in that place (`expanded`); {attr sub} a join, attr as [attr & options], sub a pattern, an entity
   schema's name (its declared one) or a depth, a positive integer or a config key naming one (the
-  enclosing pattern again, `again`)), as the walk takes it: {:star? :attrs
+  enclosing pattern again, `again`; the join's :below option, what it asks below its last level)),
+  as the walk takes it: {:star? :attrs
   :joins [{:attr :key :rev? :limit :reverse? :by :sub}]}, each join's attribute read forward, its
   key its :as else the attribute, its limit a count or a config key's value; :attrs also the name a
   reverse :by join reads. Throws :seon.ctx/invalid-pattern naming the clause it cannot read: no

@@ -371,7 +371,7 @@
       (let [main2 (d/db-with main (pm/merge-tx main main ours (keys (:ours r)) #{}))]
         (is (= #{:seon.task/reason} (set (keys (program/schema-changes main2)))))
         (is (= [facts-path] (source/changed-files main2 (:ours r))))
-        (is (= {facts-path (str/replace text status-line (str/replace status-line ":string" "[:string {:min 1}]"))}
+        (is (= {facts-path (str/replace text status-line " :seon.task/reason [:string {:min 1}]")}
                (source/files main2 (source/changed-files main2 (:ours r)))))))))
 
 (deftest the-delta-three-way-reads-data-and-schema-entries-as-the-program-does

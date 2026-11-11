@@ -268,7 +268,7 @@
                  :error (contract/error :seon.agent/stalled 'seon.agent-proc/agent-in "agent a1 sent nothing for 4000 ms with a request in flight"
                                         {:agent :a1 :quiet-ms 4000})}
         [st o1] (step st :back stalled)
-        [ask] (get o1 [:fx/evidence :in])
+        [ask] (get o1 [:fx/evidence :ask])
         db (d/db-with db (vec (filter :seon.task/id (into [] cat (writes o1)))))
         files {:sample "/x/sample.txt" :lsof "/x/lsof.txt"}
         [_ o2] (step (assoc st :conn (atom db)) :back {:dest (:dest ask) :r {:value {:dir "/x" :files files}}})
