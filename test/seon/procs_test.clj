@@ -1244,3 +1244,38 @@
     (is (= :up (get-in st2 [:view :fork-server :status])) "the server itself still serves")
     (is (= true (get-in (first (step #'root/api-proc st2 :back {:ev :standby :gen 4 :pid 9})) [:view :fork-server :standby]))
         "the next standby made: the view shows it has one again")))
+
+(deftest the-writers-merge-writes-each-members-plan-or-refuses-it
+  ;; docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it' (task
+  ;; seon.merge/a-merge-replays-the-sources-net-change): the octopus merge writes each member's transactions since its base as
+  ;; transactions of main, each naming the branch that wrote it; a member whose plan conflicts with main, or whose transaction
+  ;; main's write check refuses, is answered so with nothing of it written, and the others merge without it
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        _ (d/transact conn [{:task/name :gen/t :task/plan "p" :task/status :held}])
+        [a b c] (for [nm [:mo-a :mo-b :mo-c]] (let [x (pdb/on-main (:branch cfg) nm)] (d/branch! conn (:branch cfg) x) x))
+        on (fn [br tx] (let [bc (pdb/connect (assoc cfg :branch br))]
+                         (try (d/transact bc {:tx-data tx :tx-meta (pdb/tx-meta br)}) (finally (d/release bc)))))
+        t (pdb/eid @conn :task/name :gen/t)]
+    ;; a: a task name main makes too (the write check refuses its replay); b: a task of its own, in two transactions;
+    ;; c: the plan of the task main changes too (a conflict)
+    (on a [{:task/name :gen/same :task/plan "a" :task/status :held}])
+    (on b [{:task/name :gen/b :task/plan "b1" :task/status :held}])
+    (on b [[:db/add (pdb/eid (pdb/head conn b) :task/name :gen/b) :task/plan "b2"]])
+    (on c [[:db/add t :task/plan "c"]])
+    (d/transact conn [{:task/name :gen/same :task/plan "a" :task/status :held} [:db/add t :task/plan "main"]])
+    (let [t0 (:max-tx @conn)
+          [_ outs] (step #'writer/writer-proc st :in {:op :octopus-merge :branches [a b c] :dest {:rid 1}})
+          [ra rb rc] (:results (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs)))))
+          db @conn
+          written (sort (filter #(> % t0) (map :e (d/datoms db :aevt :db/txInstant))))]
+      (is (= :seon.merge/refused (:seon.error/type ra)) "a's replay is refused by main's write check")
+      (is (= :transact/unique (get-in ra [:refused :error :error])) "naming the check's error")
+      (is (:merged? rb) "b merges without it")
+      (is (= "b2" (:task/plan (d/entity db [:task/name :gen/b]))) "b's net change is on main")
+      (is (= 3 (count written)) "b's two transactions and the merge's last, which carries main's content mark")
+      (is (= [b b] (map #(:seon.tx/branch (d/entity db %)) (butlast written))) "each of b's names the branch that wrote it")
+      (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity db (first written)))) "and main's runtime")
+      (is (= [[:task/name :gen/t :task/plan]] (mapv :key (:conflicts rc))) "c conflicts with main, named by identity")
+      (is (= "main" (:task/plan (d/entity db t))) "and main keeps its value")
+      (is (= 1 (count (d/datoms db :avet :task/name :gen/same))) "main's one entity holds the name a claimed"))))))
