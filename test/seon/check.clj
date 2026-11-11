@@ -1033,8 +1033,8 @@
 
 (defn- main-data-datoms
   "Main's datoms (a seq) but root's own facts (:seon.root/*: its boot, its quiescence report, its
-  collection record), the user (an agent with no process, seon.task/boot-tx: a new boot writes it again), root's link to the agents it started (:seon.agent/root: a new boot
-  retracts an earlier boot's, seon.task/earlier-agents-tx, one per agent) and every transaction
+  collection record), the user (an agent with no process, seon.task/boot-tx: a new boot writes it again), root's link to the agents it started (:seon.agent/root: asserted on its own, the
+  durable check's :earlier-agents-stay-linked, seon.task/earlier-agents-tx) and every transaction
   entity's own datoms (:db/txInstant, e = tx): a restarted root writes its facts anew in
   transactions of its own (boot, quiescent, collected: three :db/txInstant datoms more), so what
   a restart must give back exactly is the rest."
@@ -1075,7 +1075,8 @@
         _ @(c/transact-main! sys [] {:flush? true})
         st (c/state sys {:datoms true})
         md (main-data-datoms sys)
-        expect {:main-datoms (count md) :by-attr (by-attr md) :main-t (get-in st [:main :t]) :user (seon.config/value :seon.config.root/user-name)}]
+        expect {:main-datoms (count md) :by-attr (by-attr md) :main-t (get-in st [:main :t]) :user (seon.config/value :seon.config.root/user-name)
+                :linked (vec (for [dt (d/datoms @(:conn sys) :aevt :seon.agent/root)] (:seon.agent/key (d/entity @(:conn sys) (:e dt)))))}]
       (spit (str path ".expect.edn") (sedn/encode expect))
       {:report {:store (:store st) :a ra :merge (dissoc m :ops) :b rb :clone [(:id cl) rc] :expect expect :store-bytes (dir-bytes (:store-path sys))}
        :checks {:merged (:merged? m)} :then :kill}))))
@@ -1099,8 +1100,8 @@
         data (main-data-datoms sys)
         md (count data)
         ba (by-attr data)
-        ;; this boot has started no agent yet: every earlier boot's link to its WORK agents is
-        ;; retracted; the agents linked are the two that outlive a boot, the user and root's session (seon.task/earlier-agents-tx)
+        ;; this boot has started no agent yet: the agents linked to root are phase 1's, each kept by
+        ;; the boot (root's page holds every boot's sessions, seon.task/earlier-agents-tx)
         linked (vec (for [dt (d/datoms @(:conn sys) :aevt :seon.agent/root)] (:seon.agent/key (d/pull @(:conn sys) [:seon.agent/key] (:e dt)))))
         [n rb rc] (spawn-ready! sys "born after the restart" {:task "resume b" :branch :dur-b} {:task "resume the clone" :branch :dur-clone})
         ;; each request's response is its last form's value: one vector of what each check reads
@@ -1121,8 +1122,8 @@
                 :born-after r-n :resumed-b r-b :b-tests (select-keys t-b [:pass :fail :error]) :resumed-clone r-c
                 :merge-b [(select-keys mmb [:ok :applied]) (dissoc mb :ops)] :after-merging-b r-n2}
        :checks {:main-recovered (and (= (:main-datoms expect) md) (:recovered? (:store st)))
-                ;; what main-data-datoms leaves out, asserted: the boot retracted phase 1's links
-                :earlier-agents-are-not-this-roots (= #{(seon.config/value :seon.config.root/user-name) "root"} (set linked))
+                ;; what main-data-datoms leaves out, asserted: the boot kept phase 1's links
+                :earlier-agents-stay-linked (= (set (:linked expect)) (set linked))
                 ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
                 ;; main-data-datoms leaves the user out: it is still main's
                 :phase-1s-user-recovered (some? (seon.db/eid @(:conn sys) :seon.agent/key (:user expect)))
