@@ -199,7 +199,8 @@
               st (-> st (assoc :bid bid) (assoc-in [:batches bid] batch) (assoc-in [:items k :status] :running))
               [st m] (step/ask st [:prove :answers] [:batch (str bid)]
                                (if (= :test (:kind it :test))
-                                 {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)}
+                                 (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)}
+                                   (:checkout it) (assoc :checkout (:checkout it)))
                                  ;; a build, a process test or a check step: root's effect owner runs it on the run's checkout
                                  {:op :fx :kind :item :req {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
                                                             :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
@@ -516,7 +517,8 @@
         (= :spawn step) (plan! (update-in st [:runs key] assoc :runner (:id r) :agent (:id r)) key)
         (= :plan step) (let [st (assoc-in st [:runs key :base] (dissoc r :items :ms :process :steps :build))
                              prio (if (= :turn (:mode run)) :turn :batch)
-                             items (into (plan-items run r) (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run) :kind :test} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t])))]))
+                             items (into (plan-items run r) (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run) :kind :test} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t]))
+                                                                                     (:checkout run) (assoc :checkout (:checkout run)))]))
                              [st outs] (ask-items (assoc-in st [:runs key :stage] :items) key prio items (set (:proofs run)))]
                          (settle st outs))
         :else [(update st :stale (fnil inc 0)) []]))))
