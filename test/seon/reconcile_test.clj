@@ -497,6 +497,18 @@
         (is (= :closed (:outcome j)))
         (is (some? (:hold j)))))))
 
+;; docs/reconcile.md#a-task-holds-how-its-work-ended: an outside agent's green work behind main alone is judged :behind, as a model
+;; agent's is, so its client hands back again taking main (seon.server's :done), never closed for main's motion; at
+;; :seon.config.merge/max-behind it is held as a model agent's is. Red before: closed, "ended green: behind 78" (Data model's real
+;; task on the standing system, 2026-11-11)
+(deftest an-outside-agents-green-work-behind-main-is-judged-behind-not-closed
+  (let [db (db-of [(decl "a")] :extra (work "a" :running :model "outside"))
+        facts {:end {:outcome :green} :results {(t "a") :pass} :behind 3}
+        max-b (cfg/value :seon.config.merge/max-behind)]
+    (is (= :behind (:outcome (judgment-of db "a" facts))) "behind alone: told again, not closed")
+    (is (= :closed (:outcome (judgment-of db "a" (assoc facts :behinds max-b)))) "at the bound: held, as a model agent's")
+    (is (= :closed (:outcome (judgment-of db "a" (assoc facts :end {:outcome :red} :results {(t "a") :fail})))) "red is no motion of main: closed as before")))
+
 (deftest a-judging-retracts-what-it-does-not-set
   ;; the judged attributes are the end's, never an earlier end's: an error and deferred results a task held from its last judging
   ;; do not survive a later one that has none (seon.task/outcome-tx)
@@ -1478,6 +1490,45 @@
     (is (= [{:task "demo/a" :cause held-why :blocks []}] (get-in st [:quiescent :root-causes])) "quiet, naming it")
     (is (= ["demo/a"] (spawns outs5)) "other work on main: it asks again"))))
 )
+
+;; docs/reconcile.md#a-task-holds-how-its-work-ended: a start refused because its branch is held by an agent whose own task is
+;; judged (a done task's process still ending) asks again once that agent is stopped, with nothing else moving main. The order is
+;; forced: the holder's end comes after the refusal. Red before: the refusal waited for main to move for another reason, the
+;; holder's end moves no fact the index reads, and the task stayed refused (batch 78's e2e-newns, 2026-11-11)
+(deftest a-refused-start-is-asked-again-when-its-holder-ends
+  (ts/test-branch! (fn [_ conn]
+  (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
+        main (fn [st db ops] (r/reconciler-proc st :main (assoc (ts/commit-of conn db) :ops ops)))
+        spawns (fn [outs] (vec (keep #(when (= :spawn (get-in % [:req :op])) (get-in % [:req :opts :task])) (:to-api outs))))
+        kills (fn [outs] (vec (keep #(when (= :kill (get-in % [:req :op])) (get-in % [:req :id])) (:to-api outs))))
+        why "branch :demo/b is held by live agent a-a working demo/a: its seon_done or an end frees it"
+        ;; a is done (its agent's process still ending); b, ready, wants a branch a's agent holds
+        db (db-of [(decl "a") (decl "b" :needs ["a"])] :extra (work "a" :done))
+        [st outs] (main (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
+        asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
+        [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.root/refused 'seon.root/spawn! why {:branch :demo/b :agent :a-a :task "demo/a"})})
+        w (first (filter #(= :write (get-in % [:req :op])) (:to-api outs2)))
+        k (first (filter #(= :kill (get-in % [:req :op])) (:to-api outs2)))
+        [st outs3] (r/reconciler-proc st :answers {:tag (:tag w) :r {:ok true}})
+        [db2 ops2] (commit db (get-in w [:req :req :tx-data]))
+        [st outs4] (main st db2 ops2)
+        ;; the holder's end, after the refusal: root answers the stop
+        [_ outs5] (if k (r/reconciler-proc st :answers {:tag (:tag k) :r {:killed :a-a}}) [st {}])]
+    (is (= ["demo/b"] (spawns outs)) "b is asked for")
+    (is (= [:a-a] (kills outs2)) "refused by a done task's agent: that agent is stopped")
+    (is (= [] (spawns outs3)) "the write's answer starts nothing")
+    (is (= [] (spawns outs4)) "nor does the refused answer's own commit")
+    (is (= ["demo/b"] (spawns outs5)) "the holder's end: b asks again, nothing else having moved main")))))
+
+(deftest a-start-refused-by-a-working-agent-stops-nothing
+  ;; the other side of the rule: a holder whose task is still running is working the branch, and is never stopped for another
+  (ts/test-branch! (fn [_ conn]
+  (let [db (db-of [(decl "a") (decl "b")] :extra (work "a" :running))
+        [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))
+        asked (first (filter #(and (= :spawn (get-in % [:req :op])) (= "demo/b" (get-in % [:req :opts :task]))) (:to-api outs)))
+        [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.root/refused 'seon.root/spawn! "held" {:branch :demo/b :agent :a-a :task "demo/a"})})]
+    (is (some? asked) (pr-str (:to-api outs)))
+    (is (not-any? #(= :kill (get-in % [:req :op])) (:to-api outs2)) "nothing is stopped")))))
 
 (deftest quiescence-names-a-task-that-cannot-start
   ;; a refused task is a root cause at quiescence, naming what it blocks

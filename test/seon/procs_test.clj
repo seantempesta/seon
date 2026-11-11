@@ -889,6 +889,29 @@
     (is (= (:in m) (:seon.error/in (answer p))) "on the defect")
     (is (= :state (:took (answer p))) "with what its step took")))
 
+(deftest an-uncaught-error-reaches-root-never-only-stderr
+  ;; docs/errors.md#nothing-crashes-and-nothing-hangs (Point 2026, Sean's silent errors): a fiber died at start with its error
+  ;; only on stderr ("Exception in go/fiber body"). Root takes every uncaught error (seon.root/catch-uncaught!): kept until it
+  ;; listens, which its start fails on, then its :back, which the api records as a named defect
+  (let [old (Thread/getDefaultUncaughtExceptionHandler)
+        u @#'root/uncaught
+        boom (fn [msg] (doto (Thread. ^Runnable (fn [] (throw (ex-info msg {:n 1})))) (.start) (.join)))]
+    (try
+      (#'root/catch-uncaught!)
+      (testing "before root listens: kept, for its start to fail on"
+        (boom "early boom")
+        (is (= ["early boom"] (map #(re-find #"early boom" (:message %)) (:early @u))) (pr-str @u)))
+      (testing "after: on root's :back, and the api records it as a defect naming it"
+        (let [back (a/chan 4) _ (swap! u assoc :back back)
+              _ (boom "late boom")
+              m (a/poll! back)
+              [_ outs] (step #'root/api-proc (api-state) :back m)]
+          (is (= :uncaught (:pid m)) (pr-str m))
+          (is (re-find #"uncaught in thread .*: late boom" (str (:message m))))
+          (is (= :seon.root/proc-defect (get-in m [:data :seon.error/type])))
+          (is (= [:proc-defect] (map :type (:events outs))) "an event, as any proc's defect")))
+      (finally (Thread/setDefaultUncaughtExceptionHandler old) (reset! u {:back nil :early []})))))
+
 (deftest a-throwing-step-answers-every-pending-request
   ;; Flow's step catch keeps the old state and drops the outputs; its error message carries the
   ;; message the step took (::flow/msg), which the pipe from Flow's error channel carries as :msg

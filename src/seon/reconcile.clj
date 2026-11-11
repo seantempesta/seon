@@ -442,6 +442,11 @@
           ;; to the agent, with what root judged on, which wakes the session; the same verdict twice holds. A whole task's
           ;; goes back to its own session too (it merges itself, so it is told why it could not); a merge task's holds,
           ;; and an outside agent's: it read the verdict as :done's answer, and no turn loop takes messages
+          ;; an outside agent's green work behind main alone: told again as behind too, never closed for main's motion;
+          ;; its client hands back again, taking main first (seon.server's :done), bounded as a model agent's is
+          (and (not= :merge kind) outside (= :green oc) (every? #(= :behind (:reason %)) rs)
+               (< behinds (cfg/value :seon.config.merge/max-behind)))
+          {:outcome :behind :reasons rs :verdict rs}
           (and (not= :merge kind) (not outside) (#{:green :red} oc))
           (let [behind-only? (every? #(= :behind (:reason %)) rs)
                 ;; behind alone is main moving under the branch, not the agent's news: the same count twice is two different
@@ -995,8 +1000,16 @@
                              (task/start-tx (:db st) id (:boot st) ag (:env act) now (:raise f 0))))
                  ;; root refused it (the branch is held, or too many live agents): the refused answer
                  ;; is the task's outcome, with root's reason; the task starts again
-                 ;; once main moves for another reason (:refused, pass)
-                 (one (write (update st :refused (fnil conj #{}) id) id :done (task/refused-tx (:db st) id r))))
+                 ;; once main moves for another reason (:refused, pass), or, held by an agent whose own task is
+                 ;; judged and not kept for a wake (a done task's process still ending), once that agent is stopped:
+                 ;; its end frees the branch but moves no fact the index reads, so its stop's answer is the wake-up
+                 (let [[st o] (write (update st :refused (fnil conj #{}) id) id :done (task/refused-tx (:db st) id r))
+                       h (:agent r) ht (:task r)]
+                   (if (and h ht (idx-done? (:idx st) ht) (not (idle (:idx st) ht)))
+                     (let [[st o2] (request st id :holder-ended {:op :kill :id h :ended true})] [st [o o2]])
+                     [st [o]])))
+      ;; the agent a refused start's branch was held by is stopped: the task asks again at the next pass
+      :holder-ended [(update st :refused disj id) []]
       ;; an outside agent works this task (seon.server): no turn loop; it hands it back
       :started (cond
                  (:died-at-spawn f) (dead st (:died-at-spawn f))

@@ -12,7 +12,8 @@
     second run. Each run is planned by the agent holding its branch (what it would run, at their digests), and its
     items, (test, digest) pairs, join one queue: an item many runs need is queued once and run once, granted to a free
     worker (seon.prove/admission: :seon.config.proofs/max-workers, max-cores and max-load) one at a time, an agent's turn
-    first, then by waiters and measured time. A run is answered at its first red item or its last green one.
+    first, then by waiters and measured time. A run is answered when every proof of its asker has its verdict: an agent's turn its own proofs (its first red when it named
+    none), any other run every item.
   - Every waiter is answered exactly once, with the run's answer.
   A run is a chain of requests to the api (this proc's `:to-api`, answers on `:answers`): the
   agent that holds the branch runs its tests (`:tests`); main, which no agent holds, is run by a
@@ -66,7 +67,7 @@
     (if (or (contract/error? r) (some :exit (:reports r)) (seq (:red r)))
       st
       (assoc-in st [:done (slot run)] {:key (:key r) :digest (:digest run)
-                                       :r (-> r (dissoc :measured) (assoc :ran 0)
+                                       :r (-> r (dissoc :measured :verdicts) (assoc :ran 0)
                                               (update :reports (partial mapv #(assoc % :reused true)))
                                               (as-> x (assoc x :reused (count (distinct (keep :var (:reports x)))))))}))))
 
@@ -133,11 +134,14 @@
           st ks))
 
 (defn- answer-asker
-  "Asker rid answered with its verdict (:green true, or the reds and errors it met first), and gone from every item's
-  waiters; a queued item no one waits on any more leaves the queue (no work for an answer already given)."
+  "Asker rid answered with its verdict (:green true, or the reds and errors it met first) and :verdicts, every verdict it
+  was told as it landed (item-ended), so a client streaming them can write the ones it has not yet: the answer, not the
+  events' order, says what it is owed (docs/server.md#ops); and gone from every item's waiters; a queued item no one
+  waits on any more leaves the queue (no work for an answer already given)."
   {:malli/schema [:=> [:cat :map :any :map] [:tuple :map [:vector :map]]]}
   [st rid r]
   (let [left (get-in st [:askers rid :left])
+        r (assoc r :verdicts (get-in st [:askers rid :verdicts] []))
         st (reduce (fn [st k]
                      (let [st (update-in st [:items k :waiters] disj rid)
                            it (get-in st [:items k])]
@@ -239,7 +243,7 @@
                   kind (assoc :kind kind)
                   ms (assoc :ms ms))
         [st outs] (reduce (fn [[st outs] rid]
-                            (let [st (cond-> (update-in st [:askers rid :left] disj k)
+                            (let [st (cond-> (-> st (update-in [:askers rid :left] disj k) (update-in [:askers rid :verdicts] (fnil conj []) verdict))
                                        signal? (update-in [:askers rid :signals] (fnil conj []) (select-keys verdict [:test :digest :kind :signal :ms]))
                                        (not signal?) (assoc-in [:askers rid :results t] r))
                                   {:keys [left results signals]} (get-in st [:askers rid])]
@@ -430,7 +434,7 @@
                   ;; that could not run answers; the verdicts that did land are the cache's
                   (let [rs (:results (:r o))
                         [st more] (finish st k (or (some (fn [[_ r]] (when (contract/error? r) r)) (sort-by (comp str key) rs))
-                                                   (run-answer (:base run) rs (:signals (:r o)))))]
+                                                   (assoc (run-answer (:base run) rs (:signals (:r o))) :verdicts (:verdicts (:r o) []))))]
                     [st (into acc more)])
                   [st acc]))
               [st (conj acc o)]))
@@ -493,7 +497,8 @@
         ;; second (:made) never stands for the first
         sk [[:seed tree (if stores? :stores :tree)] tree]]
     (cond-> (into {}
-                  (concat (for [[t d] (:process r)] [[t d] (cond-> (assoc on :kind :process :binary? true) seed? (assoc :needs #{sk}))])
+                  (concat (for [[t d] (:process r) :let [b (get-in r [:bounds t])]]
+                            [[t d] (cond-> (assoc on :kind :process :binary? true) b (assoc :bound b) seed? (assoc :needs #{sk}))])
                           (for [[s {:keys [digest binary? bound alone?]}] (:steps r)]
                             [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?)) bound (assoc :bound bound) alone? (assoc :alone? true)
                                           seed? (assoc :needs #{sk}))])))
@@ -519,7 +524,10 @@
                              prio (if (= :turn (:mode run)) :turn :batch)
                              items (into (plan-items run r) (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run) :kind :test} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t]))
                                                                                      (:checkout run) (assoc :checkout (:checkout run)))]))
-                             [st outs] (ask-items (assoc-in st [:runs key :stage] :items) key prio items (set (:proofs run)))]
+                             ;; past a red, a turn waits for its own proofs; any other run (a tree's :judge, main's) is a verdict of the
+                             ;; whole and waits for every item, so a session and a landing hear every red, never only the first
+                             proofs (if (= :turn (:mode run)) (set (:proofs run)) (into #{} (map first) (keys items)))
+                             [st outs] (ask-items (assoc-in st [:runs key :stage] :items) key prio items proofs)]
                          (settle st outs))
         :else [(update st :stale (fnil inc 0)) []]))))
 

@@ -222,7 +222,8 @@
         db (:db-after (d/with (ts/test-db)
                               (into [{:seon.agent/key k :seon.agent/task {:seon.task/id "lab/ctx"}}
                                      {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
-                                      :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
+                                      :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx
+                                      :seon.task/reasons [{:reason :proof-red :symbol 'app.x-test/f0-passes} {:reason :behind :behind 3}]}]
                                     (concat (mapcat eval-tx (range 1 6))
                                             (for [t (range 3)] {:seon.model-call/id (str "lab/ctx#1/" t) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n t})
                                             [{:seon.message/id "m1" :seon.message/from {:seon.agent/key "user"} :seon.message/body "How is it going?"
@@ -230,6 +231,9 @@
         t (:tree (ctx/build (seon.db/index) db (aid db) :b))]
     (is (= "lab/ctx" (get-in t [:seon.agent/task :seon.task/id])) "the task, pulled whole by the agent's own ref")
     (is (= "Make app.x/f0 pass." (get-in t [:seon.agent/task :seon.task/plan])))
+    ;; docs/tasks.md#the-done-rule: what the judge said was not done is data the agent's pull holds, each reason a map its schema names
+    (is (= [{:reason :proof-red :symbol 'app.x-test/f0-passes} {:reason :behind :behind 3}] (get-in t [:seon.agent/task :seon.task/reasons]))
+        "the task's judged reasons, as the maps the done rule answers")
     (is (= 4 (count (:seon.model-call/_agent t))) "every model call, those its records name among them")
     (is (= 5 (count (:seon.eval/_agent t))) "every eval")
     (is (= ["m1"] (names (:seon.message/_to t) :seon.message/id)) "the messages it holds")
@@ -436,7 +440,7 @@
     (loop [db (seeded 30 small-window-pattern) c (ctx/build (seon.db/index) db (aid db) :b) i 0 bad [] unshared [] checked 0]
       (if (= i 70)
         (do (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
-            (is (< 1000 checked) (str "the sharing check reads the paths no change touched: " checked))
+            (is (< 500 checked) (str "the sharing check reads the paths no change touched: " checked))
             (is (empty? unshared) (str "a path no change touched that is a new object: " (first unshared))))
         (let [tx (change db i r) rep (d/with db tx) db' (:db-after rep) c' (ctx/patch c db' (:tx-data rep) :b)
               b (ctx/build (seon.db/index) db' (aid db') :b)
@@ -725,13 +729,14 @@
 
 (deftest a-lookups-patch-costs-its-change
   ;; a task's lookups (:by) patched in the work of what moved, whatever the session's size
-  ;; (measured at 100 and 1,000 evals: a redefinition 23 calls and 118 KB, a new caller 22 and
-  ;; 113 KB, a plan edit 10 and 86 KB), and each names the one path it changed
+  ;; (measured at 100 and 1,000 evals: a plan edit 10 calls and 86 KB), and each names the one path it changed;
+  ;; a cited var's redefinition and a new caller of it change no path (docs/references.md#an-entity-cites)
   (let [changed (fn [[c db tx b]] [db (set (map second (ctx/changes c (ctx/patch c db tx b))))])
         task (fn [_] [:task])
         f0 #(into (task %) [:seon.cite/_of (id % [:seon.cite/id "lab/ctx app.x/f0"]) :seon.cite/target])]
-    (let [[db ps] (changed (cited-redefined 10))] (is (= #{(conj (f0 db) :var/form)} ps) "a redefinition: the cited var's form"))
-    (let [[db ps] (changed (new-caller 10))] (is (= #{(conj (f0 db) :callers (id db [:form/id "app.x/c-2"]))} ps) "a new caller: that caller"))
+    ;; a cite holds its target by identity (docs/references.md#an-entity-cites): its form and callers are its render's reads, so neither moves the record
+    (let [[_ ps] (changed (cited-redefined 10))] (is (= #{} ps) "a redefinition of a cited var: nothing of the record"))
+    (let [[_ ps] (changed (new-caller 10))] (is (= #{} ps) "a new caller of it: nothing of the record"))
     (let [[db ps] (changed (plan-edited 10))] (is (= #{(conj (task db) :seon.task/plan)} ps) "a plan edit: the plan")))
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/cited-redefined
@@ -1067,8 +1072,11 @@
   ;; what each proof calls, by name (D5: its form's :form/refs)
   (let [db (seeded 10)
         t (get-in (:tree (ctx/build (seon.db/index) db (aid db) :b)) [:task])
-        f0 (get-in t [:seon.cite/_of (id db [:seon.cite/id "lab/ctx app.x/f0"]) :seon.cite/target])]
-    (is (= "What x does." (get-in t [:seon.cite/_of (id db [:seon.cite/id "lab/ctx docs/x.md#the-x"]) :seon.cite/target :seon.doc/text])) "D3: the cited section's text, its target")
+        ;; a cite's target as its render reads it from the db (docs/references.md#an-entity-cites): the record holds it by identity
+        read #(:tree (ctx/build (seon.db/index) db (get-in t [:seon.cite/_of (id db [:seon.cite/id %]) :seon.cite/target :db/id]) nil
+                                (render/schema-property (seon.db/index) :seon.cite/target-read :seon.ctx/pattern)))
+        f0 (read "lab/ctx app.x/f0")]
+    (is (= "What x does." (:seon.doc/text (read "lab/ctx docs/x.md#the-x"))) "D3: the cited section's text, its target")
     (is (= "(defn f0 [x] x)" (get-in f0 [:var/form :form/src])) "D2: the cited var's source")
     (is (= #{(id db [:form/id "app.x/c-1"]) (id db [:form/id "app.x-test/t0-1"])} (set (keys (:callers f0)))) "D1: its callers, the test among them")
     (let [t0 (get-in t [:proved (id db [:var/name 'app.x-test/t0]) :var/form])]
@@ -1090,6 +1098,19 @@
     (is (= [{:type :fail :message "no"}] (:seon.test/failures v)))
     (is (= 40 (:seon.test/ticks v)))))
 
+(deftest a-cite-holds-what-it-names-and-its-render-reads-the-rest
+  ;; docs/references.md#an-entity-cites: the record holds what a cite names, each target by its identity alone, and the
+  ;; cite's render reads the section's text and the function's source from the db; the page shows them as before
+  (let [db (seeded 10)
+        c (:tree (ctx/build (seon.db/index) db (aid db) :b))
+        targets (map :seon.cite/target (vals (get-in c [:task :seon.cite/_of])))
+        page (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
+        text (str/join "\n" (map seon.render/part-text (filter #(and (vector? %) (= 'seon.render.ui/cite (first %))) (tree-seq coll? seq page))))]
+    (is (= #{#{:db/id :var/name} #{:db/id :seon.doc/address}} (set (map (comp set keys) targets)))
+        (str "each target by its identity alone, no :seon.doc/text, no :form/src: " (pr-str targets)))
+    (is (str/includes? text "What x does.") "the page shows the section's text, read by the render")
+    (is (str/includes? text "(defn f0 [x] x)") "and the function's source")))
+
 (deftest a-cite-joins-its-target-and-a-symbol-joins-by-name
   ;; a cite's target is a ref (docs/references.md#an-entity-cites): the cite joins the var it names, its form and its
   ;; callers, which join by :by, ctx's one option beside Datahike's pull syntax (docs/ctx.md#the-pattern): a symbol a form
@@ -1099,8 +1120,10 @@
         c (ctx/build (seon.db/index) db (aid db) :b)]
     (let [cite #(get-in (t %1) [:seon.cite/_of (id db [:seon.cite/id (str "lab/ctx " %2)])])]
       (is (= ['app.x/f0] (keep #(get-in % [:seon.cite/target :var/name]) (vals (:seon.cite/_of (t c))))) "the cite of the var: its target")
-      (is (= "(defn f0 [x] x)" (get-in (cite c 'app.x/f0) [:seon.cite/target :var/form :form/src])) "the var whole, its form joined")
-      (is (some #{"app.x/c-1"} (names (get-in (cite c 'app.x/f0) [:seon.cite/target :callers]) :form/id)) "its caller: the form naming it, by the same name reversed")
+      (let [f0 (:tree (ctx/build (seon.db/index) db (get-in (cite c 'app.x/f0) [:seon.cite/target :db/id]) nil
+                                 (render/schema-property (seon.db/index) :seon.cite/target-read :seon.ctx/pattern)))]
+        (is (= "(defn f0 [x] x)" (get-in f0 [:var/form :form/src])) "the var whole as its render reads it, its form joined")
+        (is (some #{"app.x/c-1"} (names (:callers f0) :form/id)) "its caller: the form naming it, by the same name reversed"))
       (let [rep (d/with db [{:db/id "f" :form/id "app.x/f1-1" :form/src "(defn f1 [])"} {:db/id "v" :var/name 'app.x/f1 :var/form "f"}
                             {:seon.cite/id "lab/ctx app.x/f1" :seon.cite/of [:seon.task/id "lab/ctx"] :seon.cite/target "v" :seon.cite/depth :doc :seon.cite/order 5}])
             c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]
@@ -1633,9 +1656,9 @@
     (is (= [{:seon.agent/task [:a :b] :seon.agent/key2 [:c]} :seon.agent/key]
            (render/expanded (seon.db/index) [{:seon.agent/task [:a] :seon.agent/key2 [:c]} :seon.agent/key {:seon.agent/task [:b :a]}]))
         "merged at the first clause that asked it, key by key, each clause once")
-    (is (str/includes? (str (try (render/expanded (seon.db/index) [{:seon.agent/agents [:seon.agent/key]} {:seon.agent/agents 2}]) nil
+    (is (str/includes? (str (try (render/expanded (seon.db/index) [{:seon.agent/agents 3} {:seon.agent/agents 2}]) nil
                                  (catch clojure.lang.ExceptionInfo e (ex-data e))))
-                       "asked twice")
+                       "asked twice and one of them is a depth")
         "a join asked twice where one is a depth is refused, never guessed")))
 
 (deftest the-documented-form-names-the-role-and-stores-two-clauses
@@ -1651,6 +1674,36 @@
     (is (= [:seon.db/agent-fact {:my.ns/_of [:my.ns/text]}] stored (:seon.ctx/pattern (d/pull db' [:seon.ctx/pattern] [:seon.agent/key k])))
         "two clauses: the role's name and the join added")
     (is (= "lab/ctx" (:seon.task/id task)) "and its pull still holds its task")))
+
+(deftest a-depth-join-asks-its-below-option-under-its-last-level
+  ;; docs/ctx.md#the-pattern: a depth join's :below option is what it asks below its last level (seon.render's again): entries to the
+  ;; depth, and below the last of them only what :below asks, here their ids, so an entry says how many are below it and nothing is cut
+  ;; silently. A :below on a join that is no depth is refused, as is a plain join added beside a depth of the same key
+  (let [ks ["depth/a" "depth/b" "depth/c" "depth/d" "depth/e"]
+        db (:db-after (d/with (ts/test-db) (into (mapv (fn [x] {:seon.agent/key x :seon.agent/turn 1}) ks)
+                                                 (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/agents #{{:seon.agent/key y}}}))))
+        ix (seon.db/index)
+        down #(first (vals (:seon.agent/agents %)))
+        tree (fn [p] (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "depth/a") :b p)))
+        refused (fn [p] (str (try (render/pattern ix p) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))))
+        n (seon.config/value :seon.config.render/agent-tree-depth)]
+    (let [t (tree [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2}])
+          last-full (down t)]
+      (is (= ["depth/a" "depth/b"] (mapv :seon.agent/key [t last-full])) "entries to the depth: the entity and one level more")
+      (is (= (pdb/eid db :seon.agent/key "depth/c") (:db/id (down last-full))) "the last full level holds the ids below it")
+      (is (nil? (:seon.agent/key (down last-full))) "and nothing else of them"))
+    (is (= (render/pattern ix [:seon.agent/key {:seon.agent/agents [:seon.agent/key {:seon.agent/agents [:db/id]}]}])
+           (render/pattern ix [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2}]))
+        "the joins written out, each asked by its key without :below")
+    (let [t (tree [:seon.agent/key {[:seon.agent/agents :below [:db/id]] :seon.config.render/agent-tree-depth}])
+          levels (take-while some? (iterate down t))]
+      (is (= (subvec ks 0 n) (vec (keep :seon.agent/key levels))) "a config key's value, the same way")
+      (is (nil? (:seon.agent/key (last levels))) "below the last, ids alone"))
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :below [:db/id]] [:seon.agent/key]}]) "it takes a depth")
+        "a :below on a join that is no depth: refused, never ignored")
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2} {:seon.agent/agents [:seon.agent/status]}])
+                       "asked twice and one of them is a depth")
+        "a plain join added beside a depth of the same key: refused, saying why")))
 
 (deftest a-join-asks-its-enclosing-pattern-again-to-a-depth
   ;; docs/ctx.md#the-pattern: a join's sub-pattern may be a depth, a positive integer or a config key naming one: the enclosing pattern
@@ -1682,3 +1735,4 @@
                                         (catch clojure.lang.ExceptionInfo e (pr-str (ex-data e))))))]
     (is (str/includes? (str said) "no member is held at") said)
     (is (str/includes? (str said) (str "at their entity ids: " m)) "and it names the keys the join holds")))
+

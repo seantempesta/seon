@@ -558,6 +558,23 @@
     (is (= [] (program/load-diff! main branch)))
     (is (= 9 ((resolve 'app.pt-src/twice) 3)) "the branch's imported redefinition runs in the agent")))
 
+(deftest a-process-that-runs-another-program-than-its-branch-is-told-so
+  ;; Sean, 2026-11-11 (the runtime invariant): a process runs its branch's program, and a run asks before its first item.
+  ;; Tonight's first class: a tree branch's imported change never loaded, so the agent ran main's twice
+  (let [main (main-with-file)
+        branch (d/db-with main (source/replace-tx main {"src/app/pt_src.clj" (clojure.string/replace pt-text "(add x x)" "(* 3 x)")}))]
+    (hold! 'app.pt-src pt-text)
+    (is (= '[app.pt-src/twice] (mapv :var (program/program-differs main branch))) "before the diff loads: twice is main's")
+    (program/load-diff! main branch)
+    (is (= [] (program/program-differs main branch)) "after it: the branch's program")))
+
+(deftest a-test-fixture-is-a-file-fact-of-the-branch
+  ;; Data model, 2026-11-11: a fixture a test reads is a file fact (:fixture in :seon.config.source/things), read from the
+  ;; branch (my.branch/file over seon.source/held-text), so an agent's run reads the branch's fixture, never a checkout's
+  (let [db (empty-db)
+        db (d/db-with db (source/import-tx db {"test/seon/pt_fixture.edn" "{:recorded 1}\n"}))]
+    (is (= "{:recorded 1}\n" (source/held-text db "test/seon/pt_fixture.edn")))))
+
 (deftest a-form-that-fails-at-load-is-named
   ;; root's ruling, 2026-10-27: a definition that fails at load fails the load loudly, naming the
   ;; form; it said only "did not load in seon.task-test: nil where a ... Future is required"
@@ -725,9 +742,11 @@
         ;; the entry's line as the file has it (a property added to the entry moves with it), and
         ;; its form with :paused added, as an edit would write it
         status-line (some #(when (str/starts-with? % " :seon.task/reason ") %) (str/split-lines text))
-        paused (str/trim (subs (str/replace status-line ":string" "[:string {:min 1}]") (count " :seon.task/reason ")))
+        paused "[:string {:min 1}]"
+        ;; another entry's whole line, whatever its form holds (a description rides the entry)
+        merged-line (some #(when (str/starts-with? % " :seon.task/merged-t ") %) (str/split-lines text))
         edit (fn [tx] (get (source/files (d/db-with db tx) [facts-path]) facts-path))]
-    (is (str/ends-with? status-line " :string") "the entry's line is its plain value, as the edit expects")
+    (is (and status-line merged-line) "the two entries the edits name are lines of the file")
     (testing "every schema resource imported and written back unchanged is the same text"
       (let [dir (java.io.File. (str here "/resources/seon/schemas"))
             files (into {} (for [f (.listFiles dir) :when (str/ends-with? (.getName f) ".edn")]
@@ -737,11 +756,11 @@
         (is (seq files) "the schemas directory holds resources")
         (is (= files (source/files db (source/source-files db))))))
     (testing "a replaced value: only its changed part"
-      (is (= (str/replace text status-line (str/replace status-line ":string" "[:string {:min 1}]"))
+      (is (= (str/replace text status-line (str " :seon.task/reason " paused))
              (edit [{:schema/key :seon.task/reason
                      :schema/form paused}]))))
     (testing "a removed entry takes its line"
-      (is (= (str/replace text "\n :seon.task/merged-t :int" "")
+      (is (= (str/replace text (str "\n" merged-line) "")
              (edit [[:db/retractEntity [:schema/key :seon.task/merged-t]]]))))
     (testing "a new key after the last entry, read back as written"
       (let [out (edit [{:schema/key :seon.task/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
