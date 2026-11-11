@@ -1132,15 +1132,18 @@
   "Root's session, made at the boot of a main that has none (`root-session-boot-tx`), an ordinary agent made the ordinary way: an agent
   entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern
   `root-session-pattern`, and the task request/root of the chat template (seon.template/request-tx), parked, its agent that entity, so
-  the first message's wake spawns it. Root's own entity is untouched: an entity's id derives from its identity, so it cannot take a
-  key too. See docs/users.md#roots-session."
+  the first message's wake spawns it. The user started it (:seon.task/started-by, the user's :seon.agent/agents: docs/users.md#who-started-whom).
+  Root's own entity is untouched: an entity's id derives from its identity, so it cannot take a key too. See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db]
   (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))]
     (if (contract/error? tx)
       (throw (ex-info (str "root's session task was refused: " (:seon.error/message tx)) tx))
-      (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)}]
-            (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked})))))
+      ;; started by the user: the user's tree holds root's session and what it launches (docs/users.md#who-started-whom)
+      (let [user (task/sender (cfg/value :seon.config.root/user-name))]
+        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)}
+               (assoc user :seon.agent/agents "root-session")]
+              (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
 (defn root-session-boot-tx
   "At boot, root's session: made when main has none (`root-session-tx`; the owner's ruling, root's agent is there from boot), else

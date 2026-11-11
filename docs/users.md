@@ -75,6 +75,10 @@ One writer per attribute (docs/sharing.md#where-a-fact-lives). The same agent en
 
 An agent reads its main half at `:seon.agent/main-commit`, the main its turn opened on. A pull through a ref only another branch holds answers nothing, so the user's walk reads each agent's main half from main and asks the agent for the rest (stage 4).
 
+### Who started whom
+
+The agents form one tree rooted at the user (owner, 2026-11-11, "now it's an open graph so agents can have subagents"): a starter's `:seon.agent/agents` holds each agent started for a task it released, written at the agent's start from the task's `:seon.task/started-by` (```seon.task/start-tx```), and an agent's parent, its point of contact, is the starter of the task it works. `:seon.task/started-by` says who released the task, written where it is released, by who released it: a person's request through root's `:ask` (the asker), an agent's launch (the agent, ```seon.agent/launch!```), and a release at root's REPL (```my.root/run!```, ```my.root/request!```), whose evaluator is the user, as root's evals are recorded by the user. Root's session is an agent like the others, started by the user (```seon.root/root-session-tx```), so the user's tree holds it and what it launches. A store kept from before this rule holds agents no starter's set names; no boot adopts them (a stored shape changes by an erase, never a migration).
+
 ### Each role's pull
 
 A pattern is data on the entity's schema (`:seon.ctx/pattern`), or the entity's own when it edits it; each join is one its refs imply (```seon.db/implied-pattern```). After stage 1a each is read straight from its schema entry:

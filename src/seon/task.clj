@@ -251,7 +251,8 @@
   open :stalled problem never outlives it)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db] (let [live (:seon.status/live (contract/properties :seon.agent/status))
-             agents (remove (fn [[a]] (:seon.user/name (d/entity db a))) (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db))]
+             ;; every agent still shown live, read by its status (no join through the system entity: docs/users.md#who-started-whom)
+             agents (remove (fn [[a]] (:seon.user/name (d/entity db a))) (d/q '[:find ?a :in $ [?s ...] :where [?a :seon.agent/status ?s]] db (vec live)))]
          (-> []
              (into (mapcat (fn [[a]] (when (live (:seon.agent/status (d/entity db a)))
                                        [[:db/add a :seon.agent/status :dead]])))
