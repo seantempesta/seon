@@ -991,10 +991,17 @@
   (let [f (java.io.File. (str runs "/root.port"))]
     (when (.isFile f) (parse-long (str/trim (slurp f))))))
 
+(defn runner-end
+  "The last lines of what a runner said, joined, enough to hold what stopped it: its error, where, and the verdict lines after them. Three lost the error, leaving
+  only where and the two verdicts."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [text] (str/join " | " (take-last 6 (remove str/blank? (str/split-lines text)))))
+
 (defn build-failure
   "What a checkout's failed build says, for whoever asked: the exception it names, where, and when the candidate's files ({path text})
   hold that place, the form written there up to its first blank line, so an agent reads which form of its own stops the build. A build
-  that names no exception says so. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  that names no exception says so, with how it ended (runner-end): its log is in the checkout the run removes, so the error is
+  the only place its words survive. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :string [:maybe :map]] :string]}
   [out files]
   (if-let [[_ ex msg path line] (or (re-find #"Unhandled exception \(([^)]*)\): (.*)\n\s*at \./([^:\n]+):(\d+)" out)
@@ -1005,13 +1012,7 @@
           form (when text (->> (str/split-lines text) (drop (dec (parse-long line))) (take-while (complement str/blank?)) (str/join "\n")))]
       (str "the gate's build failed: " ex ": " msg ", at " path ":" line
            (if (seq form) (str ", where your change wrote: " form) ", a place your change's files don't hold")))
-    "the gate's build failed and named no exception"))
-
-(defn runner-end
-  "The last lines of what a runner said, joined, enough to hold what stopped it: its error, where, and the verdict lines after them. Three lost the error, leaving
-  only where and the two verdicts."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [text] (str/join " | " (take-last 6 (remove str/blank? (str/split-lines text)))))
+    (str "the gate's build failed and named no exception; it ended: " (runner-end out))))
 
 (defn uncommitted
   "The files git sees changed in the checkout at dir, `git status --porcelain`'s lines, which no merge of the program carries: [] when none, or
@@ -1205,8 +1206,10 @@
 (defn run-tests
   "The :tests effect: tests on a checkout of the merge candidate (run-on-checkout), proved by the system through its :ctx's
   :prove-tree (seon.system/prove-tree!, which root binds), its answer {:value {:results :ms :log :digests :failures :kept}} or
-  its declared error; a named run reuses what this candidate already answered (run-held). See
-  docs/merging.md#a-merge-runs-what-the-change-reaches."
+  its declared error; a named run reuses what this candidate already answered (run-held). With :base (each test's digest as
+  main held it at the task's base, seon.task's :seon.task/deferred), the answer's :main-red names its reds that are main's,
+  not the change's (seon.proofs/main-red: the change does not reach the test, or main's verdict at that digest is red,
+  read by reds-at), which the gate never holds the task on. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [repo branch all?] :as req} :req {:keys [prove-tree]} :ctx}]
   (let [repo (or repo (when all? (str (cfg/checkout))))
@@ -1220,7 +1223,16 @@
       (contract/error? sha) sha
       (or all? (:built? req)) (run-on-checkout nil sha req)
       :else
-      (run-held (partial run-on-checkout prove-tree) sha req))))
+      (let [r (run-held (partial run-on-checkout prove-tree) sha req)
+            {:keys [results digests]} (:value r)
+            base (into {} (filter val) (:base req))
+            ;; main's verdict at each red test's base digest: the one reader (reds-at), an io-error excusing nothing
+            found (when (seq base)
+                    (let [at (reds-at (into {} (for [[t s] results :let [b (get base t)] :when (and b (not= :pass s))] [t b])))]
+                      (when-not (contract/error? at) (into {} (for [[t f] at] [(get base t) {:pass 0 :fail 1 :error 0 :failures [f]}])))))]
+        (if (and (seq base) (map? results))
+          (assoc-in r [:value :main-red] (proofs/main-red results (or digests {}) base (or found {})))
+          r)))))
 
 ;; ---- a session's items (Flow step 4) -------------------------------------------------
 
