@@ -440,7 +440,10 @@
     (loop [db (seeded 30 small-window-pattern) c (ctx/build (seon.db/index) db (aid db) :b) i 0 bad [] unshared [] checked 0]
       (if (= i 70)
         (do (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
-            (is (< 500 checked) (str "the sharing check reads the paths no change touched: " checked))
+            ;; checked counts, over the 70 changes, each path of the record that the change did not touch and whose value was compared, old
+            ;; record against new, for being the same object: 978 on this seed (it was over 1,000 while a cite held its section's text
+            ;; and its function's source, which jolt/citepull took out of the record). The floor says the check read most of them, not none
+            (is (< 900 checked) (str "the sharing check reads the paths no change touched: " checked))
             (is (empty? unshared) (str "a path no change touched that is a new object: " (first unshared))))
         (let [tx (change db i r) rep (d/with db tx) db' (:db-after rep) c' (ctx/patch c db' (:tx-data rep) :b)
               b (ctx/build (seon.db/index) db' (aid db') :b)
