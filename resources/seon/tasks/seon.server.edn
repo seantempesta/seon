@@ -32,4 +32,8 @@ Proofs, red first: a read by a client that does not hold the agent leaves its br
   :seon.task/proofs #{seon.server-test/a-read-by-a-client-not-holding-the-agent-leaves-its-branch-unchanged
                       seon.server-test/a-message-between-two-reads-reaches-the-next-turn
                       seon.server-test/a-context-read-of-an-unattached-task-makes-no-agent}}
+ {:seon.task/name "an-attach-starts-an-agent-as-a-spawn-does"
+  :seon.task/plan "Owner: Optimization. Found 2026-11-11 by Data model (mail 1605): an agent ATTACHED from outside (seon.server's attach!, seon_attach) and one the system SPAWNED (seon.reconcile's :spawn, seon.task/start-tx) do not hold the same facts on their own entity: the attached agent's pull held no :seon.agent/max-turns while a spawned one holds 40, so a render showing the turn budget works for one and not the other, and the pressure is a fallback in the render (refused: the defect is the start's). Correct, at the cause: one start: attach writes its agent through the same seon.task/start-tx a spawn's start writes (the outside model and holder as its env), so every fact a spawn's agent holds, an attached one holds; list the facts the two write today first (code read), and delete attach's own write of them. Proof: an attached agent's entity and a spawned one's, on the same task, hold the same set of :seon.agent/* attributes but those naming the model and holder."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.server-test/an-attached-agent-holds-what-a-spawned-one-holds}}
 ]
