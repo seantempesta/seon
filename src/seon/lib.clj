@@ -6,7 +6,19 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [jolt.ffi :as ffi] [jolt.scheme :as scm]
             [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config]
-            [seon.edn :as sedn] [clojure.java.shell :as sh] [konserve.jolt.lmdb :as klmdb]))
+            [seon.edn :as sedn] [clojure.java.shell :as sh] [konserve.jolt.lmdb :as klmdb] [jolt.fibers :as fibers]))
+
+(defn sh
+  "Run a command as clojure.java.shell/sh does (args, its options among them; answers {:exit :out :err}), always on a fiber: there
+  Jolt's sh copies the child's pipes on fibers parked on their readiness and waits for its exit as an event, starting no thread.
+  Called from a thread (a server connection's, seon.server/serve!) it ran its copies on futures, threads of Clojure's
+  send-off pool that no proc declares and that outlive the call. A thread's call runs on a fiber of its own here, joined. Every shell of Seon's runs
+  through it. See docs/machine.md#processes."
+  {:malli/schema [:=> [:cat [:* :any]] :map]}
+  [& args]
+  (if (fibers/in-fiber?)
+    (apply sh/sh args)
+    (fibers/join (fibers/spawn #(apply sh/sh args)))))
 
 (def ^:private c-schemas
   "Malli schemas of C types, for contracts derived from an FFI declaration (G1's proto.lib)."
@@ -359,4 +371,4 @@
   {:malli/schema [:=> [:cat :string [:* :string]] :nil]}
   [dir & dirs]
   (run! klmdb/close-envs-under! (cons dir dirs))
-  (apply sh/sh (str (config/checkout) "/target/remove-tree") dir dirs) nil)
+  (apply sh (str (config/checkout) "/target/remove-tree") dir dirs) nil)
