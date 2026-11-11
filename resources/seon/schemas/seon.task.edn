@@ -111,7 +111,7 @@
                         ;; the agents a message woke and a start has not taken yet, and the wakes held for agents that were running
                         ;; (seon.reconcile/wake): a waiting agent's task is ready when its agent is woken
                         [:woken {:optional true} set?] [:late {:optional true} set?]]
- :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :briefed :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated]
+ :seon.reconcile/step [:enum :ignored :done :holder-ended :dead-read :spawned :started :briefed :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated]
  ;; a task as Datahike pulls it (the readers' input)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                     [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]
