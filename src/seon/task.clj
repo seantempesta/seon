@@ -370,7 +370,7 @@
 (defn agents-join
   "The join of the agents an entity started, depth levels deep (`entry-pattern` at each), the last level holding each one's started
   agents as ids alone, so its entry says how many there are below and nothing is cut silently. See docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat pos-int?] :map]}
+  {:malli/schema [:=> [:cat :seon.config.render/agent-tree-depth] :map]}
   [depth]
   {:seon.agent/agents (conj entry-pattern (if (> depth 1) (agents-join (dec depth)) {:seon.agent/agents [:db/id]}))})
 
