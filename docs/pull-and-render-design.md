@@ -66,14 +66,14 @@ Each row is one tip, small enough to land alone, with who builds it, its proof a
 
 Kept current by the Data model session; the newest landed state runs on the standing system, http://127.0.0.1:7777/. "Running to see" is that system showing a live agent's session with hiccup drawn as html, Markdown drawn, structured evals, proofs and diffs, `@ctx` and the page at the first point, and the short system message.
 
-| # | tip | state (2026-11-11, after batch 74) |
+| # | tip | state (2026-11-11, after batch 80) |
 |---|---|---|
 | 1 | a cited schema drawn as what it is; the pattern's description and required parts | landed |
 | 2 | the role named in a pattern; a join to a depth | landed, main b7c5f8f82b (`jolt/rolenames`) |
-| 3 | the boot writes and pattern functions deleted, with the check | built and reworked after Context's review: the last level of a depth is the depth join's own `:below` option (`{[:j :below [:id]] 2}`), so adding a plain join always merges; red first and the equality with the old user pattern seen. Its whole prove on current main is running (`jolt/rolesource`). The standing store is erased when it and the rename are on main (the owner's yes) |
+| 3 | the boot writes and pattern functions deleted, with the check | built and reworked after Context's review: the last level of a depth is the depth join's own `:below` option (`{[:j :below [:id]] 2}`), so adding a plain join always merges; red first and the equality with the old user pattern seen. Handed over on named runs (`jolt/rolesource`). The standing store is erased when it and the rename are on main (the owner's yes) |
 | 4 | descriptions on the answer's keys, a file's path, a task's proofs | landed, main f56a85c416; the join-shape sentence not started |
 | 5 | the short system message | landed, main 5f0bb3c8e7 (batch 69) |
-| 6 | `@ctx` and the hiccup at the first point; the cite's pull shortened | the real `@ctx`, byte for byte, landed (batch 69). The cite's pull is built (`jolt/citepull`), its whole prove on current main running: a cite holds what it names, and its render reads the content from the db by the pattern its schema declares |
+| 6 | `@ctx` and the hiccup at the first point; the cite's pull shortened | the real `@ctx`, byte for byte, landed (batch 69). The cite's pull is handed over (`jolt/citepull`): a cite holds what it names, and its render reads the content from the db by the pattern its schema declares |
 | 7 | a proof's four states; every failure and what it calls | landed, main f56a85c416 (`jolt/proofstates`) |
 | 8 | move A, and with it text fields as Markdown by a `:seon.db/text` schema | not started. Its first commit is Web's: where the walk places an attribute, the render its schema declares draws its value (today only an entity is drawn by a schema lookup) |
 | 9 | move C, with the named sub-patterns | not started; waits on 2 and 3 |
@@ -100,7 +100,13 @@ Kept current by the Data model session; the newest landed state runs on the stan
 | - | the calls Seon makes for an agent at a turn's open are stored evals (existing attributes, written by `seon.turn`; `:seon.eval/by` the system's entity): the same data gives the same bytes after a wipe, a compaction or a change to a render's code | ruled; Context builds |
 | - | the task is shown once: whole in `@ctx`, a line and what is derived from it on the model's page | ruled; Context builds |
 | - | a refined plan is tried again from the start: two reconcile rules. The refine is done on the work's branch; its plan reaches main at the run's end by `seon.task/carry-tx` (no new attribute); the rerun starts fresh from main. A refine is known by its cite of the refine section and judged by the plan it leaves | ruled; Context builds. A merged task's rerun needs a start point as data: open |
-| - | every attribute an entity schema names says what it is: about 130 given a `:description`, and a count in `seon.db-test` that may only fall | built (`jolt/descriptions`); its count is pinned from its first run, then proved |
+| - | every attribute an entity schema names says what it is: about 130 given a `:description`, and a count in `seon.db-test` that may only fall | handed over (`jolt/descriptions`, on `jolt/citepull`). The count in a test was dropped as a second mechanism: the class that judges it is the entry seon.problems/a-schema-entry-that-says-nothing-is-a-problem |
+| - | a pull holds what is the agent's own and what it may edit: a cited task is held with its plan, instructions, proofs and cause (the task content a run's end carries), so a task that curates another reads and writes that plan at the cite's path. A refine cites its work task and needs nothing (a need means finished before I start) | built (`jolt/ctxids`, on `jolt/citepull`); lands under Context's refine chain |
+| - | a window says how many members its join has, as metadata on the join's value (`(-> @ctx :evals meta :seon.ctx/count)`), so what it left out is data and the value stays a map to sort and filter. An agent's own pull is never windowed: the count serves root's windows and a cited function's callers | built (`jolt/joincount`); lands with Web's page part |
+| - | a task's judged reasons are in its pull under the done rule's own schema (`(-> @ctx :seon.agent/task :seon.task/reasons)`), no new attribute; the flattened strings stop being written when the page is off them | handed over (`jolt/taskreasons`), a rider of the erase |
+| - | what makes the turns is read from the members: a history join whose members carry a turn number; every other history join is placed against their edges. No join is named in code and no schema is flagged | ruled; Web builds it on the relanding, with a law that every history join a pattern declares asks its link's transaction |
+| - | a required join keeps the transaction its role asks of each member's link; a pattern that asks it without is refused | written and seen red then green; lands with the relanding (the erase first) |
+| - | the task's kind is read at 20 sites for three questions, each with one answer in data: a merge step is a task that needs a task on its own branch; judged by the plan it leaves is the cite of one section, for a design and a refine both; who does a task is a ref, once a session is an agent | three entries filed as trials |
 | - | the planted-world proof (a schema with both renders, joined in a pattern, appears with no code edit) | in build (`jolt/planted`, Web); tips 8 and 9 land with its two halves |
 
 ## Not decided
