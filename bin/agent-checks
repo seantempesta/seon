@@ -30,10 +30,10 @@ ev "redefine twice so its test fails" "(in-ns 'tests.inv.lab) (defn twice {:mall
 check i "tests.inv.lab/twice-doubles" "$(prove)"
 ev "narrow the registered entry so the contracted test fails" "(my.schema/register! :tests.inv.lab/amount [:int {:min 10}])" > /dev/null
 check ii "tests.inv.lab/amount-passes" "$(prove)"
-call eval agent=root intent="end the checks' agent: an attach resumes it in a new process" code="(seon.root/kill! sys :$A)" > /dev/null
+call eval agent=root intent="end the checks' agent: an attach resumes it in a new process" code="(seon.system/kill! sys :$A)" > /dev/null
 # the kill's end, read from root's view (an event: its status gone from :idle), never a sleep; bounded by the asks it makes
 for i in {1..60}; do
-  call eval agent=root intent="read the checks' agent's status" code="(get-in (seon.root/state sys) [:agents :$A :status])" | grep -q ":value :idle" || break
+  call eval agent=root intent="read the checks' agent's status" code="(get-in (seon.system/state sys) [:agents :$A :status])" | grep -q ":value :idle" || break
 done
 call attach task=$T > /dev/null
 R=$(prove)
@@ -42,5 +42,5 @@ check iv-amount "tests.inv.lab/amount-passes" "$R"
 ev "put twice back" "(in-ns 'tests.inv.lab) (defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))" > /dev/null
 ev "put the registered entry back" "(my.schema/register! :tests.inv.lab/amount :int)" > /dev/null
 check iii "reused 2" "$(prove)"
-call eval agent=root intent="end the checks' agent" code="(seon.root/kill! sys :$A)" > /dev/null
+call eval agent=root intent="end the checks' agent" code="(seon.system/kill! sys :$A)" > /dev/null
 if (( st )); then print "AGENT CHECKS FAILED"; exit 1; else print "AGENT CHECKS OK"; fi

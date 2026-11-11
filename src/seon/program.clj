@@ -967,7 +967,7 @@
   (or (get interns (symbol (name s))) (find-var s)))
 
 (defonce ^{:private true :doc "What this process's binary was built from, as bin/build recorded it beside the binary (target/seon.program,
-  seon.root/built-program's answer), or nil when it recorded none: read once, by its first reader (root's boot, before it
+  seon.system/built-program's answer), or nil when it recorded none: read once, by its first reader (root's boot, before it
   forks the fork server, whose agents inherit it), and kept across a reload of this namespace, so a build that moves the
   record later never changes what a running binary says it holds. See docs/source.md#the-binary-records-its-program."}
   built
@@ -1237,11 +1237,11 @@
   (let [tnss (test-nss db)
         ;; lf: db's live forms, which load-all! has read (a second read was 0.6-1.1 s of a fork server's start)
         live (group-by :ns lf)
-        ;; the tree db's program was imported from, as db states it (root's :seon.root/source fact), which every :ns/file is
+        ;; the tree db's program was imported from, as db states it (root's :seon.system/source fact), which every :ns/file is
         ;; relative to: never this process's config, which a root given its source as start!'s options (every check mode,
         ;; boot-twice, a cycle) never holds, so its fork server loaded all 77 test namespaces form by form, 12.2 s of its
         ;; first fork against 1.06 s whole (measured 2026-11-10)
-        root (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source :root)
+        root (some->> (pdb/eid db :seon.system/id :root) (d/pull db [:seon.system/source]) :seon.system/source :root)
         ;; the file require reads is the one a source dir holds at the namespace's path, and it holds every
         ;; form main has of it, as main has it: a file edited since its import, or one on no source dir (a
         ;; fixture under test/build/), is never what require loads
@@ -1435,7 +1435,7 @@
   "The vars that read the checkout's files or run the binary built from them: a test whose
   reached forms reference one has the whole tree as an input, so its reach digest covers it
   (graph-index), unless the form referencing it defines one of env-readers. The host's file
-  readers (io/resource reads the resources/ classes), and seon.test-store/binary-sh, the one way a test runs target/seon, bin/root or
+  readers (io/resource reads the resources/ classes), and seon.test-store/binary-sh, the one way a test runs target/seon, bin/system or
   bin/check: what such a test proves is the whole program the binary is built from."
   '#{clojure.core/slurp clojure.core/file-seq clojure.java.io/resource seon.test-store/binary-sh})
 
@@ -1453,7 +1453,7 @@
   "The vars a test calls to read files raw: the tree-readers but binary-sh (which runs the binary: its tests are digested by
   what they reach). A raw read takes the whole tree only when it reads the checkout (checkout-read?); src's readers of one
   part of the checkout (the wiki, the task files, the source) take that part's class instead (env-class-readers: the
-  wiki's seon.doc/pages and load-dir-tx, seon.root/task-files, seon.fx/read-source), so a wiki edit moves only the tests
+  wiki's seon.doc/pages and load-dir-tx, seon.system/task-files, seon.fx/read-source), so a wiki edit moves only the tests
   that read the wiki. See docs/source.md#tests-run-by-reach."
   (disj tree-readers 'seon.test-store/binary-sh))
 
@@ -1465,7 +1465,7 @@
   (:env). A form reading files (tree-readers) or running a process (process-vars, binary-vars)
   takes every class, which graph-index adds from its flags, not this map."
   '{seon.fx/declared-refs :seon.env/system
-    seon.system/read-decl :seon.env/system
+    seon.graph/read-decl :seon.env/system
     seon.web/handler :seon.env/web
     seon.fork-server/dev-classpath! :seon.env/deps
     clojure.java.shell/sh :seon.env/bin
@@ -1495,7 +1495,7 @@
   ;; as file-readers, a 4-line wiki edit ran 117 tests (2026-11-11)
   '{seon.doc/pages :seon.env/docs
     seon.doc/load-dir-tx :seon.env/docs
-    seon.root/task-files :seon.env/tasks
+    seon.system/task-files :seon.env/tasks
     seon.fx/read-source :seon.env/src})
 
 (defn- test-class-of
@@ -2005,7 +2005,7 @@
 
 (def root-entries
   "Where the binary's own code starts, the roots of root-reach: its one entry (its modes, root's boot and procs among
-  them: system.edn's procs are edges of seon.system/read-decl, the reach graph's :data-refs). See
+  them: system.edn's procs are edges of seon.graph/read-decl, the reach graph's :data-refs). See
   docs/source.md#the-binary-records-its-program."
   '[seon.main/-main])
 
@@ -2023,7 +2023,7 @@
   "Every name root's binary runs code from, as the data that names it says: root-entries, system.edn's procs and effects
   (g's :data-refs, seon.fx/declared-refs), the renders schema entries name (a schema row's :refs: :seon.render/hiccup,
   :model and their kin) and the qualified symbols the config in force holds (cfg), less any in a test namespace (a
-  scripted model's fixture is the agent's, loaded from main). requiring-resolve's run-time names are these: seon.system's
+  scripted model's fixture is the agent's, loaded from main). requiring-resolve's run-time names are these: seon.graph's
   procs, seon.render's renders, seon.model's script; seon.cost's are a cost proof's own (a test's), seon.main's
   seon.check/-main a test driver. See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :map :map] [:vector :qualified-symbol]]}
@@ -2043,7 +2043,7 @@
 
 (defn root-reach
   "The vars of reach graph g that root's process runs from its binary (root-forms' definitions). A change to one of them
-  is judged only by a binary built with it (seon.root/binary-current), and by every test that starts a root (root-digest).
+  is judged only by a binary built with it (seon.system/binary-current), and by every test that starts a root (root-digest).
   See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :map :map] [:set :qualified-symbol]]}
   [{:keys [rows] :as g} cfg]
@@ -2181,7 +2181,7 @@
   its files' texts (:file/text), its config entries (:config/form) and its namespaces' tails, each by its entity, a content id of its identity (docs/storage.md#ids),
   so the index's order is the same on every branch and nothing is sorted. It moves when a form, schema entry or
   ns tail is added, replaced or removed, and not on a write of data. What a main run of the test
-  service reads of main's program (seon.root/prove!): per-test digests (graph-index) need the
+  service reads of main's program (seon.system/prove!): per-test digests (graph-index) need the
   checkout's tests loaded, which is the run's own work. Cost: one read of three attributes'
   datoms (measured on the standing root's main, 2699 forms, 660 schema entries, 129
   namespaces: 0.79M ticks, 5.0 MB, of which the index read is 0.52M ticks, 3.9 MB)."
@@ -2233,7 +2233,7 @@
 (def index-roots
   "The vars an index of a tree reaches: what makes a program's facts from its files (import-tree!, down through the
   analysis and the account) and what digests them. See docs/source.md#the-binary-records-its-program."
-  '[seon.root/import-tree! seon.program/program-digest])
+  '[seon.system/import-tree! seon.program/program-digest])
 
 
 (defn index-code

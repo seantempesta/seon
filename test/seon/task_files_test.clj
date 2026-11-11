@@ -7,14 +7,14 @@
             [datahike.api :as d]
             [seon.db :as pdb]
             [seon.task :as task] [my.root :as root] [clojure.string :as str] [clojure.java.shell :as sh] [seon.config :as config]
-            [seon.ref :as ref] [seon.doc :as doc] [seon.root] [test-runner :as runner]))
+            [seon.ref :as ref] [seon.doc :as doc] [seon.system] [test-runner :as runner]))
 
 (defn- empty-db [] (ts/test-db))
 
 (defn- shipped-task-files
-  "The task files the checkout ships (seon.root/task-files of its resources/seon/tasks), never the running
+  "The task files the checkout ships (seon.system/task-files of its resources/seon/tasks), never the running
   root's :seon.config.root/tasks-dir, which a root may point elsewhere."
-  [] (seon.root/task-files (str (config/checkout) "/resources/seon/tasks")))
+  [] (seon.system/task-files (str (config/checkout) "/resources/seon/tasks")))
 
 (def ^:private file-a
   "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}
@@ -120,7 +120,7 @@
         db0 (runner/program)
         db0 (d/db-with db0 (vec (remove #(contains? (:schema db0) (:db/ident %)) pdb/schema)))
         ps (into (sorted-map) (mapcat #(doc/pages co %)) (config/value :seon.config.root/wiki-dirs))
-        [db wiki-refused] (refusal db0 (seon.root/wiki-tx db0 co))
+        [db wiki-refused] (refusal db0 (seon.system/wiki-tx db0 co))
         files (shipped-task-files)
         decls (vec (mapcat val files))
         tx (task/load-tx db files)
@@ -160,12 +160,12 @@
   ;; need on another file's task is a need on it
   (let [dir (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-task-files-" (random-uuid))) (.mkdirs))
         _ (spit (java.io.File. dir "demo.edn") file-a)
-        load! (fn [db] (d/db-with db (task/load-tx db (seon.root/task-files (str dir)))))
+        load! (fn [db] (d/db-with db (task/load-tx db (seon.system/task-files (str dir)))))
         db (load! (empty-db))]
     (is (= :whole (:seon.task/kind (task/task db "demo/parse"))) "parse works and merges itself")
     (is (nil? (task/task db "demo/parse-merge")) "and has no merge task")
     (is (= #{"demo/parse"} (:seon.task/needs (task/task db "demo/index"))) "a need stays on the task")
-    (is (= [] (task/load-tx db (seon.root/task-files (str dir)))) "an unchanged file writes nothing")
+    (is (= [] (task/load-tx db (seon.system/task-files (str dir)))) "an unchanged file writes nothing")
     (spit (java.io.File. dir "demo.edn") "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}]")
     (is (= :cancelled (:seon.task/execution (task/task (load! db) "demo/index"))) "a removed task cancels")))
 
@@ -218,7 +218,7 @@
 (deftest loading-an-example-twice-changes-nothing-and-a-missing-file-is-an-error
   ;; my.root/load-example!: an example session's file (seon.ctx.session/session-tx's transactions, written with pr-str)
   ;; is transacted once; a second load of it writes nothing (main's t does not move); a file that is not there,
-  ;; does not read or is not that vector is the :seon.root/example-refused error and writes nothing
+  ;; does not read or is not that vector is the :seon.system/example-refused error and writes nothing
   ;; (on the process's shared root, with keys of its own: a root's boot was most of this test's time)
   (let [checkout (seon.config/checkout)
         id (seon.lib/unique-id)
@@ -246,7 +246,7 @@
                                (refused missing) (refused (str runs "/unreadable.edn")) (refused (str runs "/bad.edn"))]))]
         (is (= {:first 2 :second {:ok true :changed 0 :batches 0} :moved false :evals 1 :agents 1} twice)
             "the first load writes its two transactions; the second writes nothing")
-        (is (= [:seon.root/example-refused missing] [type p]))
+        (is (= [:seon.system/example-refused missing] [type p]))
         (is (str/includes? message "not found"))
         (is (str/includes? (nth unreadable 2) "not readable EDN"))
         (is (str/includes? (nth bad 2) "not a non-empty vector of transactions")))

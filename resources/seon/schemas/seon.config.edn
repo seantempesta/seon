@@ -217,7 +217,7 @@
   [:seon.config.native/sqlite-lib {:optional true} :seon.config.native/sqlite-lib]]
 
  ;; the config in force as an entity of its own (docs/config.md#facts-on-main): named by the content id of its map
- ;; (seon.task/config-tx), so the same config is one entity on every branch, and root's entity refs it (:seon.root/config)
+ ;; (seon.task/config-tx), so the same config is one entity on every branch, and root's entity refs it (:seon.system/config)
  :seon.config/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
  :seon.config/config-fact [:and {:seon.db/attributes true :seon.render/hiccup seon.render.ui/config-panel
                                  :description "The config in force: its keys (:seon.config/config) and its content id."}
