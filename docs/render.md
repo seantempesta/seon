@@ -356,6 +356,7 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 - `seon.render.ui/table-cells`: each cell's text read to tell a Markdown table's rule row from its rows (`subs` of the cell's offsets), a cut of data, not of output: the cells are drawn whole from the one scan's spans.
 - `seon.render/result-text`: the EDN envelope of a user message (`{:by .. :code .. :response ..}`) around a response the one printer already printed: the wire, not output.
 - `seon.ctx.search/search`: the call in its last hit's `:more` (`(my.agent/search q {opts})`, q and the options as `pr-str` writes them): code to evaluate that returns the hits it left out, not output.
+- `seon.ctx.wire/describe-msgs`: the path in the call it generates (`(my.agent/describe @ctx [:seon.agent/task])`, the path as `pr-str` writes it): code to evaluate, not output.
 - `my.schema/registration`: the part of a schema form that is no EDN, and where it is, in the invalid registration's message (`pr-str` of the value and its path, whole): the message tells the agent what to quote.
 - `seon.config/resolved`: the config keys a refused combination names, in its error message.
 - `my.root/first-moves!`: the code text it sends an agent to evaluate (the call to `seon.judge/first-move` on a task id): code to evaluate, not output.
