@@ -112,7 +112,7 @@
 
 (def tool-name
   "The name of the model's one tool: repl, which is no Clojure function, so a model does not write its code as (eval '(...)) inside it
-  (Point's ruling 2026-11-11, from the ladder's rung 1). See docs/model.md#one-tool-repl."
+  (the ladder's first rung wrapped two of its five calls so). See docs/model.md#one-tool-repl."
   "repl")
 
 (def eval-tool
