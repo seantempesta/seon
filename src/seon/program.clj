@@ -2037,15 +2037,16 @@
   (lib/digest (str/join " " (sort (distinct (keep #(some-> (comp-of %) cd) (mapcat #(get defs %) roots)))))))
 
 (defn- roots-of
-  "root-roots of g under the config in force, kept on g's index while its schemas, data-refs and config are the same values
+  "root-roots of g under the config a process test's root runs with (seon.config/test-root-config, the scripted profile, whichever
+  process plans), kept on g's index while its schemas, data-refs and that config are the same values
   (root-roots reads every schema row and every config value: the index would pay them at each update). Answers
   [roots key]. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map [:maybe :map]] [:tuple [:sequential :qualified-symbol] [:vector :any]]]}
   [g index]
-  (let [k [(:schemas g) (:data-refs g) cfg/config]]
+  (let [k [(:schemas g) (:data-refs g) cfg/test-root-config]]
     (if (and (= (count k) (count (:roots-key index))) (every? true? (map identical? k (:roots-key index))))
       [(:roots index) (:roots-key index)]
-      [(root-roots g cfg/config) k])))
+      [(root-roots g cfg/test-root-config) k])))
 
 (defn- index-answer
   "The function of a key and its starting forms' ids that answers {:digest :process? :binary?} (graph-index)
@@ -2199,3 +2200,28 @@
   Process tests are not automatic). Taking the index, not db, so a caller holding one walks once."
   {:malli/schema [:=> [:cat [:map-of :any [:map [:process? :boolean]]]] [:set :any]]}
   [index] (into #{} (keep (fn [[t {:keys [process?]}]] (when process? t))) index))
+
+(def index-roots
+  "The vars an index of a tree reaches: what makes a program's facts from its files (import-tree!, down through the
+  analysis and the account) and what digests them. See docs/source.md#the-binary-records-its-program."
+  '[seon.root/import-tree! seon.program/program-digest])
+
+
+(defn index-code
+  "The code that indexes a tree, as db's program states it, under inputs: the reach digest of roots
+  (seon.program/graph-index over db's seon.program/reach-graph, as a check step's root is digested), its components and
+  the runtime pins and config keys they read, never the tree or the program's source (blank in inputs: the files are the
+  index's other input). nil when db defines none of roots. What a kept index was made by, so one whose code moved is
+  made again. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat [:or :seon.host/db :map] :seon.program/inputs [:vector :qualified-symbol]] [:maybe :string]]}
+  [db-or-graph inputs roots]
+  (let [g (if (:rows db-or-graph) db-or-graph (reach-graph db-or-graph nil))]
+    (get-in (graph-index g (assoc inputs :tree "" :code "") {"index" roots}) ["index" :digest])))
+
+(defn with-index-code
+  "inputs with the code that indexes the process store, the seeded store a process test's root takes (index-code of
+  index-roots over db or its reach graph), as :seon.env/index in its :config: every process test's digest takes it, so a
+  verdict of a run on a store indexed by other code is no verdict of this one. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat [:or :seon.host/db :map] :seon.program/inputs] :seon.program/inputs]}
+  [db-or-graph inputs]
+  (assoc-in inputs [:config :seon.env/index] (or (index-code db-or-graph inputs index-roots) "none")))

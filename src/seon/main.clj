@@ -172,6 +172,9 @@
     "built-program" (let [r (c/built-program (checkout) (second (seon.config/without-overrides args)))]
                       (if (seon.contract/error? r) (out! "BUILT-PROGRAM FAILED " (shown r)) (out! (seon.edn/encode r)))
                       (lib/c-exit (if (seon.contract/error? r) 1 0)))
+    ;; bin/root start's: the inputs of this checkout's files as they are now, which the boot that follows reads them as
+    ;; (runs/root-inputs.edn), so its agents key test results by what it read, never by a tree id a build recorded
+    "inputs" (do (out! (seon.edn/encode (seon.fx/inputs (or (seon.config/value :seon.config.source/root) (checkout))))) (lib/c-exit 0))
     "embed-worker" (seon.vector/serve!)
     ;; bin/prove --root PORT [NS ...]: prove PORT CHECKOUT [NS ...]
     "prove" (let [[_ port checkout & names] (seon.config/without-overrides args)]

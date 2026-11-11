@@ -53,6 +53,17 @@ if [[ ${1:-} == run ]]; then
   N=$(HOME=$O git config --global user.name 2>/dev/null); E=$(HOME=$O git config --global user.email 2>/dev/null)
   [[ -n $N ]] && export GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME:-$N} GIT_COMMITTER_NAME=${GIT_COMMITTER_NAME:-$N}
   [[ -n $E ]] && export GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL:-$E} GIT_COMMITTER_EMAIL=${GIT_COMMITTER_EMAIL:-$E}
+  # the inputs of the files this boot reads (its catch-up's checkout as it is now), computed here where git runs (root
+  # runs none): the boot hands them to its agents, which key test results by them (seon.root/boot-inputs). A root under a
+  # starter (a test's, a check step's) is handed none and keys by its binary's record, as before
+  # (runs/root-inputs.edn: the runs dir this checkout's root keeps its store and port in, which a test's root does not share)
+  if [[ -z ${SEON_STARTER_FIFO:-} ]]; then
+    rm -f "$G/runs/root-inputs.edn"
+    ( cd "$G/target" && SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
+        JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib ./seon inputs "$@" ) > "$G/runs/root-inputs.edn.new" 2>/dev/null &&
+      tail -1 "$G/runs/root-inputs.edn.new" > "$G/runs/root-inputs.edn"
+    rm -f "$G/runs/root-inputs.edn.new"
+  fi
   cd "$G/target" && SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
     JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib \
     SEON_SERVER_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"

@@ -2876,8 +2876,8 @@
     (is (re-find #"data-standing=\"parked\"[^>]*id=\"agent-b2_2Fa1\"" html) "the parked one in the group that comes first")
     (is (re-find #"data-standing=\"finished\"[^>]*id=\"agent-b2_2Fa3\"" html) "the merged one in the last")
     (let [head (pr-str (ui/root-head {:seon.render/index (seon.db/index) :seon.ctx/ctx (or c {}) :seon.db/db db}))]
-      (is (str/includes? head "1 parked") "the head says so, in the state's plain word")
-      (is (str/includes? head "1 running") "a finished task is not running, whatever its execution still says"))))
+      (is (str/includes? head "1 task parked") "the head says so, in the state's plain word, with what it counts")
+      (is (str/includes? head "1 task running") "a finished task is not running, whatever its execution still says"))))
 
 (deftest how-an-agents-work-stands-is-said-from-its-data
   ;; owner, 2026-11-05: an agent whose task hit its turn cap read "waiting" and "idle", though a capped task is not woken
@@ -4540,3 +4540,35 @@
     (is (str/includes? html "how long a commit takes to reach the fork server") html)
     (is (not (str/includes? html "not measured")) "no gap where the boot loaded nothing")
     (is (str/includes? html "the image held main") html)))
+
+;; docs/render.md#how-the-work-stands: a proof's verdict is what its last run saw at that run's program, not its state now (Tests' task
+;; seon.render/a-verdict-shown-is-at-the-tests-digest; Data model: outside a status, a verdict reads as at its last run), so the agent's
+;; state never says green now of a test edited since
+(deftest the-agents-proofs-read-as-at-their-last-run
+  (let [html (h/html (ui/agent-state {:seon.ctx/ctx {:db/id 1 :seon.agent/task {:seon.task/id "demo/g" :proved {'demo-test/g-test {:seon.test/status :green}}}}
+                                      :seon.db/db (ts/test-db)}))]
+    (is (str/includes? html "1 of 1 proofs green at their last run") html)))
+
+;; docs/render.md#the-page: a fresh system tells a first-time person nothing it has not done (task seon.render/a-fresh-system-says-nothing-
+;; it-has-not-done; seen 2026-11-11 on a fresh store: "1 parked.", "373 tasks not released yet.", "it starts again"): the head's counts say
+;; what they count, the task files' held tasks are folded, and the input says what typing does now
+(deftest a-fresh-system-says-nothing-it-has-not-done
+  (let [db (d/db-with (ts/test-db) (for [i (range 3)] {:seon.task/id (str "demo/held-" i) :seon.task/ns 'demo :seon.task/name (str "held-" i)
+                                                        :seon.task/plan "What exists: nothing." :seon.task/execution :held}))
+        head (h/html (ui/root-head {:seon.render/index (seon.db/index) :seon.ctx/ctx {} :seon.db/db db}))
+        input (h/html (ui/agent-input {:unit "u"} {:id :root :live? false :talks? true}))]
+    (is (str/includes? head "<details") (str "the held tasks are folded: " head))
+    (is (str/includes? head "3 tasks from the task files, not started") head)
+    (is (str/includes? input "Say something and it starts") input)
+    (is (not (str/includes? input "again")) "nothing ran yet: never again")))
+
+;; docs/render.md#the-page: prose a model or a person wrote reads in the system's text face (--font-text, resources/public/css/input.css's
+;; @theme); the theme sets --font-sans to the mono face for the page's chrome on purpose, so Markdown prose is drawn by .seon-md's own rule,
+;; never by a font utility (jolt/readable put font-sans on it, which drew it mono)
+(deftest prose-reads-in-the-text-face
+  (let [css (slurp "resources/public/css/input.css")
+        md (h/html (ui/markdown "A sentence with `code`."))]
+    (is (re-find #"\.seon-md \{ font-family: var\(--font-text\); \}" css) "the Markdown block's face is the text face")
+    (is (re-find #"--font-sans: var\(--font-mono\)" css) "the chrome's face stays mono, which is why no font utility reaches prose")
+    (is (str/includes? md "seon-md") md)
+    (is (not (str/includes? md "font-sans")) "no utility that resolves to the mono face")))

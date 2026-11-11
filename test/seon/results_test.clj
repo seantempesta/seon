@@ -36,6 +36,19 @@
      (rec! dir {'a/t {:test 'a/t :digest "d-flip" :pass 1 :fail 0 :error 0}})
      (is (:flaky (get (fx/stored-results dir '{a/t "d-flip"}) "d-flip")) "a green after the red leaves it flaky"))))
 
+;; docs/merging.md#verdicts-are-a-cache: the judge and the merge gate tell main's reds from a task's own by the cache at each
+;; test's digest, whoever ran it (Data model's real task was closed on reds red without its change, 2026-11-11)
+(deftest reds-at-names-each-test-red-at-its-digest-and-no-other
+  (with-dir
+   (fn [dir]
+     (rec! dir {'a/red {:test 'a/red :digest "d1" :pass 0 :fail 1 :error 0}
+                'a/green {:test 'a/green :digest "d2" :pass 1 :fail 0 :error 0}}
+           {'a/red [{:type :fail :message "boom"}]})
+     (is (= {'a/red "boom"} (update-vals (fx/reds-at dir '{a/red "d1" a/green "d2" a/none "d3"}) :message))
+         "the red at its digest, with its first failure; a green and a test with no verdict are not red")
+     (is (= {} (fx/reds-at dir '{a/red "d-other"})) "red at another digest is not red at this one")
+     (is (= {} (fx/reds-at dir {})) "nothing asked, nothing red"))))
+
 ;; See docs/merging.md#verdicts-are-a-cache
 (deftest a-red-is-reused-with-its-failures
   (with-dir
