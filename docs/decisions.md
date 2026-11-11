@@ -92,7 +92,7 @@ A fact has two times: when it happened, and when a branch learned it. The model'
 - so a conversation orders by the transaction a pull carries (`:at`) alone, on any branch;
 - a conversation's own requests are made again on the branch that lived it, as of each call's basis commit.
 
-Datahike's merge takes the transaction data its caller gives it, so this is the caller's choice and needs no change in the fork. Not built: it is the rule the one-merge trial is held to. Its cost against one collapsed transaction is being measured. Stated in [the plan](plan.md#the-plan), part 1.
+Datahike's merge takes the transaction data its caller gives it, so this is the caller's choice and needs no change in the fork. Built, and stated in [merging](merging.md#seons-merge-is-a-three-way-merge-of-the-program): a replayed transaction writes all its source transaction wrote, a value a later one replaced included, so each state the receiving branch passes through is one the source held (```seon.merge/replay```). Its cost against one collapsed transaction is being measured. Stated in [the plan](plan.md#the-plan), part 1.
 
 ### No derived value is stored; a judgment is run on the db state (owner, 2026-11-11)
 
