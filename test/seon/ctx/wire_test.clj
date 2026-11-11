@@ -2159,7 +2159,7 @@
     (fn [_ conn]
       (let [[ask!] (parts-session conn)
             r (ask! 0)
-            seon-made (filter #(some (fn [c] (str/starts-with? (str (:code c)) "(my.render/")) (:tool-calls %)) (:messages r))]
+            seon-made (filter #(some (fn [c] (re-find #"^\((my.render|my.agent)/" (str (:code c)))) (:tool-calls %)) (:messages r))]
         (is (= 2 (count seon-made)) "the record and the page at the first point")
         (doseq [m seon-made]
           (is (seq (:content m)) (str "text before the call: " (pr-str (dissoc m :tool-calls))))

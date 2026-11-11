@@ -1106,7 +1106,7 @@
                              (str "(let [db (seon.agent/db) k (:key @seon.agent/state)"
                                   "      basis (fn [n] {:commit (datahike.api/commit-id db) :task " (pr-str task) " :turn n :max-turns 2 :origin :model :agent k})"
                                   "      msgs (fn [n] (let [b (:seon.model-call/basis (datahike.api/pull db '[:seon.model-call/basis] [:seon.model-call/id (seon.lib/call-id k n)]))] (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store db) (:commit b)) b))))"
-                                  "      page? (fn [m] (boolean (some-> m :tool-calls first :code (#(or (.startsWith % \"(my.render/\") (.startsWith % \"(my.agent/describe \")))))))"
+                                  "      page? (fn [m] (boolean (some-> m :tool-calls first :code (#(or (.startsWith % \"(my.render/\") (.startsWith % \"(my.agent/describe \"))))))"
                                   "      calls (fn [ms] (vec (keep #(some-> % :tool-calls first :code) (remove page? ms))))"
                                   "      pages (fn [ms] (vec (for [[a b] (partition 2 1 ms) :when (page? a)] (:content b))))"
                                   "      m1 (msgs 1) m2 (msgs 2) m3 (:messages (seon.ctx.wire/render db (basis 3)))"
