@@ -4321,3 +4321,11 @@
     (is (str/includes? tiles "href=\"/agent/a5\"") "the started agent's entry, a link to its page, among the tiles")
     (is (some #(= "agent-a5" (:id %)) units) "a unit of its own, keyed by the agent's key")
     (is (not (str/includes? (pr-str model) "a5")) "the model's page holds no entry")))
+
+;; docs/ctx.md#the-pattern: root's evals are a window (the newest :seon.config.ctx/window); its line says how many it did not pull, in the printer's words
+(deftest roots-evals-say-what-their-window-left-out
+  (let [evals (fn [held joined] (with-meta (into {} (for [i (range held)] [(- 1000 i) {:seon.eval/id (str "e" i)}])) {:seon.ctx/count joined}))
+        summary (fn [v] (let [[_ _ [_ _ s]] (seon.render.ui/root-evals {:seon.ctx/ctx {:evals v}})] s))]
+    (is (= "20 evals sent to root, 92 not pulled" (summary (evals 20 112))))
+    (is (= "20 evals sent to root" (summary (evals 20 20))) "a window holding every member says nothing left out")
+    (is (= "20 evals sent to root" (summary (with-meta (evals 20 20) nil))))))
