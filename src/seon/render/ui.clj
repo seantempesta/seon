@@ -1952,7 +1952,7 @@
   what each was for, its intent (intents, in xs' order; one with none is not named): the chat shows the messages and what was done,
   a person opens the steps for their code and output; nothing for none. See docs/render.md#the-page."
   {:seon.render/style ".seon-steps > summary { cursor: pointer; font-size: 0.75rem; color: var(--color-text-500); list-style: none; } .seon-steps > summary::before { content: '▸ '; } .seon-steps[open] > summary::before { content: '▾ '; }
-.seon-steps > summary .intent { color: var(--color-text-300); }"
+.seon-steps > summary .intent { color: var(--color-text-300); } .seon-steps[open] > summary .intent { display: none; }"
    :malli/schema [:=> [:cat :int [:sequential :any] [:sequential :string]] :any]}
   [n xs intents]
   (when-let [xs (seq xs)]
