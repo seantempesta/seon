@@ -290,15 +290,16 @@
 (defn model-parts
   "The parts of entity c's page the model reads, as one component: the lists its page render places (seon.render/render-var-of: its own
   render, else its schema's) that hold no messages and are not for the page alone, as seon.render/page-lists keeps them, in the order the
-  render places them. The root of the parts walk (`parts-walk`), so a list an entity's own render adds is read by the model as the
+  render places them; none at a point before the entity was made. The root of the parts walk (`parts-walk`), so a list an entity's own render adds is read by the model as the
   task's parts are. See docs/render.md#an-entity-may-name-its-own-render."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
   [opts c]
-  (let [out ((render/render-var-of (:seon.render/index opts) c) opts c)
+  ;; at a point before the entity was made its pull holds nothing, and nothing draws its page: no parts
+  (let [out (if (:db/id (ratom/untracked c)) ((render/render-var-of (:seon.render/index opts) c) opts c) [])
         placed (if (and (vector? out) (keyword? (first out))) (drop-while map? (rest out)) out)
         model? (fn [x] (and (vector? x) (var? (first x))
                             (let [m (meta (first x))]
-                              (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for (second x)))))))]
+                              (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for m)) (not= "page" (:wire/for (second x)))))))]
     (into [:div {:id "model-parts"}] (filter model?) placed)))
 
 (defn- parts-walk
