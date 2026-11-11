@@ -1788,7 +1788,7 @@
      [:h1 (str (or (:seon.agent/key e) (:seon.user/name e) (:db/id e)) " as data")]
      [:p "Schema " [:code (str schema)] " · its pattern is " (if (= :entity source) "its own (:seon.ctx/pattern on the entity)" "its schema's")
       " · " (count (render/entity-pattern ix e)) " clauses"]
-     [:p "Drawn for a person by " [:code (str (:hiccup renders))] (when (:model renders) (list " · for the model by " [:code (str (:model renders))]))]
+     [:p "Its schema's render for a person is " [:code (str (:hiccup renders))] (when (:model renders) (list " · for the model " [:code (str (:model renders))]))]
      [:h2 "What the pattern asks, and what the pull holds"]
      (into [:ul] (map #(pull-clause % (get e (:key %)))) clauses)
      [:h2 (str "What its schema names that the pattern does not ask (" (count unasked) ")")]
