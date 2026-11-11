@@ -751,3 +751,18 @@
                  @seen
                  {:key k :ran 2 :verdicts [v1 v2]}))
        (is (= ['app.s-test/one 'app.s-test/two] (mapv :test @lines)) "each verdict once, the live one first")))))
+
+;; docs/server.md#ops: seon_done answers once the judge has decided the task's own work, at :gate too: the merge gate's run of
+;; the process tests the change reaches can outlast any client's wait (242 items, ~30 min, Data model's real task, 2026-11-11:
+;; the client gave up while the verdict was still to come). Red before: :gate was a state the done waited through
+(deftest done-answers-when-the-tasks-own-work-is-judged-not-after-its-gate
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
+     (let [at (fn [o] (d/transact conn [{:seon.task/id "demo/g" :seon.task/outcome o}]) @conn)
+           settled? (fn [db] (#'seon.server/done-settled? db "demo/g" (constantly nil)))]
+       (is (not (settled? (at :running))) "still working: wait")
+       (is (not (settled? (at :ready))) "judged green, its merge next: wait (minutes)")
+       (is (settled? (at :gate)) "its gate running: answer now, the verdict comes to the page")
+       (is (settled? (at :merged)))
+       (is (#'seon.server/done-settled? (at :running) "demo/g" (constantly {:seon.error/type :x})) "a defect stopped the judge: answer")))))
