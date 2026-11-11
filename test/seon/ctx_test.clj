@@ -1604,10 +1604,16 @@
         (d/transact conn [{:seon.agent/key "old" :seon.agent/turn 1 :seon.ctx/pattern before}])
         (d/transact conn [{:seon.message/id "m1" :seon.message/to [[:seon.agent/key "old"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "Hello."}])
         (d/transact conn [{:seon.model-call/id (seon.lib/call-id "old" 1) :seon.model-call/agent [:seon.agent/key "old"] :seon.model-call/n 1 :seon.model-call/origin :model :seon.model-call/reply "Hi."}])
+        ;; two more after turn 1's call: the turn after takes them, in the order they were delivered
+        (d/transact conn [{:seon.message/id "m3" :seon.message/to [[:seon.agent/key "old"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "Then this."}])
+        (d/transact conn [{:seon.message/id "m2" :seon.message/to [[:seon.agent/key "old"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "And this."}])
         (let [db @conn
-              c (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "old") :b))]
-          (is (= 1 (count (:seon.message/_to c))) "the pull holds the message")
-          (is (= ["m1"] (mapv second (get (ctx/placed-messages c) 1))) "and it is placed, at the turn that read it"))))))
+              c (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "old") :b))
+              placed (ctx/placed-messages c)]
+          (is (= 3 (count (:seon.message/_to c))) "the pull holds every message")
+          (is (every? (comp :db/txInstant :at) (vals (:seon.message/_to c))) "each with the transaction that delivered it, its role's :tx :at")
+          (is (= ["m1"] (mapv second (get placed 1))) "the first placed at the turn that read it")
+          (is (= ["m3" "m2"] (mapv second (:pending placed))) "the later two for the turn after, in the order delivered (not by id)"))))))
 
 
 (deftest a-pattern-that-drops-a-required-join-is-refused-naming-it
