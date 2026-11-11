@@ -307,15 +307,30 @@
                                   :else nil))]
     (into [:div {:id "model-parts"}] (lists out))))
 
+(defn- page-ctx
+  "Agent a's record at db d0 on branch, pulled by what its page reads: its own pattern without the conversation's joins (seon.render/page-pattern:
+  the model reads those as its messages), the ctx the page parts are drawn over and what `ctx-at` shows the model."
+  {:malli/schema [:=> [:cat :seon.host/db :int :any] :map]}
+  [d0 a branch]
+  (let [ix0 (program/index-of-db d0)]
+    (assoc-in (ctx/build ix0 d0 a branch (render/page-pattern ix0 (or (render/entity-pattern ix0 (d/pull d0 '[*] a)) []))) [:ix :own-index?] true)))
+
+(defn ctx-at
+  "Agent a's record at point p of its branch, on db's store, as data: what `@ctx` held there, without the conversation's joins (its
+  calls, evals and messages, which the model reads as its own messages, never twice). What the model is shown whole at its first point,
+  before its page (`page-diff-msgs`), and what my.render/ctx answers. See docs/ctx.md#what-the-model-reads-and-what-the-page-renders."
+  {:malli/schema [:=> [:cat :seon.host/db :int :map] :map]}
+  [db a p]
+  (let [d0 (db-at db p)]
+    (:tree (page-ctx d0 a (get-in (or (:origin-db d0) d0) [:config :branch])))))
+
 (defn- parts-walk
   "Agent a's page-parts walk drawn at db d0 (its branch's own, at t), cold: {:id :t :at :c :r :w}, the walk the model reads (:model-only:
-  what is the page's alone is not drawn) over the agent pulled by what the parts read (seon.render/page-pattern of its own pattern)."
+  what is the page's alone is not drawn) over the agent pulled by what the parts read (`page-ctx`)."
   {:malli/schema [:=> [:cat :seon.host/db :int :int [:tuple :any :any :int]] :map]}
   [d0 t a id]
   (let [parts #'model-parts
-        branch (nth id 1)
-        ix0 (program/index-of-db d0)
-        c0 (assoc-in (ctx/build ix0 d0 a branch (render/page-pattern ix0 (or (render/entity-pattern ix0 (d/pull d0 '[*] a)) []))) [:ix :own-index?] true)
+        c0 (page-ctx d0 a (nth id 1))
         at (volatile! d0) r (ratom/atom (:tree c0))
         w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [parts {} (ratom/ref-view r ctx/changes)] (:index (:ix c0)))
                  :outputs #{:seon.render/hiccup} :model-only true)]
@@ -459,7 +474,9 @@
           (cond (empty? edits) []
                 ;; the page whole, unless it shows nothing (what moved from nothing to it is no edits: a pull holding no page)
                 q0 (page-message id (str "(my.render/diff " q0 " " q1 ")") edits)
-                :else (page-message id (str "(my.render/page " q1 ")") h1)))))
+                ;; the first point: the record whole as data (Sean, 2026-11-11: "the @ctx and the hiccup displayed in full"), then the page
+                :else (into (page-message (lib/id (lib/digest (str "ctx " q1))) (str "(my.render/ctx " q1 ")") (ctx-at db a p1))
+                            (page-message id (str "(my.render/page " q1 ")") h1))))))
 
 (defn model-call-msgs
   "A model call (:seon.model-call/fact) as the model reads it: what the model said and its reasoning. Whether those are sent is

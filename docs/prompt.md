@@ -20,7 +20,7 @@ To find things: `(search "words")` ranks code and wiki sections; `(doc x)` reads
 
 What you are sent is drawn from your record, `@ctx`, an atom. Changing it changes what you are sent: `(keys (:seon.eval/_agent @ctx))` lists your evals by id, and `(swap! ctx update :seon.eval/_agent dissoc id)` drops one.
 
-Your page reaches you as evals Seon makes: `(my.render/page p)` at your first turn, your page whole as hiccup, each part a section under its id; then `(my.render/diff p0 p1)` where something moved, as edits `[path op value]`:
+Your record and your page reach you as evals Seon makes: at your first turn `(my.render/ctx p)`, your record whole as data, then `(my.render/page p)`, your page whole as hiccup, each part a section under its id; then `(my.render/diff p0 p1)` where something moved, as edits `[path op value]`:
 
 ```clojure
 [[["page" "status" :merging] :-]
