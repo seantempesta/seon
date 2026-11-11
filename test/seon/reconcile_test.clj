@@ -1709,7 +1709,9 @@
         (is (and (:seon.task/branch a) (not= old (:seon.task/branch a))) (str "on a new branch: " (:seon.task/branch a) " (was " old ")"))
         (is (nil? (:seon.task/reasons a)) "root's last reasons are no news to the fresh run")
         (is (= 1 (count (filter #(and (= :spawn (:op %)) (= "demo/a" (:task %))) (actions-for db3)))) "one fresh run")
-        (is (= [(:seon.task/branch a)] (keep #(when (= "demo/a" (:task %)) (get-in % [:env :branch])) (actions-for db3))) "from its new branch")))
+        (is (= [(:seon.task/branch a)] (keep #(when (= "demo/a" (:task %)) (get-in % [:env :branch])) (actions-for db3))) "from its new branch")
+        (is (nil? (task/session-key db3 "demo/a")) "by a new agent: the old one's conversation is on the old branch")
+        (is (= (akey "a") (task/session-key db0 "demo/a")) "while the first run's agent is its session's on its own branch")))
     (testing "a refine that changed nothing"
       (let [{db3 :db} (judge! db2 "a-refine" {:outcome :green})]
         (is (= :held (:seon.task/execution (task/task db3 "demo/a"))) "starts no run")))))

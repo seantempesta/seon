@@ -326,8 +326,12 @@
                     (recur seen (rest todo))
                     (recur (conj seen (:db/id e)) (into (rest todo) (filter #(= br (:seon.task/branch %)) (:seon.task/needs e)))))
                   seen))
+        ;; only an agent on the task's branch: a session is one branch, so a run on a new branch (a refined task run again,
+        ;; seon.task/again-tx) is a new agent, while a go back moves the agent and the task to its branch together (seon.root)
+        on (or br (default-branch id))
         newest (->> chain
                     (keep #(:seon.task/agent (d/entity db %)))
+                    (filter #(= on (:seon.agent/branch %)))
                     (sort-by #(:seon.agent/started-ms % 0))
                     last)]
     (:seon.agent/key newest)))
