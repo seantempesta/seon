@@ -95,28 +95,33 @@
  :seon.text/edited [:map [:edited [:map [:lines [:vector :any]]]] [:seon.text/said {:optional true} :string]]
  ;; an eval's answer while it is live: its value is whatever the form answered, a var or a fn among them (seon.repl/response).
  ;; What is stored of it is :seon.eval/response, plain data
- :seon.repl/answer [:map {:seon.render/hiccup seon.render.ui/evaluation}
+ ;; each key says what it is in its own :description: what an agent reads by (doc :seon.repl/answer), in place of a list in the
+ ;; standing prompt (docs/prompt.md)
+ :seon.repl/answer [:map {:seon.render/hiccup seon.render.ui/evaluation :description "What an eval answers: a map under a handle. A key appears only when it has something to say."}
                       ;; none on a call of root's from the page, recorded with what root answered (seon.render.proc/web-answered)
-                      [:handle {:optional true} :qualified-symbol] [:value {:optional true} :any]
+                      [:handle {:optional true :description "The name this result is kept under. Use it like any value: (:value result/a3f9c1d2)."} :qualified-symbol]
+                      [:value {:optional true :description "What the code answered. With :forms, a vector holding one value per form."} :any]
                       ;; the namespace the REPL is in after it, as every nREPL response carries: where the next eval runs
-                      [:ns {:optional true} :symbol]
+                      [:ns {:optional true :description "The namespace your next call runs in."} :symbol]
                       ;; code of several top-level forms: how many ran, its :value each one's in order (seon.repl/response)
-                      [:forms {:optional true} [:int {:min 2}]]
+                      [:forms {:optional true :description "How many top-level forms ran, when more than one."} [:int {:min 2}]]
                       ;; what the forgiving reader changed of the call's code before it ran (seon.ctx.search/repaired)
-                      [:repaired {:optional true} :seon.eval/repairs]
+                      [:repaired {:optional true :description "What the reader changed of your code before it ran."} :seon.eval/repairs]
                       ;; each existing var whose contract or docstring this eval changed, its before and
                       ;; after and the wiki sections citing it (seon.program/meaning-changes); absent when none
-                      [:redefined {:optional true} [:vector :seon.program/meaning-change]]
+                      [:redefined {:optional true :description "Each function whose contract or docstring this eval changed, before and after, with the wiki sections that cite it."} [:vector :seon.program/meaning-change]]
                       ;; what its definitions warn (seon.repl/instrument): an uncontracted definition, a contract not armed
-                      [:warnings {:optional true} [:vector [:map [:seon.repl/finding :keyword]]]] [:out {:optional true} [:map [:seon.print/code :string]]]
-                      [:err {:optional true} [:map [:seon.print/code :string]]] [:ex {:optional true} :seon.error/base]
+                      [:warnings {:optional true :description "Problems with your definitions, each with its fix."} [:vector [:map [:seon.repl/finding :keyword]]]]
+                      [:out {:optional true :description "What it printed."} [:map [:seon.print/code :string]]]
+                      [:err {:optional true :description "What it printed to the error stream."} [:map [:seon.print/code :string]]] [:ex {:optional true :description "The error that stopped it."} :seon.error/base]
                       [:ms {:optional true} number?] [:ticks {:optional true} :int] [:bytes {:optional true} :int]
                       ;; the branch refused this eval's record (seon.repl/record!, :seon.agent/unrecorded), or the commit that followed its writes (seon.agent/commit!, :seon.agent/commit-refused: the writes were dropped)
-                      [:unrecorded {:optional true} :seon.error/base]
+                      [:unrecorded {:optional true :description "Your result was not recorded on your branch, and why."} :seon.error/base]
                       [:text {:optional true} :string] [:record {:optional true} :string]
-                      [:recorded {:optional true} [:vector [:or :symbol [:vector :any]]]] [:unmapped {:optional true} [:vector :qualified-symbol]] [:fns {:optional true} [:vector :map]]
+                      [:recorded {:optional true :description "The vars that became program on your branch, a method as [multi dispatch]. What is not here will not merge."} [:vector [:or :symbol [:vector :any]]]]
+                      [:unmapped {:optional true :description "The vars it removed from your branch's program."} [:vector :qualified-symbol]] [:fns {:optional true} [:vector :map]]
                       ;; seon.repl/edit!'s: the var it changed and the lines around the change, [line text] each
-                      [:edited {:optional true} [:map [:var :symbol] [:lines [:vector [:tuple pos-int? :string]]]]]]
+                      [:edited {:optional true :description "What an edit changed: the var and the lines around the change."} [:map [:var :symbol] [:lines [:vector [:tuple pos-int? :string]]]]]]
  ;; what an eval changed of an existing var's meaning (seon.program/meaning: its contract, its
  ;; docstring): what it was, what it is now (a removed one absent), and each wiki section citing
  ;; the var with the form that reads it, so the agent sees the change it made and what text to update
