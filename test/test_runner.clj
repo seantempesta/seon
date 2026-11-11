@@ -7,7 +7,7 @@
                                       into OUT/steps (WHAT: tests, checks or both)
     --shard FILE                      one shard's tests run here, each result stored
     --store-steps OUT                 the steps bin/check ran green stored at their digests
-    --overran FILE                    a shard bin/stalls ended: its overran test stored red, the rest to FILE's -rest.edn
+    --overran FILE                    a shard bin/stalls ended: its overran test a signal (no verdict stored), the rest to FILE's -rest.edn
   bin/test runs each shard in a process of its own, at once. The program the plan reads is kept
   per git tree in a store of its own (program-db)."
   (:require [konserve.jolt.lmdb :as klmdb] [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
@@ -239,6 +239,8 @@
         g (reach-graph-of db (:data-refs in) store)
         ;; the process store a process test's root takes is indexed by this tree's code: its key is an input of theirs
         in (seon.program/with-index-code g in)
+        ;; a process test's config values are its root's, whoever plans (seon.config/test-system-config)
+        in (assoc in :test-system-config (fx/config-input config/test-system-config (config/checkout)))
         all (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))
         ;; a name of the form ns/test selects that one deftest (bin/test NS/TEST); a bare ns selects its tests
         whole (if (seq names) (set (keep #(when-not (str/includes? % "/") (symbol %)) names)) nss)
@@ -420,25 +422,20 @@
 
 (defn- overran!
   "A shard bin/stalls ended (its log, file's .log, holds \"OVERRAN <test> <bound> ms ...\": the test ran past its end bound,
-  docs/clocks.md#time-decides-the-owners-exceptions): each overran test cached red at its digest, the line its failure
-  (unless the tree is not the plan's, as shard! keeps), and printed RED; the shard's tests that never ended (no ended,
+  docs/clocks.md#time-decides-the-owners-exceptions): each overran test is a SIGNAL about the run, never a verdict about
+  the test (the owner, 2026-11-11: \"The step bounds are signals not hard constraints\"; a bound past which a starved machine
+  ends a test is the machine's load, which no assertion may read): nothing is cached at its digest, it runs again at the next
+  prove, and it is printed OVERRAN as no verdict (a red cached from an overrun at load 46 made batch 89's tip flaky, 2026-11-12); the shard's tests that never ended (no ended,
   reused or OVERRAN line) and its generative keys (which a shard runs last) written to file's -rest.edn, for bin/test to
   run in a shard of their own (nothing left, no file). The reds of tests that ended before are not stored, as a stopped
   shard's are not (shard!). Answers 1: the shard ran a red."
   [file]
-  (let [{:keys [tests digests tree rerun mg] :as sh} (edn/read-string (slurp file))
+  (let [{:keys [tests digests rerun mg] :as sh} (edn/read-string (slurp file))
         lines (str/split-lines (slurp (str/replace file #"\.edn$" ".log")))
         over (into (sorted-map) (keep #(when-let [[_ t] (re-matches #"OVERRAN (\S+) .*" %)] [(symbol t) %])) lines)
         done (into (set (keys over)) (keep #(when-let [[_ t] (re-matches #"(?:ended|reused) (\S+)(?: .*)?" %)] (symbol t))) lines)
-        left (vec (remove done tests))
-        same? (= tree (fx/tree-id (config/checkout)))
-        unstored (when same?
-                   (record-run! {:id (str "bin/test overran " tree " " (random-uuid)) :tree tree}
-                                (into {} (for [t (keys over)] [t {:test t :digest (digests t) :pass 0 :fail 0 :error 1}]))
-                                (into {} (for [[t l] over] [t [{:type :error :message l}]]))))]
-    (doseq [[t l] over] (println "RED" t (pr-str {:pass 0 :fail 0 :error 1 :message l})))
-    (when-not same? (println "the tree changed since the plan: no result stored"))
-    (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
+        left (vec (remove done tests))]
+    (doseq [[t l] over] (println "OVERRAN-NO-VERDICT" t (pr-str {:message l})))
     (when (or (seq left) (seq mg))
       (write! (str/replace file #"\.edn$" "-rest.edn")
               (sedn/encode (assoc sh :tests left :digests (select-keys digests left) :rerun (into (sorted-set) (filter (set left)) rerun)))))

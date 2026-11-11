@@ -1053,7 +1053,9 @@
   will do with a function is judged from its owner as read, never stored and never the page's: one in its owner task's namespace
   or reached by the task's proofs (their forms' refs) is one it will change (its source and tests drawn), any other one it calls.
   A pulled section or var alone is not rendered by this: it prints as the data it is. See docs/references.md#an-entity-cites."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
+  ;; its words (what a cited function is to the plan, how many tests reach it) read in the text face; its code stays mono by code's own rules
+  {:seon.render/style ".cite > p { font-family: var(--font-text); }"
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
   [{db :seon.db/db ix :seon.render/index} c]
   (let [c (ratom/realize c)
         ;; an entity the cite names, read whole by the pattern schema k declares; one with no id (a cite made by hand) as it is given

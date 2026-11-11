@@ -1416,6 +1416,25 @@
       stale (assoc :stale-binary stale)
       inputs (assoc :inputs (update inputs :config merge config-input)))))
 
+(defn restart-for
+  "Why a landing must restart this system, or nil when it can keep running: held, main's :seon.root/source after the landing's
+  bridge (seon.root/landed-tx moved its :tree); tree, the git tree of main's files now (bin/tree, where git runs); stale, the
+  binary's answer for held's tree (stale-binary); inputs, what bin/root start's `inputs` mode wrote for the files now
+  (held-inputs). A system keeps running, its agents with it, when main already holds the landed tree as data and the running
+  binary is current for it: the merge loaded the change in place, so only the source fact is written again with the new inputs
+  (booted-source). Each other case is the restart's reason: no source fact; main not at the files' tree (no bridge ran, so
+  only a boot's catch-up reads them); a binary that was stale at its boot, or is stale for the landed tree (a build input, or a
+  form of root-reach, changed); no inputs written. See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat [:maybe :map] :string [:maybe :map] [:maybe :map]] [:maybe :string]]}
+  [held tree stale inputs]
+  (cond
+    (nil? held) "main holds no source fact"
+    (not= tree (:tree held)) (str "main holds tree " (:tree held) ", not the files' " tree ": no landing brought it in as data")
+    (:stale-binary held) "this system's binary was stale at its boot"
+    stale (str "the running binary is not current for " tree
+               (if (:error stale) (str ": " (:error stale)) (str ": what differs reaches " (str/join ", " (or (seq (:reaches stale)) [(name (:missing stale :code))])))))
+    (nil? inputs) "no inputs were written for the files (runs/root-inputs.edn)"))
+
 (defn- build-input?
   "Is changed path p (with its git modes) something the binary bakes and no load of the db brings: a pin (a gitlink),
   native code, deps.edn, bin/build, .gitmodules, or a class of resource the build compiles in (seon.fx/env-class: the
@@ -1427,6 +1446,14 @@
                (str/starts-with? p "resources/seon/config/")
                (#{:seon.env/schemas :seon.env/system :seon.env/deps} (fx/env-class p)))))
 
+(defn- judged-path
+  "Where binary-current's answer for a binary built from tree from, judged for tree to over to's own program, is kept beside the
+  checkout's builds: target/binary-current/FROM-TO.edn (derived data, as seon.fx/tree-diff's diff is). The answer is a function
+  of the two trees, so whoever judged it with the tree's program (the plan, bin/test) answers every later reader, a boot
+  whose store holds another program among them. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [from to] (str (cfg/checkout) "/target/binary-current/" from "-" to ".edn"))
+
 (defn binary-current
   "Whether a binary built from built's tree (binary-program's record, its :inputs :tree) runs tree's program as tree
   would have it built: nil when it does, else {:binary its tree :tree tree :reaches [what differs that it bakes]}. Equal
@@ -1436,7 +1463,9 @@
   that changed (its text on db, main holding tree's program, is not in the file as the binary's tree has it) is in
   root-reach of db's reach graph, or when db holds no namespace of it (added or gone: what it held is unknown); a path
   of none of these that does not run from the checkout or main (tests, the wiki, task files, bin/'s scripts) is not current. Anything else (tests, the wiki, task files, agent-side code) is current: a process
-  loads it from main's db. The one rule a spawn refusal, the stale-binary row and the gate's build all ask.
+  loads it from main's db. The one rule a spawn refusal, the stale-binary row and the gate's build all ask, and one answer for two
+  trees: a caller holding the tree's own graph (g, the plan's) keeps its answer beside the builds (judged-path), which every later
+  caller reads first, so a boot whose store holds another program (a test's system) never answers otherwise than the plan did.
   Cost: one git diff, one reach graph of db (or g, when the caller holds one), O(changed files' forms).
   See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string]] [:maybe :map]]
@@ -1450,6 +1479,8 @@
        ;; a binary that recorded no tree, against a main that holds one, is unknown: never current
        (nil? from) {:binary nil :tree tree :reaches [] :missing :binary-tree}
        (= from tree) nil
+       ;; judged before over the tree's own program (the plan's graph, below): the answer for these two trees, whatever db asks
+       (.isFile (java.io.File. ^String (judged-path from tree))) (:answer (sedn/decode (slurp (judged-path from tree))))
        :else
        (let [changed (fx/tree-diff (cfg/checkout) from tree)]
          (if (contract/error? changed)
@@ -1464,6 +1495,7 @@
                                         (some #(or (= p %) (str/starts-with? p (str % "/"))) (cfg/value :seon.config.source/tree-excludes))))
                  ;; a changed path the rule cannot place (the web assets the build compiles, anything else) is not current
                  unplaced (vec (for [[p om nm] changed :when (not (or (build-input? p om nm) (some #{p} src) (elsewhere? p)))] p))
+                 given-g (some? g)
                  g (or g (program/reach-graph db (fx/declared-refs system/built-text)))
                  reach (program/root-reach g cfg/config)
                  ns-of (fn [p] (d/q '[:find ?n . :in $ ?p :where [?e :ns/file ?p] [?e :ns/name ?n]] db p))
@@ -1473,8 +1505,12 @@
                                                 :when (not (and old (str/includes? old src)))
                                                 [k s] (:defines (get (:rows g) id)) :when (= :var k)] s)))
                  hits (vec (for [p src :let [n (ns-of p)] v (if n (filter reach (changed-vars n p)) [(symbol p)])] v))
-                 reaches (-> inputs (into unplaced) (into hits))]
-             (when (seq reaches) {:binary from :tree tree :reaches reaches}))))))))
+                 reaches (-> inputs (into unplaced) (into hits))
+                 r (when (seq reaches) {:binary from :tree tree :reaches reaches})]
+             ;; a caller holding the tree's own graph (g: the plan's, bin/test) judged over the tree's program, so its answer is
+             ;; the two trees' and is kept for every later reader, a boot whose store holds another program among them
+             (when given-g (fx/write-file {:req {:path (judged-path from tree) :text (sedn/encode {:answer r})}}))
+             r)))))))
 
 (defn- previous-end
   "How the root before this boot on main ended: the stop fact it wrote, or, when it wrote

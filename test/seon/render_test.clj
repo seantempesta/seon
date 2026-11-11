@@ -4486,18 +4486,6 @@
     (is (some #(= "agent-a5" (:id %)) units) "a unit of its own, keyed by the agent's key")
     (is (not (str/includes? (pr-str model) "a5")) "the model's page holds no entry")))
 
-;; docs/render.md#how-the-work-stands: the done rule's reasons are data the task holds (:seon.task/reasons), read in their schema's words
-;; (:seon.reconcile/reason's :seon.status/title), what each is about as code; never the flattened keyword string (Point, 2026-11-11: the
-;; header read "proof-red seon.render-test/x; open-problem ..." raw)
-(deftest an-agents-end-reasons-read-in-their-schemas-words
-  (let [t {:seon.task/outcome :cap :seon.task/reason "proof-red seon.render-test/x; open-problem k"
-           :seon.task/reasons [{:reason :proof-red :symbol 'seon.render-test/x} {:reason :open-problem :key "k"}]}
-        r (:reason (ui/standing {:seon.agent/outcome :cap} t))]
-    (is (= "proof red `seon.render-test/x`; problems to clear `k`" r) "each reason in its words, what it is about as code")
-    (is (not (str/includes? r "proof-red")) "no keyword read raw")
-    (is (= "root restarted" (:reason (ui/standing {} {:seon.task/outcome :cap :seon.task/reason "root restarted"})))
-        "a reason with no data behind it is its string")))
-
 (deftest describe-says-what-a-value-holds-by-path
   ;; docs/agent.md#looking-at-what-you-pulled (owner, 2026-11-11: "Instead of dumping the whole @ctx value we are now doing this more
   ;; metadata approach"): a value's paths and what each holds, never the value shown; keys, never positions; a plain value has no schema
@@ -4529,6 +4517,37 @@
     (is (str/includes? text "(get-in result/e1 path)") "a form that reads more, naming the answer by its handle")
     (is (not (str/includes? text "(get-in v path)")) "never by a placeholder")
     (is (and (str/includes? plain ":value 2") (not (str/includes? plain ":is"))) (str "a plain value is itself: " plain))))
+
+;; docs/render.md#how-the-work-stands: the done rule's reasons are data the task holds (:seon.task/reasons), read in their schema's words
+;; (:seon.reconcile/reason's :seon.status/title), what each is about as code; never the flattened keyword string (Point, 2026-11-11: the
+;; header read "proof-red seon.render-test/x; open-problem ..." raw)
+(deftest an-agents-end-reasons-read-in-their-schemas-words
+  (let [t {:seon.task/outcome :cap :seon.task/reason "proof-red seon.render-test/x; open-problem k"
+           :seon.task/reasons [{:reason :proof-red :symbol 'seon.render-test/x} {:reason :open-problem :key "k"}]}
+        r (:reason (ui/standing {:seon.agent/outcome :cap} t))]
+    (is (= "proof red `seon.render-test/x`; problems to clear `k`" r) "each reason in its words, what it is about as code")
+    (is (not (str/includes? r "proof-red")) "no keyword read raw")
+    (is (= "root restarted" (:reason (ui/standing {} {:seon.task/outcome :cap :seon.task/reason "root restarted"})))
+        "a reason with no data behind it is its string")))
+
+(deftest describe-shows-what-acts-on-a-part-at-its-path
+  ;; docs/render.md#a-render-is-a-value-printed-once (Point and Data model, 2026-11-11, after loop D2: nine reads to find where a cited
+  ;; task's plan is): an entry whose schema says what acts on it carries those forms for its own path, and asked at a path, describe walks
+  ;; into a join keyed by ids member by member, so a cited task shows the one form that changes its plan
+  (let [ix (seon.db/index)
+        v {:seon.agent/task {:db/id 1 :seon.task/id "x/a" :seon.task/plan "Do a."
+                             :seon.cite/_of {5 {:db/id 5 :seon.cite/id "c" :seon.cite/target {:db/id 7 :seon.task/id "x/b" :seon.task/plan "Do b."}}}}}
+        at (r/describe ix v [:seon.agent/task] 2)
+        by (into {} (map (juxt :path identity)) at)
+        target (by [:seon.agent/task :seon.cite/_of 5 :seon.cite/target])
+        top (r/describe ix v [] 2)]
+    (is (some? target) (str "the cited task has its own entry, member by its id: " (pr-str (map :path at))))
+    (is (= :seon.task/task-fact (:schema target)))
+    (is (= '[(swap! ctx assoc-in (conj [:seon.agent/task :seon.cite/_of 5 :seon.cite/target] :seon.task/plan) x)] (map second (:to-use target)))
+        "its form, for its own path")
+    (is (not-any? #(= 5 (get (:path %) 2)) top) "a first look at the whole is the overview: no member walked")
+    (is (not-any? (fn [e] (some #(some #{'v 'id 'path} (filter symbol? (tree-seq coll? seq (second %)))) (:to-use e))) (concat at top))
+        "no form shown holds a placeholder it could not fill")))
 
 ;; docs/ctx.md#the-pattern: root's evals are a window (the newest :seon.config.ctx/window); its line says how many it did not pull, in the printer's words
 (deftest roots-evals-say-what-their-window-left-out
@@ -4587,3 +4606,10 @@
     (is (re-find #"--font-sans: var\(--font-mono\)" css) "the chrome's face stays mono, which is why no font utility reaches prose")
     (is (str/includes? md "seon-md") md)
     (is (not (str/includes? md "font-sans")) "no utility that resolves to the mono face")))
+
+
+(deftest a-cites-words-read-in-the-text-face
+  ;; docs/render.md#the-page: the words a cite says of what it names ("A function your plan names.", "2 tests reach it") read in the text
+  ;; face, as Markdown prose does; its code stays mono. A rule on the cite component's own style, page-only: nothing the model reads moves
+  (let [rs (into {} (r/rules {#'ui/cite nil}))]
+    (is (str/includes? (get rs 'seon.render.ui/cite "") ".cite > p { font-family: var(--font-text); }") (pr-str (get rs 'seon.render.ui/cite)))))
