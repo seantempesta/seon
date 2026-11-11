@@ -157,49 +157,28 @@
                         (str "with an earlier member of the octopus merge, " said ": merge main into the branch first") {:tx (:max-tx main) :behind (count ds)})
         (contract/error :seon.merge/dangling #'seon.writer/dangling-refused said {:tx (:max-tx main) :dangling (vec ds)})))))
 
-(defn- plan-refused
-  "The refusal of a merge whose plan (seon.merge/plan) writes nothing, or nil when the plan is groups to write: the two
-  sides' net changes conflict (:seon.merge/conflicts, the agent resolves), or the branch changed an entity that bears no
-  identity (:seon.merge/unidentified, a defect of that entity's schema). See docs/decisions.md, 'A merge replays the
-  source's transactions on the branch that receives it'."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe [:or :seon.merge/conflicts :seon.merge/unidentified]]]}
-  [main p]
-  (cond (seq (:conflicts p))
-        (contract/error :seon.merge/conflicts #'seon.writer/plan-refused
-                        (str "main and the branch changed " (count (:conflicts p)) " key(s) to different ends since their base: "
-                             (str/join "; " (map (comp sedn/encode :key) (:conflicts p))))
-                        {:tx (:max-tx main) :conflicts (:conflicts p)})
-        (seq (:unidentified p))
-        (contract/error :seon.merge/unidentified #'seon.writer/plan-refused
-                        (str "the branch changed " (count (:unidentified p)) " entit(ies) that bear no identity, which cannot cross: attributes "
-                             (str/join "; " (map (comp sedn/encode sort) (:unidentified p))))
-                        {:tx (:max-tx main) :unidentified (:unidentified p)})))
-
 (defn- applied!
   "Groups (a plan's) applied on main's connection after what is pending, not committed (seon.merge/apply-groups!, under
-  main's tx-meta). Answers {:db :reps :applied}, or with :refused :seon.merge/replay-refused at the first one the write check
-  refuses. See docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  main's tx-meta). Answers {:db :reps :applied}, or with :refused the :seon.merge/replay-refused of the first one the write
+  check refuses (seon.merge/refusal). See docs/decisions.md, 'A merge replays the source's transactions on the branch that
+  receives it'."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :seon.host/db [:sequential :map]] [:map [:reps [:vector :map]]]]}
   [conn main db groups]
   (let [a (pm/apply-groups! conn db (pdb/tx-meta (pdb/conn-main conn)) groups)]
     (if-let [{:keys [tx exception]} (:refused a)]
-      (let [err (or (when (:seon.error/type (ex-data exception)) (ex-data exception)) (refused (step/error-msg exception) (or (ex-data exception) {})))]
-        (assoc a :refused (contract/error :seon.merge/replay-refused #'seon.writer/applied!
-                                          (str "main's write check refuses the branch's transaction " tx ": " (:seon.error/message err)
-                                               ": main moved since the base; merge main into the branch and merge again")
-                                          {:tx (:max-tx main) :refused {:tx tx :error err}})))
+      (assoc a :refused (pm/refusal (:max-tx main) tx exception))
       a)))
 
 (defn- member-applied!
   "Branch head (from base) merged onto db, main with what is pending on main's connection, as the merge writes it: its plan
-  (seon.merge/plan base db head) refused (plan-refused), or applied after what is pending (applied!) and refused when the
+  (seon.merge/plan base db head) refused (seon.merge/refusal), or applied after what is pending (applied!) and refused when the
   write check refuses one of its transactions or the result leaves a name unbound (dangling-refused; behind? when an earlier
   member was taken). The one definition of what a merge writes: the octopus merge and the merge gate's candidate both
   apply it. Answers {:db :reps} or {:refused why :reps}, :reps what of it is pending (abandoning them is the caller's)."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :seon.host/db :seon.host/db :seon.host/db :boolean] [:map [:reps [:vector :map]]]]}
   [conn main db base head behind?]
   (let [p (pm/plan base db head)]
-    (if-let [why (plan-refused main p)]
+    (if-let [why (pm/refusal (:max-tx main) p)]
       {:refused why :reps []}
       (let [a (applied! conn main db (:groups p))]
         (if (:refused a) a (if-let [why (dangling-refused main (:db a) behind?)] (assoc a :refused why) a))))))

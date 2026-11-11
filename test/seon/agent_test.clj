@@ -3118,9 +3118,48 @@
      (agent/commit!)
      (let [c0 (d/commit-id @store-conn) r (agent/merge-main! {})]
        (is (not (:ok r)))
+       (is (= :seon.merge/conflicts (:seon.error/type r)) "the typed refusal the writer's merge gives (seon.merge/refusal)")
        (is (= [[:task/name :gen/down :task/plan]] (mapv :key (:conflicts r))) (pr-str r))
        (is (= c0 (d/commit-id @store-conn)) "nothing written")
        (let [r (agent/merge-main! {[:task/name :gen/down :task/plan] "settled"})]
          (is (:ok r) (pr-str r))
          (is (= "settled" (:task/plan (d/entity @store-conn t))) "the resolution is the branch's value")
          (is (= (d/commit-id @conn) (d/commit-id (pdb/branch-base conn main-b ab))) "and the base moved"))))))
+
+(deftest a-resolution-that-keeps-mains-value-writes-nothing-of-its-own
+  ;; seon.merge/held-op?: a resolution taking main's value finds it on the branch already (the replay wrote it), so the merge
+  ;; writes main's transaction and its own merge transaction, no empty one between
+  (down-agent
+   (fn [{:keys [conn store-conn t]}]
+     (d/transact conn [[:db/add t :task/plan "main's"]])
+     (agent/transact! [[:db/add t :task/plan "the branch's"]])
+     (agent/commit!)
+     (let [txs #(count (d/datoms @store-conn :aevt :db/txInstant)) n0 (txs)
+           r (agent/merge-main! {[:task/name :gen/down :task/plan] "main's"})]
+       (is (:ok r) (pr-str r))
+       (is (= "main's" (:task/plan (d/entity @store-conn t))))
+       (is (= (+ n0 (count (:applied r)) 1) (txs)) "main's transactions and the merge's own: no resolution transaction")))))
+
+(deftest a-resolution-on-an-entity-main-retracted-is-refused
+  ;; main retracted the task whole, the branch changed its plan: a conflict whose main end is :seon.merge/gone. A resolution
+  ;; cannot settle it: main's retraction, replayed whole, retracts the values main held and leaves the branch's own plan on a
+  ;; task with no name, which the branch's write check refuses (:seon.merge/replay-refused), whichever value the resolution
+  ;; keeps, and nothing is written. The branch retracting the task itself first is what merges
+  (down-agent
+   (fn [{:keys [conn store-conn t]}]
+     (d/transact conn [[:db/retractEntity t]])
+     (agent/transact! [[:db/add t :task/plan "the branch's"]])
+     (agent/commit!)
+     (let [k [:task/name :gen/down :task/plan] c0 (d/commit-id @store-conn)
+           r (agent/merge-main! {})]
+       (is (= [[k "the branch's" :seon.merge/gone]] (mapv (juxt :key :ours :theirs) (:conflicts r))) (pr-str r))
+       (doseq [v ["the branch's" :seon.merge/gone]]
+         (let [r (agent/merge-main! {k v})]
+           (is (= :seon.merge/replay-refused (:seon.error/type r)) (pr-str r))
+           (is (= :seon.db/invalid-entity (get-in r [:refused :error :seon.error/type])) "the write check's own error inside")
+           (is (= c0 (d/commit-id @store-conn)) "nothing written")))
+       (agent/transact! [[:db/retractEntity t]])
+       (agent/commit!)
+       (let [r (agent/merge-main! {})]
+         (is (:ok r) (pr-str r))
+         (is (empty? (d/datoms @store-conn :eavt t)) "the task is gone on the branch as on main"))))))

@@ -210,3 +210,38 @@
      ;; uncontracted (as a contracted predicate asked of each attribute it was 1,771)
      :fixed {:bytes 4000000 :calls 27}
      :sizes [10 30 100]}))
+
+(defn plan-of
+  "seon.merge/plan's arguments for a merge up on a store holding n forms: their base, main moved by one record transaction,
+  and a branch that wrote 100 tasks of its own (about 360 datoms) in 20 transactions, all read from the store."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db]]}
+  [n]
+  (let [conn @store
+        cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
+        b (keyword (str "p" n "-" (random-uuid)))
+        _ (d/branch! conn :db b)
+        bc (pdb/connect (assoc cfg :branch b))
+        _ (doseq [part (partition-all 500 (range n))] (d/transact bc {:tx-data (vec (mapcat #(program/account-tx @bc (#'pc/acct % "x") %) part))}))
+        side (fn [nm txs] (let [s (keyword (str (name b) "-" nm)) _ (d/branch! conn b s) c (pdb/connect (assoc cfg :branch s))]
+                            (doseq [tx txs] (d/transact c {:tx-data tx :tx-meta (pdb/tx-meta s)}))
+                            (d/release c)
+                            (pdb/head conn s)))
+        r [(pdb/head conn b)
+           (side "main" [[{:seon.root/id :root :seon.root/boot "moved"}]])
+           (side "branch" (for [i (range 20)] (vec (for [j (range 5)] {:task/name (keyword "cost" (str "t" i "-" j)) :task/plan (str "plan " i j) :task/status :held}))))]]
+    (d/release bc)
+    r))
+
+(deftest a-plan-costs-what-the-two-sides-changed
+  ;; task seon.merge/a-merge-replays-the-sources-net-change: an agent's turn plans a merge whenever main moved, so a plan costs
+  ;; what the two sides changed since their base (the two net changes, the history diff, the replay), never the store: the
+  ;; identity of an entity read from the db's schema map (:schema), never (d/schema db), which built the whole map again per
+  ;; entity (32.4M ticks and 104 MB a plan on a 60,590-datom store, 2026-11-12)
+  (spit "/tmp/mergeop/plan-proof.edn"
+        (pr-str (cost/proof
+                 {:of 'seon.merge/plan :input 'seon.merge-cost-test/plan-of
+                  :n "forms the store holds; one record on main, about 360 datoms in 20 transactions on the branch"
+                  :work "the datoms that differ on each side and the branch's transactions since the base: never the store"
+                  :growth :constant
+                  :fixed {:ticks 3000000 :bytes 8000000}
+                  :sizes [100 300 1000]}))))

@@ -542,8 +542,9 @@
   (main's commit its merge parent, :seon.tx/merged main, the agent's :seon.agent/base-commit), one commit or none; the
   changed definitions load here. After it the merge base is that main commit and the branch holds everything it holds.
   A conflict no resolution settles, an entity of main's with no identity, or a transaction the branch's write check
-  refuses writes nothing and is the answer, as data. Answers {:ok :applied [main's transactions written] :conflicts
-  :resolved :t}, or {:ok false} with :conflicts, :unidentified or :refused {:tx :error}. See docs/decisions.md, 'A
+  refuses writes nothing and is the answer: the typed refusal the writer's merge gives (seon.merge/refusal:
+  :seon.merge/conflicts, :seon.merge/unidentified, :seon.merge/replay-refused), or the write check's own error for the
+  branch's own write, with :ok false. Answers {:ok :applied [main's transactions written] :conflicts :resolved :t}. See docs/decisions.md, 'A
   merge replays the source's transactions on the branch that receives it'."
   {:malli/schema [:=> [:cat :map] [:map [:ok :boolean]]]}
   [resolutions]
@@ -556,23 +557,25 @@
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
       (let [base (pdb/branch-base conn main-b (:branch @state))
             p (pm/plan base head main resolutions)]
-        (cond
-          (seq (:conflicts p)) {:ok false :applied [] :conflicts (:conflicts p) :t (:max-tx head)}
-          (:unidentified p) {:ok false :applied [] :conflicts [] :unidentified (:unidentified p) :t (:max-tx head)}
-          :else
+        (if-let [why (pm/refusal (:max-tx head) p)]
+          (assoc why :ok false :applied [] :t (:max-tx head))
           (let [a (pm/apply-groups! conn head (pdb/tx-meta (:branch @state)) (:groups p))
                 own (fn [tx-data opts] (dw/apply! conn (cond-> {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:op opts) (assoc :seon.tx/merged main-b)))}
                                                          (:op opts) (assoc :parents #{(d/commit-id main)}))
                                                   opts))
-                resolved (when (and (not (:refused a)) (seq resolutions)) (own (resolution-tx resolutions) nil))
+                ;; a resolution that keeps what the branch holds after the replay writes nothing (seon.merge/held-op?)
+                settle (when-not (:refused a) (vec (remove #(pm/held-op? (:db a) %) (resolution-tx resolutions))))
+                resolved (when (seq settle) (own settle nil))
                 final (when (and (not (:refused a)) (or (nil? resolved) (map? resolved)))
                         (own [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}] {:op 'merge!}))
-                refused (or (:refused a) (when (and resolved (not (map? resolved))) {:tx nil :exception resolved})
-                            (when (and final (not (map? final))) {:tx nil :exception final}))]
-            (if refused
-              (do (dw/abandon-pending! conn)
-                  {:ok false :applied [] :conflicts [] :t (:max-tx head)
-                   :refused {:tx (:tx refused) :error (or (ex-data (:exception refused)) {:seon.error/message (ex-message (:exception refused))})}})
+                ;; the branch's own write refused (a resolution, the merge's transaction): the write check's own error
+                own-refused (fn [e] (or (when (:seon.error/type (ex-data e)) (ex-data e))
+                                        (contract/error :seon.writer/refused #'seon.agent/merge-main! (or (ex-message e) (str e)) (or (ex-data e) {}))))
+                why (cond (:refused a) (pm/refusal (:max-tx head) (:tx (:refused a)) (:exception (:refused a)))
+                          (and resolved (not (map? resolved))) (own-refused resolved)
+                          (and final (not (map? final))) (own-refused final))]
+            (if why
+              (do (dw/abandon-pending! conn) (assoc why :ok false :applied [] :t (:max-tx head)))
               (let [c (try (dw/commit-pending! conn) (finally (when (dw/pending? conn) (dw/abandon-pending! conn))))
                     ops (vec (mapcat pdb/report->tx (cond-> (:reps a) resolved (conj resolved) true (conj final))))
                     errs (program/load-changes! (:db c) ops)]

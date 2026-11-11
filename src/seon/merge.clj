@@ -29,7 +29,7 @@
   ours and theirs as data, until the branch's content for its key changes or it is
   resolved (`resolve-tx`). Every function here is pure over db values."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.datom :as dd] [datahike.writer :as dw] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.datom :as dd] [datahike.writer :as dw] [clojure.string :as str] [clojure.set] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg]))
 
 (def carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
@@ -564,7 +564,7 @@
 
 (defn- identity-of
   "Entity e's identity on db: [attribute value] of its upsert key, an attribute that is :db.unique/identity in db's own
-  schema ((d/schema db), which a schema entry's {:seon.db/identity true} installs: seon.schema.datahike), or :db/ident (an
+  schema (its :schema map, which a schema entry's {:seon.db/identity true} installs: seon.schema.datahike), or :db/ident (an
   attribute's declaration, by Datahike's own identity); nil when it bears none. Read from the db's data, never a process's
   registry, so a branch's own identities count. An entity holding several (a user is an agent: :seon.agent/key and
   :seon.user/name) is named by the one whose attribute's ident sorts first, which both sides of a merge share, never by
@@ -572,7 +572,8 @@
   docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:tuple :keyword :any]]]}
   [db e]
-  (let [schema (d/schema db)
+  ;; the db's schema map as it holds it (:schema), never (d/schema db), which builds the whole map again on every call
+  (let [schema (:schema db)
         ids (filter (fn [dt] (or (= :db/ident (:a dt)) (= :db.unique/identity (get-in schema [(:a dt) :db/unique])))) (d/datoms db :eavt e))]
     (some (fn [dt] [(:a dt) (:v dt)]) (sort-by :a ids))))
 
@@ -593,8 +594,11 @@
         tx? (memoize (fn [e] (boolean (or (seq (d/datoms db :eavt e :db/txInstant)) (seq (d/datoms base :eavt e :db/txInstant))))))
         value (fn [dt] (if (ref? (:a dt)) (or (id (:v dt)) [:db/id (:v dt)]) (:v dt)))
         ;; a fact both hold under two transactions (a merge's copy, written again under a new one) is no change
-        [gone added] (let [[g a] (d/datoms-diff base db :eavt []) held (fn [x] (fn [dt] (seq (d/datoms x :eavt (:e dt) (:a dt) (:v dt)))))]
-                       [(remove (held db) g) (remove (held base) a)])
+        ;; (in both halves of the diff by e, a and v: a set of the two, no index read; a value compared by content, as the index does)
+        [gone added] (let [[g a] (d/datoms-diff base db :eavt [])
+                           eav (fn [dt] [(:e dt) (:a dt) (let [v (:v dt)] (if (bytes? v) (vec v) v))])
+                           both (clojure.set/intersection (into #{} (map eav) g) (into #{} (map eav) a))]
+                       (if (empty? both) [g a] [(remove #(both (eav %)) g) (remove #(both (eav %)) a)]))
         step (fn [now]
                (fn [acc dt]
                  (let [e (:e dt) a (:a dt)]
@@ -641,8 +645,10 @@
   entity ids are kept (the store's, issued once: docs/storage.md#ids). A retraction the source's history does
   not hold (an attribute that keeps no history) rides the last group. See docs/decisions.md, 'A merge replays
   the source's transactions on the branch that receives it'."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector [:map [:tx :int] [:meta :map] [:ops [:vector :any]]]]]}
-  [base src]
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:vector [:map [:tx :int] [:meta :map] [:ops [:vector :any]]]]]
+                  [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword]] [:vector [:map [:tx :int] [:meta :map] [:ops [:vector :any]]]]]]}
+  ([base src] (replay base src nil))
+  ([base src skip]
   (let [tx? (memoize (fn [e] (boolean (or (seq (d/datoms src :eavt e :db/txInstant)) (seq (d/datoms base :eavt e :db/txInstant))))))
         ;; every datom the source's history holds that base's does not: what its transactions since base wrote
         wrote (remove #(tx? (:e %)) (second (d/datoms-diff (d/history base) (d/history src) :eavt [])))
@@ -654,12 +660,16 @@
         unsaid (for [dt (first (d/datoms-diff base src :eavt [])) :when (and (not (tx? (:e dt))) (not (said [(:e dt) (:a dt) (:v dt)]))
                                                                              (empty? (d/datoms src :eavt (:e dt) (:a dt) (:v dt))))]
                  [:db/retract (:e dt) (:a dt) (:v dt)])
-        by-tx (if (and (seq unsaid) (seq by-tx)) (update by-tx (key (last by-tx)) into unsaid) by-tx)]
-    (vec (for [[t ops] by-tx]
-           {:tx t
-            ;; retractions first: a value replaced in one transaction is retracted, then asserted
-            :ops (vec (sort-by #(if (= :db/retract (first %)) 0 1) ops))
-            :meta (into {} (for [dt (d/datoms src :eavt t) :when (not= :db/txInstant (:a dt))] [(:a dt) (:v dt)]))}))))
+        meta (fn [t] (into {} (for [dt (d/datoms src :eavt t) :when (not= :db/txInstant (:a dt))] [(:a dt) (:v dt)])))
+        ;; a transaction branch skip wrote itself is left out first, so the unsaid retractions ride a group that stays
+        by-tx (into (sorted-map) (remove (fn [[t _]] (and skip (= skip (:seon.tx/branch (meta t)))))) by-tx)
+        ;; the unsaid ride the last group, or one of their own when none is left
+        groups (vec (for [[t ops] by-tx] {:tx t :ops ops :meta (meta t)}))
+        groups (cond (empty? unsaid) groups
+                     (seq groups) (update-in groups [(dec (count groups)) :ops] into unsaid)
+                     :else [{:tx (:max-tx src) :ops (vec unsaid) :meta {}}])]
+    ;; retractions first: a value replaced in one transaction is retracted, then asserted
+    (mapv (fn [g] (update g :ops #(vec (sort-by (fn [op] (if (= :db/retract (first op)) 0 1)) %)))) groups))))
 
 (defn plan
   "What merging src into onto does, decided before anything is written, from the three values alone: their
@@ -680,7 +690,53 @@
           (seq (:unidentified theirs)) {:unidentified (:unidentified theirs)}
           ;; a transaction the receiving branch wrote itself, come back through the other side's replay of it, is not
           ;; written again: it holds nothing the branch lacks, and a value the branch changed since stays the branch's
-          :else {:groups (let [b (get-in onto [:config :branch])] (filterv #(not= b (:seon.tx/branch (:meta %))) (replay base src)))}))))
+          :else {:groups (replay base src (pdb/main-branch (:config onto)))}))))
+
+(defn held-op?
+  "Does op write nothing on db: an assertion of a datom db holds, a retraction (or :db.fn/retractAttribute) of what db does
+  not hold? An entity or a ref value named by its identity (a lookup) is read as db names it; one db cannot resolve is no
+  held assertion (the write answers for it) and a held retraction (nothing there to retract). What a merge leaves out of a transaction, so it writes no empty one (apply-groups!,
+  seon.agent/merge-main!'s resolutions). See docs/decisions.md, 'A merge replays the source's transactions on the branch
+  that receives it'."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :any]] :boolean]}
+  [db [op e a v]]
+  (let [id (fn [x] (if (vector? x) (:db/id (d/entity db x)) x))
+        eid (id e)
+        v (if (and (vector? v) (= :db.type/ref (get-in (:schema db) [a :db/valueType]))) (id v) v)]
+    (boolean (case op
+               ;; a retraction from an entity db does not hold (its identity retracted) has nothing to retract
+               :db.fn/retractAttribute (or (nil? eid) (empty? (d/datoms db :eavt eid a)))
+               :db/retract (or (nil? eid) (empty? (d/datoms db :eavt eid a v)))
+               :db/add (and eid (some? v) (seq (d/datoms db :eavt eid a v)))
+               false))))
+
+(defn refusal
+  "The refusal of a merge whose plan (plan) writes nothing, or nil when it is groups to write; and, given a source
+  transaction and the exception the receiving branch's write check threw at it, that refusal: :seon.merge/conflicts (the two
+  sides' net changes conflict: the agent resolves), :seon.merge/unidentified (the source changed an entity that bears no
+  identity: a defect of its schema), :seon.merge/replay-refused (the receiving branch moved since the base: merge the other
+  way and try again). t is the receiving branch's. One shape for the writer's merge up and an agent's merge down. See
+  docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  {:malli/schema [:function [:=> [:cat :int :map] [:maybe [:or :seon.merge/conflicts :seon.merge/unidentified]]]
+                  [:=> [:cat :int :int :any] :seon.merge/replay-refused]]}
+  ([t p]
+   (cond (seq (:conflicts p))
+         (contract/error :seon.merge/conflicts #'seon.merge/refusal
+                         (str "the two sides changed " (count (:conflicts p)) " key(s) to different ends since their base: "
+                              (str/join "; " (map (comp sedn/encode :key) (:conflicts p))))
+                         {:tx t :conflicts (:conflicts p)})
+         (seq (:unidentified p))
+         (contract/error :seon.merge/unidentified #'seon.merge/refusal
+                         (str "the source changed " (count (:unidentified p)) " entit(ies) that bear no identity, which cannot cross: attributes "
+                              (str/join "; " (map (comp sedn/encode sort) (:unidentified p))))
+                         {:tx t :unidentified (:unidentified p)})))
+  ([t source-tx exception]
+   (let [err (or (when (:seon.error/type (ex-data exception)) (ex-data exception))
+                 (contract/error :seon.writer/refused #'seon.merge/refusal (or (ex-message exception) (str exception)) (or (ex-data exception) {})))]
+     (contract/error :seon.merge/replay-refused #'seon.merge/refusal
+                     (str "the receiving branch's write check refuses the source's transaction " source-tx ": " (:seon.error/message err)
+                          ": it moved since the base; merge the other way and try again")
+                     {:tx t :refused {:tx source-tx :error err}}))))
 
 (defn apply-groups!
   "Groups (plan's, replay's) applied on conn after what is pending, each its own transaction through the connection's checked
@@ -694,7 +750,7 @@
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :map [:sequential :map]] [:map [:reps [:vector :map]] [:applied [:vector :int]]]]}
   [conn db meta0 groups]
   (reduce (fn [acc g]
-            (if (every? (fn [[op e a v]] (= (= :db/add op) (boolean (seq (d/datoms (:db acc) :eavt e a v))))) (:ops g))
+            (if (every? #(held-op? (:db acc) %) (:ops g))
               acc
               (let [rep (dw/apply! conn {:tx-data (:ops g) :tx-meta (merge meta0 (select-keys (:meta g) [:seon.tx/branch :seon.tx/eval :seon.tx/merged]))})]
                 (if (map? rep)

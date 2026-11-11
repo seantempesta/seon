@@ -691,3 +691,23 @@
        (is (= {[:task/name :gen/own :task/plan] "changed after the merge"} (:keys (pm/net-change base @bc))) "the branch changed one key")
        (is (empty? (:conflicts (pm/plan base @bc @conn))) "merged down, no conflict")
        (is (empty? (:conflicts (pm/plan base @conn @bc))) "merged up, no conflict")))))
+
+;; docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it': a retraction the source's history
+;; does not hold (an attribute that keeps no history) rides the last group that is replayed, never one left out: here main's last
+;; transactions are the branch's own, come back through the merge up, and are no group of the merge down
+(deftest a-retraction-with-no-history-rides-a-group-that-stays
+  (branched
+   (fn [conn bc br]
+     (let [v (first (es @conn :var/form))]
+       (d/transact conn [[:db/add v :seon.test/status :green]])
+       (d/release bc) (d/delete-branch! conn br) (d/branch! conn (:branch (:config @conn)) br)
+       (let [bc (pdb/connect (assoc (:config @conn) :branch br))]
+         (try
+           (apply! bc :branch [{:task/name :gen/own :task/plan "p" :task/status :held}])
+           ;; main drops the status (no history keeps the retraction), then takes the branch's work
+           (d/transact conn [[:db/retract v :seon.test/status :green]])
+           (is (seq (:groups (replay-up! conn br))))
+           (let [base (pdb/branch-base conn (:branch (:config @conn)) br)
+                 p (pm/plan base @bc @conn)]
+             (is (= [[:db/retract v :seon.test/status :green]] (vec (mapcat :ops (:groups p)))) (pr-str p)))
+           (finally (d/release bc))))))))
