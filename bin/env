@@ -45,7 +45,9 @@ JOLT_BUILD_CACHE_DIR=${JOLT_BUILD_CACHE_DIR:-$MAIN_TREE/target/cache/build}
 JOLT_RUNTIME_CACHE_DIR=${JOLT_RUNTIME_CACHE_DIR:-$MAIN_TREE/target/cache/runtime}
 JOLT_CACHE_DIR=${JOLT_CACHE_DIR:-$MAIN_TREE/target/cache/aot}
 JOLT_CACHE_GENERATIONS=${JOLT_CACHE_GENERATIONS:-4}
-JOLT_CACHE_MB=${JOLT_CACHE_MB:-4096}
+# 32 GB while we develop, so nothing is evicted (owner, 2026-11-11); the release number is chosen from the measured
+# working set and tested at the target's size first (task jolt.loader/the-cache-bound-is-tested-at-the-targets-size-before-release)
+JOLT_CACHE_MB=${JOLT_CACHE_MB:-32768}
 export JOLT_BUILD_CACHE_DIR JOLT_RUNTIME_CACHE_DIR JOLT_CACHE_DIR JOLT_CACHE_GENERATIONS JOLT_CACHE_MB
 # Jolt's compile options for everything a Seon process compiles (its build, the test runner,
 # root's and agents' evals; Jolt reads JOLT_COMPILER_OPTIONS into *compiler-options*' root at
