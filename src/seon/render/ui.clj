@@ -1583,7 +1583,7 @@
   as root's message to them carries it: the owner's ruling on home tiles, docs/decisions.md), and under it, by this same
   render, the agents it started (its :seon.agent/agents); at the depth its parent's pull stopped (members held as ids alone), how many
   there are below, never a silent cut. Its group (`where-stands`) orders it, those that need the person first (CSS order). Drawn from the
-  view alone: the joining pattern pulls what it reads (seon.task/entry-pattern). For the page alone (:wire/for \"page\"). See
+  view alone: the joining pattern pulls what it reads (:seon.agent/entry's pattern). For the page alone (:wire/for \"page\"). See
   docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any] :any]}
   [db c]
