@@ -1387,12 +1387,12 @@
   #{:var/doc :ns/doc})
 
 (def file-readers
-  "The vars a test calls to read the checkout's files: the tree-readers but binary-sh (which runs
-  the binary: its tests are digested by what they reach), and src's readers of a checkout
-  directory (the wiki, read or loaded, and the source dirs: seon.repl-test/the-template-instructions-and-the-help-page-run read
-  the help page through seon.doc/pages and was reused over its edits; seon.task-files-test reads the
-  task files through seon.root/task-files and was marked flaky over an edit to one). See docs/source.md#tests-run-by-reach."
-  (-> tree-readers (disj 'seon.test-store/binary-sh) (conj 'seon.doc/load-dir-tx 'seon.doc/pages 'seon.root/task-files 'seon.fx/read-source)))
+  "The vars a test calls to read files raw: the tree-readers but binary-sh (which runs the binary: its tests are digested by
+  what they reach). A raw read takes the whole tree only when it reads the checkout (checkout-read?); src's readers of one
+  part of the checkout (the wiki, the task files, the source) take that part's class instead (env-class-readers: the
+  wiki's seon.doc/pages and load-dir-tx, seon.root/task-files, seon.fx/read-source), so a wiki edit moves only the tests
+  that read the wiki. See docs/source.md#tests-run-by-reach."
+  (disj tree-readers 'seon.test-store/binary-sh))
 
 (def env-class-readers
   "The vars that read one class of the checkout's files that have no program facts
@@ -1421,7 +1421,13 @@
     ;; every var of the process's namespaces without a contract (bin/check contracts): a new function in
     ;; src changes its answer, though no test names it (batch 18's scan-code went uncontracted with
     ;; the contracts step green at its digest, 2026-10-30)
-    seon.contract/uncontracted :seon.env/src})
+    seon.contract/uncontracted :seon.env/src
+    ;; one part of the checkout each, read whole: the wiki (a page, or every page loaded), the task files, the source (once
+    ;; file-readers, which took the whole tree: a 4-line wiki edit ran 117 tests, 2026-11-11)
+    seon.doc/pages :seon.env/docs
+    seon.doc/load-dir-tx :seon.env/docs
+    seon.root/task-files :seon.env/tasks
+    seon.fx/read-source :seon.env/src})
 
 (def registry-walkers
   "The vars that hold every schema entry: a form of a test's namespace naming one reads every entry, a
@@ -1496,6 +1502,20 @@
                        (update :keys into (filter config-key?) (names (less-config-fields f)))
                        (update :listed into (keep #(when (and (vector? %) (config-key? (first %))) (first %))) (when (and (vector? f) (= :map (first f))) f))))))
              {:keys #{} :listed #{}} schemas))
+
+(defn- checkout-read?
+  "Does form f's raw read (file-readers) read the checkout: io/resource (the classpath is the checkout's resources), or a
+  read in a form that names the checkout (seon.config/checkout) or a relative path (a literal with a slash, not rooted: a
+  shard's working directory is the checkout)? A form reading only paths it made (a temp directory, a log, a run's out
+  directory) reads nothing of the checkout and takes no tree. Its edge, a checkout path built in a helper the form calls
+  without naming it, is the full run's (task seon.program/a-test-reads-the-checkout-only-through-a-classed-reader).
+  See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [f]
+  (boolean (or (some #{'clojure.java.io/resource 'seon.config/checkout} (:refs f))
+               ;; the form as the reader reads it (it was loaded, so it reads), its strings walked: no text matched
+               (some #(and (string? %) (str/includes? % "/") (not (str/starts-with? % "/")) (not (str/includes? % " ")))
+                     (when-let [src (:src f)] (tree-seq coll? seq (binding [*read-eval* false] (read-string src))))))))
 
 (defn- env-reader-form?
   "Does form f define only env-readers (its file reads are of a class held apart from the tree, or of no checkout file)?"
@@ -1724,10 +1744,10 @@
                   (into holders)
                   (into starters)
                   (as-> d (into #{} (remove gone-ids) d)))
-        ;; a test namespace's form reading the checkout's files itself (file-readers) judges those files:
+        ;; a test namespace's form reading the checkout's files itself (file-readers, checkout-read?) judges those files:
         ;; the tests reaching it take the tree (one-printer-and-no-cut-before-it
         ;; was reused over edits to what it read, and read as flaky)
-        scans (flag :scans #(and (test-nss (:ns %)) (some file-readers (:refs %)) (not (env-reader-form? %))))
+        scans (flag :scans #(and (test-nss (:ns %)) (some file-readers (:refs %)) (checkout-read? %) (not (env-reader-form? %))))
         ;; a test namespace's form reading a docstring (clojure.repl/doc, a var's or namespace's doc fact) judges docs,
         ;; which a form's code leaves out (form-ids): it reads the src class, the program's text, as kept-program-store's readers do
         docs (flag :docs #(and (test-nss (:ns %)) (or (some doc-readers (:refs %)) (:doc-attr? %))))
