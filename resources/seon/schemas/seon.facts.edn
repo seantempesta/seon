@@ -237,7 +237,8 @@
  :seon.agent/ended-turn :int
  ;; an entity's own pattern, stored with it from its first change; before that it reads its schema's (its role's). The
  ;; description is what an agent reads beside its pattern (seon.render.ui/pull-front): what it is, the warning, one form that adds
- ;; a join. What a role's pattern must keep is that role's :seon.ctx/required (docs/ctx.md#changing-it-swap)
+ ;; a join. What a role's pattern must keep is that role's :seon.ctx/required, {attribute what-it-is}, a join's attribute or a
+ ;; plain one (docs/ctx.md#changing-it-swap)
  :seon.ctx/pattern [:and {:description "Your pull pattern: what your pull holds, in Datahike's pull syntax, one clause an attribute or a join ({attribute sub-pattern}). Your page and your next request are made from it, so changing it changes what you read. ADD to it, never replace it: a pattern that drops a join your role requires is refused, and one that drops anything else simply stops showing it to you. To add a join: (swap! ctx update :seon.ctx/pattern (fn [p] (conj (vec (or p (seon.render/entity-pattern (seon.agent/branch-index) @ctx))) {:my.ns/_of [:my.ns/text]})))"}
                     [:vector :any] :seon.db/plain]
  ;; an entity's own render, as :seon.ctx/pattern is its own pattern: what its page is drawn by in place of its schema's (seon.render/render-var-of; docs/render.md#an-entity-may-name-its-own-render)

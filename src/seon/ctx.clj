@@ -621,15 +621,17 @@
 (defonce ^:private pending (volatile! nil))
 
 (defn- lost-required
-  "Why pattern p may not be entity e's (in the entity index ix): each join its role requires (its schema's :seon.ctx/required,
-  {join reason}) that p no longer asks, as an :invalid entry naming the join and what it is; [] when it keeps them all. A pattern
-  is added to, never replaced. See docs/ctx.md#changing-it-swap."
+  "Why pattern p may not be entity e's (in the entity index ix): each clause its role requires (its schema's :seon.ctx/required,
+  {attribute reason}: a join's attribute, or a plain one) that p no longer asks, as an :invalid entry naming it and what it is; []
+  when it keeps them all. A clause is asked as a keyword, as [attribute & options] or as a join's key. A pattern is added to,
+  never replaced. See docs/ctx.md#changing-it-swap."
   {:malli/schema [:=> [:cat :map :map [:sequential :any]] [:vector :map]]}
   [ix e p]
   (let [required (render/schema-property ix (render/entity-schema ix e nil) :seon.ctx/required)
-        asked (into #{} (comp (filter map?) (mapcat keys) (map #(if (vector? %) (first %) %))) p)]
+        attr (fn [k] (if (vector? k) (first k) k))
+        asked (into #{} (mapcat (fn [x] (if (map? x) (map attr (keys x)) [(attr x)]))) p)]
     (vec (for [[k what] required :when (not (asked k))]
-           {:path [:seon.ctx/pattern] :why (str "your pattern must keep its join of " k " (" what "): add to the pattern, never replace it")}))))
+           {:path [:seon.ctx/pattern] :why (str "your pattern must keep " k " (" what "): add to the pattern, never replace it")}))))
 
 (defn write!
   "A swap! of the record to nv, written: its change from the record (edits) as one transaction,

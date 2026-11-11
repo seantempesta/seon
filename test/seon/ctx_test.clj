@@ -1592,9 +1592,9 @@
                                                   (catch clojure.lang.ExceptionInfo e (pr-str (ex-data e)))))))]
     (is (= :written (tryit (conj p :seon.agent/started-ms))) "a clause added: accepted")
     (let [said (str (tryit (vec (remove #(join? :seon.message/_to %) p))))]
-      (is (str/includes? said "must keep its join of :seon.message/_to") said)
+      (is (str/includes? said "must keep :seon.message/_to") said)
       (is (str/includes? said "the messages sent to you") "and says what the join is"))
-    (is (str/includes? (str (tryit [:seon.agent/key])) "must keep its join of") "a replacement is refused")))
+    (is (str/includes? (str (tryit [:seon.agent/key])) "must keep") "a replacement is refused")))
 
 (deftest a-swap-at-a-key-the-join-does-not-hold-says-so
   ;; docs/ctx.md#changing-it-swap: a join's members are keyed by their entity ids; a swap! whose path names a key the join holds no member
