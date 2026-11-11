@@ -1568,7 +1568,9 @@
         refused-main (count (filter #(= "root stopped" (:seon.error/message %)) mr))
         conn (seon.db/connect (:cfg sys))
         main-notes (d/q '[:find (count ?e) . :where [?e :note/agent :root]] @conn)
-        left (filter alive? (cons fs-pid pids))]
+        ;; the one rule of what a stop leaves (still-there): an orphan zombie launchd has not yet reaped ran nothing past the stop
+        ;; (batch 46: :left [88937], an agent killed with its server's group, its exit awaited, its reap launchd's)
+        left (still-there (cons fs-pid pids))]
       (d/release conn)
       {:report {:agents n :stop st :main {:ok ok-main :refused-after-close refused-main :stored main-notes}
                 :evals {:done (count (filter #(= ":done" (printed %)) evr))

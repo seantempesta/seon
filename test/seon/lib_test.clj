@@ -97,6 +97,16 @@
   ;; the watcher is a C thread Chez never made, so 200 forks beside it each run their child
   (is (= {{:exit 0} 200} (fork-case "forks-beside-the-watch"))))
 
+(defn- machine-pressure
+  "The machine's memory pressure as the kernel reports it (kern.memorystatus_vm_pressure_level: 1 normal, 2 warn, 4
+  critical) and vm_stat's page counts: what a gauge reading under a full run's load is read beside (task
+  seon.lib/the-memory-gauges-proof-measures-the-block-alone). Read, never applied: memory_pressure with no option makes
+  pressure. See docs/cost.md#what-is-measured."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (str "pressure level " (clojure.string/trim (:out (clojure.java.shell/sh "sysctl" "-n" "kern.memorystatus_vm_pressure_level")))
+       "; vm_stat:\n" (:out (clojure.java.shell/sh "vm_stat"))))
+
 (deftest the-memory-gauge-reads-what-macos-charges-across-a-fork
   ;; task seon.lib/real-mb-reads-what-macos-charges: the gauge is the task's phys_footprint, what
   ;; macOS charges (Activity Monitor, jetsam). It counted a process's private and shared-now-private
@@ -104,7 +114,9 @@
   ;; 76 MB after forking a child (measured 2026-10-23), so root, which forks the fork server, read a
   ;; quarter of what it holds. A forked child is charged what it writes, not what it shares.
   (let [{:keys [before held child after] :as r} (fork-case "memory-gauge")]
-    (is (and before held (< 60 (- held before) 80)) (str "a 64 MB block written: " (pr-str r)))
+    ;; red under a full run's load once (59.4 MB, 84a88d2c83) and never alone: the machine's pressure goes with a red, so its cause is read
+    (let [ok (boolean (and before held (< 60 (- held before) 80)))]
+      (is ok (str "a 64 MB block written: " (pr-str r) (when-not ok (str "\n" (machine-pressure))))))
     (is (= {:exit 0} child) "a forked child is charged the 8 MB it writes")
     (is (and after (< (* 0.95 held) after)) (str "the parent still holds its block after the fork: " (pr-str r))))
   ;; the reading child (case "touch-gauge", task seon.lib/scale-charges-what-the-machine-lost): a
