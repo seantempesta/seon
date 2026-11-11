@@ -674,4 +674,20 @@
                                                       :ticks (:ticks @cost) :bytes (:bytes @cost)}))
        (is (= 1 (count (:applied a))) "only main's own transaction is written")
        (is (= (inc (txs head)) (txs @bc)) "the branch's own, come back, leave no transaction")
-       (is (some? (pdb/eid @bc :task/name :gen/mains)) "and main's change is on the branch")))))
+       (is (some? (pdb/eid @bc :task/name :gen/mains)) "and main's change is on the branch")
+       (is (every? #(pdb/eid @bc :task/name (keyword "gen" (str "own" %))) (range 5)) "and the branch keeps what it wrote")))))
+
+;; docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it': a fact two dbs hold under two
+;; transactions (a merge's copy, written again under a new one) is no change of either: after a merge up, the branch changes one
+;; of its own facts and main changes nothing of its own; merged either way, no conflict
+(deftest a-fact-held-under-another-transaction-is-no-change
+  (branched
+   (fn [conn bc br]
+     (apply! bc :branch [{:task/name :gen/own :task/plan "p" :task/status :held}])
+     (is (seq (:groups (replay-up! conn br))))
+     (apply! bc :branch [[:db/add (pdb/eid @bc :task/name :gen/own) :task/plan "changed after the merge"]])
+     (let [base (pdb/branch-base conn (:branch (:config @conn)) br)]
+       (is (= {} (:keys (pm/net-change base @conn))) "main changed nothing since the base: its copy of the branch's facts is none")
+       (is (= {[:task/name :gen/own :task/plan] "changed after the merge"} (:keys (pm/net-change base @bc))) "the branch changed one key")
+       (is (empty? (:conflicts (pm/plan base @bc @conn))) "merged down, no conflict")
+       (is (empty? (:conflicts (pm/plan base @conn @bc))) "merged up, no conflict")))))

@@ -582,7 +582,7 @@
   [identity-attr identity-value attribute] and its now is the value on db, or ::gone; of cardinality many it is
   [identity-attr identity-value attribute value] and its now is true (asserted) or ::gone (retracted). A ref's
   value is its target's identity. A transaction's own facts are no change of the branch's data (a merge writes
-  new transactions). An entity that bears no identity is named in :unidentified by its attributes: it cannot
+  new transactions), and neither is a fact both hold under two transactions (a merge's copy). An entity that bears no identity is named in :unidentified by its attributes: it cannot
   cross (docs/decisions.md, 'A merge replays the source's transactions')."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:keys :map] [:unidentified [:set [:set :keyword]]]]]}
   [base db]
@@ -592,7 +592,9 @@
         id (memoize (fn [e] (or (identity-of db e) (identity-of base e))))
         tx? (memoize (fn [e] (boolean (or (seq (d/datoms db :eavt e :db/txInstant)) (seq (d/datoms base :eavt e :db/txInstant))))))
         value (fn [dt] (if (ref? (:a dt)) (or (id (:v dt)) [:db/id (:v dt)]) (:v dt)))
-        [gone added] (d/datoms-diff base db :eavt [])
+        ;; a fact both hold under two transactions (a merge's copy, written again under a new one) is no change
+        [gone added] (let [[g a] (d/datoms-diff base db :eavt []) held (fn [x] (fn [dt] (seq (d/datoms x :eavt (:e dt) (:a dt) (:v dt)))))]
+                       [(remove (held db) g) (remove (held base) a)])
         step (fn [now]
                (fn [acc dt]
                  (let [e (:e dt) a (:a dt)]
@@ -644,7 +646,9 @@
         by-tx (reduce (fn [m dt] (update m (:tx dt) (fnil conj []) (op dt))) (sorted-map) wrote)
         ;; what base holds and the source does not, with no retraction in its history
         said (into #{} (comp (filter #(= :db/retract (first %))) (map rest)) (mapcat val by-tx))
-        unsaid (for [dt (first (d/datoms-diff base src :eavt [])) :when (and (not (tx? (:e dt))) (not (said [(:e dt) (:a dt) (:v dt)])))]
+        ;; ... and the source does not hold under any transaction (a merge's copy holds it under another)
+        unsaid (for [dt (first (d/datoms-diff base src :eavt [])) :when (and (not (tx? (:e dt))) (not (said [(:e dt) (:a dt) (:v dt)]))
+                                                                             (empty? (d/datoms src :eavt (:e dt) (:a dt) (:v dt))))]
                  [:db/retract (:e dt) (:a dt) (:v dt)])
         by-tx (if (and (seq unsaid) (seq by-tx)) (update by-tx (key (last by-tx)) into unsaid) by-tx)]
     (vec (for [[t ops] by-tx]
