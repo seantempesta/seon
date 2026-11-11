@@ -90,12 +90,19 @@
     (if (string? p) (emit/marked-hiccup :seon.print/code p) [:pre {:class "text-text-100"} [:code p]])))
 
 (defn task-title
-  "A task's id as a person reads it: its name in words, its first letter capital (seon.print/a-long-string
-  becomes \"A long string\");  See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [id]
-  (let [s (str/replace (name (symbol id)) "-" " ")]
-    (str (str/upper-case (subs s 0 (min 1 (count s)))) (subs s (min 1 (count s))))))
+  "Task t as a person reads its title. A task whose name is its plan's first sentence in words (a person's request: seon.root/request-name
+  names it by seon.task/request-words, numbered when taken) is titled by that sentence as written, demo.math/half and its colon intact; any
+  other, or one whose plan no longer opens with those words, by its name in words, first letter capital (seon.print/a-long-string becomes
+  \"A long string\"). Computed from the data, never stored. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [t]
+  (let [nm (name (symbol (:seon.task/id t)))
+        plan (ratom/realize (:seon.task/plan t))
+        said (when (and (string? plan) (not (str/blank? plan))) (task/request-words plan))]
+    (if (and said (or (= nm said) (and (str/starts-with? nm (str said "-")) (re-matches #"\d+" (subs nm (inc (count said)))))))
+      (task/request-sentence plan)
+      (let [s (str/replace nm "-" " ")]
+        (str (str/upper-case (subs s 0 (min 1 (count s)))) (subs s (min 1 (count s))))))))
 
 (defn- inline
   "The hiccup of text between offsets from and to, a stretch of a Markdown block, by the one parse: spans, seon.ref/scan's, drawn as code and
@@ -160,7 +167,7 @@
   ([text {:keys [inline?]}]
    (let [{:seon.ref/keys [blocks spans]} (ref/scan text)
          run (fn [a b] (if inline? (inline text a b spans) [(subs text a b)]))]
-     (into [:div {:class "seon-md font-sans flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
+     (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
            (for [{:seon.ref/keys [kind from to heading heading-level text-from text-to items ordered]} blocks
                  :let [body (subs text from to)]]
              (cond
@@ -456,7 +463,7 @@
       [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
                           (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
                           :placeholder (cond (and talks? live?) "Say something (Enter; Shift+Enter: a new line)\n(+ 1 2) runs in its REPL"
-                                       talks? "Say something and it starts again (Enter; Shift+Enter: a new line)"
+                                       talks? "Say something and it starts (Enter; Shift+Enter: a new line)"
                                        :else "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)")}
                    ;; the chat takes focus (it follows its tail); a browser scrolls a focused field into view, and this one ends the page
                    focus? (assoc :autofocus true))]
@@ -685,7 +692,7 @@
         (str "task · " (namespace (symbol id))
              (cond (:seon.task/outcome t) (str " · " (:text (standing nil {:seon.task/outcome (:seon.task/outcome t)})))
                    execution (str " · " (kname execution))))]
-       [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
+       [:p {:class "text-lg font-bold text-text-100"} (task-title t)]
        (when instructions [:details [:summary "how the agent works it"] (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/instructions} instructions)])
        (when plan (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/plan} plan))
        ;; its id, which an agent names its task by (my.task/*)
@@ -716,6 +723,12 @@
      (when why (list ": " (plain why (cell) {:one-line? true})))
      (when-let [ts (seq (:answered-by r))] (str " (answered by " (str/join ", " ts) ")"))]))
 
+(defn- class-words
+  "What problem class c's open rows are, in words, from :seon.problems/class's :seon.status/title (the words are data: docs/health.md); its
+  name when it has none."
+  {:malli/schema [:=> [:cat :keyword] :string]}
+  [c] (or (get (:seon.status/title (contract/properties :seon.problems/class)) c) (kname c)))
+
 (defn problems
   "Main's problems (the declared html render of :seon.problems/report): each class with rows,
   its count, and its rows a line each (`problem-row`), open ones first, rendered only when the
@@ -729,7 +742,7 @@
        [:p "none open"]
        (for [[c n rows] cs :let [id (str "pc-" (name c)) shown? (or (nil? open) (contains? open id))]]
          [:details (cond-> (toggle id) (and open shown?) (assoc :open true))
-          [:summary {:class "cursor-pointer"} (str (kname c) " " n)]
+          [:summary {:class "cursor-pointer" :title (kname c)} (str (class-words c) ": " n)]
           (when shown? (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.problems/row} (assoc r :class c))))]))]))
 
 (defn problems-model
@@ -902,15 +915,21 @@
   (when (seq xs) [:p {:key label} (str label ": " (str/join ", " (map str xs)))]))
 
 (defn call-in
-  "One real call of sym in source src: the first form opening `(sym ` or `(name `, as written (`seon.ctx.status/form-at`), or nil
-  when src has none or it is only the function's name and bare symbols (that is its arglist, which the source above says). What a
-  test or a caller that reaches a function shows of how it is called."
+  "One real call of sym in source src: the first form opening `(sym ` or `(name `, as written (`seon.ctx.status/form-at`), that is a call
+  an agent can evaluate, or nil when src has none: one that is only the function's name and bare symbols is its arglist, which the
+  source above says, and one that holds an unquote is a macro's template (its syntax-quote), never a call. What a test or a caller
+  that reaches a function shows of how it is called. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat [:maybe :string] :qualified-symbol] [:maybe :string]]}
   [src sym]
   (when src
-    (let [starts (keep #(str/index-of src %) [(str "(" sym " ") (str "(" sym ")") (str "(" (name sym) " ") (str "(" (name sym) ")")])
-          call (when (seq starts) (status/form-at src (reduce min starts)))]
-      (when (and call (not (re-matches #"\([^\s()\"]+(\s+[A-Za-z][\w\-?!*.<>=/]*)*\)" call)) (not (re-find #"[a-z]{3,} [a-z]{3,} [a-z]{3,}" (str/replace call #"\"[^\"]*\"" "")))) call))))
+    (let [opens [(str "(" sym " ") (str "(" sym ")") (str "(" (name sym) " ") (str "(" (name sym) ")")]
+          at (fn [o] (loop [from 0 acc []] (if-let [k (str/index-of src o from)] (recur (inc k) (conj acc k)) acc)))
+          bare (fn [call] (str/replace call #"\"[^\"]*\"" ""))
+          call? (fn [call] (and call
+                                (not (re-matches #"\([^\s()\"]+(\s+[A-Za-z][\w\-?!*.<>=/]*)*\)" call))
+                                (not (re-find #"[a-z]{3,} [a-z]{3,} [a-z]{3,}" (bare call)))
+                                (not (str/includes? (bare call) "~"))))]
+      (some #(let [call (status/form-at src %)] (when (call? call) call)) (sort (distinct (mapcat at opens)))))))
 
 (defn- section-hiccup
   "A wiki section as pulled (its :seon.doc/_parent joined) at depth: what it is in a sentence, its heading and address, its text at that
@@ -1051,6 +1070,16 @@
                        :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))}))))
 
 
+(defn- hit-line
+  "The line a search hit named n shows under its name: line, the line of its text holding a word of the query, as it is; but when that is
+  only the opening of its own definition (`(defn- n`), which says nothing its name does not, its arglist read from its source (src-of,
+  called only then, answering the source or nil), or nil with no source. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:maybe :string] :any ifn?] [:maybe :string]]}
+  [line n src-of]
+  (if (and (seq line) (symbol? n) (re-matches (re-pattern (str "\\(def[a-z-]*\\s+(\\^\\S+\\s+)*" (java.util.regex.Pattern/quote (name n)) "\\s*")) (str/trim line)))
+    (when-let [src (src-of)] (str (reader/arglists src (symbol (namespace n)))))
+    line))
+
 (defn searched
   "Search s (the declared html render of :seon.search/search-fact, a component over the db), drawn as one compact hiccup that the
   page shows and the model is sent as it is: its query searched on main as the agent's branch last merged it (:seon.agent/base-commit), so the agent's own writes move no hit,
@@ -1089,7 +1118,8 @@
            ;; each hit with the line of its text that holds a word of the query, as grep shows a hit: a bare name was passed over
            ;; (curated pair 1, 2026-11-10) where a line says why it matters
            ;; each hit its name, the line folded under it: a person reads the names and opens one (folding is presentation)
-           (into [:ol] (for [{:keys [name line]} hits]
+           (into [:ol] (for [{:keys [name line]} hits
+                             :let [line (hit-line line name #(doc/source-of at name))]]
                          (if (seq line)
                            [:li [:details {:data-preserve-attr "open"} [:summary [:code (str name)]] [:p line]]]
                            [:li [:code (str name)]])))])))))
@@ -1235,7 +1265,8 @@
 
 (defn agent-state
   "The agent's state for the person (a component over ctx and the db), nothing of it for the model: how its work stands
-  (`standing`, from the task's outcome where it holds one), its task, the form it is running and its proofs green."
+  (`standing`, from the task's outcome where it holds one), its task, the form it is running and its proofs green at their last run (a verdict is what a run saw at its program, not the
+  state now: the status judges that; seon.ctx.status, docs/render.md#how-the-work-stands)."
   {:seon.render/style ".agent-state {border-radius: 0.375rem; background: var(--color-base-900); padding: 0.5rem; min-width: 0; overflow-x: auto; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (let [task (:seon.agent/task c)
@@ -1247,9 +1278,9 @@
         running (d/q '[:find ?r . :in $ ?a :where [?p :seon.process/agent ?a] [?p :seon.process/running ?r]] db (:db/id c))]
     [:div {:wire/for "page"}
      [:p (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))) (when (:reason stands) (str " · " (:reason stands))))]
-     (when-let [id (:seon.task/id t)] [:p "task " (task-title id)])
+     (when (:seon.task/id t) [:p "task " (task-title t)])
      (when running [:p "running " [:code running]])
-     (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green")])]))
+     (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green at their last run")])]))
 
 (defn own-problems
   "The open problems of the agent (a component over its branch db, seon.problems/own: its newest run's,
@@ -2119,7 +2150,7 @@
     [:div {:class "seon-stack"}
      [:div {:class "flex items-baseline gap-3"}
       [:h1 {:class "text-base font-bold text-signal" :title (str/join " · " (remove nil? [(kname id) (when branch (str "on branch " (kname branch))) (when pid (str "pid " pid))]))}
-       (if-let [t (some-> (ratom/realize (or (:task v) (:seon.agent/task v))) :seon.task/id)] (task-title t) (or (:seon.user/name v) (kname id)))]
+       (if-let [t (some-> (ratom/realize (or (:task v) (:seon.agent/task v))) (#(when (:seon.task/id %) %)))] (task-title t) (or (:seon.user/name v) (kname id)))]
       ;; how its work stands, at a glance and in a person's words (standing): working, waiting for you only where a message
       ;; is taken, stopped at its cap, merged; the reason it stands so beside it
       (when-not (:seon.user/name v)
@@ -2183,7 +2214,7 @@
   "What an agent works on, in words: its task's title, else its branch's name; nil for neither."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:maybe :string]]}
   [a t]
-  (cond (:seon.task/id t) (task-title (:seon.task/id t))
+  (cond (:seon.task/id t) (task-title t)
         (:seon.agent/branch a) (kname (:seon.agent/branch a))))
 
 (def ^:private session-attrs
@@ -2214,9 +2245,12 @@
      ;; the tasks by their state, in plain words (owner, 2026-11-08: "Just show the status as parked"): a parked one wakes on a message
      [:h1 {:class "text-base font-semibold text-text-50"}
       (if (pos? (+ running parked))
-        (str (str/join ", " (remove nil? [(when (pos? parked) (str parked " parked")) (when (pos? running) (str running " running"))])) ".")
+        (str (str/join ", " (remove nil? [(when (pos? parked) (str parked (if (= 1 parked) " task" " tasks") " parked"))
+                                          (when (pos? running) (str running (if (= 1 running) " task" " tasks") " running"))])) ".")
         "Nothing running.")]
-     (when (pos? held) [:p {:class "seon-note"} (str held (if (= 1 held) " task" " tasks") " not released yet.")])
+     ;; the task files a seed loads are held until someone releases one: no one's work yet, so folded, never the head's first words
+     (when (pos? held) [:details {:class "seon-note"} [:summary (str held (if (= 1 held) " task" " tasks") " from the task files, not started")]
+                        [:p "Each waits until a person or the system releases it; nothing runs for it before then."]])
      (root-quiet {} (relevant :seon.root/root-fact c))]))
 
 (defn source-line
@@ -2270,18 +2304,21 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (let [{:keys [writer fork-server root-errors-total health events boot]} (ratom/realize (:process c))
-        stat (fn [label v] (when (some? v) [:span [:span {:class "muted"} (str label " ")] (str v)]))
+        stat (fn [label v & [means]] (when (some? v) [:span (cond-> {} means (assoc :title means)) [:span {:class "muted"} (str label " ")] (str v)]))
         sick (filter (fn [[_ h]] (pos? (:defects h 0))) health)]
     [:section [:h2 "root's process"]
      [:p {:class "text-xs text-text-400"} (str/join " · " (remove nil? [(some->> (ratom/realize (:seon.root/boot c)) (str "boot ")) (some->> (ratom/realize (:seon.root/generation c)) :commit (str "generation "))]))]
      [:p {:class "flex flex-wrap gap-x-3 text-xs tabular-nums"}
       (stat "batch p50" (some-> (:batch-p50-ms writer) ms-str)) (stat "tx/commit" (:tx-per-commit writer)) (stat "commits" (:commits writer))
-      (stat "fork p50" (some-> (:fork-ms-p50 fork-server) ms-str)) (stat "fork lag" (some-> (:lag-ms fork-server) ms-str))
+      (stat "fork p50" (some-> (:fork-ms-p50 fork-server) ms-str)) (stat "fork lag" (some-> (:lag-ms fork-server) ms-str)
+            "how long a commit takes to reach the fork server, the middle of its last 200; on an idle system it stays at the boot's own backlog")
       (stat "defects" root-errors-total)]
      [:p {:class "text-xs text-text-400"}
       (let [{:keys [loaded ms]} (:program boot)]
-        (cond (nil? loaded) "program load not measured"
-              (zero? loaded) "the image held main's program: no forms loaded"
+        ;; a boot with no :program loaded no forms over its image, so it recorded no load (Optimization), as for a load of none;
+        ;; no boot read yet says nothing
+        (cond (nil? boot) nil
+              (or (nil? loaded) (zero? loaded)) "the image held main's program: no forms loaded"
               :else (str loaded " forms loaded" (when ms (str " in " ms " ms")))))]
      (when (seq sick)
        [:ul {:class "text-xs"} (for [[pid {:keys [defects newest]}] sick]
@@ -2296,13 +2333,15 @@
                                    [:span {:class "min-w-0 break-all text-text-300"} (event-detail ev)]])]])]))
 
 (defn root-evals
-  "The evals sent to root (a component over its ctx): one closed line that opens to them, in the order written. They are how sessions debug root, not its work. See docs/render.md#the-page."
+  "The evals sent to root (a component over its ctx): one closed line that opens to them, in the order written, saying how many its window
+  did not pull (seon.print.emit/left-out, the printer's words). They are how sessions debug root, not its work. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (let [es (sort (keys (:evals c)))]
     (when (seq es)
       [:details {:data-preserve-attr "open"}
-       [:summary {:class "seon-note cursor-pointer"} (str (count es) (if (= 1 (count es)) " eval" " evals") " sent to root")]
+       [:summary {:class "seon-note cursor-pointer"} (str (count es) (if (= 1 (count es)) " eval" " evals") " sent to root"
+                                                          (some->> (emit/left-out (:evals c)) emit/left-out-words (str ", ")))]
        (into [:ol {:class "seon-stack mt-2"}] (for [eid es] (get-in c [:evals eid])))])))
 
 (defn sign-in

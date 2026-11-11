@@ -66,6 +66,8 @@
   (when (and (map? v) (<= 1 (count v) 2) (every? #(or (= :db/id %) (contains? (:identity-schemas ix) %)) (keys v)))
     (some (fn [[k x]] (when (not= :db/id k) x)) v)))
 
+(declare more-of answer schema-property)
+
 (defn model
   "What the printer shows in place of value v (seon.print/print-value's :render): {:value m} when v's schema (its metadata
   :seon.render/schema) declares a model render (`model-declared`), which makes a value
@@ -75,13 +77,27 @@
   {:malli/schema [:function [:=> [:cat :map :any] [:maybe [:map [:value :any]]]] [:=> [:cat :map :any :map] [:maybe [:map [:value :any]]]]]}
   ([ix v] (model ix v {}))
   ([ix v opts]
-   (let [k (:seon.render/schema (meta v)) sym (model-declared ix k) full? (full-declared? k)]
+   (let [k (:seon.render/schema (meta v)) sym (model-declared ix k) full? (full-declared? k) more (when k (more-of ix k))]
      (if-some [r (when (and (nil? k) (map? v) (<= (count v) 2)) (reference-value ix v))]
        ;; a reference prints as its identity value (`reference-value`)
        {:value r}
-     (when (or sym full?)
+     (when (or sym full? (seq more))
        ;; a schema that declares no render shows the value itself, no longer named by it (the printer would draw it by this again)
-       (cond-> {:value (if sym ((requiring-resolve sym) opts v) (vary-meta v dissoc :seon.render/schema))} full? (assoc :full true)))))))
+       (let [shown (if sym ((requiring-resolve sym) opts v) (vary-meta v dissoc :seon.render/schema))]
+         (cond-> {:value (if (seq more) (answer ix k shown more (:handle opts)) shown)} full? (assoc :full true))))))))
+
+(defn answer
+  "A tool's answer v, shown (its model render's value or itself), as every answer whose schema k says what brings more
+  (:seon.render/more) reads: what it is (the first sentence of k's :description), the value, then the [words form] pairs that act on
+  it, `v` in each form being the answer: its handle when one is given (seon.print/at-handle). The one shape for every tool's answer,
+  so no tool formats its own (docs/render.md#a-render-is-a-value-printed-once)."
+  {:malli/schema [:=> [:cat :map :qualified-keyword :any [:sequential [:tuple :string :any]] :any] :map]}
+  [ix k shown more handle]
+  (let [d (schema-property ix k :description)
+        is (when (string? d) (first (str/split d #"(?<=\.)\s" 2)))]
+    (cond-> (with-meta (cond-> (array-map) is (assoc :is is) true (assoc :value shown) true (assoc :to-use (vec more)))
+              {:seon.print/answer true})
+      handle (->> (print/at-handle handle)))))
 
 (defn stored-model
   "`model` of a stored value, an eval's record: nil when it no longer fits the schema it kept, so an old record prints as the data it is. See docs/render.md#the-page."
@@ -548,6 +564,13 @@
                           (vreset! kept nil)
                           ;; health sees it (`take-defects!`)
                           (vswap! (:defects w) conj defect)
+                          ;; a call placed to answer an output (opts' :seon.render/as: wire's task-msgs in the request) answers that output
+                          ;; with the error, as an entity's model render that throws does above: by the render the error's schema names for
+                          ;; it, so the model reads that its context lost a part, never a gap
+                          (when-let [as (:seon.render/as opts)]
+                            (vswap! outs assoc as (if-let [ef (some-> (render-for ix :seon.render/component-defect as) requiring-resolve)]
+                                                    (place as (assoc env :children kids :self k) (ef {:seon.db/db ((:db w)) :seon.render/index ix} defect))
+                                                    [])))
                           ;; its line first, as text (what threw and where), then the error as data
                           (with-id [:section [:p (:seon.error/message defect)]
                                     [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index @(:index w)} defect]]
@@ -1504,3 +1527,47 @@
         ;; each attribute asked with its transaction: the key it fills
         :txs (into {} (keep #(when (vector? %) [(first %) (nth % 2)])) p)
         :joins joins}))))
+
+(defn describe
+  "What value v holds at path, depth levels in, as entries {:path :holds [:schema :doc :render]} read in entity index ix: the body of
+  my.agent/describe (its docstring says the shape), here so root can describe a record at a point without an agent (the first
+  point's (describe @ctx), seon.ctx.wire/page-diff-msgs). Paths are keys, never positions. See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :map :any [:sequential :any] pos-int?] [:vector :map]]}
+  [ix v path depth]
+  (let [
+         ids? (fn [x] (and (map? x) (seq x) (every? integer? (keys x))))
+         entity? (fn [x] (and (map? x) (contains? x :db/id) (not (ids? x))))
+         ;; what is there, never the value shown and never cut here (the printer cuts, with the forms that read the rest): a name as
+         ;; itself, text (a string holding a space) as its size, a join as its members' ids in order, a collection as its count
+         holds (fn [x] (cond (string? x) (if (re-find #"\s" x) {:chars (count x)} x)
+                             (ids? x) {:members (count x) :ids (vec (sort (keys x)))}
+                             (entity? x) :entity
+                             (map? x) {:map (count x) :keys (vec (sort-by str (keys x)))}
+                             (vector? x) {:vector (count x)}
+                             (set? x) {:set (count x)}
+                             (coll? x) {:items (count x)}
+                             :else x))
+         first-sentence (fn [d] (when (string? d) (first (str/split d #"(?<=\.)\s" 2))))
+         about (fn [k x] (let [s (cond (ids? x) (entity-schema ix (val (first x)) k)
+                                       (entity? x) (entity-schema ix x k)
+                                       (qualified-keyword? k) k)
+                               d (when s (first-sentence (schema-property ix s :description)))
+                               r (when s (render-for ix s :seon.render/hiccup))]
+                           (cond-> {} (and s (not= s k)) (assoc :schema s) (and s (= s k) (or d r)) (assoc :schema s) d (assoc :doc d) r (assoc :render r))))
+         walk (fn walk [p node left]
+                (mapcat (fn [[k x]]
+                          (let [q (conj p k)]
+                            (cons (merge {:path q :holds (holds x)} (about k x))
+                                  (when (and (> left 1) (map? x) (not (ids? x))) (walk q x (dec left))))))
+                        (sort-by (comp str key) (dissoc node :db/id))))
+         node (get-in v path)]
+     (if (and (map? node) (not (ids? node)))
+       (vec (walk (vec path) node depth))
+       [{:path (vec path) :holds (holds node)}])))
+
+(defn more-of
+  "What schema k (or its nearest parent, in the entity index ix) says acts on its value: its :seon.render/more, [words form] pairs, the
+  forms written once as data and read by every reader that shows such a value (the model's print and the person's page). See
+  docs/render.md#a-render-is-a-value-printed-once."
+  {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] [:maybe [:vector [:tuple :string :any]]]]}
+  [ix k] (schema-property ix k :seon.render/more))
