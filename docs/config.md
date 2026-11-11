@@ -56,6 +56,22 @@ At boot root writes the config in force on main as an entity of its own, named b
 
 A limit is removed, or derived from measurements with its provenance, and reaching it is a typed error or a problem that names the key: never a silent cut, drop or clamp (owner, 2026-10-30: "Please don't put any artificially low limits that will bite us in our asses and especially if they won't loudly crash"; "The limits should always fail loudly btw. That budget is useful to catch problems IF we use it right."). Each key's comment in `resources/seon/config/default.edn` gives its unit, its provenance (the commit whose message holds the numbers) and what happens at the bound. Before adding a bound, measure the population it bounds and ask what happens at the bound and who sees it: a fixed 1 GiB byte budget for an eval, set from one agent's 17 evals, stopped root's whole-program loads, a prove and a heap test before it was removed. A budget is right when work stays under it nine times in ten and an overrun is worth looking at. Nothing cuts an agent's own context or evals ([decisions](decisions.md#no-artificial-limits-or-cuts-on-an-agents-context-or-evals-owner-2026-10-29)).
 
+## The test service's three limits
+
+How much the test service runs at once is three optional keys, and any combination of them has an answer (owner, 2026-11-11: "a fixed max number and a load max and core max ... any combination has a solution"). ```seon.prove/admission``` turns them into one count and, when set, a load; ```seon.prove/config-admission``` reads them from the config this process holds. What an item is, and how the queue grants one, is [the test service](merging.md#the-test-service).
+
+| key | unit | unset means | at the bound |
+|---|---|---|---|
+| `:seon.config.proofs/max-workers` | items running at once | no count of its own | an item waits in the queue until a running one ends |
+| `:seon.config.proofs/max-cores` | a share of `:seon.config.machine/cores` in (0,1], rounded down and at least 1; or a count of cores over 1 | no core bound | the same |
+| `:seon.config.proofs/max-load` | the machine's 1-minute load average | the load admits everything | no further item is granted until a step reads the load under it |
+
+- **The count** is the least of the two count keys that are set. With neither set it is the machine's cores (`:seon.config.machine/cores`, read by `#seon/cores` when the config is read and never written as a literal), so an empty config still has a bound.
+- **The load** is read only inside a step the service is already taking (an ask arrived, an item ended), never on a timer ([the machine's load admits work](clocks.md#the-machines-load-admits-work)). It never blocks the first item: with nothing running one item is always granted whatever the load, because nothing else would wake the queue.
+- **These are signals, not hard constraints** (owner, 2026-11-11: "The step bounds are signals not hard constraints"). They decide when an item starts. They never decide a verdict, and reaching one is not an error: the item waits, and the service's reported state shows the queue and the load it last read.
+- **Every combination:** all three unset, the cores bound the count and the load admits everything. A count alone, that count. A load alone, the cores bound the count and the load gates each grant after the first. All three, the least count, gated by the load.
+- **Set them to the machine** in `config/local.edn` ([layers](#layers)): the shipped file holds `max-workers` with its provenance and leaves the other two unset, since a load that is right for 18 cores is wrong for 8.
+
 ## Constants
 
 Every limit, bound or default is a config key. A number left in src is one of the kinds below, each named here with its reason, and `seon.main-test/a-bound-is-a-config-key` is red on any other. It reads src's forms from the compiler's facts and flags every top-level `def` of a number and every literal count over 2 given to `take`, `take-last`, `drop` or `drop-last`. Not covered, so a review reads for them: a number in `subs`, `repeat`, `partition`, `nth`, a `let`, a comparison or a `def` wrapped in a call. A foreign interface's constant, named in upper case as its C header names it (a socket flag such as `seon.sock/AF-UNIX`, LMDB's `seon.db/MDB_NOSYNC`), is the interface's value, not a bound, and is not listed; the case is trusted, so a bound written in upper case escapes the law, and review reads for it.
