@@ -147,6 +147,21 @@
            (mapv (juxt task/cited-name :seon.cite/depth) (task/cites-of db (pdb/eid db :seon.agent/key "a1"))))
         "on the agent's record, in the config's order (the references it is told it can read, not pulled into its context whole)")))
 
+;; docs/references.md#an-entity-cites: a store may lack a section the config cites (a store older than its wiki). An agent is
+;; then made citing the sections the store holds, the write is one a db takes (a cite of a missing target threw "Nothing found
+;; for entity id" in the fork server's step, and every spawn failed), and what was left out is data: the addresses, by name
+(deftest an-agent-is-made-though-the-store-lacks-a-section-the-config-cites
+  (let [held (vec (seon.config/value :seon.config.agent/cites)) gone "docs/nowhere.md#never-written"
+        base (d/db-with (db-with-program) (for [a held] {:seon.doc/address a :seon.doc/heading a}))
+        ;; the task's own set names one address the store holds no section for, between two it holds
+        db (d/db-with base (task/create-tx base [(assoc (decl "Do.") :seon.task/config {:seon.config.agent/cites [(first held) gone (second held)]})]))
+        db (pdb/db-with db (task/start-tx db "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0))
+        tx (task/agent-cites-tx db [:seon.agent/key "a1"] "a1")
+        db' (pdb/db-with db tx)]
+    (is (nil? (pdb/eid db :seon.doc/address gone)) "the store holds no such section")
+    (is (= [(first held) (second held)] (mapv task/cited-name (task/cites-of db' (pdb/eid db' :seon.agent/key "a1")))) "a cite for each section the store holds, in the config's order")
+    (is (= [gone] (task/agent-cites-missing db "a1")) "the address the store lacks, named")))
+
 (deftest a-task-may-name-what-its-agent-cites
   ;; docs/config.md: a task holds a config key as its own setting, read before the shipped value; a role's standing cites are
   ;; :seon.config.agent/cites on its task (its template sets it), so a worker and a preparer can read different sections

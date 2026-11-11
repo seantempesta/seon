@@ -5,7 +5,8 @@
   The model edge as data: a provider's reply body read into the completion (task
   seon.model/budgets-are-data-and-spend-is-measured). Run: bin/test seon.model-test"
   (:require [clojure.test :refer [deftest is testing]] [clojure.core.async :as a] [clojure.data.json :as json]
-            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.repl :as repl] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.ctx] [seon.error] [seon.cost :as cost] [seon.fixtures :as fixtures]))
+            [ring-chez.adapter :as adapter] [seon.model :as model] [seon.repl :as repl] [seon.fx :as fx] [seon.turn :as turn] [seon.contract] [clojure.string :as str] [seon.ctx] [seon.error] [seon.cost :as cost] [seon.fixtures :as fixtures]
+            [seon.config :as config] [seon.task :as task] [seon.test-store :as ts] [datahike.api :as d]))
 
 (defn- stop-now!
   "Stops a test's local HTTP server at once: no drain wait, so no time decides. See docs/clocks.md#time-decides-nothing-here-clock-reads-named-as-data."
@@ -374,3 +375,24 @@
         (is (= [["Square "] ["Square " "multiplies."]] (map :text (filter (comp #{"c1/reasoning"} :stream) out))))
         (is (nil? (shut)) "the connection is closed already, and closing again is nothing"))
       (finally (stop-now! server)))))
+
+;; docs/model.md#thinking-is-off-by-default: a task states thinking and reasoning effort, and the
+;; request built from its resolved provider (seon.config/provider-at) carries them; one that
+;; states nothing gets the file's values
+(deftest a-request-carries-its-tasks-resolved-settings
+  (ts/test-branch! (fn [cfg conn]
+    (let [c (merge config/config {:seon.config.ai/provider :openai-compat})
+          base {:seon.task/ns (quote a) :seon.task/plan "p" :seon.task/execution :held :seon.task/kind :work}
+          sent (fn [id] (model/request-body (config/provider-at @conn @conn id) {:messages [] :task id :turn 1}))]
+      (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx c {}))})
+      (d/transact conn {:tx-data [(assoc base :seon.task/id "a/deep" :seon.task/name "deep" :seon.task/branch :task-a-deep
+                                         :seon.config.ai/thinking :enabled :seon.config.ai/reasoning-effort :low)
+                                  (assoc base :seon.task/id "a/plain" :seon.task/name "plain" :seon.task/branch :task-a-plain)]})
+      (is (seon.contract/valid? :seon.task/declaration {:seon.task/ns (quote a) :seon.task/name "deep" :seon.task/plan "p"
+                                                         :seon.task/config {:seon.config.ai/thinking :enabled :seon.config.ai/reasoning-effort :low}})
+          "a task file may state thinking and effort")
+      (is (= :enabled (:thinking (config/provider (update-in c [:seon.config.ai/models (:seon.config.ai/model c)] assoc :seon.config.ai/thinking :enabled)))) "and a model's entry states its thinking, through the one resolver")
+      (is (= {:type "enabled"} (:thinking (sent "a/deep"))) "the task's thinking")
+      (is (= "low" (:reasoning_effort (sent "a/deep"))) "the task's effort")
+      (is (= {:type "disabled"} (:thinking (sent "a/plain"))) "a task stating nothing: the file's thinking")
+      (is (not (contains? (sent "a/plain") :reasoning_effort)) "and no effort, the file states none")))))

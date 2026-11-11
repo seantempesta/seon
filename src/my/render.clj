@@ -32,7 +32,7 @@
 
 (defn page
   "Your page parts at point p of your branch ({:branch :commit :t}, :branch optional): the page drawn at p with today's renders, as hiccup without its presentation, the parts the model reads. Pure in the point: the same point and renders give the same bytes, which your first turn's page shows as the result of this call (seon.ctx.wire/page-diff-msgs). See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
-  {:seon.model-call/reply "My page is that same data drawn by render functions: my task and its plan, what it cites, and how my proofs stand. The person working with me sees these parts as html. I read it whole once; after this I am shown only what changes."
+  {:seon.model-call/reply "My page is that same data drawn by render functions: my task and its plan, what it cites, and how my proofs stand. The person working with me sees these parts as html. I read it whole once; after this, each turn shows only what changed on it, as edits by name."
    :seon.eval/intent "Read my page, whole, as hiccup."
    :malli/schema [:=> [:cat [:map [:commit :uuid] [:t :int]]] :any]}
   [p] (wire/page-parts-at (agent/db) (:db/id @seon.ctx/ctx) p))

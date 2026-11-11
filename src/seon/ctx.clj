@@ -245,7 +245,8 @@
 (defn- join
   "Join j of entity e (m, its own attributes) at path p: [value r], value its members' nodes (a
   collection: a map by their ids, newest first; else the one node), r the record's state gaining
-  their paths and the join's watch keys. old, the join's value before: a reverse join changes by the
+  their paths and the join's watch keys. A window (:limit) says how many members its join has, as metadata on its value (:seon.ctx/count, docs/ctx.md#the-pattern): read
+  once when it is first full, then kept from the datoms that move it. old, the join's value before: a reverse join changes by the
   datoms that touched it (window-moves), so a member joining costs that member; any other collection is read
   again, keeping every member still in it that nothing touched (the same object) and changing only
   the members that joined, left or were touched; a member that left is forgotten (forget)."
@@ -253,14 +254,29 @@
   [db e m j p old r touched]
   (let [r (watch r [e (:key j)] (watched e m j))
         old-map (if (map? old) old {})
-        moves (when (map? touched) (get touched [e (:key j)]))]
+        moves (when (map? touched) (get touched [e (:key j)]))
+        ;; how many members the join has in the db, whatever its :limit holds of them: a reverse join's ref datoms
+        ;; counted (their ids, no member read), a forward one's values
+        joined (fn [] (let [{:keys [attr by]} j]
+                        (if (:rev? j)
+                          (if-some [v (if by (get m by) e)] (count (d/datoms db :avet attr v)) 0)
+                          (let [v (get m attr) vs (if (set? v) v (if (some? v) [v] []))]
+                            (count (if by (keep #(pdb/eid db by %) vs) vs))))))
+        ;; a window's value saying, as metadata, that its join has n members (:seon.ctx/count): v itself when it says so already
+        counted (fn [v n] (if (and (:limit j) (map? v) (not= n (:seon.ctx/count (meta v)))) (vary-meta v assoc :seon.ctx/count n) v))]
     (if (many? db j)
       (if-let [[v r entered] (when (seq moves) (window-moves db e j p old-map r moves touched))]
         ;; members a datom touched as entities (their own attributes), not just built, built again in place
-        (reduce (fn [[v r] x] (if (and (contains? v x) (not (entered x)) (touched x))
-                                (let [[n r] (node db x (:sub j) (conj p x) r (get v x) touched)] [(assoc v x (linked db e j x n)) r])
-                                [v r]))
-                [v r] (filter integer? (keys touched)))
+        (let [;; the join's count moves by its own ref datoms: each assertion one more, each retraction one fewer
+              n (when (:limit j)
+                  (if-some [c (:seon.ctx/count (meta old-map))]
+                    (+ c (count (filter :added moves)) (- (count (remove :added moves))))
+                    (joined)))
+              v (if n (counted v n) v)]
+          (reduce (fn [[v r] x] (if (and (contains? v x) (not (entered x)) (touched x))
+                                  (let [[n r] (node db x (:sub j) (conj p x) r (get v x) touched)] [(assoc v x (linked db e j x n)) r])
+                                  [v r]))
+                  [v r] (filter integer? (keys touched))))
         (let [es (members (:index r) db e m j)
               now (set es)
               ;; members that left: their subtrees forgotten
@@ -272,9 +288,12 @@
                                       (let [[n r] (node db x (:sub j) (conj p x) r o touched)] [(conj ps [x (linked db e j x n)]) r]))))
                                 [[] r] es)]
           ;; the same members, each the same object: the map as it was
-          [(if (and (= (count pairs) (count old-map)) (every? (fn [[x n]] (identical? n (get old-map x))) pairs))
-             old-map
-             (members-map pairs (boolean (and (:rev? j) (:reverse? j) (not (in-time-order? (:index r) j)))))) 
+          [(counted
+                    (if (and (= (count pairs) (count old-map)) (every? (fn [[x n]] (identical? n (get old-map x))) pairs))
+                      old-map
+                      (members-map pairs (boolean (and (:rev? j) (:reverse? j) (not (in-time-order? (:index r) j))))))
+                    ;; a window not full holds every member: no read
+                    (if (and (:limit j) (= (:limit j) (count es))) (joined) (count es)))
            r]))
       (let [es (members (:index r) db e m j) x (first es) o (when (and (map? old) (= x (:db/id old))) old)]
         (cond

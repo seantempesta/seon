@@ -510,6 +510,22 @@
   [x] (let [ix (agent/branch-index) v (if-let [r (render/model ix x)] (:value r) x)]
         (select/chars-tokens (count (if (string? v) v (:text (print/print-value v {:budget Integer/MAX_VALUE :render #(render/model ix %)})))))))
 
+(defn describe
+  "What value v holds, without showing it: a vector of entries, one a path, {:path [...] :holds x}, where :holds is the value when it
+  is a short scalar, else what it is as data ({:chars n}, {:map n :keys [...]}, {:vector n}, {:set n}, {:members n :ids [...]} for
+  a map keyed by entity ids, :entity for a pulled entity), and, where the key or the entity has a schema, :schema, :doc (the first
+  sentence of its :description) and :render (the function its schema declares draws it). Paths are keys, never positions: (get-in v
+  path) reads what an entry describes, (describe v path) goes one level in, and for your record (swap! ctx assoc-in path x) changes
+  it. depth: the levels described (default :seon.config.agent/describe-depth). Works on any value: @ctx, a result's :value, a
+  query's answer. See docs/ctx.md#the-pattern."
+  {:seon.model-call/reply "My record can be large, so I look at what it holds first: each path, what is there, and what it is."
+   :seon.eval/intent "Describe @ctx: each path, what it holds, its schema and doc in a line. (get-in @ctx path) reads one; (swap! ctx assoc-in path v) changes one."
+   :malli/schema [:function [:=> [:cat :any] [:vector :map]] [:=> [:cat :any [:sequential :any]] [:vector :map]]
+                  [:=> [:cat :any [:sequential :any] pos-int?] [:vector :map]]]}
+  ([v] (describe v [] (cfg/value :seon.config.agent/describe-depth)))
+  ([v path] (describe v path (cfg/value :seon.config.agent/describe-depth)))
+  ([v path depth] (with-meta (render/describe (agent/branch-index) v path depth) {:seon.render/schema :my.agent/described})))
+
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn
   reads it the same way: a library's vars carry both), or nil."
@@ -630,7 +646,7 @@
 
 (defn doc-of
   "The thing x names as data, for `doc`: a schema key (:var/form, its form and what cites it), a wiki address
-  (\"docs/vector.md#the-model\" a section whole, \"docs/vector.md\" a page's sections, an anchor of the help page
+  (\"docs/vector.md#the-model\" a section whole, \"docs/vector.md\" a page's sections, each by its address, heading and summary without its edges, an anchor of the help page
   \"done\"), a hit of (search ...) or its :name. A miss answers what it did not find, the nearest addresses
   (help-nearest) and the forms that read one, never nil. See docs/references.md#a-section-read-at-a-depth-with-its-edges."
   {:malli/schema [:=> [:cat [:or :string :symbol :qualified-keyword [:map [:kind :keyword]]]] :any]}
@@ -647,7 +663,7 @@
       (keyword? x) (let [f (schema/forms x)] (if (contract/error? f) f (cited db x)))
       :else (let [a (if (str/includes? x "#") x (str wire/help-page "#" x))]
               (or (some-> (doc/view db a :code) doc-view)
-                  (some-> (doc/page db x :summary) doc-view)
+                  (some-> (doc/page db x :summary false) doc-view)
                   {:no-section x
                    :nearest (help-nearest db x)
                    :read-one "(doc \"docs/<page>.md\") lists a page's sections; (doc \"docs/<page>.md#<section>\") reads one; (doc 'ns.name) a namespace, every definition a line; (doc :ns/key) a schema key"})))))
@@ -655,11 +671,13 @@
 (defmacro doc
   "Print the documentation of x and answer nil, as clojure.repl/doc does: a var, a namespace or a special form, named as written
   or quoted (a namespace also lists its definitions, a line each). And what is Seon's: a schema key `(doc :var/form)` or a
-  wiki address `(doc \"docs/storage.md#history\")` prints what `doc-of` answers. A name that is none says so in words, with
-  the nearest names."
+  wiki address `(doc \"docs/storage.md#history\")` prints what `doc-of` answers, and so does a local that holds one
+  (`(let [a \"docs/storage.md\"] (doc a))`: its value is read). A name that is none says so in words, with the nearest names.
+  See docs/references.md#a-section-read-at-a-depth-with-its-edges."
   [x]
   (let [x (if (and (seq? x) (= 'quote (first x))) (second x) x)]
-    (if-not (symbol? x)
+    ;; a symbol the macro's environment binds is a local: its value is read, as a literal's is
+    (if (or (not (symbol? x)) (contains? &env x))
       `(do (println (:text (seon.print/print-value (my.agent/doc-of ~x) {:budget Integer/MAX_VALUE}))) nil)
       (let [special ('{& fn catch try finally try} x)]
         (cond (or special (@#'clojure.repl/special-doc-map x)) `(#'clojure.repl/print-doc (#'clojure.repl/special-doc '~(or special x)))

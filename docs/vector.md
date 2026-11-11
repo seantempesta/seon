@@ -69,6 +69,8 @@ The text ranking of `my.agent/search` is SQLite's FTS5 (```seon.doc/tokens```): 
 
 A branch's db value is a new object at every deref, indexes included, so `identical?` on `(:aevt db)` never hits: the index is keyed by `(:hash db)` with `(:max-tx db)`.
 
+On an agent's page each hit shows its name and the line of its text that holds a word of the query; a hit whose line is only the opening of its own definition, which says nothing its name does not, shows its arglist (```seon.render.ui/searched```).
+
 ## Fused with the call graph
 
 The task's data once listed the program functions nearest its plan by meaning (`:similar`): off since step 6 measured no gain (green 8 of 15 with five listed, 7 of 15 with none), and deleted on 2026-11-02, the request's search part showing what is near the request. Fusing the call graph's helpers (the cited vars' and proofs' one-hop callees, tf-idf) with the forms nearest a task's plan by reciprocal rank (```seon.vector/rrf```, k `:seon.config.vector/rrf-k`) was measured below; embeddings alone did as well, so the task's data uses them alone, and the fusion stays for further exploration.

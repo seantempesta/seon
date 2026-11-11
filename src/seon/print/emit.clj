@@ -180,6 +180,17 @@
   (str "…+~" (max 1 (chars-tokens omitted)) " tokens" (when (pos? lines) (str " in " lines " more line" (when (not= 1 lines) "s")))
        (when continuation (str " " (form-text continuation)))))
 
+(defn left-out
+  "How many members the join whose value is v has in the db and v does not hold: a window (a join's :limit) says how many its
+  join has as its value's :seon.ctx/count (docs/ctx.md#the-pattern); nil when it holds them all or no window made v. v may be a view."
+  {:malli/schema [:=> [:cat :any] [:maybe pos-int?]]}
+  [v] (when-some [n (:seon.ctx/count (meta v))] (let [l (- n (count v))] (when (pos? l) l))))
+
+(defn left-out-words
+  "What a window's cut says of the members its join has in the db and it did not pull (docs/ctx.md#the-pattern)."
+  {:malli/schema [:=> [:cat pos-int?] :string]}
+  [n] (str n " not pulled"))
+
 (defn elided-text
   "The one text of a cut: `…N` or `…?`, then its continuation form; a string's
   `\"prefix\"`, then its `cut-words`."
@@ -191,8 +202,10 @@
                          (str (code-text (:seon.print/code? node) (or (:seon.print/prefix node) "") (:seon.print/indent node 0)) " ")
                          (string-literal (or (:seon.print/prefix node) "")))
                        (cut-words (:seon.print/omitted node) (:seon.print/lines node) form))
+      :left-out (str "…" (left-out-words (:seon.print/omitted node)))
       (cond-> (if (= :pending (:seon.print/elision-unit node)) "…?" (str "…" (:seon.print/omitted node "?")))
-        form (str " " (form-text form))))))
+        form (str " " (form-text form))
+        (:seon.print/left-out node) (str ", " (left-out-words (:seon.print/left-out node)))))))
 
 ;;; Emission: one walk appends a node tree's fipp-style operation maps to one vector; text is
 ;;; the layout of that stream, hiccup a fold over the same stream.

@@ -471,7 +471,9 @@
                          _ (when gone (agent/transact! (mapv (fn [[_ e f]] [:db/retract e :var/form f]) gone)))
                          m (cond-> m gone (assoc :unmapped (mapv first gone)))]
                    (if acct
-                     (let [[tx redefined] (try
+                     (let [;; the vars this form makes that the branch did not hold before it (read before its transaction)
+                           made (vec (remove #(pdb/eid (agent/db) :var/name %) (map :var (:defs acct))))
+                           [tx redefined] (try
                                             (let [tx (when contract/record? (program/record-tx (agent/db) acct))]
                                               ;; what this form's own transaction changes of an existing var's contract or
                                               ;; docstring, read before it is applied (a form that defines nothing reads nothing)
@@ -488,6 +490,9 @@
                                                                        (map (juxt :multi :dispatch) (:methods acct)) (map (juxt :protocol :type) (:impls acct))))
                                       :repl/defined (mapv :var (:defs acct)))
                          redefined (assoc :redefined redefined)
+                         ;; a var new in a program namespace may be a look, not a change: said where it lands, whatever form made it
+                         ;; (loop 2: a def, eight turns; Data model's tasks: a scratch defn and a macro, unnoticed)
+                         (seq made) (assoc :program-def made)
                          (seq (program/unknown-refs acct)) (assoc :unknown-vars (program/unknown-refs acct))))
                      (cond-> m
                        l (assoc :repl/defined (program/set-vars l))
@@ -620,6 +625,9 @@
                    ;; a def beside calls (wrap-record): it stays this eval, not program
                    (some :not-program fs)
                    (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)})
+                   (some :program-def fs)
+                   (conj {:seon.repl/finding :program-def :vars (vec (mapcat :program-def fs))
+                          :seon.repl/fix "New on your branch, so it merges with your task. If you only meant to try something, take it back with (ns-unmap 'the.ns 'the-name) and define such things in your own namespace."})
                    (some :unknown-vars fs)
                    (conj {:seon.repl/finding :unknown-var :unknown (vec (distinct (mapcat :unknown-vars fs)))
                           :seon.repl/fix "No var has this name yet, so the definition fails when that line runs: fix the name, or define it."})
@@ -1122,6 +1130,22 @@
       (contract/error :seon.turn/invalid-call #'call-problem
                       "this eval has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
 
+(defn- repair-problem
+  "Why an eval call's code may not run as the forgiving reader repaired it (seon.reader/forgive's repairs of code), or nil: a repair
+  that only adds closers at the end is what the code plainly meant, and runs; one that drops text, comments a line out or inserts
+  inside the form changes what the form does (in a loop, a swap!'s lines were commented out and the let it was in ran
+  as nothing), so the call is not run, and its answer names the repairs. See docs/prompt.md."
+  {:malli/schema [:=> [:cat :string [:sequential :map]] [:maybe :seon.error/base]]}
+  [code repairs]
+  (let [end (count (clojure.string/trimr code))
+        closer? (fn [{:keys [at inserted dropped]}] (and (empty? dropped) (re-matches #"[)\]}]+" (str inserted)) (>= at end)))]
+    (when (and (seq repairs) (not-every? closer? repairs))
+      (contract/error :seon.turn/invalid-call #'repair-problem
+                      (str "this eval's code does not read as written, and making it read would change what it does (a line commented out, "
+                           "text dropped or inserted inside the form: under :repaired), so it was not run; fix the form and send it again "
+                           "(a newline inside a string is \\n, never a backslash at a line's end)")
+                      {:problem :repaired}))))
+
 (defn run-calls
   "Eval calls ({:id :intent :code}, a reply's or an insert's: docs/turn.md#an-eval-can-be-inserted) through the one REPL
   path in order, each answered as its own result: {:id :code :intent :not-run :response}. req-of is a call's id to its
@@ -1140,7 +1164,7 @@
                         (seq repairs) (assoc :repaired (search/repaired src repairs)))
                   why (if problem
                         (contract/error :seon.turn/invalid-call #'run-calls problem {:problem :arguments})
-                        (call-problem intent src))]
+                        (or (call-problem intent src) (repair-problem code repairs)))]
               (conj acc (if why
                           {:id id :code code :intent intent :not-run false
                            :response (let [r (unrun src req why)] (agent/commit!) r)}
@@ -1452,8 +1476,12 @@
       ;; and the history is what names it in an error's position (`located`, docs/errors.md#an-eval-errors-diagnostics)
       (jolt.host/enable-trace!)
       (agent/init! fd m db0 serve!)
-      (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
-                                (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
-                                (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
-                                (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state))))
+      ;; the sections its config cites and its store holds no entity for (a store older than its wiki): it was made citing the
+      ;; rest (seon.task/agent-cites-tx), and says which are missing, never silently. Read once.
+      (let [missing (seon.task/agent-cites-missing (agent/db) (:key @agent/state))]
+        (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
+                                  (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
+                                  (seq missing) (assoc :missing-cites missing)
+                                  (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
+                                  (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state)))))
       (serve!))))
