@@ -56,6 +56,12 @@ Asked what "resume from any point in time" means in the store: "Okay tell Point 
 
 Counted that day by a search for "root" as the subject of a system act: about 157 lines of the wiki and AGENTS.md, 201 of `src` and 27 of the schema files say root where they mean the system; none is swept by this entry. In the data it means the planned `:seon.root/*` to `seon.system/*` rename, `:seon.agent/root` going, and the reserved agent key. Stated in [vocabulary](vocabulary.md#words-we-do-not-use).
 
+### Ids are unique across every branch; time orders, not transaction ids (owner, 2026-11-11)
+
+"I want all IDs to be unique among all the branches and for us to use time for ordering not TX-ids" (relayed by the managing session). It replaces the managing session's answer of the same day (order by the transaction's id, its time for showing). A recorded time used to sort data is data, so it is no clock deciding ([clocks](clocks.md#time-measured-recorded-never-compared-to-decide)): a wait or a judgment by a clock stays ruled out.
+
+What the standing store held that day, read at the REPL across main and three agents' branches: no transaction id, no entity id and no eval id names two different things on two branches (the store issues them from one counter); a transaction's time is `:db/txInstant`, a millisecond; along main's 400 transactions and a branch's 158 it never went backwards and no two neighbours shared a millisecond. Not yet answered: what breaks a tie when two do, and that an import must write the original time or an imported conversation orders by when it was loaded. Stated in [the plan](plan.md#the-plan), part 1, as the open step.
+
 ### Work, then refine, then review; a refinement is tried from the store's history (owner, 2026-11-11)
 
 "For us this will be a task following their work step. Us doing a refine your previous session context and curate the task so it would have been done better. And then we can test those refinements without losing the previous one because we have db history." And of the fork that reflects mid-task: "What if we take advantage of our ability to fork sessions and make edits to the context? It's cheap from a tokens perspective since it's mostly cached data and we can inject a mini task at the end ... So lets say after 10 turns we do this reflect and improve step". Stated in [the plan](plan.md#the-plan), part 2; not built.
