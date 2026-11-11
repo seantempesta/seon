@@ -2,7 +2,7 @@
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
   (:require [clojure.test :refer [deftest is]] [jolt.fibers] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
-            [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d] [clojure.java.shell]))
+            [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d] [clojure.java.shell] [clojure.core.async :as a]))
 
 (deftest each-op-has-its-answer
   ;; the ops table (each op's doc and args, the MCP tool list) and op-answer's methods are one set of
@@ -721,3 +721,29 @@
         (doseq [^java.io.File l links] (.delete l))
         (clojure.java.shell/sh "git" "-C" here "worktree" "remove" "--force" wt)
         (seon.lib/remove-tree! tmp)))))
+
+;; docs/server.md#ops: a streaming :prove writes every verdict its answer names, though the answer came before the verdict's
+;; event (two paths with no order between them: root's events mult and the asker's answer) or the event never came (a
+;; sliding tap); one the events brought is not written twice. The race is forced: the run answers before any event is put.
+(deftest a-streamed-prove-writes-every-verdict-its-answer-names
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [src (a/chan 8)
+           sys {:graph nil :ext (a/chan) :conn conn :events-mult (a/mult src)}
+           v1 {:test 'app.s-test/one :digest "d1" :status :pass :ms 3}
+           v2 {:test 'app.s-test/two :digest "d2" :status :pass :ms 4}
+           k "tree-x@d:app.s-test"
+           lines (atom [])
+           seen (promise)
+           stream (fn [run] (binding [seon.server/*emit* (fn [l] (swap! lines conj l) (when (= 'app.s-test/one (:test l)) (deliver seen true)))]
+                              (#'seon.server/prove-streamed sys :tree-x run)))]
+       ;; the answer first, no event at all: today nothing is written
+       (stream (fn [] {:key k :ran 2 :verdicts [v1 v2]}))
+       (is (= [['app.s-test/one :pass] ['app.s-test/two :pass]] (mapv (juxt :test :status) @lines)) (pr-str @lines))
+       (is (every? #(and (= :prove-verdict (:type %)) (= k (:key %))) @lines) "each line a verdict of the run")
+       ;; one brought live, then the answer: one is not written again, two is written from the answer
+       (reset! lines [])
+       (stream (fn [] (a/>!! src {:type :prove-verdict :key k :test 'app.s-test/one :digest "d1" :status :pass :ms 3})
+                 @seen
+                 {:key k :ran 2 :verdicts [v1 v2]}))
+       (is (= ['app.s-test/one 'app.s-test/two] (mapv :test @lines)) "each verdict once, the live one first")))))

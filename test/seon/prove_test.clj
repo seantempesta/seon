@@ -467,6 +467,10 @@
         "both askers of the one item are told its verdict")
     (is (= ["k2"] (keys (answers o2))) "k2, whose only item it was, is answered; k1 still waits on u")
     (is (< (.indexOf ^java.util.List (mapv :op o2) :prove-verdict) (.indexOf ^java.util.List (mapv :op o2) :asker-answered)) "told before it is answered")
+    ;; the answer carries every verdict its asker was told: a streaming client writes from it what the events had not
+    ;; brought before the answer (seon.server's prove-streamed), so none is owed by a race
+    (is (= [{:test 'app.x-test/t :digest "d1" :status :pass}] (mapv #(select-keys % [:test :digest :status]) (:verdicts (get (answers o2) "k2"))))
+        "k2's answer names the verdict it was told")
     (is (= [{:key "k1" :test 'app.x-test/u :digest "d2" :status :no-verdict}] (told o3)) "an item with no verdict is told so")))
 
 (defn queue-of
