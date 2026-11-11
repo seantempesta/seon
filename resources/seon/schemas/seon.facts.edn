@@ -237,7 +237,8 @@
  :seon.agent/ended-turn :int
  :seon.ctx/pattern [:and [:vector :any] :seon.db/plain]
  ;; an entity's own render, as :seon.ctx/pattern is its own pattern: what its page is drawn by in place of its schema's (seon.render/render-var-of; docs/render.md#an-entity-may-name-its-own-render)
- :seon.render/hiccup :symbol
+ ;; its description is what an agent reads beside the clause in its pull view (seon.render.ui/pull-front): what a render is handed
+ :seon.render/hiccup [:and {:description "Your own render: the function your page is drawn by in place of your schema's, by its symbol. A render is (f opts node), node the pulled entity, and answers hiccup. opts always holds :seon.render/index, the entity index; name :seon.db/db or :seon.ctx/ctx in its opts contract, [:and :seon.render/opts [:map [:seon.db/db :any]]], to be handed the db at your page's point or your whole pull (as @ctx gives it). Another render's output is never handed to it; what the walk drew is (my.render/tree) after it. Try a render on one node at your REPL: (f {:seon.render/index (seon.agent/branch-index)} node). To watch a render you are changing, draw it on your own page: docs/ctx.md#adding-a-datum-and-its-render."} :symbol]
  ;; the doc sections its system message is, when it names its own (docs/render.md#the-models-context-a-cached-prefix-then-the-turn); with none, docs/prompt.md's
  :seon.agent/system [:set {:seon.db/to [:seon.doc/fact]} :seon.db/ref]
  ;; a person's name, a lookup ref, and its presence is what makes an agent a user: a location /user/<name> reads it (docs/users.md#what-each-thing-is)
