@@ -70,7 +70,7 @@ jobs=$(<$OUT/jobs)
 # a test or step that reaches a process of its own (a root, an agent, the binary) runs target/seon,
 # which its digest does not cover: that binary is built from this tree first (a no-op build costs
 # ~30-45 s) unless it is current for this tree, what differs reaching nothing root runs from its binary
-# (seon.root/binary-current, the plan's out/build). The plan names what it selected that reaches one (out/binary); nothing, no build
+# (seon.system/binary-current, the plan's out/build). The plan names what it selected that reaches one (out/binary); nothing, no build
 # the plan's answer on the binary (out/build, empty when it is current for this tree by reach): a check a test of this run
 # starts itself reads it (bin/check), as the run's own steps do
 export SEON_PLAN_BUILD=$OUT/build
@@ -88,15 +88,15 @@ FAST=(); if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then
   fi
 fi
 # built only when a selected key reaches it and it is not current for this tree (the plan's out/build:
-# seon.root/binary-current); bin/check and seon.root/booted-source ask the same rule (task
-# seon.root/every-reader-of-the-binarys-tree-asks-binary-current)
+# seon.system/binary-current); bin/check and seon.system/booted-source ask the same rule (task
+# seon.system/every-reader-of-the-binarys-tree-asks-binary-current)
 if [[ -s $OUT/build ]]; then
   nice -n 15 "$ROOT/bin/build" seon > "$OUT/build.log" 2>&1 || { tail -5 "$OUT/build.log"; echo "TEST FAILED (bin/build seon: $OUT/build.log)"; exit 1 }
 fi
 # the process tests' store gets this tree's program and wiki on :db (the plan made the store), so a root
-# whose main is a branch of it imports nothing (seon.root/seed-program!)
+# whose main is a branch of it imports nothing (seon.system/seed-program!)
 if [[ -s $OUT/process-store ]]; then
-  nice -n 15 "$ROOT/bin/root" seed "$(<$OUT/process-store)" > "$OUT/seed.log" 2>&1 || { tail -5 "$OUT/seed.log"; echo "TEST FAILED (bin/root seed: $OUT/seed.log)"; exit 1 }
+  nice -n 15 "$ROOT/bin/system" seed "$(<$OUT/process-store)" > "$OUT/seed.log" 2>&1 || { tail -5 "$OUT/seed.log"; echo "TEST FAILED (bin/system seed: $OUT/seed.log)"; exit 1 }
 fi
 st=0 P=()
 [[ -e $OUT/stopped ]] && { F=(); : > "$OUT/steps" }

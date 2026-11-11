@@ -13,7 +13,7 @@
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt] [seon.stage :as stage] [seon.root :as root] [seon.doc] [seon.system] [seon.agent] [test-runner]))
+            [seon.program-test :as pt] [seon.stage :as stage] [seon.system :as root] [seon.doc] [seon.graph] [seon.agent] [test-runner]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -134,7 +134,7 @@
       (finally (swap! @#'seon.program/loaded #(if before (assoc % 'my.fx/send before) (dissoc % 'my.fx/send)))))))
 
 (deftest root-loads-the-program-and-leaves-test-namespaces-unevaluated
-  ;; task seon.root/root-holds-no-test-code, docs/source.md#a-process-holds-the-tests-only-when-it-runs-them:
+  ;; task seon.system/root-holds-no-test-code, docs/source.md#a-process-holds-the-tests-only-when-it-runs-them:
   ;; root imports test/ as facts and evaluates its src; the fork server (load-all! with no option) evaluates
   ;; both, so every agent inherits main's tests. A form changed later follows the same rule
   (let [files {"src/x/rnt_prog.clj" "(ns x.rnt-prog)\n\n(defn k [] 1)\n"
@@ -163,13 +163,13 @@
 (deftest a-test-namespace-loads-whole-from-the-tree-main-was-imported-from
   ;; docs/source.md#a-process-holds-the-tests-only-when-it-runs-them: a test namespace whose forms are all its file's is loaded whole
   ;; by require (compiled once through Jolt's AOT cache), its file found under the tree main's program was imported from, as main
-  ;; states it on root's :seon.root/source fact. Read from the process's config instead, a root given its source as start!'s
+  ;; states it on root's :seon.system/source fact. Read from the process's config instead, a root given its source as start!'s
   ;; options (every bin/check mode, boot-twice, a cycle) held none, and its fork server loaded all 77 test namespaces form by
   ;; form: 12.2 s of its first fork against 1.06 s whole (2026-11-10). bin/test, like those roots, sets no source root.
   (let [path "test/seon/required_whole.clj"
         files {path (slurp (str here "/" path))}
         db (d/db-with (empty-db) (source/import-tx (empty-db) files))
-        db (d/db-with db [{:seon.root/id :root :seon.root/source {:root here :files 1 :forms 2 :ms 0}}])]
+        db (d/db-with db [{:seon.system/id :root :seon.system/source {:root here :files 1 :forms 2 :ms 0}}])]
     (is (nil? (get config/config :seon.config.source/root)) "this process names no source root, as a check mode's root does")
     ;; a shard loads test/'s namespaces as it plans: this one is taken out first, as a fork server holds none of them
     (remove-ns 'seon.required-whole)
@@ -231,7 +231,7 @@
         tree (fx/tree-id here)
         ;; the graph the plan kept for this program (test-runner/reach-graph-of: decoded and brought to date, a sixth of
         ;; building it; docs/source.md#tests-run-by-reach), built only when the kept one is another builder's
-        g (test-runner/reach-graph-of db (fx/declared-refs seon.system/built-text) (ts/kept-program-store))
+        g (test-runner/reach-graph-of db (fx/declared-refs seon.graph/built-text) (ts/kept-program-store))
         git (fn [env & args] (:out (apply sh/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
         built-with (fn [path f]
                      ;; tree with path's text replaced by (f text), or its gitlink moved when f is :pin
@@ -349,12 +349,12 @@
           (is (= [k] (in one "(:config (my.branch/changes))")))
           (is (= :nowhere (in two reads-the-key))))
         (testing "it merges, and writes back byte-preserved"
-          (is (true? (at-root "(-> @(seon.root/call! sys {:op :write :req {:op :octopus-merge :branches [:task-cfgt-one] :data-attrs #{}}}) :results first :merged?)")))
+          (is (true? (at-root "(-> @(seon.system/call! sys {:op :write :req {:op :octopus-merge :branches [:task-cfgt-one] :data-attrs #{}}}) :results first :merged?)")))
           (is (= 7 (at-root reads-the-key)) "root holds main's")
-          (is (= 7 (at-root (str "(get-in (datahike.api/pull @(:conn sys) [{:seon.root/config [" k "]}] [:seon.root/id :root]) [:seon.root/config " k "])"))) "and main's config in force, the entity root's :seon.root/config names, says so")
+          (is (= 7 (at-root (str "(get-in (datahike.api/pull @(:conn sys) [{:seon.system/config [" k "]}] [:seon.system/id :root]) [:seon.system/config " k "])"))) "and main's config in force, the entity root's :seon.system/config names, says so")
           (is (= (let [end (str/last-index-of held "}")] (str (subs held 0 end) "\n " k " 7" (subs held end)))
                  (at-root "(get (seon.source/files @(:conn sys) [seon.config/shipped-file]) seon.config/shipped-file)")))))
-      ;; a boot on a file that doesn't load reads no file: seon.root-test/a-boot-reads-no-file-a-commit-broke
+      ;; a boot on a file that doesn't load reads no file: seon.system-test/a-boot-reads-no-file-a-commit-broke
       (testing "a re-index that meets a file that doesn't load says which file and which commit, and main keeps its own"
         (spit file bad)
         (let [err (str (at-root "(:seon.error/message (my.root/import! sys))"))]
@@ -454,13 +454,13 @@
       (finally (seon.lib/remove-tree! dir)))))
 
 (deftest a-landing-moves-roots-source-fact-to-the-landed-tree
-  ;; docs/source.md#a-landing-enters-main-as-data: what the bridge writes (seon.root/landed-tx) moves root's source fact to
+  ;; docs/source.md#a-landing-enters-main-as-data: what the bridge writes (seon.system/landed-tx) moves root's source fact to
   ;; the landed tree, so the next re-index reads what differs from it, not every file landed since the last import
   (let [db0 (pdb/empty-db false)
         held {:root "/r" :dirs ["src"] :tree "t0" :commit "c0" :digest "d0" :files 1 :forms 0 :ms 1.0}
-        db (:db-after (pdb/with db0 [{:seon.root/id :root :seon.root/source held}]))
+        db (:db-after (pdb/with db0 [{:seon.system/id :root :seon.system/source held}]))
         db1 (:db-after (pdb/with db (root/landed-tx db {"src/app/landed.clj" "(ns app.landed)\n(defn f [] 1)\n"} {} "t1" "c1")))
-        fact (:seon.root/source (d/pull db1 [:seon.root/source] [:seon.root/id :root]))]
+        fact (:seon.system/source (d/pull db1 [:seon.system/source] [:seon.system/id :root]))]
     (is (= ["t1" "c1"] [(:tree fact) (:commit fact)]) "the landed tree and commit")
     (is (not= "d0" (:digest fact)) "its digest is the landed tree's")
     (is (= ["/r" ["src"]] [(:root fact) (:dirs fact)]) "what the import read from stays")
@@ -485,16 +485,16 @@
   ;; the landed files' inputs once its db holds that fact (a fork of main, or a merge of main), with no restart
   (let [db0 (pdb/empty-db false)
         old {:root "/r" :dirs ["src"] :tree "t1" :commit "c1" :files 1 :forms 0 :ms 1.0 :inputs {:tree "t0m" :env "e" :code "c" :config {}}}
-        db (:db-after (pdb/with db0 [{:seon.root/id :root :seon.root/boot "b1" :seon.root/source (assoc old :boot "b1")}]))
+        db (:db-after (pdb/with db0 [{:seon.system/id :root :seon.system/boot "b1" :seon.system/source (assoc old :boot "b1")}]))
         landed {:tree "t1m" :env "e" :code "c2" :config {}}
         src (root/booted-source old "b1" nil "p1" {} nil landed)
-        db1 (:db-after (pdb/with db [{:seon.root/id :root :seon.root/source src}]))]
+        db1 (:db-after (pdb/with db [{:seon.system/id :root :seon.system/source src}]))]
     (is (= "t0m" (:tree (first (seon.agent/test-inputs db)))) "before: the boot's inputs")
     (is (= "t1m" (:tree (first (seon.agent/test-inputs db1)))) "after the kept landing, the landed files' inputs, under the same boot")))
 
 (deftest a-landing-through-the-bridge-is-a-zero-diff
-  ;; task seon.root/a-boot-resumes-from-the-db: a Claude session's landing enters main as data, the changed files' facts
-  ;; (seon.root/changed-tx, what bin/land's bridge has root write on main).
+  ;; task seon.system/a-boot-resumes-from-the-db: a Claude session's landing enters main as data, the changed files' facts
+  ;; (seon.system/changed-tx, what bin/land's bridge has root write on main).
   ;; Main indexed so from tree A, then from what A -> B changed (a form changed, a namespace added, a script's text and
   ;; mode, a page changed and one removed, a task file added), holds B: the program a seed of B holds (its program
   ;; digest, so a binary built from B is no stale binary), written back byte for byte (seon.doc/files), so the main
@@ -566,7 +566,7 @@
                (get (source/files main2 (source/changed-files main2 ours)) "src/app/pt_src.clj")))))))
 
 (deftest a-moved-tree-replaces-mains-program
-  ;; task seon.root/main-follows-its-source-tree: main imported the file, then merged a new
+  ;; task seon.system/main-follows-its-source-tree: main imported the file, then merged a new
   ;; form; the tree moves on (one function changed, one removed, the merged form in it)
   (let [[main _] (merged (main-with-file) 'app.pt-src "(defn thrice [x] (* 3 x))")
         b (-> (source/file-text main 'app.pt-src)
@@ -1317,10 +1317,10 @@
 ;; a scratch repository of one file on a store of its own, empty: the seed is one of the claims, and none reads more
 ;; than one namespace (the checkout's tree analysed at each boot was 81 s)
 (deftest a-boot-resumes-main-and-reads-no-file
-  ;; task seon.root/a-boot-resumes-from-the-db (owner, 2026-11-09: "Boot's job is to resume the existing system or if
+  ;; task seon.system/a-boot-resumes-from-the-db (owner, 2026-11-09: "Boot's job is to resume the existing system or if
   ;; it's fresh to index it and get it to the point that everything is running off the db. From that point on we are
-  ;; syncing data TO files not reading from them"), end to end through bin/root: a fresh store is indexed once, at its
-  ;; first boot (seon.root/seed!); a file written under the running root changes nothing on main; a commit made while
+  ;; syncing data TO files not reading from them"), end to end through bin/system: a fresh store is indexed once, at its
+  ;; first boot (seon.system/seed!); a file written under the running root changes nothing on main; a commit made while
   ;; root is down changes nothing at the next boot either, which resumes main with its source tree moved away; only
   ;; my.root/import!, a person's re-index, reads the tree. Red before: the boot imported the commit (import-tree!)
   (let [dir (scratch-dir "resume")
@@ -1338,7 +1338,7 @@
         ask (fn [code] (let [a (ts/ask @root {:op :eval :agent "root" :code code})]
                          (if (:error a) a (ts/value-of (:response a)))))
         has-var? (fn [n] (ask (str "(some? (seon.db/eid @(:conn sys) :var/name 'seon.resume-probe-" n "/probe))")))
-        state "[(seon.program/program-digest @(:conn sys)) (:commit (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))]"]
+        state "[(seon.program/program-digest @(:conn sys)) (:commit (:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root])))]"]
     (try
       (.mkdirs (java.io.File. (str co "/src/seon")))
       ;; a tree's own deps, which the binary was not built with
@@ -1371,7 +1371,7 @@
         (seon.lib/remove-tree! dir)))))
 
 ;; docs/source.md#a-boot-catches-up-with-its-checkout: the default boot of a root with a source tree indexes what its checkout changed
-;; since main last indexed it, through bin/root, end to end: an untracked new file reaches main; a file that does not read is named
+;; since main last indexed it, through bin/system, end to end: an untracked new file reaches main; a file that does not read is named
 ;; and left out; with nothing changed the boot indexes nothing; a file a merged task main holds unsynced also changed is left out,
 ;; naming the task, and main keeps the merge's text. Red before: every restart resumed main as it was (the test above's rule,
 ;; now the explicit :seon.config.root/catch-up-on-boot false)
@@ -1405,23 +1405,23 @@
       (is (re-find #"(?m)^ROOT CAUGHT UP \d+ files" (log)) (log))
       (is (re-find #"(?m)^ROOT CATCH-UP LEFT OUT src/seon/catchup_broken.clj: " (log)) "a file that does not read is named and left out")
       (is (false? (ask "(some? (seon.db/eid @(:conn sys) :ns/name 'seon.catchup-broken))")))
-      ;; the rest is seon.root/catch-up itself, the boot's read, on the running root: one restart is the boot's claim
+      ;; the rest is seon.system/catch-up itself, the boot's read, on the running root: one restart is the boot's claim
       (.delete (java.io.File. (str co "/src/seon/catchup_broken.clj")))
-      (is (= [["src/seon/catchup_probe_1.clj"] []] (ask (str "(let [c (seon.root/catch-up @(:conn sys) " (pr-str co) ")] @(seon.root/transact-main! sys (:tx c)) [(:paths c) (:skipped c)])")))
+      (is (= [["src/seon/catchup_probe_1.clj"] []] (ask (str "(let [c (seon.system/catch-up @(:conn sys) " (pr-str co) ")] @(seon.system/transact-main! sys (:tx c)) [(:paths c) (:skipped c)])")))
           "a catch-up that left a file out kept the source fact where it was, so the next one reads what differs again; the broken file is gone")
-      (is (= {:paths []} (ask (str "(seon.root/catch-up @(:conn sys) " (pr-str co) ")"))) "nothing changed: nothing to index")
-      (is (= {} (:value (fx/changed-since co (ask "(:tree (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))"))))
+      (is (= {:paths []} (ask (str "(seon.system/catch-up @(:conn sys) " (pr-str co) ")"))) "nothing changed: nothing to index")
+      (is (= {} (:value (fx/changed-since co (ask "(:tree (:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root])))"))))
           "the tree main holds is the checkout's: nothing differs, untracked files included")
       (probe! 2 2)
       (is (= [["src/seon/catchup_probe_2.clj"] false]
-             (ask (str "(let [c (seon.root/catch-up @(:conn sys) " (pr-str co) " {:fact? false})] [(:paths c) (boolean (some :seon.root/source (filter map? (:tx c))))])")))
+             (ask (str "(let [c (seon.system/catch-up @(:conn sys) " (pr-str co) " {:fact? false})] [(:paths c) (boolean (some :seon.system/source (filter map? (:tx c))))])")))
           "with :fact? false (a session's files as a branch) the same files are indexed and no source fact moves")
       ;; a merged task main holds unsynced (its entry declared) whose change is probe 1's file
-      (is (map? (ask (str "@(seon.root/transact-main! sys [{:seon.task/id \"t/m\" :seon.task/ns 't :seon.task/name \"m\" :seon.task/plan \"p\""
+      (is (map? (ask (str "@(seon.system/transact-main! sys [{:seon.task/id \"t/m\" :seon.task/ns 't :seon.task/name \"m\" :seon.task/plan \"p\""
                           " :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work :seon.task/outcome :merged"
                           " :seon.task/declared \"{}\" :seon.task/changed #{\"[:form \\\"seon.catchup-probe-1/x\\\"]\"}}])"))))
       (probe! 1 11)
-      (let [[skipped src] (ask (str "(let [c (seon.root/catch-up @(:conn sys) " (pr-str co) ")] @(seon.root/transact-main! sys (:tx c))"
+      (let [[skipped src] (ask (str "(let [c (seon.system/catch-up @(:conn sys) " (pr-str co) ")] @(seon.system/transact-main! sys (:tx c))"
                                     " [(:skipped c) (some-> (datahike.api/entity @(:conn sys) [:var/name 'seon.catchup-probe-1/probe]) :var/form :form/src)])"))]
         (is (= ["src/seon/catchup_probe_1.clj"] (mapv :path skipped)) (pr-str skipped))
         (is (str/starts-with? (str (:reason (first skipped))) "merged task t/m ") (pr-str skipped))

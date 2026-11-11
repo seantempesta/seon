@@ -19,7 +19,7 @@
 ;; - Layers (owner, 2026-10-21: "hand out different edn config files ... or do command line
 ;;   overrides"): this file, then the command line's --config FILE and --set :ns/key=edn
 ;;   (a checkout's config/local.edn, gitignored, which bin/ports writes with its ports, is one
-;;   only where a command line names it: bin/root does for the standing root). Later
+;;   only where a command line names it: bin/system does for the standing root). Later
 ;;   layers win key by key; the merged map is validated once; seon.config/sources (and the
 ;;   :seon.config/sources fact on main) names the layer each key came from.
 {;; ==== root and its procs ====================================================================
@@ -27,23 +27,23 @@
  ;; Unit: live agents. Root holds a socket (two descriptors) per agent and raises its open-file
  ;; limit to 256 + 2 x this at boot. Provenance: proto/flow f2-final's PROTO_MAX_AGENTS (the
  ;; first version forked a thousand agents at ~1.4 MB each, AGENTS.md).
- ;; At the bound: a spawn is refused (:seon.root/refused "too many live agents").
- ;; Unit: a name. The one person this store's boot makes as its user (:seon.user/name) and signs in (:seon.root/signed-in), until there
+ ;; At the bound: a spawn is refused (:seon.system/refused "too many live agents").
+ ;; Unit: a name. The one person this store's boot makes as its user (:seon.user/name) and signs in (:seon.system/signed-in), until there
  ;; is a login; a person sets their own in config/local.edn ({:seon.config.root/user-name "sean"}). Provenance: replaced the OS
- ;; account read at boot (seon.root/person), owner's ruling via the managing session, 2026-11-10: a default in the config file is
+ ;; account read at boot (seon.system/person), owner's ruling via the managing session, 2026-11-10: a default in the config file is
  ;; config, not a fake default in code.
  :seon.config.root/user-name "user"
  :seon.config.root/max-agents 1024
  ;; Unit: bytes. How much of a dead agent's stderr its death records: the last bytes of its
- ;; file. Provenance: the value seon.root held as a literal (shrink). At the bound: earlier
+ ;; file. Provenance: the value seon.system held as a literal (shrink). At the bound: earlier
  ;; output is not recorded; the file itself is kept.
  :seon.config.root/death-stderr-bytes 2048
- ;; Unit: ms. Flow's :stop-timeout-ms for root's graph (seon.root/start!). Provenance: the literal
+ ;; Unit: ms. Flow's :stop-timeout-ms for root's graph (seon.system/start!). Provenance: the literal
  ;; 10000 it replaces. At the bound: flow/stop answers the pids still running.
  :seon.config.root/flow-stop-ms 10000
  ;; Unit: entries. The newest entries root's view keeps of a list it grows: an agent's
  ;; evaluations and root's own defects; the view counts them all, and a render says how many it
- ;; left. Provenance: the value seon.root held as a literal twice (shrink). At the bound: the
+ ;; left. Provenance: the value seon.system held as a literal twice (shrink). At the bound: the
  ;; oldest entry leaves the view; the facts on main keep everything.
  :seon.config.root/view-window 20
 
@@ -91,7 +91,7 @@
  :seon.config.root/max-heap-free-ratio 10
 
  ;; Where kept runs live (owner, 2026-10-21: runs are kept, "a perfect record frozen in time").
- ;; bin/root exports SEON_RUNS (<this tree>/runs).
+ ;; bin/system exports SEON_RUNS (<this tree>/runs).
  :seon.config.root/runs-dir #or [#env SEON_RUNS #seon/checkout "runs"]
  ;; The one store (owner, 2026-10-21: one store, many branches, as in production): created
  ;; when missing; every root works on its own main, a branch of the store's seed. bin/check
@@ -111,7 +111,7 @@
  :seon.config.root/tasks-dir #or [#env SEON_TASKS #seon/checkout "resources/seon/tasks"]
  ;; Unit: directories of the checkout ("." is its top level, the .md files there: AGENTS.md, BAGGAGE.md,
  ;; README.md). The pages an index (a seed, or my.root/load-docs!) writes into main as wiki sections
- ;; (seon.root/wiki-tx), so one search and one view reach them (owner, 2026-10-27: "everything of
+ ;; (seon.system/wiki-tx), so one search and one view reach them (owner, 2026-10-27: "everything of
  ;; consequence that is for seon agents use should be indexed into the db"); a boot reads none.
  ;; Provenance: one-index audit, step 6 (root's scratchpad one-index.md). At the
  ;; bound: n/a; a dir with no .md files loads nothing.
@@ -422,15 +422,15 @@
  ;; Unit: path. The repository whose source is the program (session LOOP, resources/seon/tasks/
  ;; seon.source.edn): main imports its dirs at boot when it holds none of them, and each merge
  ;; that changes them is written to their files and committed on :seon.config.source/branch.
- ;; Default: SEON_SOURCE_ROOT, which bin/root sets to its own checkout (owner, 2026-10-22: no
+ ;; Default: SEON_SOURCE_ROOT, which bin/system sets to its own checkout (owner, 2026-10-22: no
  ;; store, build it from source; a store, resume it; the command line overrides), so a root started
- ;; with bin/root builds main from its checkout's source. Unset (bin/test, bin/check, a root a test
+ ;; with bin/system builds main from its checkout's source. Unset (bin/test, bin/check, a root a test
  ;; boots): absent, no source is imported and nothing is written. config/local.edn or --set names
  ;; another tree: the main tree's names its merges worktree (bin/worktree --path merges), so
  ;; write-back never edits main's files.
  :seon.config.source/root #env SEON_SOURCE_ROOT
  ;; Unit: boolean. Whether a boot of a root with a source tree (:seon.config.source/root) catches main up with the files that changed
- ;; since main last indexed it (seon.root/catch-up, docs/source.md#a-boot-catches-up-with-its-checkout): about 40 ms when nothing
+ ;; since main last indexed it (seon.system/catch-up, docs/source.md#a-boot-catches-up-with-its-checkout): about 40 ms when nothing
  ;; changed, the changed files' forms when some did. Provenance: the owner, 2026-11-10 ("if very little has changed it doesn't take
  ;; forever to start"); sessions edit the files from outside. False: the boot resumes main as it is and reads no file, for a Seon
  ;; no one edits from outside. At the bound: n/a.
@@ -443,7 +443,7 @@
  ;; prove's entry there). Provenance: root's ruling (a), 2026-10-23, from step E's dry run (a test
  ;; root importing test/ could not host a checkout, and its gated merges were all refused).
  ;; Absent (as here): root's own source root (:seon.config.source/root as it resolves, the
- ;; standing root's merges tree; seon.root/start! writes it with the config in force), so every
+ ;; standing root's merges tree; seon.system/start! writes it with the config in force), so every
  ;; root with a source gates a merge on the process tests its change reaches, nobody asking. With
  ;; neither (a test root given no source), such a merge is held, its reason naming the tests and
  ;; that no checkout runs them: never merged with them silently unrun.
@@ -454,7 +454,7 @@
  ;; test/ is in: a task's proofs and their fixtures live there, and an agent holds main's
  ;; tests only when main imported them (step E run #11, 2026-10-23: a worktree root without
  ;; test/ forked a design whose proof namespace did not exist, 27 turns of no progress). Only
- ;; a root with a source root imports (bin/root's: SEON_SOURCE_ROOT); a test's root states its
+ ;; a root with a source root imports (bin/system's: SEON_SOURCE_ROOT); a test's root states its
  ;; own dirs. It costs each boot the test forms' evaluation (+5 s a restart, measured
  ;; 2026-10-22; task seon.source/test-namespaces-built-into-the-binary).
  :seon.config.source/dirs ["src" "test" "resources/seon/schemas" "resources/seon/config" "bin"]
@@ -554,13 +554,13 @@
  ;; `target/seon embed-worker` (2026-10-29: the helper tests ran a stale binary, red and green at one
  ;; digest, until this named it).
  ;; seon.test-store/process-store (2026-10-29): a test that reads the process store's path needs the store
- ;; bin/test's plan makes, and the program bin/test seeds on it (seon.root/seed-program!), though it starts
+ ;; bin/test's plan makes, and the program bin/test seeds on it (seon.system/seed-program!), though it starts
  ;; no process itself (test-store-test's a-test-root-is-its-own failed with no-process-store when only it ran).
  :seon.config.source/binary-vars #{seon.test-store/binary-sh seon.test-store/process-store seon.vector/start!}
  ;; Unit: branch. Merges are committed here, never on main and never pushed (owner). Worktrees share
  ;; refs, so a worktree root writing "jolt/seon-merges" would move the main tree's merges branch:
  ;; a worktree's is its own, jolt/seon-merges-<worktree> (#seon/own-branch, the loader's: task
- ;; seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1; audit cut 11, 2026-10-27: it was
+ ;; seon.system/root-repairs-a-failed-merge-from-its-repl, gap 1; audit cut 11, 2026-10-27: it was
  ;; an env var bin/env set, outside the config).
  :seon.config.source/branch #seon/own-branch "jolt/seon-merges"
  ;; Unit: branch. Git's main, which worktree branches merge into: a branch's health step reads
@@ -574,7 +574,7 @@
  :seon.config.source/committer-email "seon@localhost"
  ;; Unit: path. Where each generation is built (seon.fx/build, docs/source.md#the-next-generation):
  ;; <dir>/<commit>, a worktree of the merges commit (bin/worktree --at) with its own target/,
- ;; whose target/seon bin/root next starts. Kept with the run (a generation is a record of what
+ ;; whose target/seon bin/system next starts. Kept with the run (a generation is a record of what
  ;; ran); one worktree and one ~200 MB binary per merges commit built.
  :seon.config.source/generations-dir #join [#ref [:seon.config.root/runs-dir] "/generations"]
  ;; Unit: path. Where a merge's deferred process tests run (seon.fx/run-tests, root's ruling
@@ -648,7 +648,7 @@
  :seon.config.proofs/shard-min-ms 30000
  ;; Unit: MB. What one shard of a run takes at its peak, its own process and the roots and agents its tests start
  ;; (seon.proofs/memory-jobs). Provenance: measured 2026-11-10, the summed RSS of one shard's process tree sampled every 2 s
- ;; (the shard, its roots and agents: 9 processes at the peak) over seon.root-test's 12 process tests, 64 s: peak 2,046 MB. A
+ ;; (the shard, its roots and agents: 9 processes at the peak) over seon.system-test's 12 process tests, 64 s: peak 2,046 MB. A
  ;; 2 s sample can miss a shorter peak, and another namespace's tests may boot more: a floor, not a ceiling.
  :seon.config.proofs/shard-mb 2048
  ;; Unit: MB. The free memory a run leaves the machine (seon.proofs/memory-jobs): below it a run takes one shard. Provenance:
@@ -1126,8 +1126,8 @@
  ;; line and recorded in runs/root.port (a test's root: seon.test-store/start-root!,
  ;; never a port picked and released beforehand, which another process can take). config/local.edn names
  ;; the checkout's own (main 7888, worktree k 7900+10k).
- ;; bin/root PORT WEB, bin/mcp PORT and the mcp check set SEON_SERVER_PORT, which local.edn's
- ;; #env honours where bin/root names it (until a built binary's top-level code sees its argv,
+ ;; bin/system PORT WEB, bin/mcp PORT and the mcp check set SEON_SERVER_PORT, which local.edn's
+ ;; #env honours where bin/system names it (until a built binary's top-level code sees its argv,
  ;; so --set can say it).
  :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 0]
  ;; Unit: pid. The process this root ends with (seon.lib/end-with!, armed once its boot has forked the fork server):

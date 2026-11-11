@@ -9,7 +9,7 @@
             [datahike.api :as d]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.fork-server :as server]
-            [seon.agent :as agent] [seon.agent-proc :as ap] [seon.fx] [seon.root :as root] [seon.problems :as problems] [seon.repl :as repl] [seon.render.proc] [seon.web]
+            [seon.agent :as agent] [seon.agent-proc :as ap] [seon.fx] [seon.system :as root] [seon.problems :as problems] [seon.repl :as repl] [seon.render.proc] [seon.web]
             [taoensso.trove :as trove]))
 
 (trove/set-log-fn! nil)
@@ -101,7 +101,7 @@
   ;; commit (what an agent reads from the store to skip its diffs of main), and a commit of records leaves it: a write, a
   ;; :flush? batch, an octopus merge, and the writer's start. Red before: no commit carried one
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
-        mark (fn [db] (:seon.root/content-t (d/entity db [:seon.root/id :root])))
+        mark (fn [db] (:seon.system/content-t (d/entity db [:seon.system/id :root])))
         at (fn [outs] (d/commit-as-db conn (:commit (last (:main outs)))))
         t0 (:max-tx @conn)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
@@ -116,7 +116,7 @@
       (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data (redefine "app.m0/f2-a") :dest {:rid 2}})
             m1 (mark (at outs))]
         (is (< m0 m1) "a definition moves it, in its own stored commit")
-        (is (some (fn [[_ _ a]] (= :seon.root/content-t a)) (:ops (last (:main outs)))) "and the notice's ops carry it")
+        (is (some (fn [[_ _ a]] (= :seon.system/content-t a)) (:ops (last (:main outs)))) "and the notice's ops carry it")
         (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :flush? true :tx-data (redefine "app.m0/f2-b") :dest {:rid 3}})
               m2 (mark (at outs))]
           (is (< m1 m2) "a :flush? batch's definition moves it")
@@ -197,7 +197,7 @@
 (deftest a-context-read-makes-its-agent-neither-busy-nor-idle
   ;; docs/server.md#ops: a read never writes (owner, 2026-11-10). A :context read is an eval of origin :context: in
   ;; flight, the agent is not made busy, and its answer reports the status it already had, so root's view of the agent
-  ;; does not move and nothing is written to main for it (seon.root's record-agents writes only a change). An eval that
+  ;; does not move and nothing is written to main for it (seon.system's record-agents writes only a change). An eval that
   ;; is work still makes it busy. Red before: every request sent {:status :busy}, and its answer :idle: two commits on
   ;; main for each read.
   (let [[r a'] (sock/socketpair)
@@ -306,7 +306,7 @@
         {:keys [cfg conn]} (pdb/open! :lmdb path 0 :db)]
    (try (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
-        source (fn [pins] {:seon.root/id :root :seon.root/source {:root "tree" :files 0 :forms 0 :ms 0.0 :pins pins}})]
+        source (fn [pins] {:seon.system/id :root :seon.system/source {:root "tree" :files 0 :forms 0 :ms 0.0 :pins pins}})]
     (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "after" :note/agent :t}] :dest {:rid 2}})
     (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [(source (into (sorted-map) (for [i (range 40)] [(str "reference-code/m" i) (apply str (repeat 40 "a"))])))] :dest {:rid 1}})
           answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
@@ -317,7 +317,7 @@
               [_ outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [(source pins)] :dest {:rid 3}})]
           (is (true? (:ok (:r (first (:to-api outs))))))
           (is (seq pins))
-          (is (= pins (get-in (d/pull @conn [:seon.root/source] [:seon.root/id :root]) [:seon.root/source :pins])))))))
+          (is (= pins (get-in (d/pull @conn [:seon.system/source] [:seon.system/id :root]) [:seon.system/source :pins])))))))
      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
 (deftest the-flush-is-continuous-group-commit
@@ -405,7 +405,7 @@
         (is (empty? (:to-api outs)))))))))
 
 (deftest a-wait-on-main-is-answered-at-the-reconcilers-quiet
-  ;; task seon.root/a-wait-on-main-ends-when-nothing-can-make-it-true: a wait on main (seon.root/
+  ;; task seon.system/a-wait-on-main-ends-when-nothing-can-make-it-true: a wait on main (seon.system/
   ;; await-db, named) asks the reconciler on :judge for its first quiet at or after :after. Before,
   ;; only a commit making the wait's pred true ended it, and a quiet spell that went on wrote no
   ;; later report: agent_test's four await-quiet calls after :done hung (1h45m). The answer is the
@@ -471,7 +471,7 @@
          (let [fresh (fn [p] (-> (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                                                    :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
                                  (assoc :conn conn)
-                                 (assoc-in [:view :agents :a1] {:status :spawning}) (assoc-in [:seon.root/spawning :a1] p)))
+                                 (assoc-in [:view :agents :a1] {:status :spawning}) (assoc-in [:seon.system/spawning :a1] p)))
                p (promise) o (volatile! {})
                st' (#'root/set-agent (fresh p) o :a1 {:ready true :load-errors [e]})
                swp (:started-without-program (deref p 0 ::unanswered))
@@ -480,7 +480,7 @@
            (is (= :seon.agent/started-without-program (:seon.error/type swp)) (pr-str (deref p 0 ::unanswered)))
            (is (= [e] (:errors swp)) "naming every load error")
            (is (= :idle (get-in st' [:view :agents :a1 :status])) "the agent runs")
-           (is (= {:seon.root/id :root} (:seon.message/from msg)) "and its first fact is a message from Seon to it")
+           (is (= {:seon.system/id :root} (:seon.message/from msg)) "and its first fact is a message from Seon to it")
            (is (= [[:seon.agent/key "a1"]] (:seon.message/to msg)))
            (is (clojure.string/includes? (:seon.message/body msg) "app.t") "naming what did not load")
            (testing "once per standing set of errors: a second hello that meets them, main holding the message, writes none"
@@ -509,7 +509,7 @@
                st (-> (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                                         :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
                       (assoc :conn conn)
-                      (assoc-in [:view :agents :a1] {:status :spawning}) (assoc-in [:seon.root/spawning :a1] p))
+                      (assoc-in [:view :agents :a1] {:status :spawning}) (assoc-in [:seon.system/spawning :a1] p))
                st' (#'root/set-agent st o :a1 {:ready true :missing-cites [gone]})]
            (is (= [gone] (:missing-cites (deref p 0 ::unanswered))) (pr-str (deref p 0 ::unanswered)))
            (is (= :idle (get-in st' [:view :agents :a1 :status])) "the agent runs")))))))
@@ -544,7 +544,7 @@
   ;; test's root whose fork server died at boot)
   (let [[fd peer] (sock/socketpair)
         st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :fd fd :log []}
-        refused? #(= :seon.root/refused (:seon.error/type %))
+        refused? #(= :seon.system/refused (:seon.error/type %))
         [st outs] (step #'server/fork-server-proc st :ev {:ev :eof :pid 1})]
     (testing "its death answers the requests it never answered"
       (is (= [:fork-server-down :fork-server-lost] (keep :ev (:to-api outs))))
@@ -629,14 +629,14 @@
          (is (re-find #"no user is signed in" (str (:seon.error/message @p))) "no user: the ask is refused"))
        (let [[p _] (ask {:op :message :id :a1 :body "hi"})]
          (is (re-find #"no user is signed in" (str (:seon.error/message @p))) "no user: the message is refused"))
-       (d/transact conn {:tx-data [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"} {:seon.root/id :root :seon.root/signed-in "u"}]})
+       (d/transact conn {:tx-data [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"} {:seon.system/id :root :seon.system/signed-in "u"}]})
        (let [[_ outs] (ask {:op :ask :text "do a thing"})]
          (is (some #{[:db/add [:seon.task/id "request/do-a-thing"] :seon.task/started-by [:seon.agent/key "sean"]]} (txs outs)) "the signed-in user started it"))
        (let [[_ outs] (ask {:op :message :id :a1 :body "hi"})]
          (is (some #(and (map? %) (= {:seon.agent/key "sean"} (:seon.message/from %))) (txs outs)) "from the signed-in user"))
        ;; a sender the caller names is kept: root's own (the reconciler's stage boundary sends :from :root), never the person
        (let [[_ outs] (ask {:op :message :id :a1 :from :root :body "the design is done"})]
-         (is (some #(and (map? %) (= {:seon.root/id :root} (:seon.message/from %))) (txs outs)) "from the system, as root names itself"))))))
+         (is (some #(and (map? %) (= {:seon.system/id :root} (:seon.message/from %))) (txs outs)) "from the system, as root names itself"))))))
 
 (deftest root-moves-the-signed-in-users-focus-and-refuses-an-unknown-agent-or-no-user
   ;; docs/users.md#whats-on-screen: root's focus! request writes the signed-in user's :seon.user/focus to the agent named by key
@@ -650,7 +650,7 @@
        (d/transact conn {:tx-data [{:seon.agent/key "a1"}]})
        (let [[p _] (ask (req "a1"))]
          (is (re-find #"no user is signed in" (str (:seon.error/message @p))) "no user: refused"))
-       (d/transact conn {:tx-data [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"} {:seon.root/id :root :seon.root/signed-in "u"}]})
+       (d/transact conn {:tx-data [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean"} {:seon.system/id :root :seon.system/signed-in "u"}]})
        (let [[p _] (ask (req "nobody"))]
          (is (re-find #"no agent or task nobody" (str (:seon.error/message @p))) "no such agent or task: refused"))
        ;; a task an agent just launched, before its agent is made: the focus is the task
@@ -681,8 +681,8 @@
       (when (realized? p)
         (is (= [:seon.agent/died :a1] ((juxt :seon.error/type :agent) @p)) (pr-str @p))
         (is (re-find #"ended by root" (:seon.error/message @p))))
-      (is (empty? (:seon.root/dying st')) "nothing is parked")
-      (is (false? @(:seon.root/stall-timer st')) "and no stall timer was armed"))))
+      (is (empty? (:seon.system/dying st')) "nothing is parked")
+      (is (false? @(:seon.system/stall-timer st')) "and no stall timer was armed"))))
 
 (deftest a-step-that-throws-after-a-stall-check-leaves-the-check-armed
   ;; docs/clocks.md: root's stall check is a timer to itself (seon.step/timer). A step that took :stall-check and then
@@ -693,7 +693,7 @@
   (let [puts (atom [])
         st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                              :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
-        st (assoc st :stall-ms 2 :seon.root/busy #{:a1})]
+        st (assoc st :stall-ms 2 :seon.system/busy #{:a1})]
     (with-redefs [step/put-after! (fn [_ _ m] (swap! puts conj m) nil)]
       (let [[st _] (#'root/api-proc st :ext {:op :noop})]
         (is (= [{:op :stall-check}] @puts) "an eval in flight arms the check")
@@ -725,7 +725,7 @@
             "the form returned: no longer running")))))
 
 (deftest root-view-of-an-agents-evals-holds-handles-not-values
-  ;; task seon.root/an-agents-view-keeps-handles-not-values (docs/machine.md#roots-heap):
+  ;; task seon.system/an-agents-view-keeps-handles-not-values (docs/machine.md#roots-heap):
   ;; the bytes root's view keeps of an agent's evals are the same whatever the evals returned, wrote or
   ;; threw. Red while the entry held the response whole (its :value, :out and an error's :data grew with them)
   (let [st0 (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
@@ -752,17 +752,17 @@
                              :system (doto (promise) (deliver {:procs {} :conns []}))})
         ask (fn [m] (let [p (promise)] (step #'root/api-proc st :ext (assoc m :p p)) @p))]
     (doseq [op [:eval :tests :stats :merge-main]]
-      (is (= [:seon.root/ended :a7] ((juxt :seon.error/type :agent) (ask {:op op :id :a7 :forms "1"}))) (str op " to an agent that ended"))
-      (is (= :seon.root/no-agent (:seon.error/type (ask {:op op :id :nope :forms "1"}))) (str op " to one root never had")))
-    (is (= :seon.root/ended (:seon.error/type (ask {:op :clone :parent :a7}))) "a clone of an agent that ended")
+      (is (= [:seon.system/ended :a7] ((juxt :seon.error/type :agent) (ask {:op op :id :a7 :forms "1"}))) (str op " to an agent that ended"))
+      (is (= :seon.system/no-agent (:seon.error/type (ask {:op op :id :nope :forms "1"}))) (str op " to one root never had")))
+    (is (= :seon.system/ended (:seon.error/type (ask {:op :clone :parent :a7}))) "a clone of an agent that ended")
     (testing "a request in flight when root stopped its agent is answered ended"
       (let [p (promise)
             st (-> st (assoc-in [:agents :a1] {:branch :b1}) (assoc-in [:view :agents :a1] {:status :killed}))
             [st rid] (#'root/pend st p :eval :a1)
             st (#'root/end-agent st (volatile! {}) {:agent :a1 :inflight [rid]})]
-        (is (= [:seon.root/ended :a1] ((juxt :seon.error/type :agent) @p)))
+        (is (= [:seon.system/ended :a1] ((juxt :seon.error/type :agent) @p)))
         (is (get-in st [:view :agents :a1 :ended-ms]) "and its view records the end")))
-    (is (= :seon.root/ended (:seon.error/type (root/request 'merge-main! :a7 nil {:status :killed :ended-ms 1}))) "request's merge-main! to an agent that ended")))
+    (is (= :seon.system/ended (:seon.error/type (root/request 'merge-main! :a7 nil {:status :killed :ended-ms 1}))) "request's merge-main! to an agent that ended")))
 
 (def ^:private fake-members
   "Protocol members a refused answer must not carry: an eval item's, a test count's, a merge's."
@@ -784,7 +784,7 @@
       (is (bare? @p) (pr-str @p)))
     (let [p (promise)]
       (step #'root/api-proc st :ext {:op :ping :id :nope :p p})
-      (is (= :seon.root/refused (:seon.error/type @p)) "a request kind with no producer is refused, not left unanswered"))
+      (is (= :seon.system/refused (:seon.error/type @p)) "a request kind with no producer is refused, not left unanswered"))
     (doseq [[f a] [['merge-main! nil] ['merge! nil] ['merge! {:branch :b :status :dead}] ['nope! nil]]]
       (is (bare? (root/request f :a1 nil a)) (str f))))
   (ts/test-branch! (fn [cfg conn]
@@ -802,7 +802,7 @@
     (let [p (promise)
           [_ outs] (step #'root/api-proc (assoc st :agents {:a1 {:status :running}}) :ext {:op :write :req {:op :collect} :p p})]
       (is (realized? p) "answered at once")
-      (is (= :seon.root/refused (:seon.error/type (when (realized? p) @p))))
+      (is (= :seon.system/refused (:seon.error/type (when (realized? p) @p))))
       (is (= [:a1] (:agents (when (realized? p) @p))))
       (is (empty? (:to-writer outs))))
     (let [p (promise)
@@ -914,7 +914,7 @@
 
 (deftest an-uncaught-error-reaches-root-never-only-stderr
   ;; docs/errors.md#nothing-crashes-and-nothing-hangs (Point 2026, Sean's silent errors): a fiber died at start with its error
-  ;; only on stderr ("Exception in go/fiber body"). Root takes every uncaught error (seon.root/catch-uncaught!): kept until it
+  ;; only on stderr ("Exception in go/fiber body"). Root takes every uncaught error (seon.system/catch-uncaught!): kept until it
   ;; listens, which its start fails on, then its :back, which the api records as a named defect
   (let [old (Thread/getDefaultUncaughtExceptionHandler)
         u @#'root/uncaught
@@ -939,7 +939,7 @@
               [_ outs] (step #'root/api-proc (api-state) :back m)]
           (is (= :uncaught (:pid m)) (pr-str m))
           (is (re-find #"uncaught in thread .*: late boom" (str (:message m))))
-          (is (= :seon.root/proc-defect (get-in m [:data :seon.error/type])))
+          (is (= :seon.system/proc-defect (get-in m [:data :seon.error/type])))
           (is (= [:proc-defect] (map :type (:events outs))) "an event, as any proc's defect")))
       (finally (Thread/setDefaultUncaughtExceptionHandler old) (reset! u {:back nil :early []})))))
 
@@ -950,13 +950,13 @@
     (testing "the api's own step threw on {:op :state}: its caller is answered the defect, not left waiting"
       (let [p (promise)]
         (step #'root/api-proc st :back {:op :error :pid :api :message "boom" :msg {:op :state :p p}})
-        (is (= :seon.root/proc-defect (:seon.error/type (answer p))))))
+        (is (= :seon.system/proc-defect (:seon.error/type (answer p))))))
     (testing "the writer threw on a request the api sent it: the api answers that request's caller by its rid"
       (let [p (promise)
             [st outs] (step #'root/api-proc st :ext {:op :write :req {:op :tx :branch :db :tx-data []} :p p})
             sent (first (:to-writer outs))]
         (step #'root/api-proc st :back {:op :error :pid :writer :message "boom" :msg sent})
-        (is (= :seon.root/proc-defect (:seon.error/type (answer p))))
+        (is (= :seon.system/proc-defect (:seon.error/type (answer p))))
         (is (= "boom" (:seon.error/message (answer p))))))
     (testing "the api's step threw on a later message of its batch (Flow names only the first): each message it took is answered"
       (let [first-msg {:op :state :p (promise)}]
@@ -966,12 +966,12 @@
         (let [[_ outs] (step #'root/api-proc st :back {:op :error :pid :api :message "boom" :msg first-msg})
               again (get outs [:reconciler :answers])]
           (is (= [3] (map :tag again)) "the second message, a proc's write request, is answered on its route")
-          (is (= :seon.root/proc-defect (:seon.error/type (:r (first again))))))))
+          (is (= :seon.system/proc-defect (:seon.error/type (:r (first again))))))))
     (testing "a proc threw on the answer it took: the api answers it again on the proc's :answers route, once"
       (let [[_ outs] (step #'root/api-proc st :back {:op :error :pid :render :message "boom" :msg {:tag 7 :r {:agents {}}}})
             again (get outs [:render :answers])]
         (is (= [7] (map :tag again)))
-        (is (= :seon.root/proc-defect (:seon.error/type (:r (first again)))))
+        (is (= :seon.system/proc-defect (:seon.error/type (:r (first again)))))
         (testing "and a step that throws on that defect is not answered again"
           (let [[_ outs] (step #'root/api-proc st :back {:op :error :pid :render :message "boom" :msg (first again)})]
             (is (empty? (get outs [:render :answers])))))
@@ -1019,14 +1019,14 @@
               p (promise)
               [after _] (step #'root/api-proc lost :ext {:op :spawn :opts {} :p p})
               refused (answer p)]
-          (is (re-find #"step-failed" (pr-str (:seon.root/errors lost))) "root recorded the error")
+          (is (re-find #"step-failed" (pr-str (:seon.system/errors lost))) "root recorded the error")
           (is (= :lost (get-in lost [:view :fork-server :status])))
-          (is (= :seon.root/refused (:seon.error/type refused)) (pr-str refused))
+          (is (= :seon.system/refused (:seon.error/type refused)) (pr-str refused))
           (is (re-find #"fork server is lost" (str (:seon.error/message refused))) (pr-str refused))
           (is (= (:agents lost) (:agents after)) "no agent was made for the refused spawn"))))))))
 
 (deftest a-spawn-is-answered-at-its-agents-ready
-  ;; task seon.root/a-spawn-answers-at-its-agents-ready: never at once, while the agent is
+  ;; task seon.system/a-spawn-answers-at-its-agents-ready: never at once, while the agent is
   ;; :spawning, but at its hello, so what is sent to it next reaches a ready agent
   (spawning-api (fn [st]
     (let [p (promise)
@@ -1055,9 +1055,9 @@
         (is (= a1 (:agent first-answer)))
         ;; exactly one answer: the spawn's entry is gone once answered, so a later hello or end
         ;; has no caller to answer (a promise ignores a second delivery, so the entry is the proof)
-        (is (not (contains? (:seon.root/spawning st) a1)) "answered: no spawn is held for the agent")
+        (is (not (contains? (:seon.system/spawning st) a1)) "answered: no spawn is held for the agent")
         (let [[st _] (step #'root/api-proc st :back {:op :status :agent a1 :set {:ready true}})]
-          (is (not (contains? (:seon.root/spawning st) a1)))
+          (is (not (contains? (:seon.system/spawning st) a1)))
           (is (= first-answer (answer p))))))))
   (spawning-api (fn [st]
     (let [p (promise)
@@ -1076,7 +1076,7 @@
 
 (deftest root-state-never-answers-an-empty-system
   ;; "Unknown is not {}": what the api answers is what the caller gets; a defect stays a defect
-  (let [e (seon.contract/error :seon.root/proc-defect 'seon.root/api-proc "boom" {:pid :api})]
+  (let [e (seon.contract/error :seon.system/proc-defect 'seon.system/api-proc "boom" {:pid :api})]
     (answering-sys e (fn [sys]
       (testing "state: the defect, not a view decorated around it"
         (is (= e (root/state sys))))
@@ -1151,7 +1151,7 @@
            commit! (fn [i] (d/transact conn (seon.task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "t" i) :seon.task/plan (str "Make t" i " true.")}])))
            ;; each proc is judged against main as it stood when its own run of commits ended
            stale (fn [proc st] (for [[path t] (ts/stale-dbs st (:max-tx @conn))] [proc path t]))
-           _ (d/transact conn (seon.test-store/root-tx {:seon.root/boot "b" :seon.config.agent/max-running 4}))
+           _ (d/transact conn (seon.test-store/root-tx {:seon.system/boot "b" :seon.config.agent/max-running 4}))
            ;; the fork server: every commit is a :tx, and a fork or a standby is the only thing that brings its index to main
            fs (reduce (fn [st i]
                         (let [rep (commit! i)
@@ -1189,7 +1189,7 @@
     (d/branch! conn main ab)
     (let [[st r] (union-of st)
           _ (is (true? (:ok r)))
-          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from {:seon.root/id :root} :seon.message/body "from main"}] :dest {:rid 1}})
+          [st _] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:seon.message/id "m1" :seon.message/from {:seon.system/id :root} :seon.message/body "from main"}] :dest {:rid 1}})
           bc (pdb/connect (assoc cfg :branch ab))
           _ (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from {:seon.agent/key "a1"} :seon.message/body "from a1"}] :tx-meta (pdb/tx-meta ab)})
           _ (d/release bc)
@@ -1272,7 +1272,7 @@
      (let [live (fn [st] (vec (sort (keys (:agents st)))))
            [st _] (step #'root/api-proc st :ext {:op :spawn :opts {:key "a3"} :p (promise)})
            b (get-in st [:agents :a3 :branch])
-           st (-> st (assoc-in [:view :agents :a3 :status] :idle) (assoc-in [:seon.root/backing :a3] {:p (promise) :branch b}))
+           st (-> st (assoc-in [:view :agents :a3 :status] :idle) (assoc-in [:seon.system/backing :a3] {:p (promise) :branch b}))
            [st1 outs1] (step #'root/api-proc st :from-writer {:dest {:back :a3} :r {:ok true}})]
        (is (= [:a3] (live st)) "an agent started under a session's key is named by it")
        (is (= [:a3] (live st1)) "the old process is the one live process at the Back")
@@ -1282,7 +1282,7 @@
              spawns (filter #(= :spawn (:op %)) (:to-writer outs2))]
          (is (= [:a3] (live st2)) "its end seen, the new process takes its place: one live process")
          (is (= [[:a3 "a3"]] (mapv (juxt :agent :key) spawns)) "forked once, as the same agent, its id's name its key")
-         (is (empty? (:seon.root/respawn st2)) "nothing waits to be forked")
+         (is (empty? (:seon.system/respawn st2)) "nothing waits to be forked")
          (is (= :spawning (get-in st2 [:view :agents :a3 :status])) "and the view holds the new process, not the old"))))))
 
 (deftest a-failed-standby-is-a-recorded-problem
@@ -1292,7 +1292,7 @@
                              :view {:agents {} :fork-server {:status :up :pid 5 :standby true}} :graph (promise)
                              :system (doto (promise) (deliver {:procs {} :conns []}))})
         [st2 _] (step #'root/api-proc st :back {:ev :standby-failed :gen 3 :active-threads 7})
-        fold (pr-str (:seon.root/errors st2))]
+        fold (pr-str (:seon.system/errors st2))]
     (is (re-find #":seon.fork-server/standby-failed" fold) fold)
     (is (re-find #"7" fold) fold)
     (is (= false (get-in st2 [:view :fork-server :standby])) "the view shows the server has no standby")

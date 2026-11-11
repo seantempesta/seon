@@ -67,7 +67,7 @@
  ;; agents
  ;; an agent's lifecycle as root's view holds it, in the dashboard's order: live, then gone
  ;; (stopped by root: a kill, or the end of its run; or dead). The sets are the
- ;; lifecycle's one declaration (seon.root/gone, seon.render.ui/live): a new status is one entry
+ ;; lifecycle's one declaration (seon.system/gone, seon.render.ui/live): a new status is one entry
  :seon.agent/status [:enum {:seon.status/live #{:spawning :busy :idle} :seon.status/stopped #{:ended :killed}
                             :seon.status/gone #{:ended :killed :dead}}
                      :spawning :busy :idle :ended :killed :dead]
@@ -131,14 +131,14 @@
                                [:cited-by [:vector [:map [:section :string] [:read :any]]]]]
  :seon.test/result [:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]
  ;; root's API
- :seon.root/sys [:map [:graph :any] [:ext :seon.host/chan] [:conn :seon.host/conn]]
- :seon.root/api-state [:map [:agents :map] [:pending :map] [:rid :int] [:boot :string]]
- :seon.root/request [:map [:op :keyword]]
- ;; root's system declaration (resources/seon/system.edn, seon.system): procs by id, effect
+ :seon.system/sys [:map [:graph :any] [:ext :seon.host/chan] [:conn :seon.host/conn]]
+ :seon.system/api-state [:map [:agents :map] [:pending :map] [:rid :int] [:boot :string]]
+ :seon.system/request [:map [:op :keyword]]
+ ;; root's system declaration (resources/seon/system.edn, seon.graph): procs by id, effect
  ;; kinds, the conns between them
- :seon.system/decl [:map [:procs [:map-of :keyword [:map [:proc :qualified-symbol] [:args {:optional true} :map] [:chan-opts {:optional true} :map]]]]
+ :seon.graph/decl [:map [:procs [:map-of :keyword [:map [:proc :qualified-symbol] [:args {:optional true} :map] [:chan-opts {:optional true} :map]]]]
                     [:fx {:optional true} [:map-of :keyword :map]] [:conns [:vector [:tuple [:tuple :keyword :keyword] [:tuple :keyword :keyword]]]]]
- :seon.root/spawn-opts [:maybe [:map [:branch {:optional true} :seon.db/branch] [:task {:optional true} [:maybe :string]] [:run {:optional true} [:maybe :string]]
+ :seon.system/spawn-opts [:maybe [:map [:branch {:optional true} :seon.db/branch] [:task {:optional true} [:maybe :string]] [:run {:optional true} [:maybe :string]]
                                      ;; the session's agent the process continues (seon.task/session-key)
                                      [:key {:optional true} :string]
                                      ;; evals run on its REPL queue before anything else, intent and code each, recorded as evals any

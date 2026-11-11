@@ -21,7 +21,7 @@
 
 (def help-page
   "The help page, docs/agent.md: what `doc` answers of an anchor, each section on demand. Main holds
-  it as the wiki's sections from root's boot on (seon.root/start!)."
+  it as the wiki's sections from root's boot on (seon.system/start!)."
   "docs/agent.md")
 
 (defn help-text

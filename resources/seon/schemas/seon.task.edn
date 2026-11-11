@@ -86,7 +86,7 @@
  ;; the reconciler proc's state, and the steps of a flight
  :seon.reconcile/state [:map [:db :seon.host/db] [:boot :string]
                         [:rid :int] [:flights :map] [:pending :map] [:quiet {:optional true} :boolean]
-                        ;; waits on main asked on :judge (seon.root/await-db), each answered once quiet at or after its :after,
+                        ;; waits on main asked on :judge (seon.system/await-db), each answered once quiet at or after its :after,
                         ;; held across steps (an edge's promise outlives the step that took it); :report, the quiet
                         ;; spell's report until its write is answered
                         [:waits {:optional true} [:vector [:map [:after :int] [:p :seon.host/promise]]]] [:report {:optional true} :int]

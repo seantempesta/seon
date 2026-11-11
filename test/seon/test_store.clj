@@ -170,7 +170,7 @@
   [m]
   (let [config-key? #(some-> (namespace %) (clojure.string/starts-with? "seon.config."))
         cs (into {} (filter (comp config-key? key)) m)]
-    (cond-> [(into {:seon.root/id :root} (remove (comp config-key? key)) m)]
+    (cond-> [(into {:seon.system/id :root} (remove (comp config-key? key)) m)]
       (seq cs) (into (seon.task/config-tx cs {})))))
 
 (defn turn-tx
@@ -250,7 +250,7 @@
            [path (java.io.RandomAccessFile. path "rw")])))
 
 (defn binary-sh
-  "clojure.java.shell/sh of a command that runs the checkout's binary (target/seon, bin/root,
+  "clojure.java.shell/sh of a command that runs the checkout's binary (target/seon, bin/system,
   bin/check): the one way a test does, so seon.program/tree-readers names it and such a test's
   reach digest covers the whole tree the binary is built from. It runs under bin/held with this
   process's starter fifo: what it starts ends when the test process ends."
@@ -270,9 +270,9 @@
   "scripted")
 
 (defn- root-sh
-  "bin/root COMMAND ARGS for a test's root (root): its store, main and runs named in the
+  "bin/system COMMAND ARGS for a test's root (root): its store, main and runs named in the
   environment it starts with, over the caller's, so nothing inherited redirects it; its server port -1, a port the kernel
-  assigns, which bin/root next carries to the next generation."
+  assigns, which bin/system next carries to the next generation."
   {:malli/schema [:=> [:cat :map :string [:sequential :string]] :map]}
   [{:keys [store main runs env]} command args]
   (apply binary-sh (concat ["env" (str "SEON_RUNS=" runs) (str "SEON_STORE=" store) (str "SEON_MAIN=" main)
@@ -280,7 +280,7 @@
                             ;; the root ends with this test process, however it ends (:seon.config.root/end-with)
                             (str "SEON_END_WITH=" (seon.lib/c-getpid))]
                            (for [[k v] env] (str k "=" v))
-                           ["bin/root" command] args)))
+                           ["bin/system" command] args)))
 
 (defn drop-main!
   "Delete main and every branch under it from the store at store (seon.db/delete-main!), with its
@@ -297,7 +297,7 @@
     {:deleted gone}))
 
 (defn start-args
-  "bin/root start's arguments for a test's root in runs (start-root!): root-profile, its task files
+  "bin/system start's arguments for a test's root in runs (start-root!): root-profile, its task files
   and verdict cache its own, no catch-up with the checkout at boot, the test running it as --started-by, then args, whose
   --profile and --set win."
   {:malli/schema [:=> [:cat [:map [:runs :string] [:args {:optional true} [:sequential :string]]]] [:vector :string]]}
@@ -310,7 +310,7 @@
        ;; its main is the seeded store's, the tree its run indexed: a session's edits since are no test's subject, and a boot
        ;; reads no git (docs/source.md#a-boot-catches-up-with-its-checkout); a test of the catch-up sets it again
        "--set" ":seon.config.root/catch-up-on-boot=false"]
-      ;; the test running now started this root: its merge gate leaves it out (:seon.root/started-by)
+      ;; the test running now started this root: its merge gate leaves it out (:seon.system/started-by)
       (into (when-let [{:keys [ns name]} (meta (first clojure.test/*testing-vars*))]
               ["--started-by" (str (ns-name ns) "/" name)]))
       (into args)))
@@ -324,20 +324,20 @@
   [path] (let [f (java.io.File. ^String path)] (if (.exists f) (slurp f) "")))
 
 (defn start-root!
-  "A built root (bin/root start, this checkout's binary) on store and main, both named and never
+  "A built root (bin/system start, this checkout's binary) on store and main, both named and never
   inherited (a caller's SEON_STORE or SEON_MAIN, a bin/check run's, opened a store another run
   had written). Its server is on a port the kernel assigns (:seon.config.root/server-port -1),
-  read back from its ROOT LISTENING line: bin/root returns at that line or at the root's death,
-  never on a clock (:started, the last line bin/root start printed). runs: its pids, log and port; env: more variables {name value}; args: more
+  read back from its ROOT LISTENING line: bin/system returns at that line or at the root's death,
+  never on a clock (:started, the last line bin/system start printed). runs: its pids, log and port; env: more variables {name value}; args: more
   root arguments. Answers the options with :port, nil when the root died before listening, and
   then its :log, which says why (ask answers it as the test's error). runs is one root's, named per main by its caller: a root still running there
-  is refused, never answered (bin/root start in it would only report that root, and the test
+  is refused, never answered (bin/system start in it would only report that root, and the test
   would ask another test's root: task seon.test-store/a-test-root-is-its-own). The refused start
   backs that rule, it is no lock: two starts at once in one runs could both pass it, which a
   runs per main makes unreachable. Its task files are its own (:seon.config.root/tasks-dir under
   runs, unless args name another): the checkout's are every session's, and an event on one (a
   merge's write, which FSEvents also delivers to a watcher begun just after it) made a test root
-  load all of them (seon.root-test/a-second-boot-resumes-the-same-main read 810 tasks), and so is its
+  load all of them (seon.system-test/a-second-boot-resumes-the-same-main read 810 tasks), and so is its
   verdict cache (:seon.config.proofs/results-dir under runs, docs/merging.md#verdicts-are-a-cache). The test
   running it (clojure.test/*testing-vars*) is the root's --started-by, so its merge gate never
   runs the test that started it (docs/merging.md#a-merge-runs-what-the-change-reaches); called
@@ -392,8 +392,8 @@
   [root] (read-branch root :db))
 
 (defn kill-root!
-  "SIGKILL the root (bin/root kill), answered once the root and every process it started are
-  gone (bin/held --drain). Answers {:drained boolean}: false when bin/root did not say so."
+  "SIGKILL the root (bin/system kill), answered once the root and every process it started are
+  gone (bin/held --drain). Answers {:drained boolean}: false when bin/system did not say so."
   {:malli/schema [:=> [:cat [:map [:runs :string]]] [:map [:drained :boolean]]]}
   [root] {:drained (boolean (re-find #"\(drained\)" (:out (root-sh root "kill" []))))})
 
@@ -436,9 +436,9 @@
       (catch java.io.IOException _ {:error :reset}))))
 
 (defn stop-root!
-  "Stop a root start-root! started (bin/root stop: its stdin closes, it stops cleanly, and the
+  "Stop a root start-root! started (bin/system stop: its stdin closes, it stops cleanly, and the
   wait ends at its exit). Answers {:exit :log}: its exit status, and its whole output; or
-  {:error :stopped-without-status :out out :log log} when bin/root printed none."
+  {:error :stopped-without-status :out out :log log} when bin/system printed none."
   {:malli/schema [:=> [:cat [:map [:runs :string]]] :map]}
   [{:keys [runs] :as root}]
   (let [{:keys [out]} (root-sh root "stop" [])

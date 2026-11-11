@@ -90,7 +90,7 @@
     (if (string? p) (emit/marked-hiccup :seon.print/code p) [:pre {:class "text-text-100"} [:code p]])))
 
 (defn task-title
-  "Task t as a person reads its title. A task whose name is its plan's first sentence in words (a person's request: seon.root/request-name
+  "Task t as a person reads its title. A task whose name is its plan's first sentence in words (a person's request: seon.system/request-name
   names it by seon.task/request-words, numbered when taken) is titled by that sentence as written, demo.math/half and its colon intact; any
   other, or one whose plan no longer opens with those words, by its name in words, first letter capital (seon.print/a-long-string becomes
   \"A long string\"). Computed from the data, never stored. See docs/render.md#the-page."
@@ -446,9 +446,9 @@
 
 (defn agent-input
   "The input at the top of an agent's page, each through root's requests (the server's ops send
-  the same): words are a message its next turn reads (seon.root/message!), and a line that starts with
-  ( evaluates in its REPL (seon.root/submit!, origin :ui), as every line does on an agent with no task; interrupt stops its running form;
-  release runs its task's next run when the task is held (seon.root/release!). input {:id
+  the same): words are a message its next turn reads (seon.system/message!), and a line that starts with
+  ( evaluates in its REPL (seon.system/submit!, origin :ui), as every line does on an agent with no task; interrupt stops its running form;
+  release runs its task's next run when the task is held (seon.system/release!). input {:id
   :address :live? :held :focus? :busy? :talks?}: address, its key, whom a word goes to in any boot; talks?, it has a task, so what's said wakes it, process or none; live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
   focus?, its field takes focus as the page loads (the chat's:
   @ctx's page is long and the field ends it)."
@@ -457,7 +457,7 @@
   [opts {:keys [id address live? held focus? busy? talks?]}]
   [:section {:id (:unit opts) :class "seon-stack-2"}
    (if (or live? talks?)
-     [:form {:class "seon-row" :data-seon-repl "" :seon/call 'seon.root/submit! :seon/agent (or address id)}
+     [:form {:class "seon-row" :data-seon-repl "" :seon/call 'seon.system/submit! :seon/agent (or address id)}
       [:span {:class "text-signal"} (str (kname id) "=>")]
       ;; Enter sends, Shift+Enter is a new line: a form may span lines
       [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
@@ -471,12 +471,12 @@
       ;; so the field keeps its width as the agent goes busy and idle within a turn (it came and went, and the field jumped each time)
       (when (or live? busy?)
         [:button (cond-> {:type "button" :data-interrupt "" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
-                          :seon/call 'seon.root/interrupt! :seon/agent id}
+                          :seon/call 'seon.system/interrupt! :seon/agent id}
                    (not busy?) (assoc :disabled true)) "⏹ interrupt"])]
      [:p {:class "muted"} "This agent isn't running, so it can't answer. What it did is above."])
    (when held
      [:button {:class "self-start rounded border border-base-700 px-2" :title (str "release " held ": the reconciler runs its next run (my.root/run!)")
-               :seon/call 'seon.root/release! :seon/agent id :seon/args {:task held}}
+               :seon/call 'seon.system/release! :seon/agent id :seon/args {:task held}}
       (str "▶ release " held)])])
 
 ;;; --- an eval's parts ---------------------------------------------------------------
@@ -497,7 +497,7 @@
   [x]
   (let [x (ratom/realize x)]
     (cond (:seon.agent/key x) [:a {:href (str "/agent/" (:seon.agent/key x))} (or (:seon.user/name x) (:seon.agent/key x))]
-          (:seon.root/id x) [:span "Seon"])))
+          (:seon.system/id x) [:span "Seon"])))
 
 (defn- ran-by
   "Who ran eval e, from the entity its pull joins as :seon.eval/by (an agent, a user, the system): \"its own turn\" when that is the eval's
@@ -1350,8 +1350,8 @@
         key (some-> c (get :seon.agent/key) ratom/realize)]
     [:li
      [:details (cond-> {:class "seon-eval" :id (str "eval-" id)} opened (assoc :open true))
-      ;; opening it is a fact on main (seon.root/opened!), which the agent takes before it draws again
-      (into (if key [:summary {:seon/call 'seon.root/opened! :seon/agent (keyword key) :seon/args {:key key :eval id}}] [:summary])
+      ;; opening it is a fact on main (seon.system/opened!), which the agent takes before it draws again
+      (into (if key [:summary {:seon/call 'seon.system/opened! :seon/agent (keyword key) :seon/args {:key key :eval id}}] [:summary])
             (remove nil?)
             [(when err [:span {:class "shrink-0 text-error"} "⚠"])
              (if said?
@@ -1390,17 +1390,17 @@
 
 (defn- step-tools
   "An opened step's buttons, for a live agent (the page's stylesheet shows them only beside its REPL's input, so no step is drawn again as its status moves): run it again in its place,
-  run the agent's evals down to it, edit its code and run that, copy its code, go back to it. Each is a call of root's table (seon.root/request's again! and back!). See docs/turn.md#an-eval-can-be-run-again."
+  run the agent's evals down to it, edit its code and run that, copy its code, go back to it. Each is a call of root's table (seon.system/request's again! and back!). See docs/turn.md#an-eval-can-be-run-again."
   {:malli/schema [:=> [:cat :any :map] :any]}
   [agent {:seon.eval/keys [id code]}]
   (let [button "rounded border border-base-700 px-2 py-0.5 hover:border-text-400"
-        call (fn [args] {:seon/call 'seon.root/again! :seon/agent agent :seon/args (assoc args :eval id)})]
+        call (fn [args] {:seon/call 'seon.system/again! :seon/agent agent :seon/args (assoc args :eval id)})]
     [:div {:class "seon-step-tools flex flex-wrap items-baseline gap-1 text-2xs"}
      [:button (merge {:type "button" :class button :title "Run this again in its place. Its code runs for real, and the model reads the new result."} (call {})) "▶ Run"]
      [:button (merge {:type "button" :class button :title "Run the agent's steps from the start down to this one, stopping at the first that fails. Their code runs for real."} (call {:to-here true})) "⏭ To here"]
      [:button {:type "button" :class button :title "Copy its code" (keyword "data-on:click") "navigator.clipboard.writeText(el.closest('.seon-eval').querySelector('pre code').textContent)"} "⧉ Copy"]
      ;; what a person is typing is theirs, not the page's: a new eval landing morphs the list, and would close this.
-     ;; what a person is typing stays, for this process: another one (seon.root/back!) is another element, whose calls reach it
+     ;; what a person is typing stays, for this process: another one (seon.system/back!) is another element, whose calls reach it
      [:details {:id (str "step-edit-" (name agent) "-" id) :class "w-full" :data-ignore-morph ""}
       [:summary {:class "cursor-pointer text-text-400"} "✎ Edit"]
       [:form (merge {:class "mt-1 flex flex-col gap-1"} (call {}))
@@ -1410,7 +1410,7 @@
       [:summary {:class "cursor-pointer text-text-400"} "↩ Back to here"]
       [:div {:class "mt-1 flex flex-col gap-1 text-text-400"}
        [:p "The agent goes back to just after this step, and everything after it leaves this chat. Nothing is lost: the later steps stay on the old branch. Values it kept in memory don't come back on their own; To here runs its steps again to rebuild them. If it was working on a task, it waits here until you send it a message."]
-       [:button (merge {:type "button" :class (str button " self-start")} {:seon/call 'seon.root/back! :seon/agent agent :seon/args {:eval id}}) "Go back"]]]]))
+       [:button (merge {:type "button" :class (str button " self-start")} {:seon/call 'seon.system/back! :seon/agent agent :seon/args {:eval id}}) "Go back"]]]]))
 
 (defn eval-output
   "What came of eval view ev as the person reads it when it is opened (a component over the db and the eval; the model reads the same response as the one printer prints it, `seon.ctx.wire/tool-text`): how long it ran, what it costs the context in tokens and its handle, what its forms printed, then its error, or its
@@ -2168,30 +2168,30 @@
   "What root's head adds: when it last went quiet, its root causes a line each."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [_ v]
-  (let [{:seon.root/keys [quiescent]} v]
+  (let [{:seon.system/keys [quiescent]} v]
     (when-let [cs (seq (:root-causes quiescent))]
       [:details [:summary {:class "cursor-pointer text-text-300"} (str (count cs) (if (= 1 (count cs)) " root cause" " root causes") " when it went quiet")]
        (for [{:keys [task cause run blocks]} cs]
          [:p (str task ": " cause (when run (str " (" run ")")) (when (seq blocks) (str " · blocks " (count blocks))))])])))
 
 (defn root-input
-  "Root's input on a person's page: a sentence asking for something (seon.root/ask!). What is for whoever works on Seon itself is on
+  "Root's input on a person's page: a sentence asking for something (seon.system/ask!). What is for whoever works on Seon itself is on
   root's debug page (`root-tools`). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts _]
   [:section {:id (:unit opts) :class "flex flex-col gap-2 xl:flex-row"}
-   ;; a sentence is a request: a task an agent starts on (seon.root/ask!)
-   [:form {:class "flex min-w-0 flex-1 gap-2" :seon/call 'seon.root/ask! :seon/agent :root}
+   ;; a sentence is a request: a task an agent starts on (seon.system/ask!)
+   [:form {:class "flex min-w-0 flex-1 gap-2" :seon/call 'seon.system/ask! :seon/agent :root}
     [:input {:name "task" :class "flex-1 min-w-0" :autocomplete "off" :placeholder "What would you like done?"}]]])
 
 (defn root-tools
-  "Root's tools for whoever works on Seon itself, on root's debug page: spawn agents (seon.root/spawn!) or evaluate forms in every live
-  agent (seon.root/submit! to :all). See docs/render.md#the-debug-page-is-the-wire-request."
+  "Root's tools for whoever works on Seon itself, on root's debug page: spawn agents (seon.system/spawn!) or evaluate forms in every live
+  agent (seon.system/submit! to :all). See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat] :any]}
   []
   [:section {:class "flex flex-wrap items-baseline gap-2 text-xs"}
-   [:button {:type "button" :class "rounded border border-base-700 px-2" :seon/call 'seon.root/spawn! :seon/agent :root :seon/args {:n 10}} "spawn 10"]
-   [:form {:class "flex min-w-0 flex-1 items-baseline gap-2" :seon/call 'seon.root/submit! :seon/agent :all}
+   [:button {:type "button" :class "rounded border border-base-700 px-2" :seon/call 'seon.system/spawn! :seon/agent :root :seon/args {:n 10}} "spawn 10"]
+   [:form {:class "flex min-w-0 flex-1 items-baseline gap-2" :seon/call 'seon.system/submit! :seon/agent :all}
     [:span {:class "text-signal"} "all=>"]
     [:input {:name "forms" :class "flex-1 min-w-0" :autocomplete "off" :spellcheck "false" :placeholder "a form every live agent evaluates"}]]])
 
@@ -2253,10 +2253,10 @@
      ;; the task files a seed loads are held until someone releases one: no one's work yet, so folded, never the head's first words
      (when (pos? held) [:details {:class "seon-note"} [:summary (str held (if (= 1 held) " task" " tasks") " from the task files, not started")]
                         [:p "Each waits until a person or the system releases it; nothing runs for it before then."]])
-     (root-quiet {} (relevant :seon.root/root-fact c))]))
+     (root-quiet {} (relevant :seon.system/root-fact c))]))
 
 (defn source-line
-  "Which system a page is (the declared html render of :seon.root/source): the checkout main was last indexed from, by its folder's
+  "Which system a page is (the declared html render of :seon.system/source): the checkout main was last indexed from, by its folder's
   name, the branch checked out there and its commit, short; the whole path, commit and tree on hover. See docs/render.md#the-page."
   {:seon.render/style ".source-line { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.6875rem; color: var(--color-text-400); white-space: nowrap; }
 .source-line .commit { display: inline-block; max-width: 10ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }"
@@ -2272,8 +2272,8 @@
   so a person always sees which checkout, branch and commit they are looking at. See docs/render.md#the-page. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx ix :seon.render/index}]
-  (when-let [src (some-> (:seon.root/source c) ratom/realize)]
-    (render/hiccup {:seon.render/index ix :schema :seon.root/source} src)))
+  (when-let [src (some-> (:seon.system/source c) ratom/realize)]
+    (render/hiccup {:seon.render/index ix :schema :seon.system/source} src)))
 
 (defn problems-tile
   "Main's open problems (a component over root's ctx, its :health: the report the render proc keeps
@@ -2309,7 +2309,7 @@
         stat (fn [label v & [means]] (when (some? v) [:span (cond-> {} means (assoc :title means)) [:span {:class "muted"} (str label " ")] (str v)]))
         sick (filter (fn [[_ h]] (pos? (:defects h 0))) health)]
     [:section [:h2 "root's process"]
-     [:p {:class "text-xs text-text-400"} (str/join " · " (remove nil? [(some->> (ratom/realize (:seon.root/boot c)) (str "boot ")) (some->> (ratom/realize (:seon.root/generation c)) :commit (str "generation "))]))]
+     [:p {:class "text-xs text-text-400"} (str/join " · " (remove nil? [(some->> (ratom/realize (:seon.system/boot c)) (str "boot ")) (some->> (ratom/realize (:seon.system/generation c)) :commit (str "generation "))]))]
      [:p {:class "flex flex-wrap gap-x-3 text-xs tabular-nums"}
       (stat "batch p50" (some-> (:batch-p50-ms writer) ms-str)) (stat "tx/commit" (:tx-per-commit writer)) (stat "commits" (:commits writer))
       (stat "fork p50" (some-> (:fork-ms-p50 fork-server) ms-str)) (stat "fork lag" (some-> (:lag-ms fork-server) ms-str)
@@ -2370,7 +2370,7 @@
     [:ol {:id "c-side"} [#'root-side {}] (seq (started-agents as))]))
 
 (defn root
-  "The system entity (the declared html render of :seon.root/root-fact), on the system's own walk (seon.render.proc's root walk, which holds
+  "The system entity (the declared html render of :seon.system/root-fact), on the system's own walk (seon.render.proc's root walk, which holds
   root's runtime values beside its pull): what the system is doing (p-head), its process, main's problems and the evals sent to root
   (p-tiles), which the frame places beside root's agent's page. The sessions are not here: root's session's page draws the user's tree
   (`agent`'s person entry). See docs/render.md#the-page."

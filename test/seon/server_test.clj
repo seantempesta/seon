@@ -189,7 +189,7 @@
 
 (deftest a-message-reaches-the-agent
   ;; (parity row 73): the owner's message, sent as
-  ;; the page's message bar sends it (seon.root/message!, here through the server's :message
+  ;; the page's message bar sends it (seon.system/message!, here through the server's :message
   ;; op), is root's one delivery: it is in the agent's inbox when the agent next reads it,
   ;; though it arrived while the agent was not reading its socket; no agent: refused
   (let [names (volatile! nil)
@@ -255,7 +255,7 @@
     (is (= [2 4] (filterv number? (map :value (:responses called)))) "each eval answers, in order")
     (let [exs (keep #(:seon.error/type (:ex %)) (:responses stopped))]
       (is (= [:seon.turn/invalid-call] exs) "a call with no intent is answered invalid, and what follows it runs (owner, 2026-11-08)"))
-    (is (= :seon.root/refused (:seon.error/type old)) (pr-str old))
+    (is (= :seon.system/refused (:seon.error/type old)) (pr-str old))
     (is (clojure.string/includes? (:seon.error/message old) "message-md") "the old shape is told the new one, nothing run")
     (is (= 2 (:value turn-of)) "each reply is a turn: no one growing turn 0")
     (is (= ["seon.print"] (filterv string? (map :value (:responses ns-after)))) (str "the namespace a reply moved to is where the next one runs: " (pr-str moved-ns)))
@@ -322,7 +322,7 @@
     (is (clojure.string/includes? (str (:text sourced)) "defn help") "and reads the definition")))
 
 (deftest a-done-shells-on-no-thread-of-roots
-  ;; task seon.root/a-boot-runs-no-shell-of-its-own: a connection is answered on its own thread (seon.server/serve!), and
+  ;; task seon.system/a-boot-runs-no-shell-of-its-own: a connection is answered on its own thread (seon.server/serve!), and
   ;; seon_done's answer reads the checkout's uncommitted files through git (seon.fx/uncommitted): clojure.java.shell called
   ;; off a fiber copies on futures, two clojure-agent-send-off-pool threads root does not declare, which outlive the answer.
   ;; Every shell runs on a fiber (seon.lib/sh, docs/machine.md#processes): root's threads are the same after the answer.
@@ -495,7 +495,7 @@
     (is (true? (:shared attached)) "the context read's agent, shared: its seon_done ends it for both")
     (is (= [(:agent attached) (:task attached)] [(:agent again) (:task again)]) "attaching again answers the same agent and task")
     (is (contract/error? other) "v's branch is t's, which t's agent holds: refused, as an answer, never a server defect")
-    (is (= :seon.root/refused (:seon.error/type other)) (pr-str other))
+    (is (= :seon.system/refused (:seon.error/type other)) (pr-str other))
     (is (re-find #"held by live agent :[a-p][0-9a-f]{15} working [a-p][0-9a-f]{15}/t: its seon_done" (str (:seon.error/message other))) (pr-str other))))
 
 (deftest a-prove-never-ends-the-agent-it-proves

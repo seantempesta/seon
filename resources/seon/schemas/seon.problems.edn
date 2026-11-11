@@ -32,12 +32,12 @@
  :seon.vector/model-unopened [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/model-unopened]] [:path :string]]]
  :seon.vector/helper-died [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/helper-died]] [:exit :int] [:stderr :string]]]
  :seon.vector/encode-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/encode-failed]] [:code :int]]]
- :seon.root/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
- ;; a wait on main (seon.root/await-db) whose pred was false when the reconciler went quiet at
+ :seon.system/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
+ ;; a wait on main (seon.system/await-db) whose pred was false when the reconciler went quiet at
  ;; t: nothing in flight will make it true (an outside commit still may)
- :seon.root/quiet-before-true [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/quiet-before-true]] [:t :int] [:waits-on :string]]]
+ :seon.system/quiet-before-true [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/quiet-before-true]] [:t :int] [:waits-on :string]]]
  ;; a request to an agent after it ended (root stopped it, or it died): not gone, it was
- :seon.root/ended [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/ended]] [:agent :keyword]]]
+ :seon.system/ended [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/ended]] [:agent :keyword]]]
  :seon.agent/last-op [:map [:kind :keyword] [:form {:optional true} [:maybe :string]] [:since-ms {:optional true} [:maybe :int]]]
  :seon.agent/died [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/died]] [:agent :keyword]
                                           [:pid {:optional true} [:maybe :int]] [:exit {:optional true} [:maybe :seon.lib/exit-status]]
@@ -45,7 +45,7 @@
  ;; a message root sent an agent that the wire's codec cannot encode: answered to its request in its place, the end kept open
  :seon.agent/unencodable [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/unencodable]] [:message-op {:optional true} [:maybe :keyword]]]]
  ;; what root saw go wrong for an agent: a red test run of an agent with no task (a task's
- ;; run records its reds at its end), a spawn or fork refused (seon.root/set-agent)
+ ;; run records its reds at its end), a spawn or fork refused (seon.system/set-agent)
  :seon.agent/failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/failed]] [:agent :keyword]]]
  ;; an agent's socket to root that cannot raise SIGIO (seon.sock/signal-at-input!): the agent
  ;; ends with its root only when it next reads that socket
@@ -61,27 +61,27 @@
  ;; an agent's config cites a wiki section its store holds no entity for (seon.task/agent-cites-missing, said in its hello): it runs
  ;; citing the rest (docs/references.md#an-entity-cites)
  :seon.agent/cite-missing [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/cite-missing]] [:address :string]]]
- ;; an agent forked from a program that did not load (seon.root's set-agent at its hello): every load error it was given; the agent runs
+ ;; an agent forked from a program that did not load (seon.system's set-agent at its hello): every load error it was given; the agent runs
  :seon.agent/program-differs [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/program-differs]] [:differs [:vector :map]]]]
  :seon.agent/started-without-program [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/started-without-program]] [:errors [:vector :seon.program/error]]]]
  ;; a new agent whose branch or forked image is not at the commit root branched it from
  ;; (the writer's :spawn names main's commit and t on :fork; seon.agent/init! compares)
  :seon.agent/fork-misaligned [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/fork-misaligned]]
                                                      [:commit :uuid] [:t :int] [:branch-commit [:maybe :uuid]] [:image-t :int]]]
- :seon.root/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/proc-defect]] [:pid {:optional true} [:maybe :keyword]]
+ :seon.system/proc-defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/proc-defect]] [:pid {:optional true} [:maybe :keyword]]
                                                      [:took {:optional true} [:or :keyword [:vector :keyword]]]]]
- :seon.root/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/refused]]]]
- :seon.root/no-gate-checkout [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-gate-checkout]]]]
+ :seon.system/refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/refused]]]]
+ :seon.system/no-gate-checkout [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/no-gate-checkout]]]]
  ;; a step of the fork server that threw (seon.fork-server/server-step): docs/processes.md#a-step-that-throws
  :seon.fork-server/step-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/step-failed]] [:op {:optional true} [:maybe :keyword]]]]
- ;; the fork server made no standby (seon.root/back-op): a platform problem, and root's view shows it has none (docs/processes.md#a-step-that-throws)
+ ;; the fork server made no standby (seon.system/back-op): a platform problem, and root's view shows it has none (docs/processes.md#a-step-that-throws)
  :seon.fork-server/standby-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.fork-server/standby-failed]] [:active-threads {:optional true} [:maybe :int]] [:gen {:optional true} [:maybe :int]]]]
  ;; a release (my.root/run!) of a task that is not held: unknown (execution nil), already
  ;; running, or cancelled; the held ids of the same call are released
- :seon.root/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/not-held]] [:task :string]
+ :seon.system/not-held [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/not-held]] [:task :string]
                                              [:execution [:maybe [:enum :held :running :cancelled]]]]]
  ;; a cancel (my.root/cancel-tx) of an id that names no task: answered, never upserted as a task
- :seon.root/unknown-task [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/unknown-task]] [:task :string]]]
+ :seon.system/unknown-task [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/unknown-task]] [:task :string]]]
  ;; seon.ctx.session/session-tx of a key no agent holds, of a session with no request to show or with a record of a kind an
  ;; example does not hold: docs/tasks.md#a-task-names-example-sessions
  ;; a request whose tree drew no system message (seon.ctx.wire/request): refused, what stood first in its place named
@@ -93,13 +93,13 @@
  :seon.ctx/session-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/session-refused]] [:key :string]]]
  ;; my.root/example-txs of an example file that is missing, does not read as EDN, or is not the vector of tx-data
  ;; seon.ctx.session/session-tx writes: docs/failure-points.md
- :seon.root/example-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/example-refused]] [:path :string]]]
+ :seon.system/example-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/example-refused]] [:path :string]]]
  ;; my.root/write-back! of a run that lost no write-back (or does not exist), of a root with no source tree,
  ;; or of files main holds no text for: nothing to write
- :seon.root/nothing-lost [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/nothing-lost]] [:run :string]]]
+ :seon.system/nothing-lost [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/nothing-lost]] [:run :string]]]
  ;; my.root/sync-req: a task named that is no merged task main's files still declare (docs/source.md#a-merged-task-reaches-mains-files)
- :seon.root/nothing-to-sync [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/nothing-to-sync]] [:task :seon.task/id]]]
- :seon.root/no-source-root [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-source-root]] [:runs [:vector :string]]]]
+ :seon.system/nothing-to-sync [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/nothing-to-sync]] [:task :seon.task/id]]]
+ :seon.system/no-source-root [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/no-source-root]] [:runs [:vector :string]]]]
  ;; the daily full run asked while the one before it has not ended (seon.prove's full run): a hung
  ;; full run is seen the next day, never a day skipped in silence
  :seon.prove/full-run-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-red]] [:tests [:vector :qualified-symbol]]]]
@@ -107,9 +107,9 @@
  :seon.prove/no-verdict [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/no-verdict]] [:test [:or :qualified-symbol :string]]]]
  ;; a tree's build or seed that is not green (seon.prove/item-ended): every item that needs it answers it, none granted
  :seon.prove/build-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/build-red]] [:tree :string] [:kind [:enum :build :seed]]]]
- :seon.root/no-source-text [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-source-text]] [:paths [:vector :string]]]]
+ :seon.system/no-source-text [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/no-source-text]] [:paths [:vector :string]]]]
  ;; my.root/hold! of a task that is not running (held, cancelled, unknown): nothing to take back
- :seon.root/not-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/not-running]] [:task :string]
+ :seon.system/not-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/not-running]] [:task :string]
                                                 [:execution [:maybe [:enum :held :running :cancelled]]]]]
  ;; a defect answering one outside request at root's server (seon.server/respond): the
  ;; line it took, and the cause's ex-data printed; the server goes on serving

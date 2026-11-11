@@ -13,13 +13,13 @@
   printf '{:op :agents}\\n' | nc -w 5 127.0.0.1 PORT
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
+  (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.system :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
             [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [seon.ctx.wire :as wire] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk] [clojure.core.async :as a] [jolt.fibers :as fibers]))
 
 (defn- refused
   "The server refusing a request, as root's API does: the one error map."
-  {:malli/schema [:=> [:cat :string] :seon.root/refused]}
-  [why] (contract/error :seon.root/refused #'seon.server/refused why))
+  {:malli/schema [:=> [:cat :string] :seon.system/refused]}
+  [why] (contract/error :seon.system/refused #'seon.server/refused why))
 
 (defn task-summaries
   "Every task on main db: {id {:execution :done :blocked-by :agent :outcome :failure}}: the server's and the
@@ -85,7 +85,7 @@
 
 (defn agents-answer
   "Live agents (id, branch, status, task) and what is live on main (live-tasks), over main's index kept by change (index-now)."
-  {:malli/schema [:=> [:cat :seon.root/sys] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys] :map]}
   [sys]
   (assoc (let [db @(:conn sys)] (live-tasks db (index-now (:conn sys) db)))
          :agents (into (sorted-map) (for [[id a] (:agents (c/state sys)) :when (not (c/gone-statuses (:status a)))]
@@ -97,20 +97,20 @@
 
 (defn- root-eval
   "Evaluate code as root through the one REPL path (seon.repl/eval-string: the printer,
-  cost, error maps, *1 and *e), in root.repl (my.root as root, seon.root as c, datahike as
+  cost, error maps, *1 and *e), in root.repl (my.root as root, seon.system as c, datahike as
   d) with `sys` a local bound to this root, unbounded (root's own forms take no tick or allocation
   budget: a whole-program load allocates tens of GB, and the agent's per-form
   budget stopped it); its response recorded on main as root's eval, by the user (seon.repl/record-tx). The record's write is
   sent and not waited on: nothing reads it before the answer, and root's writer keeps its order before any later write
   (it cost 6-30 ms of every root eval's 45-54 ms). See docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.root/sys :string] :seon.repl/answer]}
+  {:malli/schema [:=> [:cat :seon.system/sys :string] :seon.repl/answer]}
   [sys code]
   (when-not (find-ns 'root.repl)
-    (binding [*ns* (create-ns 'root.repl)] (refer-clojure) (require '[my.root :as root] '[seon.root :as c] '[datahike.api :as d])))
+    (binding [*ns* (create-ns 'root.repl)] (refer-clojure) (require '[my.root :as root] '[seon.system :as c] '[datahike.api :as d])))
   (let [r (binding [*sys* sys]
             (repl/eval-string code {"ns" "root.repl" :origin :outside :ticks 0 :bytes 0
                                     :repl/eval-fn (fn [form] (eval (list 'let '[sys seon.server/*sys*] form)))}))]
-    (c/transact-main! sys (repl/record-tx {:seon.root/id :root} (str "root-outside-" (profile/now-ns)) (task/sender (cfg/value :seon.config.root/user-name))
+    (c/transact-main! sys (repl/record-tx {:seon.system/id :root} (str "root-outside-" (profile/now-ns)) (task/sender (cfg/value :seon.config.root/user-name))
                                           (repl/record-details code r {})))
     ;; its value too: the :eval answer passes it on when it is plain data (op-answer :eval)
     r))
@@ -120,7 +120,7 @@
   with dead its running agent that is gone (died, ended by seon_done, killed for memory): a
   death is a fact root's view reads, so a dead agent never answers as the one to work the
   task (attach! starts a fresh agent on the same branch). [nil nil] when none runs."
-  {:malli/schema [:=> [:cat :seon.root/sys :seon.host/db :seon.task/id] [:tuple [:maybe :map] [:maybe :map]]]}
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.host/db :seon.task/id] [:tuple [:maybe :map] [:maybe :map]]]}
   [sys db id]
   (if-let [r (some #(when (= id (:task %)) %) (task/running db))]
     (let [a (get-in (c/state sys) [:agents (:agent r)])]
@@ -140,13 +140,13 @@
   whoever attached it, and that one's seon_done ends it for both. An agent that is gone (live-run)
   is replaced by a fresh one on its branch, the session's key continuing. A branch another live agent holds
   is spawn!'s refusal, answered as a value, naming the agent and the task it works.
-  clone-of: the agent is that live agent's clone (seon.root/clone!: live values and all, its branch
+  clone-of: the agent is that live agent's clone (seon.system/clone!: live values and all, its branch
   cut from the clone's once its writes commit), its own key and conversation (a fork's). client:
   who attached it (bin/mcp's id for its session), the agent's :holder: only that client's requests,
   or ones that name the task, act on it (held).
   Answers {:agent :task}."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.task/id] :map]
-                  [:=> [:cat :seon.root/sys :seon.task/id [:map [:fresh? {:optional true} :boolean] [:clone-of {:optional true} :keyword] [:client {:optional true} [:maybe :string]]]] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.system/sys :seon.task/id] :map]
+                  [:=> [:cat :seon.system/sys :seon.task/id [:map [:fresh? {:optional true} :boolean] [:clone-of {:optional true} :keyword] [:client {:optional true} [:maybe :string]]]] :map]]}
   ([sys id] (attach! sys id {}))
   ([sys id {:keys [fresh? clone-of client]}]
   (let [db @(:conn sys)
@@ -183,7 +183,7 @@
   clone has its own key and conversation: an agent's entity on main is its key's, and two live
   agents of one key overwrite each other's facts. Each is judged and merged on its own; root
   cancels the one not wanted, and a refused clone cancels its sibling at once. Answers attach!'s."
-  {:malli/schema [:=> [:cat :seon.root/sys :keyword [:maybe :string]] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys :keyword [:maybe :string]] :map]}
   [sys from client]
   (let [db @(:conn sys)
         t (some->> (get-in (c/state sys) [:agents from :task]) (task/task db))]
@@ -201,7 +201,7 @@
 
 (defn- work-of
   "The task the live agent ag works, from main: {:task :env :key}, or nil."
-  {:malli/schema [:=> [:cat :seon.root/sys :keyword] [:maybe :map]]}
+  {:malli/schema [:=> [:cat :seon.system/sys :keyword] [:maybe :map]]}
   [sys ag]
   (some (fn [a] (when (= ag (:agent a)) (select-keys a [:task :env :key])))
         (task/running @(:conn sys))))
@@ -262,7 +262,7 @@
    :context {:doc "The request of the task an agent works as a model is sent it now: system prompt, its conversation and its page. Name the agent, or a task (ns/name): the agent working it, else one attached to it now (attach), so one request reads a task's context. wire: the request body as JSON, as a provider is sent it (roles, call ids, tools; a root with no --profile has no model or max_tokens in it). No model is called."
              :args {:agent {:type "string"} :task {:type "string" :description "ns/name, instead of an agent"}
                     :wire {:type "boolean" :description "answer the request body as JSON, not the text"}}}
-   :message {:doc "Send an agent a message (the owner's words): a message on main to the agent (whether or not its process lives), which its next turn delivers onto its branch and reads, and which wakes a session that waits, with its allowance of turns more. The page's message bar sends the same request (seon.root/message!)."
+   :message {:doc "Send an agent a message (the owner's words): a message on main to the agent (whether or not its process lives), which its next turn delivers onto its branch and reads, and which wakes a session that waits, with its allowance of turns more. The page's message bar sends the same request (seon.system/message!)."
              :args {:agent {:type "string"} :body {:type "string" :description "what to tell the agent"}
                     :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent" "body"]}
    :write_back {:doc "Sync main's changed files to disk and commit them on the merges branch: every merged task whose files no commit holds. Answers the tasks, the paths and the commit, or what it couldn't."
@@ -288,7 +288,7 @@
   "The refusal of request req on agent ag when another client holds it, else nil: its
   :holder (attach!'s client) is not req's :client and req names no :task, or another than the
   agent's. One session's seon_done once named another session's agent and ended its work red."
-  {:malli/schema [:=> [:cat :seon.root/sys :keyword :map] [:maybe :map]]}
+  {:malli/schema [:=> [:cat :seon.system/sys :keyword :map] [:maybe :map]]}
   [sys ag req]
   (when-let [{:keys [task env]} (work-of sys ag)]
     (let [h (:holder env)]
@@ -302,7 +302,7 @@
   (:root, an agent's keyword, or nil) and the request, one method per key of ops. One method
   each, so a test's reach takes the methods of the ops it sends and no other
   (seon.program/reach-step)."
-  {:malli/schema [:=> [:cat :seon.root/sys [:maybe :keyword] :map] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys [:maybe :keyword] :map] :map]}
   (fn [_ _ req] (:op req)))
 
 (defmethod op-answer :default [_ _ req] (refused (str "unknown op " (:op req))))
@@ -312,7 +312,7 @@
 
 (defn- agent-reply
   "An outside agent's request of agent ag as one reply (seon.turn/outside-reply!): {:responses [...]}, each eval's. The shape every eval of an agent takes, the old :code refused, saying so, with nothing run. See docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.root/sys :keyword :map] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys :keyword :map] :map]}
   [sys ag req]
   (let [{:keys [task env]} (work-of sys ag)
         outside? (and task (= "outside" (:model env)))
@@ -395,7 +395,7 @@
   before run starts (on a fiber of its own), let go after. The answer's :verdicts (seon.prove's answer-asker: every
   verdict the run was told) are what the client is owed: one the events did not bring before the answer (another path
   than the answer's, and a sliding tap) is written then, so none is lost and none written twice. See docs/server.md#ops."
-  {:malli/schema [:=> [:cat :seon.root/sys :keyword ifn?] :any]}
+  {:malli/schema [:=> [:cat :seon.system/sys :keyword ifn?] :any]}
   [sys branch run]
   (let [ev (c/events sys)
         done (a/chan 1)
@@ -452,7 +452,7 @@
 
 (defmethod op-answer :prove [sys ag req]
   (let [run (fn [] (c/prove-tree! sys (cond-> (select-keys req [:checkout :tree :names]) (:mode req) (assoc :mode (keyword (name (:mode req)))))))
-        ;; a checkout's files, on their tree's branch (seon.root/prove-tree!), its verdicts streamed when asked; else an agent's branch, or main
+        ;; a checkout's files, on their tree's branch (seon.system/prove-tree!), its verdicts streamed when asked; else an agent's branch, or main
         r (cond (and (:checkout req) (:stream req) *emit*) (prove-streamed sys (c/tree-branch (:tree req)) run)
                 (:checkout req) (run)
                 :else @(c/prove! sys (if ag (or (c/agent-ref sys ag) {}) {:branch :main}) (set (map symbol (:names req)))))]
@@ -517,7 +517,7 @@
 
 (defn answer
   "One request's answer: its op's (op-answer), or held's refusal for an op on an agent another client holds."
-  {:malli/schema [:=> [:cat :seon.root/sys :map] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys :map] :map]}
   [sys req]
   (let [ag (some-> (:agent req) (#(if (= "root" %) :root (keyword %))))
         missing (remove #(contains? req (keyword %)) (:required (get ops (:op req))))]
@@ -550,7 +550,7 @@
   (seon_context's, the block's text itself: the model's own view, not an escaped string
   inside a map). A method it does not know, or a tool no op names, is the JSON-RPC error
   saying so."
-  {:malli/schema [:=> [:cat [:maybe :seon.root/sys] :map] [:maybe :map]]}
+  {:malli/schema [:=> [:cat [:maybe :seon.system/sys] :map] [:maybe :map]]}
   [sys {:strs [id method params] :as msg}]
   (let [result (fn [r] {"jsonrpc" "2.0" "id" id "result" r})]
     (when id
@@ -587,7 +587,7 @@
   that does not read, an op that throws) answers that request as the typed
   :seon.server/defect, for MCP inside a JSON-RPC error with the request's id (-32700 for
   a line that is not JSON, naming the rule)."
-  {:malli/schema [:=> [:cat [:maybe :seon.root/sys] :string] [:maybe :string]]}
+  {:malli/schema [:=> [:cat [:maybe :seon.system/sys] :string] [:maybe :string]]}
   [sys line]
   (let [mcp? (str/starts-with? (str/triml line) "{\"")
         msg (volatile! nil)]
@@ -606,7 +606,7 @@
 (defn- serve-connection!
   "Answer one connection's request lines (respond), line by line, until it closes; a
   notification is answered nothing. Every other connection is its own thread."
-  {:malli/schema [:=> [:cat :seon.root/sys :any] :any]}
+  {:malli/schema [:=> [:cat :seon.system/sys :any] :any]}
   [sys sock]
   (let [r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream sock) "UTF-8"))
         out (.getOutputStream sock)]
@@ -624,7 +624,7 @@
   "Listen on 127.0.0.1:port (0: a free port the kernel picks; read it with .getLocalPort):
   the accept loop and each connection on edge threads (blocking accept and reads). Answers
   the server socket."
-  {:malli/schema [:=> [:cat :seon.root/sys nat-int?] :any]}
+  {:malli/schema [:=> [:cat :seon.system/sys nat-int?] :any]}
   [sys port]
   (let [ss (java.net.ServerSocket. port 50 (java.net.InetAddress/getByName "127.0.0.1"))]
     (doto (Thread. ^Runnable (fn [] (loop [] (let [s (.accept ss)]

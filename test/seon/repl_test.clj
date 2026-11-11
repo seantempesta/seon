@@ -177,7 +177,7 @@
     (is (= 0 (second (:value branch))) "its inner eval records no eval of its own: the edit's call is the one kept")))
 
 (deftest an-edit-of-a-path-keeps-its-mode
-  ;; docs/agent.md#changing-a-file: the roots-log agent's `spit` to bin/root took the execute bit off; a file's mode is its own
+  ;; docs/agent.md#changing-a-file: the roots-log agent's `spit` to bin/system took the execute bit off; a file's mode is its own
   (let [d (str (seon.config/checkout) "/target/tmp/repl-path-" (random-uuid))
         p (str d "/run.sh")
         mode #(str (java.nio.file.Files/getPosixFilePermissions (.toPath (java.io.File. ^String p)) (into-array java.nio.file.LinkOption [])))]
@@ -238,7 +238,7 @@
                        [(str "(seon.repl/edit! " (pr-str a) " \"the task's failure.\" \"the task's failure (as the turn ends.\")")
                         (str "(seon.repl/edit! " (pr-str a) " \"no such text\" \"x\")")
                         {:op :eval :agent "root"
-                         :code (lead (str "(:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"))}
+                         :code (lead (str "(:db @(seon.system/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"))}
                         {:op :eval :agent "root" :code (lead "@(:conn sys)")}]))]
     (is (= a (get-in edit [:value :edited :doc])) (pr-str edit))
     (is (= :not-found (get-in missing [:value :seon.repl/refused-because])) (pr-str missing))
@@ -642,7 +642,7 @@
               ["(my.task/update! :seon.task/plan str \" Then more.\")" :text "Then more.\""]
               ["(string? (my.task/update! :seon.task/plan str \"\"))" :text "true"]
               ["{:seon.task/id \"x/y\" :n 1}" :text ":n 1"]
-              ["(seon.contract/error :seon.root/refused 'a/b \"m\")" :text "#:seon.error{:type :seon.root/refused"]]
+              ["(seon.contract/error :seon.system/refused 'a/b \"m\")" :text "#:seon.error{:type :seon.system/refused"]]
         items (at/in-agent (mapv first rows))]
     (doseq [[[form k expected] item] (map vector rows items)]
       (is (str/includes? (str (get item k)) expected) (str form " -> " (pr-str item))))))
@@ -936,7 +936,7 @@
   ;; interrupt; root's SIGUSR1 stops the request running, and one that merges while the agent
   ;; is idle stops nothing that comes after it
   (let [[_ after-idle stopped after-stop]
-        (at/in-agent #(vector {:op :eval :agent "root" :code (str "(seon.root/interrupt! sys :" (:agent %) ")")}
+        (at/in-agent #(vector {:op :eval :agent "root" :code (str "(seon.system/interrupt! sys :" (:agent %) ")")}
                              "(+ 1 2)"
                              "(do (seon.lib/c-kill (seon.lib/c-getpid) seon.lib/SIGUSR1) (loop [] (recur)))"
                              "(+ 2 2)"))]
@@ -1326,7 +1326,7 @@
     (fn [{:keys [names ask]}]
       (let [{:keys [task agent]} names
             root (fn [code] (ts/value-of (:response (ask {:op :eval :agent "root" :code code}))))
-            branch (str "(:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))")
+            branch (str "(:db @(seon.system/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))")
             run (fn [code] (root (str "@(c/submit! sys :" agent " " (pr-str code) " {:origin :outside})")))
             held (fn [id] (root (str "(datahike.api/pull " branch " '[:seon.eval/id {:seon.eval/result [*]}] [:seon.eval/id " (pr-str id) "])")))
             _ (run "(def tick (atom 0))")

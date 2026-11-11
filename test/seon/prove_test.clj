@@ -86,7 +86,7 @@
     (is (= 1 (count (asks o :spawn))) "it runs again")))
 
 (deftest a-run-is-keyed-by-what-it-reads
-  ;; seon.root/prove! and seon.agent/prove! name the digest of what the run reads: a branch's tx
+  ;; seon.system/prove! and seon.agent/prove! name the digest of what the run reads: a branch's tx
   ;; moves with any write, the run's own facts, its prove agent's end and the eval that asked among them
   (let [main (fn [rid t digest] [:req {:rid rid :branch :main :t t :digest digest}])
         [st outs] (feed (proc0) [(main 1 5 "d0")])
@@ -109,7 +109,7 @@
     (is (= 2 (count (:done st))) "two slots at one digest: both can be asked again")
     (let [st (ask st 3 6 nil)]
       (is (= [[:agent-3 nil :judge]] (keys (:done st))) "the branch moved to d6: the slots at d5 are dropped")
-      (let [ended (seon.contract/error :seon.root/ended 'seon.root/api-proc "agent a3 ended" {:agent :a3})
+      (let [ended (seon.contract/error :seon.system/ended 'seon.system/api-proc "agent a3 ended" {:agent :a3})
             [st o] (feed st [(req 4 :agent-3 7 :a3)])
             [st _] (run-through st o ended)]
         (is (empty? (:done st)) "its agent ended: nothing of the branch is kept")))))
@@ -126,7 +126,7 @@
 
 (deftest a-failed-run-answers-its-waiters-with-the-error
   (let [[st outs] (feed (proc0) [(req 1 :a 1 :aa) (req 2 :a 1 :aa)])
-        err (seon.contract/error :seon.root/no-agent 'seon.root/run-tests! "no live agent" {})
+        err (seon.contract/error :seon.system/no-agent 'seon.system/run-tests! "no live agent" {})
         [st all] (run-through st outs err)]
     (is (= [1 2] (waiters-answered all)))
     (is (every? seon.contract/error? (map :r (filter #(= :prove-answer (:op %)) all))))))
@@ -210,7 +210,7 @@
 ;; ---- admission details ----------------------------------------------------------------------
 
 (deftest an-error-is-answered-recorded-and-never-remembered
-  (let [err (seon.contract/error :seon.root/no-agent 'seon.root/run-tests! "no live agent" {})
+  (let [err (seon.contract/error :seon.system/no-agent 'seon.system/run-tests! "no live agent" {})
         [st outs] (feed (proc0) [(req 1 :agent-3 7 :a3)])
         [st all] (run-through st outs err)]
     (is (= [1] (waiters-answered all)))
@@ -225,10 +225,10 @@
 
 (deftest a-run-whose-agent-ended-is-answered-not-a-platform-problem
   ;; bin/check e2e-calc (2026-10-23): a cancel killed an agent whose turn had asked prove for its
-  ;; tests; root answers a request to an agent that ended :seon.root/ended (its producer knows
+  ;; tests; root answers a request to an agent that ended :seon.system/ended (its producer knows
   ;; ended from never-was), the run's waiter is answered with it, and nothing is recorded as a
   ;; :platform problem: the agent's end is its run's record
-  (let [ended (seon.contract/error :seon.root/ended 'seon.root/api-proc "agent a3 ended" {:agent :a3})
+  (let [ended (seon.contract/error :seon.system/ended 'seon.system/api-proc "agent a3 ended" {:agent :a3})
         [st outs] (feed (proc0) [(req 1 :agent-3 7 :a3)])
         [st all] (run-through st outs ended)]
     (is (= [1] (waiters-answered all)) "its waiter is answered with the error")
@@ -238,14 +238,14 @@
 (deftest a-spawn-failure-and-a-prove-agent-that-dies-are-answered-and-recorded
   (let [[st outs] (feed (proc0) [(req 1 :main 1) (req 2 :main 1)])
         spawn (first (asks outs :spawn))
-        refused (seon.contract/error :seon.root/refused 'seon.root/spawn! "too many live agents" {})
+        refused (seon.contract/error :seon.system/refused 'seon.system/spawn! "too many live agents" {})
         [st o] (feed st [(answer-of spawn refused)])]
     (is (= [1 2] (waiters-answered o)) "a spawn refused: both waiters answered the error")
     (is (some #(= :problem (:op %)) o))
     (is (nil? (:running st))))
   (let [[st outs] (feed (proc0) [(req 1 :main 1)])
         [st o2] (feed st [(answer-of (first (asks outs :spawn)) {:id :p1})])
-        died (seon.contract/error :seon.agent/died 'seon.root/api-proc "agent p1 died" {:agent :p1})
+        died (seon.contract/error :seon.agent/died 'seon.system/api-proc "agent p1 died" {:agent :p1})
         [st o3] (feed st [(answer-of (first (asks o2 :tests)) died)])]
     (is (= [1] (waiters-answered o3)) "the prove agent died mid-run: its waiter is answered the error")
     (is (some #(and (= :problem (:op %)) (= :seon.agent/died (get-in % [:error :seon.error/type]))) o3))
@@ -265,7 +265,7 @@
 (defn- model-run
   "A service driven through steps pseudo-random events from seed: a request (a branch of main, b1
   or b2, a digest of three, an asker agent for a branch) or the api answering one of the asks still
-  open (a success or an :seon.root/ended error, as an agent ending answers). Then every ask left is
+  open (a success or an :seon.system/ended error, as an agent ending answers). Then every ask left is
   answered with a success, until none. Answers [final-state rids-asked answers-seen]."
   [seed steps]
   (loop [i 0 x seed st (proc0) open [] asked [] answers []]
@@ -279,7 +279,7 @@
           ;; the api answers one open ask
           (let [m (open (mod pick (count open))) op (get-in m [:req :op])
                 r (if (zero? (mod (quot pick 5) 3))
-                    (seon.contract/error :seon.root/ended #'seon.prove/prove-proc "the agent ended" {:agent :a1})
+                    (seon.contract/error :seon.system/ended #'seon.prove/prove-proc "the agent ended" {:agent :a1})
                     (case op :spawn {:id :p1} :tests test-run-answer :write {:ok true :t 6} :kill {:killed :p1}))
                 [st o] (feed st [(answer-of m r)])]
             (recur (inc i) x st (into (vec (remove #(= m %) open)) (filter :req o)) asked (into answers (waiters-answered o)))))
@@ -302,7 +302,7 @@
       (is (and (nil? (:running st)) (empty? (:next st))) (str "seed " seed ": the service ends idle: " (pr-str (select-keys st [:running :next])))))))
 
 (deftest the-service-reports-what-it-holds-when-that-changes
-  ;; a hang in a run's chain is read from what the service holds (seon.root keeps it for a stall's
+  ;; a hang in a run's chain is read from what the service holds (seon.system keeps it for a stall's
   ;; evidence): each run in flight with its stage and who waits, the queue, the free workers, and the api's asks it has open
   (let [state-of (fn [outs] (:r (last (filter #(= :prove-state (:op %)) outs))))
         [st outs] (feed (proc0) [(req 1 :main 5) (req 2 :main 5)])

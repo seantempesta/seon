@@ -18,7 +18,7 @@ Clone with the submodules and build once; every checkout builds its own binary.
 git clone --recurse-submodules https://github.com/seantempesta/seon-next   # or the folder you were given
 cd seon-next
 nice -n 15 bin/build     # Chez (our fork) -> Jolt (our fork) -> LMDB, LZ4, zstd -> target/seon; all output in target/
-bin/root start           # a root on this checkout's own ports (bin/ports); bin/root status | stop
+bin/system start           # a root on this checkout's own ports (bin/ports); bin/system status | stop
 bin/prove                # run exactly the tests and checks the change reaches
 ```
 

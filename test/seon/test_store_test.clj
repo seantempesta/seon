@@ -24,11 +24,11 @@
 
 (deftest a-test-root-is-its-own
   ;; task seon.test-store/a-test-root-is-its-own: root_test's root-answers gave every root on the
-  ;; one test store the runs directory <store>-runs; bin/root start in a runs directory whose root
+  ;; one test store the runs directory <store>-runs; bin/system start in a runs directory whose root
   ;; still runs only reports that root, so under parallel load one test asked another test's
   ;; root (main-follows-its-source-tree-across-restarts read the whole Seon program, :removed-forms 71).
   ;; A second root asked for in a runs directory a live root holds is refused, never answered
-  ;; The live root is the one bin/root's status reads: runs/root.pids names a running process. This
+  ;; The live root is the one bin/system's status reads: runs/root.pids names a running process. This
   ;; process stands in for it (a root booted for it was all of this test's time; that a started root
   ;; listens is every process test's claim, and n-roots-open-the-process-store-at-once's)
   (let [store (ts/process-store)
@@ -105,7 +105,7 @@
   ;; checkout's own source (its source fact names it), so a test sees the code it is run on
   (let [ask (fn [names] [{:op :eval :agent "root"
                           :code (str "[(seon.lib/c-getpid)"
-                                     " (:root (:seon.root/source (datahike.api/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root])))"
+                                     " (:root (:seon.system/source (datahike.api/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root])))"
                                      " (vec (sort (map name (datahike.api/branches (:conn sys)))))"
                                      " (into #{} (for [[id v] (:agents (c/state sys)) :when (not (:ended-ms v))] (name id)))]")}
                          "(:seon.task/id (my.task/current))"])

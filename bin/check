@@ -53,7 +53,7 @@ export SEON_RESULTS_DIR=$CHECK_RESULTS
 trap 'rm -rf "$CHECK_RESULTS"' EXIT
 # a check's roots serve no dashboard: system.edn's :web :port 7777 is the owner's, and a
 # step's root that found it free took it (the owner's browser then showed a throwaway check
-# root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/root
+# root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/system
 export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
 # every check root has a store of its own: its wiki's baseline from git (4 s) is not what a check asks
 export SEON_WIKI_BASELINE=${SEON_WIKI_BASELINE:-false}
@@ -84,7 +84,7 @@ VERDICT=CHECK; [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]] && VERDICT=${(U)1}
 # a binary built from another tree checks another program (and may refuse this tree's config
 # before it says anything): bin/build records the tree it built from, bin/tree names this one
 # The plan's out/build (bin/test's run dir: the steps' SEL, or its parent for the fast tier) says it when empty: the binary is
-# current for this tree by reach (seon.root/binary-current), what differs reaching nothing root runs from its binary
+# current for this tree by reach (seon.system/binary-current), what differs reaching nothing root runs from its binary
 # A check a test of that run starts itself (bin/check MODE from a shard) has no steps dir: the run's out/build is
 # SEON_PLAN_BUILD, which bin/test exports, and it answers for that run's checkout alone (a test's own scratch checkout,
 # seon.check-test/a-stale-binary-is-refused, has a binary of its own)

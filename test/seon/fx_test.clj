@@ -252,13 +252,13 @@
   ;; 2026-10-27: the regex over RED and SHARD lines went): a green there passed (it ran green, or
   ;; was green at its digest), a red is red, and a test with no result, or no digest (the plan
   ;; or the build failed before it), is :error, never a pass (review, 2026-10-23)
-  (let [tests ['seon.root-test/boots 'seon.root-test/threads 'seon.check-test/clean 'seon.check-test/never]
-        plan {:digests {'seon.root-test/boots "dg-boots" 'seon.root-test/threads "dg-threads" 'seon.check-test/clean "dg-clean"}}
+  (let [tests ['seon.system-test/boots 'seon.system-test/threads 'seon.check-test/clean 'seon.check-test/never]
+        plan {:digests {'seon.system-test/boots "dg-boots" 'seon.system-test/threads "dg-threads" 'seon.check-test/clean "dg-clean"}}
         found {"dg-boots" {:digest "dg-boots" :pass 1 :fail 0 :error 0} "dg-threads" {:digest "dg-threads" :pass 0 :fail 1 :error 0}}]
-    (is (= {'seon.root-test/boots :pass 'seon.root-test/threads :fail 'seon.check-test/clean :error 'seon.check-test/never :error}
+    (is (= {'seon.system-test/boots :pass 'seon.system-test/threads :fail 'seon.check-test/clean :error 'seon.check-test/never :error}
            (fx/test-results plan found tests))
         "green at its digest passed; a red is red; a digest with no result, or a test the plan never named, is no pass")
-    (is (= {'seon.root-test/boots :error} (fx/test-results nil found ['seon.root-test/boots]))
+    (is (= {'seon.system-test/boots :error} (fx/test-results nil found ['seon.system-test/boots]))
         "a run whose plan never ran says nothing of any test")))
 
 (deftest a-checkout-says-what-no-merge-carries
@@ -288,21 +288,21 @@
     (is (= "the gate's build failed and named no exception" (fx/build-failure "nothing" files)))))
 
 (deftest a-gates-answer-is-what-the-system-ran
-  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the gate is proved by the system (seon.root/prove-tree!), which is
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the gate is proved by the system (seon.system/prove-tree!), which is
   ;; answered at its first red; a deferred test it never reached is in no result, so its branch keeps it deferred and asks
   ;; again, never a red it did not show (a :fail there would stand until that test's own digest moved)
-  (let [a {:red ['seon.root-test/b]
-           :reports [{:type :pass :var "#'seon.check-test/a"} {:type :pass :var "#'seon.root-test/b"}
-                     {:type :fail :var "#'seon.root-test/b" :message "expected 1"}]
-           :digests {'seon.check-test/a "da" 'seon.root-test/b "db" 'seon.agent-test/c "dc"}}
-        v (fx/gate-answer a ['seon.check-test/a 'seon.root-test/b 'seon.agent-test/c])]
-    (is (= {'seon.check-test/a :pass 'seon.root-test/b :fail} (:results v)))
-    (is (= ["expected 1"] (map :message (get-in v [:failures 'seon.root-test/b]))))
-    (is (= {'seon.check-test/a "da" 'seon.root-test/b "db"} (:digests v)))))
+  (let [a {:red ['seon.system-test/b]
+           :reports [{:type :pass :var "#'seon.check-test/a"} {:type :pass :var "#'seon.system-test/b"}
+                     {:type :fail :var "#'seon.system-test/b" :message "expected 1"}]
+           :digests {'seon.check-test/a "da" 'seon.system-test/b "db" 'seon.agent-test/c "dc"}}
+        v (fx/gate-answer a ['seon.check-test/a 'seon.system-test/b 'seon.agent-test/c])]
+    (is (= {'seon.check-test/a :pass 'seon.system-test/b :fail} (:results v)))
+    (is (= ["expected 1"] (map :message (get-in v [:failures 'seon.system-test/b]))))
+    (is (= {'seon.check-test/a "da" 'seon.system-test/b "db"} (:digests v)))))
 
 (deftest a-gate-is-proved-by-the-system-on-its-candidates-checkout
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the :tests effect makes the candidate's checkout (the merges head,
-  ;; the candidate's files over it) and asks the system to prove it (its :ctx's :prove-tree, seon.root/prove-tree! as root
+  ;; the candidate's files over it) and asks the system to prove it (its :ctx's :prove-tree, seon.system/prove-tree! as root
   ;; binds it), named by exactly the deferred tests, in mode :judge, by the checkout's tree; the checkout is removed after.
   ;; Before, it ran bin/prove --tests in the checkout, a shell runner beside the test service
   (let [repo (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-gate-" (random-uuid))) (.mkdirs)))

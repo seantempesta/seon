@@ -98,7 +98,7 @@ One store holds many branches, and a pull reads the one db it is made on. So whe
 | a message | `:seon.message/id` | at its delivery to the recipient's branch, a transaction of that branch | where it was sent | `{[:seon.message/_to :tx :at] ...}`: `:at` is when it reached this branch |
 | a cite | `:seon.cite/id` | by whoever cited (`my.agent/cite!`), or by a plan's text naming an address | a task file's plan | `{:seon.cite/_of ...}` of the agent and of its task |
 | a process | `:seon.process/id` | never | by the system: pid, when it forked and ended, a stall | not in an agent's own pull; on main by `:seon.process/_agent` |
-| the system | `:seon.root/id` | never | by the boot and each landing: what main was indexed from, the boot | root's page; not an agent's pull |
+| the system | `:seon.system/id` | never | by the boot and each landing: what main was indexed from, the boot | root's page; not an agent's pull |
 
 What follows from it:
 - **A fact main keeps about an agent is not in that agent's own pull.** Its pattern asks `status` and `branch`, and on its own branch they hold nothing. (An agent attached from outside, `seon_attach`, also lacks its `max-turns`, which a spawned one holds: the two starts do not write the same facts.) A render that needs one reads it where it lives, or the data is moved; it is never patched with a second pull written by hand.

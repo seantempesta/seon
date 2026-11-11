@@ -150,7 +150,7 @@
 
 (deftest the-shipped-file-validates-under-every-profile
   ;; the scripted model's script is stated only under :scripted (checks and tests); :seon.config.source/root
-  ;; is `#env SEON_SOURCE_ROOT` (bin/root exports it, bin/test does not): present or absent by the process's
+  ;; is `#env SEON_SOURCE_ROOT` (bin/system exports it, bin/test does not): present or absent by the process's
   ;; environment, so it is left out of both sides; max-cores and max-load are optional bounds shipped unset
   ;; (docs/merging.md#the-test-service)
   (doseq [p [:default :scripted :deepseek]]
@@ -243,7 +243,7 @@
     (is (nil? (config/from-db @conn)))
     (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx c {:seon.config.web/port "--set"}))})
     (is (= c (config/from-db @conn)))
-    (is (= {:seon.config.web/port "--set"} (d/q '[:find ?s . :where [?e :seon.root/id :root] [?e :seon.config/sources ?s]] @conn)))
+    (is (= {:seon.config.web/port "--set"} (d/q '[:find ?s . :where [?e :seon.system/id :root] [?e :seon.config/sources ?s]] @conn)))
     ;; the reconciler's root read sees the same config keys
     (is (= {:boot "boot-1" :max-running 6 :max-merging (config/value :seon.config.merge/max-running)} (task/root @conn)))
     ;; a branch made from main holds them too (what an agent forked onto it reads)
@@ -257,9 +257,9 @@
     (d/transact conn {:tx-data (into (task/boot-tx "boot-1" "sean") (seon.task/config-tx config/config {}))})
     (let [ix (pdb/index)
           best (fn [m] (key (apply max-key val (frequencies (keep (:entity-schemas ix) (keys m))))))
-          root (d/entity @conn [:seon.root/id :root])]
-      (is (= :seon.root/root-fact (best (d/pull @conn '[*] [:seon.root/id :root]))) "root's entity reads as root")
-      (let [c (:seon.root/config root)]
+          root (d/entity @conn [:seon.system/id :root])]
+      (is (= :seon.system/root-fact (best (d/pull @conn '[*] [:seon.system/id :root]))) "root's entity reads as root")
+      (let [c (:seon.system/config root)]
         (is (some? c) "root refs the config in force")
         (is (= :seon.config/config-fact (get (:identity-schemas ix) :seon.config/id)) "named by the config's own identity")
         (is (pdb/extends? ix :seon.config/config-fact :seon.config/config) "an entity schema holding the config's attributes")
@@ -273,13 +273,13 @@
           _ (do (d/branch! conn (:branch cfg) a) (d/branch! conn (:branch cfg) b))
           on (fn [br] (let [c (pdb/connect (assoc cfg :branch br))]
                         (d/transact c {:tx-data (seon.task/config-tx config/config {})})
-                        (:db/id (:seon.root/config (d/entity @c [:seon.root/id :root])))))
+                        (:db/id (:seon.system/config (d/entity @c [:seon.system/id :root])))))
           [ea eb] [(on a) (on b)]]
       (is (some? ea))
       (is (= ea eb) "one entity on every branch")))))
 
 ;; owner, 2026-10-28: "Fix the model provider not reading the config. A config can override at any point even
-;; between turns." The provider was copied once at boot (seon.root/start!); it is resolved at the call now
+;; between turns." The provider was copied once at boot (seon.system/start!); it is resolved at the call now
 (deftest the-provider-is-the-config-as-it-stands-at-the-call
   (ts/test-branch! (fn [cfg conn]
     (let [c (merge config/config {:seon.config.ai/provider :none})
@@ -462,7 +462,7 @@
         f (str root "/target/ports-test-" (random-uuid) ".edn")]
     (try
       (spit f (str ";; the main tree's config/worktree-ports (x); edit it to move this checkout's ports.\n"
-                   "{;; root's server (bin/root, bin/mcp)\n"
+                   "{;; root's server (bin/system, bin/mcp)\n"
                    " :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT 7920]\n"
                    " :seon.config.web/port #long #or [#env SEON_WEB_PORT 7921]\n"
                    " ;; the merges tree\n"
@@ -513,7 +513,7 @@
 
 (deftest a-worktree-commits-its-merges-on-a-branch-of-its-own
   ;; worktrees share refs: a root in one that wrote jolt/seon-merges would move the main tree's merges branch
-  ;; (task seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1). The config names it from the
+  ;; (task seon.system/root-repairs-a-failed-merge-from-its-repl, gap 1). The config names it from the
   ;; checkout (#seon/own-branch), not an env var (audit cut 11)
   (let [root (config/checkout)
         git (fn [& args] (str/trim (:out (apply clojure.java.shell/sh "git" "-C" root args))))

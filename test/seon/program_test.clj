@@ -211,7 +211,7 @@
 (deftest the-program-digest-moves-with-the-program-and-not-with-data
   (let [db (record (empty-db) 'app.pt-pd "(defn f [x] x)")
         dg (program/program-digest db)]
-    (is (= dg (program/program-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from {:seon.root/id :root} :seon.message/body "hello"}])))
+    (is (= dg (program/program-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from {:seon.system/id :root} :seon.message/body "hello"}])))
         "a write of data (a message) leaves it")
     (is (not= dg (program/program-digest (record db 'app.pt-pd "(defn f [x] (inc x))"))) "a replaced form moves it")
     (is (not= dg (program/program-digest (record db 'app.pt-pd "(defn g [x] x)"))) "an added form moves it")
@@ -223,7 +223,7 @@
   ;; them, "green: ran 0"; a run selects the task's proofs, so its key moves with them
   (let [db (d/db-with (record (empty-db) 'app.pt-rd "(defn f [x] x)\n(defn g [x] x)") [{:seon.task/id "app.pt-rd/t"}])
         dg (program/run-digest db)]
-    (is (= dg (program/run-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from {:seon.root/id :root} :seon.message/body "hello"}])))
+    (is (= dg (program/run-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from {:seon.system/id :root} :seon.message/body "hello"}])))
         "a write of other data leaves it")
     (is (not= dg (program/run-digest (record db 'app.pt-rd "(defn f [x] (inc x))"))) "the program moves it")
     (let [proved (d/db-with db [{:seon.task/id "app.pt-rd/t" :seon.task/proofs ['app.pt-rd/f]}])]
@@ -556,7 +556,7 @@
           "and back to the first program: its digests again")
       (is (<= stamp (.lastModified file)) "the store moved with the program"))
     (testing "other data-refs: built over"
-      (let [refs {'seon.system/read-decl #{'app.pt-calc/add}}]
+      (let [refs {'seon.graph/read-decl #{'app.pt-calc/add}}]
         (is (= (digests (program/reach-graph db' refs)) (digests (runner/reach-graph-of db' refs dir))))))))
 
 (deftest a-types-method-is-in-the-reach-of-what-constructs-it
@@ -773,7 +773,7 @@
              (form 'app.fc-test "reads-schemas" :test '#{seon.reconcile/index})
              (form 'app.fc-test "runs-a-script" :test '#{clojure.java.shell/sh})
              (form 'app.fc-test "serves" :test '#{seon.web/handler})
-             (form 'app.fc-test "reads-system" :test '#{seon.system/read-decl})
+             (form 'app.fc-test "reads-system" :test '#{seon.graph/read-decl})
              (form 'app.fc-test "reads-deps" :test '#{seon.fork-server/dev-classpath!})
              (form 'app.fc "contracts-step" :fn '#{seon.contract/uncontracted})
              ;; every-key-is-documented-by-its-schema stayed green over a key with no unit: it walks the
@@ -1170,7 +1170,7 @@
   ;; import of the same tree. The same commit, imported twice and from a copy at another path,
   ;; gives the same digest for every test: a second run reruns nothing, two worktrees share.
   ;; And root's import of it (seon.source/import-tx of :seon.config.source/dirs, as
-  ;; a seed reads them, seon.root/import-tree!) gives bin/test's digests: bin/test imported src and test
+  ;; a seed reads them, seon.system/import-tree!) gives bin/test's digests: bin/test imported src and test
   ;; only, root the schemas too, so 882 of 922 differed and the judge reused 0 of 917 greens
   ;; bin/prove stored (task an-outside-branch-hands-back-through-the-store, experiment 2)
   ;; A small tree of eight files in two repositories (tiny-tree): a function calling another file's, and names quoted
@@ -1262,11 +1262,11 @@
       (is (contains? moved 'seon.render-test/one-printer-and-no-cut-before-it) "a test slurping a doc takes the tree")
       (is (not (contains? moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead)) "a test loading the wiki through its reader takes no tree")
       (is (contains? moved 'seon.repl-test/the-template-instructions-and-the-help-page-run) "a test reading the wiki through seon.doc/pages takes the tree (it was reused over edits to the help page)")
-      (is (not (contains? moved 'seon.task-files-test/no-shipped-task-is-merged-work)) "nor one reading the task files through seon.root/task-files")
+      (is (not (contains? moved 'seon.task-files-test/no-shipped-task-is-merged-work)) "nor one reading the task files through seon.system/task-files")
       ;; 2026-11-08: a process test reading its root's log by slurp took the tree, so a wiki edit reran all of them
       (is (not (contains? moved 'seon.agent-test/an-agent-ends-when-its-root-is-gone)) "a test reading only its own outputs (seon.test-store/output, its root's log) takes no tree")
       (is (< (* 4 (count moved)) (count a)) (str (count moved) " of " (count a) " tests read the checkout's files from their own namespace: a few, not the 286 whose reach reads one"))
-      (is (not-any? #(= "seon.root-test" (namespace %)) moved) "a test running the binary takes no tree"))
+      (is (not-any? #(= "seon.system-test" (namespace %)) moved) "a test running the binary takes no tree"))
     (is (not= (step "t1") (step "t2")) "a step reaching a raw read of the checkout still takes the tree")
     ;; the wiki's and the task files' classes move what reads them, and only that
     ;; each against a (no class held): two indexes, the test's budget being a few full indexes of the suite
@@ -1305,7 +1305,7 @@
         in {:env "e" :tree "t" :config {} :data-refs '{app.pt-sys/read-decl #{app.pt-procs/writer-proc}}}
         k 'app.pt-sys-test/boot-test]
     (is (not= ((ts/reach-digests db in) k) ((ts/reach-digests db' in) k)) "the proc changed: the test booting through the declaration moves")
-    (is (contains? (get (fx/declared-refs (slurp (str (seon.config/checkout) "/resources/seon/system.edn"))) 'seon.system/read-decl) 'seon.writer/writer-proc)
+    (is (contains? (get (fx/declared-refs (slurp (str (seon.config/checkout) "/resources/seon/system.edn"))) 'seon.graph/read-decl) 'seon.writer/writer-proc)
         "the shipped declaration's procs are the reader's data refs")))
 
 (deftest the-config-in-force-is-an-input

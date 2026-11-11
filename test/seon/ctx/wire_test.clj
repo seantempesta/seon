@@ -54,7 +54,7 @@
 
 (defn- wiki!
   "The checkout's system prompt into conn (seon.doc/system-page), as root's boot loads it with the rest of the wiki
-  (seon.root/start!): the one page a request reads (the help page is read on demand, by `doc`). The whole wiki
+  (seon.system/start!): the one page a request reads (the help page is read on demand, by `doc`). The whole wiki
   (1.4 MB, 40 pages) cost a request test 180 M ticks to load and check, and moved none of its bytes."
   [conn] (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))})))
 

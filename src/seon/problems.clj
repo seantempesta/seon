@@ -177,7 +177,7 @@
 (def pins
   "Where the wiki states each customized library's pin: the page, and the line that states one
   (`reference-code/x` pinned at `sha`), compared with the gitlinks root's last index of its source
-  recorded (:seon.root/source :pins, seon.root/import-tree!)."
+  recorded (:seon.system/source :pins, seon.system/import-tree!)."
   {:page "docs/forks.md" :line #"(?m)^`(reference-code/[^`]+)` pinned at `([0-9a-f]+)`"})
 
 (defn stale-pins
@@ -187,7 +187,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
   (let [{:keys [page line]} pins
-        recorded (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source :pins)]
+        recorded (some->> (pdb/eid db :seon.system/id :root) (d/pull db [:seon.system/source]) :seon.system/source :pins)]
     (vec (when recorded
            (for [{a :v e :e} (d/datoms db :aevt :seon.doc/address) :when (str/starts-with? a (str page "#"))
                  [_ path sha] (re-seq line (or (:seon.doc/text (d/pull db [:seon.doc/text] e)) ""))
@@ -198,24 +198,24 @@
 
 (def stale-binary-acts
   "What brings a root's binary and its main into agreement, each then a restart of root: what the :stale-binary row, root's
-  refused spawn and the last line of bin/root start and bin/update say. See docs/source.md#files-and-the-db-two-directions."
-  (str "Bring them into agreement, then restart root: erase the store and seed it from the tree (bin/root stop; bin/root start --reindex, "
-       "which is bin/remove-tree runs/store and bin/root start), or reindex main from disk at root ((my.root/import! sys), (my.root/load-docs! sys), "
-       "(my.root/load-tasks! sys); then bin/root stop and bin/root start), or start the binary main's program was built from (bin/root next)"))
+  refused spawn and the last line of bin/system start and bin/update say. See docs/source.md#files-and-the-db-two-directions."
+  (str "Bring them into agreement, then restart root: erase the store and seed it from the tree (bin/system stop; bin/system start --reindex, "
+       "which is bin/remove-tree runs/store and bin/system start), or reindex main from disk at root ((my.root/import! sys), (my.root/load-docs! sys), "
+       "(my.root/load-tasks! sys); then bin/system stop and bin/system start), or start the binary main's program was built from (bin/system next)"))
 
 (defn stale-binary
-  "A :stale-binary row while root's binary is not current for its main: seon.root/stale-binary's answer as its boot held it on
-  root's :seon.root/source fact (:stale-binary, seon.root/booted-source), naming the binary's tree, main's and what between
+  "A :stale-binary row while root's binary is not current for its main: seon.system/stale-binary's answer as its boot held it on
+  root's :seon.system/source fact (:stale-binary, seon.system/booted-source), naming the binary's tree, main's and what between
   them reaches root's own code or a build input (or what is missing). What agents merged into main since is main's own, never a
   row. None on a boot whose binary is current, or with no source fact; gone at the next boot on a current binary. While it
   shows, root forks no agent. Derived from the fact, never computed here, no clock; its message names the acts
   (`stale-binary-acts`). Cost: one pull. See docs/health.md#a-stale-binary."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]}
   [db ans]
-  (let [{:keys [boot stale-binary]} (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/source]) :seon.root/source)
+  (let [{:keys [boot stale-binary]} (some->> (pdb/eid db :seon.system/id :root) (d/pull db [:seon.system/source]) :seon.system/source)
         {:keys [binary tree reaches missing error]} stale-binary]
     (if stale-binary
-      [(derived-row ans (str "stale-binary " boot) 'seon.root
+      [(derived-row ans (str "stale-binary " boot) 'seon.system
                     (str "root's binary was built from " (if binary (str "tree " binary) "a tree its build did not record")
                          ", and main was last brought from tree " tree
                          (cond missing (str ": " (name missing) " is unknown")

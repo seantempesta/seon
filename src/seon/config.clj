@@ -13,7 +13,7 @@
     args): `--profile NAME` (default `:default`; aero's `#profile` reads the file under it, and
     `:seon.config.root/profile` records it), then `--config FILE` and `--set :ns/key=edn`.
     Later layers win, key by key; `sources` names the layer of each key. A checkout's `config/local.edn`
-    (gitignored; its ports, and the standing root's source) is no implicit layer: bin/root
+    (gitignored; its ports, and the standing root's source) is no implicit layer: bin/system
     and bin/ports pass it with --config, so a check's or a test's process reads only what its
     command line gives it.
 
@@ -68,7 +68,7 @@
 (defmethod aero/reader 'seon/own-branch
   ;; #seon/own-branch "jolt/seon-merges": the branch as named in the main tree, and in a git
   ;; worktree (its .git a file, not a directory) the branch with -<worktree> appended: worktrees
-  ;; share refs, so each commits on a branch of its own (task seon.root/root-repairs-a-failed-merge-from-its-repl, gap 1)
+  ;; share refs, so each commits on a branch of its own (task seon.system/root-repairs-a-failed-merge-from-its-repl, gap 1)
   [opts _tag value]
   (let [co (java.io.File. ^String (::checkout opts))]
     (if (.isFile (java.io.File. co ".git")) (str value "-" (.getName co)) value)))
@@ -295,7 +295,7 @@
 
 (defn load-layers
   "The layers a process of checkout dir would read, args its command line: dir's shipped file, as this process's branch states it when dir is this checkout. The checkout's config/local.edn is a layer only when a
-  --config names it (bin/root, bin/ports): read implicitly, it gave a check's root in the
+  --config names it (bin/system, bin/ports): read implicitly, it gave a check's root in the
   main tree the standing root's source tree (task seon.check/a-checks-roots-take-explicit-config)."
   {:malli/schema [:=> [:cat :string [:sequential :string]] [:vector [:tuple :string :map]]]}
   [dir args]
@@ -525,14 +525,14 @@
 
 (defn from-db
   "The config root wrote on db (main, or any branch made from it since): every declared key
-  the entity root's :seon.root/config names holds, each as its schema declares it. What agents, the dashboard and the
+  the entity root's :seon.system/config names holds, each as its schema declares it. What agents, the dashboard and the
   context read. A [:set T] key is a cardinality-many attribute (seon.schema.datahike/
   declaration), which a pull answers as a vector: it is read back as the set it was (the
   first set-valued key, :seon.config.source/process-vars, came back a vector, so the config
   in force and main's copy of it differed)."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
-  (not-empty (into {} (for [[k v] (:seon.root/config (d/pull db [{:seon.root/config (keys-declared)}] [:seon.root/id :root]))]
+  (not-empty (into {} (for [[k v] (:seon.system/config (d/pull db [{:seon.system/config (keys-declared)}] [:seon.system/id :root]))]
                         [k (if (dbu/multival? db k) (set v) v)]))))
 
 (defn provider-at

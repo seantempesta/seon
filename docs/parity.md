@@ -10,10 +10,10 @@ Each v1 way of starting, stopping and watching the system, and where it stands h
 
 | v1 | next | Status |
 |---|---|---|
-| ``bin/seon start``, ``start --head``, ``status``, ``stop`` | `bin/root start`, `next` (the newest built generation), `status`, `stop`; every end is a fact on main (`:seon.root/stopped` with its cause, `:seon.root/previous-end` at the next boot, `:unclean` after a SIGKILL or a crash: `seon.root/stop!`) | present |
+| ``bin/seon start``, ``start --head``, ``status``, ``stop`` | `bin/system start`, `next` (the newest built generation), `status`, `stop`; every end is a fact on main (`:seon.system/stopped` with its cause, `:seon.system/previous-end` at the next boot, `:unclean` after a SIGKILL or a crash: `seon.system/stop!`) | present |
 | ``bin/seon logs`` | `runs/root.log`, no command | partial |
 | ``bin/seon open``, ``init``, ``reset``, ``nuke`` | none (one root per checkout; per-checkout ports, `bin/ports`) | missing |
-| ``bin/seon config apply`` (sparse, per branch) | config layers plus `--set`; `seon.root/apply!` re-reads `resources/seon/system.edn` | partial |
+| ``bin/seon config apply`` (sparse, per branch) | config layers plus `--set`; `seon.system/apply!` re-reads `resources/seon/system.edn` | partial |
 | ``bin/worker`` claims and proven commits | worktrees (`bin/worktree`) and root's merges | dropped |
 
 ## The MCP server
@@ -39,7 +39,7 @@ Each v1 function of the agent's REPL and where it stands here.
 | `my.program/callers`, `source`, `tests-reaching` | `my.agent/callers` (a var's callers, or the functions using a qualified keyword), `callees`, `grep`, `source-fn`; `seon.program/graph-index` (the digest of what a test reaches; `my.agent/prove` runs the tests a change reaches) | present |
 | `my.program/history` | none yet; the store keeps history ([storage](storage.md#history)), the function is not built | missing |
 | `my.program/search`, `similar` (embeddings) | `my.agent/similar` ('ns/f or text); `seon.vector/near` in any query; fused with the call graph ([vectors](vector.md)); EmbeddingGemma-2 in process (llama.cpp) where v1 ran MLX over HTTP | present, better |
-| `my.program/diff`, `sizes`, `breaks` | `seon.root/branch-diff` (root only) | partial |
+| `my.program/diff`, `sizes`, `breaks` | `seon.system/branch-diff` (root only) | partial |
 | `my.program/write-branch!` | write-back at merge (`seon.source`, the `:git` effect) | present, better |
 | `my.message/inbox`, `send` (stored facts) | `my.agent/messages`, `send-message`: a person's message one entity on main, to the agent (`:seon.message/to`), and on the delivering agent's branch (`:seon.message/*`); another agent's send the same entity, written by root whether or not the recipient's process lives, which wakes it if it waits | partial |
 | ``my.test/run``, ``check`` (v1's) | proofs run by themselves after each evaluation, and `my.agent/prove` runs the same selection at the REPL ([turn](turn.md#who-runs-which-tests)) | present |
@@ -81,7 +81,7 @@ Each v1 capability for building and printing the model's context, and where it s
 | wiki sections in the context | `seon.doc` | new |
 | Datastar pages: `/`, `/agent/{id}` | `seon.web` | present |
 | `/agent/{id}/debug`: each model call, what it was sent, its tokens | `/agent/{id}/debug` (`seon.render.proc/debug-value`; `/agent/{id}/ctx` is the agent's `@ctx` printed): the raw wire, a bar for each model turn and one request's messages as sent in wire order, made again from its records (```seon.ctx.wire/wire-turn```) and compared with the hash the turn recorded (`:seon.model-call/sent-hash`), each message beside the record that made it, with its tokens, cache share and, for a failed call, its typed error | present (`seon.ctx.wire-test/the-request-is-a-conversation-of-evals-and-the-page`) |
-| `/agent/{id}/message` (the person's input bar) | the page's input (its words, told apart from its forms by `seon.reader/words-and-forms`) and the server's `:message` op, both `seon.root/message!`: root's one write of the fact (`seon.root/message-write`), which the agent's next act delivers onto its branch | present: a fact on main (from the user's name, to the agent), and on the agent's branch once delivered, placed in a turn by ``:seon.message/call`` |
+| `/agent/{id}/message` (the person's input bar) | the page's input (its words, told apart from its forms by `seon.reader/words-and-forms`) and the server's `:message` op, both `seon.system/message!`: root's one write of the fact (`seon.system/message-write`), which the agent's next act delivers onto its branch | present: a fact on main (from the user's name, to the agent), and on the agent's branch once delivered, placed in a turn by ``:seon.message/call`` |
 | `/ns/{ns}` and its debug pages; `/data`; `/chains`; `/health` | none (task `seon.render/namespace-agent-debug-and-data-pages`; the routes here: [dashboard](dashboard.md)) | missing |
 | POSTs refuse a cross-origin request (``::same-origin``) | every POST (a call, a cut opened, a debug step) is refused with 403 before any route reads it when its Origin is another's or its Sec-Fetch-Site says cross-site (`seon.web/same-origin?`, `seon.web/handler`; `seon.web-test/a-cross-origin-post-is-refused`) | present |
 

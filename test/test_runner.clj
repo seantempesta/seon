@@ -12,7 +12,7 @@
   per git tree in a store of its own (program-db)."
   (:require [konserve.jolt.lmdb :as klmdb] [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
             [datahike.api :as d] [seon.config :as config] [seon.db :as pdb] [seon.test-store :as ts] [seon.agent]
-            [seon.edn :as sedn] [seon.error :as error] [seon.lib :as lib] [seon.contract :as contract] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.system :as system]
+            [seon.edn :as sedn] [seon.error :as error] [seon.lib :as lib] [seon.contract :as contract] [seon.fx :as fx] [seon.program :as program] [seon.proofs :as proofs] [seon.print :as print] [seon.source :as source] [seon.graph :as graph]
             [seon.doc :as doc] [seon.task :as task] [seon.problems :as problems] [my.root]))
 
 (defn- test-namespaces
@@ -247,8 +247,8 @@
         idx (into {} (filter #(or (whole (symbol (namespace (key %)))) (vars (key %)))) all)]
     {:graph g :inputs in
      ;; whether the binary target/seon is (its build record, target/seon.program) runs this tree's program as a build of it would:
-     ;; nil, or what differs that it bakes (seon.root/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
-     :binary-current (seon.root/binary-current db (seon.program/binary-program) tree g)
+     ;; nil, or what differs that it bakes (seon.system/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
+     :binary-current (seon.system/binary-current db (seon.program/binary-program) tree g)
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
@@ -460,7 +460,7 @@
 
 (defn build-text
   "out/build's text, what bin/test builds target/seon for: when a selected key reaches the binary (bin-keys) and the binary is
-  not current for the tree (binary-current's answer, seon.root/binary-current), that answer; else empty, and nothing is
+  not current for the tree (binary-current's answer, seon.system/binary-current), that answer; else empty, and nothing is
   built. docs/source.md#the-binary-records-its-program."
   [bin-keys binary-current]
   (if (and (seq bin-keys) binary-current) (str (pr-str binary-current) "\n") ""))
@@ -534,14 +534,14 @@
         step-bin (filterv proofs/step-needs-binary? run-steps)
         bin-keys (into (vec (filter binary run-tests)) step-bin)
         _ (write! (str out "/binary") (str (str/join " " bin-keys) (when (seq bin-keys) "\n")))
-        ;; out/build: what bin/test builds target/seon for, empty when the binary is current for this tree (seon.root/binary-current):
+        ;; out/build: what bin/test builds target/seon for, empty when the binary is current for this tree (seon.system/binary-current):
         ;; a change that reaches nothing root runs from its binary builds nothing (rule (a), docs/source.md#the-binary-records-its-program)
         _ (write! (str out "/build") (build-text bin-keys binary-current))
         ;; this tree's inputs beside the binary (target/seon.inputs, keyed by their :tree): what a root booting on this tree with a
-        ;; binary current for it by reach hands its agents (seon.root/booted-source), read as a file: root runs no git
+        ;; binary current for it by reach hands its agents (seon.system/booted-source), read as a file: root runs no git
         _ (write! (str (config/checkout) "/target/seon.inputs") (sedn/encode inputs))
         _ (when (and (seq bin-keys) (not binary-current))
-            (println "prove: target/seon is current for this tree by reach (seon.root/binary-current): no build"))
+            (println "prove: target/seon is current for this tree by reach (seon.system/binary-current): no build"))
         ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms), and the end bound of a test with no
         ;; record (the step-end factor times it): "<stall ms> <end ms>"
         _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) " "
@@ -665,7 +665,7 @@
         ;; the step's edge: the checked write's refusal is its answer, as a root's load answers it (seon.db/with throws it typed)
         write (fn [db tx] (try (pdb/db-with db tx) (catch clojure.lang.ExceptionInfo e (if (:seon.error/type (ex-data e)) (ex-data e) (throw e)))))
         db (write db (doc/load-dir-tx db dir (config/value :seon.config.root/wiki-dirs) {}))
-        tx (when-not (contract/error? db) (task/load-tx db (seon.root/task-files (str dir "/" (tasks-dir)))))]
+        tx (when-not (contract/error? db) (task/load-tx db (seon.system/task-files (str dir "/" (tasks-dir)))))]
     (cond (contract/error? db) db
           (contract/error? tx) tx
           :else (write db tx))))
@@ -719,7 +719,7 @@
   schema digest> as store is keyed (health!'s stem: :seon.config.proofs/program-store's with -health-base), which the base's own
   code makes when it is not there (make-base-tree!, a process of its own in a checkout at at), read here as facts. Never analyzed
   in this image: analysis runs each file's ns form in the live namespace, so a base's ns form that aliases a namespace
-  this image holds under another target retargets this image's alias (across the rename of seon.root to seon.system,
+  this image holds under another target retargets this image's alias (across the rename of seon.system to seon.graph,
   seon.server's `c`), and a macro there expands with this checkout's code. Answers the db, or :seon.fx/io-error: a base whose
   program schema (seon.test-store/program-schema-digest) is not this code's keeps no branch this code reads."
   [root base store stem at]

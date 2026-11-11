@@ -13,7 +13,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.lib :as lib] [seon.repl :as repl] [seon.program :as program] [seon.db :as pdb]
             [seon.step :as step] [seon.sock :as sock] [seon.config :as cfg] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.ffi :as ffi]
-            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.system :as system] [seon.reconcile :as r] [seon.agent :as agent] [jolt.io-poller :as poller] [seon.task :as task] [seon.ctx :as ctx] [seon.doc :as doc] [datahike.db.interface :as dbi]))
+            [jolt.deps] [clojure.edn :as edn] [seon.fx :as fx] [seon.graph :as graph] [seon.reconcile :as r] [seon.agent :as agent] [jolt.io-poller :as poller] [seon.task :as task] [seon.ctx :as ctx] [seon.doc :as doc] [datahike.db.interface :as dbi]))
 
 (defn- reaped
   "Child pid, whose exit arrived (jolt.io-poller/exit-chan): waited for exactly, so the wait is the
@@ -273,7 +273,7 @@
     :load-errors load-errors
     ;; the first fork freezes the heap: nothing is static yet (seon.fork-server/static-due?)
     :static-due true
-    :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs system/built-text))
+    :graph (or graph (program/reach-indexed (program/reach-graph db (fx/declared-refs graph/built-text))
                                             (second (agent/test-inputs db))))
     ;; listed here when the server boots; a standby inherits its server's
     :index (or index {:commit (d/commit-id db) :index (r/index db)})})
@@ -451,8 +451,8 @@
   "The answer to every request a lost fork server is asked (one that died with no standby
   to take its place): the request refused, naming why. Root's api refuses a spawn with it
   once it has heard of the loss, before any agent is made."
-  {:malli/schema [:=> [:cat] :seon.root/refused]}
-  [] (seon.contract/error :seon.root/refused #'seon.fork-server/lost
+  {:malli/schema [:=> [:cat] :seon.system/refused]}
+  [] (seon.contract/error :seon.system/refused #'seon.fork-server/lost
                           "the fork server is lost: it died with no standby to take its place, so root forks no agent and answers no fork server request"))
 
 (defn- promote

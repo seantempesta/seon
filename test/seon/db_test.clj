@@ -17,9 +17,9 @@
       (is (= 'app.m0/f1 (:var/name (d/entity db (pdb/eid db :var/name 'app.m0/f1))))))
     (testing "a value no entity holds is nil, not an id"
       (is (nil? (pdb/eid db :var/name 'app.m0/no-such)))
-      (is (nil? (pdb/eid db :seon.root/id :root))))
+      (is (nil? (pdb/eid db :seon.system/id :root))))
     (testing "root's facts pulled by lookup ref are nil before root's first boot: no eid guard is needed"
-      (is (nil? (d/pull db [:seon.root/boot] [:seon.root/id :root]))))))
+      (is (nil? (d/pull db [:seon.system/boot] [:seon.system/id :root]))))))
 
 (deftest a-test-takes-a-branch-of-the-test-store
   (ts/test-branch! (fn [cfg-a a] (ts/test-branch! (fn [cfg-b b] (let [seed (pdb/connect (dissoc cfg-a :branch))]
@@ -815,7 +815,7 @@
         reply (slice @text 11 3000)
         vk (hasch.core/uuid reply)
         on (fn [b f] (let [c (pdb/connect (assoc (:config @conn) :branch b))] (try (f c) (finally (d/release c)))))
-        record! (fn [r] (when-not (:skipped r) (d/transact conn [{:seon.root/id :root :seon.root/collected r}])) r)]
+        record! (fn [r] (when-not (:skipped r) (d/transact conn [{:seon.system/id :root :seon.system/collected r}])) r)]
     (try
       (d/transact conn [{:note/text "main's" :note/agent :t}])
       ;; garbage before the first collection: a branch made and deleted
@@ -849,16 +849,16 @@
         size #(.length (java.io.File. (str path "/data.mdb")))]
     (try
       (is (nil? (pdb/compact-if-due! path)) "nothing swept: no compaction")
-      (d/transact conn [{:seon.root/id :root :seon.root/collected (pdb/collect! conn true)}])
+      (d/transact conn [{:seon.system/id :root :seon.system/collected (pdb/collect! conn true)}])
       (d/branch! conn :db :gone)
       (let [c (pdb/connect (assoc (:config @conn) :branch :gone))]
         (d/transact c {:tx-data (vec (for [i (range 3000)] {:note/text (str "note " i (apply str (repeat 400 "x"))) :note/agent :t}))})
         (d/release c))
-      (d/transact conn [{:seon.root/id :root :seon.root/collected (pdb/collect! conn true)}])
+      (d/transact conn [{:seon.system/id :root :seon.system/collected (pdb/collect! conn true)}])
       (d/delete-branch! conn :gone)
       (let [r (pdb/collect! conn true)]
         (is (pos? (:swept r)) "the gone branch swept")
-        (d/transact conn [{:seon.root/id :root :seon.root/collected r}]))
+        (d/transact conn [{:seon.system/id :root :seon.system/collected r}]))
       (let [before (head conn) big (size) cfg (:config @conn)]
         (pdb/sync! cfg)
         (d/release conn)
@@ -900,7 +900,7 @@
             main-before (notes-of @conn) hist-before (hist @conn) tail (d/commit-id @conn)
             r (pdb/retain! conn 3)]
         (is (pos? (:swept r)) (pr-str r))
-        (is (= (:generation r) (:generation (:seon.root/retained (d/pull @conn [:seon.root/retained] [:seon.root/id :root])))) "and it is written on main")
+        (is (= (:generation r) (:generation (:seon.system/retained (d/pull @conn [:seon.system/retained] [:seon.system/id :root])))) "and it is written on main")
         (is (nil? (pdb/retain! conn 3)) "with nothing new landed, none is due")
         (is (= (conj (vec main-before)) (notes-of @conn)) "main's head reads the same")
         (is (<= hist-before (hist @conn)) "its history too")
@@ -1604,7 +1604,7 @@
               "retracting a key the entity held and still needs is refused")
           (is (nil? (pdb/invalid-entity (d/with @conn [[:db.fn/retractEntity [:seon.agent/key "whole"]]])))
               "an entity retracted whole has stopped being that thing")))
-      (testing "an upsert of an unknown identity is no stub (seon.root's release! of a task id main does not hold)"
+      (testing "an upsert of an unknown identity is no stub (seon.system's release! of a task id main does not hold)"
         (is (= :seon.task/task-fact (:schema (pdb/invalid-entity (d/with @conn (task/execution-tx ["no/such"] :running))))))))))
 
 (defn written-tasks

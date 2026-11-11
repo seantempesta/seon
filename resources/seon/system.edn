@@ -1,17 +1,17 @@
 ;; Root's system procs, declared (owner, 2026-10-20: "the definition lives in a file for now
-;; and an explicit start is better"). Read with aero by seon.system/read-decl; started all at
-;; once by seon.root/start! after the physics step (the store opened, the fork server forked
-;; while root is single-threaded), and re-applied by seon.root/apply!, which update!s only
+;; and an explicit start is better"). Read with aero by seon.graph/read-decl; started all at
+;; once by seon.system/start! after the physics step (the store opened, the fork server forked
+;; while root is single-threaded), and re-applied by seon.system/apply!, which update!s only
 ;; the procs whose declaration changed. Agents are not here: the reconciler starts them
 ;; from tasks.
 ;;
 ;; A proc: {:proc step-fn symbol, :args map, :chan-opts map}. A :bind/<name> keyword is a
-;; value the boot step holds (a connection, a channel, a config key; seon.root/bindings), put in
+;; value the boot step holds (a connection, a channel, a config key; seon.system/bindings), put in
 ;; at build. :conns is the dependency graph: procs park on their inputs until upstream
 ;; sends, readiness is each proc's ping-map-fn, and there is no start order.
 ;; :fx declares the effect kinds (session FX1): each becomes an owner :fx/<kind> and its workers.
 {:procs
- {:api {:proc seon.root/api-proc
+ {:api {:proc seon.system/api-proc
         ;; room for every answer the writer can owe while the api is not reading
         :chan-opts {:from-writer {:buf-or-n :bind/api-from-writer-buf}}
         :args {:view :bind/view :ext :bind/ext :back :bind/back :graph :bind/graph
@@ -67,9 +67,9 @@
   ;; the next generation (my.root/build!): bin/build seon of the last merges commit, niced, ~25-45 s
   :build {:perform seon.fx/build :workers 1}
   ;; a merge's deferred process tests, run only when root asks (owner, 2026-10-23): a worktree of the merge candidate, proved
-  ;; by the system (seon.root/prove-tree!, bound here as :prove-tree); one at a time. Its one worker waits on items the :item
+  ;; by the system (seon.system/prove-tree!, bound here as :prove-tree); one at a time. Its one worker waits on items the :item
   ;; owner runs, another owner, so it never waits on itself; the wait ends with the run's answer or its typed error (the
-  ;; service answers every waiter once, and a tree agent that ends answers :seon.root/ended)
+  ;; service answers every waiter once, and a tree agent that ends answers :seon.system/ended)
   :tests {:perform seon.fx/run-tests :workers 1 :ctx {:prove-tree :bind/prove-tree}}
   ;; a session's prove items (seon.prove grants them, at most its admission's workers at once): a build, one process test, one check
   ;; step, on the session's own checkout (docs/merging.md#a-session-proves-through-root)

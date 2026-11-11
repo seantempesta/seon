@@ -28,7 +28,7 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [clojure.string :as str]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [datahike.api :as d]
-            [seon.lib :as lib] [seon.render :as render] [seon.program :as program] [seon.render.ui :as ui] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.root :as c]
+            [seon.lib :as lib] [seon.render :as render] [seon.program :as program] [seon.render.ui :as ui] [seon.print :as print] [seon.print.select :as select] [seon.repl :as repl] [seon.system :as c]
             [seon.web.html :as h] [seon.task :as task] [seon.reconcile :as reconcile] [seon.ctx :as ctx] [seon.ratom :as ratom] [seon.db] [datahike.index.interface]
             [seon.config :as config] [seon.step :as step] [seon.problems :as problems]))
 
@@ -66,7 +66,7 @@
 
 (defn process-value
   "Root's process as one value (:seon.render/process), from the render proc's state: the writer's,
-  the fork server's and the store's numbers as root's own `state` shows them (seon.root/view-numbers),
+  the fork server's and the store's numbers as root's own `state` shows them (seon.system/view-numbers),
   each declared proc's defects (health is what flows: no ping, no beat) and the events, newest
   first. Root's own data, part of root's ctx (process!), never written."
   {:malli/schema [:=> [:cat :map] :seon.render/process]}
@@ -296,10 +296,10 @@
   [db view]
   (cond (vector? view) (location db (second view))
         ;; root's page is root's agent's (its session, the agent keyed "root", made at boot), drawn as any agent's is
-        (= :root view) (or (:db/id (d/entity db [:seon.agent/key "root"])) (:db/id (d/entity db [:seon.root/id :root])))
+        (= :root view) (or (:db/id (d/entity db [:seon.agent/key "root"])) (:db/id (d/entity db [:seon.system/id :root])))
         ;; home: the signed-in person's focus (docs/users.md#whats-on-screen); with none, root's page, which presents the system
         ;; to them (owner, 2026-11-11: "the goal is mostly root running the presentation"); no one signed in, the sign-in page
-        (= :home view) (let [u (:seon.root/signed-in (d/entity db [:seon.root/id :root])) f (:seon.user/focus u)]
+        (= :home view) (let [u (:seon.system/signed-in (d/entity db [:seon.system/id :root])) f (:seon.user/focus u)]
                          ;; a focused task is its agent's page once its agent exists
                          (when u (or (:db/id (if (:seon.task/id f) (:seon.task/agent f) f)) (location db :root))))
         (keyword? view) (session-of db (address-of view))
@@ -310,7 +310,7 @@
   root's (:root or :home) retracting it; nil when none of them names a page, the user is not signed in, or the focus already is that. See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] [:sequential :any]] [:maybe [:vector :any]]]}
   [db opened]
-  (when-let [u (some-> db (d/entity [:seon.root/id :root]) :seon.root/signed-in)]
+  (when-let [u (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in)]
     (let [named (fn [v] (let [x (if (vector? v) (second v) v)]
                           (cond (#{:root :home} x) ::root
                                 (keyword? x) (let [e (some->> (location db x) (d/entity db))] (when (:seon.agent/key e) (:seon.agent/key e))))))
@@ -496,7 +496,7 @@
   [st db]
   (let [cell (or (:user-walks st) (volatile! {}))
         ;; the signed-in user's agents list is every page's (`user-sides`): its change redraws every view
-        signed (some-> db (d/entity [:seon.root/id :root]) :seon.root/signed-in :seon.user/name)
+        signed (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in :seon.user/name)
         side (fn [] (when-let [kw (get @cell signed)] (into {} (for [u (list-units (render/placed-units (:w kw)) "#c-side")] [(:id u) (:rev u)]))))
         before (side)]
     (doseq [[n kw] @cell] (vswap! cell assoc n (advance-walk! kw db :main identity)))
@@ -508,12 +508,12 @@
                                             (when (keyword? x) (some->> (location db x) (d/entity db) :seon.agent/key (contains? @cell))))) (keys (:views st)))))))
 
 (defn- user-sides
-  "The agents list every page shows: the signed-in user's (root's :seon.root/signed-in), as that user's kept walk drew it (seon.render.ui/agents-list,
+  "The agents list every page shows: the signed-in user's (root's :seon.system/signed-in), as that user's kept walk drew it (seon.render.ui/agents-list,
   its page's c-side): root, then what the user started, each with what it started under it. Nothing before main is read or with no one signed in.
   See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat :map [:maybe :seon.host/db]] [:vector :map]]}
   [st db]
-  (if-let [kw (when-let [u (some-> db (d/entity [:seon.root/id :root]) :seon.root/signed-in)] (user-walk st db u))]
+  (if-let [kw (when-let [u (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in)] (user-walk st db u))]
     (list-units (render/placed-units (:w kw)) "#c-side")
     []))
 
@@ -635,7 +635,7 @@
   list every page shows is the signed-in user's (`user-sides`), not root's."
   {:malli/schema [:=> [:cat :map :seon.host/db [:maybe :seon.host/db]] :map]}
   [st db held]
-  (let [root (:db/id (d/entity db [:seon.root/id :root]))
+  (let [root (:db/id (d/entity db [:seon.system/id :root]))
         rw (:root-walk st)]
     (cond
       (nil? root) st
@@ -1061,11 +1061,11 @@
         detail (print/text r)]
     (when form
       (let [rec (repl/record-details form (if err {:ex r} {:value r}) {})]
-        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.root/id :root} (str "root-ui-" (profile/now-ns)) (task/sender (config/value :seon.config.root/user-name)) rec)}}
+        (step/out! o :to-api {:op :request :req {:op :write :req {:op :tx :branch :db :tx-data (repl/record-tx {:seon.system/id :root} (str "root-ui-" (profile/now-ns)) (task/sender (config/value :seon.config.root/user-name)) rec)}}
                               :route [:render :answers] :tag [:web-record]})))
     (ask-state (cond-> (on-event st {:type :ui :call (str v) :agent agent :at-ms (System/currentTimeMillis) :error err :detail detail})
                  ;; an eval opened is a fact on main the agent takes when it draws: ask it to draw again
-                 (= 'seon.root/opened! (symbol v)) (update-in [:parts agent] dissoc :asked))
+                 (= 'seon.system/opened! (symbol v)) (update-in [:parts agent] dissoc :asked))
                o)))
 
 (defn- answered
@@ -1178,7 +1178,7 @@
                           :keyframe (if (ready? st (:view m))
                                       (do (step/out! o :to-web {:op :keyframe :view (:view m) :html (view-html st (:view m))}) st)
                                       (ask-state (update st :kf-wanted conj (:view m)) o))
-                          ;; main's health for the api (seon.root's :health, my.root/problems): this proc's,
+                          ;; main's health for the api (seon.system's :health, my.root/problems): this proc's,
                           ;; brought to the main the asker read (advance-main, health!), never read whole again, and
                           ;; at the counts the api's fold holds (with-fold: a repeat of a written signature is counted
                           ;; there, not yet on main), which it keeps to bring its next move of main from what it held

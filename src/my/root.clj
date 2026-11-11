@@ -1,8 +1,8 @@
 (ns my.root
   "Root's functions on tasks (from proto.agents.root): write desired state on main;
-  the reconciler proc does the rest. Each takes root's system (seon.root/start!)."
+  the reconciler proc does the rest. Each takes root's system (seon.system/start!)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.root :as root] [seon.task :as task] [seon.doc :as doc] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
+  (:require [seon.edn :as sedn] [seon.contract :as contract :refer [defn defn-]] [seon.system :as root] [seon.task :as task] [seon.doc :as doc] [seon.problems :as problems] [clojure.java.io :as io] [clojure.string :as str] [seon.config :as config]
             [seon.reconcile :as reconcile] [seon.db :as pdb] [seon.template :as tpl] [seon.profile :as profile] [datahike.api :as d]
             [seon.judge :as judge] [seon.model :as model] [seon.turn :as turn] [clojure.edn :as edn] [seon.lib :as lib] [seon.fx :as fx] [seon.error :as err] [seon.source :as source] [seon.program :as program] [seon.agent]))
 
@@ -10,7 +10,7 @@
   "Declared state's tx written on main: the error that built it as it is; an empty tx
   writes nothing ({:ok true :changed 0}); else the writer's answer, with counts and the datoms
   written. A cite whose target is no entity is the writer's refusal, :seon.db/no-target (docs/references.md#an-entity-cites)."
-  {:malli/schema [:=> [:cat :seon.root/sys :any :map] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys :any :map] :map]}
   [sys tx counts]
   (cond (contract/error? tx) tx
         (empty? tx) (assoc counts :ok true :changed 0)
@@ -18,7 +18,7 @@
 
 (defn create!
   "Write task declarations as held tasks. Answers the writer's answer, or the error."
-  {:malli/schema [:=> [:cat :seon.root/sys [:vector :seon.task/declaration]] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys [:vector :seon.task/declaration]] :map]}
   [sys decls] (write-declared! sys (task/create-tx @(:conn sys) decls) {}))
 
 (defn request!
@@ -27,8 +27,8 @@
   seon.template/stages for an experiment), written released in one transaction on main (seon.template/request-tx), so no
   agent forks before every task of it is set. Answers the writer's answer with the tasks'
   ids, or the error."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.task/declaration] :map]
-                  [:=> [:cat :seon.root/sys :seon.task/declaration ifn?] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.system/sys :seon.task/declaration] :map]
+                  [:=> [:cat :seon.system/sys :seon.task/declaration ifn?] :map]]}
   ([sys decl] (request! sys decl tpl/request))
   ([sys decl template]
    (let [ds (template decl)
@@ -43,20 +43,20 @@
 (defn run!
   "Release tasks ids: the one release (nothing autoruns). Each held task becomes running,
   by compare-and-swap on main (a cancel! between the read and the write refuses the write);
-  each id that is not held (unknown, running, cancelled) is answered :seon.root/not-held
+  each id that is not held (unknown, running, cancelled) is answered :seon.system/not-held
   under :not-held, and only the held ones are written. A release is a person's continue: the reasons root last gave
   (:seon.task/reasons) are retracted, so the same again is news to the next judgment (seon.reconcile/judgment); to go
   on past a turn cap, raise the agent's :seon.agent/max-turns first (docs/turn.md#the-cap). Answers the writer's answer (or
   {:ok true :changed 0} when none is held) with :not-held when any. Who released it is its starter (:seon.task/started-by): root's REPL
   evaluates as the user (seon.server's root eval records its evals by the user), so the user, and its agent is in the user's tree
   (:seon.agent/agents, seon.task/start-tx). See docs/users.md#who-started-whom."
-  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [db @(:conn sys)
         x (into {} (for [id ids] [id (some->> (pdb/eid db :seon.task/id id) (d/pull db [:seon.task/execution]) :seon.task/execution)]))
         held (filterv #(= :held (x %)) ids)
         refused (vec (for [id ids :when (not= :held (x id))]
-                       (contract/error :seon.root/not-held #'my.root/run!
+                       (contract/error :seon.system/not-held #'my.root/run!
                                        (str "task " id (if-let [e (x id)] (str " is " (name e)) " does not exist") ", not held: nothing to release")
                                        {:task id :execution (x id)})))]
     (cond-> (if (seq held)
@@ -73,7 +73,7 @@
   and keeps the task, which run! releases again (its failure, the reason, stays like any hold's: the
   next run continues from it). Answers {:tx :taken ids :not-running errors}: a task that is held,
   cancelled, unknown, never released or already done (merged work keeps :running) is answered
-  :seon.root/not-running."
+  :seon.system/not-running."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id] :string] :map]}
   [db ids reason]
   (let [x (into {} (for [id ids] [id (some->> (pdb/eid db :seon.task/id id) (d/pull db [:seon.task/execution]) :seon.task/execution)]))
@@ -84,7 +84,7 @@
      :tx (vec (mapcat (fn [id] [[:db/cas [:seon.task/id id] :seon.task/execution :running :held]
                                 {:seon.task/id id :seon.task/failure {:reason reason}}]) taken))
      :not-running (vec (for [id ids :when (not-any? #{id} taken)]
-                         (contract/error :seon.root/not-running #'my.root/take-back-tx
+                         (contract/error :seon.system/not-running #'my.root/take-back-tx
                                          (str "task " id (cond (nil? (x id)) " does not exist" (and (= :running (x id)) (done? id)) " is done" :else (str " is " (name (x id)))) ", not running: nothing to take back")
                                          {:task id :execution (x id)})))}))
 
@@ -93,7 +93,7 @@
   task is held with reason and keeps its branch, and run! releases it again (the next run
   continues the branch). Where cancel! is final, this is a pause root can end. Answers the writer's answer
   (or {:ok true :changed 0} when none is running) with :not-running when any."
-  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id] :string] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys [:sequential :seon.task/id] :string] :map]}
   [sys ids reason]
   (let [{:keys [tx not-running]} (take-back-tx @(:conn sys) ids reason)]
     (cond-> (if (seq tx) @(root/transact-main! sys tx) {:ok true :changed 0})
@@ -101,7 +101,7 @@
 
 (defn cancel-tx
   "The write that cancels the tasks among ids that exist on db, and an error for each id that names no
-  task (:seon.root/unknown-task): a cancel never makes a task, since an id upserted alone is an entity
+  task (:seon.system/unknown-task): a cancel never makes a task, since an id upserted alone is an entity
   with no namespace, name or plan that every reader of tasks then refuses (a bare name given for
   ns/name once made two such and stopped root's boot). Answers {:tx :unknown errors}."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id]] :map]}
@@ -109,15 +109,15 @@
   (let [known? #(some? (pdb/eid db :seon.task/id %))]
     {:tx (task/execution-tx (filterv known? ids) :cancelled)
      :unknown (vec (for [id ids :when (not (known? id))]
-                     (contract/error :seon.root/unknown-task #'my.root/cancel-tx
+                     (contract/error :seon.system/unknown-task #'my.root/cancel-tx
                                      (str "task " id " does not exist (a task's id is ns/name): nothing to cancel")
                                      {:task id})))}))
 
 (defn cancel!
   "Cancel the tasks among ids (cancel-tx): a live run is killed; tasks that need them stay blocked. An id
-  that names no task is answered :seon.root/unknown-task under :unknown and written nowhere. Answers the
+  that names no task is answered :seon.system/unknown-task under :unknown and written nowhere. Answers the
   writer's answer (or {:ok true :changed 0} when none exists) with :unknown when any."
-  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [{:keys [tx unknown]} (cancel-tx @(:conn sys) ids)]
     (cond-> (if (seq tx) @(root/transact-main! sys tx) {:ok true :changed 0})
@@ -126,10 +126,10 @@
 (defn write-back!
   "Sync main's changed files to disk: the files the merged tasks ids (none: every merged task whose files no commit holds) wait on, read from main as
   it is now and committed on the merges branch in one :git effect. What the git effect answers is recorded by seon.reconcile/commit-tx: the sha on each task, which
-  clears the wait (and holds a new one for any file main has no text for), or the error again. A task with no such files is answered :seon.root/nothing-lost under
+  clears the wait (and holds a new one for any file main has no text for), or the error again. A task with no such files is answered :seon.system/nothing-lost under
   :not-lost and left out; no source root, or no text on main for any of the files, is answered at once and recorded nowhere (the tasks keep their
   error). Answers {:written ids :paths paths :sha}, the git effect's error, or the precondition's, with :not-lost when any. See docs/source.md#commit-the-merges-branch."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys [:sequential :seon.task/id]] :map]]}
   ([sys] (write-back! sys (vec (for [e (d/q '[:find [?e ...] :where [?e :seon.task/error]] @(:conn sys))
                                      :let [t (d/pull @(:conn sys) [:seon.task/id :seon.task/outcome :seon.task/error] e)]
                                      :when (reconcile/lost-write-back t)]
@@ -139,16 +139,16 @@
         tasks (into {} (for [id ids] [id (d/pull db [:seon.task/outcome :seon.task/error] [:seon.task/id id])]))
         lost (filterv #(some? (reconcile/lost-write-back (tasks %))) ids)
         not-lost (vec (for [id ids :when (not-any? #{id} lost)]
-                        (contract/error :seon.root/nothing-lost #'my.root/write-back!
+                        (contract/error :seon.system/nothing-lost #'my.root/write-back!
                                         (str "task " id (if (:seon.task/outcome (tasks id)) " has no write-back to repeat" " does not exist")) {:task id})))
         paths (vec (sort (distinct (mapcat #(:seon.git/files (reconcile/lost-write-back (tasks %))) lost))))
         root (config/value :seon.config.source/root)
         files (when (and (seq lost) root) (doc/files db paths))
         members (vec (for [id lost] {:task id}))
         r (cond (empty? lost) {:written []}
-                (nil? root) (contract/error :seon.root/no-source-root #'my.root/write-back!
+                (nil? root) (contract/error :seon.system/no-source-root #'my.root/write-back!
                                             "no source root declared (:seon.config.source/root): nothing is written back here" {:tasks lost})
-                (empty? files) (contract/error :seon.root/no-source-text #'my.root/write-back!
+                (empty? files) (contract/error :seon.system/no-source-text #'my.root/write-back!
                                                (str "main holds no text for " (str/join ", " paths) ": nothing to write back") {:paths paths})
                 :else @(root/effect! sys :git {:dir root :branch (config/value :seon.config.source/branch) :files files :modes (source/modes db (keys files))
                                                :message (source/commit-message members)}))
@@ -162,7 +162,7 @@
   db holds them now, and its task file, read under tasks-dir (where root reads its tasks), with its entry removed
   (seon.source/task-file-text), as the :git effect's request for root's source dir: on jolt/sync-<the first task's name>, a new
   branch starting at git's main (:seon.config.source/main), its message naming each task as Completes:. A task that is no
-  merged task its files still declare (seon.problems/unsynced?) is :seon.root/nothing-to-sync under :not-unsynced. Answers
+  merged task its files still declare (seon.problems/unsynced?) is :seon.system/nothing-to-sync under :not-unsynced. Answers
   {:tasks :paths :req :not-unsynced}. See docs/source.md#a-merged-task-reaches-mains-files."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.task/id] :string] :map]}
   [db ids tasks-dir]
@@ -176,7 +176,7 @@
         files (merge (doc/files db paths) entries)]
     {:tasks ts :paths paths
      :not-unsynced (vec (for [id ids :when (not-any? #{id} ts)]
-                          (contract/error :seon.root/nothing-to-sync #'my.root/sync-req (str "task " id " is no merged task main's files still declare") {:task id})))
+                          (contract/error :seon.system/nothing-to-sync #'my.root/sync-req (str "task " id " is no merged task main's files still declare") {:task id})))
      :req {:branch (str "jolt/sync-" (some-> (first ts) (str/split #"/" 2) second)) :base (config/value :seon.config.source/main)
            :files files :modes (source/modes db (keys files))
            :message (str "Sync: " (str/join ", " ts) "\n\n" (str/join (for [id ts] (str "Completes: " id "\n"))))}}))
@@ -185,30 +185,30 @@
   "Write the merged tasks ids' work onto a branch for a session to review and land (sync-req), in one :git effect on root's source
   dir (:seon.config.source/root). Landing it (bin/land) brings main's files the work and retracts each entry
   (seon.task/load-tx), which closes its :unsynced row. Answers {:branch :sha :tasks :paths} with :not-unsynced when any, the git
-  effect's error, or :seon.root/no-source-root. See docs/source.md#a-merged-task-reaches-mains-files."
-  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
+  effect's error, or :seon.system/no-source-root. See docs/source.md#a-merged-task-reaches-mains-files."
+  {:malli/schema [:=> [:cat :seon.system/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [{:keys [tasks paths req not-unsynced]} (sync-req @(:conn sys) ids (config/value :seon.config.root/tasks-dir))
         root (config/value :seon.config.source/root)
         r (cond (empty? tasks) {:value {:sha nil}}
-                (nil? root) (contract/error :seon.root/no-source-root #'my.root/sync! "no source root declared (:seon.config.source/root): nothing is written here" {:tasks tasks})
+                (nil? root) (contract/error :seon.system/no-source-root #'my.root/sync! "no source root declared (:seon.config.source/root): nothing is written here" {:tasks tasks})
                 :else @(root/effect! sys :git (assoc req :dir root)))]
     (cond-> (if (contract/error? r) r {:branch (when (seq tasks) (:branch req)) :sha (get-in r [:value :sha]) :tasks tasks :paths paths})
       (seq not-unsynced) (assoc :not-unsynced not-unsynced))))
 
 (defn tasks-read-tx
-  "The write of outcome, the last read of the task files (:seon.root/tasks: {:files} or {:error}),
+  "The write of outcome, the last read of the task files (:seon.system/tasks: {:files} or {:error}),
   on root. A refused read's error names it as its subject and is written with it, in one
   transaction; the first read whose outcome differs closes it, and the same outcome again
   writes no datom."
-  {:malli/schema [:=> [:cat :seon.root/tasks] [:vector :map]]}
-  [outcome] [{:seon.root/id :root :seon.root/tasks outcome}])
+  {:malli/schema [:=> [:cat :seon.system/tasks] [:vector :map]]}
+  [outcome] [{:seon.system/id :root :seon.system/tasks outcome}])
 
 (defn load-answer
   "Answer r of a read of the task files, as load-tasks! answers it: a refused one (a file's or the
-  reconcile's) names :seon.root/tasks as its subject, the read's outcome."
+  reconcile's) names :seon.system/tasks as its subject, the read's outcome."
   {:malli/schema [:=> [:cat :map] :map]}
-  [r] (cond-> r (contract/error? r) (assoc :seon.error/subject :seon.root/tasks)))
+  [r] (cond-> r (contract/error? r) (assoc :seon.error/subject :seon.system/tasks)))
 
 (def ^:private load-lock
   "The one lock every loader of main's declared state takes around its read of main's db and the write
@@ -220,10 +220,10 @@
 (defn load-tasks!
   "Reconcile the task files into main (seon.task/load-tx): new entries created held, changed
   ones updated, removed ones cancelled; unchanged ones write nothing. A good read writes its
-  outcome, root's :seon.root/tasks (tasks-read-tx), with the declarations when it differs from the
+  outcome, root's :seon.system/tasks (tasks-read-tx), with the declarations when it differs from the
   one held; a refused one answers its error (load-answer) to whoever asked. A person's re-index
   (docs/source.md#indexing-a-tree). Answers the writer's answer with the counts, or the error. Releasing stays run!'s."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :string] :map]]}
   ([sys] (load-tasks! sys nil))
   ([sys dir]
    (locking load-lock
@@ -231,7 +231,7 @@
            files (if dir (root/task-files dir) (root/task-files))
            tx (task/load-tx db files)
            outcome {:files (count files)}
-           held (some->> (pdb/eid db :seon.root/id :root) (d/pull db [:seon.root/tasks]) :seon.root/tasks)]
+           held (some->> (pdb/eid db :seon.system/id :root) (d/pull db [:seon.system/tasks]) :seon.system/tasks)]
        ;; the outcome rides in the declarations' transaction, and only when it changed: an unchanged
        ;; good read still writes nothing
        (load-answer (write-declared! sys (cond-> tx (and (not (contract/error? tx)) (not= outcome held)) (into (tasks-read-tx outcome)))
@@ -244,16 +244,16 @@
 (defn example-txs
   "The tx-data of the example session file at path (seon.ctx.session/session-tx's answer written with pr-str: a
   non-empty vector of transactions, the first writing the example agent keyed \"example/<id>\"), read as
-  seon.root/task-files reads a task file (seon.lib/dir-texts, so a file gone when read is a file not found), or the
-  :seon.root/example-refused error naming path: not found, not readable EDN, or not that vector. The one edge
+  seon.system/task-files reads a task file (seon.lib/dir-texts, so a file gone when read is a file not found), or the
+  :seon.system/example-refused error naming path: not found, not readable EDN, or not that vector. The one edge
   of an example file (docs/failure-points.md); the read is of the directory's files named like path, the
   one by that name taken."
-  {:malli/schema [:=> [:cat :string] [:or [:vector [:vector :map]] :seon.root/example-refused]]}
+  {:malli/schema [:=> [:cat :string] [:or [:vector [:vector :map]] :seon.system/example-refused]]}
   [path]
   (let [f (java.io.File. path)
         n (.getName f)
         text (get (lib/dir-texts (or (.getParent f) ".") n) n)
-        refuse #(contract/error :seon.root/example-refused #'my.root/example-txs (str "example file " path ": " %) {:path path})
+        refuse #(contract/error :seon.system/example-refused #'my.root/example-txs (str "example file " path ": " %) {:path path})
         [ok x] (if text (try [:read (edn/read-string text)] (catch Exception e [:unreadable (ex-message e)])) [:missing])]
     (cond (= :missing ok) (refuse "not found")
           (= :unreadable ok) (refuse (str "not readable EDN: " x))
@@ -270,7 +270,7 @@
   writes nothing ({:ok true :changed 0 :batches 0}); else the last writer's answer with :batches, how many it
   wrote. The example agent has no branch (only the writer makes a branch): its records are main's, and its pages
   open at /agent/main/example-<id>, the page of a branchless agent on main (seon.render.proc/location). See docs/tasks.md#a-task-names-example-sessions."
-  {:malli/schema [:=> [:cat :seon.root/sys :string] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys :string] :map]}
   [sys path]
   (let [txs (example-txs path)]
     (if (contract/error? txs)
@@ -288,7 +288,7 @@
   entities (seon.doc/load-tx), a person's explicit act: a changed section rewritten, a removed one retracted, an
   unchanged wiki writing nothing. Answers the writer's answer with the counts; a link to no section is its refusal, :seon.db/no-target naming
   it (docs/references.md#the-wiki-in-the-store). See docs/source.md#indexing-a-tree."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys] :map] [:=> [:cat :seon.root/sys :string] :map]]}
+  {:malli/schema [:function [:=> [:cat :seon.system/sys] :map] [:=> [:cat :seon.system/sys :string] :map]]}
   ([sys] (load-docs! sys "docs"))
   ([sys dir]
    (locking load-lock
@@ -305,25 +305,25 @@
   repeats not yet on main). The render proc's health, kept by what each move of main changed
   (seon.render.proc/health!), brought to main as this call reads it: a read costs what main changed
   since the last, never the whole program (seon.problems/health). See docs/health.md#cost."
-  {:malli/schema [:=> [:cat :seon.root/sys] :seon.problems/report]}
+  {:malli/schema [:=> [:cat :seon.system/sys] :seon.problems/report]}
   [sys] @(root/call! sys {:op :health :db @(:conn sys)}))
 
 (defn import!
   "Re-index Seon's source into main now, a person's explicit act (docs/source.md#indexing-a-tree): with paths (relative
   to the source root) only those files, else the tree's changes since main's last index (the :source read,
-  seon.fx/read-source), as a seed indexes it (seon.root/import-of), written on main with root's :seon.root/source fact
+  seon.fx/read-source), as a seed indexes it (seon.system/import-of), written on main with root's :seon.system/source fact
   in one transaction, which keeps what this boot recorded of its binary. Answers the fact written, main's fact when
   nothing differs, the error that stopped it (a read that failed, a file that does not load), or nil when root has no
   source tree."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys] :any]
-                  [:=> [:cat :seon.root/sys [:maybe [:set :string]]] :any]]}
+  {:malli/schema [:function [:=> [:cat :seon.system/sys] :any]
+                  [:=> [:cat :seon.system/sys [:maybe [:set :string]]] :any]]}
   ([sys] (import! sys nil))
   ([sys paths]
    (when-let [{:keys [root dirs] :as source} (get-in sys [:bindings :source])]
      (locking load-lock
        (let [t0 (profile/now-ns)
              db @(:conn sys)
-             held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
+             held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))
              paths (when (:digest held) (some-> paths set))
              r @(root/effect! sys :source (cond-> {:root root :dirs dirs :paths paths}
                                            (and (nil? paths) (:digest held) (:tree held)) (assoc :since (:tree held) :since-dirs (:dirs held []))))
@@ -332,7 +332,7 @@
                error error
                (nil? tx) held
                :else (let [fact (merge fact (select-keys held [:boot :binary :program :inputs]))
-                           w @(root/transact-main! sys (conj tx {:seon.root/id :root :seon.root/source fact}))]
+                           w @(root/transact-main! sys (conj tx {:seon.system/id :root :seon.system/source fact}))]
                        (if (contract/error? w) w fact))))))))
 
 (defn union
@@ -340,21 +340,21 @@
   sys)) asks what happened across every branch; each datom's transaction names its branch
   (:seon.tx/branch). Built at the first ask (about 1 s at 50k datoms), then kept current by
   every commit (about 1 ms each)."
-  {:malli/schema [:=> [:cat :seon.root/sys] :seon.host/db]}
+  {:malli/schema [:=> [:cat :seon.system/sys] :seon.host/db]}
   [sys] (:db @(root/union sys)))
 
 (defn generation
   "The next generation on main (seon.reconcile/generation): the last merges commit built,
   {:commit :checkout :binary :ms}, or why its build was refused; nil before any."
-  {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :seon.root/generation]]}
+  {:malli/schema [:=> [:cat :seon.system/sys] [:maybe :seon.system/generation]]}
   [sys] (reconcile/generation @(:conn sys)))
 
 (defn resume-args
-  "The root arguments (bin/root start ARGS) that resume this root's store and main, Seon's
+  "The root arguments (bin/system start ARGS) that resume this root's store and main, Seon's
   source at source-root (its tree's own, by default): a restart catches up on main's merges
   where it boots (seon.program/load-all!), and the test that started this boot, when one did
-  (:seon.root/started-by): the next generation is still that test's root."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys] [:vector :string]] [:=> [:cat :seon.root/sys [:maybe :string]] [:vector :string]]]}
+  (:seon.system/started-by): the next generation is still that test's root."
+  {:malli/schema [:function [:=> [:cat :seon.system/sys] [:vector :string]] [:=> [:cat :seon.system/sys [:maybe :string]] [:vector :string]]]}
   ([sys] (resume-args sys (get-in sys [:bindings :source :root])))
   ([sys source-root]
    (-> (into [] (mapcat (fn [[k v]] ["--set" (str k "=" (sedn/encode v))]))
@@ -368,45 +368,45 @@
        (into (when-let [t (:started-by (task/root @(:conn sys)))] ["--started-by" t])))))
 
 (defn landed!
-  "A landing kept in place (bin/update after bin/land's bridge): when nothing calls for a restart (seon.root/restart-for of main's
+  "A landing kept in place (bin/update after bin/land's bridge): when nothing calls for a restart (seon.system/restart-for of main's
   source fact, tree, the binary's answer for it and the inputs bin/update wrote), main's source fact is written again as a boot
-  writes it (seon.root/booted-source: this boot, main's program digest now, the inputs of the files now), so agents key their
+  writes it (seon.system/booted-source: this boot, main's program digest now, the inputs of the files now), so agents key their
   results by the landed files and every agent keeps running. Answers {:kept boot :tree} or {:restart why}, which bin/update
   restarts on. See docs/source.md#a-landing-enters-main-as-data."
-  {:malli/schema [:=> [:cat :seon.root/sys :string] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys :string] :map]}
   [sys tree]
   (let [db @(:conn sys)
-        held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
+        held (:seon.system/source (d/pull db [:seon.system/source] [:seon.system/id :root]))
         inputs (root/held-inputs)
         why (root/restart-for held tree (when (= tree (:tree held)) (root/stale-binary db)) inputs)]
     (if why
       {:restart why}
       (let [src (root/booted-source held (:boot sys) (program/binary-program) (program/program-digest db) (fx/config-input config/config (config/checkout)) nil inputs)
-            r @(root/transact-main! sys [{:seon.root/id :root :seon.root/source src}])]
+            r @(root/transact-main! sys [{:seon.system/id :root :seon.system/source src}])]
         (if (contract/error? r) r {:kept (:boot sys) :tree tree})))))
 
 (defn build!
   "Build the next generation from main's last merges commit, for what cannot load in place
   (a Jolt, Chez or dependency pin, deps.edn, native code; a merge loads in place:
   seon.program/load-changes!). Waits for the :build effect (seon.fx/build), records what it
-  answered on main (:seon.root/generation, and a failure's :effect row naming it:
-  seon.error/asked-tx) and answers it: what `bin/root next` starts. nil
+  answered on main (:seon.system/generation, and a failure's :effect row naming it:
+  seon.error/asked-tx) and answers it: what `bin/system next` starts. nil
   when no merge was committed."
-  {:malli/schema [:=> [:cat :seon.root/sys] [:maybe :seon.root/generation]]}
+  {:malli/schema [:=> [:cat :seon.system/sys] [:maybe :seon.system/generation]]}
   [sys]
   (when-let [commit (reconcile/last-commit @(:conn sys))]
     (let [r @(root/effect! sys :build {:repo (get-in sys [:bindings :source :root]) :commit commit})
           g (if (contract/error? r)
               {:commit commit :ms (/ (:seon.fx/us r 0) 1000.0) :error (:seon.error/message r)}
               (:value r))]
-      @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.root/generation [{:seon.root/id :root :seon.root/generation g}]))
+      @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.system/generation [{:seon.system/id :root :seon.system/generation g}]))
       g)))
 
 (defn next-generation
-  "What `bin/root next` starts (docs/source.md#the-next-generation): [checkout & args], the
+  "What `bin/system next` starts (docs/source.md#the-next-generation): [checkout & args], the
   built generation's tree and the arguments that resume this root's store and main in it,
   Seon's source now its tree; nil when no generation is built (my.root/build!)."
-  {:malli/schema [:=> [:cat :seon.root/sys] [:maybe [:vector :string]]]}
+  {:malli/schema [:=> [:cat :seon.system/sys] [:maybe [:vector :string]]]}
   [sys]
   (when-let [{:keys [checkout]} (let [g (generation sys)] (when (:binary g) g))]
     (into [checkout] (resume-args sys checkout))))
@@ -426,10 +426,10 @@
   (seon.judge/scorer) is scored again from its calls, with no model call (:reused?
   :rescored?). Answers {:rows [{:task :acted :right-var :right-test :waste :uncompiled :green
   :usd :reused? :rescored?}] :usd :stopped :error}."
-  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [bound (fn [db id] (config/value :seon.config.ai/judge-pass-usd {:task (d/pull db [:seon.config.ai/judge-pass-usd] [:seon.task/id id])}))
-        src (:seon.root/source (d/pull @(:conn sys) [:seon.root/source] [:seon.root/id :root]))
+        src (:seon.system/source (d/pull @(:conn sys) [:seon.system/source] [:seon.system/id :root]))
         version (select-keys src [:root :commit])
         ;; the score of calls against task t's subject, made in an agent of its own (a reply's
         ;; ns forms run there, so no task's reading leaks into the next), ended once it answers;
@@ -521,7 +521,7 @@
   "Write main's slow tests as held tasks (slow-tests-tx over the test vars of main, by the verdict cache), so a
   test the cache shows slow is work with its metric known ahead of time; bin/update calls it once root is up.
   Answers the task ids filed, [] when every slow test has its task. See docs/merging.md#a-slow-test-runs-last."
-  {:malli/schema [:=> [:cat :seon.root/sys] [:vector :string]]}
+  {:malli/schema [:=> [:cat :seon.system/sys] [:vector :string]]}
   [sys]
   (let [db @(:conn sys)
         tests (into {} (for [d (d/datoms db :aevt :var/name) :when (str/ends-with? (or (namespace (:v d)) "") "-test")] [(:v d) nil]))
@@ -532,10 +532,10 @@
 (defn file-findings!
   "Write main's :long-form findings as held tasks (findings-tx over main and its reach graph), for root or
   the owner to release (my.root/run!): the system's long parts become its work. Answers the task ids filed, [] when every finding has its task."
-  {:malli/schema [:=> [:cat :seon.root/sys] [:vector :string]]}
+  {:malli/schema [:=> [:cat :seon.system/sys] [:vector :string]]}
   [sys]
   (let [db @(:conn sys)
-        g (program/reach-indexed (program/reach-graph db (fx/declared-refs seon.system/built-text))
+        g (program/reach-indexed (program/reach-graph db (fx/declared-refs seon.graph/built-text))
                                  (second (seon.agent/test-inputs db)))
         tx (findings-tx db g)]
     (when (seq tx) @(root/transact-main! sys tx))

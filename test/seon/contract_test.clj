@@ -87,7 +87,7 @@
           (let [big (vec (range (quot n 8)))
                 text (apply str (repeat n "x"))
                 live (atom big)
-                flowed (:data (#'seon.root/flow-error {:clojure.core.async.flow/pid :render
+                flowed (:data (#'seon.system/flow-error {:clojure.core.async.flow/pid :render
                                                        :clojure.core.async.flow/ex (ex-info "boom" {:v big :s text :a live})}))]
             (is (not-any? #(instance? clojure.lang.IDeref %) (tree-seq coll? seq flowed)) "no live object is kept, only its print")
             (is (string? (:seon.print/code (:a flowed))) "the atom is kept as its print")
@@ -103,7 +103,7 @@
 (deftest an-agents-own-error-keeps-its-full-data
   (let [big (vec (range 100000)) text (apply str (repeat 100000 "x")) live (atom big)
         mapped ((requiring-resolve 'seon.agent/error-map) (ex-info "boom" {:v big :s text :a live}))
-        made (contract/error :seon.root/refused 'app/f "boom" {:big big :took text :held live})]
+        made (contract/error :seon.system/refused 'app/f "boom" {:big big :took text :held live})]
     ;; plain data whole, whatever its size; what no store keeps, a live atom, is what it was (seon.contract/plainly)
     (is (= {:v big :s text} (select-keys (:data mapped) [:v :s])) "an eval error's ex-data is its :data, whole")
     (is (= {:seon.value/type (.getName (class live))} (:a (:data mapped))))

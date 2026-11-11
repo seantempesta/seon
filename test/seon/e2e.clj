@@ -10,7 +10,7 @@
   Each run ends on what the system observes (the reconciler's quiescence report, an event,
   or a fact on main), never on a deadline. Prints one EDN line per phase; the last line is
   the run's numbers and its verdict."
-  (:require [seon.await :as await] [seon.root :as c] [my.root :as root] [seon.task :as task] [seon.turn :as turn] [seon.ctx.wire :as wire] [seon.reconcile :as r]
+  (:require [seon.await :as await] [seon.system :as c] [my.root :as root] [seon.task :as task] [seon.turn :as turn] [seon.ctx.wire :as wire] [seon.reconcile :as r]
             [seon.fixtures :as fx] [datahike.api :as d] [seon.lib :as lib] [clojure.string :as str] [seon.config] [clojure.java.shell :as sh]
             [clojure.core.async :as a] [seon.server :as server] [seon.contract :as contract] [seon.test-store :as ts]))
 
@@ -47,7 +47,7 @@
   "A function from an agent key to the db of its branch on sys: an agent's turns and model calls are written there (main holds its
   start and its end, as the task's outcome), d being main; an agent no root has started yet (root's session at boot,
   docs/users.md#roots-session) has no branch and has written nothing, so its records are main's."
-  {:malli/schema [:=> [:cat :seon.root/sys :seon.host/db] fn?]}
+  {:malli/schema [:=> [:cat :seon.system/sys :seon.host/db] fn?]}
   [sys d]
   (fn [k] (if-let [b (:seon.agent/branch (d/entity d [:seon.agent/key k]))] (:db @(c/branch-db sys b)) d)))
 
@@ -167,7 +167,7 @@
         cloned (sh/sh "git" "clone" "-q" "--local" repo tree)
         head (git "rev-parse" "HEAD")
         sys (c/start! {:datoms 300 :max-running 2 :source {:root tree :dirs ["src"] :branch "jolt/seon-merges"}})
-        src (d/q '[:find ?s . :where [?e :seon.root/source ?s]] (db sys))]
+        src (d/q '[:find ?s . :where [?e :seon.system/source ?s]] (db sys))]
     (println :clone (:exit cloned) tree :head head)
     (println :source src)
     (let [{:keys [commits commit-errors turn-ms spans root agent] sha :commit} (loop-turn! sys)
@@ -210,7 +210,7 @@
     (select-keys (if model? (merge e (:model e)) e) [:check :expect])))
 
 (defn- work-summaries
-  "server/task-summaries of d less root's own session's task (its session is the agent keyed \"root\", seon.root/root-session-boot-tx: made at
+  "server/task-summaries of d less root's own session's task (its session is the agent keyed \"root\", seon.system/root-session-boot-tx: made at
   every boot, parked until a message, never done): the work a scenario released."
   [d] (into {} (remove (fn [[id _]] (= "root" (task/session-key d id)))) (server/task-summaries d)))
 

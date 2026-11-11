@@ -6,7 +6,7 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.doc :as doc] [seon.sqlite :as sqlite] [seon.root] [seon.config] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
+            [seon.doc :as doc] [seon.sqlite :as sqlite] [seon.system] [seon.config] [seon.source] [seon.fx] [seon.ref] [seon.problems :as problems]
             [seon.config :as config]))
 
 (defn- empty-db [] (ts/test-db))
@@ -368,12 +368,12 @@
   (with-checkout
     (fn [co]
       (let [db0 (mt/world)
-            tx (seon.root/wiki-tx db0 co)
+            tx (seon.system/wiki-tx db0 co)
             db (pdb/db-with db0 tx)
             paths (set (seon.doc/page-paths db))]
         (is (every? paths ["AGENTS.md" "BAGGAGE.md" "README.md" "docs/agent.md"]) "the top-level pages and docs/'s")
         (is (seq (seon.doc/page db "AGENTS.md" :summary)) "a top-level page reads through the one view")
-        (is (= [] (seon.root/wiki-tx db co)) "an unchanged wiki writes nothing")
+        (is (= [] (seon.system/wiki-tx db co)) "an unchanged wiki writes nothing")
         (is (= "docs" (first (seon.config/value :seon.config.root/wiki-dirs))))
         (is (= {"AGENTS.md" true} (select-keys (into {} (map (fn [p] [p true])) (keys (seon.doc/pages co "."))) ["AGENTS.md"])) "pages of \".\" are named without a directory")))))
 
@@ -396,7 +396,7 @@
         ix0 (seon.doc/text-index db0)
         n0 (sqlite/size ix0)
         attrs #(map (juxt :e :a) (:tx-data %))
-        r1 (d/with db0 [{:seon.root/id :root :seon.root/boot "a-boot"}])
+        r1 (d/with db0 [{:seon.system/id :root :seon.system/boot "a-boot"}])
         _ (seon.doc/carry-index! db0 (:db-after r1) (attrs r1))
         db1 (:db-after r1)
         ;; the slot is keyed to db1 by the carry itself, before any read could build

@@ -28,15 +28,15 @@
 (deftest calls-become-requests
   (testing "the REPL box: an eval in that agent, origin :ui"
     (is (= [[{:op :eval :id :a1 :forms "(+ 1 2)" :origin :ui} :a1]]
-           (w/requests {:var 'seon.root/submit! :agent :a1 :forms "(+ 1 2)"} index))))
+           (w/requests {:var 'seon.system/submit! :agent :a1 :forms "(+ 1 2)"} index))))
   (testing "all=>: one eval per live agent, the ended ones left out"
-    (is (= [:a1 :a3] (mapv second (w/requests {:var 'seon.root/submit! :agent :all :forms "1"} index)))))
+    (is (= [:a1 :a3] (mapv second (w/requests {:var 'seon.system/submit! :agent :all :forms "1"} index)))))
   (testing "interrupt!: an effect this proc performs, no request"
-    (is (= [] (w/requests {:var 'seon.root/interrupt! :agent :a1} index))))
+    (is (= [] (w/requests {:var 'seon.system/interrupt! :agent :a1} index))))
   (testing "run-tests!: the agent proves its branch through the test service, as root's judge does (task seon.proofs/the-dashboards-run-tests-asks-the-service)"
-    (is (= [[{:op :judge :id :a1} :a1]] (w/requests {:var 'seon.root/run-tests! :agent :a1} index))))
+    (is (= [[{:op :judge :id :a1} :a1]] (w/requests {:var 'seon.system/run-tests! :agent :a1} index))))
   (testing "spawn n with the form's task"
-    (let [rs (w/requests {:var 'seon.root/spawn! :agent :root :args {:n 3 :task "x"}} index)]
+    (let [rs (w/requests {:var 'seon.system/spawn! :agent :root :args {:n 3 :task "x"}} index)]
       (is (= 3 (count rs)))
       (is (every? #(= {:op :spawn :opts {:task "x"}} (first %)) rs))))
   (testing "an agent's own fn: evaluated there through the allowlist check"
@@ -52,8 +52,8 @@
   (is (= :seon.render/not-callable (:seon.error/type (w/ui-call 'no.such/fn {})))))
 
 (deftest callbacks-are-data
-  (is (= "<button data-on:click=\"@post('/call?fn=seon.root%2Fkill%21&amp;agent=a1')\">x</button>"
-         (h/html [:button {:seon/call 'seon.root/kill! :seon/agent :a1} "x"])))
+  (is (= "<button data-on:click=\"@post('/call?fn=seon.system%2Fkill%21&amp;agent=a1')\">x</button>"
+         (h/html [:button {:seon/call 'seon.system/kill! :seon/agent :a1} "x"])))
   (is (str/includes? (h/html [:form {:seon/call 'app.x/f :seon/args {:k 1}} [:input {:name "v"}]])
                      "contentType:'form'")))
 
@@ -92,7 +92,7 @@
   ;; task seon.render/one-owner-per-view-path (B9): root's function called from the page is
   ;; recorded on main with what root answered, when it answers; never a made-up "requested"
   (let [st (#'w/web-proc {:port 0})
-        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/kill! :agent :a1}})
+        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.system/kill! :agent :a1}})
         [req] (:to-api out)]
     (is (= 1 (count (:to-api out))) "the function's request only: nothing is recorded before root answers")
     (is (not (str/includes? (pr-str out) "requested")))
@@ -100,16 +100,16 @@
           [_ o] (#'p/render-proc rp :answers {:tag (:tag req) :r {:ok true :killed :a1}})
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
           e (some #(when (:seon.eval/response %) %) (get-in w [:req :req :tx-data]))]
-      (is (= "(seon.root/kill! :a1)" (:seon.eval/code e)))
+      (is (= "(seon.system/kill! :a1)" (:seon.eval/code e)))
       (is (= "user" (:seon.agent/key (:seon.eval/by e))) "by the user, a ref to the user's agent")
       (is (str/includes? (seon.print/record-text (assoc e :seon.eval/response (seon.db/response-of nil e))) ":killed :a1") "what root answered"))))
 
 (deftest an-eval-opened-on-a-page-is-no-eval-of-roots
-  ;; the browser pass (3b-root): opening an agent's eval on its page called seon.root/opened!, and each
+  ;; the browser pass (3b-root): opening an agent's eval on its page called seon.system/opened!, and each
   ;; open was recorded as an eval in root's conversation. Opening is a reader's view of the eval,
   ;; written as the fact (:seon.agent/opened), never root's work
   (let [st (#'w/web-proc {:port 0})
-        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/opened! :agent :a1 :args {:key "b1/a1" :eval "e9"}}})
+        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.system/opened! :agent :a1 :args {:key "b1/a1" :eval "e9"}}})
         [req] (:to-api out)]
     (is (= :write (get-in req [:req :op])) (pr-str req))
     (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :zoom {} :merges 0}
@@ -120,16 +120,16 @@
   ;; root refuses a call of one of its fns that is none of its requests, before any request: the refused
   ;; answer goes to the render proc as the call's answer (shown, and recorded on main as an :err item), not dropped
   (let [st (#'w/web-proc {:port 0})
-        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.root/nope! :agent :a2}})
+        [_ out] (#'w/web-proc (assoc st :index index) :http {:op :call :call {:var 'seon.system/nope! :agent :a2}})
         [m] (:to-render out)]
     (is (empty? (:to-api out)) "no request: root refused it")
     (is (= :refused (:op m)))
-    (is (= :seon.root/refused (:seon.error/type (:r m))))
+    (is (= :seon.system/refused (:seon.error/type (:r m))))
     (let [rp {:rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events [] :views {} :zoom {} :merges 0}
           [_ o] (#'p/render-proc rp :from-web m)
           w (first (filter #(= :write (get-in % [:req :op])) (:to-api o)))
           e (some #(when (:seon.eval/response %) %) (get-in w [:req :req :tx-data]))]
-      (is (= "(seon.root/nope! :a2)" (:seon.eval/code e)))
+      (is (= "(seon.system/nope! :a2)" (:seon.eval/code e)))
       (is (str/includes? (seon.print/record-text (assoc e :seon.eval/response (seon.db/response-of nil e))) "not one of root's requests") "what root refused, and why"))))
 
 (deftest a-listener-that-cannot-bind-is-the-one-error-map
@@ -160,7 +160,7 @@
   ;; (a call, a cut opened, a debug step); the dashboard's own page, and a client naming no origin, are served
   (let [ch (a/chan 8)
         handle (w/handler ch)
-        posts {"/call" ["fn=seon.root%2Fsubmit%21" :call] "/open" ["view=c1&unit=c1-row&open=true" :toggle] "/at" ["view=c1&turn=latest" :at]}
+        posts {"/call" ["fn=seon.system%2Fsubmit%21" :call] "/open" ["view=c1&unit=c1-row&open=true" :toggle] "/at" ["view=c1&turn=latest" :at]}
         post (fn [uri headers]
                (handle {:request-method :post :uri uri :query-string (first (posts uri))
                         :headers headers :body (java.io.StringReader. "")}))

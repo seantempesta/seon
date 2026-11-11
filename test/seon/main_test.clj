@@ -1,9 +1,9 @@
 (ns seon.main-test
-  "A root holds no program it was not given (GUARDS #50): a fresh store, as seon.root/start!
+  "A root holds no program it was not given (GUARDS #50): a fresh store, as seon.system/start!
   opens it by default, holds the schema and nothing else; root's warm-up needs no seed."
   (:require [seon.lib] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [seon.program] [seon.root :as root] [seon.main] [seon.test-store :as ts] [test-runner :as runner]))
+            [seon.db :as pdb] [seon.program] [seon.system :as root] [seon.main] [seon.test-store :as ts] [test-runner :as runner]))
 
 (defn- program-datoms [db]
   (vec (mapcat #(d/datoms db :aevt %) [:ns/name :form/id :var/name :task/name])))
@@ -43,7 +43,7 @@
         file (into {} (d/q '[:find ?n ?f :where [?e :ns/name ?n] [?e :ns/file ?f]] db))
         in? (fn [dir n] (some-> (file n) (clojure.string/starts-with? dir)))
         reqs (d/q '[:find ?n ?r :where [?e :ns/name ?n] [?e :ns/form ?f] [?f :form/requires ?r]] db)]
-    (is (in? "src/" 'seon.root) "the facts hold src's namespaces")
+    (is (in? "src/" 'seon.system) "the facts hold src's namespaces")
     (is (in? "test/" 'seon.fixtures) "and test's")
     (is (= #{} (set (for [[n r] reqs :when (and (in? "src/" n) (in? "test/" r))] [n r])))
         "no src namespace requires a test/ one")))
@@ -273,7 +273,7 @@
     (is (= #{'seon.fx/git-run 'seon.fx/checked-out? 'seon.config/reader} readers))))
 
 (deftest every-shell-runs-through-lib-sh
-  ;; task seon.root/a-boot-runs-no-shell-of-its-own: clojure.java.shell/sh called off a fiber copies a child's pipes on
+  ;; task seon.system/a-boot-runs-no-shell-of-its-own: clojure.java.shell/sh called off a fiber copies a child's pipes on
   ;; futures, threads of Clojure's send-off pool that root does not declare (seon.server-test/a-done-shells-on-no-thread-of-roots);
   ;; seon.lib/sh runs it on a fiber, and no other src form names it (docs/machine.md#processes). src's forms read as data
   ;; from the compiler's facts

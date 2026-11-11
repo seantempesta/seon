@@ -1,14 +1,14 @@
 (ns seon.main
-  "The production entry point of the binary: a root serving its checkout (bin/root's `root`
+  "The production entry point of the binary: a root serving its checkout (bin/system's `root`
   mode); every other mode loads the check driver (seon.check,
   in test/) from the checkout's source. The binary holds what this namespace requires, so it
-  requires every namespace system.edn names a proc in (seon.system resolves them by name at boot)."
+  requires every namespace system.edn names a proc in (seon.graph resolves them by name at boot)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.root :as c] [seon.program] [seon.lib :as lib] [seon.print :as print]
+  (:require [seon.contract :refer [defn defn-]] [seon.system :as c] [seon.program] [seon.lib :as lib] [seon.print :as print]
             [seon.config] [seon.server] [seon.fx] [clojure.string] [my.root] [clojure.edn] [jolt.deps]
             ;; the e2e loop's subject: the binary built from a merge answers its new value
             [seon.generation] [seon.vector] [seon.problems :as problems]
-            ;; the procs system.edn names, resolved by name at boot (seon.system/proc-var)
+            ;; the procs system.edn names, resolved by name at boot (seon.graph/proc-var)
             [seon.fork-server] [seon.prove] [seon.reconcile] [seon.render.proc] [seon.web] [seon.writer]))
 
 (defn out!
@@ -22,7 +22,7 @@
   [v] (print/text (vary-meta v assoc :seon.print/full true)))
 
 (defn- checkout
-  "The checkout this binary runs for: the parent of the working directory (bin/root and
+  "The checkout this binary runs for: the parent of the working directory (bin/system and
   bin/check run the binary in target/)."
   {:malli/schema [:=> [:cat] :string]}
   [] (.getParent (java.io.File. (System/getProperty "user.dir"))))
@@ -40,15 +40,15 @@
 
 (defn root-serve
   "A root with its server on 127.0.0.1:(:seon.config.root/server-port) (seon.server),
-  until stdin closes (bin/root stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
+  until stdin closes (bin/system stop) or SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks):
   what an outside agent's MCP relay (bin/mcp) talks to. It runs off its store and reads no
   file (docs/source.md#a-boot-resumes-from-the-db). Its end is a fact on main
-  naming that cause (seon.root/stop!). A checkout whose config names no server port (0)
+  naming that cause (seon.system/stop!). A checkout whose config names no server port (0)
   serves none, and says so; -1 asks the kernel for a free port. ROOT LISTENING names the port
-  it bound (what bin/root and seon.test-store/start-root! read), never one picked beforehand; a ROOT STALE BINARY line
-  before it, on one line, when the binary is not current for main (seon.root/stale-binary), which bin/root start ends on.
+  it bound (what bin/system and seon.test-store/start-root! read), never one picked beforehand; a ROOT STALE BINARY line
+  before it, on one line, when the binary is not current for main (seon.system/stale-binary), which bin/system start ends on.
   args: the mode's own, `--started-by ns/test` naming the test that started it (its boot's
-  :seon.root/started-by)."
+  :seon.system/started-by)."
   {:malli/schema [:=> [:cat [:sequential :string]] :any]}
   [args]
   (let [port (seon.config/value :seon.config.root/server-port)
@@ -70,16 +70,16 @@
                  @stopped)]
       (.addShutdownHook (Runtime/getRuntime) (Thread. ^Runnable (fn [] (end! :signal))))
       ;; the key's three values, read here only: -1 the kernel assigns a port (0 to bind), >0 that
-      ;; port (0, none, refused above); the port bound is the fact, printed for bin/root to record
+      ;; port (0, none, refused above); the port bound is the fact, printed for bin/system to record
       ;; a test's root ends with its test process (:seon.config.root/end-with), armed now that the boot has forked
       ;; the fork server (a thread before it would refuse the fork); the fork server and agents end with root
       (let [p (seon.config/value :seon.config.root/end-with)] (when (pos? p) (lib/end-with! p false)))
       (let [bound (.getLocalPort ^java.net.ServerSocket (seon.server/serve! sys (if (= -1 port) 0 port)))]
-        ;; a binary of another program than main's is never silent: said before the listening line, so bin/root start and
+        ;; a binary of another program than main's is never silent: said before the listening line, so bin/system start and
         ;; bin/update end on it (docs/source.md#files-and-the-db-two-directions)
-        ;; the boot view's :stale-binary (seon.root/stale-binary's answer), on one line: bin/root start and bin/update keep the
+        ;; the boot view's :stale-binary (seon.system/stale-binary's answer), on one line: bin/system start and bin/update keep the
         ;; line that starts with it, so its fields are joined as text, never a value a printer may break across lines
-        ;; what this boot's catch-up indexed and left out (seon.root/catch-up), on one line each: bin/root start builds only after a
+        ;; what this boot's catch-up indexed and left out (seon.system/catch-up), on one line each: bin/system start builds only after a
         ;; catch-up line (docs/source.md#a-boot-catches-up-with-its-checkout)
         (let [{:keys [paths skipped t] :as c} (get-in @(c/call! sys {:op :state}) [:boot :caught-up])]
           (when (seq paths) (out! "ROOT CAUGHT UP " (count paths) " files at t " t ": " (clojure.string/join " " paths)))
@@ -156,13 +156,13 @@
 (defn -main
   "The binary's modes: `root` (root-serve) here, every other one the check
   driver's (driver!), with the checkout's root the parent of the working directory (bin/check
-  and bin/root run the binary in target/)."
+  and bin/system run the binary in target/)."
   {:malli/schema [:=> [:cat [:* :string]] :any]}
   [& args]
   ;; first of all: Chez starts a GC sweeper per thread it finds waiting in a collection and never stops one,
-  ;; so a pool left unfixed is as big as the busiest collection before root fixes it (seon.root/start!,
+  ;; so a pool left unfixed is as big as the busiest collection before root fixes it (seon.system/start!,
   ;; after the fork server), a number that follows timing. Fixed at 0 now (the first act of -main; a collection while
-  ;; this namespace loads is earlier, and seon.root-test/the-sweeper-pool-is-fixed-before-anything-collects is the proof it starts none),
+  ;; this namespace loads is earlier, and seon.system-test/the-sweeper-pool-is-fixed-before-anything-collects is the proof it starts none),
   ;; nothing starts before then.
   (lib/gc-sweepers! 0)
   ;; a process ends with what started it (a shell, bin/held, a test runner), and so does all it forks
@@ -177,7 +177,7 @@
     "built-program" (let [r (c/built-program (checkout) (second (seon.config/without-overrides args)))]
                       (if (seon.contract/error? r) (out! "BUILT-PROGRAM FAILED " (shown r)) (out! (seon.edn/encode r)))
                       (lib/c-exit (if (seon.contract/error? r) 1 0)))
-    ;; bin/root start's: the inputs of this checkout's files as they are now, which the boot that follows reads them as
+    ;; bin/system start's: the inputs of this checkout's files as they are now, which the boot that follows reads them as
     ;; (runs/root-inputs.edn), so its agents key test results by what it read, never by a tree id a build recorded
     "inputs" (do (out! (seon.edn/encode (seon.fx/inputs (or (seon.config/value :seon.config.source/root) (checkout))))) (lib/c-exit 0))
     "embed-worker" (seon.vector/serve!)

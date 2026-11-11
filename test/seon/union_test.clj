@@ -8,7 +8,7 @@
   "The owner's example: root's message on main, the agent's reply on its branch, as one query."
   '[:find ?body ?reply ?branch
     :in $
-    :where [?m :seon.message/from ?root] [?root :seon.root/id :root] [?m :seon.message/body ?body]
+    :where [?m :seon.message/from ?root] [?root :seon.system/id :root] [?m :seon.message/body ?body]
            [?r :seon.message/from ?f ?tx] [?f :seon.agent/key "demo/f#1"] [?r :seon.message/body ?reply]
            [?tx :seon.tx/branch ?branch]])
 
@@ -21,7 +21,7 @@
            bc (pdb/connect (assoc cfg :branch b))]
        (try
          ;; root writes on main after the agent forked: the agent's branch never holds it
-         (d/transact conn {:tx-data [{:seon.message/id "m1" :seon.message/from {:seon.root/id :root} :seon.message/body "main moved, merge main"}]
+         (d/transact conn {:tx-data [{:seon.message/id "m1" :seon.message/from {:seon.system/id :root} :seon.message/body "main moved, merge main"}]
                            :tx-meta (pdb/tx-meta main)})
          (d/transact bc {:tx-data [{:seon.message/id "r1" :seon.message/from {:seon.agent/key "demo/f#1"} :seon.message/body "merged; 3 forms changed"}]
                          :tx-meta (pdb/tx-meta b)})

@@ -256,7 +256,7 @@
   ;; root's records on main (boot, quiescence, recorded errors) are platform records: with
   ;; all data merged (the writer's :all) they change no key a branch carries; the task
   ;; content an agent may improve (my.task/update!) is carried
-  (let [rooted (with (base) [{:seon.root/id :root :seon.root/quiescent {:t 9 :root-causes []}}])
+  (let [rooted (with (base) [{:seon.system/id :root :seon.system/quiescent {:t 9 :root-causes []}}])
         tasked (with (base) [{:seon.task/id "t/x" :seon.task/plan "better"}])
         p #(pm/program % :all)]
     (is (empty? (:theirs (pm/three-way (p (base)) (p (base)) (p rooted)))))
@@ -454,7 +454,7 @@
   (is (= #{'app/f 'app/g} (pm/changed-vars {[:var 'app/f] [nil {:meta #{:arglists}}] [:var 'app/g] [{:meta #{:arglists}} nil] [:schema :app/k] [nil {}]})))
   (is (= #{} (pm/changed-vars {}))))
 (deftest a-merge-carries-the-namespace-of-a-form-it-carries
-  ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 3): a form in a namespace the
+  ;; task seon.system/a-behind-merge-is-bounded-and-merges-main-first (gap 3): a form in a namespace the
   ;; target lacks was carried with its :form/ns ref but not the namespace entity it names, so the form read
   ;; :ns nil there and the target's program differed from the branch's at that key for ever (the writer's
   ;; behind check never settled). The merge carries the namespace entity too.
@@ -502,7 +502,7 @@
 (deftest same-content-is-read-from-mains-mark
   (ts/test-branch!
     (fn [_ conn]
-      (let [mark! #(d/transact conn [{:seon.root/id :root :seon.root/content-t (inc (:max-tx @conn))}])
+      (let [mark! #(d/transact conn [{:seon.system/id :root :seon.system/content-t (inc (:max-tx @conn))}])
             calls (fn [f] (profile/begin!) (f) (into {} (map (juxt :var :calls)) (profile/touched)))]
         (d/transact conn ((var-tx "f" "x") @conn))
         (let [unmarked @conn]

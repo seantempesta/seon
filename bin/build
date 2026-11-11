@@ -273,7 +273,7 @@ build_embed() {
 }
 
 # record_program: the program of the tree target/seon was built from, as a seed indexes it into target/seon.index (kept
-# between builds, so a build indexes what the tree changed), and the tree's inputs (seon.root/built-program), into
+# between builds, so a build indexes what the tree changed), and the tree's inputs (seon.system/built-program), into
 # target/seon.program: a root resumes its main reading no source, and compares main's
 # program with this one (docs/source.md#the-binary-records-its-program)
 # record_program [BINARY]: by BINARY (default seon, the one in place; a rebuild passes seon.new before it moves in), the

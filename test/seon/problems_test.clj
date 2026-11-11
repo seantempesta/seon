@@ -5,7 +5,7 @@
   (:require [seon.test-store :as ts] [my.test :as t] [seon.profile :as profile] [clojure.test :refer [deftest is testing]] [clojure.edn :as edn]
             [datahike.api :as d] [clojure.core.async :as a]
             [seon.contract :as contract] [seon.db :as pdb] [seon.error :as err] [seon.agent :as agent]
-            [seon.repl :as repl] [seon.proofs :as proofs] [seon.root :as root] [seon.agent-proc :as ap]
+            [seon.repl :as repl] [seon.proofs :as proofs] [seon.system :as root] [seon.agent-proc :as ap]
             [seon.reconcile :as rec] [seon.sock :as sock]
             [seon.render :as render] [konserve.jolt.fasl] [clojure.set] [clojure.string :as str] [seon.source] [seon.fx :as fx] [seon.model :as model] [clojure.data.json] [seon.problems :as problems] [seon.task] [seon.template] [seon.cost :as cost] [seon.doc] [seon.edn :as sedn] [my.root] [clojure.java.shell :as sh]))
 
@@ -126,7 +126,7 @@
 (defn- api [& [view]]
   (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 64)
                     :view (merge {:agents {}} view) :graph (promise)
-                    :system (doto (promise) (deliver {:procs {} :conns [] :parts {[:proc :api] [{:proc 'seon.root/api-proc} nil]}}))}))
+                    :system (doto (promise) (deliver {:procs {} :conns [] :parts {[:proc :api] [{:proc 'seon.system/api-proc} nil]}}))}))
 
 (defn- step [st in m] (#'root/api-proc st in m))
 
@@ -142,7 +142,7 @@
         [_ o3] (step st :from-writer {:dest rid :r {:ok true :t 9}})]
     (is (= 1 (:seon.error/count (first w))))
     (is (= :platform (:seon.error/class (first w))))
-    (is (= 'seon.root/api-proc (:seon.error/operation (first w))) "the failed proc is the producer")
+    (is (= 'seon.system/api-proc (:seon.error/operation (first w))) "the failed proc is the producer")
     (is (= [] (writes o3)) "the answered write is followed by nothing: 500 repeats of a written signature are counted in the fold")))
 
 (deftest an-agent-death-is-recorded-with-its-cause
@@ -153,7 +153,7 @@
         st (-> (api {:store {:path dir :agents-dir (str dir "-agents")} :agents {:a1 {:status :busy :pid 77 :task "t/x" :running {:form "(work!)" :since-ms 5}}}})
                (assoc-in [:agents :a1] {:branch :b1}) (assoc-in [:pending 3] {:p p :kind :eval :agent :a1}))
         ;; the api's end of an agent (its graph's update! is the api's, not this test's)
-        end (fn [st m] (let [o (volatile! {}) st (#'root/end-agent st o m)] [(dissoc (#'root/flush-problems st o) :seon.root/update) @o]))
+        end (fn [st m] (let [o (volatile! {}) st (#'root/end-agent st o m)] [(dissoc (#'root/flush-problems st o) :seon.system/update) @o]))
         [st o1] (end st {:op :ended :agent :a1 :rid nil :pid 77 :inflight [3]})
         ;; the caller is answered when the fork server reaps the child (its exit is the death's)
         _ (step st :from-fs {:ev :exit :pid 77 :status {:signal 9}})
@@ -190,7 +190,7 @@
     (testing "a refused spawn, of any agent"
       (is (= [[:agent :seon.agent/failed "fork server went down before the fork" :a2]]
              (written (step (api view) :back {:op :status :agent :a2
-                                              :set {:error (contract/error :seon.agent/failed 'seon.root/spawn! "fork server went down before the fork" {:agent :a2})}})))))))
+                                              :set {:error (contract/error :seon.agent/failed 'seon.system/spawn! "fork server went down before the fork" {:agent :a2})}})))))))
 
 (deftest a-stall-is-observed-by-the-agent-proc
   (let [end {:in (a/chan 4) :out (a/chan 16)}
@@ -296,17 +296,17 @@
                         [:classes :stalled :rows]))
         "a respawned agent's old process's stall is no row")))
 
-(defn- gone-ended? [r] (= :seon.root/ended (:seon.error/type r)))
+(defn- gone-ended? [r] (= :seon.system/ended (:seon.error/type r)))
 
 (deftest a-late-live-status-leaves-a-gone-agent-gone
-  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path A
+  ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path A
   (testing "A: a late live status leaves a gone agent gone, out of the stall check's set"
     (let [[st _] (step (api {:agents {:a1 {:status :dead :pid 77 :ended-ms 5}}}) :back {:op :status :agent :a1 :set {:status :busy :running {:form "(work!)" :since-ms 6}}})]
       (is (= [:dead nil] ((juxt :status :running) (get-in st [:view :agents :a1]))))
-      (is (not (contains? (:seon.root/busy st) :a1))))))
+      (is (not (contains? (:seon.system/busy st) :a1))))))
 
 (deftest an-ending-agents-every-request-is-answered
-  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path A
+  ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path A
   (testing "A: an ending agent's every request the api holds is answered, one that never reached its proc too; a prove is the test service's"
     (let [p (promise) q (promise)
           st (-> (api {:agents {:a1 {:status :killed :pid 77}}}) (assoc-in [:agents :a1] {:branch :b1})
@@ -318,34 +318,34 @@
       (is (contains? (:pending st') 6)))))
 
 (deftest a-stopped-agents-exit-is-recorded-on-it
-  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path B
+  ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path B
   (testing "B: a stopped agent's exit, which no death waits on, is still recorded on it"
     (let [[st _] (step (api {:agents {:a0 {:status :dead :pid 77 :ended-ms 1 :exit {:exit 0}} :a1 {:status :killed :pid 77 :ended-ms 9}}})
                        :from-fs {:ev :exit :pid 77 :status {:signal 9}})]
       (is (= [{:exit 0} {:signal 9}] (mapv #(get-in st [:view :agents % :exit]) [:a0 :a1]))))))
 
 (deftest an-exit-goes-to-the-death-waiting-on-its-pid
-  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path B
+  ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path B
   (testing "B: an exit goes to the death waiting on its pid, never to an ended agent's entry with the same pid"
-    (let [died (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1 :pid 77})
+    (let [died (contract/error :seon.agent/died 'seon.system/end-agent "agent a1 died" {:agent :a1 :pid 77})
           st (-> (api {:agents {:a0 {:status :dead :pid 77 :ended-ms 1} :a1 {:status :dead :pid 77 :ended-ms 9}}})
-                 (assoc :seon.root/dying {77 [:a1 died []]}))
+                 (assoc :seon.system/dying {77 [:a1 died []]}))
           [st _] (step st :from-fs {:ev :exit :pid 77 :status {:signal 9}})]
       (is (= [nil {:signal 9}] (mapv #(get-in st [:view :agents % :exit]) [:a0 :a1])))
-      (is (empty? (:seon.root/dying st)) "the death recorded"))))
+      (is (empty? (:seon.system/dying st)) "the death recorded"))))
 
 (deftest the-hello-answers-the-spawn-whatever-its-status
-  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path D
+  ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path D
   (testing "D: the hello answers the spawn though an eval sent before it made the agent busy"
     (let [p (promise)
-          st (-> (api {:agents {:a1 {:status :busy :pid 77}}}) (assoc-in [:seon.root/spawning :a1] p))
+          st (-> (api {:agents {:a1 {:status :busy :pid 77}}}) (assoc-in [:seon.system/spawning :a1] p))
           _ (step st :back {:op :status :agent :a1 :set {:ready true}})]
       (is (= {:id :a1} (deref p 0 nil))))))
 
 (deftest a-new-boot-ends-an-earlier-boots-live-agents
-  ;; task seon.root/a-gone-agent-stays-gone-and-every-request-is-answered, path C
+  ;; task seon.system/a-gone-agent-stays-gone-and-every-request-is-answered, path C
   (testing "C: a new boot writes :dead for an earlier boot's agent still shown live"
-    (let [db (d/db-with (world) [{:db/id "r" :seon.root/id :root} {:seon.agent/key "b0/a1" :seon.agent/root "r"
+    (let [db (d/db-with (world) [{:db/id "r" :seon.system/id :root} {:seon.agent/key "b0/a1" :seon.agent/root "r"
                                                             :seon.agent/status :busy}
                                                             {:seon.process/id "b0/a1/5" :seon.process/agent [:seon.agent/key "b0/a1"] :seon.process/running "(work!)"}])
           db (d/db-with db (seon.task/earlier-agents-tx db))]
@@ -354,11 +354,11 @@
   ;; pull through it (:seon.agent/root, then :seon.agent/_root) reaches its agents after a restart, an earlier boot's among them (root's page holds every boot's).
   ;; Red before: every agent but a user lost the link, root's session too, and an earlier boot's sessions were reached only by a scan
   (testing "a new boot keeps root's session and an earlier boot's agent linked to root"
-    (let [db (d/db-with (world) [{:db/id "r" :seon.root/id :root}
+    (let [db (d/db-with (world) [{:db/id "r" :seon.system/id :root}
                                  {:seon.agent/key "root" :seon.agent/root "r" :seon.agent/status :busy}
                                  {:seon.agent/key "b0/a2" :seon.agent/root "r" :seon.agent/status :idle}])
           db (d/db-with db (seon.task/earlier-agents-tx db))
-          root-e (:db/id (d/entity db [:seon.root/id :root]))]
+          root-e (:db/id (d/entity db [:seon.system/id :root]))]
       (is (= root-e (:db/id (:seon.agent/root (d/entity db [:seon.agent/key "root"])))) "root's session keeps its link")
       (is (= :dead (:seon.agent/status (d/entity db [:seon.agent/key "root"]))) "though its process ended with the boot")
       (is (= root-e (:db/id (:seon.agent/root (d/entity db [:seon.agent/key "b0/a2"])))) "an earlier boot's agent keeps its link"))))
@@ -385,7 +385,7 @@
         failed (assoc (fx/read-source {:req {:root (.getParent co) :dirs ["src"]}}) :seon.fx/at-ms 1000)
         rows #(get-in (problems/report %) [:classes :effect :rows])
         open? #(not (false? (:open? (first (rows %)))))
-        import (fn [db r fact] (d/db-with db (err/asked-tx db r :seon.root/source [{:seon.root/id :root :seon.root/source fact}])))
+        import (fn [db r fact] (d/db-with db (err/asked-tx db r :seon.system/source [{:seon.system/id :root :seon.system/source fact}])))
         bad {:root "/c" :files 0 :forms 0 :ms 1.0 :error (:seon.error/message failed)}
         good {:root "/c" :files 1 :forms 1 :ms 2.0 :digest "d"}]
     (is (= :seon.fx/io-error (:seon.error/type failed)) "an unreadable file fails the read")
@@ -440,7 +440,7 @@
                                                        :seon.task/failures {'app.t/red [{:type :fail :message "m" :expected "1" :actual "2"}]}}))
                             (for [i (range n)] (ended (str "t/d" i)
                                                       {:seon.task/outcome :dead :seon.task/reason "its agent died"
-                                                       :seon.task/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})))))))
+                                                       :seon.task/error (contract/error :seon.agent/died 'seon.system/end-agent "agent a1 died" {:agent :a1})})))))))
 
 (deftest a-cancelled-tasks-problems-close
   (let [db (seeded 2 1)
@@ -702,18 +702,18 @@
   (let [att (fn [extra] (:db-after (d/with (seeded 1 5)
                                            [(ended "t/u" (merge {:seon.task/branch :u :seon.task/kind :merge :seon.task/outcome :merged
                                                                  :seon.task/agent {:seon.agent/key "b/a9" :seon.agent/ended-ms 9}
-                                                                 :seon.task/deferred #{'seon.root-test/boots 'seon.check-test/clean}}
+                                                                 :seon.task/deferred #{'seon.system-test/boots 'seon.check-test/clean}}
                                                                 extra))])))
         rows #(get-in (problems/report %) [:classes :unrun :rows])]
     (is (= [["t/u" "merged with 2 process tests unrun" true]] (mapv (juxt :task :reason :open?) (rows (att {})))))
-    (is (= 1 (count (rows (att {:seon.task/deferred-results {'seon.root-test/boots :pass}}))))
+    (is (= 1 (count (rows (att {:seon.task/deferred-results {'seon.system-test/boots :pass}}))))
         "one of two recorded: still open")
-    (is (= 1 (count (rows (att {:seon.task/deferred-results {'seon.root-test/boots :pass 'seon.check-test/clean :fail}}))))
+    (is (= 1 (count (rows (att {:seon.task/deferred-results {'seon.system-test/boots :pass 'seon.check-test/clean :fail}}))))
         "a red among them: still open")
-    (is (= [] (rows (att {:seon.task/deferred-results {'seon.root-test/boots :pass 'seon.check-test/clean :pass}})))
+    (is (= [] (rows (att {:seon.task/deferred-results {'seon.system-test/boots :pass 'seon.check-test/clean :pass}})))
         "each passing: the row closes")
     (is (= [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]
-           (:unread (first (rows (att {:seon.task/deferred-results {'seon.root-test/boots :error 'seon.check-test/clean :error}
+           (:unread (first (rows (att {:seon.task/deferred-results {'seon.system-test/boots :error 'seon.check-test/clean :error}
                                        :seon.task/gate-unread [{:ns 'app.repl-only :reason "no :ns/file on the branch: its forms were never written to a file"}]})))))
         "a gate that could not read a changed namespace names it, and why, on the open row")))
 
@@ -746,7 +746,7 @@
         (let [{:keys [tasks paths req not-unsynced]} (my.root/sync-req db ["t/m" "t/k"] tasks-dir)
               r (fx/git-commit {:req (assoc req :dir d)})]
           (is (= [["t/m"] [path]] [tasks paths]))
-          (is (= [[:seon.root/nothing-to-sync "t/k"]] (mapv (juxt :seon.error/type :task) not-unsynced)) "a task not merged is named, not synced")
+          (is (= [[:seon.system/nothing-to-sync "t/k"]] (mapv (juxt :seon.error/type :task) not-unsynced)) "a task not merged is named, not synced")
           (is (string? (get-in r [:value :sha])) (pr-str r))
           (is (= "jolt/sync-m" (:branch req)))
           (is (= (str/trim (git "rev-parse" "main")) (str/trim (git "rev-parse" "jolt/sync-m^"))) "its parent is git's main, not the checkout's HEAD")
@@ -793,16 +793,16 @@
         (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))
 
 (deftest a-root-on-a-stale-binary-is-a-problem
-  ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, docs/health.md#a-stale-binary: a boot holds seon.root/stale-binary's
+  ;; task seon.problems/a-root-on-a-stale-binary-is-a-problem, docs/health.md#a-stale-binary: a boot holds seon.system/stale-binary's
   ;; answer (is the binary current for the tree main was last brought to, by what differs reaching root's code) on root's source
-  ;; fact (seon.root/booted-source), and health derives one :stale-binary row from it while it is there, gone at the next boot on a
+  ;; fact (seon.system/booted-source), and health derives one :stale-binary row from it while it is there, gone at the next boot on a
   ;; current binary: computed at the boot, never here, no clock, never an import. Main moved by what its agents merged is no row
   (let [db0 (world)
         held {:root "/c" :files 1 :forms 1 :ms 1 :tree "t1"}
         in {:env "e" :tree "t" :config {:seon.config.agent/max-turns "40"}}
         cfg-in {:seon.config.agent/max-turns "41"}
-        boot (fn [db b built main stale & [current-inputs]] (d/db-with db [{:seon.root/id :root :seon.root/source (root/booted-source held b built main cfg-in stale current-inputs)}]))
-        source #(:seon.root/source (d/pull % [:seon.root/source] [:seon.root/id :root]))
+        boot (fn [db b built main stale & [current-inputs]] (d/db-with db [{:seon.system/id :root :seon.system/source (root/booted-source held b built main cfg-in stale current-inputs)}]))
+        source #(:seon.system/source (d/pull % [:seon.system/source] [:seon.system/id :root]))
         rows #(mapv (juxt :binary :tree) (get-in (problems/health %) [:classes :stale-binary :rows]))
         messages #(mapv :message (get-in (problems/health %) [:classes :stale-binary :rows]))
         stale (boot db0 "b1" {:program "p0" :inputs (assoc in :tree "t0")} "p1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]})]
@@ -810,7 +810,7 @@
     (is (= [["t0" "t1"]] (rows stale)) "a binary not current for main's tree: one row naming both trees")
     (is (some #(str/includes? % "seon.writer/commit-batch") (messages stale)) "and what between them reaches root's own code")
     (is (nil? (:inputs (source stale))) "and no inputs to key agents' verdicts by")
-    ;; task seon.root/every-reader-of-the-binarys-tree-asks-binary-current: a binary built from t0 and current for t1 by reach
+    ;; task seon.system/every-reader-of-the-binarys-tree-asks-binary-current: a binary built from t0 and current for t1 by reach
     (is (= "t1" (get-in (source (boot db0 "b3" {:program "p0" :inputs (assoc in :tree "t0")} "p3" nil (assoc in :tree "t1"))) [:inputs :tree]))
         "a binary current for main's tree by reach, built from another, hands agents main's tree's inputs, never its own")
     (is (nil? (:inputs (source (boot db0 "b4" {:program "p0" :inputs (assoc in :tree "t0")} "p4" {:binary "t0" :tree "t1" :reaches ['x/y]} (assoc in :tree "t1")))))
@@ -827,7 +827,7 @@
         page "# Forks\n\n## Jolt\n\n`reference-code/jolt` pinned at `4342b73c`, the tip of ``jolt/x``.\n\n## Chez\n\n`reference-code/chez` pinned at `80e4b9f`.\n"
         db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/forks.md" page}))
         pinned (fn [pins] (mapv (juxt :path :stated :recorded)
-                                (get-in (problems/health (cond-> db pins (d/db-with [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :pins pins}}])))
+                                (get-in (problems/health (cond-> db pins (d/db-with [{:seon.system/id :root :seon.system/source {:root "/c" :files 1 :forms 1 :ms 1 :pins pins}}])))
                                         [:classes :stale-pin :rows])))]
     (is (= [] (pinned nil)) "no import recorded: unknown, not a mismatch")
     (is (= [] (pinned {"reference-code/jolt" "4342b73cdeadbeef" "reference-code/chez" "80e4b9f0"})))
@@ -869,7 +869,7 @@
   [n] (let [db0 (world)
             page (apply str "# Forks\n\nThe pins.\n" (for [i (range n)] (str "\n## F" i "\n\n`reference-code/lib" i "` pinned at `abc" i "`.\n")))
             db (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/forks.md" page}))]
-        [(d/db-with db [{:seon.root/id :root :seon.root/source {:pins (into {} (for [i (range n)] [(str "reference-code/lib" i) (str "def" i)]))}}]) {}]))
+        [(d/db-with db [{:seon.system/id :root :seon.system/source {:pins (into {} (for [i (range n)] [(str "reference-code/lib" i) (str "def" i)]))}}]) {}]))
 
 (deftest unnamed-sites-follow-the-catch-forms
   (cost/proof {:of 'seon.problems/unnamed-sites :input 'seon.problems-test/catch-input
@@ -1004,7 +1004,7 @@
                        (every? #(= (set (get-in whole [:classes % :rows])) (set (get-in moved [:classes % :rows])))
                                (keys (:classes whole))))))
         died (ended "t/x" {:seon.task/proofs #{'t-test/x} :seon.task/outcome :dead :seon.task/reason "its agent died"
-                           :seon.task/error (contract/error :seon.agent/died 'seon.root/end-agent "agent a1 died" {:agent :a1})})]
+                           :seon.task/error (contract/error :seon.agent/died 'seon.system/end-agent "agent a1 died" {:agent :a1})})]
     (is (same? db1 db1) "nothing moved")
     (testing "a task whose agent died opens a problem, and a later wake that finished it closes it"
       (let [db2 (d/db-with db1 [died])
