@@ -465,22 +465,24 @@
 ;; ---- the model provider, as the config states it --------------------------------------------
 
 (defn provider
-  "The model provider config c names (:seon.config.ai/*, resolved for its model: temperature, thinking and reasoning effort too, each through the resolver, so a model's or a task's value wins over the file's; docs/model.md#thinking-is-off-by-default): none, the
+  "The model provider config c names (:seon.config.ai/*, resolved for its model: thinking too, so a model's or a task's wins over the file's, and a task's reasoning effort; docs/model.md#thinking-is-off-by-default): none, the
   scripted provider (a test fixture), or the OpenAI-compatible endpoint with the NAME of its key's
   environment variable (never the key)."
   {:malli/schema [:=> [:cat :seon.config/config] :seon.model/provider]}
   [c]
-  (let [v #(:value (resolve-in c {} % {}))
-        opt #(:value (resolve-in (merge {% nil} c) {} % {}))] ; a key the file may leave out: nil when set nowhere
+  (let [v #(:value (resolve-in c {} % {}))]
     (case (:seon.config.ai/provider c)
       :none {:kind :none}
       :scripted {:kind :scripted :script (:seon.config.ai/script c)}
       :openai-compat (cond-> {:kind :openai-compat :base-url (v :seon.config.ai/base-url) :model (:seon.config.ai/model c)
                               :api-key-env (v :seon.config.ai/api-key-variable) :max-tokens (v :seon.config.ai/max-tokens)
                               :replay-reasoning (v :seon.config.ai/replay-reasoning)}
-                       (opt :seon.config.ai/temperature) (assoc :temperature (opt :seon.config.ai/temperature))
-                       (opt :seon.config.ai/thinking) (assoc :thinking (opt :seon.config.ai/thinking))
-                       (opt :seon.config.ai/reasoning-effort) (assoc :reasoning-effort (opt :seon.config.ai/reasoning-effort))))))
+                       ;; thinking is shipped (default.edn), so the resolver reads it, a model's or a task's over the file's; temperature
+                       ;; and effort are left out of the file on purpose (the provider's own default), so they are read where a layer
+                       ;; states them, the task's merged into c by provider-at (docs/model.md#thinking-is-off-by-default)
+                       true (assoc :thinking (v :seon.config.ai/thinking))
+                       (:seon.config.ai/temperature c) (assoc :temperature (:seon.config.ai/temperature c))
+                       (:seon.config.ai/reasoning-effort c) (assoc :reasoning-effort (:seon.config.ai/reasoning-effort c))))))
 
 (defn with-provider
   "Config c stating provider p (a provider handed to root's start! in place of the file's):

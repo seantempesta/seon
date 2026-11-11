@@ -391,7 +391,7 @@
       (is (seon.contract/valid? :seon.task/declaration {:seon.task/ns (quote a) :seon.task/name "deep" :seon.task/plan "p"
                                                          :seon.task/config {:seon.config.ai/thinking :enabled :seon.config.ai/reasoning-effort :low}})
           "a task file may state thinking and effort")
-      (is (= :enabled (:thinking (config/provider (update-in c [:seon.config.ai/models (:seon.config.ai/model c)] assoc :seon.config.ai/thinking :enabled :seon.config.ai/reasoning-effort :low)))) "and a model's entry states them too")
+      (is (= :enabled (:thinking (config/provider (update-in c [:seon.config.ai/models (:seon.config.ai/model c)] assoc :seon.config.ai/thinking :enabled)))) "and a model's entry states its thinking, through the one resolver")
       (is (= {:type "enabled"} (:thinking (sent "a/deep"))) "the task's thinking")
       (is (= "low" (:reasoning_effort (sent "a/deep"))) "the task's effort")
       (is (= {:type "disabled"} (:thinking (sent "a/plain"))) "a task stating nothing: the file's thinking")
