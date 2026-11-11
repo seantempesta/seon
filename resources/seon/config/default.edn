@@ -867,6 +867,9 @@
  :seon.config.render.agent/sort-bound 64
  ;; Unit: characters per printed line (session P1's printer, matching v1's corpus output).
  :seon.config.render/width 72
+ ;; Unit: levels. The agents list (every page's) is the signed-in user's pull of the agents it started, each with the ones it
+ ;; started, to this many levels; the last level's agents show how many they started (seon.render.ui/agent's entry), never cut silently.
+ :seon.config.render/agent-tree-depth 3
  ;; Unit: tokens for a value shown inside another: a refused argument, a test's expected and
  ;; actual, ex-data (session P1).
  :seon.config.render/part-budget 256

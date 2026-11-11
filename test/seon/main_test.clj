@@ -237,10 +237,10 @@
                      [(clojure.string/starts-with? ?file "src/")]] db)
         read-in (fn [nsn src] (require nsn)
                   (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
-        ;; a form names git when it holds the literal "git" or ".git", or is a call naming
-        ;; clojure.java.shell/sh (called, or applied) with a string whose words include git (a shell
+        ;; a form names git when it holds the literal "git" or ".git", or is a call naming a shell
+        ;; runner (seon.lib/sh, or the clojure.java.shell/sh it runs; called, or applied) with a string whose words include git (a shell
         ;; line: zsh -c "... git -C ..."). Other process runners (ProcessBuilder) are not seen
-        sh? #(and (symbol? %2) (= #'clojure.java.shell/sh (ns-resolve (the-ns %1) %2)))
+        sh? #(and (symbol? %2) (#{#'clojure.java.shell/sh #'seon.lib/sh} (ns-resolve (the-ns %1) %2)))
         names-git? (fn [nsn f]
                      (some (fn [x] (or (#{"git" ".git"} x)
                                        (and (seq? x) (some #(sh? nsn %) x)
@@ -253,10 +253,30 @@
                             :when (names-git? nsn f)]
                         (or v nsn)))]
     (testing "a shell line that runs git is seen, called or applied (checkout-at's old form)"
-      (is (names-git? 'seon.fx '(defn x [d] (sh/sh "zsh" "-c" "rm -rf d && git -C \"$2\" archive HEAD | tar -x" "x" d))))
-      (is (names-git? 'seon.fx '(defn x [d] (apply sh/sh "zsh" "-c" "rm -rf d && git -C \"$2\" archive HEAD | tar -x" "x" [d])))))
+      (is (names-git? 'seon.fx '(defn x [d] (lib/sh "zsh" "-c" "rm -rf d && git -C \"$2\" archive HEAD | tar -x" "x" d))))
+      (is (names-git? 'seon.fx '(defn x [d] (apply lib/sh "zsh" "-c" "rm -rf d && git -C \"$2\" archive HEAD | tar -x" "x" [d])))))
     (testing "a shell line that names no git is not"
-      (is (not (names-git? 'seon.fx '(defn x [d] (sh/sh "zsh" "-c" "tar -x -C \"$1\"" "x" d))))))
+      (is (not (names-git? 'seon.fx '(defn x [d] (lib/sh "zsh" "-c" "tar -x -C \"$1\"" "x" d))))))
     ;; seon.config's own-branch reader tests whether the checkout's .git is a file (a worktree): a file
     ;; test at load, before any proc runs, not a read of git
     (is (= #{'seon.fx/git-run 'seon.fx/checked-out? 'seon.config/reader} readers))))
+
+(deftest every-shell-runs-through-lib-sh
+  ;; task seon.root/a-boot-runs-no-shell-of-its-own: clojure.java.shell/sh called off a fiber copies a child's pipes on
+  ;; futures, threads of Clojure's send-off pool that root does not declare (seon.server-test/a-done-shells-on-no-thread-of-roots);
+  ;; seon.lib/sh runs it on a fiber, and no other src form names it (docs/machine.md#processes). src's forms read as data
+  ;; from the compiler's facts
+  (let [db (runner/program)
+        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
+                     [(clojure.string/starts-with? ?file "src/")]] db)
+        read-in (fn [nsn src] (require nsn)
+                  (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
+        ;; a quoted name is data (seon.program/env-class-readers' key), not a call
+        names-sh? (fn [nsn f] (some #(and (symbol? %) (= #'clojure.java.shell/sh (ns-resolve (the-ns nsn) %)))
+                                    (tree-seq #(and (coll? %) (not (and (seq? %) (= 'quote (first %))))) seq f)))
+        callers (into (sorted-set)
+                      (for [[nsn src] forms :let [f (read-in nsn src)] :when (names-sh? nsn f)]
+                        (if (and (seq? f) (symbol? (second f))) (symbol (str nsn) (name (second f))) nsn)))]
+    (is (names-sh? 'seon.lib '(defn x [] (clojure.java.shell/sh "true"))) "a call naming it is seen")
+    (is (not (names-sh? 'seon.lib '(def x '{clojure.java.shell/sh :bin}))) "a quoted name is not")
+    (is (= #{'seon.lib/sh} callers))))
