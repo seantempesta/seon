@@ -66,6 +66,7 @@
     (is (boolean? (:seon.root/stall-armed (:root r))) "the armed flag, read whatever its value")
     (is (set? (:seon.root/busy (:root r))) "the agents with an eval in flight, empty or not")
     (is (map? (:agents r)) "each agent proc's, by pid")
+    (is (and (seq (:agents r)) (every? #(and (contains? % :stall-seen) (contains? % :last-frame-ms)) (vals (:agents r)))) "with what its stall check reads")
     (is (some #{:api} (:answered r)) "and the procs that answered, root's api among them")))
 
 (deftest the-sweeper-pool-is-fixed-before-anything-collects
