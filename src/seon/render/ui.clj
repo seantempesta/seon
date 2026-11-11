@@ -160,7 +160,7 @@
   ([text {:keys [inline?]}]
    (let [{:seon.ref/keys [blocks spans]} (ref/scan text)
          run (fn [a b] (if inline? (inline text a b spans) [(subs text a b)]))]
-     (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
+     (into [:div {:class "seon-md font-sans flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
            (for [{:seon.ref/keys [kind from to heading heading-level text-from text-to items ordered]} blocks
                  :let [body (subs text from to)]]
              (cond
@@ -179,6 +179,14 @@
                (#{:quote :table} kind) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
                (= :break kind) [:hr]
                :else (into [:p] (run from to))))))))
+
+(defn text
+  "A :seon.db/text value (a task's plan, a message's body: prose a person or a model wrote) as both readers read it: its Markdown's
+  structure, code spans as [:code ...] and emphasis drawn (`markdown` with :inline?), never its delimiters. The render the schema
+  declares, so a value is drawn by its attribute: (render/hiccup {:seon.render/index ix :schema :seon.task/plan} plan). See
+  docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat :seon.render/opts :string] :any]}
+  [_ s] (markdown s {:inline? true}))
 
 (defn slot
   "Where the part with element id goes: a marker the render proc fills with the part's
@@ -393,8 +401,8 @@
               (str (kname (:seon.task/kind t)) " · "
                    ;; what happened (the reconciler's observed state, when the producer carries it), else the desired execution
                    (if-let [st (:seon.task/state t)] (kname st) (kname (:seon.task/execution t)))))
-      [:pre {:class "plan" :title "its plan, accumulated along its needs: theirs first"} plan]
-      (when (:seon.task/instructions t) [:p {:class "muted"} (:seon.task/instructions t)])
+      [:div {:class "plan" :title "its plan, accumulated along its needs: theirs first"} (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/plan} plan)]
+      (when-let [i (:seon.task/instructions t)] [:div {:class "muted"} (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/instructions} i)])
       (when-let [{:keys [reason counterexample agent]} (:seon.task/failure t)]
         [:p {:class "err"} "failed" (when agent (str " in " agent)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
       (when (seq (:seon.task/needs t))
@@ -614,9 +622,19 @@
       (or (said? call) flying?)
       (cond->
         [:section {:class "flex w-full flex-col gap-1"}
-         (when-not (str/blank? reasoning)
-           [:details [:summary {:class "text-xs text-text-500"} "thinking"]
-            [:div {} [#'markdown reasoning {:inline? true}]]])
+         (if (and (str/blank? reply) (not (str/blank? reasoning)))
+           ;; a call that said nothing but thought (reasoning on: its words go to its reasoning): its first paragraph is the agent's
+           ;; words, marked as thinking, and the rest folded under a line that says how much more there is
+           (let [[first-p & more] (remove str/blank? (str/split reasoning #"\n\s*\n"))]
+             [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"}
+              [:span {:class "text-xs text-text-500"} "thinking"]
+              [#'markdown first-p {:inline? true}]
+              (when (seq more)
+                [:details [:summary {:class "text-xs text-text-500"} (str (count more) (if (= 1 (count more)) " more paragraph" " more paragraphs") " of thinking")]
+                 [:div {} [#'markdown (str/join "\n\n" more) {:inline? true}]]])])
+           (when-not (str/blank? reasoning)
+             [:details [:summary {:class "text-xs text-text-500"} "thinking"]
+              [:div {} [#'markdown reasoning {:inline? true}]]]))
          (when-not (str/blank? reply)
            [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"} [#'markdown reply {:inline? true}]])
          (when truncated [:span {:class "text-2xs text-error"} "cut at the token limit"])]
@@ -668,8 +686,8 @@
              (cond (:seon.task/outcome t) (str " · " (:text (standing nil {:seon.task/outcome (:seon.task/outcome t)})))
                    execution (str " · " (kname execution))))]
        [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
-       (when instructions [:details [:summary "how the agent works it"] [:p {:class "seon-text"} instructions]])
-       (when plan (markdown plan))
+       (when instructions [:details [:summary "how the agent works it"] (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/instructions} instructions)])
+       (when plan (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/plan} plan))
        ;; its id, which an agent names its task by (my.task/*)
        [:p {:class "seon-note"} (str "Task: " id)]
        (seq (own-tiles (:seon.render/index opts) t))])))
@@ -991,7 +1009,7 @@
                                  (remove nil? body))]))
 
 (defn cite-hiccup
-  "A cite as pulled (and filled) with its target joined, as one hiccup by what the target is: a wiki section (`section-hiccup`),
+  "A cite with its target read whole (seon.render.ui/cite reads it), as one hiccup by what the target is: a wiki section (`section-hiccup`),
   a function (`var-hiccup`), a schema key or setting (`key-hiccup`), a namespace (its doc and how to read it), a task (its plan)
   or a file (how to read it), its body folded under its first line (`folded`). The page and the model read it alike; `doc` answers
   it on demand. See docs/references.md#an-entity-cites."
@@ -1002,31 +1020,34 @@
    (cond
      (:seon.doc/address t) (section-hiccup t depth)
      (:seon.task/id t) [:section [:h3 (:seon.task/id t)] [:p "Another task your plan names."]
-                        (when-let [pl (:seon.task/plan t)] (markdown pl))]
+                        (when-let [pl (:seon.task/plan t)] (markdown pl {:inline? true}))]
      (:var/name t) (var-hiccup (:var/name t) t (boolean changing?))
      (:schema/key t) (key-hiccup db (:schema/key t) t (or lookups []))
      (:ns/name t) [:section [:h3 (str (:ns/name t))] [:p (str "A namespace your plan names." (when (:ns/doc t) (str " " (:ns/doc t))))] [:p "Read it: " [:code (help-form (:ns/name t))]]]
      (:file/path t) [:section [:h3 (:file/path t)] [:p "A file your plan names."] [:p "Read it: " [:code (str "(slurp \"" (:file/path t) "\")")]]]))))
 
 (defn cite
-  "Cite c as pulled with its target and its owner joined (the declared html render of :seon.cite/cite-fact), by `cite-hiccup`: a
-  wiki section, a function, a schema key, a namespace, a task or a file, at the cite's depth. What the agent will do with a function
-  is judged from the cite's own joins, never stored and never the page's: one in its owner task's namespace or reached by the
-  task's proofs (their forms' refs) is one it will change (its source and tests drawn), any other one it calls. ctx holds every
-  entity whole at each path its pattern pulls it (docs/ctx.md#the-pattern), so the cite's joins are all here. A pulled section or
-  var alone is not rendered by this: it prints as the data it is. See docs/references.md#an-entity-cites."
+  "Cite c (the declared html render of :seon.cite/cite-fact, a component over the db), by `cite-hiccup`: a wiki section, a function,
+  a schema key, a namespace, a task or a file, at the cite's depth. ctx holds what the cite names, its target and its owner by
+  identity; this reads the rest of each from the db by the pattern its schema declares beside the cite's (:seon.cite/target-read,
+  :seon.cite/of-read), by seon.ctx/build, so the walk tracks what it read and ctx holds none of the content. What the agent
+  will do with a function is judged from its owner as read, never stored and never the page's: one in its owner task's namespace
+  or reached by the task's proofs (their forms' refs) is one it will change (its source and tests drawn), any other one it calls.
+  A pulled section or var alone is not rendered by this: it prints as the data it is. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
-  [{db :seon.db/db} c]
+  [{db :seon.db/db ix :seon.render/index} c]
   (let [c (ratom/realize c)
-        t (:seon.cite/target c)
-        of (:seon.cite/of c)
+        ;; an entity the cite names, read whole by the pattern schema k declares; one with no id (a cite made by hand) as it is given
+        read (fn [m k] (if-let [e (:db/id m)] (merge m (dissoc (:tree (ctx/build ix db e nil (render/schema-property ix k :seon.ctx/pattern))) :t :branch :commit)) m))
+        t (read (:seon.cite/target c) :seon.cite/target-read)
+        of (read (:seon.cite/of c) :seon.cite/of-read)
         task-ns (some-> (:seon.task/ns of) str)
         reach (into #{} (for [[_ v] (:proved of) r (get-in v [:var/form :form/refs])] r))
         sym (:var/name t)
         id (:seon.task/id of)]
     ;; a test its owner task proves by is drawn by the task's proofs (seon.render.ui/status), not again as a cite (Context)
     (when-not (and sym (some #(= sym (:var/name %)) (vals (:proved of))))
-     (cite-hiccup db c {:lookups (cond-> [] id (conj [:seon.task/id id]) sym (conj [:var/name sym]))
+     (cite-hiccup db (assoc c :seon.cite/target t) {:lookups (cond-> [] id (conj [:seon.task/id id]) sym (conj [:var/name sym]))
                        :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))}))))
 
 
@@ -1165,7 +1186,11 @@
         [:p [:code (str test)] " fails."]
         (markdown (proof-state :seon.status/explain status) {:inline? true})
         (for [[i {a :assert as :asserts g :got m :message}] (map-indexed vector failures)]
-          [:p {:key i} "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."])
+          ;; what it asserted and what it got, each a value of its own, never a sentence holding them
+          [:dl {:key i :class "seon-failure"}
+           [:dt "asserted"] [:dd [:pre [:code (str/join "\n" (map #(as-text %) (or as [a])))]]]
+           [:dt "got"] [:dd [:pre [:code (as-text g)]]]
+           (when m [:dd m])])
         (when (seq calls)
           [:div {:key :calls} [:p "It calls " (str/join ", " (map #(str "`" (:var %) "`") calls)) "."]
            (for [{v :var src :source} calls :when src] [:pre {:key (str v)} [:code src]])])])

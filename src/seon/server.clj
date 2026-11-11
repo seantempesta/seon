@@ -418,8 +418,10 @@
   [port m on-event]
   (let [unanswered #(contract/error :seon.server/unanswered #'seon.server/ask-streamed
                                     (str "root on port " port (case % :refused " refused the connection: no root listens there"
-                                                                     :eof " closed the connection before its answer"
-                                                                     :reset " reset the connection before its answer"))
+                                                                     ;; the system ended under the ask: a landing's restart (bin/update) is the
+                                                                     ;; usual one, and a red the asker could read as a test's says so
+                                                                     :eof " closed the connection before its answer: the system ended or restarted (a landing restarts it); ask again, the verdicts that landed are kept"
+                                                                     :reset " reset the connection before its answer: the system ended or restarted (a landing restarts it); ask again, the verdicts that landed are kept"))
                                     {:port port :why %})]
     ;; the edge where a client's socket failures become the one typed error (docs/failure-points.md)
     (try
@@ -441,14 +443,15 @@
         ;; a checkout's files, on their tree's branch (seon.root/prove-tree!), its verdicts streamed when asked; else an agent's branch, or main
         r (cond (and (:checkout req) (:stream req) *emit*) (prove-streamed sys (c/tree-branch (:tree req)) run)
                 (:checkout req) (run)
-                :else @(c/prove! sys ag (set (map symbol (:names req)))))]
+                :else @(c/prove! sys (if ag (or (c/agent-ref sys ag) {}) {:branch :main}) (set (map symbol (:names req)))))]
     ;; each red named with its first failing assertion (message, expected, actual), and the
     ;; process tests left to the judge with why (seon.agent/run-tests-forked's :deferred :why)
     (if (contract/error? r)
       r
       (cond-> (select-keys r [:key :ran :pass :fail :error :red :reused :ms])
         (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
-        (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))
+        (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))
+        (seq (:baked r)) (assoc :baked (:baked r))))))
 
 (defmethod op-answer :done [sys ag _]
   (if-let [{:keys [task env]} (work-of sys ag)]

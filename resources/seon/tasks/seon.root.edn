@@ -109,4 +109,5 @@ Proofs, once ruled: a task file's declaration loads with the kind the ruling say
   :seon.task/plan "Owner: Optimization. Measured 2026-11-11 on the standing system (read-only): seon.root/binary-current over 11 landing tree pairs cost 12.5 s and 17.6 GB allocated, about 1.1 s and 1.6 GB a call. It builds the reach graph of the whole db each call (its docstring: one git diff, one reach graph of db, O(changed files' forms)), so the question \"does this landing reach root-run code\" costs the whole program. It will be asked at every landing (the no-restart landing) and is already asked at every spawn refusal and stale-binary row. Correct: the reach graph is kept with the program it describes (a value keyed by the program's digest, as seon.program/graph-index's cache is), so a call costs the diff and the changed forms' lookups. Bound in a cost proof: binary-current of a one-file change costs under a fixed number of ticks whatever the program's size."
   :seon.task/kind :work
   :seon.task/proofs #{seon.root-cost-test/binary-current-costs-the-change-not-the-program}}
+
 ]
