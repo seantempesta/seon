@@ -37,6 +37,8 @@ The standard is the best way known, written down, until a better one replaces it
 
 How to do it: name the cost with its number; find what allowed it; change the script, the check or the wiki section so the better thing is the default; delete the old way in the same change; tell every session what to stop doing. A lesson kept only in a session's memory is lost at its next compaction.
 
+A compaction is where a session's own lessons are most easily lost, so it is where they are handed up: before it compacts a session reflects on its stretch of work and reports to its parent what would have saved it time; the parent turns each suggestion into an owned item of the plan or a small change made at once, and the session writes its findings into its state note and its post-compaction prompt (owner, 2026-11-11: "lots of base hits rather than swinging for homeruns"). The managing session does the same toward the owner. A Seon agent's form of this is its task: what it learned goes into the task's plan, so its evals can be dropped and its context made again from the task and its entity's data.
+
 ## No fan-out
 
 A session does its work itself, in one conversation, and starts no other session unless the owner asks (owner, 2026-10-28: "This system of launching 10+ agents just burned my tokens and was not productive"; and "let's stick with just you and me and any subtasks you do are one use agents that are sonnet and haiku and mostly just to find info for you to read and you can preprocess and run longer tests on well spec'ed ideas (especially repl interactive building) with sonnet").
