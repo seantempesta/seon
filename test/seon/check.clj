@@ -1017,9 +1017,9 @@
         ;; bounded by :seon.config.agent/test-ticks: root dies long before the bound
         _ (c/run-tests! sys b)
         ;; busy when root dies: each loop began, and the test child is forked (its pid on
-        ;; the event), or the run answered first (no child)
+        ;; the event), or the run answered first (no child); the plan's answer (a :tests with no counts) is neither
         [_ _ forked] (await-each ev [(started a "(loop [] (recur))") (started (:id cl) "(loop [] (recur))")
-                                     #(and (= b (:agent %)) (#{:tests-started :tests} (:type %)))])
+                                     #(and (= b (:agent %)) (or (= :tests-started (:type %)) (and (= :tests (:type %)) (some? (:pass %)))))])
         test-child (when (= :tests-started (:type forked)) (:pid forked))
         pids (keep #(get-in (c/state sys) [:agents % :pid]) [a b (:id cl)])]
     (out! "PIDS " (clojure.string/join " " (concat pids [(get-in (c/state sys) [:fork-server :pid])] (when test-child [test-child]))))
@@ -1794,13 +1794,6 @@
   (vec (for [[code by] (d/q '[:find ?c ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/code ?c] [?e :seon.eval/by ?by]] db attr id)]
          {:code code :by (not-empty (into {} (remove (comp nil? val)) (d/pull db [:seon.agent/key :seon.root/id] by)))})))
 
-(defn await-records
-  "What (read) answers once (enough? it) holds, read again at each :commit event of agent a
-  on ev (a tap taken before what writes them): an agent's records are applied ahead of its
-  commit (seon.agent/transact!), so its branch shows them at its commit, not before."
-  [ev a read enough?]
-  (loop [] (let [r (read)] (if (enough? r) r (do (await-event ev #(and (= :commit (:type %)) (= a (:agent %)))) (recur))))))
-
 (defn mcp-proof
   "The MCP phase's proof: an outside client (a separate process: bin/mcp PORT, the stdio
   relay, fed JSON-RPC on stdin) lists agents, evaluates in a running agent and as root, and
@@ -1826,7 +1819,6 @@
         in (str dir "/mcp-in.jsonl")
         _ (spit in (apply str (map #(str (clojure.data.json/write-str %) "\n") msgs)))
         relay (fn [p] (clojure.java.shell/sh "sh" "-c" (str "exec /usr/bin/time -l '" (seon.config/checkout) "/bin/mcp' " p " < '" in "'")))
-        ev (c/events sys)
         t0 (profile/now-ns)
         r (relay port)
         ms (profile/ms-since t0)
@@ -1837,12 +1829,10 @@
         lines (fn [r] (for [l (clojure.string/split-lines (:out r)) :when (clojure.string/starts-with? l "{")] (clojure.data.json/read-str l)))
         answers (into {} (for [j (lines r)] [(get j "id") j]))
         text (fn [id] (get-in answers [id "result" "content" 0 "text"]))
-        ;; the agent's record is on its branch at its commit (await-records); answers its one
-        ;; eval when recorded, else waits on the next commit (the eval failed: its text check says so)
-        mine (if (clojure.string/includes? (str (text 4)) "42")
-               (await-records ev a #(filter (fn [r] (clojure.string/includes? (:code r) "outside-x")) (eval-records (:db @(c/branch-db sys :mcp1)) [:seon.agent/key (name a)])) #(= 1 (count %)))
-               [])
-        _ (a/untap (:events-mult sys) ev)
+        ;; an agent commits a request's writes before it replies (seon.repl/agent-step), so once the relay has the
+        ;; answer its record is on the branch in the store: one read of it, no wait (none can hang on a record that never comes)
+        mine (filter #(clojure.string/includes? (:code %) "outside-x")
+                     (eval-records (seon.db/head (:conn sys) (get-in (c/state sys) [:agents a :branch])) [:seon.agent/key (name a)]))
         roots (filter #(= "(count (:agents (c/state sys)))" (:code %)) (eval-records @(:conn sys) [:seon.root/id :root]))
         bound (seon.config/value :seon.config.machine/relay-mb)]
       {:report {:tools (count (get-in answers [2 "result" "tools"]))

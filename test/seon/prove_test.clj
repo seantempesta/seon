@@ -4,7 +4,7 @@
   store (its agent caches its verdicts by digest: seon.results-test).
   Run: bin/test seon.prove-test"
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.test-store :as ts] [clojure.java.shell :as sh] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config]))
+            [seon.test-store :as ts] [clojure.java.shell :as sh] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.step :as step] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config]))
 
 (defn- feed
   "State st after the messages ([in m] ...) in order, with every output it made (the :to-api messages)."
@@ -21,14 +21,18 @@
 (def ^:private test-run-answer {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.b-test/t"}] :digests {'a.b-test/t "d1"} :ms 5})
 
 (defn- run-through
-  "Drive the run that st (a run just started by `outs`) is on, to its end: the runner answers a
-  tests request with answer, the write with ok. Answers [st all-outputs]."
+  "Drive the run that st (a run just started by `outs`) is on, to its end: the runner answers a plan request with
+  answer's tests as its items (at its digests), each item's tests request with answer, the write with ok. Answers
+  [st all-outputs]."
   [st outs answer]
   (loop [st st all outs seen 0]
     (let [pending (drop seen all)]
       (if-let [m (first (filter :req pending))]
         (let [op (get-in m [:req :op])
-              r (case op :spawn {:id :p1} :tests answer :write {:ok true :t 6} :kill {:killed :p1})
+              ;; the service plans a run (its agent's :tests with :plan?) before it asks for each item by name
+              plan (if (or (seon.contract/error? answer) (not (map? answer))) answer
+                     {:items (:digests answer) :selected (vec (keys (:digests answer)))})
+              r (case op :spawn {:id :p1} :tests (if (get-in m [:req :plan?]) plan answer) :write {:ok true :t 6} :kill {:killed :p1})
               [st o] (feed st [(answer-of m r)])]
           (recur st (into all o) (inc (.indexOf all m))))
         [st all]))))
@@ -38,8 +42,8 @@
     (is (= 1 (count (asks outs :spawn))) "three askers of one key: one run")
     (let [[st all] (run-through st outs test-run-answer)]
       (is (= [1 2 3] (waiters-answered all)) "each answered, once")
-      (is (= 1 (count (asks all :tests))))
-      (is (nil? (:running st)))
+      (is (= [true nil] (mapv #(get-in % [:req :plan?]) (asks all :tests))) "one plan and one run of its one item")
+      (is (= {} (:runs st)) "and the run has left the service")
       (testing "the key again after its run: answered at once, nothing runs"
         (let [[_ o] (feed st [(req 4 :main 5)])]
           (is (= [4] (waiters-answered o)))
@@ -67,7 +71,7 @@
   ;; THE PLAN 0.7 (root, 2026-10-27): a judge's run whose test child died answered every later ask
   ;; of its key from memory, so the held task's next run (seon_done again, same branch, same
   ;; program) got the same death and never ran its proof. A death is no verdict: the next ask runs
-  (let [died {:pass 0 :fail 0 :error 1 :reports [{:type :error :var "#'a.b-test/t" :exit {:exit 1} :message "test process died"}] :digests {} :ms 5}
+  (let [died {:pass 0 :fail 0 :error 1 :reports [{:type :error :var "#'a.b-test/t" :exit {:exit 1} :message "test process died"}] :digests {'a.b-test/t "d1"} :ms 5}
         [st outs] (feed (prove/prove-proc {}) [(req 1 :main 5)])
         [st all] (run-through st outs died)
         _ (is (= [1] (waiters-answered all)) "its waiter is answered the death")
@@ -93,39 +97,12 @@
 (deftest a-session-and-an-agents-turn-for-one-digest-are-one-run
   ;; the session's seon_prove for agent a3's branch at tx 7, and a3's turn asking for the same
   (let [[st outs] (feed (prove/prove-proc {}) [(req 10 :agent-3 7 :a3) (req 11 :agent-3 7 :a3)])]
-    (is (= 1 (count (asks outs :tests))) "one tests request, to the agent that holds the branch")
-    (is (= {:op :tests :id :a3 :mode :judge} (:req (first (asks outs :tests)))))
+    (is (= 1 (count (asks outs :tests))) "one plan request, to the agent that holds the branch")
+    (is (= {:op :tests :id :a3 :mode :judge :plan? true} (:req (first (asks outs :tests)))))
     (is (empty? (asks outs :spawn)) "the agent runs its own branch: no prove agent")
     (let [[_ all] (run-through st outs test-run-answer)]
       (is (= [10 11] (waiters-answered all)))
-      (is (= 1 (count (asks all :tests)))))))
-
-(deftest a-burst-is-one-run-per-branch-and-the-latest-wins-without-starving-another-branch
-  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
-        ;; while main@1 runs: 200 requests on one branch (the burst), then one on another
-        [st more] (feed st (concat (for [i (range 200)] (req (+ 100 i) :agent-3 (+ 10 i) :a3)) [(req 500 :agent-5 3 :a5)]))]
-    (is (empty? (filter :req more)) "nothing starts while a run is in flight")
-    (is (= #{[:agent-3 nil :judge] [:agent-5 nil :judge]} (set (keys (:next st)))) "one pending change per branch")
-    (is (= 209 (get-in st [:next [:agent-3 nil :judge] :t])) "the latest of the burst")
-    (is (= 200 (count (get-in st [:next [:agent-3 nil :judge] :waiters]))) "the replaced requests' askers follow the latest")
-    (let [[st all] (run-through st outs test-run-answer)]
-      (is (= 3 (count (asks all :tests))) "main, then agent-3 once, then agent-5 once: one run each")
-      (is (= 202 (count (waiters-answered all))) "every asker answered")
-      (is (= (count (distinct (waiters-answered all))) (count (waiters-answered all))) "once each")
-      (is (nil? (:running st))))))
-
-(deftest branches-take-turns
-  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :b 1 :ab) (req 2 :a 1 :aa) (req 3 :c 1 :ac)])
-        order (atom [])
-        [st all] (loop [st st all outs seen 0]
-                   (if-let [m (first (filter :req (drop seen all)))]
-                     (let [op (get-in m [:req :op])
-                           _ (when (= :tests op) (swap! order conj (get-in m [:req :id])))
-                           r (case op :spawn {:id :p1} :tests test-run-answer :write {:ok true} :kill {:killed 1})
-                           [st o] (feed st [(answer-of m r)])]
-                       (recur st (into all o) (inc (.indexOf all m))))
-                     [st all]))]
-    (is (= [:ab :ac :aa] @order) "b ran first; then the next branch in name order after it (c), then a")))
+      (is (= [true nil] (mapv #(get-in % [:req :plan?]) (asks all :tests))) "one plan and one run of its item, for both"))))
 
 (deftest a-failed-run-answers-its-waiters-with-the-error
   (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :a 1 :aa) (req 2 :a 1 :aa)])
@@ -211,18 +188,6 @@
       (is (= #{} (proofs/left-out '[a.p-test/proc] '#{a.p-test/proc} false '#{a.p-test/proc}))))))
 
 ;; ---- admission details ----------------------------------------------------------------------
-
-(deftest a-request-naming-other-tests-never-takes-over-a-pending-run
-  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
-        names (fn [rid ns] [:req {:rid rid :branch :main :t 2 :digest "d2" :names ns}])
-        [st more] (feed st [(names 2 '#{a.x-test}) (names 3 '#{a.y-test}) (names 4 '#{a.x-test})])]
-    (is (empty? (filter :req more)) "nothing starts")
-    (is (= 2 (count (:next st))) "two slots pending: the namespaces named differ")
-    (is (= #{2 4} (get-in st [:next [:main '#{a.x-test} :judge] :waiters])) "the same slot joins")
-    (is (= #{3} (get-in st [:next [:main '#{a.y-test} :judge] :waiters])) "the other keeps its own")
-    (let [[_ all] (run-through st outs test-run-answer)]
-      (is (= 3 (count (asks all :spawn))) "three runs: main, x, y, each its own")
-      (is (= [1 2 3 4] (waiters-answered all))))))
 
 (deftest an-error-is-answered-recorded-and-never-remembered
   (let [err (seon.contract/error :seon.root/no-agent 'seon.root/run-tests! "no live agent" {})
@@ -318,16 +283,16 @@
 
 (deftest the-service-reports-what-it-holds-when-that-changes
   ;; a hang in a run's chain is read from what the service holds (seon.root keeps it for a stall's
-  ;; evidence): the running key and stage, who waits, and the api's asks it has open
+  ;; evidence): each run in flight with its stage and who waits, the queue, the free workers, and the api's asks it has open
   (let [state-of (fn [outs] (:r (last (filter #(= :prove-state (:op %)) outs))))
         [st outs] (feed (prove/prove-proc {}) [(req 1 :main 5) (req 2 :main 5)])
         s1 (state-of outs)]
-    (is (= {:running "main@d5" :stage :spawn :waiting 2 :next 0} (select-keys s1 [:running :stage :waiting :next])))
+    (is (= {"main@d5" {:stage :spawn :waiting 2}} (:runs s1)))
     (is (= [[:spawn "main@d5"]] (:open s1)) "the ask it waits on")
     (let [spawn (first (asks outs :spawn))
           [st o] (feed st [(answer-of spawn {:id :p1})])
           s2 (state-of o)]
-      (is (= [:tests [[:tests "main@d5"]] :p1] [(:stage s2) (:open s2) (:runner s2)]) "the spawn answered: the tests ask is the one open")
+      (is (= [{:stage :plan :waiting 2} [[:plan "main@d5"]]] [(get-in s2 [:runs "main@d5"]) (:open s2)]) "the spawn answered: the plan ask is the one open")
       (testing "a message that changes nothing it holds reports nothing"
         (let [[_ o2] (feed st [(answer-of {:tag 9999} {:ok true})])]
           (is (empty? (filter #(= :prove-state (:op %)) o2))))))))
@@ -355,3 +320,61 @@
     (is (not= (dir (first rs)) (dir (second rs))) "each run has a directory of its own")
     (doseq [r rs]
       (is (not (.exists (java.io.File. ^String (dir r)))) "and a green run's directory is gone with it"))))
+
+;; ---- items: the service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2) ----------------------------
+
+(defn- items-st [slots] (assoc (prove/prove-proc {:conn nil}) :slots slots))
+(defn- batches [outs] (filterv #(= :tests (get-in % [:req :op])) outs))
+(defn- answers [outs] (into {} (for [o outs :when (= :asker-answered (:op o))] [(:asker o) (:r o)])))
+(def ^:private green-of (fn [& ts] {:pass (count ts) :fail 0 :error 0 :reports (mapv #(hash-map :type :pass :var (str "#'" %)) ts)}))
+
+;; docs/merging.md#the-test-service: ten askers of one item run it once, and each is answered when its last item is green
+(deftest an-item-many-ask-runs-once-and-answers-each
+  (let [it {:agent :a1 :ms 50}
+        [st o1] (prove/ask-items (items-st 4) 1 :batch {['app.x-test/t "d1"] it})
+        [st o2] (prove/ask-items st 2 :batch {['app.x-test/t "d1"] it})
+        _ (is (= 1 (count (batches (into o1 o2)))) "the second asker joins the item: one batch, not two")
+        _ (is (= {} (answers (into o1 o2))) "nobody is answered before it ends")
+        [st m] (step/answered st (:tag (first (batches o1))))
+        [st o3] (prove/batch-ended st (parse-long (second m)) (green-of 'app.x-test/t))]
+    (is (= {1 true 2 true} (update-vals (answers o3) :green)) "both answered green from the one run")
+    (is (= {} (:items st)) "and the item has left the service: its verdict is the cache's")
+    (is (= 4 (:slots st)) "its slot free again")))
+
+;; an asker wants to know whether its tests pass: its first red answers it at once, and the work only it wanted is dropped
+(deftest a-red-answers-its-asker-at-once-and-drops-what-only-it-wanted
+  (let [[st o1] (prove/ask-items (items-st 1) 1 :batch {['app.a-test/t "da"] {:agent :a1 :ms 10} ['app.b-test/u "db"] {:agent :a1 :ms 10}})
+        b (first (batches o1))
+        [st v] (step/answered st (:tag b))
+        red {:pass 0 :fail 1 :error 0 :reports [{:type :fail :var (str "#'" (first (get-in b [:req :names]))) :message "no"}]}
+        [st o2] (prove/batch-ended st (parse-long (second v)) red)]
+    (is (= 1 (count (batches o1))) "one slot: one batch at a time")
+    (is (false? (:green (get (answers o2) 1))) "the first red answers its asker, red")
+    (is (= [] (batches o2)) "the other item, which only it wanted, is never run")
+    (is (= {} (:items st)) "and has left the queue")))
+
+;; an agent's turn waits to act: its items go ahead of a batch's, however the batch's are valued
+(deftest a-turns-item-goes-ahead-of-a-batchs
+  (let [[st _] (prove/ask-items (items-st 0) 1 :batch {['app.cheap-test/t "dc"] {:agent :a1 :ms 1}})
+        [st _] (prove/ask-items st 2 :turn {['app.slow-test/u "ds"] {:agent :a2 :ms 100000}})
+        [st outs] (#'prove/grant (assoc st :slots 1))]
+    (is (= [:a2 #{'app.slow-test/u}] ((juxt #(get-in % [:req :id]) #(get-in % [:req :names])) (first (batches outs))))
+        "the free slot goes to the turn's item")
+    (is (= 1 (get-in st [:items ['app.cheap-test/t "dc"] :skips])) "and the batch's item passed over ages a skip")))
+
+;; every wait ends: a batch whose run errored (a test child that died) answers each of its askers with that error, never silence
+;; no shards: a worker pulls one item, so two items of one namespace are two grants, and a second worker takes the second
+(deftest a-worker-pulls-one-item-at-a-time
+  (let [[_ outs] (prove/ask-items (items-st 2) 1 :batch {['app.x-test/a "da"] {:agent :a1 :ms 5} ['app.x-test/b "db"] {:agent :a1 :ms 5}})]
+    (is (= [1 1] (mapv #(count (get-in % [:req :names])) (batches outs))) "two workers, one item each, though both are app.x-test's")))
+
+(deftest a-batch-that-died-answers-its-askers-with-the-error
+  (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :a1 :ms 5}})
+        b (first (batches o1))
+        [st v] (step/answered st (:tag b))
+        died {:seon.error/type :seon.test/fork-refused :seon.error/message "the test child could not be forked"}
+        [st o2] (prove/batch-ended st (parse-long (second v)) died)
+        r (get (answers o2) 7)]
+    (is (false? (:green r)))
+    (is (seon.contract/error? (get-in r [:results 'app.x-test/t])) "the asker holds the typed error for the item")
+    (is (= 1 (:slots st)))))

@@ -975,9 +975,23 @@
             [st3 patch] (pass-view st2 [:chat :a3])
             added (concat (:appends patch) (:afters patch) (:prepends patch))]
         (is (= 3 (count (side st3))) "root's line, a3's entry, a4's entry")
-        (is (= ["agent-a4"] (mapv (fn [[_ html]] (second (re-find #"id=\"([^\"]+)\"" html))) added)) "a4's entry, placed in the list")
+        (is (= ["u-agent-a4"] (mapv (fn [[_ html]] (second (re-find #"id=\"([^\"]+)\"" html))) added)) "a4's entry, placed in the list, named apart as the user's walk names its elements")
         (is (str/includes? (second (first added)) "href=\"/agent/a4\"") "a link to its page")
         (is (empty? (:frags patch)) (str "nothing else of the list sent again: " (map first (:frags patch))))))
+    (r/dispose-walk! (get-in st [:root-walk :w]))))
+
+(deftest a-page-names-each-element-once
+  ;; docs/render.md#a-layout-places-its-lists: a page's units are keyed by element id, and the frame puts the user's agents list beside the
+  ;; page's own units: an agent the user started is on root's page twice (the list, root's sessions), so the user's walk names its elements
+  ;; apart. Red before: agent-a3 twice, one unit overwriting the other in the view, a patch for one landing on the other
+  (let [[main branch eid] (paged-dbs)
+        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "a3" :seon.agent/root [:seon.root/id :root]}])
+        st (root-state (branch-state main branch) main)
+        [st1 _] (pass-view st :root)
+        html (p/view-html st1 :root)
+        ids (map second (re-seq #" id=\"([^\"]+)\"" html))]
+    (is (= 2 (count (re-seq #"href=\"/agent/a3\"" html))) "a3's entry is drawn twice: the list and root's sessions")
+    (is (empty? (for [[id n] (frequencies ids) :when (> n 1)] id)) (str "no element id twice: " (pr-str (for [[id n] (frequencies ids) :when (> n 1)] id))))
     (r/dispose-walk! (get-in st [:root-walk :w]))))
 
 (deftest a-part-that-sorts-into-the-middle-goes-there
@@ -989,6 +1003,38 @@
     (is (= [["a" "b"]] (:afters patch)) "b after a")
     (is (empty? (:appends patch)))
     (is (empty? (:prepends patch)))))
+
+(deftest a-reordered-unit-is-moved-not-its-container-sent
+  ;; docs/render.md#a-layout-places-its-lists: a unit that changed place among the held ones of its container is taken out and put back by
+  ;; its new neighbour; the others stay. Red before: a list's reorder moved nothing (the tab kept the old order), and a parent whose children
+  ;; only changed order was sent whole with every child in it
+  (let [li (fn [id] (str "<li id=\"" id "\">" id "</li>"))
+        u (fn [id] {:id id :container "#c-rows" :input id :html (li id)})
+        step (fn [held units] (let [[v patch] (#'p/step-units (seon.db/index) held units)] (#'p/finish-patch v patch units)))
+        [v1 _] (step nil (mapv u ["a" "b" "c" "d"]))
+        [v2 patch] (step v1 (mapv u ["a" "c" "d" "b"]))]
+    (is (= [["b" "#d" "after" (li "b")]] (:moves patch)) "b alone moves, after d")
+    (is (empty? (concat (:frags patch) (:appends patch) (:afters patch) (:prepends patch) (:removes patch))))
+    (is (= {"#c-rows" ["a" "c" "d" "b"]} (:order v2)) "the order held is the new one")
+    (let [[_ patch] (step v2 (mapv u ["b" "a" "c" "d"]))]
+      (is (= [["b" "#a" "before" (li "b")]] (:moves patch)) "first: before the one now after it"))
+    (testing "a parent whose children only changed order is not sent; the child that moved is"
+      (let [parent (fn [ids] {:id "p" :container "#p-tiles" :input (vec ids) :html (str "<ul id=\"p\">" (apply str (for [i ids] (str "<!--s:" i "-->"))) "</ul>")})
+            kid (fn [id] {:id id :container "#p" :parent "p" :input id :html (li id)})
+            [v1 _] (step nil [(parent ["x" "y" "z"]) (kid "x") (kid "y") (kid "z")])
+            [_ patch] (step v1 [(parent ["z" "x" "y"]) (kid "z") (kid "x") (kid "y")])]
+        (is (empty? (:frags patch)) (str "the parent stays: " (:frags patch)))
+        (is (= [["z" "#x" "before" (li "z")]] (:moves patch)))))
+    (testing "a slot that moved into another element is no reorder: its parent is sent"
+      (let [parent (fn [h] {:id "t" :container "#c-rows" :input h :html h})
+            kid (fn [id] {:id id :container "#t" :parent "t" :input id :html (li id)})
+            [v1 _] (step nil [(parent "<div id=\"t\"><div><!--s:a--></div><!--s:b--></div>") (kid "a") (kid "b")])
+            [_ patch] (step v1 [(parent "<div id=\"t\"><div><!--s:b--><!--s:a--></div></div>") (kid "b") (kid "a")])]
+        (is (= ["t"] (map first (:frags patch))) "the parent, whole")
+        (is (empty? (:moves patch)) "its children come in it")))
+    (testing "a move is sent as a remove, then a put back by its neighbour"
+      (let [chunk (seon.web/chunk-of (assoc patch :view nil))]
+        (is (re-find #"(?s)selector \[id=\"b\"\].*mode remove.*selector #d.*mode after.*elements <li id=\"b\">" chunk) chunk)))))
 
 (defn- depth "Hiccup x's nesting." [x] (if (vector? x) (inc (reduce max 0 (map depth x))) 0))
 

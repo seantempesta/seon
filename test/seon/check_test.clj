@@ -134,19 +134,6 @@
           (is (= (disj in1 b1) (disj in2 b2)) "and nothing else changed")))
       (finally (seon.lib/remove-tree! path (str path "-agents") runs)))))
 
-(deftest records-are-read-at-the-agents-commit
-  ;; the branch is read again at
-  ;; each of the agent's commit events, never before one when its records are not there yet
-  (let [ev (a/chan 8)
-        reads (atom 0)
-        ;; the branch shows the records from its second read on: after a commit
-        read #(if (= 1 (swap! reads inc)) [] [:r1 :r2])]
-    (doseq [e [{:type :reply :agent :a1} {:type :commit :agent :a2 :t 5} {:type :commit :agent :a1 :t 7} {:type :ready :agent :a3}]]
-      (a/>!! ev e))
-    (is (= [:r1 :r2] (#'seon.check/await-records ev :a1 read #(= 2 (count %)))))
-    (is (= 2 @reads) "once at the start, once at a1's commit")
-    (is (= {:type :ready :agent :a3} (a/poll! ev)) "it waited through a1's commit, not a2's or a reply")))
-
 (deftest the-probe-says-what-it-took
   ;; the system check awaits the probe's
   ;; own event for its third message, not a window

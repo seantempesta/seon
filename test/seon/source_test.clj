@@ -1453,3 +1453,38 @@
   ;; the owner, 2026-11-07: "these changed forms name no source file to write back" stops being an outcome: a namespace made at a REPL reaches disk as any other
   (is (= "src/app/my_lib/core.clj" (source/namespace-path 'app.my-lib.core)))
   (is (= "test/app/core_test.clj" (source/namespace-path 'app.core-test))))
+
+(deftest an-update-never-says-ok-on-a-merge-that-did-nothing
+  ;; 2026-11-11: the standing root's write-back (seon.fx/git-commit: plumbing, then update-ref) moved jolt/merges, the
+  ;; branch the write-back tree has checked out, so that tree's index stayed at the parent: the merged files read as
+  ;; staged deletions. bin/update's clean check read only the working tree (git diff), so the merge of main ran on a dirty
+  ;; index, and eight updates said UPDATE OK while the tree stayed at batch 24 (the ninth failed). Its merge step
+  ;; (bin/update --merges-only, the function the update runs) refuses staged changes, and says OK only when HEAD
+  ;; contains main. Red before: the mode did not exist, and the update's check passed this tree
+  (let [here (config/checkout)
+        d (str here "/target/tmp/update-merges-" (random-uuid))
+        g (fn [& args] (let [r (apply sh/sh "git" "-C" d args)] (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))
+        update #(sh/sh (str here "/bin/update") "--merges-only" d)]
+    (try
+      (.mkdirs (java.io.File. d))
+      (g "init" "-q" "-b" "main") (g "config" "user.name" "t") (g "config" "user.email" "t@t")
+      (spit (str d "/a.txt") "a\n") (g "add" "a.txt") (g "commit" "-q" "-m" "one")
+      (g "checkout" "-q" "-b" "jolt/merges")
+      ;; Seon's merge onto the checked-out branch, as the write-back commits it
+      (is (some? (:sha (:value (fx/git-commit {:req {:dir d :branch "jolt/merges" :files {"src/demo/half.clj" "(ns demo.half)\n"} :message "Seon merge"}})))))
+      (is (str/includes? (g "status" "--short") "D  src/demo/half.clj") "the write-back left the tree's index at the parent: a staged deletion")
+      (is (zero? (:exit (sh/sh "git" "-C" d "diff" "--quiet"))) "the old check, the working tree against the index, passed this tree")
+      ;; main moves on
+      (g "update-ref" "refs/heads/main" (g "commit-tree" "-m" "two" "-p" "main" (g "rev-parse" "main^{tree}")))
+      (let [r (update)]
+        (is (= 1 (:exit r)) (str (:out r) (:err r)))
+        (is (str/includes? (:err r) "staged changes its HEAD does not hold") "refused, naming the staged change")
+        (is (str/includes? (:out r) "UPDATE FAILED")))
+      ;; the tree brought to its HEAD: the update merges main and says so
+      (g "read-tree" "-u" "--reset" "HEAD")
+      (let [r (update)]
+        (is (= 0 (:exit r)) (str (:out r) (:err r)))
+        (is (str/includes? (:out r) "UPDATE OK"))
+        (is (zero? (:exit (sh/sh "git" "-C" d "merge-base" "--is-ancestor" "main" "HEAD"))) "HEAD contains main")
+        (is (.isFile (java.io.File. (str d "/src/demo/half.clj"))) "and the merged file is kept"))
+      (finally (seon.lib/remove-tree! d)))))

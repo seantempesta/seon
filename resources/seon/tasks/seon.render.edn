@@ -1,8 +1,4 @@
-[ {:seon.task/name "a-flush-places-what-moved"
-  :seon.task/plan "What exists: seon.render/placed walks the page's whole output (a prewalk of the root's output and, for the page's units, every placed component's) on each call of `seon.render/placed-units`, which the render proc makes each flush: O(page hiccup) a flush whatever moved. Measured 2026-11-10 on jolt/pages (seon.render-cost-test's page-of at 10 turns, nothing moved, every unit's html cached): 289,823 ticks and 2.19 MB for 22 units, a call. Correct: an index the walk keeps, each component's placement (its container and parent) recorded when its render runs and dropped when it unmounts, so a flush reads the placements of the components it ran: O(changed). Proof: a cost proof, n = components on the page, one leaf changed: the placement work flat in n."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.render-cost-test/a-flush-places-what-moved}}
-{:seon.task/name "a-merge-conflict-shows-on-the-page"
+[ {:seon.task/name "a-merge-conflict-shows-on-the-page"
   :seon.task/plan "What exists: the agent's status part (`seon.render.ui/status-hiccup`) draws each unmerged entry with its key, yours and main's text and the forms that settle it; a task's merge conflicts (:seon.task/conflicts: key, kind, base, ours, theirs) are drawn nowhere with their base, and the run entry (`seon.render.ui` line showing N conflicts) and the problems banner show only a count. Correct: a declared html render of :seon.merge/conflict with its three sides, shown from the run entry and the task's page as well as the agent's status."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/a-merge-conflict-shows-its-three-sides}}
