@@ -296,6 +296,15 @@
                                               :cfg (:cfg st) :resumed resumed?
                                               :commit (d/commit-id @conn) :t (:max-tx @conn)})
                (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
+      ;; a session's files as a branch of main, keyed by their tree (seon.root/prove-tree!): made once, from main's head, with
+      ;; the catch-up of the checkout written on it; a second asker of one tree finds it made (:exists), never makes it again
+      :branch-for-tree (reply st (if (exists? (:branch m))
+                                   {:ok true :exists true}
+                                   (do (d/branch! conn main (:branch m))
+                                       (when (seq (:tx m))
+                                         (let [bc (pdb/connect (assoc (:cfg st) :branch (:branch m)))]
+                                           (try (d/transact bc (vec (:tx m))) (finally (d/release bc)))))
+                                       {:ok true :exists false})))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
       :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))

@@ -130,7 +130,7 @@
 
 (declare deliver-rid answer-taken)
 
-(declare answer-spawn insert-evals start-spawn no-room binary-program binary-current)
+(declare answer-spawn insert-evals start-spawn no-room binary-program binary-current kill!)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -1911,6 +1911,52 @@
 
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}
   [sys req] (call! sys {:op :write :req req}))
+
+(defonce ^:private tree-runs
+  ;; tree branch -> runs of it in flight here (prove-tree!): its agent ends when the last answers
+  (atom {}))
+
+(defn tree-branch
+  "The branch a checkout's files are proved on, by the checkout's tree id (seon.fx/tree-id): every session on one tree shares it,
+  its agent, its plan and its run key. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :string] :keyword]}
+  [tree] (keyword (str "tree-" tree)))
+
+(defn prove-tree!
+  "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
+  their branch (tree-branch), made once from main with the checkout's catch-up written on it (catch-up :fact? false, as the writer's
+  one :branch-for-tree op), its live agent or one forked onto it, and prove! of names in mode (default :judge). The run's answer,
+  or a typed error: no tree on main to diff from, the catch-up's read failing, or a file it left out (:seon.root/catch-up-skipped,
+  each named: a judgement of part of the files would be wrong). The branch's agent ends once no run of it is in flight here.
+  See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :seon.root/sys [:map [:checkout :string] [:tree :string]]] :map]}
+  [sys {:keys [checkout tree names mode]}]
+  (let [b (tree-branch tree)
+        c (catch-up @(:conn sys) checkout {:fact? false})]
+    (cond
+      (nil? c) (refused 'seon.root/prove-tree! "main holds no tree of its checkout to diff a session's files from" {:checkout checkout})
+      (contract/error? c) c
+      (seq (:skipped c)) (contract/error :seon.root/catch-up-skipped #'prove-tree!
+                                         (str "the checkout's files could not all be read, so none is proved: "
+                                              (str/join "; " (map #(str (:path %) ": " (:reason %)) (:skipped c))))
+                                         {:skipped (:skipped c)})
+      :else
+      (let [w @(write! sys {:op :branch-for-tree :branch b :tx (:tx c)})]
+        (if (contract/error? w)
+          w
+          (let [full (pdb/on-main (pdb/conn-main (:conn sys)) b)
+                live (fn [] (some (fn [[aid a]] (when (and (= full (:branch a)) (not (gone-statuses (:status a)))) aid)) (:agents (state sys))))
+                ;; the spawn's answer: the new agent, or, for an asker who came second, the refusal naming the live holder
+                s (when-not (live) @(request! sys 'spawn! nil {:branch b}))
+                ag (or (live) (:id s) (:agent s))]
+            (if-not ag
+              s
+              (do (swap! tree-runs update b (fnil inc 0))
+                  (let [r @(prove! sys ag (set (map symbol names)) (or mode :judge))]
+                    (when (zero? (b (swap! tree-runs update b dec)))
+                      (swap! tree-runs dissoc b)
+                      (kill! sys ag))
+                    r)))))))))
 
 (defn store-clean!
   "A promise of the writer's answer once its store is clean ({:ok :commits :flushes}): every
