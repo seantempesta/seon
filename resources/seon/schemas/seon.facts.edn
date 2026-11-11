@@ -151,6 +151,7 @@
                               [:task/refs {:optional true} :task/refs]]
  :seon.db/note-fact [:map {:seon.db/attributes true}
                       [:note/text :note/text] [:note/agent :note/agent]]
+ :seon.db/text [:string {:description "Prose a person or a model wrote, in Markdown: drawn as html for a person, read as its structure by the model. See docs/render.md#a-value-draws-itself." :seon.render/hiccup seon.render.ui/text}]
  ;; ---- the recording transaction of each eval request, and the agent's answered t.
  ;; Observations: data on the branch that recorded them, never carried by a merge ----
  ;; an eval: one per eval request (a model's tool call, a form the user or a session typed),
@@ -218,7 +219,7 @@
  ;; the agent's turn number (docs/turn.md#the-turn-is-a-number): moved by the model turn that starts (seon.turn/act!) in the
  ;; transaction of its model call's first facts, agent-wide and never restarting across wakes; every record takes the number in force
  :seon.agent/turn [:int {:description "The agent's turn number, agent-wide and never restarting across wakes. See docs/turn.md#the-turn-is-a-number."}]
- :seon.agent/description [:string]
+ :seon.agent/description :seon.db/text
  ;; the model it works for, when its task names none of root's; the client that attached it, when an outside agent's (seon.server/held)
  :seon.agent/model [:string {:description "The model the agent works for, when its task names none of root's."}]
  :seon.agent/holder [:string {:description "The client that attached this agent, when it is an outside agent's."}]
@@ -381,8 +382,8 @@
  :seon.task/id [:and {:seon.db/identity true :description "The task's identity."} :string]
  :seon.task/ns [:symbol {:description "The namespace the task's code lives in; its agent's REPL starts there."}]
  :seon.task/name [:string {:description "The task's name within its namespace."}]
- :seon.task/plan [:string]
- :seon.task/instructions [:string]
+ :seon.task/plan :seon.db/text
+ :seon.task/instructions :seon.db/text
  :seon.task/proofs [:set {:description "The tests that say this task is done. A proof is a clojure.test deftest in the test namespace of what it proves, built on a small test world, never the live db: (my.test/world). Register one with (my.task/update! :seon.task/proofs conj (quote ns-test/name)). (prove) runs your proofs and every test your change reaches, and records the verdicts; clojure.test/run-test-var records nothing."} :qualified-symbol]
  :seon.task/needs [:set {:seon.db/to [:seon.task/task-fact] :description "The tasks that this task needs."} :seon.db/ref]
  ;; the example sessions its agent reads before its own (seon.ctx.wire/request): agents keyed "example/<id>"
@@ -602,7 +603,7 @@
  :seon.message/to [:set {:seon.db/to [:seon.db/agent-fact] :seon.db/index true :description "The agents that receive the message, a ref each."} :seon.db/ref]
  ;; when root's writer recorded it (ms): it orders and decides nothing (docs/clocks.md)
  :seon.message/sent-ms [:int {:description "When root's writer recorded the message, in ms; it orders and decides nothing. See docs/clocks.md."}]
- :seon.message/body [:string]
+ :seon.message/body :seon.db/text
  :seon.message/fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/message :seon.render/openai-compat seon.ctx.wire/message-msgs} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
                      [:seon.message/to {:optional true} :seon.message/to] [:seon.message/sent-ms {:optional true} :seon.message/sent-ms]
                      [:seon.message/body :seon.message/body]]
@@ -656,8 +657,8 @@
  :seon.model-call/origin [:enum {:description "Who read the context: the agent's model, or an outside agent through the server."} :model :outside]
  ;; the model's reply: its text (a reply that called nothing is a message to the user), its reasoning as returned and the
  ;; provider's finish_reason; truncated, the reply stopped at max-tokens and its text was cut
- :seon.model-call/reply [:string]
- :seon.model-call/reasoning [:string]
+ :seon.model-call/reply :seon.db/text
+ :seon.model-call/reasoning :seon.db/text
  :seon.model-call/truncated [:boolean {:description "True when the reply stopped at max-tokens and its text was cut."}]
  ;; a call that failed: the typed error as data (the agent's end holds it too, :seon.agent/error)
  :seon.model-call/error [:and {:description "The typed error, as data, of a call that failed."} :seon.error/base]

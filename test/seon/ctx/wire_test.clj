@@ -2,7 +2,7 @@
   "The agent's current-state block says each thing once: a passing proof is its status, a
   red one its source and its failures (expected and actual), a reference already shown as a
   proof is not shown again, a merge task's plan stays its own."
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
+  (:require [my.branch] [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.ctx.search :as search] [seon.ctx.session :as session] [seon.ctx.status :as status] [seon.ctx.wire :as wire] [seon.print :as print]
             [seon.doc-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.doc :as doc] [seon.judge] [seon.ctx :as ctx] [seon.fixtures] [seon.render :as render] [seon.render.ui] [seon.web.html] [my.test :as t]
             [seon.print.select :as select] [seon.ratom] [clojure.walk] [clojure.string :as str] [seon.lib] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model] [seon.config] [clojure.data.json] [seon.render-cost-test]))
@@ -499,7 +499,8 @@
             text (str/join "\n\n" (map render/part-text (vals page)))
             times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
         (is (some #(= % "status") (keys page)) "how the work stands is on the page")
-        (is (= 1 (times "Make ```demo/g``` exact.")) "the plan, once, in the task")
+        (is (= 1 (count (re-seq #"Make .{0,40}?demo/g.{0,40}? exact\." text))) "the plan, once, in the task")
+        (is (zero? (times "```demo/g```")) "its code span an element, never its delimiters (docs/render.md#a-value-draws-itself)")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
         (is (= 1 (count (re-seq #"\[:code \"demo-test/f-test\"\]" text))) "the proofs' statuses once, in the status")))))
 
@@ -1178,7 +1179,7 @@
         html #(:html (some (fn [u] (when (str/starts-with? (:id u) %) u)) units))
         task (html "task-view")
         cites (apply str (map :html (filter #(str/starts-with? (:id %) "cite-") units)))]
-    (is (str/includes? task "Make ```demo/g``` say one thing") "D4: the whole plan")
+    (is (re-find #"Make <code[^>]*>demo/g</code> say one thing" task) "D4: the whole plan, its code span an element (docs/render.md#a-value-draws-itself)")
     (is (not (str/includes? task "(deftest g-test")) "D1: the proof's source is the status's, the task's part does not repeat it")
     (is (str/includes? (html "status") "demo-test/g-test") "D1: the proof written is the status's, by name")
 
@@ -2196,7 +2197,7 @@
 (deftest the-recorded-requests-come-out-the-same
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: what the model is sent does not change by a byte unless a change means it to, and then this
   ;; rewrites test/seon/recorded_requests.edn in the same commit
-  (let [recorded (clojure.edn/read-string (slurp (str (seon.config/checkout) "/test/seon/recorded_requests.edn")))
+  (let [recorded (clojure.edn/read-string (my.branch/file "test/seon/recorded_requests.edn"))
         now (recorded-sessions)]
     (is (= (update-vals recorded count) (update-vals now count)) "the same sessions, the same turns of each")
     (doseq [[k turns] recorded [i t] (map-indexed vector turns)]
