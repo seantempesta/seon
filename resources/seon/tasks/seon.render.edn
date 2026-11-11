@@ -1,8 +1,4 @@
-[ {:seon.task/name "the-frame-places-the-page-render"
-  :seon.task/plan "What exists: seon.render.ui/page-chrome lays a page out by hand in five named regions (#c-side, #p-head, #c-rows, #p-task, #p-tiles, with caption, rules and input), and a walk's units are placed only where their container id matches one, so a render chooses which regions it fills but cannot make one of its own (found 2026-11-11 building the stage, seon.render.ui/stage: docs/render.md#an-entity-may-name-its-own-render). The change: the frame places the root render's own output as the page, one unit holding its containers, and keeps only the top bar, the agents list and the input; seon.render.ui/agent draws its two columns itself. A second layout is built only after this (owner via Point, 2026-11-11). Cost: no new walk; the root unit is one more unit, sent when its own output changes (its children are slots). Proof: a render whose output names a container no frame region has gets its lists placed there (seon.render-test/a-render-places-its-own-regions); the agent page's html is unchanged in content."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.render-test/a-render-places-its-own-regions}}
- {:seon.task/name "a-merge-conflict-shows-on-the-page"
+[ {:seon.task/name "a-merge-conflict-shows-on-the-page"
   :seon.task/plan "What exists: the agent's status part (`seon.render.ui/status-hiccup`) draws each unmerged entry with its key, yours and main's text and the forms that settle it; a task's merge conflicts (:seon.task/conflicts: key, kind, base, ours, theirs) are drawn nowhere with their base, and the run entry (`seon.render.ui` line showing N conflicts) and the problems banner show only a count. Correct: a declared html render of :seon.merge/conflict with its three sides, shown from the run entry and the task's page as well as the agent's status."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/a-merge-conflict-shows-its-three-sides}}

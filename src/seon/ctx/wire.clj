@@ -289,18 +289,23 @@
 
 (defn model-parts
   "The parts of entity c's page the model reads, as one component: the lists its page render places (seon.render/render-var-of: its own
-  render, else its schema's) that hold no messages and are not for the page alone, as seon.render/page-lists keeps them, in the order the
+  render, else its schema's), anywhere in its output (a layout places them in its columns: docs/render.md#a-layout-places-its-lists),
+  that hold no messages and are not for the page alone, as seon.render/page-lists keeps them, in the order the
   render places them; none at a point before the entity was made. The root of the parts walk (`parts-walk`), so a list an entity's own render adds is read by the model as the
   task's parts are. See docs/render.md#an-entity-may-name-its-own-render."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
   [opts c]
   ;; at a point before the entity was made its pull holds nothing, and nothing draws its page: no parts
   (let [out (if (:db/id (ratom/untracked c)) ((render/render-var-of (:seon.render/index opts) c) opts c) [])
-        placed (if (and (vector? out) (keyword? (first out))) (drop-while map? (rest out)) out)
         model? (fn [x] (and (vector? x) (var? (first x))
                             (let [m (meta (first x))]
-                              (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for m)) (not= "page" (:wire/for (second x)))))))]
-    (into [:div {:id "model-parts"}] (filter model?) placed)))
+                              (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for m)) (not= "page" (:wire/for (second x)))))))
+        ;; the lists, through the layout's own elements, never into a component call's arguments
+        lists (fn lists [x] (cond (model? x) [x]
+                                  (and (vector? x) (keyword? (first x))) (mapcat lists (rest x))
+                                  (seq? x) (mapcat lists x)
+                                  :else nil))]
+    (into [:div {:id "model-parts"}] (lists out))))
 
 (defn- parts-walk
   "Agent a's page-parts walk drawn at db d0 (its branch's own, at t), cold: {:id :t :at :c :r :w}, the walk the model reads (:model-only:
