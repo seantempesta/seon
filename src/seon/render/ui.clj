@@ -160,7 +160,7 @@
   ([text {:keys [inline?]}]
    (let [{:seon.ref/keys [blocks spans]} (ref/scan text)
          run (fn [a b] (if inline? (inline text a b spans) [(subs text a b)]))]
-     (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
+     (into [:div {:class "seon-md font-sans flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
            (for [{:seon.ref/keys [kind from to heading heading-level text-from text-to items ordered]} blocks
                  :let [body (subs text from to)]]
              (cond
@@ -179,6 +179,14 @@
                (#{:quote :table} kind) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
                (= :break kind) [:hr]
                :else (into [:p] (run from to))))))))
+
+(defn text
+  "A :seon.db/text value (a task's plan, a message's body: prose a person or a model wrote) as both readers read it: its Markdown's
+  structure, code spans as [:code ...] and emphasis drawn (`markdown` with :inline?), never its delimiters. The render the schema
+  declares, so a value is drawn by its attribute: (render/hiccup {:seon.render/index ix :schema :seon.task/plan} plan). See
+  docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat :seon.render/opts :string] :any]}
+  [_ s] (markdown s {:inline? true}))
 
 (defn slot
   "Where the part with element id goes: a marker the render proc fills with the part's
@@ -393,8 +401,8 @@
               (str (kname (:seon.task/kind t)) " · "
                    ;; what happened (the reconciler's observed state, when the producer carries it), else the desired execution
                    (if-let [st (:seon.task/state t)] (kname st) (kname (:seon.task/execution t)))))
-      [:pre {:class "plan" :title "its plan, accumulated along its needs: theirs first"} plan]
-      (when (:seon.task/instructions t) [:p {:class "muted"} (:seon.task/instructions t)])
+      [:div {:class "plan" :title "its plan, accumulated along its needs: theirs first"} (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/plan} plan)]
+      (when-let [i (:seon.task/instructions t)] [:div {:class "muted"} (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/instructions} i)])
       (when-let [{:keys [reason counterexample agent]} (:seon.task/failure t)]
         [:p {:class "err"} "failed" (when agent (str " in " agent)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
       (when (seq (:seon.task/needs t))
@@ -614,9 +622,19 @@
       (or (said? call) flying?)
       (cond->
         [:section {:class "flex w-full flex-col gap-1"}
-         (when-not (str/blank? reasoning)
-           [:details [:summary {:class "text-xs text-text-500"} "thinking"]
-            [:div {} [#'markdown reasoning {:inline? true}]]])
+         (if (and (str/blank? reply) (not (str/blank? reasoning)))
+           ;; a call that said nothing but thought (reasoning on: its words go to its reasoning): its first paragraph is the agent's
+           ;; words, marked as thinking, and the rest folded under a line that says how much more there is
+           (let [[first-p & more] (remove str/blank? (str/split reasoning #"\n\s*\n"))]
+             [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"}
+              [:span {:class "text-xs text-text-500"} "thinking"]
+              [#'markdown first-p {:inline? true}]
+              (when (seq more)
+                [:details [:summary {:class "text-xs text-text-500"} (str (count more) (if (= 1 (count more)) " more paragraph" " more paragraphs") " of thinking")]
+                 [:div {} [#'markdown (str/join "\n\n" more) {:inline? true}]]])])
+           (when-not (str/blank? reasoning)
+             [:details [:summary {:class "text-xs text-text-500"} "thinking"]
+              [:div {} [#'markdown reasoning {:inline? true}]]]))
          (when-not (str/blank? reply)
            [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"} [#'markdown reply {:inline? true}]])
          (when truncated [:span {:class "text-2xs text-error"} "cut at the token limit"])]
@@ -668,8 +686,8 @@
              (cond (:seon.task/outcome t) (str " · " (:text (standing nil {:seon.task/outcome (:seon.task/outcome t)})))
                    execution (str " · " (kname execution))))]
        [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
-       (when instructions [:details [:summary "how the agent works it"] [:p {:class "seon-text"} instructions]])
-       (when plan (markdown plan))
+       (when instructions [:details [:summary "how the agent works it"] (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/instructions} instructions)])
+       (when plan (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/plan} plan))
        ;; its id, which an agent names its task by (my.task/*)
        [:p {:class "seon-note"} (str "Task: " id)]
        (seq (own-tiles (:seon.render/index opts) t))])))
@@ -1002,7 +1020,7 @@
    (cond
      (:seon.doc/address t) (section-hiccup t depth)
      (:seon.task/id t) [:section [:h3 (:seon.task/id t)] [:p "Another task your plan names."]
-                        (when-let [pl (:seon.task/plan t)] (markdown pl))]
+                        (when-let [pl (:seon.task/plan t)] (markdown pl {:inline? true}))]
      (:var/name t) (var-hiccup (:var/name t) t (boolean changing?))
      (:schema/key t) (key-hiccup db (:schema/key t) t (or lookups []))
      (:ns/name t) [:section [:h3 (str (:ns/name t))] [:p (str "A namespace your plan names." (when (:ns/doc t) (str " " (:ns/doc t))))] [:p "Read it: " [:code (help-form (:ns/name t))]]]
@@ -1168,7 +1186,11 @@
         [:p [:code (str test)] " fails."]
         (markdown (proof-state :seon.status/explain status) {:inline? true})
         (for [[i {a :assert as :asserts g :got m :message}] (map-indexed vector failures)]
-          [:p {:key i} "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."])
+          ;; what it asserted and what it got, each a value of its own, never a sentence holding them
+          [:dl {:key i :class "seon-failure"}
+           [:dt "asserted"] [:dd [:pre [:code (str/join "\n" (map #(as-text %) (or as [a])))]]]
+           [:dt "got"] [:dd [:pre [:code (as-text g)]]]
+           (when m [:dd m])])
         (when (seq calls)
           [:div {:key :calls} [:p "It calls " (str/join ", " (map #(str "`" (:var %) "`") calls)) "."]
            (for [{v :var src :source} calls :when src] [:pre {:key (str v)} [:code src]])])])
