@@ -275,7 +275,7 @@ Pinned in `deps.edn` (not a submodule).
 
 ## lmdb
 
-`reference-code/lmdb` pinned at `5f96859c`, the tip of ``jolt/an-env-neither-corrupts-nor-leaks-3``, cut from `28f384a8` (``jolt/upstream-2026-11-10``: upstream `mdb.master3` at `ba47717`), built from source by `bin/build lmdb` with `MDB_USE_ROBUST` ([failure points](failure-points.md#lmdb-locks)).
+`reference-code/lmdb` pinned at `989f3e07`, the tip of ``jolt/an-env-inherited-across-fork-is-refused`` (one commit on `5f96859c`, ``jolt/an-env-neither-corrupts-nor-leaks-3``: a transaction begun through an env inherited across fork() fails with ``MDB_ENV_FORKED``, where it took a reader slot under its parent's pid; proof `native/lmdb_kill.c` case 10), cut from `28f384a8` (``jolt/upstream-2026-11-10``: upstream `mdb.master3` at `ba47717`), built from source by `bin/build lmdb` with `MDB_USE_ROBUST` ([failure points](failure-points.md#lmdb-locks)).
 
 - Fork repo: ``https://github.com/seantempesta/lmdb``. Upstream: ``LMDB/lmdb``, branch `mdb.master3`.
 - Base: `ba47717`, upstream `mdb.master3` (2026-11-10: nothing of upstream's is missing). There is no ``jolt/main`` yet: the pin sits on its topic branch.

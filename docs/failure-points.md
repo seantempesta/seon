@@ -340,6 +340,8 @@ store made again at the path opens its own; a store another process holds is del
 process works on its files until it closes them. Nothing of a deleted store is left outside its tree
 (`lmdb-lock` case 7, `seon.db-test/a-deleted-store-leaves-nothing`).
 
+An env is its opener's alone: a process forked after an open must open its own (`seon.agent/own-store!`, `seon.lib/fork!`'s callers), and a transaction it begins through the env it inherited is refused with ``MDB_ENV_FORKED`` (`native/lmdb_kill.c` case 10). Before, such a reader's slot stood under its parent's pid, so the parent's death let a writer clear it and reuse the pages of a snapshot still being read.
+
 ## LMDB crash safety
 
 A store is opened ``MDB_SAFENOSYNC`` (```seon.db/store-cfg```, [storage](storage.md#durability-is-continuous-group-commit)).
