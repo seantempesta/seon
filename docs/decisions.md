@@ -254,6 +254,18 @@ The fiber tip costs +18% bytes (16 MB on a lazy-heavy eval) beside its +5% ticks
 
 "You don't have to update AGENTS.md at the time. I do not want a long append log of instructions that won't be evergreen. Definitely check it for out of date information and don't put in things that aren't important that agents might not find in the wiki on their own". Stated in [sessions](sessions.md#the-way-improves).
 
+### Proving is one call on a reference: fork main, load that point's program whole, run its proofs (owner, 2026-11-11)
+
+Asked what holds the test system up: "We just need to index the worktrees into a branch on the db right? Then it can run the tests from the db intead of from the files. This is a test system designed for seon test agents. There are no \"files\" for the repl runtime it's all in the db". Then the mechanism: "Fork main and load all the code in the system in the right order in one eval and you have something close to the full build without building it from scratch. If that works awesome as that's how the replay from any point in time is supposed to work so we can write this once and we have the general capability. If that's not enough the fallback for both of those routes is building a binary from the source code the agent has imported and then running the tests forked from that codebase." The interface: "It's some kind of code sort by dependency order eval and then run (seon.test/prove #commit id or whatever we are passing in to signfify the branch or point in time and that runs it". Told that a reloaded type's live instances are of the old type: "I did this all the time with my editor and clojure repl. Just try it. It's not fullproof if it fails we can always build the binary from the source code and then run it. Build both so we have both. One is going to be a helluva lot faster and will work most of the time". So one mechanism serves a session's tree, an agent's branch and a replay from a point in history; the tree is indexed into a branch on the standing system, never a system for each worktree. Stated in [the plan](plan.md), part 5; not yet built.
+
+### The machine's whole load is the sessions' while the owner is away (owner, 2026-11-11)
+
+"I'm not using my machine so target the full load of all cores and when the test system lands you can update the config to run on load". The limit is the system's one key, `:seon.config.proofs/max-load`, set to the cores; a session's hand gate goes when plain `bin/prove` asks the system ([the plan](plan.md), part 5).
+
+### Spec more work than fits, and reshape what does not fit (owner, 2026-11-11)
+
+"There's a lot more spec'ed out right? You agents are bad at estimating how much work you'll do in a short period of time. Spec out more work than that and keep refining the work with your agents don't just accept it if it's a square peg and a round hole". Stated in [sessions](sessions.md#the-managing-session): its queues.
+
 ## 2026-11-10 rulings
 
 The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
