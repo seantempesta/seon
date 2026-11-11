@@ -25,8 +25,9 @@ export HOME=$ROOT/target/home
 # - build-unit and runtime: keyed by the unit's text and the building runtime's fingerprint;
 # - AOT (JOLT_CACHE_DIR): keyed by the source, its requires' keys and what its compile read, each
 #   read named relative to the project root (JOLT_PWD), so a checkout hashes its own files;
-#   JOLT_CACHE_GENERATIONS runtimes are kept (one per Jolt pin in use), and nothing inside a generation is removed, so it grows
-#   with every tree compiled: 27 GB on 2026-11-11 (task jolt.loader/an-aot-cache-is-bounded-by-bytes-least-recently-used-first).
+#   JOLT_CACHE_GENERATIONS runtimes are kept (one per Jolt pin in use), and the whole cache is kept under JOLT_CACHE_MB,
+#   least recently used first (a hit marks its artifact; Jolt's loader.ss aot-prune-to-budget!): it grew to 27 GB unbounded
+#   by 2026-11-11, where one tree needs 0.07-0.28 GiB a generation.
 # No key holds a checkout's path, and entries are published by temp+rename. One directory in the main
 # tree's target/, found from git's common dir so a worktree anywhere (bin/worktree --at DIR too)
 # names the same absolute path.
@@ -44,7 +45,10 @@ JOLT_BUILD_CACHE_DIR=${JOLT_BUILD_CACHE_DIR:-$MAIN_TREE/target/cache/build}
 JOLT_RUNTIME_CACHE_DIR=${JOLT_RUNTIME_CACHE_DIR:-$MAIN_TREE/target/cache/runtime}
 JOLT_CACHE_DIR=${JOLT_CACHE_DIR:-$MAIN_TREE/target/cache/aot}
 JOLT_CACHE_GENERATIONS=${JOLT_CACHE_GENERATIONS:-4}
-export JOLT_BUILD_CACHE_DIR JOLT_RUNTIME_CACHE_DIR JOLT_CACHE_DIR JOLT_CACHE_GENERATIONS
+# Its value is the config key :seon.config.build/jolt-cache-mb (resources/seon/config/default.edn), read from its one
+# line as JOLT_COMPILER_OPTIONS' is below: Jolt reads it before any Seon config exists
+JOLT_CACHE_MB=${JOLT_CACHE_MB:-$(sed -nE 's#^ :seon\.config\.build/jolt-cache-mb ([0-9]+)$#\1#p' "$ROOT/resources/seon/config/default.edn")}
+export JOLT_BUILD_CACHE_DIR JOLT_RUNTIME_CACHE_DIR JOLT_CACHE_DIR JOLT_CACHE_GENERATIONS JOLT_CACHE_MB
 # Jolt's compile options for everything a Seon process compiles (its build, the test runner,
 # root's and agents' evals; Jolt reads JOLT_COMPILER_OPTIONS into *compiler-options*' root at
 # start): Seon writes no state image, so its fn literals register no source for one

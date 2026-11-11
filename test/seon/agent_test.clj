@@ -694,6 +694,19 @@
     (is (= (dissoc a 'app.pt-calc-test/data-test) (dissoc b 'app.pt-calc-test/data-test)) "the tests reading no branch keep theirs")
     (is (= (checkout branch) (checkout written)) "bin/test's digests hold no branch")))
 
+(deftest an-agents-own-deftest-is-no-failure-point
+  ;; docs/health.md#a-laws-unnamed-site: a deftest an agent defines at its REPL, in a namespace of its own (which takes a file under src,
+  ;; seon.source/namespace-path), is a test by its var's :test (the compiler's fact), so its `is`'s catch opens no
+  ;; :unnamed-site the done rule refuses on (seon.problems/caused); a catch in a function it defines there still does
+  (let [[_ caused] (in-agent (fn [{n :ns}]
+                               [(str "(ns " n ".lab (:require [clojure.test :refer [deftest is]]))"
+                                     " (deftest p (is (= 1 1)))"
+                                     " (defn f [] (try 1 (catch Exception _ 2)))")
+                                "(seon.problems/caused (seon.agent/heard-main) (seon.agent/db))"]))
+        site (fn [v] (some #(str/includes? % (str ".lab/" v " has a catch site")) (:value caused)))]
+    (is (not (site "p")) (pr-str caused))
+    (is (site "f") (pr-str caused))))
+
 (deftest an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test green at its digest is not run again, "especially when freshly branched": an agent's greens and a
   ;; checkout's (bin/test's) are one verdict cache, so an agent's plan must key each test by the digest bin/test's plan does.
