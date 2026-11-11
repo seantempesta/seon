@@ -976,7 +976,7 @@
         ;; a turn's edge: its basis's t, else the transaction that made its call
         edge (fn [call] (or (:t (:seon.model-call/basis call)) (:db/id (:at call)) 0))
         ;; the turns in order, one pass with the messages: each turn takes those delivered at or before its edge, no edge before an earlier one's. The record holds its calls newest first, so its reverse is turn order; one that is not (a window by position) is sorted by number
-        ;; strict? false: entries sorted by number, where two calls of one number are one turn's (an answer's call beside its turn's)
+        ;; strict? false: entries sorted by number (calls held by position); a number is one call (seon.turn writes one per turn, id <key>/<n>)
         take-to (fn [out k at] (if-let [id (get-in held [(nth (nth ms k) 1) :seon.message/id])] (assoc! out at (conj (get out at []) [(nth (nth ms k) 1) id])) out))
         place (fn [entries strict?]
                 (loop [es (seq entries) i 0 mx 0 prev 0 out (transient {})]
