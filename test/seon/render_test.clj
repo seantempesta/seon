@@ -1346,7 +1346,7 @@
                                                                                 :seon.error/message "no model provider"}}])
                 html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-o2"})) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
-            (is (str/includes? html "my.render/ctx") "beside what it sent: the record, the turn's first generated eval")))))))
+            (is (str/includes? html "my.agent/describe") "beside what it sent: the record described, the turn's first generated eval")))))))
 
 (deftest a-page-opened-before-its-first-turn-takes-it
   ;; the browser check of 4bc612cf89: a debug page opened at "no model turn yet" never showed the turns that
@@ -4321,3 +4321,18 @@
     (is (str/includes? tiles "href=\"/agent/a5\"") "the started agent's entry, a link to its page, among the tiles")
     (is (some #(= "agent-a5" (:id %)) units) "a unit of its own, keyed by the agent's key")
     (is (not (str/includes? (pr-str model) "a5")) "the model's page holds no entry")))
+
+(deftest describe-says-what-a-value-holds-by-path
+  ;; docs/agent.md#looking-at-what-you-pulled (owner, 2026-11-11: "Instead of dumping the whole @ctx value we are now doing this more
+  ;; metadata approach"): a value's paths and what each holds, never the value shown; keys, never positions; a plain value has no schema
+  (let [v {:a 1 :s (apply str (repeat 100 "x")) :m {:b [1 2 3]} :ms (sorted-map 5 {:db/id 5 :x 1} 3 {:db/id 3 :x 2})}
+        es (render/describe (seon.db/index) v [] 2)
+        by (into {} (map (juxt :path :holds)) es)]
+    (is (= 1 (by [:a])) "a short scalar as itself")
+    (is (= {:chars 100} (by [:s])) "text as its size")
+    (is (= {:map 1 :keys [:b]} (by [:m])) "a map as its count and keys")
+    (is (= {:vector 3} (by [:m :b])) "one level in, at depth 2")
+    (is (= {:members 2 :ids [5 3]} (by [:ms])) "a map keyed by ids as its members")
+    (is (every? #(not= ::none (get-in v (:path %) ::none)) es) "every entry's path reads back by get-in")
+    (is (not-any? :schema es) "a plain value has no schema")
+    (is (= [{:path [:a] :holds 1}] (render/describe (seon.db/index) v [:a] 2)) "a path to a scalar describes it alone")))

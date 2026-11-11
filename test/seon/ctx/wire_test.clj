@@ -410,9 +410,9 @@
                                    :seon.model-call/ms 1}))
 
 (defn- page-call?
-  "Whether message m is a call Seon generated to show the record or the page: an assistant message whose one call's code is (my.render/ctx ..),
+  "Whether message m is a call Seon generated to show the record or the page: an assistant message whose one call's code is (my.agent/describe @ctx),
   (my.render/page ..) or (my.render/diff ..)."
-  [m] (boolean (and (= "assistant" (:role m)) (some #(re-find #"^\(my\.render/(ctx|page|diff) " (str (:code %))) (:tool-calls m)))))
+  [m] (boolean (and (= "assistant" (:role m)) (some #(re-find #"^\((my\.render/(page|diff)|my\.agent/describe) " (str (:code %))) (:tool-calls m)))))
 
 (defn- page-code
   "The code of the generated page call before the last message of ms (the tool message holding its result), else nil."
@@ -454,14 +454,10 @@
         (is (= (wire/system-text @conn) (:content (first r0))) "the system message is the system prompt as main holds it")
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou're at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "user" "assistant" "tool" "assistant" "tool"] (mapv :role r0)) "the first request: the system prompt, what opens the session, then the record and the page whole, each a generated eval and its result")
-        (is (str/starts-with? (get-in r0 [2 :tool-calls 0 :code]) "(my.render/ctx {:commit #uuid \"") "the record whole first, as data (owner, 2026-11-11: the @ctx and the hiccup in full)")
-        (is (str/includes? (:content (nth r0 3)) ":seon.agent/task") "the record holds the agent's task")
-        (is (= (let [c (get-in r0 [2 :tool-calls 0 :code])
-                   d0 (#'wire/db-at @conn (clojure.edn/read-string (subs c (count "(my.render/ctx ") (dec (count c)))))]
-               (print/text (vary-meta (seon.ctx/agent-ctx (seon.program/index-of-db d0) d0 (pdb/eid @conn :seon.agent/key "a1")) assoc :seon.print/full true)))
-               (:content (nth r0 3)))
-            "exactly @ctx at that point, as the agent would read it (owner, 2026-11-11: the same thing, not a filtered copy)")
-        (is (= 1 (count (filter #(str/starts-with? (str (get-in % [:tool-calls 0 :code])) "(my.render/ctx") r2))) "shown once, at the first point")
+        (is (= "(my.agent/describe @ctx)" (get-in r0 [2 :tool-calls 0 :code])) "the record described first, never printed whole (owner, 2026-11-11: \"Instead of dumping the whole @ctx value we are now doing this more metadata approach\")")
+        (is (str/includes? (:content (nth r0 3)) "[:seon.agent/task]") "its entries name the task by its path")
+        (is (not (str/includes? (:content (nth r0 3)) "Make ```demo/f``` triple")) "and never the plan's text: its size")
+        (is (= 1 (count (filter #(= "(my.agent/describe @ctx)" (str (get-in % [:tool-calls 0 :code]))) r2))) "shown once, at the first point")
         (is (str/starts-with? (page-code r0) "(my.render/page {:commit #uuid \"") "the page is the call (my.render/page p)")
         (is (every? #(re-find % (:content (peek r0))) [#":render seon.render.ui/cite" #"Doubles\." #":render seon.render.ui/status"]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (str/starts-with? (page-code r1) "(my.render/diff {:commit #uuid \"") "what moved is a generated eval of its own at the end, after turn 1's own eval")
@@ -2156,7 +2152,7 @@
 (deftest every-call-seon-writes-is-a-whole-reply
   ;; the law (owner, 2026-11-11: "Set a good example for the agent"): each function a Seon-made call names holds its reply and its
   ;; intent, and every assistant message of a request that holds no record of the model's own has text and each call an intent
-  (doseq [f '[my.render/ctx my.render/page my.render/diff]
+  (doseq [f '[my.agent/describe my.render/page my.render/diff]
           k [:seon.model-call/reply :seon.eval/intent]]
     (is (seq (get (meta (requiring-resolve f)) k)) (str f " holds " k)))
   (ts/test-branch!
@@ -2188,8 +2184,8 @@
             before (codes (:messages r3))
             _ (d/transact conn [[:db/retract [:seon.model-call/id (seon.lib/call-id "a1" 2)] :seon.model-call/agent [:seon.agent/key "a1"]]])
             after (:messages (wire/render @conn {:commit (d/commit-id @conn) :task "demo/f" :turn 3 :max-turns 9 :origin :model :agent "a1"}))]
-        (is (= [(str "(my.render/ctx " (point 1) ")") (str "(my.render/page " (point 1) ")") (str "(my.render/diff " (point 1) " " (point 2) ")") (str "(my.render/diff " (point 2) " " (point 3) ")")] before) "three turns: the page, then a diff at each")
-        (is (= [(str "(my.render/ctx " (point 1) ")") (str "(my.render/page " (point 1) ")") (str "(my.render/diff " (point 1) " " (point 3) ")")] (codes after)) "the middle call unlinked: the page at turn 1's point, then one diff from it to turn 3's")
+        (is (= ["(my.agent/describe @ctx)" (str "(my.render/page " (point 1) ")") (str "(my.render/diff " (point 1) " " (point 2) ")") (str "(my.render/diff " (point 2) " " (point 3) ")")] before) "three turns: the page, then a diff at each")
+        (is (= ["(my.agent/describe @ctx)" (str "(my.render/page " (point 1) ")") (str "(my.render/diff " (point 1) " " (point 3) ")")] (codes after)) "the middle call unlinked: the page at turn 1's point, then one diff from it to turn 3's")
         (is (not (str/includes? (pr-str after) (point 2))) "and nothing names the point removed")
         (is (str/includes? (:content (peek after)) "quadruple") "the diff holds what moved over both turns, the plan's last text")))))
 

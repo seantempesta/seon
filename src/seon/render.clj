@@ -1470,3 +1470,45 @@
         ;; each attribute asked with its transaction: the key it fills
         :txs (into {} (keep #(when (vector? %) [(first %) (nth % 2)])) p)
         :joins joins}))))
+
+(defn describe
+  "What value v holds at path, depth levels in, as entries {:path :holds [:schema :doc :render]} read in entity index ix: the body of
+  my.agent/describe (its docstring says the shape), here so root can describe a record at a point without an agent (the first
+  point's (describe @ctx), seon.ctx.wire/page-diff-msgs). Paths are keys, never positions. See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :map :any [:sequential :any] pos-int?] [:vector :map]]}
+  [ix v path depth]
+  (let [
+         ids? (fn [x] (and (map? x) (seq x) (every? integer? (keys x))))
+         entity? (fn [x] (and (map? x) (contains? x :db/id) (not (ids? x))))
+         holds (fn [x] (cond (string? x) (if (< (count x) 60) x {:chars (count x)})
+                             (ids? x) (cond-> {:members (count x) :ids (vec (take 10 (keys x)))} (< 10 (count x)) (assoc :more (- (count x) 10)))
+                             (entity? x) :entity
+                             (map? x) (cond-> {:map (count x)} (<= (count x) 12) (assoc :keys (vec (sort-by str (keys x)))))
+                             (vector? x) {:vector (count x)}
+                             (set? x) {:set (count x)}
+                             (coll? x) {:items (count x)}
+                             :else (let [s (pr-str x)] (if (< (count s) 60) x {:chars (count s)}))))
+         first-sentence (fn [d] (when (string? d) (first (str/split d #"(?<=\.)\s" 2))))
+         about (fn [k x] (let [s (cond (ids? x) (entity-schema ix (val (first x)) k)
+                                       (entity? x) (entity-schema ix x k)
+                                       (qualified-keyword? k) k)
+                               d (when s (first-sentence (schema-property ix s :description)))
+                               r (when s (render-for ix s :seon.render/hiccup))]
+                           (cond-> {} (and s (not= s k)) (assoc :schema s) (and s (= s k) (or d r)) (assoc :schema s) d (assoc :doc d) r (assoc :render r))))
+         walk (fn walk [p node left]
+                (mapcat (fn [[k x]]
+                          (let [q (conj p k)]
+                            (cons (merge {:path q :holds (holds x)} (about k x))
+                                  (when (and (> left 1) (map? x) (not (ids? x))) (walk q x (dec left))))))
+                        (sort-by (comp str key) (dissoc node :db/id))))
+         node (get-in v path)]
+     (if (and (map? node) (not (ids? node)))
+       (vec (walk (vec path) node depth))
+       [{:path (vec path) :holds (holds node)}])))
+
+(defn more-of
+  "What schema k (or its nearest parent, in the entity index ix) says acts on its value: its :seon.render/more, [words form] pairs, the
+  forms written once as data and read by every reader that shows such a value (the model's print and the person's page). See
+  docs/render.md#a-render-is-a-value-printed-once."
+  {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] [:maybe [:vector [:tuple :string :any]]]]}
+  [ix k] (schema-property ix k :seon.render/more))

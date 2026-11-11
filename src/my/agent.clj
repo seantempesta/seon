@@ -510,6 +510,29 @@
   [x] (let [ix (agent/branch-index) v (if-let [r (render/model ix x)] (:value r) x)]
         (select/chars-tokens (count (if (string? v) v (:text (print/print-value v {:budget Integer/MAX_VALUE :render #(render/model ix %)})))))))
 
+(defn describe
+  "What value v holds, without showing it: a vector of entries, one a path, {:path [...] :holds x}, where :holds is the value when it
+  is a short scalar, else what it is as data ({:chars n}, {:map n :keys [...]}, {:vector n}, {:set n}, {:members n :ids [...]} for
+  a map keyed by entity ids, :entity for a pulled entity), and, where the key or the entity has a schema, :schema, :doc (the first
+  sentence of its :description) and :render (the function its schema declares draws it). Paths are keys, never positions: (get-in v
+  path) reads what an entry describes, (describe v path) goes one level in, and for your record (swap! ctx assoc-in path x) changes
+  it. depth: the levels described (default :seon.config.agent/describe-depth). Works on any value: @ctx, a result's :value, a
+  query's answer. See docs/ctx.md#the-pattern."
+  {:seon.model-call/reply "My record can be large, so I look at what it holds first: each path, what is there, and what it is."
+   :seon.eval/intent "Describe @ctx: each path, what it holds, its schema and doc in a line. (get-in @ctx path) reads one; (swap! ctx assoc-in path v) changes one."
+   :malli/schema [:function [:=> [:cat :any] [:vector :map]] [:=> [:cat :any [:sequential :any]] [:vector :map]]
+                  [:=> [:cat :any [:sequential :any] pos-int?] [:vector :map]]]}
+  ([v] (describe v [] (cfg/value :seon.config.agent/describe-depth)))
+  ([v path] (describe v path (cfg/value :seon.config.agent/describe-depth)))
+  ([v path depth] (with-meta (render/describe (agent/branch-index) v path depth) {:seon.render/schema :my.agent/described})))
+
+(defn described-text
+  "Entries es of `describe` as the eval shows them (seon.render/model, the schema :my.agent/described): first the forms that act on
+  them, from the schema's own :seon.render/more (seon.render/more-of), then the entries. See docs/agent.md#looking-at-what-you-pulled."
+  {:malli/schema [:=> [:cat :any [:sequential :map]] :map]}
+  [opts es]
+  {:to-use (vec (for [[w f] (render/more-of (or (:ix opts) (agent/branch-index)) :my.agent/described)] (str w ": " (pr-str f)))) :entries (vec es)})
+
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn
   reads it the same way: a library's vars carry both), or nil."
