@@ -139,14 +139,17 @@
 
 (defn- held-order
   "Members in the order they show. When `x` sorts, as `[index member]`, `index` their place in
-  `seq`: short members first, then a hash map or set alphabetically, an array map in its own
-  order. Otherwise `seq`'s own order, each member's index its place in it."
+  `seq`: short members first, then a hash map or set alphabetically, and an array map in its own
+  order (a view's map of what matters, in its author's order) unless it is an entity (it holds
+  :db/id, as every pulled node does), whose attributes have no order: alphabetically, so an entity
+  made two ways (a cold build, a patch) prints the same bytes. Otherwise `seq`'s own order, each
+  member's index its place in it. See docs/render.md#one-printer."
   {:malli/schema [:=> [:cat :any :seon.host/fn] [:maybe [:sequential :any]]]}
   [x key-of]
   (if (sorts? x key-of)
     ;; each member's sort key made once, not once per comparison as sort-by would (the keys are
     ;; distinct, so the order is the same)
-    (let [array? (identical? (class x) clojure.lang.PersistentArrayMap)]
+    (let [array? (and (identical? (class x) clojure.lang.PersistentArrayMap) (not (contains? x :db/id)))]
       (->> x
            (into [] (map-indexed (fn [index member]
                                    (let [k (key-of member)]
