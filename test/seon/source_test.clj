@@ -108,6 +108,31 @@
         (is (= [] (program/load-changes! db (vec (for [dt (d/datoms db :aevt :form/src)] [:db/add (:e dt) :form/src (:v dt)]))))
           "and so does load-changes!")))))
 
+;; docs/source.md#the-binary-records-its-program: a process holds a form of main's compiled only when its binary was built from
+;; that form's text (its id among the binary's forms, target/seon.program); a form of a namespace the binary holds whose text main
+;; changed (a boot's catch-up of the checkout's edit; a landing that kept the system running, then a restart on the same binary) is
+;; loaded over it. Red before: held? read a form imported from a file, every var it defines bound, as the binary's own, so a fork
+;; server ran the binary's text of an agent-side form main had changed, and an agent's plan lacked what the edit added
+(deftest a-form-main-changed-is-loaded-over-the-binarys-text
+  (let [real (get (src-files) "src/my/fx.clj")
+        edited (str/replace real "(defn send \"" "(defn send  \"")
+        loaded #(get @@#'seon.program/loaded 'my.fx/send)
+        before (loaded)
+        base (empty-db)
+        on (fn [text] (d/db-with base (source/import-tx base {"src/my/fx.clj" text})))]
+    (is (not= real edited) "the edit changes the form's text, and its code not at all")
+    (try
+      (let [db (on real)]
+        (is (= [] (program/program-differs base db)) "the binary's own text: this process holds it, nothing differs")
+        (is (= (count (program/live-forms base)) (:loaded (program/load-all! db))) "and none of it loads"))
+      (let [db (on edited)
+            id (:form/id (:var/form (d/entity db [:var/name 'my.fx/send])))]
+        (is (= ['my.fx/send] (mapv :var (program/program-differs base db))) "main's text of send is not the binary's")
+        (is (= (inc (count (program/live-forms base))) (:loaded (program/load-all! db))) "the fork server's load takes it, and only it")
+        (is (= id (loaded)) "this process now runs main's form")
+        (is (= [] (program/program-differs base db)) "and nothing differs"))
+      (finally (swap! @#'seon.program/loaded #(if before (assoc % 'my.fx/send before) (dissoc % 'my.fx/send)))))))
+
 (deftest root-loads-the-program-and-leaves-test-namespaces-unevaluated
   ;; task seon.root/root-holds-no-test-code, docs/source.md#a-process-holds-the-tests-only-when-it-runs-them:
   ;; root imports test/ as facts and evaluates its src; the fork server (load-all! with no option) evaluates

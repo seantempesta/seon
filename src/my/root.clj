@@ -381,7 +381,7 @@
         why (root/restart-for held tree (when (= tree (:tree held)) (root/stale-binary db)) inputs)]
     (if why
       {:restart why}
-      (let [src (root/booted-source held (:boot sys) (root/binary-program) (program/program-digest db) (fx/config-input config/config (config/checkout)) nil inputs)
+      (let [src (root/booted-source held (:boot sys) (program/binary-program) (program/program-digest db) (fx/config-input config/config (config/checkout)) nil inputs)
             r @(root/transact-main! sys [{:seon.root/id :root :seon.root/source src}])]
         (if (contract/error? r) r {:kept (:boot sys) :tree tree})))))
 
