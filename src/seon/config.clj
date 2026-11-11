@@ -402,12 +402,13 @@
   (not-empty (into {} (for [dt (d/datoms db :aevt :config/form)] [(:config/key (d/entity db (:e dt))) (:v dt)]))))
 
 (def test-root-config
-  "The config a process test's root runs with: the shipped file's scripted profile (every test starts its roots under
-  --profile scripted) over this process's config, one value a process. What a process test's digest takes for what root
-  runs (seon.program/roots-of), so that digest is one whichever process plans the test: an agent under its own root's
-  profile and the shell's runner under scripted gave 103 of seon.agent-test's 139 different root digests (measured in
-  task seon.prove/one-digest-whichever-runner-plans-it). See docs/source.md#tests-run-by-reach."
-  (merge config (read-layer (str (checkout) "/" shipped-file) :scripted (checkout))))
+  "The config a process test's root runs with: the shipped file under the scripted profile (every test starts its roots
+  under --profile scripted, with no config/local.edn and none of the planning process's layers), one value a process. What
+  a process test's digest takes for what root runs (seon.program/roots-of) and for the config values its reach reads
+  (the planners' :root-config), so that digest is one whichever process plans it: an agent of the standing system, under
+  its own profile and local.edn, gave 103 of 180 process digests apart from the shell's (task
+  seon.prove/one-digest-whichever-runner-plans-it). See docs/source.md#tests-run-by-reach."
+  (read-layer (str (checkout) "/" shipped-file) :scripted (checkout)))
 
 (defn hold!
   "Make this process's config what es and changes state (of-entries), when they differ from what it holds. Its :schema follows changes even when the entries are refused, so a branch can name a key before it states it; what it reads stays as it was. Answers nil, or the refusal. es nil (nothing stated) holds nothing. See docs/config.md#a-process-holds-its-branchs-config."

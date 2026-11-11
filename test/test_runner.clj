@@ -239,6 +239,8 @@
         g (reach-graph-of db (:data-refs in) store)
         ;; the process store a process test's root takes is indexed by this tree's code: its key is an input of theirs
         in (seon.program/with-index-code g in)
+        ;; a process test's config values are its root's, whoever plans (seon.config/test-root-config)
+        in (assoc in :root-config (fx/config-input config/test-root-config (config/checkout)))
         all (into {} (filter #(nss (symbol (namespace (key %))))) (program/graph-index g in nil))
         ;; a name of the form ns/test selects that one deftest (bin/test NS/TEST); a bare ns selects its tests
         whole (if (seq names) (set (keep #(when-not (str/includes? % "/") (symbol %)) names)) nss)
