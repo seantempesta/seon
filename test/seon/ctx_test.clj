@@ -1486,7 +1486,9 @@
                   :entity entity
                   :collection (merge-with - (per coll-at 100 1000) (per str-at 100 1000) (update-vals entry #(* 2 %)))
                   :eq (update-vals (merge-with - (per eq-at 100 1000) entity (update-vals entry #(* 2 %)) (update-vals key #(* 12 %))) #(/ % (:eq rec-size)))}]
-    (doseq [[step dims] measured [d v] dims :let [stated (get-in ctx/change-steps [step d])]]
+    ;; a step's cost is a difference of measured rates: floating arithmetic leaves 3e-15 B where the bytes cancel (Jolt
+    ;; 6a8df52a, when a forced lazy node stopped allocating its claim), and that is zero: a billionth of a unit is not a cost
+    (doseq [[step dims] measured [d v0] dims :let [stated (get-in ctx/change-steps [step d]) v (if (< (Math/abs (double v0)) 1e-9) 0.0 v0)]]
       ;; within the slack above (the bound would be under), and not past a third below (it would be loose)
       (is (<= (* cost/loose stated) v (* (get cost/slack d) stated)) (str step " " d ": measured " v " against " stated " stated")))))
 
