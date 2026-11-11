@@ -677,14 +677,14 @@
 (defn record-tx
   "The recording transaction of one eval: its entity, on the agent's, who evaluated it (:seon.eval/by, `by`: :self is the agent the
   record is on, else its lookup), and its details, each its own attribute (`record-details`). Who is the one upsert, by its identity: an
-  agent's key ({:seon.agent/key k}, its id's name) or root's ({:seon.root/id :root}); an agent's holds the
+  agent's key ({:seon.agent/key k}, its id's name) or root's ({:seon.system/id :root}); an agent's holds the
   namespace the eval left its REPL in (:seon.agent/ns), a datom only when it moved (an unchanged value adds none),
   which seon.ctx/current-ns reads. Another evaluator (a user, the system) is written by its identity (seon.task/sender), an upsert, so it
   resolves on a branch forked before it was made. See docs/render.md#a-component-answers-hiccup."
   {:malli/schema [:=> [:cat :map :string [:or [:= :self] :map] :map] :seon.db/tx-data]}
   [who id by details]
   ;; the agent one upsert, the model call naming it by the same tempid: two would refuse a new agent's first record
-  [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by (if (or (= :self by) (= by (select-keys who [:seon.agent/key :seon.root/id]))) "agent" by)}
+  [(into {:seon.eval/id id :seon.eval/agent "agent" :seon.eval/by (if (or (= :self by) (= by (select-keys who [:seon.agent/key :seon.system/id]))) "agent" by)}
          (cond-> details (:seon.eval/call details) (assoc-in [:seon.eval/call :seon.model-call/agent] "agent")))
    (cond-> (assoc who :db/id "agent")
      (and (:seon.agent/key who) (symbol? (get-in details [:seon.eval/response :ns]))) (assoc :seon.agent/ns (get-in details [:seon.eval/response :ns])))])
@@ -1231,7 +1231,7 @@
   {:malli/schema [:=> [:cat :string] [:vector [:map [:id :string] [:failed? :boolean]]]]}
   [id]
   (let [evals (map val (sort-by key (:seon.eval/_agent @ctx/ctx)))
-        work? #(and (:seon.eval/call %) (not (get-in % [:seon.eval/by :seon.root/id])))]
+        work? #(and (:seon.eval/call %) (not (get-in % [:seon.eval/by :seon.system/id])))]
     (if (some #(= id (:seon.eval/id %)) evals)
       (reduce (fn [acc ev]
                 (let [e (:seon.eval/id ev)
@@ -1353,11 +1353,11 @@
                 (intr/clear-pending!)
                 (agent/send! {:op :started :id (:id m)})
                 ;; its value goes with the reply only when it is plain data (seon.contract/plain?: what the socket and the wire carry);
-                ;; root keeps none of it (its view keeps the head: seon.root/eval-head), and the asker reads the value as data,
+                ;; root keeps none of it (its view keeps the head: seon.system/eval-head), and the asker reads the value as data,
                 ;; never the printed text back, which is no EDN once the eval printed (its :out verbatim)
                 [{:op :reply :id (:id m) :response (let [r (eval-string (:forms m) (select-keys m [:ticks :origin]))] (agent/on-the-wire r))
                   :t (:max-tx (agent/db))}])
-              ;; evals given at its spawn (seon.root/spawn!'s :evals) or inserted later: run on this queue, in order, answering no one
+              ;; evals given at its spawn (seon.system/spawn!'s :evals) or inserted later: run on this queue, in order, answering no one
               (= :evals (:op m)) (do (intr/clear-pending!) (insert! (:by m) (:evals m)) [])
               :else (agent/handle! m))]
      ;; a branch is committed whenever a request is done (its writes ran ahead in memory), before its answer: a

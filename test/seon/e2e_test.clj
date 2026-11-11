@@ -25,7 +25,7 @@
       (is (= "seon.reconcile/reconciler-proc: boom" (get-in r [:problem :seon.error/message])) "the problem, as recorded"))
     (testing "quiescence ends it as before"
       (ts/test-branch! (fn [_ c] (let [t (:max-tx @c) waiting (future (await/await-quiet {:conn c} t))]
-        (d/transact c {:tx-data [{:seon.root/id :root :seon.root/quiescent {:t (inc t) :root-causes []}}]})
+        (d/transact c {:tx-data [{:seon.system/id :root :seon.system/quiescent {:t (inc t) :root-causes []}}]})
         (is (= {:t (inc t) :root-causes []} (deref waiting)))))))))))
 
 ;; ---- the first real DeepSeek runs (task seon.e2e/the-scenarios-measure-real-agents) ----------

@@ -7,7 +7,7 @@
 # are the relay of the checkout the session started in, not the helper's (docs/server.md#working-a-task-from-a-worktree).
 # bin/mcp [PORT]   the MCP server (stdio JSON-RPC) for outside agents: a relay of each line to the
 # root's server on 127.0.0.1:PORT, which answers MCP itself (seon.server/mcp-reply). Without
-# PORT, the port this checkout's root bound: runs/root.port, which bin/root writes from the root's
+# PORT, the port this checkout's root bound: runs/root.port, which bin/system writes from the root's
 # ROOT LISTENING line while it runs, read at each message, so a root restarted on
 # another port is followed. Tools: seon_agents, seon_eval (an agent's own REPL, recorded
 # :outside; or "root"), seon_context, seon_attach, seon_done, seon_prove (every op of
@@ -15,7 +15,7 @@
 #
 # Stock perl, no Seon binary (a `seon mcp` per client was 722 MB each; this is about 6 MB, and
 # seon.check/mcp-proof fails past :seon.config.machine/relay-mb). One connection per message, so
-# a root restarted between calls (bin/root next) costs the session nothing. A message with an id
+# a root restarted between calls (bin/system next) costs the session nothing. A message with an id
 # that root does not answer (none running, not listening, it died mid-request) is answered the
 # JSON-RPC error saying why: the client never hangs on it. A line that is not JSON is relayed as
 # it is, and root answers its defect (docs/failure-points.md).
@@ -53,10 +53,10 @@ exec perl -MIO::Socket::INET -MJSON::PP -e '
     if (ref $msg eq "HASH") { $msg->{"seon/client"} = $client; $line = encode_json($msg) . "\n" }
     my $p = $port;
     if ($p eq "") { if (open my $f, "<", $portf) { chomp($p = <$f> // ""); close $f } }
-    my ($s, $why) = (undef, "no root running for this checkout ($portf is missing): bin/root start");
+    my ($s, $why) = (undef, "no root running for this checkout ($portf is missing): bin/system start");
     if ($p ne "") {
       $s = IO::Socket::INET->new(PeerAddr => "127.0.0.1", PeerPort => $p, Proto => "tcp");
-      $why = $s ? "root answered nothing (it stopped mid-request?)" : "root'"'"'s server on 127.0.0.1:$p is not listening ($!): bin/root start";
+      $why = $s ? "root answered nothing (it stopped mid-request?)" : "root'"'"'s server on 127.0.0.1:$p is not listening ($!): bin/system start";
     }
     my $got = 0;
     if ($s) { print $s $line; shutdown($s, 1); while (my $a = <$s>) { print $a; $got = 1 } close $s }

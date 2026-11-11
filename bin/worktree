@@ -11,7 +11,7 @@
 #                             reference-code checkouts); it is finished (its HEAD is not on main's first-parent chain, so its
 #                             branch landed by a merge, or its HEAD commit is over 24 hours old, a tree cut from main and never
 #                             used); nothing uses it (no process whose command line holds its path or whose working directory
-#                             is inside it, no running system of its own, bin/root's runs/root.pids); and it is not the one this
+#                             is inside it, no running system of its own, bin/system's runs/root.pids); and it is not the one this
 #                             runs from or one config/local.edn names (.worktrees/merges). The disk freed is not totalled:
 #                             `du` counts each APFS clone whole (docs/machine.md#disk-stays-bounded)
 # bin/worktree --at DIR COMMIT [REPO [FROM]]  a detached worktree of REPO (default next/) at COMMIT in DIR, set
@@ -38,7 +38,7 @@
 # - target/ is an APFS clone of the main tree's (blocks shared until written; chez and jolt stay
 #   fresh, so `bin/build seon` is the only build needed), without Jolt's compile caches: every
 #   checkout shares main's target/cache (bin/env);
-# - its stores are its own: its root's runs/store (bin/root), and a check run takes a store of its own
+# - its stores are its own: its root's runs/store (bin/system), and a check run takes a store of its own
 #   (SEON_STORE=$PWD/target/check-store bin/check ...).
 # Builds run niced, in parallel (no lock). Merging: the worktree session reports and root merges its branch
 # (docs/merging.md); the worktree never edits the main tree.
@@ -99,7 +99,7 @@ setup() {
     # and delete while this copies (a directory deleted under cp failed the copy: seon.source-test's
     # bin/worktree --at went red in full proves, never alone)
     for e in "$FROM"/target/*.stamp(N); do
-      # and NAME.program, the program the binary was built from (seon.root/binary-current reads it: without it a gate's binary is unknown, and builds)
+      # and NAME.program, the program the binary was built from (seon.system/binary-current reads it: without it a gate's binary is unknown, and builds)
       for p in $e ${e%.stamp} ${e%.stamp}.build ${e%.stamp}.tree ${e%.stamp}.program; do
         if [[ -e $p ]]; then cp -cR "$p" "$WT/target/"; fi
       done
@@ -206,7 +206,7 @@ if [[ ${1:-} == --setup ]]; then
   [[ ! -e $WT/target ]] || die "$WT/target exists: already set up"
   setup "$WT"
   print "worktree $WT set up; ports: $("$WT/bin/ports")"
-  print "  build: cd $WT && nice -n 15 bin/build seon; root: bin/root start; workflow: docs/server.md#working-a-task-from-a-worktree"
+  print "  build: cd $WT && nice -n 15 bin/build seon; root: bin/system start; workflow: docs/server.md#working-a-task-from-a-worktree"
   exit 0
 fi
 
@@ -281,6 +281,6 @@ PORTS=$("$WT/bin/ports")
 print "worktree $WT on $BR (from $BASE)"
 print "  build:  cd $WT && nice -n 15 bin/build seon"
 print "  test:   bin/prove (the tests and check steps the change reaches; bin/test --all, bin/check 100: the full runs)"
-print "  root:   bin/root (start | status | stop), on this worktree's own ports: $PORTS"
+print "  root:   bin/system (start | status | stop), on this worktree's own ports: $PORTS"
 print "  merge:  report to root, which merges the branch (docs/merging.md)"
 print "  remove: $MAIN/bin/worktree --remove $NAME"

@@ -26,7 +26,7 @@
                 (task/execution-tx [(str "r3/" nm)] :running)))
       4 (when t (task/env-tx t {:max-turns (inc (.nextInt rng 9))}))
       5 (seon.test-store/root-tx {:seon.config.agent/max-running (inc (.nextInt rng 40)) :seon.config.merge/max-running 1})
-      6 (when (zero? (.nextInt rng 4)) [{:seon.root/id :root :seon.root/boot (pick ["r3-boot" "old-boot"])}])
+      6 (when (zero? (.nextInt rng 4)) [{:seon.system/id :root :seon.system/boot (pick ["r3-boot" "old-boot"])}])
       ;; a need onto a plain work task (they need nothing), from a task that is not one: no cycle
       7 (let [work (filterv #(re-find #"/p[0-9]+$" %) ts) src (pick (filterv #(not (re-find #"/p[0-9]+$" %)) ts))]
           (when (and src (seq work)) [[:db/add [:seon.task/id src] :seon.task/needs [:seon.task/id (pick work)]]]))
