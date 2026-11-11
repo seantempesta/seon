@@ -1377,6 +1377,18 @@
   (let [f (java.io.File. (str (cfg/checkout) "/target/seon.program"))]
     (when (.isFile f) (sedn/decode (slurp f)))))
 
+(defn held-inputs
+  "The inputs of the files this system's checkout holds, as bin/root start (or bin/update's no-restart landing) last computed
+  them where git runs (the binary's `inputs` mode, seon.fx/inputs of the source root, else the checkout), read from its runs
+  dir (runs/root-inputs.edn): what a boot hands its agents (booted-source), and what a landing that does not restart hands
+  them again for the program it brings in. nil when none was written (a root under a starter: a test's). Root runs no git,
+  since clojure.java.shell's futures are threads root does not declare (seon.root-test/root-threads-are-what-root-declares).
+  See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat] [:maybe :map]]}
+  []
+  (let [f (java.io.File. (str (cfg/value :seon.config.root/runs-dir) "/root-inputs.edn"))]
+    (when (.isFile f) (sedn/decode (slurp f)))))
+
 (defn booted-source
   "Root's :seon.root/source fact held, as this boot (id boot) states it: the git tree the binary was built from (built,
   `binary-program`'s :tree, as :binary-tree) and its program (:binary), absent when bin/build recorded none. When that tree is
@@ -1528,8 +1540,7 @@
             ;; the inputs of the files this boot read, as bin/root start computed them just before it (runs/root-inputs.edn,
             ;; in its runs dir, written fresh each start, none under a starter: root runs no git, since clojure.java.shell's futures are threads root does not declare,
             ;; seon.root-test/root-threads-are-what-root-declares, batch 28); none under a starter (a test's root)
-            main-inputs (let [f (java.io.File. (str (cfg/value :seon.config.root/runs-dir) "/root-inputs.edn"))]
-                          (when (.isFile f) (sedn/decode (slurp f))))]
+            main-inputs (held-inputs)]
         (warm! conn)
         (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         (lib/static!)
