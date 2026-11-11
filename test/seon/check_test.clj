@@ -296,6 +296,46 @@
     (is (.isDirectory (java.io.File. (str (seon.config/checkout) "/" rel))) "it names the tree's task files under the checkout")
     (is (= rel (seon.config/value :seon.config.source/tasks-dir)) "the tree's layout, not the process's place")))
 
+;; docs/health.md#checks-are-callers-of-seon: the base's program is built by the base's own code in a process of its own, never in the
+;; image that holds the head's. Analysis evaluates each file's ns form in the live namespace, so a base whose ns form aliases a
+;; namespace this image has loaded under another target (across the rename of seon.root to seon.system, seon.server's `c` names
+;; one in each tree) is a retargeted alias, which Jolt refuses. This image has loaded seon.check-test, `contract` naming
+;; seon.contract; a clone of this checkout's HEAD gets a base commit where that alias names seon.error, and a head restoring it
+(deftest the-health-step-reads-a-base-whose-alias-the-head-retargets
+  (let [co (str (seon.config/checkout))
+        dir (str co "/target/tmp/health-rename-" (random-uuid))
+        repo (str dir "/repo")
+        store (str dir "/store")
+        file "test/seon/check_test.clj"
+        sh! (fn [& args] (let [r (apply clojure.java.shell/sh args)] (is (zero? (:exit r)) (pr-str args r)) (str/trim (:out r))))
+        commit! (fn [msg] (sh! "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-a" "-m" msg)
+                  (sh! "git" "-C" repo "rev-parse" "HEAD"))
+        retargeted? (fn [db] (boolean (some #(str/includes? % "[seon.error :as contract]")
+                                            (d/q '[:find [?s ...] :in $ ?n :where [?ns :ns/name ?n] [?f :form/ns ?ns] [?f :form/src ?s]] db 'seon.check-test))))]
+    (try
+      (sh! "git" "clone" "-q" "--shared" co repo)
+      (let [text (slurp (str repo "/" file))
+            _ (is (str/includes? text "[seon.contract :as contract]"))
+            _ (spit (str repo "/" file) (str/replace text "[seon.contract :as contract]" "[seon.error :as contract]"))
+            base (commit! "base")]
+        (spit (str repo "/" file) text)
+        (commit! "head")
+        ;; the plan's kept store, cloned: each tree differs from the kept one by the commits and this checkout's edits
+        (sh! "mkdir" "-p" store)
+        (sh! "cp" "-c" (str (ts/kept-program-store) "/data.mdb") (str store "/data.mdb"))
+        (let [head (test-runner/program-db repo store)
+              based (test-runner/base-program repo base store (str dir "/base-store") (str dir "/base"))]
+          (is (not (contract/error? based)) (pr-str based))
+          (is (not (retargeted? head)) "the head's alias is this image's")
+          (is (retargeted? based) "the base holds its own")
+          (is (= 'seon.contract (some-> (get (ns-aliases 'seon.check-test) 'contract) ns-name))
+              "and this image's namespace keeps its own alias: the base's ns form never ran here")
+          (is (not (.exists (java.io.File. (str dir "/base")))) "the base's checkout is removed once its runner ran")
+          (is (retargeted? (test-runner/base-program repo base store (str dir "/base-store") (str dir "/base2")))
+              "a base the base store keeps is read again")
+          (is (not (.exists (java.io.File. (str dir "/base2")))) "with no checkout made")))
+      (finally (test-runner/remove-checkout! (str dir "/base")) (seon.lib/remove-tree! dir)))))
+
 ;; docs/references.md#task-references: a task's citation of nothing is refused at its write (owner, 2026-11-09); the health step loads
 ;; the tree's tasks through that one checked write, so a task citing a key no program holds is health's typed refusal, never a lookup
 ;; Datahike throws (batch 15: a plan citing :db/contentId in one backtick threw out of health before any row)
