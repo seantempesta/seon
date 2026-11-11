@@ -793,7 +793,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean] [:maybe :map]]}
   [db at calls raw?]
   (let [pull #(d/pull db [:seon.model-call/basis :seon.model-call/sent-hash :seon.model-call/tokens :seon.model-call/cache-hit-tokens
-                          :seon.model-call/cache-miss-tokens :seon.model-call/error] %)
+                          :seon.model-call/cache-miss-tokens :seon.model-call/error :seon.model-call/ms :seon.model-call/model] %)
         last-e (peek calls)
         lb (some-> last-e pull :seon.model-call/basis)
         ;; the turn to come: on latest, while the newest model turn's agent has no end
@@ -819,7 +819,7 @@
         {:at at :to-come? to-come? :turn (:turn b) :agent (:agent b) :origin (:origin b) :raw? raw? :swept? (boolean swept?)
          :body (:body w) :sources (:sources w) :new (:new w)
          :differs? (boolean (and sent-hash (not= sent-hash (lib/digest (sedn/encode (:messages w))))))
-         :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens])
+         :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens :seon.model-call/ms :seon.model-call/model])
          :error (:seon.model-call/error m)}))))
 
 (defn more
@@ -860,7 +860,7 @@
 
 (defn rules-list
   "The page's rules as a list of their own (p-rules), so a change of a rule draws nothing else: on the page, never in the model's request. See docs/render.md#style."
-  {:seon.render/list "p-rules" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  {:seon.render/list "p-rules" :wire/for "page" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_] [:div {:id "p-rules"} [#'page-rules {:wire/for "page"}]])
 
 
@@ -1708,10 +1708,10 @@
   docs/render.md#an-entity-may-name-its-own-render."
   {:seon.render/style ".stage-front details { font-size: 0.875rem; color: var(--color-text-300); }
 .stage-front details li { margin: 0.5rem 0; }
-.stage-front > details[data-as] > summary { font-size: 0.8125rem; color: var(--color-text-300); cursor: pointer; }
-.stage-front > details[data-as]:not([open]) [data-when=open], .stage-front > details[data-as][open] [data-when=closed] { display: none; }
-#app:has(.stage-front > details[data-as]:not([open])) :is(.seon-context, #c-rows, #p-agent-head) { display: none; }
-.stage-front:has(> details[data-as][open]) > :not(details[data-as]) { display: none; }
+:is(.stage-front, .pull-front) > details[data-as] > summary { font-size: 0.8125rem; color: var(--color-text-300); cursor: pointer; }
+:is(.stage-front, .pull-front) > details[data-as]:not([open]) [data-when=open], :is(.stage-front, .pull-front) > details[data-as][open] [data-when=closed] { display: none; }
+#app:has(:is(.stage-front, .pull-front) > details[data-as]:not([open])) :is(.seon-context, #c-rows, #p-agent-head) { display: none; }
+:is(.stage-front, .pull-front):has(> details[data-as][open]) > :not(details[data-as]) { display: none; }
 #app:has(.stage-front > details[data-as]:not([open])) #p-input :is(input, textarea) { font-size: 1.25rem; padding: 0.875rem 1rem; font-family: ui-sans-serif, system-ui, sans-serif; }"
    :malli/schema [:=> [:cat [:vector :map] :boolean] [:sequential :any]]}
   [exchanges waiting?]
@@ -1746,6 +1746,76 @@
   "The stage's own list (p-head), for the page alone: `stage-front` over the agent's pull. See docs/render.md#an-entity-may-name-its-own-render."
   {:seon.render/list "p-head" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_] [:div {:id "p-head"} [#'stage-front {}]])
+
+(defn- pulled-summary
+  "Value v as a pull holds it, in words for the pull view: a scalar as it is, a join by its members' count, any other value by its kind;
+  the whole value folded under it (`pull-front`), never cut. See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [v] (cond (nil? v) "nothing" (and (map? v) (:db/id v)) "one entity" (map? v) (str (count v) " pulled")
+            (coll? v) (str (count v) " values") :else (print/text v)))
+
+(defn- pull-clause
+  "Pattern clause x of pulled entity e as the pull view draws it: what it asks (an attribute, or a join and its own pattern) and what the
+  pull holds for it, the transaction its datom was written in when the pull holds that (:seon.ctx/tx), a join's members by count with the
+  sub-pattern's clauses as each member answers them (n of the members hold it). See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat :any :any] :any]}
+  [x e]
+  (let [attr (fn [k] (if (vector? k) (first k) k))
+        tx (fn [k] (get-in e [:seon.ctx/tx (attr k)]))
+        leaf (fn [k] (let [v (get e (attr k))]
+                       [:li [:code (print/text k)] " " (pulled-summary v) (when-let [t (tx k)] (str " · tx " t))
+                        (when (coll? v) [:details [:summary "value"] [:pre (print/text v)]])]))]
+    (cond
+      (map? x) (for [[k sub] x :let [v (get e (attr k))
+                                      ms (cond (and (map? v) (:db/id v)) [v] (map? v) (vec (vals v)) (sequential? v) (vec v) :else [])]]
+                 [:li [:code (print/text k)] " " (str (count ms) (if (= 1 (count ms)) " member" " members"))
+                  ;; a join's own pattern, a vector of clauses (a recursion depth or a single clause is one clause)
+                  (into [:ul] (for [y (if (sequential? sub) sub [sub]) :let [ks (if (map? y) (keys y) [y])] k2 ks :let [a2 (attr k2)]]
+                                [:li [:code (print/text (if (map? y) {k2 '...} k2))] " " (str (count (filter #(some? (get % a2)) ms)) " of " (count ms))]))
+                  (when (seq ms) [:details [:summary "members"] [:pre (print/text ms)]])])
+      :else [(leaf x)])))
+
+(defn pull-front
+  "Entity pull c presented as its data model (docs/render.md#an-entity-may-name-its-own-render): where its pattern comes from (its own
+  :seon.ctx/pattern, else its schema's), the pattern clause by clause with what the pull holds for each (`pull-clause`), and the attributes
+  its schema names that the pattern does not ask. From the pull and the entity index alone, for the page. See
+  docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/style ".pull-front { max-width: 52rem; margin: 0 auto; padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 0.75rem; font-size: 0.875rem; color: var(--color-text-100); }
+.pull-front h1 { font-size: 1.5rem; font-weight: 600; font-family: ui-sans-serif, system-ui, sans-serif; }
+.pull-front h2 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.12em; color: var(--color-text-400); margin-top: 0.75rem; }
+.pull-front ul { margin-left: 1.25rem; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
+.pull-front details pre { max-height: 20rem; overflow: auto; font-size: 0.75rem; color: var(--color-text-300); white-space: pre-wrap; }
+.pull-front code { color: var(--color-signal); }"
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx ix :seon.render/index}]
+  (let [e (ratom/realize c)
+        s (render/entity-schema ix e nil)
+        own? (some? (:seon.ctx/pattern e))
+        p (render/entity-pattern ix e)
+        asked (into #{} (mapcat (fn [x] (if (map? x) (map #(if (vector? %) (first %) %) (keys x)) [(if (vector? x) (first x) x)]))) p)
+        unasked (when s (remove asked (pdb/attributes-of ix s)))]
+    [:section
+     [:h1 (str (or (:seon.agent/key e) (:seon.user/name e) (:db/id e)) " as data")]
+     [:p "Schema " [:code (str s)] " · its pattern is " (if own? "its own (:seon.ctx/pattern on the entity)" "its schema's")
+      " · " (count p) " clauses"]
+     [:h2 "What the pattern asks, and what the pull holds"]
+     (into [:ul] (mapcat #(pull-clause % e)) p)
+     [:h2 (str "What its schema names that the pattern does not ask (" (count unasked) ")")]
+     (into [:ul] (for [a unasked] [:li [:code (print/text a)]]))
+     [:details {:data-as "conversation" :data-preserve-attr "open"} [:summary [:span {:data-when "closed"} "Show as the conversation"] [:span {:data-when "open"} "Show as data"]]]]))
+
+(defn pull-list
+  "The pull view's own list (p-head): `pull-front` over the entity's pull, read by the person and the model. See docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/list "p-head" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div {:id "p-head"} [#'pull-front {}]])
+
+(defn pull-view
+  "An entity's page as its data model, a render it names as its own (:seon.render/hiccup) as it would a stage (`stage`): the same lists over
+  the same pull, and in front `pull-front`, a part the model reads too (its list's call holds no :wire/for \"page\"), so an agent that
+  puts it on itself reads its own pull in its request. See
+  docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
+  [opts c] (if (:seon.render/nested opts) (agent opts c) (conj (agent opts c) [#'pull-list {}])))
 
 (defn stage
   "An agent's page as a stage, a render an agent names as its own (:seon.render/hiccup) in place of its schema's `agent`: the same lists
@@ -2345,7 +2415,7 @@
   while opened, the whole body's JSON as sent. input as `debug-input` answers it. See docs/render.md#the-debug-page-is-the-wire-request. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:keys [view to-come? turn agent origin body sources new raw? error differs? opened swept?]
-         {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]} :usage}]
+         {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens] call-ms :seon.model-call/ms call-model :seon.model-call/model} :usage}]
   (let [unit (:unit opts)
         ms (:messages body)
         sizes (mapv #(select/estimate (json/write-str %)) ms)
@@ -2417,6 +2487,8 @@
       (when (and prompt (pos? prompt))
         [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens from cache (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
       [:span {:class "muted"} (str (count ms) " messages · " (count (filter true? new)) " new")]
+      ;; which model answered it and how long the call took, as the turn recorded them (the two facts the model call keeps)
+      (when (or call-model call-ms) [:span {:class "muted"} (str/join " · " (remove nil? [call-model (some-> call-ms (str " ms"))]))])
       (cond (= :outside origin) [:span {:class "muted"} "an outside read: no model call"]
             to-come? [:span {:class "muted"} "redrawn as the branch moves"]
             (not (or tokens error)) [:span {:class "muted"} "the call is in flight"])]

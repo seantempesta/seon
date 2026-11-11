@@ -2,7 +2,9 @@
 # bin/cache-smoke: where the runtime finds its native libraries and its checkout, and Jolt's options.
 # LMDB: konserve.jolt.lmdb-ffi loads JOLT_LMDB_LIB, the robust-lock build bin/build makes
 # (bin/build lmdb). Every process on a store must load the same build: the lock scheme is
-# part of the lock file's format.
+# part of the lock file's format, and another build's open is refused (MDB_VERSION_MISMATCH) while
+# a process holds the store; the first open when none holds it takes the store over
+# (docs/failure-points.md#lmdb-locks).
 ROOT=${ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
 JOLT_LMDB_LIB=${JOLT_LMDB_LIB:-$ROOT/target/lib/liblmdb.dylib}
 export JOLT_LMDB_LIB

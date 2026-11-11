@@ -285,13 +285,8 @@
   (let [tm (Throwable->map e)
         d (merge (clojure.main/ex-triage (assoc tm :clojure.error/phase :execution)) (ex-data e))
         compile? (:jolt.error/line d)
-        ;; a frame inside an anonymous fn is named ns/var$fn: the error is in that var (a cast
-        ;; in a map-indexed fn would otherwise name no fn: its frame ns/var$fn, its line -1)
-        ;; a contract's wrapper (malli's instrumented fn, seon.contract's) is never where an error is: whether its
-        ;; frame tops the trace depends on what is armed, so an error at a request's top was located in malli.core
-        ;; after some tests and in nothing after others
-        sym (when-not compile? (some-> (:clojure.error/symbol d) (#(symbol (namespace %) (first (clojure.string/split (name %) #"\$"))))
-                                       (#(when-not (#{"malli.core" "seon.contract"} (namespace %)) %))))
+        ;; the fn it was in (seon.error/thrown-in: an anonymous fn's frame names its var, a contract's wrapper is never it)
+        sym (when-not compile? (err/thrown-in e))
         ;; its line: the error's own, else the var's own frame's in the trace (the anonymous fn's frame has none)
         frame-line (fn [] (let [prefix (str (munge (namespace sym)) "$" (munge (name sym)) "$")]
                             (some (fn [[cls _ _ l]] (when (and (clojure.string/starts-with? (str cls) prefix) (pos-int? l)) l)) (:trace tm))))
@@ -743,7 +738,6 @@
                 id (update :seon.eval/response #(into {:handle (symbol "result" (lib/id (first (clojure.string/split h #"-"))))} %))))
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
-      (:seon.render/page (meta v)) (assoc :seon.eval/page (:seon.render/page (meta v)))
       (:issued req) (assoc :db/id (:issued req))
       (:intent req) (assoc :seon.eval/intent (:intent req))
       (:call-id req) (assoc :seon.eval/call-id (:call-id req))

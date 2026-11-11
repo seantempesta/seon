@@ -1217,8 +1217,8 @@
 
 (deftest a-merge-of-source-with-no-file-records-what-it-wrote-no-file-for
   (ts/test-branch! (fn [_ conn]
-  ;; a merged member whose changed forms name no source file: no write-back runs, so its task
-  ;; holds a commit-error naming them, never silence; one that changed no source stays silent
+  ;; a merged member that changed no source file: no write-back runs and its task holds no error;
+  ;; one whose files main holds no text for holds a typed :seon.git/commit-failed error naming them
   (let [db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :ready)))
         [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))
         st (assoc st :source {:branch "jolt/seon-merges"})
@@ -1229,7 +1229,7 @@
         data (answered {:merged? true :tx 9 :keys 1 :files [] :unfiled {}})]
     (is (some? asked))
     (is (= :merged (:seon.task/outcome data)))
-    (is (nil? (:seon.task/commit-error data)) "a change of no source names no file, and says nothing")
+    (is (nil? (:seon.task/error data)) "a change of no source names no file, and holds no error")
     (testing "a write-back whose files main holds no text for: no commit, and each member's task says so"
       (let [step (fn [st tag r] (r/reconciler-proc st :answers {:tag tag :r r}))
             write-of (fn [outs] (first (filter #(= :write (get-in % [:req :op])) (:to-api outs))))
@@ -1238,25 +1238,21 @@
             [st3 outs3] (step st2 (:tag (write-of outs2)) {:ok true})
             [_ outs4] (step st3 (:tag (write-of outs3)) {:db db})
             tk (task/task (d/db-with db (vec (concat merged-tx (get-in (write-of outs4) [:req :req :tx-data])))) "demo/add-merge")]
-        (is (not-any? :seon.task/commit-error (filter map? merged-tx)) "a member with files is the write-back's to record")
+        (is (not-any? :seon.task/error (filter map? merged-tx)) "a member with files is the write-back's to write: the merge's own write holds no error")
         (let [two (update-in st [:flights "demo/add-merge" :act :members] conj {:task "demo/data-merge"})
               [st2' _] (step two (:tag asked) {:ok true :results [{:merged? true :tx 9 :keys 1 :files ["src/app/none.clj"] :unfiled {}}
                                                                    {:merged? true :tx 9 :keys 1 :files [] :unfiled {}}]})]
           (is (= [{:task "demo/add-merge"}] (get-in st2' [:flights "demo/add-merge" :writeback :members]))
               "a merged member with no files is no member of the write-back: no sha for files it never touched"))
         (is (= {:op :branch-db :branch :db} (get-in (write-of outs3) [:req :req])) "the write-back reads main")
-        (is (= ["src/app/none.clj"] (:seon.git/files (:seon.task/error tk))) "held as a lost write-back, named by file")
-        (is (nil? (:seon.task/commit-error tk)) "and no untyped note beside it"))))))
+        (is (= ["src/app/none.clj"] (:seon.git/files (:seon.task/error tk))) "held as a lost write-back, named by file"))))))
 )
 
 (deftest a-failed-write-back-is-a-root-cause-until-a-commit-holds-its-files
   ;; the :git effect refused the write-back of a merged task (a locked ref): it holds a typed error naming the files,
-  ;; quiescence names it, and a later commit of them (my.root/write-back!) clears it, beside
-  ;; the note of forms that name no file, which stays; a commit that left a file out (main has no text
-  ;; for it) holds the error again, for that file alone
-  (let [note "merged at t 9; these changed forms name no source file to write back: app.no-file [:var app.no-file/probe]"
-        db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :merged)
-                                              [{:seon.task/id "demo/add-merge" :seon.task/commit-error note}]))
+  ;; quiescence names it, and a later commit of them (my.root/write-back!) clears it; a commit that
+  ;; left a file out (main has no text for it) holds the error again, for that file alone
+  (let [db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :merged)))
         members [{:task "demo/add-merge"}]
         refused (assoc (contract/error :seon.fx/io-error 'seon.fx/git-commit "cannot lock ref refs/heads/jolt/seon-merges" {:path "/x"}) :seon.fx/at-ms 5)
         lost (d/db-with db (r/commit-tx db refused members ["src/app/m.clj" "src/app/a.clj"] []))
@@ -1272,10 +1268,9 @@
              :cause "write-back lost: cannot lock ref refs/heads/jolt/seon-merges [src/app/a.clj, src/app/m.clj]; (my.root/write-back! sys [\"demo/add-merge\"]) writes it again"}]
            causes)
         "a merged task with that error is a root cause, naming the function that writes them again")
-    (is (= [] (r/root-causes (r/index db))) "a merged task that lost nothing (and one with only the no-file note) is none")
+    (is (= [] (r/root-causes (r/index db))) "a merged task that lost nothing is none")
     (is (= "abc123" (:seon.task/commit (task-of fixed))))
     (is (nil? (:seon.task/error (task-of fixed))) "a commit holds them: the error is gone")
-    (is (= note (:seon.task/commit-error (task-of fixed))) "and the note of forms that name no file stays: a retry does not replace it")
     (is (= [] (r/root-causes (r/index fixed))))
     (testing "a commit that left a file out holds the error for that file alone, never silently clearing it"
       (is (= "def456" (:seon.task/commit (task-of partial))))
