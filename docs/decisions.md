@@ -2,6 +2,14 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-11 rulings
+
+The owner's rulings of 2026-11-10 and 2026-11-11 on what the store may lose in a crash.
+
+### The store may lose its last commits, never corrupt or exhaust the machine (owner, 2026-11-10/11)
+
+"Losing data is fine, but semaphore exhaustion and corrupt storage is not okay" (2026-11-10). He first chose a safe copy of the store, then replaced that: "I changed my mind and want to see if we can just fix the corruption issue with LMDB since we already own the dependency" (2026-11-11; both relayed by the managing session). So the fix is in our LMDB fork: its locks are record locks the kernel gives back, and a store opened ``MDB_SAFENOSYNC`` rolls back to its last sync after an OS crash, never past it. Stated in [failure points](failure-points.md#lmdb-locks), [failure points](failure-points.md#lmdb-crash-safety), [storage](storage.md#durability-is-continuous-group-commit) and [forks](forks.md#lmdb).
+
 ## 2026-11-10 rulings
 
 The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.

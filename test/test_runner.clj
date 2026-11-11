@@ -160,8 +160,7 @@
         open #(try (pdb/open! :lmdb store 0 :db)
                    (catch clojure.lang.ExceptionInfo e
                      (if (#{:seon.db/types-differ :seon.db/name-retired} (:seon.error/type (ex-data e)))
-                       ;; its env, opened before the refusal, closed first: a removed store's env left open is the one this
-                       ;; process reopens (and its semaphore set outlives it)
+                       ;; its env, opened before the refusal, closed first (seon.lib/remove-tree! closes it too: docs/failure-points.md#lmdb-locks)
                        (do (klmdb/close-env! store) (seon.lib/remove-tree! store) (pdb/open! :lmdb store 0 :db))
                        (throw e))))
         ;; the bound is the write's: a tree the store keeps is read whatever the store's size (a shard read the plan's tree

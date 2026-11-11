@@ -119,13 +119,14 @@
 
  ;; ==== the store ==============================================================================
 
- ;; The durable store's konserve backend: LMDB (one env sync per commit) or the POSIX filestore.
+ ;; The durable store's konserve backend: LMDB (a commit unsynced, the flusher's one env sync covering
+ ;; every commit since the last: docs/storage.md#durability-is-continuous-group-commit) or the POSIX filestore.
  :seon.config.store/backend :lmdb
  ;; Unit: bytes. LMDB's map size, the store's largest size. At the bound LMDB refuses the
  ;; write (MDB_MAP_FULL, a :seon.writer/refused answer). Provenance: the store's first
  ;; default was 1 GiB (seon.db's SEON_LMDB_MB); on 2026-10-21 the standing root's kept store
  ;; reached 747 MB and two agents died on Datahike's fatal-commit-error while recording. The map
- ;; is address space, not memory or disk: without MDB_WRITEMAP (the flags are MDB_NOSYNC) the
+ ;; is address space, not memory or disk: without MDB_WRITEMAP (the flags are MDB_NOSYNC|MDB_SAFENOSYNC) the
  ;; file grows only as it is used, so LMDB's guidance is a map as large as the store may ever
  ;; grow. 64 GiB.
  :seon.config.store/lmdb-map-bytes 68719476736
