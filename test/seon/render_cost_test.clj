@@ -662,3 +662,40 @@
      :per-n {:calls 0 :bytes 900}
      :fixed {:calls 85 :bytes 100000}
      :sizes [10 40 160]}))
+
+(defn big-member
+  "A member of a list whose hiccup is ctx's :size elements: the page's bulk, which no change moves."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] (into [:li [:h3 "bulk"]] (for [i (range (:size c))] [:p [:span (str "x" i)]])))
+(defn bulk-list
+  "A list of one big member (`big-member`) and ctx's :ids, each member reading its own value."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] (into [:ol [#'big-member {}]] (for [id (seon.ratom/realize (:ids c))] [#'val-member {} id])))
+
+(defn bulk-of
+  "The input of size n: a page of ten small members and one whose hiccup is n elements, drawn and its units written once, then one
+  small member changed and flushed: placed-units' argument, the walk."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  (let [a (seon.ratom/atom {:db/id 1 :size n :ids (vec (range 10 20)) :vals (into {} (map (fn [i] [i {:v 0}])) (range 10 20))})
+        w (seon.render/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'bulk-list {}] (seon.db/index))]
+    (seon.render/flush! w nil)
+    (seon.render/placed-units w)
+    (swap! a update-in [:vals 10 :v] inc)
+    (seon.render/flush! w nil)
+    [w]))
+
+;; docs/render.md#a-layout-places-its-lists
+(deftest a-flush-places-what-moved
+  ;; seon.render/a-flush-places-what-moved: where each unit sits is read from what each component places, kept by its revision, never from the page's
+  ;; hiccup: one small member changed, the units placed costs the same whatever an unchanged member's hiccup holds (red before: a prewalk
+  ;; of every placed component's output on each call, O(page hiccup), 289,823 ticks and 2.19 MB for 22 units at 10 turns, 2026-11-10)
+  (cost/proof
+    {:of 'seon.render/placed-units :input 'seon.render-cost-test/bulk-of
+     :n "elements in an unchanged member's hiccup"
+     :work "each component's kept placements read once, the changed member's html written again; nothing of the unchanged member's hiccup"
+     :growth :constant
+     ;; measured 2026-11-11: 2 calls and 18.8 KB at 10, within 20 KB at 100 and 1000; before (the prewalk) 31.2 KB at 10, 83.7 KB at 100 (n^0.43)
+     :fixed {:calls 2 :bytes 20000}
+     :sizes [10 100 1000]}))
+

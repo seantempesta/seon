@@ -364,6 +364,24 @@
 
 (declare entity-schema)
 
+(defn- places
+  "The components output out places, in order, [[sel k]]: each child's marker with the selector of the nearest element above it in out
+  that has an id (nil when none does), never walking into a child's own output: what `placed` reads of each component, kept on its cache
+  entry by its revision (made at the first read after its output moved), so a placement reads the components and never the page's hiccup. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :any] [:vector [:tuple [:maybe :string] [:vector :any]]]]}
+  [out]
+  (let [found (volatile! [])]
+    ((fn walk [x sel]
+       (cond (and (vector? x) (= ::child (first x))) (vswap! found conj [sel (second x)])
+             (and (vector? x) (keyword? (first x)))
+             (let [attrs (when (map? (second x)) (second x))
+                   sel (if-let [id (:id attrs)] (str "#" id) sel)]
+               (doseq [y (if attrs (drop 2 x) (rest x))] (walk y sel)))
+             (sequential? x) (doseq [y x] (walk y sel))
+             :else nil))
+     out nil)
+    @found))
+
 (defn render!
   "Component [f opts & children] drawn in walk w: its marker [::child key], its output kept in w's
   cache. Skipped when its children are = to last time's (views by source and path) and nothing it
@@ -692,10 +710,11 @@
   its list), in order, [[sel k]]: its container's selector and its key; a list component (its var's
   :seon.render/list) is no
   part: its output is its list, the components in it placed there; a component that drew nothing (with-id) is
-  placed nowhere. With sels, the element ids of some lists, those lists' alone, in sels' order. The one prewalk of
-  the root that placed-units and placed-hiccup read. nested? true: each placed component's own components too, each in the element of
-its parent that holds it, at any depth (the page's units), each [sel k parent-k] (parent-k nil in a root list); false: the lists' own
-components (the model's parts, which nest their children themselves). See docs/render.md#a-layout-places-its-lists."
+  placed nowhere. With sels, the element ids of some lists, those lists' alone, in sels' order. Read from what each component
+  places (`places`, kept by its revision), from the root down: the components, never their hiccup, so a flush that ran one leaf
+  pays the placed components, not the page (seon.render-cost-test/a-flush-places-what-moved). nested? true: each placed component's own components too, each in the element of
+  its parent that holds it, at any depth (the page's units), each [sel k parent-k] (parent-k nil in a root list); false: the lists' own
+  components (the model's parts, which nest their children themselves). See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:function [:=> [:cat :map] [:vector [:tuple :string [:vector :any]]]]
                   [:=> [:cat :map [:maybe [:sequential :string]]] [:vector [:tuple :string [:vector :any]]]]
                   [:=> [:cat :map [:maybe [:sequential :string]] :boolean] [:vector [:or [:tuple :string [:vector :any]] [:tuple :string [:vector :any] [:maybe [:vector :any]]]]]]]}
@@ -704,28 +723,24 @@ components (the model's parts, which nest their children themselves). See docs/r
   ([w sels nested?]
   (let [found (volatile! [])
         want (some-> sels set)
-        list (fn [k] (let [f (:f (get @(:cache w) k))] (when (var? f) (:seon.render/list (meta f)))))
-        ;; x walked with sel, the selector of the nearest element above it with an id: a component's marker is placed there (a list
-        ;; component is no part: its output is walked as the list's own)
-        ;; parent, the placed component whose output x is in (nil in the root's)
-        walk (fn walk [x sel parent]
-               (cond (and (vector? x) (= ::child (first x)))
-                     (let [k (second x) c (get @(:cache w) k)]
-                       (when (some? (:out c))
-                         (if-let [l (list k)]
-                           ;; a list a reader of some lists did not ask for is not walked
-                           (when (or (nil? want) (want (str "#" l))) (walk (:out c) sel parent))
-                           (when sel
-                             (vswap! found conj (if nested? [sel k parent] [sel k]))
-                             ;; nested?: the components inside it, each in the element of its own that holds it, at any depth
-                             (when nested? (walk (:out c) nil k))))))
-                     (and (vector? x) (keyword? (first x)))
-                     (let [attrs (when (map? (second x)) (second x))
-                           sel (if-let [id (:id attrs)] (str "#" id) sel)]
-                       (doseq [y (if attrs (drop 2 x) (rest x))] (walk y sel parent)))
-                     (sequential? x) (doseq [y x] (walk y sel parent))
-                     :else nil))]
-    (walk (:out (get @(:cache w) @(:out w))) nil nil)
+        cache @(:cache w)
+        list (fn [k] (let [f (:f (get cache k))] (when (var? f) (:seon.render/list (meta f)))))
+        ;; what k places, kept by its revision: made again only for a component whose output moved since it was last read
+        places-of (fn [k] (let [c (get cache k)]
+                            (if (and (contains? c :places) (= (:rev c) (:places-rev c))) (:places c)
+                                (let [ps (places (:out c))] (vswap! (:cache w) update k assoc :places ps :places-rev (:rev c)) ps))))
+        ;; component k's placements, sel the selector above them where k's own output gives none; parent, the placed component
+        ;; whose output they are in (nil in the root's): a list component is no part, its placements are its parent's
+        go (fn go [k sel parent]
+             (doseq [[s ck] (places-of k) :let [s (or s sel)] :when (some? (:out (get cache ck)))]
+               (if-let [l (list ck)]
+                 ;; a list a reader of some lists did not ask for is not walked
+                 (when (or (nil? want) (want (str "#" l))) (go ck s parent))
+                 (when s
+                   (vswap! found conj (if nested? [s ck parent] [s ck]))
+                   ;; nested?: the components inside it, each in the element of its own that holds it, at any depth
+                   (when nested? (go ck nil ck))))))]
+    (go @(:out w) nil nil)
     (if sels (vec (mapcat (group-by first @found) sels)) @found))))
 
 (defn placed-units
