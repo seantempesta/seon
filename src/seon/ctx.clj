@@ -962,9 +962,10 @@
   (docs/users.md#messages). One sort of the agent's messages and one pass with its turns. See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :map] [:map-of [:or :int [:= :pending]] [:vector :any]]]}
   [c]
-  (let [;; who the two joins hold, read tracked (their key sets, no member): a message delivered or a turn's call made places again a
-        ;; render that asked; the members are read untracked below, so a list's reading costs no read per member
-        _ (when (ratom/view? c) (count (get c :seon.message/_to)) (count (get c :seon.model-call/_agent)))
+  (let [;; who the messages join holds, read tracked (its key set, no member): a message delivered places again a render that asked
+        ;; (a turn's call moves :seon.agent/turn, which its readers read); the members are read untracked below, so a list's reading
+        ;; costs no read per member
+        _ (count (get c :seon.message/_to))
         plain (ratom/untracked c)
         a (:db/id plain)
         held (:seon.message/_to plain)
