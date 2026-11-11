@@ -120,7 +120,7 @@
         before (loaded)
         base (empty-db)
         on (fn [text] (d/db-with base (source/import-tx base {"src/my/fx.clj" text})))
-        ;; the binary's forms, as a build of the real file records them (seon.root/built-program's :forms): passed, so the test
+        ;; the binary's forms, as a build of the real file records them (seon.system/built-program's :forms): passed, so the test
         ;; reads no record of a build
         binary (into #{} (comp (filter #(= 'my.fx (:ns %))) (map :id)) (program/live-forms (on real)))]
     (is (not= real edited) "the edit changes the form's text, and its code not at all")
