@@ -1421,10 +1421,16 @@
     ;; every var of the process's namespaces without a contract (bin/check contracts): a new function in
     ;; src changes its answer, though no test names it (batch 18's scan-code went uncontracted with
     ;; the contracts step green at its digest, 2026-10-30)
-    seon.contract/uncontracted :seon.env/src
-    ;; one part of the checkout each, read whole: the wiki (a page, or every page loaded), the task files, the source (once
-    ;; file-readers, which took the whole tree: a 4-line wiki edit ran 117 tests, 2026-11-11)
-    seon.doc/pages :seon.env/docs
+    seon.contract/uncontracted :seon.env/src})
+
+(def test-class-readers
+  "src's readers of one part of the checkout, read whole, and the class each reads: the wiki (a page, or every page loaded),
+  the task files, the source. A test namespace's form calling one takes that class (graph-index's :classed), as one reading
+  the checkout raw takes the tree (:scans); they were file-readers, which took the whole tree. Only a test's own call: a src
+  form calling one (a boot indexing the wiki) is read through the world the test builds, which its own reach digests, as
+  before. See docs/source.md#tests-run-by-reach."
+  ;; as file-readers, a 4-line wiki edit ran 117 tests (2026-11-11)
+  '{seon.doc/pages :seon.env/docs
     seon.doc/load-dir-tx :seon.env/docs
     seon.root/task-files :seon.env/tasks
     seon.fx/read-source :seon.env/src})
@@ -1709,7 +1715,7 @@
         ;; a test's form is reached only as the root it is: another form naming a test (its
         ;; name quoted as data, a proof list) never runs it, clojure.test does
         test-ids (set (keep var-form tests))
-        flag (fn [k pred] (into (apply disj (k g) removed) (comp (filter pred) (map :id)) added))
+        flag (fn [k pred] (into (apply disj (or (k g) #{}) removed) (comp (filter pred) (map :id)) added))
         pvars (cfg/value :seon.config.source/process-vars)
         bvars (cfg/value :seon.config.source/binary-vars)
         reads (flag :reads tree-reading?) proc (flag :proc #(uses? pvars %)) bin (flag :bin #(uses? bvars %))
@@ -1748,6 +1754,8 @@
         ;; the tests reaching it take the tree (one-printer-and-no-cut-before-it
         ;; was reused over edits to what it read, and read as flaky)
         scans (flag :scans #(and (test-nss (:ns %)) (some file-readers (:refs %)) (checkout-read? %) (not (env-reader-form? %))))
+        ;; a test namespace's form reading one part of the checkout whole (test-class-readers) takes that part's class
+        classed (flag :classed #(and (test-nss (:ns %)) (some test-class-readers (:refs %))))
         ;; a test namespace's form reading a docstring (clojure.repl/doc, a var's or namespace's doc fact) judges docs,
         ;; which a form's code leaves out (form-ids): it reads the src class, the program's text, as kept-program-store's readers do
         docs (flag :docs #(and (test-nss (:ns %)) (or (some doc-readers (:refs %)) (:doc-attr? %))))
@@ -1790,7 +1798,8 @@
                                        (assoc! fl n {:reads (any :reads reads) :scans (any :scans scans) :proc (any :proc proc) :bin (any :bin bin)
                                                     ;; the config keys it and what it reaches read, its largest
                                                     ;; kid's set grown by the rest
-                                                    :config (let [own (map #(let [cf (cond-> (:config (rows %)) (walks %) (-> (or #{}) (conj :seon.env/schemas)) (docs %) (-> (or #{}) (conj :seon.env/src)))]
+                                                    :config (let [own (map #(let [cf (cond-> (:config (rows %)) (walks %) (-> (or #{}) (conj :seon.env/schemas)) (docs %) (-> (or #{}) (conj :seon.env/src))
+                                                                                (classed %) (-> (or #{}) (into (keep test-class-readers) (:refs (rows %)))))]
                                                                          (if (computed %) (into (or cf #{}) (:schema-config g)) cf))
                                                                      c)
                                                                   ks (keep #(get-in fl [% :config]) kids)]
@@ -1803,7 +1812,7 @@
                                    (:next g)]
                                   (components (vec affected) (fn [id] (filter affected (adj id)))))]
     (cond-> (assoc g :rows rows :defs defs :methods methods :impls impls :contract contract :tests tests :test-nss test-nss :refd refd :adj adj :rev rev
-           :reads reads :scans scans :docs docs :proc proc :bin bin :walks walks :plain plain :own own :computed computed
+           :reads reads :scans scans :classed classed :docs docs :proc proc :bin bin :walks walks :plain plain :own own :computed computed
            :comp-of (persistent! comp-of) :cd (persistent! cd) :flags (persistent! fl) :next n :affected (count affected))
       held (assoc :tests-by-ns tests-by-ns
                   :index (update held :answers #(apply dissoc % (concat stale dead)))
@@ -1840,7 +1849,7 @@
         live (live-ids db)
         {config :keys listed :listed} (config-facts schemas)]
     (reach-step {:rows {} :defs {} :methods {} :impls {} :contract {} :tests #{} :refd {} :adj {} :rev {}
-                 :reads #{} :scans #{} :docs #{} :proc #{} :bin #{} :walks #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0 :computed #{}
+                 :reads #{} :scans #{} :classed #{} :docs #{} :proc #{} :bin #{} :walks #{} :plain {} :own {} :comp-of {} :cd {} :flags {} :next 0 :computed #{}
                  :data-refs data-refs :schemas schemas :schema-config config :listed listed :live live}
                 db []
                 (into (reach-rows db (set (vals live)) true) (for [[k text] schemas] (schema-row k text (contains? listed k))))
@@ -1994,7 +2003,10 @@
         root (delay (root-digest g (first (roots-of g (:index g)))))
         binary (delay (root-digest g (conj (first (roots-of g (:index g))) 'seon.check/-main)))
         ;; :seon.env/src is a direct reader's (kept-program-store): a process test runs a program it names
-        env-keys (filterv #(and (= "seon.env" (namespace %)) (not= % :seon.env/src)) (keys config))]
+        ;; a process reads the classes it runs on (bin/, system.edn, web/, deps, the schemas), not the wiki or the task files,
+        ;; which a test reaches only through its own reader (test-class-readers): as classes they would move every process
+        ;; test at each wiki edit (242 of 1,712), which no digest of theirs held before they were classes
+        env-keys (filterv #(and (= "seon.env" (namespace %)) (not (#{:seon.env/src :seon.env/docs :seon.env/tasks} %))) (keys config))]
     (fn [k ids]
       (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
             ;; the config keys its reach reads (config-reads) that the config holds
