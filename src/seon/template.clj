@@ -159,7 +159,7 @@
   '#{seon.stall-proofs/the-stall-ended seon.stall-proofs/its-cause-is-recorded seon.stall-proofs/a-bug-is-filed})
 
 (defn stall
-  "The task for root to deal with stall s of agent on task (seon.root's first write of a stall in a
+  "The task for root to deal with stall s of agent on task (seon.system's first write of a stall in a
   live task): one per agent and task (its name), in ns root, its cause pre-filled with the stall
   (s: :quiet-ms, :last-op, :pid), its proofs the boundary conditions (stall-proofs). Its model is
   \"outside\": a Claude session works it through seon_attach, and the reconciler forks no model's

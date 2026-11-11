@@ -116,7 +116,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :any :any]]}
   [n]
   (let [db0 (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (vec (for [i (range n)] {:seon.task/ns 't :seon.task/name (str "k" i) :seon.task/plan (str "Make " i ".") :seon.task/proofs #{}}))))
-        db0 (-> db0 (d/db-with (seon.test-store/root-tx {:seon.root/boot "b1" :seon.config.agent/max-running 4})) (d/db-with (seon.task/agent-tx :a1 {:status :idle})))
+        db0 (-> db0 (d/db-with (seon.test-store/root-tx {:seon.system/boot "b1" :seon.config.agent/max-running 4})) (d/db-with (seon.task/agent-tx :a1 {:status :idle})))
         st (#'seon.render.proc/main-info {} db0)
         db1 (d/db-with db0 (seon.task/agent-tx :a1 {:status :busy}))]
     [st db1 (vec (apply concat (d/datoms-diff db0 db1 :eavt [])))]))
@@ -143,7 +143,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :any] pos-int?]]}
   [n]
   (let [db (reduce d/db-with (ts/test-db)
-                   [[{:seon.root/id :root :seon.root/boot "b1"}]
+                   [[{:seon.system/id :root :seon.system/boot "b1"}]
                     (seon.task/agent-tx :a1 {:status :idle})
                     (into [] (mapcat #(seon.repl/record-tx {:seon.agent/key "b1/a1"} (str "e" %) (seon.task/sender "a1")
                                                            {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle 'result/e1 :value 3}}))
@@ -156,7 +156,7 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple [:vector :any] pos-int?]]}
   [n]
   (let [[[branch] eid] (agent-of n)
-        main (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :b})])]
+        main (reduce d/db-with (ts/test-db) [[{:seon.system/id :root :seon.system/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :b})])]
     [[main branch] eid]))
 
 (defn- watching
@@ -205,7 +205,7 @@
   (let [k "a1"
         ev (fn [id turn] (seon.repl/record-tx {:seon.agent/key k} id (seon.task/sender "a1") {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3} :seon.eval/call (seon.task/call-ref k turn) :seon.eval/call-id (str "c-" id)}))
         db0 (reduce d/db-with (ts/test-db)
-                    [[{:seon.root/id :root :seon.root/boot "b1"}]
+                    [[{:seon.system/id :root :seon.system/boot "b1"}]
                      (seon.task/agent-tx :a1 {:status :busy :branch :task-x})])
         db0 (reduce d/db-with db0
                     [(seon.doc/load-tx db0 "docs" {seon.doc/system-page "# You are a Seon agent\n\nThe help page."})
@@ -289,7 +289,7 @@
                                               :seon.eval/response {:handle (symbol "result" id) :value {:step i}}})
                         (when (zero? (mod i 3))
                           (seon.task/message-tx (str "mm-" i) (seon.task/sender "owner") [k] (str "How is step " i "?") 1000)))))
-        base (reduce d/db-with (ts/test-db) [[{:seon.root/id :root :seon.root/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :b})])
+        base (reduce d/db-with (ts/test-db) [[{:seon.system/id :root :seon.system/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :b})])
         ;; a turn, then its basis at the branch's t as the loop writes it (seon.turn/basis!), which places a message delivered before it
         with-turn (fn [db i] (let [db (d/db-with db (vec (turn i)))]
                                (d/db-with db [{:seon.model-call/id (seon.lib/call-id k (inc i))
