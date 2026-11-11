@@ -1573,6 +1573,21 @@
           (is (= ["m1"] (mapv second (get (ctx/placed-messages db c) 1))) "and it is placed, at the turn that read it"))))))
 
 
+(deftest a-pattern-that-drops-a-required-join-is-refused-naming-it
+  ;; docs/ctx.md#changing-it-swap: a pattern is the agent's own data, added to and never replaced (owner, 2026-11-11: "The agent can
+  ;; break their context"; "a schema for a functioning agent ... the pull pattern has required parts that we can check"). What a
+  ;; role's pattern must keep is data on its schema (:seon.ctx/required); the one write path refuses a swap! that drops one, naming it
+  (let [db (:db-after (d/with (ts/test-db) [{:seon.agent/key k :seon.agent/turn 1}]))
+        p (vec (render/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern))
+        join? (fn [a x] (and (map? x) (some #(= a (if (vector? %) (first %) %)) (keys x))))
+        tryit (fn [p'] (first (as-agent! db #(try (swap! ctx/ctx assoc :seon.ctx/pattern p') :written
+                                                  (catch clojure.lang.ExceptionInfo e (pr-str (ex-data e)))))))]
+    (is (= :written (tryit (conj p :seon.agent/started-ms))) "a clause added: accepted")
+    (let [said (str (tryit (vec (remove #(join? :seon.message/_to %) p))))]
+      (is (str/includes? said "must keep its join of :seon.message/_to") said)
+      (is (str/includes? said "the messages sent to you") "and says what the join is"))
+    (is (str/includes? (str (tryit [:seon.agent/key])) "must keep its join of") "a replacement is refused")))
+
 (deftest a-swap-at-a-key-the-join-does-not-hold-says-so
   ;; docs/ctx.md#changing-it-swap: a join's members are keyed by their entity ids; a swap! whose path names a key the join holds no member
   ;; at (a map entry, a string id) is refused saying that, with the keys it does hold, not only that a new member names its identity

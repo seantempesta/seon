@@ -1804,6 +1804,8 @@
      [:h1 (str (or (:seon.agent/key e) (:seon.user/name e) (:db/id e)) " as data")]
      [:p "Schema " [:code (str schema)] " · its pattern is " (if (= :entity source) "its own (:seon.ctx/pattern on the entity)" "its schema's")
       " · " (count (render/entity-pattern ix e)) " clauses"]
+     ;; what a pattern is, the warning and one form that adds a join: the attribute's own description, data on its schema
+     (when-let [d (:description (contract/properties :seon.ctx/pattern))] [:p d])
      [:p "Its schema's render for a person is " [:code (str (:hiccup renders))] (when (:model renders) (list " · for the model " [:code (str (:model renders))]))]
      [:h2 "What the pattern asks, and what the pull holds"]
      (into [:ul] (map #(pull-clause % (get e (:key %)))) clauses)
