@@ -16,17 +16,23 @@
 
 (defn diff
   "What moved of your page between point p0 and point p1 of your branch ({:commit :t}, as a page call prints it; :branch optional; p0 nil: nothing before it, so each part whole, [[id] :+ form]), as edits [[path op value] ...], each path starting with the part's id: the page drawn at each point with today's renders and the edits `seon.render/page-edits` makes of the two. Pure in the points: the same points and renders give the same edits, which the model reads for each turn between the points of its two requests (:seon.model-call/basis). The same edits your turn's page message prints (seon.ctx.wire/page-edits-between). See docs/render.md#a-change-is-edits-by-name."
-  {:malli/schema [:=> [:cat [:maybe [:map [:branch {:optional true} :any] [:commit :uuid] [:t :int]]] [:map [:branch {:optional true} :any] [:commit :uuid] [:t :int]]] [:or [:vector :any] :map]]}
+  {:seon.model-call/reply "Before I go on: what changed on my page since my last turn."
+   :seon.eval/intent "Read the edits that take my page from my last turn's point to this one."
+   :malli/schema [:=> [:cat [:maybe [:map [:branch {:optional true} :any] [:commit :uuid] [:t :int]]] [:map [:branch {:optional true} :any] [:commit :uuid] [:t :int]]] [:or [:vector :any] :map]]}
   [p0 p1] (wire/page-edits-between (agent/db) (agent/branch-index) (:db/id @seon.ctx/ctx) p0 p1))
 
 (defn ctx
-  "Your record at point p of your branch ({:commit :t}, :branch optional): what @ctx held there, as data, without your conversation (your
-  calls, evals and messages, which you read as your own messages). Your first turn shows it whole as the result of this call, before your
+  "Your record at point p of your branch ({:commit :t}, :branch optional): exactly what @ctx held there, as data, whole: your calls, evals
+  and messages included, as your own pattern pulls them (the same value, never a filtered copy). Your first turn shows it whole as the result of this call, before your
   page (seon.ctx.wire/page-diff-msgs). See docs/ctx.md#what-the-model-reads-and-what-the-page-renders."
-  {:malli/schema [:=> [:cat [:map [:commit :uuid] [:t :int]]] :map]}
+  {:seon.model-call/reply "First, my own record at this point, whole: what I hold, as data."
+   :seon.eval/intent "Read @ctx as it stood at this point."
+   :malli/schema [:=> [:cat [:map [:commit :uuid] [:t :int]]] :map]}
   [p] (wire/ctx-at (agent/db) (:db/id @seon.ctx/ctx) p))
 
 (defn page
   "Your page parts at point p of your branch ({:branch :commit :t}, :branch optional): the page drawn at p with today's renders, as hiccup without its presentation, the parts the model reads. Pure in the point: the same point and renders give the same bytes, which your first turn's page shows as the result of this call (seon.ctx.wire/page-diff-msgs). See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
-  {:malli/schema [:=> [:cat [:map [:commit :uuid] [:t :int]]] :any]}
+  {:seon.model-call/reply "Then my page at this point: my task, its plan, what it cites and how my proofs stand."
+   :seon.eval/intent "Read my page at this point, whole."
+   :malli/schema [:=> [:cat [:map [:commit :uuid] [:t :int]]] :any]}
   [p] (wire/page-parts-at (agent/db) (:db/id @seon.ctx/ctx) p))

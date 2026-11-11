@@ -973,10 +973,11 @@
           [(or (get-in c [:seon.model-call/_agent e :seon.model-call/n]) 0) e])))
 
 (defn agent-ctx
-  "Agent a's ctx value as db holds it, drawn cold (seon.ctx/build, schemas read in the entity index ix): a read of a session with no live @ctx. See
-  docs/ctx.md#the-pattern."
+  "Agent a's ctx value as db holds it, drawn cold (seon.ctx/build, schemas read in the entity index ix): a read of a session with no live @ctx,
+  the same value the live one holds at db's point, its :branch the db's own (Datahike's config, as the agent's state names it), never the
+  agent's :seon.agent/branch, which main holds and a branch db read at an earlier point may not. See docs/ctx.md#the-pattern."
   {:malli/schema [:=> [:cat :map :seon.host/db :int] :map]}
-  [ix db a] (:tree (build ix db a (:seon.agent/branch (d/pull db [:seon.agent/branch] a)))))
+  [ix db a] (:tree (build ix db a (get-in (or (:origin-db db) db) [:config :branch]))))
 
 (defn revalued
   "Eval record e on db with value as its value: its result another entity, the content hash of what it now answers, the rest of its response as it was. See docs/users.md#what-each-thing-is."

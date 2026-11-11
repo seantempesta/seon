@@ -2135,17 +2135,38 @@
     (is (= (subvec before (inc at)) (subvec after (inc at))) "and nothing after it")))
 
 (deftest a-page-message-is-a-generated-eval-with-no-wrapper
-  ;; docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup: the page reaches the model as the
-  ;; agent's own call and its result, the value printed whole by the one printer, nothing around it; its bytes are its code, id and value
+  ;; docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup: the page reaches the model as a
+  ;; whole reply of the agent's, its text and a call with its intent (owner, 2026-11-11: "Seon's own calls should carry an intent too"),
+  ;; the words read from the called function's var, and its result, the value printed whole by the one printer, nothing around it
   (let [edits [[["status"] :r [:p "moved"]]]
-        code "(my.render/diff {:commit #uuid \"00000000-0000-0000-0000-000000000001\", :t 1} {:commit #uuid \"00000000-0000-0000-0000-000000000002\", :t 2})"
+        q0 "{:commit #uuid \"00000000-0000-0000-0000-000000000001\", :t 1}" q1 "{:commit #uuid \"00000000-0000-0000-0000-000000000002\", :t 2}"
         id (seon.lib/id (seon.lib/digest "points"))
-        [call result :as ms] (wire/page-message id code edits)]
+        [call result :as ms] (wire/page-message id 'my.render/diff [q0 q1] edits)
+        {:seon.model-call/keys [reply] :seon.eval/keys [intent]} (meta #'my.render/diff)]
     (is (= ["assistant" "tool"] (mapv :role ms)))
-    (is (= {:role "assistant" :content "" :tool-calls [{:id id :code code}]} call) "one call: its id and its code")
+    (is (= {:role "assistant" :content reply :tool-calls [{:id id :intent intent :code (str "(my.render/diff " q0 " " q1 ")")}]} call)
+        "one reply: the function's words, then its call with its intent")
     (is (= id (:tool-call-id result)) "and its result names it")
     (is (= "[[[\"status\"] :r [:p \"moved\"]]]" (:content result)) "the edits printed whole, with no {:value ..} around them")
-    (is (= ms (wire/page-message id code edits)) "the same bytes again")))
+    (is (= ms (wire/page-message id 'my.render/diff [q0 q1] edits)) "the same bytes again")
+    (is (= :seon.ctx/unworded (try (wire/page-message id 'clojure.core/inc ["1"] 2) nil (catch clojure.lang.ExceptionInfo e (:seon.error/type (ex-data e)))))
+        "a function with no words is refused, never an empty message")))
+
+(deftest every-call-seon-writes-is-a-whole-reply
+  ;; the law (owner, 2026-11-11: "Set a good example for the agent"): each function a Seon-made call names holds its reply and its
+  ;; intent, and every assistant message of a request that holds no record of the model's own has text and each call an intent
+  (doseq [f '[my.render/ctx my.render/page my.render/diff]
+          k [:seon.model-call/reply :seon.eval/intent]]
+    (is (seq (get (meta (requiring-resolve f)) k)) (str f " holds " k)))
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask!] (parts-session conn)
+            r (ask! 0)
+            seon-made (filter #(some (fn [c] (str/starts-with? (str (:code c)) "(my.render/")) (:tool-calls %)) (:messages r))]
+        (is (= 2 (count seon-made)) "the record and the page at the first point")
+        (doseq [m seon-made]
+          (is (seq (:content m)) (str "text before the call: " (pr-str (dissoc m :tool-calls))))
+          (is (every? (comp seq :intent) (:tool-calls m)) (str "each call an intent: " (pr-str (:tool-calls m)))))))))
 
 (deftest a-compacted-turns-page-is-regenerated-from-the-calls-that-remain
   ;; docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup: the page calls are never stored, so

@@ -1219,6 +1219,23 @@
     (is (= t was) "the commit at t itself needs no walk")
     (is (true? as-of?) "past what collection kept, a db as of t")))
 
+;; docs/ctx.md#what-the-model-reads-and-what-the-page-renders: the record the first request shows as (my.render/ctx p) is the agent's own
+;; @ctx, the live atom, printed whole: the same thing it reads when it types @ctx, never a filtered copy (owner, 2026-11-11)
+(deftest the-record-shown-is-the-live-ctx
+  ;; after a turn, inside one eval: the live atom and (my.render/ctx p) at the agent's db's own point, each printed whole as the
+  ;; request prints the record (seon.ctx.wire/page-message)
+  (let [[_ same]
+        (in-agent (fn [{:keys [task]}]
+                    [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
+                     (str "(let [db (seon.agent/db) whole #(seon.print/text (vary-meta % assoc :seon.print/full true))"
+                          " live (whole @seon.ctx/ctx) shown (whole (my.render/ctx {:commit (datahike.api/commit-id db) :t (:max-tx db)}))]"
+                          " {:equal (= live shown) :sizes [(count live) (count shown)] :conversation? (some? (:seon.model-call/_agent @seon.ctx/ctx))"
+                          " :at (when (not= live shown) (let [i (or (first (keep-indexed (fn [i [a b]] (when (not= a b) i)) (map vector live shown))) (min (count live) (count shown)))]"
+                          " [(subs live (max 0 (- i 100)) (min (count live) (+ i 150))) (subs shown (max 0 (- i 100)) (min (count shown) (+ i 150)))]))})")])
+                  {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})]
+    (is (:conversation? (:value same)) (str "a turn in, so the record holds the conversation's joins: " (pr-str same)))
+    (is (true? (:equal (:value same))) (str "the record shown at a point is the live @ctx there, byte for byte: " (pr-str (:value same))))))
+
 ;; docs/render.md#a-change-is-edits-by-name: a wake is told what moved since the page it last showed, never the page again: a second whole page
 ;; costs about 4k tokens a wake
 (deftest a-wake-shows-what-moved-not-the-page-again
