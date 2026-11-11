@@ -991,7 +991,7 @@
                                  (remove nil? body))]))
 
 (defn cite-hiccup
-  "A cite as pulled (and filled) with its target joined, as one hiccup by what the target is: a wiki section (`section-hiccup`),
+  "A cite with its target read whole (seon.render.ui/cite reads it), as one hiccup by what the target is: a wiki section (`section-hiccup`),
   a function (`var-hiccup`), a schema key or setting (`key-hiccup`), a namespace (its doc and how to read it), a task (its plan)
   or a file (how to read it), its body folded under its first line (`folded`). The page and the model read it alike; `doc` answers
   it on demand. See docs/references.md#an-entity-cites."
@@ -1009,24 +1009,27 @@
      (:file/path t) [:section [:h3 (:file/path t)] [:p "A file your plan names."] [:p "Read it: " [:code (str "(slurp \"" (:file/path t) "\")")]]]))))
 
 (defn cite
-  "Cite c as pulled with its target and its owner joined (the declared html render of :seon.cite/cite-fact), by `cite-hiccup`: a
-  wiki section, a function, a schema key, a namespace, a task or a file, at the cite's depth. What the agent will do with a function
-  is judged from the cite's own joins, never stored and never the page's: one in its owner task's namespace or reached by the
-  task's proofs (their forms' refs) is one it will change (its source and tests drawn), any other one it calls. ctx holds every
-  entity whole at each path its pattern pulls it (docs/ctx.md#the-pattern), so the cite's joins are all here. A pulled section or
-  var alone is not rendered by this: it prints as the data it is. See docs/references.md#an-entity-cites."
+  "Cite c (the declared html render of :seon.cite/cite-fact, a component over the db), by `cite-hiccup`: a wiki section, a function,
+  a schema key, a namespace, a task or a file, at the cite's depth. ctx holds what the cite names, its target and its owner by
+  identity; this reads the rest of each from the db by the pattern its schema declares beside the cite's (:seon.cite/target-read,
+  :seon.cite/of-read), by seon.ctx/build, so the walk tracks what it read and ctx holds none of the content. What the agent
+  will do with a function is judged from its owner as read, never stored and never the page's: one in its owner task's namespace
+  or reached by the task's proofs (their forms' refs) is one it will change (its source and tests drawn), any other one it calls.
+  A pulled section or var alone is not rendered by this: it prints as the data it is. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]] :any] :any]}
-  [{db :seon.db/db} c]
+  [{db :seon.db/db ix :seon.render/index} c]
   (let [c (ratom/realize c)
-        t (:seon.cite/target c)
-        of (:seon.cite/of c)
+        ;; an entity the cite names, read whole by the pattern schema k declares; one with no id (a cite made by hand) as it is given
+        read (fn [m k] (if-let [e (:db/id m)] (merge m (dissoc (:tree (ctx/build ix db e nil (render/schema-property ix k :seon.ctx/pattern))) :t :branch :commit)) m))
+        t (read (:seon.cite/target c) :seon.cite/target-read)
+        of (read (:seon.cite/of c) :seon.cite/of-read)
         task-ns (some-> (:seon.task/ns of) str)
         reach (into #{} (for [[_ v] (:proved of) r (get-in v [:var/form :form/refs])] r))
         sym (:var/name t)
         id (:seon.task/id of)]
     ;; a test its owner task proves by is drawn by the task's proofs (seon.render.ui/status), not again as a cite (Context)
     (when-not (and sym (some #(= sym (:var/name %)) (vals (:proved of))))
-     (cite-hiccup db c {:lookups (cond-> [] id (conj [:seon.task/id id]) sym (conj [:var/name sym]))
+     (cite-hiccup db (assoc c :seon.cite/target t) {:lookups (cond-> [] id (conj [:seon.task/id id]) sym (conj [:var/name sym]))
                        :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))}))))
 
 
