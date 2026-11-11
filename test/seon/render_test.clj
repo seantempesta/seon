@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.fixtures :refer [flush! draw]] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.ctx] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx]))
+            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx] [malli.registry]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -2802,6 +2802,36 @@
     (let [mo (r/pulled db ix {:db/id a :seon.agent/key k :seon.ctx/pattern [:seon.agent/key :seon.ctx/pattern]} nil)]
       (is (= :entity (:source mo)) "an entity holding its own pattern is read by it")
       (is (= [:seon.agent/task :seon.agent/turn] (:held-unasked mo)) "what the entity holds on the db that its pattern does not ask"))))
+
+(deftest a-pulled-entity-reads-a-schemas-name-in-its-pattern-as-that-schemas-pattern
+  ;; docs/ctx.md#the-pattern: seon.render/pulled reads an entity's own pattern expanded (seon.render/expanded): a schema's name among its
+  ;; clauses lists the clauses that schema's pattern asks, never the name, and the pattern is still the entity's own
+  (let [k "inspect/named"
+        db (:db-after (d/with (ts/test-db) [{:seon.agent/key k :seon.agent/turn 1}]))
+        ix (seon.db/index)
+        own [:seon.db/agent-fact :seon.agent/started-ms]
+        node {:db/id (seon.db/eid db :seon.agent/key k) :seon.agent/key k :seon.ctx/pattern own}
+        m (r/pulled db ix node nil)
+        asked (set (map :clause (:clauses m)))]
+    (is (= :entity (:source m)) "its own pattern")
+    (is (= (:clauses (r/pulled db ix node (conj (vec (r/schema-property ix :seon.db/agent-fact :seon.ctx/pattern)) :seon.agent/started-ms)))
+           (:clauses m))
+        "clause by clause, the schema's pattern and the added clause")
+    (is (every? asked [:seon.agent/key :seon.agent/started-ms]) "the schema's clauses and the added one")
+    (is (some #(and (contains? % :members) (= :seon.agent/task (:attr %))) (:clauses m)) "the joins the schema's pattern asks")
+    (is (not (asked :seon.db/agent-fact)) "never the schema's name as an attribute")))
+
+(deftest a-schemas-name-whose-pattern-reaches-itself-is-refused
+  ;; docs/ctx.md#the-pattern: a schema's name among a pattern's clauses is spliced by its pattern (seon.render/expanded); one whose pattern
+  ;; names it again, through another, is refused with a typed error naming it, as a join's schema that reaches itself is
+  (let [forms {:lab.loop/a-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:lab.loop/b-fact :lab.loop/x]} [:lab.loop/x :lab.loop/x]]
+               :lab.loop/b-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:lab.loop/a-fact :lab.loop/y]} [:lab.loop/y :lab.loop/y]]
+               :lab.loop/x :string :lab.loop/y :string}
+        ix (seon.db/index-of {:forms forms})
+        said (binding [malli.registry/*registry* (seon.contract/registry-of forms)]
+               (try (r/pattern ix [:lab.loop/a-fact]) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))]
+    (is (= :seon.ctx/invalid-pattern (:seon.error/type said)) (pr-str said))
+    (is (str/includes? (str said) "reaches itself") (pr-str said))))
 
 (deftest an-own-renders-part-is-the-models-unless-marked-for-the-page
   ;; docs/render.md#an-entity-may-name-its-own-render: the lists a walk reads as parts (seon.render/page-lists, what the model reads) hold
