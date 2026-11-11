@@ -76,6 +76,17 @@ A related entity works the same way when its pattern joins it: a search the page
 
 What a render is handed, and where it finds the entity index: [components](render.md#what-a-render-is-handed).
 
+**Seeing a render you are changing.** A key you added is drawn as a part of your page (```seon.render.ui/ctx-keys```), and your model's request holds that part. So before you change a render, put its drawing on your own page: give a key of yours a render that calls the one you are changing on a node of your pull. Each request after that holds what it draws now, with no node built by hand and nothing printed again:
+
+```clojure
+(ns lab.ui) (defn watch "The render I am changing, drawn on my own task." {:malli/schema [:=> [:cat :map :string] :any]} [opts _] (seon.render.ui/task-view opts (:seon.agent/task @seon.ctx/ctx))) (in-ns 'agent.a1)
+(my.schema/register! :lab.ctx/watch '[:string {:seon.render/hiccup lab.ui/watch}])
+(swap! ctx assoc :seon.ctx/pattern (conj (vec (seon.render/entity-pattern (seon.agent/branch-index) @ctx)) :lab.ctx/watch))
+(my.db/transact! [{:seon.agent/key (:seon.agent/key @ctx) :lab.ctx/watch "on"}])
+```
+
+A key's render is handed the entity index and the key's value, not `:seon.ctx/ctx`: it reads your pull as `@seon.ctx/ctx`.
+
 **Your own render, or the shared one.** To try another way of rendering something, declare your own, as above: a key of your own with its render changes only what your pull shows. You can also redefine a shared render, or re-register `:seon.render/render-ctx`, on your branch ([your page, changed at your REPL](render.md#reactive-renders)), but once that merges it changes what every agent reads, so experiment with your own first ([decisions](decisions.md#2026-11-05-rulings)). Every function is a query away: `:form/src` of its `:var/form` is its source and `:var/contract` its inputs and output, so a render is found by what it takes:
 
 ```clojure
