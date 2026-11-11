@@ -180,9 +180,21 @@
           ;; the load is read only when it decides: an item to grant, one running, and a max-load set
           ld (if (and k (nil? ld) (:max-load st) (pos? running)) (machine-load) ld)
           st (cond-> st ld (assoc :load ld))]
-      (if (or (nil? k) (and ld (pos? running) (>= ld (:max-load st))))
-        [st outs]
-        (let [batch #{k}
+      (cond
+        (nil? k) [st outs]
+        ;; held for the load: each asker with an item queued is told once as the hold begins (:prove-held, which its
+        ;; client prints, so a hold never reads as a hang), and once as it ends, at the next grant (:resumed)
+        (and ld (pos? running) (>= ld (:max-load st)))
+        (if (:held st)
+          [st outs]
+          (let [askers (into (sorted-set) (comp (filter #(= :queued (:status %))) (mapcat :waiters)) (vals (:items st)))
+                queued (count (filter #(= :queued (:status %)) (vals (:items st))))]
+            [(assoc st :held askers)
+             (into outs (for [a askers] {:op :prove-held :key a :held true :load ld :max-load (:max-load st) :queued queued}))]))
+        :else
+        (let [outs (into outs (for [a (:held st)] {:op :prove-held :key a :held false}))
+              st (dissoc st :held)
+              batch #{k}
               bid (inc (:bid st 0))
               st (-> st (assoc :bid bid) (assoc-in [:batches bid] batch) (assoc-in [:items k :status] :running))
               [st m] (step/ask st [:prove :answers] [:batch (str bid)]
