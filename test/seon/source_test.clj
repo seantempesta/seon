@@ -922,6 +922,31 @@
     (testing "an unchanged tree: nothing to do"
       (is (= [] (source/refresh-tx db {}))))))
 
+(deftest a-refresh-reads-again-a-form-whose-macro-read-a-changed-file
+  ;; docs/source.md#indexing-a-tree: a form whose expansion reads a file (a macro calling slurp, as seon.config/schema-forms
+  ;; bakes the schema resources) is the analysis of that file's text, so a refresh changing only that file reads the form's
+  ;; namespace again, as the whole tree's replace would: main's gate test read the nearest kept tree's schema keywords
+  (let [dir (scratch-dir "baked")
+        path "resources/seon/schemas/seon.rfbake.edn"
+        put! (fn [text] (.mkdirs (.getParentFile (java.io.File. (str dir "/" path)))) (spit (str dir "/" path) text) text)
+        files {"src/rf/bake.clj" (str "(ns rf.bake)\n\n(defmacro baked [] (list 'quote (read-string (slurp " (pr-str (str dir "/" path)) "))))\n\n"
+                                      "(def held (baked))\n")
+               path (put! "{:rfbake/a :string}\n")}
+        db (let [db (empty-db)] (d/db-with db (source/import-tx db files)))
+        keywords (fn [db] (set (:form/keywords (:var/form (d/entity db (pdb/eid db :var/name 'rf.bake/held))))))
+        changed {path (put! "{:rfbake/b :string}\n")}
+        refreshed (d/db-with db (source/refresh-tx db changed))]
+    (is (contains? (keywords db) :rfbake/a) "the import holds the file's keyword as the form's")
+    (is (= #{:rfbake/b} (set (filter #(= "rfbake" (namespace %)) (keywords refreshed))))
+        "the refresh of the schema file alone moves the baking form's keywords")
+    (is (= (program-of (d/db-with db (source/replace-tx db (merge files changed)))) (program-of refreshed))
+        "as the whole tree's replace reads it")))
+
+(deftest the-programs-baking-forms-are-found-by-their-macros-reads
+  ;; docs/source.md#indexing-a-tree: on the checkout's own program, the forms baking the schema resources and the shipped
+  ;; config file (seon.config/schema-forms, built-text) are found from the facts, so a refresh changing a schema reads them again
+  (is (= 'seon.config (get (source/file-reading-expansions (test-runner/program)) "src/seon/config.clj"))))
+
 (defn- refresh-program
   "A program of n forms in other files (files of ten functions each, every one requiring rfc.c
   and calling it when hub? is true) beside rfc.c, a file of ten functions: db holding it, and
