@@ -425,6 +425,15 @@
        (on-main conn t n) (on-branch bc t n)
        (f (pm/net-change base @conn) (pm/net-change base @bc))))))
 
+(defn- sides-db
+  "(f base main branch) with the three values of a branch after on-main ran on main and on-branch on it."
+  [on-main on-branch f]
+  (branched
+   (fn [conn bc br]
+     (let [base @conn t (pdb/eid base :task/name :gen/t) n (first (notes-of base :base))]
+       (on-main conn t n) (on-branch bc t n)
+       (f base @conn @bc)))))
+
 (deftest two-ends-of-one-key-are-a-conflict-by-identity
   (sides (fn [c t _] (d/transact c [[:db/add t :task/plan "main's plan"]]))
          (fn [c t _] (d/transact c [[:db/add t :task/plan "the branch's plan"]]))
@@ -475,3 +484,29 @@
          (is (= [] refused) "every group passes the write check on main: each state it makes is one the branch held")
          (is (= (:keys (pm/net-change base @bc)) (:keys (pm/net-change base landed)))
              "main after the replay holds the branch's net change, key for key, by identity"))))))
+
+(deftest a-merge-is-planned-from-three-values-before-anything-is-written
+  ;; both sides wrote the same key to two ends: the plan is its conflict, and no group
+  (sides-db (fn [c t _] (d/transact c [[:db/add t :task/plan "main's plan"]]))
+            (fn [c t _] (d/transact c [[:db/add t :task/plan "the branch's plan"]]))
+            (fn [base main branch]
+              (is (= {:conflicts [{:key [:task/name :gen/t :task/plan] :ours "main's plan" :theirs "the branch's plan"}]}
+                     (pm/plan base main branch)))))
+  ;; the branch changed a note, which bears no identity: named, never carried, and no group
+  (sides-db (fn [_ _ _] nil)
+            (fn [c _ n] (d/transact c [[:db/add n :note/text "changed on the branch"]]))
+            (fn [base main branch]
+              (is (= {:unidentified #{#{:note/text :note/agent}}} (pm/plan base main branch)))))
+  ;; main and the branch changed two keys of one task: no conflict, and the plan is the branch's transactions
+  (sides-db (fn [c t _] (d/transact c [[:db/add t :task/plan "main's plan"]]))
+            (fn [c t _] (d/transact c [[:db/add t :task/status :ready]]))
+            (fn [base main branch]
+              (let [p (pm/plan base main branch)]
+                (is (= [:groups] (keys p)))
+                (is (= [[[:db/retract :task/status :held] [:db/add :task/status :ready]]]
+                       (mapv (fn [g] (mapv (fn [[op _ a v]] [op a v]) (:ops g))) (:groups p)))
+                    "one group, the branch's one transaction, whole"))))
+  ;; nothing on the branch that main lacks: no group
+  (sides-db (fn [c t _] (d/transact c [[:db/add t :task/plan "main's plan"]]))
+            (fn [_ _ _] nil)
+            (fn [base main branch] (is (= {:groups []} (pm/plan base main branch))))))

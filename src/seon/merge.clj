@@ -644,3 +644,19 @@
             ;; retractions first: a value replaced in one transaction is retracted, then asserted
             :ops (vec (sort-by #(if (= :db/retract (first %)) 0 1) ops))
             :meta (into {} (for [dt (d/datoms src :eavt t) :when (not= :db/txInstant (:a dt))] [(:a dt) (:v dt)]))}))))
+
+(defn plan
+  "What merging src into onto does, decided before anything is written, from the three values alone: their
+  base, the branch that receives (onto) and the branch merged in (src). {:conflicts [...]} when the two sides'
+  net changes conflict (conflicts); {:unidentified #{attrs ...}} when src changed an entity that bears no
+  identity, which cannot cross (net-change); else {:groups [...]}, src's transactions since base as the
+  receiving branch will write them (replay), which is [] when src holds nothing onto lacks. The writer's
+  merge runs it inside its one op, so two branches merging at once are each judged against what the other
+  left. Task seon.merge/a-merge-replays-the-sources-net-change."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :map]}
+  [base onto src]
+  (let [theirs (net-change base src)
+        cs (conflicts (net-change base onto) theirs)]
+    (cond (seq cs) {:conflicts cs}
+          (seq (:unidentified theirs)) {:unidentified (:unidentified theirs)}
+          :else {:groups (replay base src)})))
