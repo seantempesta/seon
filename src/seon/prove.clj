@@ -497,7 +497,8 @@
         ;; second (:made) never stands for the first
         sk [[:seed tree (if stores? :stores :tree)] tree]]
     (cond-> (into {}
-                  (concat (for [[t d] (:process r)] [[t d] (cond-> (assoc on :kind :process :binary? true) seed? (assoc :needs #{sk}))])
+                  (concat (for [[t d] (:process r) :let [b (get-in r [:bounds t])]]
+                            [[t d] (cond-> (assoc on :kind :process :binary? true) b (assoc :bound b) seed? (assoc :needs #{sk}))])
                           (for [[s {:keys [digest binary? bound alone?]}] (:steps r)]
                             [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?)) bound (assoc :bound bound) alone? (assoc :alone? true)
                                           seed? (assoc :needs #{sk}))])))

@@ -238,6 +238,24 @@
       (seon.lib/remove-tree! runs)
       {:ids ids :agents agents :out log :left (if drained left (conj left :not-drained))})))
 
+;; docs/merging.md#the-test-service: the one call proves a reference (Sean, 2026-11-11: "seon.test/prove #commit id or
+;; whatever we are passing in to signify the branch or point in time and that runs it"). Wrong if a reference at an earlier
+;; commit answers the head's verdicts: a past point always forks, onto a branch made at that commit, which loads its program
+(deftest a-reference-at-an-earlier-commit-is-proved-at-that-point
+  (let [[head past] (with-agent {}
+                      (fn [{:keys [names eval-root]}]
+                        (let [a (:agent names) ev (comp root-value eval-root)
+                              sub (fn [code] (ev (str "(:value (last @(c/submit! sys :" a " " (pr-str code) " {:origin :outside})))")))
+                              head-of (str "(seon.db/head (:conn sys) (:branch (get-in (c/state sys) [:agents :" a "])))")]
+                          (sub "(ns pt.atref (:require [clojure.test :refer [deftest is]])) (defn f [] 1) (deftest f-is-one (is (= 1 (f))))")
+                          ;; the commit that holds the green: an agent commits a request's writes before it replies
+                          (let [c (ev (str "(datahike.api/commit-id " head-of ")"))]
+                            (sub "(in-ns 'pt.atref) (defn f [] 2)")
+                            [(ev (str "(vec (:red @(c/prove! sys (c/agent-ref sys :" a ") '#{pt.atref})))"))
+                             (ev (str "(select-keys @(c/prove! sys (assoc (c/agent-ref sys :" a ") :commit #uuid " (pr-str (str c)) ") '#{pt.atref}) [:red :pass :ran :seon.error/message])"))]))))]
+    (is (= '[pt.atref/f-is-one] head) (str "the head is red: " (pr-str head)))
+    (is (and (empty? (:red past)) (pos? (:pass past 0))) (str "the earlier commit is proved as it stood, green: " (pr-str past)))))
+
 (deftest a-tests-request-is-answered-while-an-eval-blocks
   ;; task seon.agent/the-agent-is-a-flow-graph: root's :tests request goes to the agent's :tests proc,
   ;; never behind the eval the :repl proc runs (md-scan #21: a :tests waited behind a wait that held the
@@ -249,7 +267,7 @@
             (let [a (:agent names) ev (comp root-value eval-root)]
               (ev (began-code a "(clojure.core.async/<!! (clojure.core.async/chan))"))
               ;; the run's answer, or :none if the agent did not answer it while its eval blocked
-              [(ev (str "(deref (future @(c/prove! sys :" a " #{} :turn)) 60000 :none)"))
+              [(ev (str "(deref (future @(c/prove! sys (c/agent-ref sys :" a ") #{} :turn)) 60000 :none)"))
                (do (ev (str "(c/interrupt! sys :" a ")"))
                    (ev "(clojure.string/starts-with? (:seon.error/message (:ex @blocked)) \"interrupted by root\")"))
                (ev (str "(:value @(c/submit! sys :" a " \"(+ 2 2)\" {:origin :outside}))"))])))]
@@ -364,7 +382,7 @@
                   defined (ev (str "@(c/submit! sys :" a " " (pr-str held) ")"))
                   ;; the test service proves the branch as its turn does (mode :turn: the tests the branch changed,
                   ;; held-proof/h among them): it asks the idle agent for :tests
-                  _ (ev (str "(def held-run (future @(c/prove! sys :" a " #{} :turn)))"))
+                  _ (ev (str "(def held-run (future @(c/prove! sys (c/agent-ref sys :" a ") #{} :turn)))"))
                   in (java.io.FileInputStream. ^String began)
                   in-test (.read in)
                   ;; the child holds in its test: the agent answers an eval meanwhile
