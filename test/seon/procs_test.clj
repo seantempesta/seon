@@ -1325,7 +1325,27 @@
     (is (:merged? r) (pr-str r))
     (is (= (:branch cfg) (:seon.tx/branch (d/entity db (:max-tx db)))) "the branch seon.ctx reads from main's last transaction is main")
     (is (= b (:seon.tx/merged (d/entity db (:max-tx db)))) "and it names the member it merged")
-    (is (= [b b] (mapv #(:seon.tx/branch (d/entity db %)) (butlast txs))) "the replayed ones name the branch that wrote them")))))
+    (is (= [b b] (mapv #(:seon.tx/branch (d/entity db %)) (butlast txs))) "the replayed ones name the branch that wrote them"))))
+  ;; two members: one transaction of main's own a member, in member order, each naming the member it merged; the content mark and
+  ;; every parent ride the last
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        [b1 b2] (for [nm [:two-1 :two-2]] (let [x (pdb/on-main (:branch cfg) nm)] (d/branch! conn (:branch cfg) x) x))
+        _ (doseq [[x nm] [[b1 :gen/two-1] [b2 :gen/two-2]]]
+            (let [c (pdb/connect (assoc cfg :branch x))]
+              (try (d/transact c {:tx-data [{:task/name nm :task/plan "p" :task/status :held}] :tx-meta (pdb/tx-meta x)}) (finally (d/release c)))))
+        t0 (:max-tx @conn)
+        [_ outs] (step #'writer/writer-proc st :in {:op :octopus-merge :branches [b1 b2] :dest {:rid 1}})
+        rs (:results (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs)))))
+        db @conn
+        txs (sort (filter #(> % t0) (map :e (d/datoms db :aevt :db/txInstant))))
+        own (take-last 2 txs)]
+    (is (every? :merged? rs) (pr-str rs))
+    (is (= [b1 b2] (mapv #(:seon.tx/merged (d/entity db %)) own)) "one transaction of main's own a member, in member order, naming it")
+    (is (= [(:branch cfg) (:branch cfg)] (mapv #(:seon.tx/branch (d/entity db %)) own)) "each main's")
+    (is (= [b1 b2] (mapv #(:seon.tx/branch (d/entity db %)) (butlast (butlast txs)))) "after the members' replayed transactions")
+    (is (= (last own) (some (fn [dt] (when (= :seon.root/content-t (:a dt)) (:tx dt))) (d/datoms db :eavt (pdb/eid db :seon.root/id :root) :seon.root/content-t)))
+        "the content mark rides the last")))))
 
 (deftest a-write-queued-before-a-merge-is-committed-before-it
   ;; the merge's pending value is its own: writer-one commits the batch before any other op (seon.writer/octopus-merge), so a

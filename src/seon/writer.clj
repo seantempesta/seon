@@ -238,24 +238,26 @@
             {:taken #{} :db main :members []} branches)))
 
 (defn- committed!
-  "The octopus merge's members, applied and pending on main's connection (judged-members), committed: one last transaction
-  of main's own (main's :seon.tx/branch, so main never ends on a member's: seon.ctx reads a db's branch from its last
-  transaction) holding main's content mark (docs/storage.md#mains-content-mark), the members' heads as its merge parents and,
-  for one member, :seon.tx/merged its branch (cardinality one), then one commit (datahike.writer/commit-pending!), its
-  notices (stored!, main-commit) and each member's answer. Answers [st {:tx :datoms :results}]. See docs/decisions.md, 'A
+  "The octopus merge's members, applied and pending on main's connection (judged-members), committed: one transaction of
+  main's own a member, in member order (main's :seon.tx/branch, so main never ends on a member's: seon.ctx reads a db's
+  branch from its last transaction), each :seon.tx/merged its member's branch (cardinality one: one a member), the last also
+  holding main's content mark (docs/storage.md#mains-content-mark) and every member's head as its merge parents
+  ({:op 'merge!}); then one commit (datahike.writer/commit-pending!), its notices (stored!, main-commit) and each member's answer. Answers [st {:tx :datoms :results}]. See docs/decisions.md, 'A
   merge replays the source's transactions on the branch that receives it'."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.host/db [:sequential :map] [:vector :map]] [:tuple :seon.writer/state :map]]}
   [st o main ok members]
   ;; git: each member's head becomes a parent, so its merge base moves to it; each member's parent is the commit its
   ;; merge was computed from, not its head when this commits
   (let [conn (:conn st)
-        mark (dw/apply! conn {:parents (set (map (comp d/commit-id :head) ok)) :tx-data (mark-tx main)
-                              :tx-meta (pdb/tx-meta (pdb/conn-main conn) (if (= 1 (count ok)) {:seon.tx/merged (:branch (first ok))} {}))}
-                        {:op 'merge!})
-        _ (when-not (map? mark) (throw mark))
+        own (vec (for [[i m] (map-indexed vector ok) :let [last? (= i (dec (count ok)))]]
+                   (let [meta {:tx-meta (pdb/tx-meta (pdb/conn-main conn) {:seon.tx/merged (:branch m)})}
+                         rep (if last?
+                               (dw/apply! conn (assoc meta :parents (set (map (comp d/commit-id :head) ok)) :tx-data (mark-tx main)) {:op 'merge!})
+                               (dw/apply! conn (assoc meta :tx-data [])))]
+                     (if (map? rep) rep (throw rep)))))
         db (:db (dw/commit-pending! conn))
         t (:max-tx db)
-        ops (into (vec (mapcat pdb/report->tx (mapcat :reps ok))) (pdb/report->tx mark))
+        ops (into (vec (mapcat pdb/report->tx (mapcat :reps ok))) (mapcat pdb/report->tx own))
         _ (stored! st o ops)]
     [(main-commit st o (:max-tx main) t ops db)
      {:tx t :datoms (count ops)
