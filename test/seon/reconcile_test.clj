@@ -1190,7 +1190,7 @@
           (is (= problem (get-in tk [:seon.task/failure :reason])))
           (is (= (if (= id "demo/add-merge") #{} #{(str id "-refine")}) (set (remove (set (keys (task/tasks before))) (keys (task/tasks db')))))
               "no new task but its refine, held for root (docs/tasks.md#a-refine-curates-its-own-task); a merge task continues its work's branch and gets none")
-          (when-let [rf (task/task db' (str id "-refine"))] (is (= :held (:seon.task/execution rf)) "what follows a failure is root's to start"))
+          (when-let [rf (task/task db' (str id "-refine"))] (is (= :running (:seon.task/execution rf)) "a task that ended not done gets its refine released: work, refine, rerun"))
           (is (not-any? #(= :cancelled (:seon.task/execution %)) (vals (task/tasks db'))) "none cancelled")
           (is (= :held (:seon.task/execution tk)))
           (is (= (:seon.task/agent tk) (get-in tk [:seon.task/failure :agent])) "naming the agent")
@@ -1297,7 +1297,8 @@
         {db' :db} (judge! db "add" {:outcome :red} :results {(t "add") :fail})
         problem "the same verdict again: proof-red demo-test/add-test"
         released (d/db-with db' (task/execution-tx ["demo/add"] :running))
-        [sp & more] (actions-for released)]
+        ;; its refine starts too (docs/tasks.md#a-refine-curates-its-own-task); the release is the task's own
+        [sp & more] (filter #(= "demo/add" (:task %)) (actions-for released))]
     (is (nil? more))
     (is (= (mspawn "add") sp) "a new agent's start, on the task's own branch")
     (is (= (:seon.agent/branch (d/entity db [:seon.agent/key "a-add"])) (get-in sp [:env :branch])))
@@ -1314,8 +1315,10 @@
   ;; the reconciler proc's own steps: the reason's hold is one write, made where it was judged (the judging); once it is committed
   ;; nothing is left to do (quiet, naming the held task as a root cause); a root-only commit after it asks nothing
   (let [red [{:reason :proof-red :symbol (t "add")}]
-        db (:db (judge! (mdb [(decl "add") (decl "twice" :needs ["add"])] :extra (work "add" :running :members {:seon.task/reasons red}))
-                        "add" {:outcome :red} :results {(t "add") :fail}))
+        ;; its refine (released: the task ended not done) cancelled by root, so what is left is the held task alone
+        db (-> (:db (judge! (mdb [(decl "add") (decl "twice" :needs ["add"])] :extra (work "add" :running :members {:seon.task/reasons red}))
+                            "add" {:outcome :red} :results {(t "add") :fail}))
+               (d/db-with (task/execution-tx ["demo/add-refine"] :cancelled)))
         commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
         main (fn [st db ops] (r/reconciler-proc st :main (assoc (ts/commit-of conn db) :ops ops)))
         reqs (fn [outs] (remove #(= :stat (:op %)) (:to-api outs)))
@@ -1477,7 +1480,7 @@
     (is (= f (:seon.task/failure (task/task judged "demo/a"))) "the failure, on main")
     (is (nil? (d/entity judged [:seon.message/id "v-demo/a-1"])) "no verdict is told for an end its agent marked failed")
     (is (= :failed (r/task-state idx "demo/a")))
-    (is (= [] (actions-for judged)) "nothing refines or retries it")
+    (is (= ["demo/a-refine"] (map :task (actions-for judged))) "nothing retries it; its refine starts (docs/tasks.md#a-refine-curates-its-own-task)")
     (let [[row & more] (get-in (problems/report judged) [:classes :failed :rows])]
       (is (nil? more))
       (is (= {:task "demo/a" :reason "the premise is refuted" :counterexample "(= 1 2)" :open? true}
@@ -1690,7 +1693,9 @@
     (is (= :running (:seon.task/execution r)) "released")
     (is (task/refine? db1 "demo/a-refine") (str "a refine by its cite of the section: " (pr-str (task/cites-of db1 (seon.db/eid db1 :seon.task/id "demo/a-refine")))))
     (is (nil? (task/refine-tx db1 "demo/a" false)) "none twice")
-    (is (nil? (task/refine-tx db1 "demo/a-refine" false)) "a refine gets none")))
+    (is (nil? (task/refine-tx db1 "demo/a-refine" false)) "a refine gets none")
+    (is (= :held (:seon.task/execution (some #(when (= "demo/a-refine" (:seon.task/id %)) %) (task/refine-tx db "demo/a" true))))
+        "a task that finished gets its refine held by default (:seon.config.agent/refine-finished): one more paid run a finished task only when released")))
 
 (deftest a-refined-plan-starts-one-fresh-run-from-main
   ;; docs/tasks.md#a-refine-curates-its-own-task (the owner, 2026-11-11: the refinement is tried from the earlier point, beside the
