@@ -1611,6 +1611,44 @@
     (is (= "Make app.x/f0 pass." (:seon.task/plan task)) "by the task schema's pattern")
     (is (contains? (set (:attrs (render/pattern (seon.db/index) p))) :seon.agent/started-ms) "and the added clause")))
 
+(deftest a-join-asked-twice-is-one-join-holding-both-sub-patterns
+  ;; docs/ctx.md#the-pattern: the same join asked twice, by the role's pattern a schema's name splices in and by the agent's own clause, is
+  ;; one join whose sub-pattern is both (seon.render/expanded): ctx built the later over the earlier, and the role's task clauses were lost
+  (let [ev {:from "lab/ctx" :conflicts [] :unmerged ["src/app/x.clj"] :red []}
+        db (:db-after (d/with (seeded 0 nil) [{:seon.task/id "lab/ctx" :seon.task/evidence ev}]))
+        p [:seon.db/agent-fact {:seon.agent/task [:seon.task/evidence]}]
+        [[said task m] _] (as-agent! db #(let [said (try (swap! ctx/ctx assoc :seon.ctx/pattern p) :written
+                                                           (catch clojure.lang.ExceptionInfo e (pr-str (ex-data e))))]
+                                            [said (:seon.agent/task @ctx/ctx) (render/pulled nil (seon.db/index) @ctx/ctx nil)]))]
+    (is (= :written said) said)
+    (is (= "Make app.x/f0 pass." (:seon.task/plan task)) "the role's task clauses: its plan")
+    (is (= ev (:seon.task/evidence task)) "and the agent's own clause")
+    (is (= 1 (count (filter #(= :seon.agent/task (:attr %)) (:clauses m)))) "one join, not two")
+    (is (= [:seon.agent/key {[:seon.agent/task :limit 3 :reverse true] [:a]} {:seon.agent/task [:b]}]
+           (render/expanded (seon.db/index) [:seon.agent/key {[:seon.agent/task :limit 3 :reverse true] [:a]} {:seon.agent/task [:b]}]))
+        "an exact key only: a join with options is another join")
+    (is (= [{:seon.agent/task [:a :b] :seon.agent/key2 [:c]} :seon.agent/key]
+           (render/expanded (seon.db/index) [{:seon.agent/task [:a] :seon.agent/key2 [:c]} :seon.agent/key {:seon.agent/task [:b :a]}]))
+        "merged at the first clause that asked it, key by key, each clause once")
+    (is (str/includes? (str (try (render/expanded (seon.db/index) [{:seon.agent/agents [:seon.agent/key]} {:seon.agent/agents 2}]) nil
+                                 (catch clojure.lang.ExceptionInfo e (ex-data e))))
+                       "asked twice")
+        "a join asked twice where one is a depth is refused, never guessed")))
+
+(deftest the-documented-form-names-the-role-and-stores-two-clauses
+  ;; docs/ctx.md#changing-it-swap: the form :seon.ctx/pattern's description tells an agent to run names its role's pattern by the
+  ;; schema's name, so what is stored is that name and the added clause, never a copy of the role's pattern gone stale when it grows
+  (let [desc (:description (seon.contract/properties :seon.ctx/pattern))
+        form (read-string (subs desc (str/index-of desc "(swap! ctx")))
+        db (seeded 0 nil)
+        db (reduce (fn [db [a f]] (:db-after (d/with db (:tx (my.schema/registration db a f false)))))
+                   db [[:my.ns/of '[:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]] [:my.ns/text :string]])
+        [[stored task] db'] (as-agent! db #(do (eval `(let [~'ctx seon.ctx/ctx] ~form))
+                                               [(:seon.ctx/pattern @ctx/ctx) (:seon.agent/task @ctx/ctx)]))]
+    (is (= [:seon.db/agent-fact {:my.ns/_of [:my.ns/text]}] stored (:seon.ctx/pattern (d/pull db' [:seon.ctx/pattern] [:seon.agent/key k])))
+        "two clauses: the role's name and the join added")
+    (is (= "lab/ctx" (:seon.task/id task)) "and its pull still holds its task")))
+
 (deftest a-join-asks-its-enclosing-pattern-again-to-a-depth
   ;; docs/ctx.md#the-pattern: a join's sub-pattern may be a depth, a positive integer or a config key naming one: the enclosing pattern
   ;; again under the join, one less each level, the join not asked at 0 (seon.render/pattern writes it out as ordinary joins)

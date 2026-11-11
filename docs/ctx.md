@@ -68,7 +68,7 @@ An agent adds to its pull, and to what it sees of it, with five evals (`seon.ctx
 (my.schema/register! :lab.ctx/steps '[:vector {:seon.render/hiccup lab.ui/steps} :string])
 (ns lab.ui) (defn steps "The plan's steps, numbered." {:malli/schema [:=> [:cat :map [:vector :string]] :any]} [_ v] [:ol (for [s v] [:li s])]) (in-ns 'agent.a1)
 ;; a pull holds only the attributes its pattern names: name the key in yours
-(swap! ctx assoc :seon.ctx/pattern (conj (seon.render/schema-property (seon.agent/branch-index) :seon.db/agent-fact :seon.ctx/pattern) :lab.ctx/steps))
+(swap! ctx update :seon.ctx/pattern (fnil conj [:seon.db/agent-fact]) :lab.ctx/steps)
 (my.db/transact! [{:seon.agent/key (:seon.agent/key @ctx) :lab.ctx/steps ["read the plan" "write the test"]}])
 @ctx
 ```
@@ -82,7 +82,7 @@ What a render is handed, and where it finds the entity index: [components](rende
 ```clojure
 (ns lab.ui) (defn watch "The render I am changing, drawn on my own task." {:malli/schema [:=> [:cat :map :string] :any]} [opts _] (seon.render.ui/task-view opts (:seon.agent/task @seon.ctx/ctx))) (in-ns 'agent.a1)
 (my.schema/register! :lab.ctx/watch '[:string {:seon.render/hiccup lab.ui/watch}])
-(swap! ctx assoc :seon.ctx/pattern (conj (vec (seon.render/entity-pattern (seon.agent/branch-index) @ctx)) :lab.ctx/watch))
+(swap! ctx update :seon.ctx/pattern (fnil conj [:seon.db/agent-fact]) :lab.ctx/watch)
 (my.db/transact! [{:seon.agent/key (:seon.agent/key @ctx) :lab.ctx/watch "on"}])
 ```
 

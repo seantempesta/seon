@@ -2667,7 +2667,7 @@
         [_ _ swapped before drawn after gone]
         (in-agent #(vector "(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/hiccup lab.ui/steps} :string])"
                    "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat :map [:vector :string]] :any]} [_ v] [:ol (for [s v] [:li s])])"
-                   "(do (swap! seon.ctx/ctx assoc :seon.ctx/pattern (conj (seon.render/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) :lab.ctx/steps)) (swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"]))"
+                   "(do (swap! seon.ctx/ctx update :seon.ctx/pattern (fnil conj [:seon.db/agent-fact]) :lab.ctx/steps) (swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"]))"
                    n
                    {:op :eval :agent "root"
                     :code (str "(let [id :" (:agent %) "]"

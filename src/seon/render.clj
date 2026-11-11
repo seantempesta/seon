@@ -1236,31 +1236,53 @@
   {:malli/schema [:=> [:cat :map :any] :boolean]}
   [ix k] (and (qualified-keyword? k) (contains? (:required-keys ix) k)))
 
+(defn- depth?
+  "Whether join sub-pattern sub is a depth (`depth`): an integer, or a qualified keyword in a seon.config namespace. See
+  docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [sub] (or (int? sub) (and (qualified-keyword? sub) (str/starts-with? (str (namespace sub) ".") "seon.config."))))
+
+(defn- depth
+  "The depth a join's sub-pattern sub says (docs/ctx.md#the-pattern): sub itself when it is an integer, a config key's value when it
+  names one (`depth?`: read by seon.config/value as a join's :limit is), else nil: sub is a pattern or an entity schema's name."
+  {:malli/schema [:=> [:cat :any] [:maybe :int]]}
+  [sub] (cond (int? sub) sub (depth? sub) (config/value sub)))
+
 (defn expanded
   "Raw pattern p with each top-level clause that names an entity schema (in the entity index ix) spliced in its place by the pattern
   that schema declares (`schema-property`), itself expanded; every other clause as it stands, and a clause the splice repeats once.
-  So [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}] is the agent schema's pattern and that join. What every reader of
-  a raw pattern reads; the stored :seon.ctx/pattern stays raw. Throws :seon.ctx/invalid-pattern naming the clause when a schema it
-  names declares no pattern, or its pattern reaches itself (seen: the schemas spliced on the way). See docs/ctx.md#the-pattern."
+  So [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}] is the agent schema's pattern and that join. A join asked twice
+  by the exact same key (the role's {:seon.agent/task :seon.task/task-fact} and an agent's own {:seon.agent/task [...]}) is one join,
+  at the first clause that asked it, whose sub-pattern is both (a schema's name read as its declared pattern), expanded; key by key
+  for a clause holding several. What every reader of a raw pattern reads; the stored :seon.ctx/pattern stays raw. Throws
+  :seon.ctx/invalid-pattern naming the clause when a schema it names declares no pattern, its pattern reaches itself (seen: the
+  schemas spliced on the way), or a join asked twice is a depth in one of them. See docs/ctx.md#the-pattern."
   {:malli/schema [:function [:=> [:cat :map [:sequential :any]] [:vector :any]]
                   [:=> [:cat :map [:sequential :any] [:set :qualified-keyword]] [:vector :any]]]}
   ([ix p] (expanded ix p #{}))
   ([ix p seen]
-   (let [bad (fn [why clause] (throw (ex-info (str "pattern: " why) (contract/error :seon.ctx/invalid-pattern #'expanded why {:clause clause}))))]
-     (into [] (comp (mapcat (fn [x] (cond (not (entity-schema-name? ix x)) [x]
-                                          (seen x) (bad (str x "'s pattern reaches itself") x)
-                                          :else (expanded ix (or (schema-property ix x :seon.ctx/pattern) (bad (str x " declares no pattern") x))
-                                                          (conj seen x)))))
-                    (distinct))
-           p))))
-
-(defn- depth
-  "The depth a join's sub-pattern sub says (docs/ctx.md#the-pattern): sub itself when it is an integer, a config key's value when it
-  names one (a qualified keyword in a seon.config namespace, read by seon.config/value as a join's :limit is), else nil: sub is a
-  pattern or an entity schema's name."
-  {:malli/schema [:=> [:cat :any] [:maybe :int]]}
-  [sub] (cond (int? sub) sub
-              (and (qualified-keyword? sub) (str/starts-with? (str (namespace sub) ".") "seon.config.")) (config/value sub)))
+   (let [bad (fn [why clause] (throw (ex-info (str "pattern: " why) (contract/error :seon.ctx/invalid-pattern #'expanded why {:clause clause}))))
+         spliced (into [] (comp (mapcat (fn [x] (cond (not (entity-schema-name? ix x)) [x]
+                                                      (seen x) (bad (str x "'s pattern reaches itself") x)
+                                                      :else (expanded ix (or (schema-property ix x :seon.ctx/pattern) (bad (str x " declares no pattern") x))
+                                                                      (conj seen x)))))
+                                (distinct))
+                       p)
+         as-pattern (fn [sub] (if (keyword? sub) (or (schema-property ix sub :seon.ctx/pattern) (bad (str sub " declares no pattern") sub)) sub))
+         ;; join k's two sub-patterns as one
+         both (fn [k a b] (if (or (depth? a) (depth? b))
+                            (bad (str "the join " k " is asked twice and one of them is a depth: ask it once") {k b})
+                            (expanded ix (vec (concat (as-pattern a) (as-pattern b))) seen)))]
+     ;; out: the clauses so far; at: each join key asked so far, at the index of the clause that asked it first
+     (:out (reduce (fn [{:keys [out at] :as acc} x]
+                     (if-not (map? x)
+                       (update acc :out conj x)
+                       (let [{out :out fresh :fresh} (reduce (fn [r [k sub]] (if-let [i (at k)] (update-in r [:out i k] #(both k % sub)) (assoc-in r [:fresh k] sub)))
+                                                             {:out out :fresh {}} x)]
+                         (if (seq fresh)
+                           {:out (conj out fresh) :at (into at (for [k (keys fresh)] [k (count out)]))}
+                           {:out out :at at}))))
+                   {:out [] :at {}} spliced)))))
 
 (defn- again
   "Pattern p with each of its joins whose sub-pattern is a depth n (`depth`) written out as ordinary nested joins: p again under the
