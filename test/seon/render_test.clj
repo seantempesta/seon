@@ -4540,3 +4540,14 @@
     (is (str/includes? html "how long a commit takes to reach the fork server") html)
     (is (not (str/includes? html "not measured")) "no gap where the boot loaded nothing")
     (is (str/includes? html "the image held main") html)))
+
+;; docs/render.md#the-page: prose a model or a person wrote reads in the system's text face (--font-text, resources/public/css/input.css's
+;; @theme); the theme sets --font-sans to the mono face for the page's chrome on purpose, so Markdown prose is drawn by .seon-md's own rule,
+;; never by a font utility (jolt/readable put font-sans on it, which drew it mono)
+(deftest prose-reads-in-the-text-face
+  (let [css (slurp "resources/public/css/input.css")
+        md (h/html (ui/markdown "A sentence with `code`."))]
+    (is (re-find #"\.seon-md \{ font-family: var\(--font-text\); \}" css) "the Markdown block's face is the text face")
+    (is (re-find #"--font-sans: var\(--font-mono\)" css) "the chrome's face stays mono, which is why no font utility reaches prose")
+    (is (str/includes? md "seon-md") md)
+    (is (not (str/includes? md "font-sans")) "no utility that resolves to the mono face")))

@@ -167,7 +167,7 @@
   ([text {:keys [inline?]}]
    (let [{:seon.ref/keys [blocks spans]} (ref/scan text)
          run (fn [a b] (if inline? (inline text a b spans) [(subs text a b)]))]
-     (into [:div {:class "seon-md font-sans flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
+     (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
            (for [{:seon.ref/keys [kind from to heading heading-level text-from text-to items ordered]} blocks
                  :let [body (subs text from to)]]
              (cond
