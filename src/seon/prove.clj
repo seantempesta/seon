@@ -121,6 +121,17 @@
   [{:keys [waiters at ms]} bid]
   (/ (double (+ (count waiters) (- bid (or at bid)))) (double (max 1 (or ms 1)))))
 
+(defn- drop-waits
+  "Asker rid no longer waits on items ks: each loses it as a waiter, a queued one no one waits on leaves the queue, and they
+  leave its :left. What a red's asker does with the items that are no proofs of its own (item-ended)."
+  {:malli/schema [:=> [:cat :map :any [:sequential :any]] :map]}
+  [st rid ks]
+  (reduce (fn [st k]
+            (let [st (-> st (update-in [:items k :waiters] disj rid) (update-in [:askers rid :left] disj k))
+                  it (get-in st [:items k])]
+              (cond-> st (and it (empty? (:waiters it)) (= :queued (:status it))) (update :items dissoc k))))
+          st ks))
+
 (defn- answer-asker
   "Asker rid answered with its verdict (:green true, or the reds and errors it met first), and gone from every item's
   waiters; a queued item no one waits on any more leaves the queue (no work for an answer already given)."
@@ -219,7 +230,13 @@
                                        signal? (update-in [:askers rid :signals] (fnil conj []) (select-keys verdict [:test :digest :kind :signal :ms]))
                                        (not signal?) (assoc-in [:askers rid :results t] r))
                                   {:keys [left results signals]} (get-in st [:askers rid])]
-                              (cond red? (let [[st o] (answer-asker st rid (cond-> {:green false :results results
+                              (cond
+                                    ;; a red, and a proof of the asker's still to hear: it keeps waiting for its proofs alone (Sean,
+                                    ;; 2026-11-11: an agent sees every proof's verdict, never :none because another went red); the
+                                    ;; other items it waited on it no longer needs (drop-waits)
+                                    (and (or red? (get-in st [:askers rid :red?])) (some (get-in st [:askers rid :proofs] #{}) left))
+                                    [(drop-waits (assoc-in st [:askers rid :red?] true) rid (remove (get-in st [:askers rid :proofs]) left)) outs]
+                                    (or red? (get-in st [:askers rid :red?])) (let [[st o] (answer-asker st rid (cond-> {:green false :results results
                                                                                     :red (vec (sort-by str (keep (fn [[t r]] (when (or (contract/error? r) (not (proofs/green? r))) t)) results)))}
                                                                              (seq signals) (assoc :signals signals)))]
                                            [st (into outs o)])
@@ -239,8 +256,10 @@
   are queued once; then slots are granted (grant). A build or seed its checkout already made green for its tree (:made,
   item-ended) is not queued again, and nothing waits on it.
   With no item it is answered green at once. Answers [st outputs]. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat :map :any [:enum :turn :batch] [:map-of :any :map]] [:tuple :map [:vector :map]]]}
-  [st rid prio items]
+  {:malli/schema [:function [:=> [:cat :map :any [:enum :turn :batch] [:map-of :any :map]] [:tuple :map [:vector :map]]]
+                  [:=> [:cat :map :any [:enum :turn :batch] [:map-of :any :map] [:set :any]] [:tuple :map [:vector :map]]]]}
+  ([st rid prio items] (ask-items st rid prio items #{}))
+  ([st rid prio items proofs]
   (let [made? (fn [[k m]] (contains? (get-in st [:made (:checkout m) :items]) k))
         done (into #{} (comp (filter made?) (map key)) items)
         items (into {} (comp (remove made?) (map (fn [[k m]] [k (cond-> m (:needs m) (update :needs #(not-empty (reduce disj % done))))]))) items)]
@@ -250,8 +269,10 @@
                        (if (get-in st [:items k])
                          (update-in st [:items k :waiters] conj rid)
                          (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :binary? :bound :alone?]) :status :queued :waiters #{rid} :at (:bid st 0)))))
-                     (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}}) items)]
-      (grant st)))))
+                     (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}
+                                                 ;; the items that are its proofs: past a red it still waits for these (item-ended)
+                                                 :proofs (into #{} (filter #(contains? proofs (first %))) (keys items))}) items)]
+      (grant st))))))
 
 (defn batch-ended
   "Batch bid's answer r (the agent's :tests answer: its :reports by test var, its :failures; or the error its run answered,
@@ -484,7 +505,7 @@
         (= :plan step) (let [st (assoc-in st [:runs key :base] (dissoc r :items :ms :process :steps :build))
                              prio (if (= :turn (:mode run)) :turn :batch)
                              items (into (plan-items run r) (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run) :kind :test} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t])))]))
-                             [st outs] (ask-items (assoc-in st [:runs key :stage] :items) key prio items)]
+                             [st outs] (ask-items (assoc-in st [:runs key :stage] :items) key prio items (set (:proofs run)))]
                          (settle st outs))
         :else [(update st :stale (fnil inc 0)) []]))))
 

@@ -368,6 +368,30 @@
     (is (= [] (batches o2)) "the other item, which only it wanted, is never run")
     (is (= {} (:items st)) "and has left the queue")))
 
+(deftest every-proof-has-its-verdict-though-one-goes-red
+  ;; Sean, 2026-11-11 ("have them fix that"): an agent saw only its first red, a proof each turn. Past a red the asker keeps
+  ;; waiting for its own proofs and is answered at the last, every red named; what is no proof of its own it stops waiting on
+  (let [p (fn [n] [(symbol "app.p-test" n) (str "d" n)])
+        items (into {(p "x") {:agent :a1 :ms 10}} (for [n ["one" "two" "three"]] [(p n) {:agent :a1 :ms 10}]))
+        [st o] (prove/ask-items (items-st 1) 1 :batch items '#{app.p-test/one app.p-test/two app.p-test/three})
+        verdict (fn [ok? t] (if ok? {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var (str "#'" t)}]}
+                              {:pass 0 :fail 1 :error 0 :reports [{:type :fail :var (str "#'" t) :message "no"}]}))
+        ;; end each granted batch in turn: red for one and three, green for two and x
+        run (fn [st o]
+              (loop [st st o o all []]
+                (if-let [b (first (batches o))]
+                  (let [[st v] (step/answered st (:tag b))
+                        t (first (get-in b [:req :names]))
+                        [st o2] (prove/batch-ended st (parse-long (second v)) (verdict (#{"two" "x"} (name t)) t))]
+                    (recur st o2 (into all o2)))
+                  [st all])))
+        [st all] (run st o)
+        r (get (answers all) 1)]
+    (is (false? (:green r)) (pr-str r))
+    (is (= '[app.p-test/one app.p-test/three] (:red r)) "both red proofs named")
+    (is (every? (set (keys (:results r))) '[app.p-test/one app.p-test/two app.p-test/three]) "every proof has its verdict")
+    (is (= {} (:items st)) "nothing left queued")))
+
 ;; an agent's turn waits to act: its items go ahead of a batch's, however the batch's are valued
 (deftest a-turns-item-goes-ahead-of-a-batchs
   (let [[st _] (prove/ask-items (items-st 0) 1 :batch {['app.cheap-test/t "dc"] {:agent :a1 :ms 1}})
