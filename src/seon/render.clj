@@ -1230,12 +1230,6 @@
   [ix k p]
   (when k (or (get (contract/properties k) p) (some #(schema-property ix % p) (parents ix k)))))
 
-(defn- entity-schema-name?
-  "Whether k names an entity schema in the entity index ix (one that names attributes of its own: a key of its :required-keys), so a
-  pattern's top-level k stands for the pattern that schema declares (`expanded`). See docs/ctx.md#the-pattern."
-  {:malli/schema [:=> [:cat :map :any] :boolean]}
-  [ix k] (and (qualified-keyword? k) (contains? (:required-keys ix) k)))
-
 (defn- depth?
   "Whether join sub-pattern sub is a depth (`depth`): an integer, or a qualified keyword in a seon.config namespace. See
   docs/ctx.md#the-pattern."
@@ -1262,7 +1256,9 @@
   ([ix p] (expanded ix p #{}))
   ([ix p seen]
    (let [bad (fn [why clause] (throw (ex-info (str "pattern: " why) (contract/error :seon.ctx/invalid-pattern #'expanded why {:clause clause}))))
-         spliced (into [] (comp (mapcat (fn [x] (cond (not (entity-schema-name? ix x)) [x]
+         ;; the entity schemas the index names: those that name attributes of their own
+         schemas (:required-keys ix)
+         spliced (into [] (comp (mapcat (fn [x] (cond (not (and (qualified-keyword? x) (contains? schemas x))) [x]
                                                       (seen x) (bad (str x "'s pattern reaches itself") x)
                                                       :else (expanded ix (or (schema-property ix x :seon.ctx/pattern) (bad (str x " declares no pattern") x))
                                                                       (conj seen x)))))
@@ -1297,7 +1293,7 @@
     (vec (map-indexed (fn [i x]
                         (if (map? x)
                           (into {} (for [[k sub] x]
-                                     [k (if-let [n (depth sub)]
+                                     [k (if-let [n (when-not (coll? sub) (depth sub))]
                                           (cond (< n 1) (throw (ex-info "pattern: a join's depth is 1 or more"
                                                                         (contract/error :seon.ctx/invalid-pattern #'again "a join's depth is 1 or more" {:clause x})))
                                                 (= n 1) (again (at i k nil))
@@ -1332,13 +1328,14 @@
   "Pattern p as a page's parts read it: p without the joins whose target schema is history (`history?`: the conversation, which the
   model reads as its native messages, never a second time in its page). The one reading of what a page's parts pull, for the walk
   that places them (seon.render.ui/agent-parts) and the model's page at a basis (seon.ctx.wire/page-parts-through). See
-  docs/render.md#the-page. p is read `expanded`."
+  docs/render.md#the-page. p is a pattern already `expanded`, as `entity-pattern` answers it: both callers hold that one, so
+  it is not expanded a second time at each read."
   {:malli/schema [:=> [:cat :map [:sequential :any]] [:vector :any]]}
   [ix p]
   (vec (keep (fn [x] (if (map? x)
                        (not-empty (into {} (remove (fn [[k sub]] (some #(history? ix %) (join-targets ix k sub)))) x))
                        x))
-             (expanded ix p))))
+             p)))
 
 (defn entity-pattern
   "Pulled entity e's pattern, `expanded` (a schema's name in it read as that schema's pattern): its own :seon.ctx/pattern (an agent's
