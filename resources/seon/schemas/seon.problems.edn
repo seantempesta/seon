@@ -84,7 +84,7 @@
  ;; a definition that broke Seon's recording of it, undone (seon.repl/undo-definition!)
  :seon.repl/definition-undone [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/definition-undone]] [:vars [:vector :any]]]]
  ;; a call Seon writes for the model whose function's var lacks its reply or its intent (seon.ctx.wire/page-message; docs/render.md#the-render-is-an-eval)
- :seon.ctx/unworded [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/unworded]] [:fn {:optional true} :symbol]]]
+ :seon.ctx/unworded [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/unworded]] [:function {:optional true} :symbol]]]
  :seon.ctx/no-system-message [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/no-system-message]] [:first {:optional true} [:maybe :map]]]]
  :seon.ctx/session-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/session-refused]] [:key :string]]]
  ;; my.root/example-txs of an example file that is missing, does not read as EDN, or is not the vector of tx-data

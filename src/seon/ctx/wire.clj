@@ -425,7 +425,7 @@
   (let [{:seon.model-call/keys [reply] :seon.eval/keys [intent]} (meta (requiring-resolve f))]
     (when-not (and (string? reply) (seq reply) (string? intent) (seq intent))
       (throw (ex-info (str f " has no :seon.model-call/reply and :seon.eval/intent on its var: a call Seon writes for the model is a whole reply")
-                      (contract/error :seon.ctx/unworded #'page-message (str "add both to " f "'s metadata") {:fn f}))))
+                      (contract/error :seon.ctx/unworded #'page-message (str "add both to " f "'s metadata") {:function f}))))
     [{:role "assistant" :content reply :tool-calls [{:id id :intent intent :code (str "(" (str/join " " (cons f args)) ")")}]}
      {:role "tool" :tool-call-id id :content (print/text (vary-meta v assoc :seon.print/full true))}]))
 
