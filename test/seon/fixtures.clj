@@ -278,10 +278,10 @@
   "The scripted model that proves a turn's rhythm (seon.agent-test): its first call evaluates
   (+ 20 21); each later call adds one to the value the last call's response showed, so its
   code holds what it saw before it was made. The answers it reads are its own calls', not the page Seon generated as an
-  eval of the agent's (a call of my.render/, docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup)."
+  eval of the agent's (a call of my.render/ or the first point's (my.agent/describe @ctx), docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup)."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [messages]}]
-  (if-let [seen (let [page-ids (set (for [m messages c (:tool-calls m) :when (str/starts-with? (str (:code c)) "(my.render/")] (:id c)))]
+  (if-let [seen (let [page-ids (set (for [m messages c (:tool-calls m) :when (re-find #"^\((my\.render/|my\.agent/describe )" (str (:code c)))] (:id c)))]
                   (some #(when (and (= "tool" (:role %)) (not (page-ids (:tool-call-id %)))) (edn/read-string (:content %))) (rseq messages)))]
     (calls "Add one to the value the last call showed." (str "(+ 1 " (:value seen) ")"))
     (calls "Add twenty and twenty-one." "(+ 20 21)")))
