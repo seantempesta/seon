@@ -443,7 +443,7 @@
         ;; a checkout's files, on their tree's branch (seon.root/prove-tree!), its verdicts streamed when asked; else an agent's branch, or main
         r (cond (and (:checkout req) (:stream req) *emit*) (prove-streamed sys (c/tree-branch (:tree req)) run)
                 (:checkout req) (run)
-                :else @(c/prove! sys ag (set (map symbol (:names req)))))]
+                :else @(c/prove! sys (if ag (or (c/agent-ref sys ag) {}) {:branch :main}) (set (map symbol (:names req)))))]
     ;; each red named with its first failing assertion (message, expected, actual), and the
     ;; process tests left to the judge with why (seon.agent/run-tests-forked's :deferred :why)
     (if (contract/error? r)
