@@ -1452,8 +1452,12 @@
       ;; and the history is what names it in an error's position (`located`, docs/errors.md#an-eval-errors-diagnostics)
       (jolt.host/enable-trace!)
       (agent/init! fd m db0 serve!)
-      (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
-                                (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
-                                (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
-                                (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state))))
+      ;; the sections its config cites and its store holds no entity for (a store older than its wiki): it was made citing the
+      ;; rest (seon.task/agent-cites-tx), and says which are missing, never silently. Read once.
+      (let [missing (seon.task/agent-cites-missing (agent/db) (:key @agent/state))]
+        (agent/hello! t-req-ns (cond-> {:interrupt-ok (:interrupt-ok @agent/state)}
+                                  (seq (:load-errors @agent/state)) (assoc :load-errors (:load-errors @agent/state))
+                                  (seq missing) (assoc :missing-cites missing)
+                                  (:misaligned @agent/state) (assoc :misaligned (:misaligned @agent/state))
+                                  (:unwatched @agent/state) (assoc :unwatched (:unwatched @agent/state)))))
       (serve!))))

@@ -58,6 +58,9 @@
  ;; an agent's boot check found its SIGUSR1 handler never ran (seon.agent/interrupt-self-test)
  :seon.agent/interrupt-unreachable [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/interrupt-unreachable]]]]
  :seon.agent/load-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/load-failed]] [:ns :symbol]]]
+ ;; an agent's config cites a wiki section its store holds no entity for (seon.task/agent-cites-missing, said in its hello): it runs
+ ;; citing the rest (docs/references.md#an-entity-cites)
+ :seon.agent/cite-missing [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/cite-missing]] [:address :string]]]
  ;; an agent forked from a program that did not load (seon.root's set-agent at its hello): every load error it was given; the agent runs
  :seon.agent/program-differs [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/program-differs]] [:differs [:vector :map]]]]
  :seon.agent/started-without-program [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/started-without-program]] [:errors [:vector :seon.program/error]]]]
