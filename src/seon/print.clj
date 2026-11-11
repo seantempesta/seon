@@ -13,7 +13,7 @@
 
   A foundational namespace, like seon.contract (which calls it for errors): its functions
   carry contracts in their metadata and are armed at boot."
-  (:require [clojure.string :as str] [seon.print.select :as select] [seon.print.emit :as emit] [seon.config :as config]))
+  (:require [clojure.string :as str] [clojure.walk] [seon.print.select :as select] [seon.print.emit :as emit] [seon.config :as config]))
 
 (def budgets
   "Tokens each kind of shown value may spend: a reply's value (Seon's shipped agent config key),
@@ -81,6 +81,16 @@
   Sized once: this runs for every eval printed. See docs/render.md#cost-is-shown-one-way."
   (inc (emit/chars-tokens (count (str ", :cost " (pr-str (emit/cost-text {:ms 1e12 :ticks 1e15 :bytes 1e15 :tok default-budget})))))))
 
+(defn at-handle
+  "Answer a (seon.render/answer: :seon.print/answer in its metadata) with `v` in its :to-use forms read as handle, the name its
+  reader reads it by (an eval's result/..., the first point's @ctx), so each form is one to copy as it stands. Any other value is
+  itself. See docs/render.md#a-render-is-a-value-printed-once."
+  {:malli/schema [:=> [:cat :any :any] :any]}
+  [handle a]
+  (if (and (map? a) (:seon.print/answer (meta a)))
+    (with-meta (update a :to-use (fn [ps] (mapv (fn [[w f]] [w (clojure.walk/postwalk-replace {'v handle} f)]) ps))) (meta a))
+    a))
+
 (defn response-text
   "Eval response r as every reader reads it (the model's tool message, the page, an outside
   agent): printed by the one printer under its handle, so a cut names the form that reads its
@@ -96,6 +106,8 @@
          ;; an eval's cost is one line with its result, what the result costs the context among it; its numbers stay data on the
          ;; record. :cost is there when the eval ran; a call not run says so in its :ex
          cost (fn [tok] (if (some r [:ms :ticks :bytes]) (str ", :cost " (pr-str (emit/cost-text (assoc (select-keys r [:ms :ticks :bytes]) :tok tok)))) ""))
+         ;; the answer is read by its handle: its forms name it (`at-handle`)
+         render (when render (if-let [h (:handle r)] (fn [x] (let [m (render x)] (cond-> m (and m (identical? x (:value r))) (update :value #(at-handle h %))))) render))
          p (print-value shown (cond-> {:handle (:handle r) :budget (cond-> default-budget (:handle r) (- cost-line-tokens))} render (assoc :render render)))
          text (or (:text p) (:seon.error/message p))]
      ;; spliced after the printed map's last entry: the text is the only place its own size is known

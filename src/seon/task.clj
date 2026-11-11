@@ -27,6 +27,19 @@
                         (for [x new :when (not (old x))] [:db/add e a x]))]
          tx)))
 
+(defn request-sentence
+  "A person's request text as its first sentence, as written: up to a . ! or ? before a space or the end (a dot inside a name,
+  demo.math/half, is part of it), else the first line. What a request task is named by (`request-words`) and titled by. See
+  docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [text] (str/trim (re-find #"(?:[^.!?\n]|[.!?](?=[^\s.!?]))*" (str/triml text))))
+
+(defn request-words
+  "The name a request's text gives its task: its first sentence's words (`request-sentence`), lower case, joined by -; \"work\" for none.
+  seon.root/request-name numbers it when the name is taken. See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [text] (str/join "-" (or (seq (re-seq #"[a-z0-9]+" (str/lower-case (request-sentence text)))) ["work"])))
+
 (defn task-id
   "The task's handle, ns/name: its identity, derived from its namespace and name."
   {:malli/schema [:=> [:cat :seon.task/ns :seon.task/name] :seon.task/id]}
@@ -153,6 +166,18 @@
   [db t]
   (cites-tx db [:seon.task/id (:seon.task/id t)] (:seon.task/id t) (text-citations db t)))
 
+(defn- agent-citations
+  "What agent k is to be made citing on db, [address citation held?] for each address of :seon.config.agent/cites as its task holds
+  it, else the shipped value (the resolver's order, docs/config.md: task first), read by seon.ref/address-citation: held?, whether db
+  holds the entity it names (seon.ref/target). An address that is no citation is left out. See docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector [:tuple :string :map :boolean]]]}
+  [db k]
+  (let [own (some->> (pdb/eid db :seon.agent/key k) (d/pull db [{:seon.agent/task [:seon.config.agent/cites]}]) :seon.agent/task :seon.config.agent/cites)]
+    (vec (for [a (or own (cfg/value :seon.config.agent/cites))
+               :let [c (ref/address-citation a)] :when c
+               :let [[attr v] (ref/target db c)]]
+           [a c (boolean (and attr (pdb/eid db attr v)))]))))
+
 (defn agent-cites-tx
   "The cites a new agent (of, its lookup ref or the tempid of the write that makes it; k its key) is made
   with: :seon.config.agent/cites as its task holds it (a role's own set, set by its template as any config key a task may
@@ -162,9 +187,17 @@
   docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :any :string] [:vector :any]]}
   [db of k]
-  ;; the task's own set when the agent is on db with its task (seon.agent/begin-run!), the resolver's order (docs/config.md: task first)
-  (let [own (some->> (pdb/eid db :seon.agent/key k) (d/pull db [{:seon.agent/task [:seon.config.agent/cites]}]) :seon.agent/task :seon.config.agent/cites)]
-    (vec (map-indexed (fn [i c] (cite-tx db of k c i)) (keep ref/address-citation (or own (cfg/value :seon.config.agent/cites)))))))
+  ;; a cite's target is a lookup ref, which a write refuses for an entity the db does not hold: only the addresses it holds are cited
+  ;; here (a store older than its wiki lacks a section; `agent-cites-missing` names those), each at its place in the config's order
+  (vec (keep-indexed (fn [i [_ c held?]] (when held? (cite-tx db of k c i))) (agent-citations db k))))
+
+(defn agent-cites-missing
+  "The addresses agent k is to be made citing (`agent-cites-tx`: its task's :seon.config.agent/cites, else the shipped value) that db
+  holds no entity for, as the config writes them: what the agent's cites leave out, as data, so its start says which address the
+  store lacks where a write of the cite threw. [] when it holds them all. See docs/references.md#an-entity-cites."
+  {:malli/schema [:=> [:cat :seon.host/db :string] [:vector :string]]}
+  [db k]
+  (vec (keep (fn [[a _ held?]] (when-not held? a)) (agent-citations db k))))
 
 (defn- cycle-in
   "A task id on a needs cycle among decls (plus the needs already on main, which cannot
