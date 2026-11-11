@@ -967,7 +967,10 @@
         ;; seed threw, and its seed.log went with the worktree)
         kept (str dir ".run")
         green? (volatile! false)
-        at (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo)]
+        ;; its built products (the runtime, the native libraries) are its root's checkout's, the tree whose pins the root runs on, so a
+        ;; candidate is judged on its own program and its root's runtime, never the main tree's (a worktree root on another Jolt pin
+        ;; judged on main's: docs/merging.md#a-merge-runs-what-the-change-reaches)
+        at (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo (cfg/checkout))]
     (cond
       (not (zero? (:exit at))) (error #'seon.fx/run-on-checkout :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
       :else

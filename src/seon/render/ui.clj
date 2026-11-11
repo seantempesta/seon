@@ -1520,7 +1520,7 @@
      :reply (when (and (not (str/blank? r)) (or (nil? m) (< (tx-of m :seon.message/body) (or (some-> rid (tx-of :seon.task/reason)) 0)))) r)}))
 
 (defn- where-stands
-  "Which of a person's groups an agent's standing stands answers (owner, 2026-11-08: those that need the person first): parked (a message
+  "Which of a person's groups an agent's standing stands answers (the owner's ruling: those that need the person first): parked (a message
   wakes it), working (lit), else finished."
   {:malli/schema [:=> [:cat :map] :keyword]}
   [{:keys [state lit?]}] (cond (#{:task/parked :task/told :status/idle} state) :parked lit? :working :else :finished))
@@ -1530,7 +1530,7 @@
   examples), one render wherever it is placed, its look by where it is (a card among a page's tiles, a pill in the agents list: CSS):
   the whole entry one link to its page by its stable address, lit while it works, what it works on (what a person asked, its first
   line, else its task's name in words) and how it stands (`standing`), what its agent last told whoever started it (the task's reason,
-  as root's message to them carries it: owner, 2026-11-08, \"each saying what its agent last told them\"), and under it, by this same
+  as root's message to them carries it: the owner's ruling on home tiles, docs/decisions.md), and under it, by this same
   render, the agents it started (its :seon.agent/agents); at the depth its parent's pull stopped (members held as ids alone), how many
   there are below, never a silent cut. Its group (`where-stands`) orders it, those that need the person first (CSS order). Drawn from the
   view alone: the joining pattern pulls what it reads (seon.task/entry-pattern). For the page alone (:wire/for \"page\"). See
@@ -1583,8 +1583,6 @@
      [#'rules-list {}]
      ;; a user's (it holds :seon.user/name): its agents list, which the frame shows on every page (seon.render.proc/user-sides)
      (when (get c :seon.user/name) [#'agents-list {}])]))
-
-(declare sessions)
 
 (defn eval-tiles
   "The tiles of agent pull c's evals whose value has a render (their record names its schema, :seon.eval/schema), each a component of its
@@ -1658,8 +1656,6 @@
    ;; what its pull joins, each by its own render, in the pull's order: its task first, as the agent's pattern joins it first
    (seq (own-tiles ix c))
    [#'eval-tiles {} c]
-   ;; until root's page is root's agent drawn by this render (step 3): root's session reads every agent here
-   (when (:seon.agent/root c) [#'sessions {:at [:seon.agent/root]}])
    ;; then the agent's own state, from its own attributes
    (when (:seon.agent/task c) [#'status {:at [:seon.agent/task :proved]}])
    (when (:seon.agent/task c) [#'own-problems {:at [:seon.agent/task]}])
@@ -1878,28 +1874,6 @@
   {:malli/schema [:=> [:cat :map] :string]}
   [a] (:seon.agent/key a))
 
-(defn sessions
-  "Root's sessions as its session reads them (a component over the db, drawn when its record holds root, :seon.agent/root, as root's
-  session's pattern does): every session on main with a task, as of the main its last turn heard (:seon.agent/main-commit), newest first, as root's own work list reads them (`work-list`), each
-  by its address, what it works on and how it stands, so root's session knows what is already being done before it starts more;
-  itself left out. The newest :seon.config.ctx/window of them; the heading says once how to read the rest, with no count, which
-  would move at every new session. Reads every :seon.agent/task datom and sorts them at each draw, O(the agents ever started):
-  fine at today's sizes, and grouping the agents list by who started each is where it gets a seek. See docs/users.md#roots-session."
-  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
-  [{c :seon.ctx/ctx db0 :seon.db/db}]
-  ;; main as the session's turn last heard it (:seon.agent/main-commit, seon.turn), not its branch: a branch takes main's program, not
-  ;; its data, so a session started on main after this one forked is on main alone (Context's review, seen on a demo root)
-  (let [db (or (when (:store db0) (some->> (ratom/realize (:seon.agent/main-commit c)) (d/commit-as-db (:store db0)))) db0)
-        me (ratom/realize (:seon.agent/key c))
-        ks (->> (d/datoms db :aevt :seon.agent/task) (sort-by (comp - :tx)) (keep #(:seon.agent/key (d/entity db (:e %)))) (remove #{me}) distinct)
-        n (config/value :seon.config.ctx/window)]
-    [:section
-     [:h2 "Sessions, newest first (all of them: (sort-by :tx > (d/datoms (my.db/db) :aevt :seon.agent/task)), each datom's :e an agent)"]
-     (if (seq ks)
-       (into [:ul] (for [k (take n ks) :let [a (d/pull db session-attrs [:seon.agent/key k]) t (:seon.agent/task a) stands (standing a t)]]
-                     [:li {:key k} [:code (str "/agent/" (session-address a))] " "
-                      (or (some-> (:seon.task/plan t) str/split-lines first) (task-name a t)) ": " (:text stands)]))
-       [:p "None yet."])]))
 
 (defn root-head
   "Root's head (a component over its ctx and the db): what is going on in a sentence, by the tasks' states, and, when it last went quiet,
