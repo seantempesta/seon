@@ -1813,3 +1813,19 @@
         [_ outs] (#'r/start (st-of db) act)
         after (d/db-with db (get-in (first outs) [:req :req :tx-data]))]
     (is (= (+ (max-of db) turns) (max-of after)) "raised by the refine's own turns")))
+
+(deftest the-branch-holder-continues-the-session-or-is-stopped
+  ;; docs/tasks.md#a-refine-curates-its-own-task, one rule read from the holder's state (seon.reconcile/holder-of at the start, and
+  ;; a-refused-start-is-asked-again-when-its-holder-ends for the refusal): the agent holding a task's branch is its session's. IDLE (its
+  ;; task at its cap or parked) it is woken for the next task on the branch; ENDING (its task done) the next task is a spawn, which its
+  ;; branch refuses until the holder is stopped and asks again (Optimization's refusedholder). The two never both apply.
+  (let [refine-of (fn [outcome] (let [db (with-refine-section (db-of [(decl "a")] :extra (work "a" outcome)))]
+                                  (d/db-with db (task/refine-tx db "demo/a" false))))
+        idle-db (refine-of :cap)
+        ending-db (refine-of :done)
+        act (fn [db] (first (filter #(= "demo/a-refine" (:task %)) (actions-for db))))]
+    (is (= {:wake (get-in (r/index idle-db) [:agents (:seon.task/agent (get-in (r/index idle-db) [:tasks "demo/a"]))])}
+           (#'r/holder-of (r/index idle-db) "demo/a-refine")) "idle holder: holder-of names it")
+    (is (= [:wake :a-a] ((juxt :op :agent) (act idle-db))) "and the refine is a wake on it")
+    (is (nil? (#'r/holder-of (r/index ending-db) "demo/a-refine")) "ending holder: no wake")
+    (is (= :spawn (:op (act ending-db))) "the refine is a spawn, refused while the holder ends and asked again when it is stopped")))
