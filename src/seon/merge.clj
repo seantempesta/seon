@@ -563,14 +563,18 @@
 ;; ---- the one merge: each side's net change, and what of it conflicts (task seon.merge/a-merge-replays-the-sources-net-change) ----
 
 (defn- identity-of
-  "Entity e's identity on db: [attribute value] of its first datom whose attribute is an upsert key in db's own schema
-  (:db.unique/identity, which a schema entry's {:seon.db/identity true} installs: seon.schema.datahike), or :db/ident (an
+  "Entity e's identity on db: [attribute value] of its upsert key, an attribute that is :db.unique/identity in db's own
+  schema ((d/schema db), which a schema entry's {:seon.db/identity true} installs: seon.schema.datahike), or :db/ident (an
   attribute's declaration, by Datahike's own identity); nil when it bears none. Read from the db's data, never a process's
-  registry, so a branch's own identities count. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  registry, so a branch's own identities count. An entity holding several (a user is an agent: :seon.agent/key and
+  :seon.user/name) is named by the one whose attribute's ident sorts first, which both sides of a merge share, never by
+  attribute ids (an attribute a branch installed has another id on main). See
+  docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:tuple :keyword :any]]]}
   [db e]
-  (let [schema (d/schema db)]
-    (some (fn [dt] (when (or (= :db/ident (:a dt)) (= :db.unique/identity (get-in schema [(:a dt) :db/unique]))) [(:a dt) (:v dt)])) (d/datoms db :eavt e))))
+  (let [schema (d/schema db)
+        ids (filter (fn [dt] (or (= :db/ident (:a dt)) (= :db.unique/identity (get-in schema [(:a dt) :db/unique])))) (d/datoms db :eavt e))]
+    (some (fn [dt] [(:a dt) (:v dt)]) (sort-by :a ids))))
 
 (defn net-change
   "What db holds that base does not, and what base held that db does not, by identity, never by entity id:

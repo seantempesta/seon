@@ -617,3 +617,39 @@
        (is (nil? (:refused r)) (pr-str (:refused r)))
        (is (contains? (d/schema @conn) :app.mg/size) "main holds the attribute")
        (is (= 3 (:app.mg/size (d/entity @conn [:app.mg/id "one"]))) "and the value")))))
+
+;; docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together: an entity holding two identities is named, in a net change, by
+;; the identity whose attribute's ident sorts first, whichever order a branch installed the attributes in
+(deftest an-entity-with-two-identities-is-named-by-the-first-ident
+  (branched
+   (fn [conn bc br]
+     (let [main-b (:branch (:config @conn))
+           keys-of (fn [order]
+                     (let [b (keyword (str (name br) "-" (name (first order)))) _ (d/branch! conn main-b b) c (pdb/connect (assoc (:config @conn) :branch b))]
+                       (try
+                         (doseq [k order]
+                           (let [r (schema/registration @c k [:and {:seon.db/identity true} :string] false)] (d/transact c {:tx-data (:tx r)})))
+                         (let [r (schema/registration @c :app.two/thing [:map {:seon.db/attributes true} [:app.two/a-id :app.two/a-id] [:app.two/b-id :app.two/b-id]] false)]
+                           (d/transact c {:tx-data (:tx r)}))
+                         (let [base (pdb/branch-base conn main-b b) k (program/schema-changes @c)]
+                           (d/transact c {:tx-data [{:app.two/b-id "b" :app.two/a-id "a"}] :seon.db/schemas {:forms k :registry (program/schema-registry k)}})
+                           (into #{} (comp (map first) (filter #{:app.two/a-id :app.two/b-id})) (keys (:keys (pm/net-change base @c)))))
+                         (finally (d/release c) (d/delete-branch! conn b)))))]
+       (let [ab (keys-of [:app.two/a-id :app.two/b-id]) ba (keys-of [:app.two/b-id :app.two/a-id])]
+         (is (= #{:app.two/a-id} ab) (str "installed a then b: " (pr-str ab)))
+         (is (= ab ba) (str "installed b then a: " (pr-str ba))))))))
+
+;; docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together: every entity schema names an identity attribute, its own or
+;; a schema's it extends, so what crosses a merge is named by its identity (seon.merge/net-change's :unidentified is the
+;; exception's refusal). The exceptions: a transaction's own facts (:seon.tx/meta, never merged), a merge's stored conflict entry
+;; (:seon.merge/entry-fact, deleted with the one merge's schema commit) and a note (:seon.db/note-fact); and three attribute
+;; groups that ride an entity identified otherwise: :seon.config/config (the keys of :seon.config/config-fact, named by
+;; :seon.config/id), :seon.config/sources-fact (on root's entity, :seon.root/id) and :seon.script/fact (on a file, :file/path)
+(deftest every-entity-schema-names-an-identity
+  (let [ix (pdb/index) forms (:forms ix)
+        entity? (fn [k] (let [f (get forms k)] (and (vector? f) (map? (second f)) (:seon.db/attributes (second f)))))
+        ids (set (keys (:identity-schemas ix)))
+        own (fn [k] (set (for [[a s] (:entity-schemas ix) :when (= s k)] a)))
+        reach (fn [k] (tree-seq (constantly true) #(#'pdb/parents-in forms %) k))]
+    (is (= #{:seon.tx/meta :seon.merge/entry-fact :seon.db/note-fact :seon.config/config :seon.config/sources-fact :seon.script/fact}
+           (into #{} (for [k (keys forms) :when (entity? k) :when (not (some #(seq (filter ids (own %))) (reach k)))] k))))))
