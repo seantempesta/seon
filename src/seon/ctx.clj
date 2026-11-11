@@ -22,10 +22,10 @@
 ;; ---- the pattern: what ctx holds (docs/ctx.md#the-pattern) ---------------------------------
 
 (defn- pattern-of
-  "The pattern ctx holds of entity m (pulled, on db): its own :seon.ctx/pattern (the agent's
-  edit), else the one its entity schema declares or a schema it extends does (render/schema-property), else its own attributes."
+  "The pattern ctx holds of entity m (pulled, on db): render/entity-pattern's (its own :seon.ctx/pattern, the agent's edit, else
+  its entity schema's, expanded), else its own attributes. See docs/ctx.md#the-pattern."
   {:malli/schema [:=> [:cat :map :map] [:vector :any]]}
-  [ix m] (or (:seon.ctx/pattern m) (when-let [s (render/entity-schema ix m nil)] (render/schema-property ix s :seon.ctx/pattern)) '[*]))
+  [ix m] (vec (or (render/entity-pattern ix m) '[*])))
 
 ;; ---- db -> map ---------------------------------------------------------------------------
 
@@ -633,13 +633,13 @@
 (defn- lost-required
   "Why pattern p may not be entity e's (in the entity index ix): each clause its role requires (its schema's :seon.ctx/required,
   {attribute reason}: a join's attribute, or a plain one) that p no longer asks, as an :invalid entry naming it and what it is; []
-  when it keeps them all. A clause is asked as a keyword, as [attribute & options] or as a join's key. A pattern is added to,
-  never replaced. See docs/ctx.md#changing-it-swap."
+  when it keeps them all. A clause is asked as a keyword, as [attribute & options] or as a join's key, in p `expanded` (a schema's
+  name keeps what that schema's pattern asks). A pattern is added to, never replaced. See docs/ctx.md#changing-it-swap."
   {:malli/schema [:=> [:cat :map :map [:sequential :any]] [:vector :map]]}
   [ix e p]
   (let [required (render/schema-property ix (render/entity-schema ix e nil) :seon.ctx/required)
         attr (fn [k] (if (vector? k) (first k) k))
-        asked (into #{} (mapcat (fn [x] (if (map? x) (map attr (keys x)) [(attr x)]))) p)]
+        asked (into #{} (mapcat (fn [x] (if (map? x) (map attr (keys x)) [(attr x)]))) (render/expanded ix p))]
     (vec (for [[k what] required :when (not (asked k))]
            {:path [:seon.ctx/pattern] :why (str "your pattern must keep " k " (" what "): add to the pattern, never replace it")}))))
 
