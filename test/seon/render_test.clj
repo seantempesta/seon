@@ -734,11 +734,29 @@
                 "p-input" "p-rules" "p-task" "p-tiles" "page-rules" "problems-tile" "process-tile" "root-evals" "root-head" "stage-as" "stage-front" "system-message"
                 "u-agent-a3" "u-root-side"}
         ;; what the frame's page-chrome drew by hand is now the layout's: its root (the page), its columns and the frame's slot for it
-        added #(remove (fn [id] (or (#{"p-page" "p-agents" "p-chat" "p-context"} id) (str/starts-with? id "agent-") (str/starts-with? id "stage-"))) (clojure.set/difference % %2))]
+        ;; and the top bar's region for which system it is (seon.render.ui/system-source; this fixture's root holds no source, so it is empty)
+        added #(remove (fn [id] (or (#{"p-page" "p-agents" "p-chat" "p-context" "p-system"} id) (str/starts-with? id "agent-") (str/starts-with? id "stage-"))) (clojure.set/difference % %2))]
     (is (= agent0 (clojure.set/intersection agent agent0)) "every element the agent's page held")
     (is (empty? (added agent agent0)) "and no other but its layout's own")
     (is (= root0 (clojure.set/intersection root root0)) "every element root's page held")
     (is (empty? (added root root0)) "and no other but its layout's own")
+    (r/dispose-walk! (get-in st2 [:root-walk :w]))))
+
+(deftest every-page-says-which-system-it-is
+  ;; docs/render.md#the-page: the system's source (root's :seon.root/source, as an index of the checkout writes it) is drawn by its
+  ;; schema's render in the top bar of every page, an agent's and root's alike, from the system walk once
+  (let [[main branch eid] (paged-dbs)
+        src {:root "/Users/x/src/seon-next/.worktrees/frame" :commit "4a74777e2a0123456789abcdef0123456789abcd" :branch "jolt/frame"
+             :tree "f3832a894ee0322bc9f1e079aeadb949b9c5c84b" :dirs ["src"] :files 3 :forms 9 :ms 1.5}
+        main (d/db-with (signed-in main [eid]) [{:seon.root/id :root :seon.root/source src}])
+        st (root-state (proc-state main branch) main)
+        [st1 _] (pass-view st [:chat :a3])
+        [st2 _] (pass-view st1 :root)
+        ;; what follows the top bar's region, to the end of the bar
+        line (fn [html] (when-let [i (str/index-of html "id=\"p-system\"")] (subs html i (or (str/index-of html "</nav>" i) (count html)))))]
+    (doseq [[v html] [[[:chat :a3] (p/view-html st2 [:chat :a3])] [:root (p/view-html st2 :root)]]]
+      (is (str/includes? (str (line html)) "frame · jolt/frame · <span class=\"commit\">4a74777e2a0123456789abcdef0123456789abcd</span>") (str v ": the checkout, its branch and its commit, in the top bar"))
+      (is (= 1 (count (re-seq #"class=\"[^\"]*\bsource-line\b" html))) (str v ": once")))
     (r/dispose-walk! (get-in st2 [:root-walk :w]))))
 
 (deftest a-location-names-root-an-agent-or-an-entity
