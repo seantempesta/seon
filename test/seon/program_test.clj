@@ -742,6 +742,13 @@
       (is (= (:env in-a) (:env in-b)) "a file at the checkout's root (git's, the tools') is no input of every test")
       (is (not= (get-in in-a [:config :seon.env/bin]) (get-in in-b [:config :seon.env/bin]))
           "it is the bin class, which a test running git or a script takes"))
+    ;; batch 77 changed AGENTS.md and four wiki pages and reran 463 of 1,785 tests and 36 of 40 steps: AGENTS.md, at the
+    ;; checkout's root, was the bin class, which every process test and step takes. It is the wiki's top page (seon.doc)
+    (let [before (fx/inputs b)
+          _ (spit (str b "/AGENTS.md") "# edited")
+          in-b (fx/inputs b)]
+      (is (= (get-in before [:config :seon.env/bin]) (get-in in-b [:config :seon.env/bin])) "a .md file at the checkout's root is no script's input")
+      (is (not= (get-in before [:config :seon.env/docs]) (get-in in-b [:config :seon.env/docs])) "it is the wiki's, the docs class"))
     (.mkdirs (java.io.File. (str b "/native")))
     (spit (str b "/native/x.c") "int x;")
     (is (not= (:env in-a) (:env (fx/inputs b))) "native/, the pins and the fixtures are every test's")))))

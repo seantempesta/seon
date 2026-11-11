@@ -56,6 +56,21 @@
     (is (nil? (resolve 'seon.render/ai)))
     (is (not-any? #(contains? (seon.contract/properties %) :seon.render/ai) (keys seon.contract/forms)) "no schema declares one")))
 
+;; docs/render.md#a-value-draws-itself: a value is drawn by the render its attribute's schema declares, by the one lookup
+(deftest an-attributes-value-is-drawn-by-its-schemas-render
+  (let [ix (seon.db/index) plan "Do `this`:\n\n- one\n- **two**"]
+    (testing "an attribute aliased to a registered schema inherits its render: a task's plan is Markdown"
+      (is (= 'seon.render.ui/text (r/render-for ix :seon.task/plan :seon.render/hiccup)))
+      (is (= 'seon.render.ui/text (r/render-for ix :seon.task/instructions :seon.render/hiccup))))
+    (testing "a code-composed string stays plain: no render"
+      (is (nil? (r/render-for ix :seon.task/reason :seon.render/hiccup))))
+    (testing "the task's plan drawn through task-box is its list, not preformatted text"
+      (let [out (h/html (r/hiccup {:seon.render/index ix :schema :seon.task/task} (assoc-in task [:seon.task/accumulated :plan] plan)))]
+        (is (= 2 (count (re-seq #"<li" out))) out)
+        (is (not (str/includes? out "<pre")) out)
+        (is (str/includes? out "<code") "a code span is its element, for the person and the model alike")
+        (is (not (str/includes? out "`this`")) "no Markdown delimiter is left")))))
+
 (deftest a-render-is-opts-then-children
   ;; Reagent's form (docs/render.md): a render takes its opts first and its
   ;; children after, and a call in hiccup is written [f opts & children]
@@ -1789,6 +1804,38 @@
     (is (= [long] (titles without)) "no form: the title holds the whole")
     (is (not-any? nil? (tree-seq vector? seq with)) "and no empty child")))
 
+(defn- outside-code
+  "The text html shows outside its <code> and <pre> elements and the printer's string values (where a backtick or a quote is the
+  code's or the data's own)."
+  [html] (-> html (str/replace #"(?s)<pre[^>]*>.*?</pre>" " ") (str/replace #"(?s)<code[^>]*>.*?</code>" " ")
+             (str/replace #"(?s)<span[^>]*seon-print-string[^>]*>.*?</span>" " ") (str/replace #"<[^>]+>" " ")))
+
+(deftest a-person-reads-no-markup
+  ;; docs/render.md#the-page: what a person reads is drawn, never the marks that describe it: no Markdown delimiter, no escaped quote of
+  ;; a printed form, no printer's tree heading, outside code (the owner, on the session pages: "we still aren't rendering html")
+  (let [db (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (seon.template/request {:seon.task/ns 'demo :seon.task/name "w"
+                                                                                              :seon.task/plan "Make w true:\n\n1. read the field `x`\n2. write **one** test"})))
+        ;; drawn by the walk, as a page draws it: its joins (the task's search) drawn by their own renders
+        task (let [w (draw (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.task/id "demo/w") nil)) seon.ctx/changes db #'ui/task-view {})]
+               (try (apply str (map :html (seon.fixtures/page-units w))) (finally (r/dispose-walk! w))))
+        red (h/html (ui/status-hiccup {} {:proofs [{:test 'demo-test/w :status :fail
+                                                     :failures [{:assert {:seon.print/code "(str/includes? h \"[:code \\\"x\\\"]\")"} :got false}]}]}))
+        value (h/html (r/print-hiccup {:seon.render/index (seon.db/index)} {:a {:b [1 {:c 2}]}}))]
+    (doseq [[what html] [["a task's plan" task] ["a red proof" red] ["a value" value]]
+            :let [t (outside-code html)]]
+      (is (not (str/includes? t "`")) (str what ": no backtick outside code: " t))
+      (is (not (str/includes? t "\\\"")) (str what ": no escaped quote outside code"))
+      (is (not (str/includes? t "items, depth")) (str what ": no printer's tree heading")))))
+
+(deftest a-plain-string-is-prose-by-default
+  ;; docs/render.md#a-value-draws-itself: a string whose attribute's schema names no render is Markdown (owner: "if it is a text field it
+  ;; is assumed to be markdown"), so a branch forked before its attribute became :seon.db/text draws it as main does; an id opts out
+  (let [old (assoc-in (seon.db/index) [:forms :seon.task/plan] :string)
+        draw-as (fn [ix k v] (h/html (r/hiccup {:seon.render/index ix :schema k} v)))]
+    (is (str/includes? (draw-as old :seon.task/plan "read `x` first") "<code>x</code>") "an old branch's plan: Markdown, its code span drawn")
+    (is (not (str/includes? (draw-as old :seon.task/plan "read `x` first") "`")) "no backtick left")
+    (is (not (str/includes? (draw-as (seon.db/index) :seon.task/id "demo/w") "<code>")) "an id is no prose: printed as the data it is")))
+
 (deftest a-whole-tasks-page-holds-its-instructions
   ;; the task part drew the plan and dropped the task's own data, its instructions with it, so no
   ;; agent read how its kind is worked (reproduce first, fail! when already right, stop reading once
@@ -1796,7 +1843,7 @@
   (let [db (ts/test-db)
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
         ;; the task as its record pulls it, drawn by its html render
-        h (h/html (ui/task-view {} (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.task/id "demo/w") nil))))]
+        h (h/html (ui/task-view {:seon.render/index (seon.db/index)} (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.task/id "demo/w") nil))))]
     (is (str/includes? h "Your task: do what the plan below asks") "the whole instructions are on the page")
     (is (str/includes? h "your run then ends and root merges your branch") "whole: their last sentence too, nothing cut")
     (is (< (str/index-of h "Your task: do what the plan below asks") (str/index-of h "Make w true.")) "above the plan")))
@@ -3164,10 +3211,10 @@
 (deftest the-task-line-of-the-side-panel-reads-through-standing
   ;; the chat's side panel said "task · seon.program · running" of a capped task: running is the task's execution, not how it stands
   (let [t {:seon.task/id "seon.program/x" :seon.task/execution :running :seon.task/outcome :cap :seon.task/plan "p"}
-        html (h/html (ui/task-view {} t))]
+        html (h/html (ui/task-view {:seon.render/index (seon.db/index)} t))]
     (is (str/includes? html "task · seon.program · stopped at its cap") html)
     (is (not (str/includes? html "running")))
-    (is (str/includes? (h/html (ui/task-view {} (dissoc t :seon.task/outcome))) "task · seon.program · running") "no outcome yet: its execution as before")
+    (is (str/includes? (h/html (ui/task-view {:seon.render/index (seon.db/index)} (dissoc t :seon.task/outcome))) "task · seon.program · running") "no outcome yet: its execution as before")
     ;; the agent's own end (an agent whose branch holds no outcome of its task) is the agent's own state, drawn by its render
     ;; (seon.render.ui/agent-state: a-merged-task-reads-merged-everywhere)
     ))
@@ -3252,7 +3299,12 @@
         (is (str/includes? t "<details") "its thinking folded")
         (is (str/includes? t "Read select first."))
         (is (not (str/includes? t "turn 1")) "its turn and tokens are for the debug tab"))
-      (is (nil? (ui/model-call-view {} (get-in c [:seon.model-call/_agent 3]))) "a turn that said nothing draws no bubble"))
+      (is (nil? (ui/model-call-view {} (get-in c [:seon.model-call/_agent 3]))) "a turn that said nothing draws no bubble")
+      (let [t (h (ui/model-call-view {} {:seon.model-call/n 3 :seon.model-call/origin :model :seon.model-call/reply ""
+                                         :seon.model-call/reasoning "First I read **it**.\n\nThen I check.\n\nThen I write."}))]
+        (is (str/includes? t "First I read <strong>it</strong>.") "a turn with no reply but reasoning: its first paragraph is the agent's words")
+        (is (str/includes? t "2 more paragraphs of thinking") "the rest folded under how much more there is")
+        (is (re-find #"(?s)<details>.*Then I check" t) "folded")))
     (testing "a message is a bubble with its sender"
       (let [m (h (ui/message {} (get-in c [:seon.message/_to 4])))]
         (is (str/includes? m "user"))
@@ -3999,7 +4051,7 @@
            :seon.agent/task {:seon.task/id "app.x/a-thing" :seon.task/outcome :merged}}
         opts {:seon.ctx/ctx c :seon.db/db (ts/test-db)}]
     (is (= "merged" (:text (ui/standing {:seon.agent/outcome :green} {:seon.task/outcome :merged}))))
-    (let [h (h/html (ui/task-view {} (:seon.agent/task c)))]
+    (let [h (h/html (ui/task-view {:seon.render/index (seon.db/index)} (:seon.agent/task c)))]
       (is (str/includes? h "task · app.x · merged") "the task's tile")
       (is (not (str/includes? h "· done")) "not the agent's own end"))
     (is (str/includes? (pr-str (ui/agent-state opts)) "● merged") "the agent state")

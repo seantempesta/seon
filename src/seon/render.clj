@@ -216,6 +216,18 @@
             [f (let [id (some #(get v %) (keep #(get (:schema-identities ix) %) (tree-seq (constantly true) #(parents ix %) s)))]
                  (cond-> {:seon.render/nested true} (some? id) (assoc :key id)))]))))))
 
+(defn- prose?
+  "Whether attribute k (in the entity index ix) holds prose with no render of its own: its form a plain string ([:string] or :string,
+  with properties at most), no identity (an id is no prose) and no render declared. Such a string is Markdown by default (owner:
+  \"if it is a text field it is assumed to be markdown\"); a string that is code, an id or an address opts out by its schema. See
+  docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] :boolean]}
+  [ix k]
+  (let [f (when k (get (:forms ix) k))
+        p (when (and (vector? f) (map? (second f))) (second f))]
+    (boolean (and (or (= :string f) (and (vector? f) (= :string (first f)) (<= (count f) 2)))
+                  (not (:seon.db/identity p)) (nil? (render-for ix k :seon.render/hiccup))))))
+
 (defn hiccup
   "v rendered: (render-fn opts v), the function its override or schema names, else the printer's
   (print-hiccup); a value's own key holding hiccup answers that hiccup. opts' :seon.render/index is the entity index its
@@ -226,8 +238,12 @@
   (let [own (own-key v :seon.render/hiccup) ix (:seon.render/index opts)]
     (if (and (some? own) (not (symbol? own)))
       own
-      ;; a producer's schema a stored value no longer fits: it is drawn as the data it is
-      ((or (when (or (nil? (:schema opts)) (contract/fits? (:schema opts) v)) (render-of ix v (:schema opts))) print-hiccup) opts v))))
+      ;; a producer's schema a stored value no longer fits: it is drawn as the data it is; a string whose attribute's schema names no
+      ;; render and is plain prose is Markdown, by :seon.db/text's own render (`prose?`: a branch forked before its attribute became
+      ;; :seon.db/text draws it as main does)
+      ((or (when (or (nil? (:schema opts)) (contract/fits? (:schema opts) v)) (render-of ix v (:schema opts)))
+           (when (and (string? v) (prose? ix (:schema opts))) (render-of ix v :seon.db/text))
+           print-hiccup) opts v))))
 
 ;;; --- the walk: a render of components (docs/render.md#components) -------------------------------
 

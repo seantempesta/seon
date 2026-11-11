@@ -24,7 +24,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
+            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [datahike.versioning] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [my.fx] [my.task] [my.user] [my.turn] [my.render] [my.branch] [my.doc] [my.test] [clojure.core.async.flow :as flow] [clojure.test]
@@ -137,7 +137,7 @@
    "main's changes since the session's base"
    "host state: atoms, open files, sockets, fibers"])
 
-(declare answer-spawn insert-evals start-spawn no-room binary-program binary-current kill! prove-tree!)
+(declare answer-spawn insert-evals start-spawn no-room binary-program binary-current kill! prove-tree! stop!)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -1559,6 +1559,13 @@
                  {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained :dropped-trees dropped-trees
                   :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
 
+(defn- thrown-in
+  "The fn throwable ex was thrown in: clojure.main's triage of its top frame (as seon.repl/located reads an eval's), a
+  qualified symbol, or nil when the triage names none."
+  {:malli/schema [:=> [:cat :any] [:maybe :symbol]]}
+  [ex] (let [in (:clojure.error/symbol (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution)))]
+         (when (qualified-symbol? in) in)))
+
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
   data, the message its step took (:msg), and the fn it was thrown in (:in, clojure.main's triage
@@ -1567,9 +1574,48 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [e]
   (let [ex (::flow/ex e)
-        in (when ex (:clojure.error/symbol (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution))))]
+        in (when ex (thrown-in ex))]
     (cond-> {:op :error :pid (::flow/pid e) :message (or (some-> ex ex-message) (str e)) :data (some-> ex ex-data contract/bounded) :msg (::flow/msg e)}
       (qualified-symbol? in) (assoc :in in))))
+
+(defonce ^:private uncaught
+  ;; where an error no thread, fiber or go body caught goes (uncaught!): kept under :early until this process's root listens,
+  ;; which start! fails on; then root's :back, as a defect the api records on main
+  (atom {:back nil :early []}))
+
+(defn uncaught-message
+  "An error ex that no one caught, in thread (nil: a go or fiber body, which the runtime reports with no thread), as the api's
+  :error message: :pid :uncaught and its own typed defect (:seon.root/proc-defect, its operation the fn it was thrown in), so it
+  lands on main as any proc's defect does, named, never only on stderr. See docs/errors.md#nothing-crashes-and-nothing-hangs."
+  {:malli/schema [:=> [:cat :any :any] :map]}
+  [thread ex]
+  (let [in (thrown-in ex)
+        where (if thread (str "thread " (.getName ^Thread thread)) "a go or fiber body")
+        msg (str "uncaught in " where ": " (or (ex-message ex) (str ex)))]
+    (cond-> {:op :error :pid :uncaught :message msg
+             :data (contract/error :seon.root/proc-defect (or in 'clojure.core.async/go) msg
+                                   (cond-> {:pid :uncaught} (ex-data ex) (assoc :data (contract/bounded (ex-data ex)))))}
+      in (assoc :in in))))
+
+(defn- uncaught!
+  "The default uncaught-exception handler's body (start! sets it): ex's message to root's :back once root listens, else kept
+  (:early) for start! to fail on. A :back too full to take it says so on stderr, never silently."
+  {:malli/schema [:=> [:cat :any :any] :nil]}
+  [thread ex]
+  (let [m (uncaught-message thread ex) {:keys [back]} @uncaught]
+    (cond (nil? back) (swap! uncaught update :early conj m)
+          (a/offer! back m) nil
+          :else (binding [*out* *err*] (println "uncaught, and root's :back is full:" (:message m)))))
+  nil)
+
+(defn- catch-uncaught!
+  "This process's default uncaught-exception handler set to uncaught!, its errors kept until root listens (start! calls it
+  first): the one place a thread's, a fiber's or a go body's uncaught error is taken, so none is only printed."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (reset! uncaught {:back nil :early []})
+  (Thread/setDefaultUncaughtExceptionHandler (reify Thread$UncaughtExceptionHandler (uncaughtException [_ t ex] (uncaught! t ex))))
+  nil)
 
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of
@@ -1590,6 +1636,8 @@
   [{:keys [datoms log? path main backend max-running provider stall-ms source started-by] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
+  ;; first of all, before anything spawns: an error no thread, fiber or go body catches reaches root (uncaught!), never only stderr
+  (catch-uncaught!)
   (let [t0 (profile/now-ns)
         ;; agents write their own branches, so the store is shared: the one durable store
         ;; (the kept runs store, bin/check's, a test's). This root resumes its main, a branch
@@ -1694,6 +1742,11 @@
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     ;; what the first agent's fork would wait for is done now, as main stands (seon.fork-server/preload); nothing waits on its answer
     (call! sys {:op :fs :req {:op :preload :t (:max-tx @conn)}})
+    ;; an error no one caught while this root started fails its start, its errors in the answer; from here they reach :back
+    (let [early (:early (swap! uncaught assoc :back (:back sys)))]
+      (when (seq early)
+        (stop! sys :uncaught-at-start)
+        (throw (ex-info (str "root's start met " (count early) " uncaught error(s): " (:message (first early))) {:uncaught early}))))
     sys))
 
 ;; ====================================================================================
@@ -1902,30 +1955,56 @@
          (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class)))))
 
 (defn prove!
-  "Ask the test service (seon.prove) to prove a branch at its head, the tests of namespaces names
-  (a set of symbols; none: all it selects): agent id's own branch in mode :turn (as its turn
-  proves it; mode :judge, as root's judge does), or main (agent nil) in mode :main (every test
-  with no result at its digest: seon.agent/run-tests-forked). The run is keyed by the digest of what it reads,
-  its branch's program and tasks' proofs (seon.program/run-digest), as its turn's seon.agent/prove! takes it,
-  so a session's request and the turn's are one run, and a request for main and the run main's
-  own program commit started (seon.prove) are one. With on ({:checkout :tree}, a session's: prove-tree!), the service runs
-  its process tests, check steps and build too, on that checkout (docs/merging.md#the-test-service). A promise of the run's answer ({:key :ran
-  :reused :pass :fail :error :red :reports ...}), the same run for every asker of that key."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol]] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol] [:enum :turn :judge :main]] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol] [:enum :turn :judge :main] [:maybe [:map [:checkout :string] [:tree :string]]]] :seon.host/promise]]}
-  ([sys agent-id] (prove! sys agent-id #{}))
-  ([sys agent-id names] (prove! sys agent-id names (if agent-id :turn :main)))
-  ([sys agent-id names mode] (prove! sys agent-id names mode nil))
+  "Prove a reference to a db value, ref (the shape a kept db value is: {:branch b} its head, {:branch b :commit c} or
+  {:branch b :t t} a point in its history; docs/storage.md#a-kept-db-value-is-a-reference): the one call every prover asks
+  (my.agent/prove, the server's :prove, bin/prove through prove-tree!, main's commit run), the tests of namespaces names
+  (a set of symbols; none: all it selects). The run is the test service's (seon.prove), keyed by the digest of what it reads
+  (seon.program/run-digest), so every asker of one program at one point is one run. Main at its head is proved as main
+  (mode :main by default). Another branch at its head is proved by the agent holding it, or one spawned onto it (whose
+  spawn loads the branch's program over main's, seon.program/load-diff!). A point in the past always forks: an agent of
+  the branch is at its head, not at that point, so one is spawned on a new branch made at that commit (a :t is found as
+  its commit, datahike.versioning/commit-at-tx), which loads that point's program, runs, and is ended. With on
+  ({:checkout :tree}, a session's: prove-tree!), the service runs its process tests, check steps and build too, on that
+  checkout (docs/merging.md#the-test-service). A promise of the run's answer ({:key :ran :reused :pass :fail :error :red
+  :reports ...}), the same run for every asker of that key."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys :map] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys :map [:set :symbol]] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys :map [:set :symbol] [:enum :turn :judge :main]] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys :map [:set :symbol] [:enum :turn :judge :main] [:maybe [:map [:checkout :string] [:tree :string]]]] :seon.host/promise]]}
+  ([sys ref] (prove! sys ref #{}))
+  ([sys ref names] (prove! sys ref names nil))
+  ([sys ref names mode] (prove! sys ref names mode nil))
   ;; on: a session's checkout and its tree (prove-tree!), on which the service runs the run's process tests, steps and build
-  ([sys agent-id names mode on]
-  (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
-    (let [db (pdb/head (:conn sys) b)]
-      (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx db) :mode mode
-                          :digest (program/run-digest db)}
-                   agent-id (assoc :agent agent-id) (seq names) (assoc :names names) on (merge (select-keys on [:checkout :tree])))))
-    (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
+  ([sys ref names mode on]
+   (let [{:keys [branch commit t]} ref
+         main (pdb/conn-main (:conn sys))
+         b (if (= :main branch) main branch)
+         ask (fn [ag mode]
+               (let [db (pdb/head (:conn sys) (if ag (get-in (state sys) [:agents ag :branch]) main))]
+                 (call! sys (cond-> {:op :prove :branch (if ag (:branch (get-in (state sys) [:agents ag])) :main) :t (:max-tx db) :mode mode
+                                     :digest (program/run-digest db)}
+                              ag (assoc :agent ag) (seq names) (assoc :names names) on (merge (select-keys on [:checkout :tree]))))))]
+     (cond
+       ;; no branch: an agent root does not hold (agent-ref answered nil), answered so, never a spawn of nothing
+       (nil? b) (doto (promise) (deliver (refused 'seon.root/prove! "no branch to prove: the reference names none (an agent root does not hold?)" {})))
+       ;; a point in the past: a new branch made at its commit, its own agent, ended once answered
+       (or commit t)
+       (let [c (or commit (:commit (datahike.versioning/commit-at-tx (:conn sys) b t)))
+             ag (spawn! sys {:branch (keyword (str "at-" c)) :commit c})
+             r @(ask ag (or mode :judge))]
+         (kill! sys ag)
+         (doto (promise) (deliver r)))
+       (= b main) (ask nil (or mode :main))
+       :else (let [live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (gone-statuses (:status a)))) aid)) (:agents (state sys)))
+                   ag (or live (spawn! sys {:branch b}))]
+               (ask ag (or mode :turn)))))))
+
+(defn agent-ref
+  "The reference prove! takes for agent id's branch at its head, {:branch b}, or nil when root holds no such agent. See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] [:maybe :map]]}
+  [sys agent-id]
+  (some->> (get-in (state sys) [:agents agent-id :branch]) (hash-map :branch)))
 
 (defn run-tests!
   "The agent's branch proved by the test service as root's judge proves it (prove! in mode
@@ -1933,7 +2012,7 @@
   promise of the run's answer {:pass :fail :error :reports [...]} (each test bounded by its
   work: :seon.config.agent/test-ticks)."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
-  [sys agent-id] (prove! sys agent-id #{} :judge))
+  [sys agent-id] (prove! sys (or (agent-ref sys agent-id) {}) #{} :judge))
 
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}
   [sys req] (call! sys {:op :write :req req}))
@@ -1986,6 +2065,18 @@
   {:malli/schema [:=> [:cat :string] :keyword]}
   [tree] (keyword (str "tree-" tree)))
 
+(defn baked-paths
+  "Of a checkout's changed paths, those a build bakes into the binary, so a process forked from the system's binary holds the
+  system's value of them however the tree's branch states it: the schema resources (seon.config/baked-schema-forms), the
+  shipped config (baked-shipped-text), system.edn (seon.system/baked-decl-text) and deps.edn (seon.fork-server/baked-deps-text).
+  A tree's run that changes one says so (prove-tree!'s :baked): its in-process verdicts read main's bake for them, until the
+  one call holds the runtime invariant for bakes. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat [:sequential :string]] [:vector :string]]}
+  [paths]
+  (filterv #(or (str/starts-with? % "resources/seon/schemas/") (= % cfg/shipped-file)
+                (= % "resources/seon/system.edn") (= % "deps.edn"))
+           paths))
+
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
   their branch (tree-branch), made once from main with the checkout's catch-up written on it (catch-up :fact? false, as the writer's
@@ -2021,7 +2112,10 @@
               _ (vreset! ag-of ag)]
           (cond (contract/error? w) w
                 (nil? ag) s
-                :else @(prove! sys ag (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})))
+                ;; a verdict partly another program's says so: the baked files the tree changed (baked-paths), never silence
+                :else (let [r @(prove! sys {:branch full} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
+                            baked (baked-paths (:paths c))]
+                        (cond-> r (and (seq baked) (map? r) (not (contract/error? r))) (assoc :baked baked)))))
          (finally (tree-leave! sys b @ag-of))))))))
 
 (defn store-clean!
