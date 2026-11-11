@@ -291,8 +291,11 @@ u-orphan() {
   (cd "$ROOT/target" && SEON_MAIN=check-orphan "$ROOT/bin/held" --drain ./seon orphan --profile scripted 7>&- 3>&-) > "$OUT/orphan.log" 2>&1
   (( $? == 0 )) || { echo "FAILED orphan (no test child)"; failed "orphan (no test child, $OUT/orphan.log)"; return 0 }
   PIDS=$(sed -n 's/^PIDS //p' "$OUT/orphan.log")
-  # every process of the tree has ended by now (the drain above); any pid still alive is a survivor
-  LEFT=$(for p in ${=PIDS}; do kill -0 $p 2>/dev/null && echo $p; done)
+  # every process of the tree has ended by now (the drain above); any pid that can still run is a survivor. A pid that
+  # can run nothing more (stat Z or E, its parent not this script: an orphan launchd reaps) has ended: the rule of
+  # seon.check/ran-nothing-more?, which drain and lifecycle use, here in ps's words
+  LEFT=$(for p in ${=PIDS}; do kill -0 $p 2>/dev/null || continue; read -r st pp <<< "$(ps -o stat=,ppid= -p $p 2>/dev/null)"
+         [[ $st == *[ZE]* && $pp != $$ ]] || echo $p; done)
   if [[ -z $PIDS ]]; then echo "FAIL no pids"; failed "orphan (no pids, $OUT/orphan.log)"
   elif [[ -n $LEFT ]]; then echo "FAIL left running: $LEFT"; kill -9 ${=LEFT}; failed "orphan (left running: $LEFT)"
   else echo "PASS none of $PIDS outlived root"; green orphan; fi

@@ -546,6 +546,17 @@
     (is (false? (await-feed throws :settled)))
     (is (= "read threw: reset" (:ended @throws)))))
 
+;; docs/processes.md#a-stop-reaps-every-child: one rule decides what a stop left running, for drain, lifecycle and orphan
+;; (seon.check/ran-nothing-more?). Batch 46's lifecycle left {:pid 87561 :ppid 1 :stat "?NE" :command "(seon)"}: an orphan
+;; exiting, which a rule counting only zombies read as running
+(deftest a-process-that-can-run-nothing-more-is-not-left-by-a-stop
+  (let [self 4242]
+    (is (seon.check/ran-nothing-more? {:pid 87561 :ppid 1 :stat "?NE" :command "(seon)"} self) "an orphan exiting")
+    (is (seon.check/ran-nothing-more? {:pid 9 :ppid 1 :stat "Z" :command "(seon)"} self) "an orphan zombie")
+    (is (not (seon.check/ran-nothing-more? {:pid 9 :ppid 1 :stat "S" :command "seon"} self)) "an orphan still running stays")
+    (is (not (seon.check/ran-nothing-more? {:pid 9 :ppid self :stat "Z" :command "(seon)"} self)) "a child the stop failed to reap stays")
+    (is (not (seon.check/ran-nothing-more? nil self)) "a pid ps did not find is judged by alive?, not here")))
+
 ;; docs/machine.md#builds-and-checks: a wait on main runs its predicate in main's writer at every commit (seon.root/await-db's
 ;; watch; datahike's writer resets the connection), so a predicate that reads main's whole problems report costs the report
 ;; once a commit and holds every commit behind it: batches 32 and 38 lost the `problems` step to it, root at 98.6% CPU for
