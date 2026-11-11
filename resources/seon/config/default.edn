@@ -634,11 +634,8 @@
  ;; load (read in a step the service already takes: an ask arrived, an item ended; never polled) is under it, except that
  ;; with nothing running one item is always granted, so the queue never stalls with nothing to wake it. Admission only,
  ;; never a verdict (docs/clocks.md#the-machines-load-admits-work).
- ;; Shipped as the machine's own cores (#seon/cores, read at load), so every machine has a bound that follows its size and none
- ;; is shipped as an absolute number; a machine sets another in config/local.edn. Provenance: 2026-11-11, one whole prove
- ;; alone is about load 30 on 18 cores, two at once made false STALLED reds at load 60; the owner: "target the full load of
- ;; all cores".
- :seon.config.proofs/max-load #seon/cores nil
+ ;; Set per machine (config/local.edn), never shipped: a load is absolute.
+ ;; :seon.config.proofs/max-load 12.0
  ;; Unit: ms. The least work a shard of an incremental run is worth (seon.proofs/worth-shards). Provenance: a shard's start
  ;; costs about 5 s, and 8 s more for its process tests' root (docs/testing.md#a-root-costs-what-it-boots), so it saves its cost past
  ;; about twice that on each side. At the bound: a run of less work than this runs in one shard, as the owner ruled 2026-10-30.
