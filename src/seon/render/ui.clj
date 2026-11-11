@@ -1116,7 +1116,9 @@
   (let [state #(:status %)
         unwritten (filter #(= :undefined (state %)) proofs)
         red (filter #(#{:fail :error} (state %)) proofs)
-        unknown (filter #(#{:unknown :not-run :deferred} (state %)) proofs)
+        ;; three states with no verdict, each told the one thing that helps it (docs/render.md#how-the-work-stands): the run died (its error
+        ;; is what to fix, :not-run), a process test the merge's gate runs (:deferred), not judged yet (:unknown: (prove) runs it)
+        [died deferred unknown] (map (fn [st] (filter #(= st (state %)) proofs)) [:not-run :deferred :unknown])
         green? (and (seq proofs) (every? #(= :pass (state %)) proofs))
         blocks (cond-> []
                  (seq refused) (into (for [r refused :when (not (and (= :proof-unknown (:reason r)) (some #(= (:test r) (:test %)) unwritten)))]
@@ -1154,14 +1156,21 @@
             (when (seq helpers) [:p "Helpers a test there uses: " (str/join ", " (map #(str "`" (name %) "`") helpers)) ". Every helper there: " [:code (str "(dir " n ")")]])
             (when example [:p "Example:"])
             (when example [:pre [:code example]])]])))
-     ;; red: which, what it asserted, what it got
-     (for [{:keys [test failures]} red]
+     ;; red: which, every assertion that failed with what it got (never a count in place of them), and what it calls (the test's own
+     ;; source is not repeated: the agent wrote it, or reads it by (source test))
+     (for [{:keys [test failures calls]} red]
        [:div {:key test}
         [:p [:code (str test)] " fails."]
-        (for [{a :assert as :asserts g :got m :message} (take 1 failures)]
-          [:p "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."
-           (when (next failures) (str " " (count (rest failures)) " more " (if (nnext failures) "assertions fail" "assertion fails") "."))])])
-     (when (seq unknown) [:p {:key :not-run} "Not run yet: " (str/join ", " (map #(str "`" (:test %) "`") unknown)) ". " [:code "(prove)"] " runs them."])
+        (for [[i {a :assert as :asserts g :got m :message}] (map-indexed vector failures)]
+          [:p {:key i} "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."])
+        (when (seq calls)
+          [:div {:key :calls} [:p "It calls " (str/join ", " (map #(str "`" (:var %) "`") calls)) "."]
+           (for [{v :var src :source} calls :when src] [:pre {:key (str v)} [:code src]])])])
+     (let [names #(str/join ", " (map (fn [p] (str "`" (:test p) "`")) %))]
+       (list
+        (when (seq died) [:p {:key :died} "No verdict, because the test run failed (above): " (names died) ". Running it again fails the same way until what stopped it is fixed."])
+        (when (seq deferred) [:p {:key :deferred} "Run when your task merges, not in your turn (each starts a process): " (names deferred) ". Nothing to do for them now."])
+        (when (seq unknown) [:p {:key :not-run} "Not judged yet for your code as it is now: " (names unknown) ". " [:code "(prove)"] " runs them."])))
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)
        [:div {:key :unmerged}
@@ -1789,15 +1798,18 @@
   "Clause m of an entity's data model (seon.render/pulled) as the pull view draws it: what it asks and what the pull holds for it, the
   transaction of its datom when the pull holds that; a join by its members' count, the pattern its sub-pattern stands for (a schema's name
   read as that schema's pattern) clause by clause with how many members hold each, and the members themselves (held, what the pull holds
-  at the clause's key) folded under it, never cut. It lays the map out and computes nothing. See
+  at the clause's key) folded under it, never cut; and what its attribute is, desc, its schema's own :description, so an agent reads
+  what a key means and how to use it where its pull holds it. It lays the map out and computes nothing. See
   docs/render.md#an-entity-may-name-its-own-render."
-  {:malli/schema [:=> [:cat :map :any] :any]}
-  [{:keys [clause value tx members sub] :as m} held]
+  {:malli/schema [:=> [:cat :map :any [:maybe :string]] :any]}
+  [{:keys [clause value tx members sub] :as m} held desc]
   (if (contains? m :members)
     [:li [:code (print/text clause)] " " (str members (if (= 1 members) " member" " members"))
+     (when desc [:p {:class "seon-note"} desc])
      (into [:ul] (for [{c :clause n :held} sub] [:li [:code (print/text c)] " " (str n " of " members)]))
      (when (pos? members) [:details [:summary "members"] [:pre (print/text held)]])]
     [:li [:code (print/text clause)] " " (pulled-summary value) (when tx (str " · tx " tx))
+     (when desc [:p {:class "seon-note"} desc])
      (when (coll? value) [:details [:summary "value"] [:pre (print/text value)]])]))
 
 (defn pull-front
@@ -1823,7 +1835,8 @@
      (when-let [d (:description (contract/properties :seon.ctx/pattern))] [:p d])
      [:p "Its schema's render for a person is " [:code (str (:hiccup renders))] (when (:model renders) (list " · for the model " [:code (str (:model renders))]))]
      [:h2 "What the pattern asks, and what the pull holds"]
-     (into [:ul] (map #(pull-clause % (get e (:key %)))) clauses)
+     ;; each clause with its attribute's own words, read from the index (one reader of a schema's properties)
+     (into [:ul] (map #(pull-clause % (get e (:key %)) (when (keyword? (:key %)) (:description (render/props ix (:key %)))))) clauses)
      [:h2 (str "What its schema names that the pattern does not ask (" (count unasked) ")")]
      (into [:ul] (for [a unasked] [:li [:code (print/text a)]]))
      [:details {:data-as "conversation" :data-preserve-attr "open"} [:summary [:span {:data-when "closed"} "Show as the conversation"] [:span {:data-when "open"} "Show as data"]]]]))
@@ -1934,14 +1947,17 @@
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])
 
 (defn steps
-  "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many: the
-  chat shows the messages and a person opens the steps; nothing for none. See docs/render.md#the-page."
-  {:seon.render/style ".seon-steps > summary { cursor: pointer; font-size: 0.75rem; color: var(--color-text-500); list-style: none; } .seon-steps > summary::before { content: '▸ '; } .seon-steps[open] > summary::before { content: '▾ '; }"
-   :malli/schema [:=> [:cat :int [:sequential :any]] :any]}
-  [n xs]
+  "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many and
+  what each was for, its intent (intents, in xs' order; one with none is not named): the chat shows the messages and what was done,
+  a person opens the steps for their code and output; nothing for none. See docs/render.md#the-page."
+  {:seon.render/style ".seon-steps > summary { cursor: pointer; font-size: 0.75rem; color: var(--color-text-500); list-style: none; } .seon-steps > summary::before { content: '▸ '; } .seon-steps[open] > summary::before { content: '▾ '; }
+.seon-steps > summary .intent { color: var(--color-text-300); }"
+   :malli/schema [:=> [:cat :int [:sequential :any] [:sequential :string]] :any]}
+  [n xs intents]
   (when-let [xs (seq xs)]
     [:details {:class "seon-steps" :id (str "steps-" n)}
-     [:summary (str (count xs) (if (= 1 (count xs)) " step" " steps"))]
+     (into [:summary (str (count xs) (if (= 1 (count xs)) " step" " steps")) (when (seq intents) ": ")]
+           (interpose " · " (for [i intents] [:span {:class "intent"} i])))
      [:ol {:class "seon-turn flex flex-col"} xs]]))
 
 (defn conversation-turn
@@ -1963,7 +1979,7 @@
                                                   ;; want them (owner, 2026-11-10: "only show messages by default and have the evals ... not shown unless
                                                   ;; they are expanded"); a call that said nothing, ran nothing and is not in flight is no element
                                                   [(when (or (seq evals) (said? call) (in-flight? call c))
-                                                     [:section {:class "flex w-full flex-col gap-1"} call (steps n (map item evals))])])))]
+                                                     [:section {:class "flex w-full flex-col gap-1"} call (steps n (map item evals) (keep #(some-> (item %) :seon.eval/intent ratom/realize) evals))])])))]
           (into [:div {:class "seon-stack"}] kids))))
     ;; the turn now opening has no call yet: what was delivered since the last turn's edge reads here, before the turn begins
     (when-let [ms (seq messages)]

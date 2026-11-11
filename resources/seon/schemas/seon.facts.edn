@@ -92,7 +92,7 @@
  :schema/key [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
  :schema/form :string
  :schema/file [:and {:seon.db/index true} :string]
- :file/path [:and {:seon.db/identity true :seon.db/content-id true} :string]
+ :file/path [:and {:seon.db/identity true :seon.db/content-id true :description "A file of the program, by its path in the checkout (a script under bin/, the shipped config). It is changed on your branch as a definition is, (seon.repl/edit! path old new), and reaches disk after your merge. A file you write with the shell or spit is not on your branch and does not merge."} :string]
  :file/text :string
  :file/mode :string
  ;; An ENTRY of the config file (docs/source.md#a-program-file): its key, its value's exact text with its tags unread, and its file. The config a process reads is built from these (seon.config/of-entries).
@@ -242,7 +242,8 @@
  :seon.ctx/pattern [:and {:description "Your pull pattern: what your pull holds, in Datahike's pull syntax, one clause an attribute or a join ({attribute sub-pattern}). Your page and your next request are made from it, so changing it changes what you read. ADD to it, never replace it: a pattern that drops a join your role requires is refused, and one that drops anything else simply stops showing it to you. Its first clause names your role's pattern (:seon.db/agent-fact), never a copy of it, so what your role gains later reaches you. To add a join: (swap! ctx update :seon.ctx/pattern (fnil conj [:seon.db/agent-fact]) {:my.ns/_of [:my.ns/text]})"}
                     [:vector :any] :seon.db/plain]
  ;; an entity's own render, as :seon.ctx/pattern is its own pattern: what its page is drawn by in place of its schema's (seon.render/render-var-of; docs/render.md#an-entity-may-name-its-own-render)
- :seon.render/hiccup :symbol
+ ;; its description is what an agent reads beside the clause in its pull view (seon.render.ui/pull-front): what a render is handed
+ :seon.render/hiccup [:and {:description "Your own render: the function your page is drawn by in place of your schema's, by its symbol. A render is (f opts node), node the pulled entity, and answers hiccup. opts always holds :seon.render/index, the entity index; name :seon.db/db or :seon.ctx/ctx in its opts contract, [:and :seon.render/opts [:map [:seon.db/db :any]]], to be handed the db at your page's point or your whole pull (as @ctx gives it). It is not handed the page drawn so far; the page at the previous stored point is to come (an owner's ruling), and what the walk drew is (my.render/tree) after it. Try a render on one node at your REPL: (f {:seon.render/index (seon.agent/branch-index)} node). To watch a render you are changing, draw it on your own page: docs/ctx.md#adding-a-datum-and-its-render."} :symbol]
  ;; the doc sections its system message is, when it names its own (docs/render.md#the-models-context-a-cached-prefix-then-the-turn); with none, docs/prompt.md's
  :seon.agent/system [:set {:seon.db/to [:seon.doc/fact]} :seon.db/ref]
  ;; a person's name, a lookup ref, and its presence is what makes an agent a user: a location /user/<name> reads it (docs/users.md#what-each-thing-is)
@@ -380,7 +381,7 @@
  :seon.task/name :string
  :seon.task/plan [:string]
  :seon.task/instructions [:string]
- :seon.task/proofs [:set :qualified-symbol]
+ :seon.task/proofs [:set {:description "The tests that say this task is done. A proof is a clojure.test deftest in the test namespace of what it proves, built on a small test world, never the live db: (my.test/world). Register one with (my.task/update! :seon.task/proofs conj (quote ns-test/name)). (prove) runs your proofs and every test your change reaches, and records the verdicts; clojure.test/run-test-var records nothing."} :qualified-symbol]
  :seon.task/needs [:set {:seon.db/to [:seon.task/task-fact]} :seon.db/ref]
  ;; the example sessions its agent reads before its own (seon.ctx.wire/request): agents keyed "example/<id>"
  ;; (seon.ctx.session/session-tx), drawn by the renders that draw its own session
