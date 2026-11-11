@@ -1,7 +1,7 @@
 (ns seon.server-test
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
-  (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
+  (:require [clojure.test :refer [deftest is]] [jolt.fibers] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
             [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d]))
 
 (deftest each-op-has-its-answer
@@ -599,3 +599,21 @@
     (is (apply = t) "the branch's t is the same after an observer's read")
     (is (apply = commit) "and nothing was committed for it")
     (is (empty? (:value evals)) "no read left an eval of its print form")))
+
+(deftest a-sessions-checkout-is-proved-on-its-trees-branch
+  ;; docs/merging.md#a-session-proves-through-root (Flow step 3, with Tests): :prove with :checkout and :tree proves the checkout's
+  ;; files on a branch keyed by the tree, every asker of one tree sharing its branch, agent and run key. Red before: :checkout was
+  ;; ignored and the op proved main
+  (let [checkout (seon.config/checkout)
+        root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str checkout))])
+        tree (seon.fx/tree-id checkout)
+        ask #(ts/ask root {:op :prove :checkout checkout :tree tree :names ["seon.ref-test"]})
+        one (ask)
+        two (ask)]
+    (is (clojure.string/starts-with? (str (:key one)) (str "tree-" tree "@")) (pr-str one))
+    (is (= (:key one) (:key two)) "a second ask of one tree is the same run, on the same branch")
+    (is (pos? (+ (or (:pass one) 0) (or (:reused one) 0))) (pr-str one))
+    ;; the owner, 2026-11-11 ("Yes, drop them"): no run of it in flight, the tree's branch is dropped, its agent ended
+    (is (= [] (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
+                                                   :code (str "(filterv #(clojure.string/ends-with? (name %) " (pr-str (str "tree-" tree)) ") (datahike.api/branches (:conn sys)))")}))))
+        "the tree's branch is gone once its runs answered")))
