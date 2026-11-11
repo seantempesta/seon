@@ -20,4 +20,5 @@
  :prop #prop user.dir
  :user #user {"no-such-user-xyz" :other :default :someone}
  :hostname #hostname {"no-such-host-xyz" :other :default :somewhere}
- :checkout #seon/checkout "resources/seon/system.edn"}
+ :checkout #seon/checkout "resources/seon/system.edn"
+ :cores #seon/cores nil}

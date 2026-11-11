@@ -217,6 +217,10 @@
 
 (defn- css-class {:malli/schema [:=> [:cat :keyword] :string]} [kind] (str "seon-print-" (name kind)))
 
+;; a separator span's class, read once at load: a member split asks it of every child, and a contracted call there
+;; would be a call a child (the printer's cost proof)
+(def ^:private separator-class (css-class :seon.print/separator))
+
 (defn- text-op
   {:malli/schema [:function [:=> [:cat :keyword :string] :seon.print/op] [:=> [:cat :keyword :string :any] :seon.print/op]]}
   ([css text] {:op :text :text text :seon.print/class css})
@@ -553,11 +557,11 @@
 
 (defn- members
   "A vector's, list's or set's frame children as its members: its delimiters dropped and the rest
-  split at each line's separator, so a member is its one element (a scalar's span, a nested
-  collection's, a cut's marker) or a tag and the value it tags."
+  split at each line's separator (its class read once at load, separator-class), so a member is its one
+  element (a scalar's span, a nested collection's, a cut's marker) or a tag and the value it tags."
   {:malli/schema [:=> [:cat [:sequential :any]] [:sequential [:sequential :any]]]}
   [children]
-  (let [separator? #(and (vector? %) (= :span (nth % 0 nil)) (= (css-class :seon.print/separator) (:class (nth % 1 nil))))]
+  (let [separator? #(and (vector? %) (= :span (nth % 0 nil)) (= separator-class (:class (nth % 1 nil))))]
     (->> (subvec (vec children) 1 (dec (count children)))
          (partition-by separator?)
          (remove (comp separator? first)))))
