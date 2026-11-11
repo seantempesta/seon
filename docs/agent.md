@@ -207,6 +207,7 @@ The judge's test selection follows reach: a change to a namespace many others re
 How merging with main works, and what to do when a merge of main answers conflicts. Main's work is merged into your branch as main moves (a work agent's too), and a merge task's branch has main merged in: main's transactions since your merge base are replayed onto your branch whole. A key both you and main changed to your own values since the base is a conflict, `{:key :base :ours :theirs}`: the merge writes nothing and answers the conflicts.
 
 - `(my.branch/merge-main!)` merges main in, or answers its `:conflicts`. Settle them by merging again with resolutions, a map from each conflict's `:key` to the value your branch keeps: ``(my.branch/merge-main! {[:seon.task/id "app/x" :seon.task/plan] "the plan both need"})``; `(:ours c)` keeps yours, `(:theirs c)` takes main's, `:seon.merge/gone` retracts it.
+- Your status's `:unmerged` (and `(my.branch/unmerged)`) names your conflicts with main as you last heard it, each with its `:resolve`, the `my.branch/merge-main!` form that settles it, its value yours to write.
 - Your branch sees only its own changes until then.
 
 ## Ending

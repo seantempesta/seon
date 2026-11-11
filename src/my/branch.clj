@@ -17,30 +17,28 @@
   does (seon.agent/merge-main!): main's transactions replayed onto the branch and loaded here. A conflict (a key this
   branch and main each changed to their own value since the base: {:key :base :ours :theirs}) writes nothing and is the
   answer: merge again with resolutions, {key value} (the conflict's :key, the value the branch keeps; :seon.merge/gone
-  retracts it). Answers {:ok :applied :conflicts :unmerged} (unmerged: entries an older merge stored), printed by
+  retracts it). Answers {:ok :applied :conflicts}, printed by
   `merged-summary`: the whole value stays under the eval's handle. See docs/decisions.md, 'A merge replays the source's
   transactions on the branch that receives it'."
   {:malli/schema [:function [:=> [:cat] [:map [:ok :boolean]]] [:=> [:cat :map] [:map [:ok :boolean]]]]}
   ([] (merge-main! {}))
   ([resolutions]
    (stage/stage!)
-   (let [r (agent/merge-main! resolutions)
-         db (agent/db)]
-     (with-meta (assoc r :unmerged (pm/unmerged db)) {:seon.render/schema :seon.branch/merged}))))
+   (with-meta (agent/merge-main! resolutions) {:seon.render/schema :seon.branch/merged})))
 
 (defn unmerged
-  "The entries of this branch still unmerged: the conflicts no re-defn or resolve! has
-  settled yet, each with its base, ours and theirs."
-  {:malli/schema [:=> [:cat] [:vector :seon.merge/entry-value]]}
+  "This branch's conflicts with main now, as a merge of main would answer them (seon.agent/main-conflicts), each
+  {:key :base :ours :theirs :resolve}, :resolve the merge-main! form that settles it. See docs/agent.md#merging."
+  {:malli/schema [:=> [:cat] [:vector :seon.merge/data-conflict]]}
   []
-  (pm/unmerged (agent/db)))
+  (agent/main-conflicts (:base @agent/state) (agent/db) (agent/heard-main)))
 
 (defn resolve!
   "Settle the unmerged entry of var sym (git add). With no side the branch keeps what it
   holds now; :theirs or :base loads that side's definition (or unmaps the var when that
   side deleted it) and records it. Answers the entries still unmerged."
-  {:malli/schema [:function [:=> [:cat :qualified-symbol] [:vector :seon.merge/entry-value]]
-                  [:=> [:cat :qualified-symbol [:enum :ours :theirs :base]] [:vector :seon.merge/entry-value]]]}
+  {:malli/schema [:function [:=> [:cat :qualified-symbol] [:vector :seon.merge/data-conflict]]
+                  [:=> [:cat :qualified-symbol [:enum :ours :theirs :base]] [:vector :seon.merge/data-conflict]]]}
   ([sym] (resolve! sym :ours))
   ([sym side]
    (let [k [:var sym]

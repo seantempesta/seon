@@ -129,6 +129,29 @@
                   (swap! state assoc :main-changes {:key k :after after})
                   after))))
 
+(defn resolving-form
+  "The form that settles conflict key k on a merge of main into this branch: my.branch/merge-main! with the resolution
+  {k value}, value the agent's to write (the branch's end, main's, or :seon.merge/gone). The one place it is built. See
+  docs/agent.md#merging."
+  {:malli/schema [:=> [:cat [:vector :any]] :any]}
+  [k] (list 'my.branch/merge-main! {k 'value}))
+
+(defn main-conflicts
+  "The conflicts of branch db with main since their merge base base, as a merge of main would answer them (seon.merge/conflicts
+  of the two net changes, {:key :base :ours :theirs}, ours the branch's), each with the form that settles it (:resolve,
+  resolving-form): a judgment run on the db state, never stored. Held keyed by the three points it is a function of, as
+  main-changes is, the newest on the state (:main-conflicts), so a reader that finds them current reads it with no diff; a db
+  with no commit (a run-ahead value) is never held. [] when main is at base. See docs/agent.md#merging."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db [:maybe :seon.host/db]] [:vector :seon.merge/data-conflict]]}
+  [base db main]
+  (let [k (mapv pdb/point [base db main])
+        {held :key cs :conflicts} (:main-conflicts @state)]
+    (cond (or (nil? base) (nil? main) (= (d/commit-id base) (d/commit-id main))) []
+          (= k held) cs
+          :else (let [cs (mapv #(assoc % :resolve (resolving-form (:key %))) (pm/conflicts (pm/net-change base db) (pm/net-change base main)))]
+                  (when (every? (comp some? first) k) (swap! state assoc :main-conflicts {:key k :conflicts cs}))
+                  cs))))
+
 (defn main-line
   "How main differs from branch b, both cut from base (dbs), as one line, or nil when main changed
   nothing of the program since base: how many names main changed (main-changes, held per pair of

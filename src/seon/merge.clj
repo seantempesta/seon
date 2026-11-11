@@ -634,14 +634,23 @@
                       (based {:key k side now other ::gone})))]
     (vec (concat both (onto-gone ko gt :ours :theirs) (onto-gone kt go :theirs :ours)))))
 
+(defn- unsaid
+  "The retractions of what base holds and src does not, that src's history does not say (said: [e a v] it retracted; an
+  attribute that keeps no history), never of a transaction's own facts (tx?) nor of a fact src holds under another
+  transaction (a merge's copy). See docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :any] :seon.host/fn] [:vector [:vector :any]]]}
+  [base src said tx?]
+  (vec (for [dt (first (d/datoms-diff base src :eavt [])) :when (and (not (tx? (:e dt))) (not (said [(:e dt) (:a dt) (:v dt)]))
+                                                                     (empty? (d/datoms src :eavt (:e dt) (:a dt) (:v dt))))]
+         [:db/retract (:e dt) (:a dt) (:v dt)])))
+
 (defn replay
   "The source's transactions since base as the transactions a merge writes on the branch that receives it:
   one group for each, in the source's order, each {:tx the source transaction :meta that transaction's own
   facts (which branch wrote it, which eval; never its time) :ops [[:db/retract e a v] ... [:db/add e a v] ...]}:
   ALL it wrote, the values a later transaction replaced included, so each state the receiving branch passes
-  through is one the source held (and passed the write check with); the net change cut by transaction is not
-  (a value written twice leaves its first transaction only the retraction of the base value: refused, 'requires
-  :task/plan'); `plan` leaves out a transaction the receiving branch wrote itself. No reader the system makes stands between two
+  through is one the source held (and passed the write check with), as the net change cut by transaction is not;
+  `plan` leaves out a transaction the receiving branch wrote itself. No reader the system makes stands between two
   replayed transactions (a reference to a branch is a commit, and the merge commits once at its end); only a raw as-of at a t
   inside the merge does, and it reads, for those keys, a state the source really held. Ops, never datoms, so each group is a new transaction of the receiving branch with a new time;
   entity ids are kept (the store's, issued once: docs/storage.md#ids). A retraction the source's history does
@@ -656,12 +665,7 @@
         wrote (remove #(tx? (:e %)) (second (d/datoms-diff (d/history base) (d/history src) :eavt [])))
         op (fn [dt] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])
         by-tx (reduce (fn [m dt] (update m (:tx dt) (fnil conj []) (op dt))) (sorted-map) wrote)
-        ;; what base holds and the source does not, with no retraction in its history
-        said (into #{} (comp (filter #(= :db/retract (first %))) (map rest)) (mapcat val by-tx))
-        ;; ... and the source does not hold under any transaction (a merge's copy holds it under another)
-        unsaid (for [dt (first (d/datoms-diff base src :eavt [])) :when (and (not (tx? (:e dt))) (not (said [(:e dt) (:a dt) (:v dt)]))
-                                                                             (empty? (d/datoms src :eavt (:e dt) (:a dt) (:v dt))))]
-                 [:db/retract (:e dt) (:a dt) (:v dt)])
+        unsaid (unsaid base src (into #{} (comp (filter #(= :db/retract (first %))) (map rest)) (mapcat val by-tx)) tx?)
         meta (fn [t] (into {} (for [dt (d/datoms src :eavt t) :when (not= :db/txInstant (:a dt))] [(:a dt) (:v dt)])))
         ;; a transaction branch skip wrote itself is left out first, so the unsaid retractions ride a group that stays
         by-tx (into (sorted-map) (remove (fn [[t _]] (and skip (= skip (:seon.tx/branch (meta t)))))) by-tx)

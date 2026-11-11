@@ -3163,3 +3163,26 @@
        (let [r (agent/merge-main! {})]
          (is (:ok r) (pr-str r))
          (is (empty? (d/datoms @store-conn :eavt t)) "the task is gone on the branch as on main"))))))
+
+(deftest an-agents-conflicts-with-main-are-held-by-three-commits
+  ;; seon.agent/main-conflicts (docs/agent.md#merging): the status reads the branch's conflicts with main every turn, so they
+  ;; are held keyed by base, branch and main: a second read with the same three diffs nothing; a moved main reads again.
+  ;; Each conflict carries the form that settles it
+  (down-agent
+   (fn [{:keys [conn store-conn t]}]
+     (d/transact conn [[:db/add t :task/plan "main's"]])
+     (agent/transact! [[:db/add t :task/plan "the branch's"]])
+     (agent/commit!)
+     (let [calls (fn [f] (profile/begin!) (let [r (f)] [r (get (into {} (map (juxt :var :calls)) (profile/touched)) 'seon.merge/net-change 0)]))
+           base (:base @agent/state)
+           [cs n1] (calls #(agent/main-conflicts base @store-conn @conn))
+           [cs2 n2] (calls #(agent/main-conflicts base @store-conn @conn))
+           k [:task/name :gen/down :task/plan]]
+       (is (= [[k "p" "the branch's" "main's"]] (mapv (juxt :key :base :ours :theirs) cs)) (pr-str cs))
+       (is (= (list 'my.branch/merge-main! {k 'value}) (:resolve (first cs))) "with the form that settles it")
+       (is (= 2 n1) "the first read diffs each side once")
+       (is (= [cs 0] [cs2 n2]) "a second read with the same three commits diffs nothing")
+       (d/transact conn [[:db/add t :task/status :ready]])
+       (let [[cs3 n3] (calls #(agent/main-conflicts base @store-conn @conn))]
+         (is (= 2 n3) "main moved: read again")
+         (is (= (mapv :key cs) (mapv :key cs3))))))))

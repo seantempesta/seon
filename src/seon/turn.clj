@@ -503,7 +503,11 @@
                            ;; (a green run that ended behind main's newer merges was judged behind: swarm's s9)
                            (and (not no-status?) (empty? reasons))
                            (let [m (branch/merge-main!)]
-                             (if (and (empty? (:applied m)) (empty? (:conflicts m))) (ended st :green (unjudged-reason s) nil) [::next st]))
+                             (cond (and (empty? (:applied m)) (empty? (:conflicts m))) (ended st :green (unjudged-reason s) nil)
+                                   ;; main conflicts with the branch: the main it heard is recorded as a turn records it (main-base-tx), so the
+                                   ;; next status reads the conflicts (seon.agent/main-conflicts) and the agent resolves them in a turn
+                                   (seq (:conflicts m)) (do (agent/transact! (main-base-tx)) [::next st])
+                                   :else [::next st]))
                            ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
                            ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
                            (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)

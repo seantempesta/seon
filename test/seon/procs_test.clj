@@ -1325,9 +1325,11 @@
     (is (:merged? r) (pr-str r))
     (is (= (:branch cfg) (:seon.tx/branch (d/entity db (:max-tx db)))) "the branch seon.ctx reads from main's last transaction is main")
     (is (= b (:seon.tx/merged (d/entity db (:max-tx db)))) "and it names the member it merged")
-    (is (= [b b] (mapv #(:seon.tx/branch (d/entity db %)) (butlast txs))) "the replayed ones name the branch that wrote them"))))
+    (is (= [b b] (mapv #(:seon.tx/branch (d/entity db %)) (butlast txs))) "the replayed ones name the branch that wrote them")))))
+
+(deftest a-merge-of-two-members-ends-on-one-transaction-of-mains-own-a-member
   ;; two members: one transaction of main's own a member, in member order, each naming the member it merged; the content mark and
-  ;; every parent ride the last
+  ;; every parent ride the last (docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it')
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         [b1 b2] (for [nm [:two-1 :two-2]] (let [x (pdb/on-main (:branch cfg) nm)] (d/branch! conn (:branch cfg) x) x))

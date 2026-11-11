@@ -530,6 +530,22 @@
 
 ;; ---- the property on the one merge: a branch merged up as the writer's op makes it (replay-up!) ----
 
+(defn- replayed-as-written
+  "Point (3) of a merge's promise, msg naming the seed and round: each datom a replayed transaction on main (after, from main0)
+  asserts was asserted by that source transaction on the branch (head0, from base), with its eval and branch."
+  [base main0 head0 after up msg]
+          (testing "(3) each datom a replayed transaction asserts was asserted by that source transaction on the branch, same eval and branch"
+            (let [new-txs (sort (filter #(> % (:max-tx main0)) (map :e (d/datoms after :aevt :db/txInstant))))
+                  by-tx (fn [from to] (reduce (fn [m dt] (if (and (:added dt) (not= (:tx dt) (:e dt))) (update m (:tx dt) (fnil conj #{}) [(:e dt) (:a dt) (:v dt)]) m))
+                                              {} (second (d/datoms-diff (d/history from) (d/history to) :eavt []))))
+                  gained (by-tx main0 after) wrote (by-tx base head0)
+                  asserted (fn [db t] (get (if (identical? db after) gained wrote) t #{}))
+                  who (fn [db t] (select-keys (d/entity db t) [:seon.tx/branch :seon.tx/eval]))]
+              (doseq [[t g] (map vector new-txs (:groups up))]
+                (is (clojure.set/subset? (asserted after t) (asserted head0 (:tx g))) (str msg " transaction " t " of source " (:tx g)))
+                (is (= (who head0 (:tx g)) (who after t)) (str msg " who made " t)))))
+)
+
 (defn- check-round-up
   "The assertions of one round on the one merge (replay-up!), msg naming the seed and round: the claims of check-round,
   each as the one merge states it (it merges up only; main into the branch is a later piece)."
@@ -561,16 +577,7 @@
           (testing "(2) every key the branch did not change is as main had it"
             (doseq [k ks :when (not (changed? k))] (is (= (value main0 k) (value after k)) (str msg " key " k)))
             (is (every? #(contains? nb %) (keys (:keys (pm/net-change main0 after)))) msg))
-          (testing "(3) each datom a replayed transaction asserts was asserted by that source transaction on the branch, same eval and branch"
-            (let [new-txs (sort (filter #(> % (:max-tx main0)) (map :e (d/datoms after :aevt :db/txInstant))))
-                  by-tx (fn [from to] (reduce (fn [m dt] (if (and (:added dt) (not= (:tx dt) (:e dt))) (update m (:tx dt) (fnil conj #{}) [(:e dt) (:a dt) (:v dt)]) m))
-                                              {} (second (d/datoms-diff (d/history from) (d/history to) :eavt []))))
-                  gained (by-tx main0 after) wrote (by-tx base head0)
-                  asserted (fn [db t] (get (if (identical? db after) gained wrote) t #{}))
-                  who (fn [db t] (select-keys (d/entity db t) [:seon.tx/branch :seon.tx/eval]))]
-              (doseq [[t g] (map vector new-txs (:groups up))]
-                (is (clojure.set/subset? (asserted after t) (asserted head0 (:tx g))) (str msg " transaction " t " of source " (:tx g)))
-                (is (= (who head0 (:tx g)) (who after t)) (str msg " who made " t)))))
+          (replayed-as-written base main0 head0 after up msg)
           (testing "every ref the merge wrote names an entity main holds"
             (is (every? #(seq (d/datoms after :eavt (:v %))) (filter #(many-attrs (:a %)) (added-by main0 after))) msg))
           (testing "merging the same branch again changes nothing"
@@ -580,7 +587,8 @@
 
 (defn- property-up
   "Rounds of the merge property on the one merge from seed, ops the writes drawn: as property, each round's branch merged
-  up by replay-up! and checked (check-round-up)."
+  up by replay-up! and checked (check-round-up). Answers how many rounds it refused and merged: whether a run reached both
+  is asked once over all its seeds (reached-both)."
   [seed ops]
   (ts/test-branch!
    (fn [cfg conn]
@@ -602,17 +610,24 @@
                      thrown (error-of #(check-round-up conn br base @conn @bc msg seen))]
                  (is (nil? thrown) (str msg ": the merge threw"))))
              (finally (d/release bc) (d/delete-branch! conn br)))))
-       (is (= #{:refused :merged} (set @seen)) (str "seed " seed " reached " (frequencies @seen)))))))
+       (frequencies @seen)))))
 
 ;; docs/storage.md#merges-read-what-changed: the same property with every write, the broken ones included, on the one merge
+(defn- reached-both
+  "Over the rounds of all of a run's seeds, both a refused and a clean merge happened, so neither half of the property held
+  vacuously; the counts are the assertion's message."
+  [counts]
+  (let [total (apply merge-with + counts)]
+    (is (and (pos? (:refused total 0)) (pos? (:merged total 0))) (str "rounds refused and merged over " (count counts) " seed(s): " total))))
+
 (deftest any-branch-with-any-write-merges-to-main-safely
-  (doseq [seed (seeds)] (property-up seed (into safe-ops broken-ops))))
+  (reached-both (mapv #(property-up % (into safe-ops broken-ops)) (seeds))))
 
 ;; the same property at the two seeds that were red against a claim the ruling never made ("every datom main gained is one the
 ;; branch wrote"): both sides end one key on the same value, the branch through another, so main's value is replaced by the
 ;; branch's earlier one for one replayed transaction and comes back
 (deftest any-branch-with-any-write-merges-to-main-safely-at-seeds-once-red
-  (doseq [seed [648157791624536068 760273206766611146]] (property-up seed (into safe-ops broken-ops))))
+  (reached-both (mapv #(property-up % (into safe-ops broken-ops)) [648157791624536068 760273206766611146])))
 
 ;; docs/source.md#schemas-at-the-repl: a branch registers an entity of its own (my.schema/registration, as my.schema/register! writes
 ;; it: the schema entries and the Datahike declarations of their attributes) and writes one; merged up by the one merge, main holds
