@@ -609,7 +609,7 @@
         red (sort (remove green (keys digests)))
         built (let [b (io/file (config/checkout) "target/seon.tree")] (when (.isFile b) (str/trim (slurp b))))
         ;; a step that runs a seon.check mode ran on target/seon: kept only if built from the plan's tree;
-        ;; laws, lmdb-kill and lmdb-sem ran no mode, so no binary's tree is theirs to compare
+        ;; laws and the lmdb steps ran no mode, so no binary's tree is theirs to compare
         keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
         ;; each step's wall ms as bin/check measured it (out/step-ms, "<step> <ms>" a line; a kill/reopen pair's two phases
         ;; summed under their step), kept on its verdict: its bound's measure (out/step-bounds) and the deal's
