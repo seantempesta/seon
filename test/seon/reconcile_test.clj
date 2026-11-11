@@ -5,7 +5,7 @@
   (:require [seon.lib] [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is are testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.task :as task]
+            [seon.task :as task] [seon.doc]
             [seon.reconcile :as r] [my.root]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg] [seon.edn :as sedn]
@@ -1667,11 +1667,16 @@
   (is (= :tested (r/after-work {:value {:outcome :failed}} nil)))
   (is (= :tested (r/after-work {:ex {:seon.error/message "threw"}} nil)) "and so is a loop that threw"))
 
+(defn- with-refine-section
+  "db holding the section a refine cites (docs/tasks.md#a-refine-curates-its-own-task), as a root's store holds the wiki: a test
+  world holds no page but the prompt's stub, and a plan's cite is written only to a section the store holds."
+  [db] (d/db-with db (seon.doc/load-tx db "docs" {"docs/tasks.md" "# Tasks\n\n## A refine curates its own task\n\nA refine curates the task it needs.\n"})))
+
 (deftest every-end-gets-one-refine-and-a-refine-gets-none
   ;; docs/tasks.md#a-refine-curates-its-own-task (the owner, 2026-11-11: "every state should be convertable to a completed task"): an
   ;; ended task's refine is written with its end, a :design task on its branch that needs it and cites the refine section; a refine
   ;; gets none, and none is written twice
-  (let [db (db-of [(decl "a")])
+  (let [db (with-refine-section (db-of [(decl "a")]))
         tx (task/refine-tx db "demo/a")
         db1 (d/db-with db tx)
         r (task/task db1 "demo/a-refine")]
@@ -1689,7 +1694,7 @@
   ;; original): a work task's failed end is held and gets its refine on its branch; the refine's end that changed the task's plan
   ;; carries the plan to main and releases the task on a new branch from main; a refine that changed nothing starts no run
   (let [red [{:reason :proof-red :symbol (t "a")}]
-        db0 (mdb [(decl "a")] :extra (work "a" :running :members {:seon.task/reasons red}))
+        db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running :members {:seon.task/reasons red})))
         {db1 :db} (judge! db0 "a" {:outcome :red} :results {(t "a") :fail})
         old (:seon.task/branch (task/task db1 "demo/a-refine"))
         db2 (d/db-with db1 (work "a-refine" :running))
