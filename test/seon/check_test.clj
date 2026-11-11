@@ -310,19 +310,28 @@
         sh! (fn [& args] (let [r (apply clojure.java.shell/sh args)] (is (zero? (:exit r)) (pr-str args r)) (str/trim (:out r))))
         commit! (fn [msg] (sh! "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@t" "commit" "-q" "-a" "-m" msg)
                   (sh! "git" "-C" repo "rev-parse" "HEAD"))
+;; the ns form's alias only: this test's own body holds the retargeted text as a string, which another form's
+        ;; source would match
         retargeted? (fn [db] (boolean (some #(str/includes? % "[seon.error :as contract]")
-                                            (d/q '[:find [?s ...] :in $ ?n :where [?ns :ns/name ?n] [?f :form/ns ?ns] [?f :form/src ?s]] db 'seon.check-test))))]
+                                            (d/q '[:find [?s ...] :in $ ?n :where [?ns :ns/name ?n] [?ns :ns/form ?f] [?f :form/src ?s]] db 'seon.check-test))))]
     (try
       (sh! "git" "clone" "-q" "--shared" co repo)
+      ;; as a shard's earlier test does on a clean checkout: this process holds HEAD's tree from the kept store (the plan's
+      ;; own read of the checkout's program), whose copy below keeps its id
+      (test-runner/program-db repo (ts/kept-program-store))
       (let [text (slurp (str repo "/" file))
             _ (is (str/includes? text "[seon.contract :as contract]"))
             _ (spit (str repo "/" file) (str/replace text "[seon.contract :as contract]" "[seon.error :as contract]"))
             base (commit! "base")]
-        (spit (str repo "/" file) text)
+        ;; the head a tree of its own: the copy of the kept store keeps the original's id, so a tree both hold (the checkout's
+        ;; HEAD, which a process may have read from the original) is one branch under two paths, which Datahike refuses
+        (spit (str repo "/" file) (str text "\n;; head\n"))
         (commit! "head")
         ;; the plan's kept store, cloned: each tree differs from the kept one by the commits and this checkout's edits
         (sh! "mkdir" "-p" store)
         (sh! "cp" "-c" (str (ts/kept-program-store) "/data.mdb") (str store "/data.mdb"))
+        ;; as a shard's earlier test does: this process holds the checkout's own tree from the kept store, whose copy here
+        ;; keeps its id, so a branch of one tree in both is one connection's (batch 58's \"Configuration does not match\")
         (let [head (test-runner/program-db repo store)
               based (test-runner/base-program repo base store (str dir "/base-store") (str dir "/base"))]
           (is (not (contract/error? based)) (pr-str based))
