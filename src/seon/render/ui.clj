@@ -1399,6 +1399,17 @@
          (let [k (:seon.eval/schema e)]
            [:div (render/hiccup (cond-> {:seon.render/index ix :budget (budget v) :handle handle :db db} k (assoc :as :block :schema k)) (whole v))]))])))
 
+(defn hiccup-value
+  "Value v that is hiccup (:seon.render/hiccup-value: what a render answers, as an agent's call of one at its REPL answers it) drawn as
+  the html it is, and under it, folded, the value as data as the one printer shows it, which is what the model reads of it; in one
+  line (:as :inline), the printer's line alone. See docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat :seon.render/opts :any] :any]}
+  [opts v]
+  (if (= :inline (:as opts))
+    (render/print-hiccup opts v)
+    ;; the fold is the person's: the model reads the value itself as data once, never a second printed copy
+    [:div v [:details {:wire/for "page"} [:summary "show as data"] (render/print-hiccup (dissoc opts :schema :as) v)]]))
+
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
   the eval's value): its one line (the schema's model render, my.agent/prove-summary), then each proof's
@@ -1826,7 +1837,7 @@
 .pull-front ul { margin-left: 1.25rem; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
 .pull-front details pre { max-height: 20rem; overflow: auto; font-size: 0.75rem; color: var(--color-text-300); white-space: pre-wrap; }
 .pull-front code { color: var(--color-signal); }"
-   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :seon.render/hiccup-value]}
   [{c :seon.ctx/ctx ix :seon.render/index}]
   (let [e (ratom/realize c)
         {:keys [schema source clauses unasked renders]} (render/pulled nil ix e nil)]
