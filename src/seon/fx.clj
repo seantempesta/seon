@@ -408,9 +408,13 @@
   the same, and builds it)."
   {:malli/schema [:=> [:cat :string] :string]}
   [dir]
-  (let [status (str/split-lines (git! {} dir ["status" "--porcelain=v2" "--branch" "-uall" "--ignore-submodules=all"] nil))
-        head (second (re-find #"^# branch\.oid (\S+)" (first (filter #(str/starts-with? % "# branch.oid ") status))))
-        _ (when (or (nil? head) (= "(initial)" head)) (throw (ex-info (str "pin " dir ": it has no commit") {:dir dir})))]
+  (let [out (git! {} dir ["status" "--porcelain=v2" "--branch" "-uall" "--ignore-submodules=all"] nil)
+        status (str/split-lines out)
+        ;; git's header line, when it printed one: a status that exits 0 with none (an empty output, seen once under load in a
+        ;; seed, 2026-11-12) is said with what git printed, never a NullPointerException in the parse
+        head (some->> (first (filter #(str/starts-with? % "# branch.oid ") status)) (re-find #"^# branch\.oid (\S+)") second)
+        _ (when (nil? head) (throw (ex-info (str "pin " dir ": git status printed no branch header: " (pr-str out)) {:dir dir})))
+        _ (when (= "(initial)" head) (throw (ex-info (str "pin " dir ": it has no commit") {:dir dir})))]
     (if (every? #(str/starts-with? % "# ") status)
       head
       (str head "+" (tree-id dir [])))))
