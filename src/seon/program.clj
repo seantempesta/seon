@@ -2037,15 +2037,16 @@
   (lib/digest (str/join " " (sort (distinct (keep #(some-> (comp-of %) cd) (mapcat #(get defs %) roots)))))))
 
 (defn- roots-of
-  "root-roots of g under the config in force, kept on g's index while its schemas, data-refs and config are the same values
+  "root-roots of g under the config a process test's root runs with (seon.config/test-root-config, the scripted profile, whichever
+  process plans), kept on g's index while its schemas, data-refs and that config are the same values
   (root-roots reads every schema row and every config value: the index would pay them at each update). Answers
   [roots key]. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map [:maybe :map]] [:tuple [:sequential :qualified-symbol] [:vector :any]]]}
   [g index]
-  (let [k [(:schemas g) (:data-refs g) cfg/config]]
+  (let [k [(:schemas g) (:data-refs g) cfg/test-root-config]]
     (if (and (= (count k) (count (:roots-key index))) (every? true? (map identical? k (:roots-key index))))
       [(:roots index) (:roots-key index)]
-      [(root-roots g cfg/config) k])))
+      [(root-roots g cfg/test-root-config) k])))
 
 (defn- index-answer
   "The function of a key and its starting forms' ids that answers {:digest :process? :binary?} (graph-index)
