@@ -4,6 +4,8 @@ Every agent is its own OS process, forked from one single-threaded fork server t
 
 Root never forks after boot: it is multithreaded, and a process that forks must never have started Chez's parallel-collector sweeper threads ([failure points](failure-points.md#physics-who-may-run-threads)). So the fork server, each agent and each agent's test children stay single-threaded, and only root runs threads and Flow.
 
+That is also why an agent's eval is a fiber on the agent's one OS thread and not a thread of its own: an agent forks from itself while an eval runs (its test children, and a clone, inherit the live agent's in-process state, so the fork server cannot fork them for it), and a fork copies only the forking thread, leaving the child every lock the other thread held ([failure points](failure-points.md#physics-who-may-run-threads): 50 of 50 forced forks beside running threads deadlocked). Running the eval on a second thread was proposed and withdrawn on 2026-11-11 for this reason; what a fiber on one thread costs instead is that the runtime must keep each fiber's state right across a pause, which is Jolt's to guarantee ([forks](forks.md#jolt)).
+
 ## The fork server
 
 The fork server is one thread that holds main's db value, takes every main commit in order (read from the store as the writer made it, never replayed from its datoms), and forks an agent on request: `seon.fork-server`.
