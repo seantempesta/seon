@@ -13,7 +13,7 @@
   asker records the outcome in its own recording transaction."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.lib :as lib] [seon.step :as step] [seon.config :as cfg] [seon.model :as model]
-            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.java.shell :as sh] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
+            [clojure.core.async :as a] [clojure.core.async.flow :as flow] [clojure.string :as str] [jolt.ffi :as ffi] [jolt.deps :as deps]
             [seon.edn :as sedn] [clojure.edn :as edn] [seon.proofs :as proofs] [seon.reader :as reader]))
 
 (defn- error
@@ -69,7 +69,7 @@
   [env dir args in]
   (let [env (merge {"GIT_CONFIG_GLOBAL" "/dev/null" "GIT_CONFIG_NOSYSTEM" "1"} env)
         cmd (concat (cons "env" (for [[k v] (sort env)] (str k "=" v))) ["git" "-C" dir] args)]
-    (if in (apply sh/sh (concat cmd [:in in])) (apply sh/sh cmd))))
+    (if in (apply lib/sh (concat cmd [:in in])) (apply lib/sh cmd))))
 
 (defn- git-failed
   "git's failure of args in result r, as the exception git! and git-try throw: git's words."
@@ -377,7 +377,7 @@
   (let [tar (java.io.File/createTempFile "seon-checkout-at" ".tar")]
     (try
       (git! {} root (concat ["archive" "-o" (.getPath tar) rev "--"] paths) nil)
-      (let [r (sh/sh "zsh" "-c" "rm -rf \"$1\" && mkdir -p \"$1\" && tar -x -C \"$1\" -f \"$2\"" "checkout-at" dir (.getPath tar))]
+      (let [r (lib/sh "zsh" "-c" "rm -rf \"$1\" && mkdir -p \"$1\" && tar -x -C \"$1\" -f \"$2\"" "checkout-at" dir (.getPath tar))]
         (when-not (zero? (:exit r))
           (throw (ex-info (str "checkout-at " rev ": " (str/trim (str (:err r) (:out r)))) {})))
         dir)
@@ -456,7 +456,7 @@
                    (loop [] (let [form (read {:eof ::end} r)] (when-not (= ::end form) (declare-aliases! form) (recur)))))
                  (catch Throwable e (ex-message e))
                  (finally (run! remove-ns (map ns-name @made)))))
-          flag (let [r (sh/sh interp flag :in text)]
+          flag (let [r (lib/sh interp flag :in text)]
                  (when-not (zero? (:exit r)) (str/trim (str (:err r) (:out r))))))))
 
 (defn unreadable
@@ -611,7 +611,7 @@
         log (str dir ".build.log")
         clean child-env-scrub
         step (fn [what args]
-               (let [r (apply sh/sh "zsh" "-c" "\"$@\" >> \"$0\" 2>&1" log (concat clean args))]
+               (let [r (apply lib/sh "zsh" "-c" "\"$@\" >> \"$0\" 2>&1" log (concat clean args))]
                  (when-not (zero? (:exit r))
                    ;; the log's text travels with the error: a test that removes its scratch keeps the cause
                    (error #'seon.fx/build :seon.fx/io-error (str what " exited " (:exit r) "; its log: " log) {:path dir :log (slurp log)}))))]
@@ -977,7 +977,7 @@
         ;; its built products (the runtime, the native libraries) are its root's checkout's, the tree whose pins the root runs on, so a
         ;; candidate is judged on its own program and its root's runtime, never the main tree's (a worktree root on another Jolt pin
         ;; judged on main's: docs/merging.md#a-merge-runs-what-the-change-reaches)
-        at (sh/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo (cfg/checkout))]
+        at (lib/sh (str (cfg/checkout) "/bin/worktree") "--at" dir sha repo (cfg/checkout))]
     (cond
       (not (zero? (:exit at))) (error #'seon.fx/run-on-checkout :seon.fx/io-error (str "bin/worktree --at exited " (:exit at) ": " (:err at)) {:path dir})
       :else
@@ -994,13 +994,13 @@
               ;; a run with no candidate is main's tree, and its build is kept by that tree (bin/build reads the stamp): a red's second run
               ;; or the next day's reuses it, measured at 45 s against 2 s. One slot, the last tree built
               _ (when (and (empty? files) (.isFile (java.io.File. (str slot "/seon"))))
-                  (doseq [n kept-build] (sh/sh "cp" "-c" (str slot "/" n) (str dir "/target/" n))))
+                  (doseq [n kept-build] (lib/sh "cp" "-c" (str slot "/" n) (str dir "/target/" n))))
               ;; the binary root runs, with its build record, over the clone bin/worktree --at took of the main tree's: what a gate's
               ;; runner judges current for the candidate's tree (seon.root/binary-current) is the binary that is running
               _ (when-not all?
                   (doseq [n ["seon" "seon.stamp" "seon.tree" "seon.program"]
                           :let [f (java.io.File. (str (cfg/checkout) "/target/" n))] :when (.isFile f)]
-                    (sh/sh "cp" "-cf" (.getPath f) (str dir "/target/" n)))
+                    (lib/sh "cp" "-cf" (.getPath f) (str dir "/target/" n)))
                   ;; and root's kept stores, so the candidate's plan and seed import only what it changed: the plan's program
                   ;; store (a branch per tree, keyed by the importer: seon.test-store/kept-program-store) and the process
                   ;; tests' store (its source fact keyed by the indexing code, seon.root/kept-index!: a clone whose code moved
@@ -1012,22 +1012,22 @@
                           :when (and (.isDirectory d) (re-matches #"(program-store|test-store)-[0-9a-f]+" n)
                                      (.isFile (java.io.File. d "data.mdb")))]
                     (let [to (str dir "/target/" rel)]
-                      (seon.lib/remove-tree! to) (sh/sh "mkdir" "-p" to)
+                      (seon.lib/remove-tree! to) (lib/sh "mkdir" "-p" to)
                       (doseq [n ["data.mdb" "reach-graph.fasl"] :when (.isFile (java.io.File. d n))]
-                        (sh/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))))
+                        (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))))
               ;; a gate's run builds only through its runner, when the binary is not current for the candidate's tree
               ;; (bin/test's plan: seon.root/binary-current, rule (a)); the full run builds main's tree here, into its kept slot
-              b (if all? (apply sh/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])) {:exit 0})
+              b (if all? (apply lib/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])) {:exit 0})
               _ (when (and all? (empty? files) (zero? (:exit b)))
                   (.mkdirs (java.io.File. ^String slot))
-                  (doseq [n kept-build] (sh/sh "cp" "-cf" (str dir "/target/" n) (str slot "/" n))))]
+                  (doseq [n kept-build] (lib/sh "cp" "-cf" (str dir "/target/" n) (str slot "/" n))))]
           (if (not (zero? (:exit b)))
             (do (spit log (str (:out b) (:err b)))
                 (error #'seon.fx/run-on-checkout :seon.fx/io-error (str (build-failure (str (:out b) (:err b)) files) "; its log: " log) {:path dir}))
             ;; the tree's shards cache their verdicts in this checkout's verdict cache, named to them,
             ;; so the verdicts read below are the ones its run wrote
             (let [out (str dir "/target/prove/run")
-                  r (apply sh/sh (concat clean [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))]
+                  r (apply lib/sh (concat clean [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))]
                                          (if all? (full-run-command out) (test-command (sort-by str (distinct tests)) out))
                                          [:dir dir]))
                   plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
@@ -1057,8 +1057,8 @@
                             (not @green?) (assoc :kept kept))})))))
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [run (java.io.File. (str dir "/target/prove/run"))
-                       mv (when (and (not @green?) (.isDirectory run)) (sh/sh "mv" (.getPath run) kept))
-                       rm (sh/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
+                       mv (when (and (not @green?) (.isDirectory run)) (lib/sh "mv" (.getPath run) kept))
+                       rm (lib/sh (str (cfg/checkout) "/bin/worktree") "--remove-at" dir)]
                    (spit log (str (when mv (str "\nkept the run's logs (not all green): " kept ": exit " (:exit mv) (:err mv)))
                                   "\nremove-at " dir ": exit " (:exit rm) "\n" (:out rm) (:err rm)) :append true)))))))
 
@@ -1475,7 +1475,7 @@
                     "sample $p 5 -file sample.txt > /dev/null 2>&1\n"
                     "lsof -p $p > lsof.txt 2>&1\n"
                     "g=$(ps -o pgid= -p $p | tr -d ' '); [[ -n $g ]] && ps -o pid,ppid,pgid,stat,etime,%cpu,rss,command -g $g > ps.txt 2>&1\n")
-        _ (sh/sh "zsh" "-c" script "evidence" dir (str pid))
+        _ (lib/sh "zsh" "-c" script "evidence" dir (str pid))
         _ (some->> (lib/tail-bytes stderr (cfg/value :seon.config.agent/stall-fibers-bytes)) (spit (str dir "/fibers.txt")))
         files (into {} (for [[k f] {:sample "sample.txt" :lsof "lsof.txt" :ps "ps.txt" :fibers "fibers.txt"}
                              :let [path (str dir "/" f) file (java.io.File. path)]

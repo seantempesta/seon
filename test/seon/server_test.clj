@@ -320,6 +320,23 @@
     (is (nil? (:ex sourced)) (str "source resolves in a namespace the agent switched to: " (pr-str (:ex sourced))))
     (is (clojure.string/includes? (str (:text sourced)) "defn help") "and reads the definition")))
 
+(deftest a-done-shells-on-no-thread-of-roots
+  ;; task seon.root/a-boot-runs-no-shell-of-its-own: a connection is answered on its own thread (seon.server/serve!), and
+  ;; seon_done's answer reads the checkout's uncommitted files through git (seon.fx/uncommitted): clojure.java.shell called
+  ;; off a fiber copies on futures, two clojure-agent-send-off-pool threads root does not declare, which outlive the answer.
+  ;; Every shell runs on a fiber (seon.lib/sh, docs/machine.md#processes): root's threads are the same after the answer.
+  ;; A root of its own (:group): no earlier test's idle pool thread can take the copies.
+  (let [roster (str "(frequencies (map #(clojure.string/replace (.getName ^Thread %) #\"-\\d+$\" \"\")"
+                    " (keys (Thread/getAllStackTraces))))")
+        [before done after] (at/in-agent (fn [{:keys [agent]}]
+                                           [{:op :eval :agent "root" :code roster} {:op :done :agent agent}
+                                            {:op :eval :agent "root" :code roster}])
+                                         {:group :done-threads})
+        pool #(get (:value %) "clojure-agent-send-off-pool" 0)]
+    (is (map? (:value before)) (pr-str before))
+    (is (clojure.string/includes? (str (:line done)) ":outcome") (pr-str done))
+    (is (= (pool before) (pool after)) (str "send-off threads before and after the done: " (pool before) " " (pool after)))))
+
 (deftest done-answers-the-judges-reasons
   ;; dogfood 2026-10-25: seon_done answered {:judging ...} and ended the agent, so an outside agent
   ;; never saw its verdict. It answers when main holds the judgement: here the one proof was never

@@ -244,18 +244,15 @@
      max-turns (assoc :seon.config.agent/max-turns max-turns))])
 
 (defn earlier-agents-tx
-  "A new boot's root is no longer the root of the agents an earlier boot started: their link to
-  root retracted (their processes ended with that boot; history keeps that root started them), so
-  root's agents are this boot's (root's walk, :seon.agent/_root), the user's, and root's own session (key \"root\",
-  seon.root/root-session-boot-tx), which outlive a boot and keep their link; one still shown live (:busy,
-  :idle, :spawning: a root that crashed or was stopped wrote no end) is :dead, its running form
-  retracted; and a stall one showed is over, its :seon.process/stall retracted with its process (an
+  "What a new boot changes about the agents an earlier boot started: each keeps its link to root
+  (:seon.agent/root, so root's page holds every boot's sessions, grouped by :seon.agent/boot,
+  seon.root/root-session-pattern); one still shown live (:busy, :idle, :spawning: a root that
+  crashed or was stopped wrote no end) is :dead, its running form retracted; and a stall one showed is over, its :seon.process/stall retracted with its process (an
   open :stalled problem never outlives it)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db] (let [live (:seon.status/live (contract/properties :seon.agent/status))
              agents (remove (fn [[a]] (:seon.user/name (d/entity db a))) (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db))]
-         ;; root's session keeps its link to root, as the user does: it outlives a boot (its process does not)
-         (-> (vec (for [[a r] agents :when (not= "root" (:seon.agent/key (d/entity db a)))] [:db/retract a :seon.agent/root r]))
+         (-> []
              (into (mapcat (fn [[a]] (when (live (:seon.agent/status (d/entity db a)))
                                        [[:db/add a :seon.agent/status :dead]])))
                    agents)
@@ -363,13 +360,34 @@
                 (for [[id m] (:seon.config.ai/models c)]
                   (-> (dissoc m :seon.config.ai/max-in-flight :seon.config.ai/max-tokens) (assoc :seon.ai.model/id id))))))
 
+(def entry-pattern
+  "What an agent's entry reads where another's pull joins it (seon.render.ui/agent's nested form): its identity, its process's status, its
+  branch and turns, when it started, its name when it is a user (root holds the user too), and its task's id, plan, outcome, reason and who started it. One pattern for every join of
+  :seon.agent/agents (an agent's, a user's, root's). See docs/users.md#whats-on-screen."
+  [:seon.agent/key :seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms
+   {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]}])
+
+(defn agents-join
+  "The join of the agents an entity started, depth levels deep (`entry-pattern` at each), the last level holding each one's started
+  agents as ids alone, so its entry says how many there are below and nothing is cut silently. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat :seon.config.render/agent-tree-depth] :map]}
+  [depth]
+  {:seon.agent/agents (conj entry-pattern (if (> depth 1) (agents-join (dec depth)) {:seon.agent/agents [:db/id]}))})
+
+(defn user-pattern
+  "What the user's pull reads: its name and the agents it started, each with the ones it started, to :seon.config.render/agent-tree-depth
+  levels (`agents-join`): its page and every page's agents list are this one pull. Written on the user at each boot (`boot-tx`), so a
+  change of the key reaches it at the next. See docs/users.md#whats-on-screen."
+  {:malli/schema [:=> [:cat] [:vector :any]]}
+  [] [:seon.agent/key :seon.user/name (agents-join (cfg/value :seon.config.render/agent-tree-depth))])
+
 (defn boot-tx
   "Root's boot: its id for this process lifetime (the config in force, max-running among its keys, is written with it,
   config-tx), and the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
   makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.root/signed-in). See docs/users.md#what-each-thing-is."
   {:malli/schema [:=> [:cat :string :string] [:vector :any]]}
   [boot name]
-  (into [{:db/id "user" :seon.agent/key name :seon.user/name name}
+  (into [{:db/id "user" :seon.agent/key name :seon.user/name name :seon.ctx/pattern (user-pattern)}
          {:seon.root/id :root :seon.root/boot boot :seon.root/signed-in "user"}]
         (agent-tx (keyword name) {})))
 
