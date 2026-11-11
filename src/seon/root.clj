@@ -1122,27 +1122,33 @@
   "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/sessions) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
 (defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through the system entity to the sessions root
-  holds, newest first to :seon.config.ctx/window, each with what its entry reads, its boot and the agents it started as the user's pull joins them (seon.task/entry-pattern,
-  seon.task/agents-join: root's page draws each under its starter, not again at the top), which root's page
-  draws (seon.render.ui/root nested) and root's model asks for at its REPL (my.user/sessions). See docs/users.md#whats-on-screen."
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join to whoever started it (:seon.agent/_agents, the
+  user: its :seon.agent/agents holds root's session as one of the agents it started), pulled as the user's own pull is (seon.task/user-pattern: the
+  agents it started, each with the ones it started, to :seon.config.render/agent-tree-depth levels). Root's page draws that tree (seon.render.ui/agent's
+  person entry, the agents under it) and root's model asks for it at its REPL (my.user/sessions). See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat] [:vector :any]]}
   [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
-           {:seon.agent/root [:seon.root/id {[:seon.agent/_root :limit :seon.config.ctx/window :reverse true] (conj task/entry-pattern :seon.agent/boot (task/agents-join (cfg/value :seon.config.render/agent-tree-depth)))}]}))
+           {:seon.agent/_agents (task/user-pattern)}))
 
 (defn root-session-tx
   "Root's session, made at the boot of a main that has none (`root-session-boot-tx`), an ordinary agent made the ordinary way: an agent
   entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern
-  `root-session-pattern`, and the task request/root of the chat template (seon.template/request-tx), parked, its agent that entity, so
-  the first message's wake spawns it. Root's own entity is untouched: an entity's id derives from its identity, so it cannot take a
-  key too. See docs/users.md#roots-session."
+  `root-session-pattern`, its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
+  chat template (seon.template/request-tx), parked, its agent that entity, so the first message's wake spawns it. The user started it
+  (:seon.task/started-by, the user's :seon.agent/agents: docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
+  derives from its identity, so it cannot take a key too. See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db]
   (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))]
     (if (contract/error? tx)
       (throw (ex-info (str "root's session task was refused: " (:seon.error/message tx)) tx))
-      (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)}]
-            (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked})))))
+      ;; started by the user: the user's tree holds root's session and what it launches (docs/users.md#who-started-whom); drawn as a
+      ;; stage (seon.render.ui/stage, its own render, which a person turns back to the conversation): the page a fresh system opens on
+      (let [user (task/sender (cfg/value :seon.config.root/user-name))]
+        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)
+                :seon.render/hiccup 'seon.render.ui/stage}
+               (assoc user :seon.agent/agents "root-session")]
+              (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
 (defn root-session-boot-tx
   "At boot, root's session: made when main has none (`root-session-tx`; the owner's ruling, root's agent is there from boot), else
@@ -1503,6 +1509,8 @@
             compacted (when (and (= :lmdb backend) (cfg/value :seon.config.store/sole-writer?)) (pdb/compact-if-due! path))
             sole? (and (= :lmdb backend) (cfg/value :seon.config.store/sole-writer?))
             opened (pdb/open! backend path datoms main)
+            ;; before any agent: a tree's branch left by an earlier root's end, its last run cut short, is dropped as that run would have
+            dropped-trees (pdb/drop-trees! (:conn opened) main)
             ;; still the only process: old snapshots swept when enough commits have landed, and the freed pages compacted at once
             retained (when sole? (pdb/retain! (:conn opened) (cfg/value :seon.config.store/keep-commits)))
             compacted (if (pos? (:swept retained 0))
@@ -1542,7 +1550,7 @@
         (lib/static!)
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
-                 {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained
+                 {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained :dropped-trees dropped-trees
                   :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
 
 (defn- flow-error
@@ -1587,7 +1595,7 @@
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
-        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors digest digest-ms contracts pid fd compacted retained main-inputs]}
+        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors digest digest-ms contracts pid fd compacted retained dropped-trees main-inputs]}
         (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
@@ -1621,7 +1629,7 @@
               :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
-              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :seeded seeded :caught-up caught-up :seed-ms (lib/r2 seed-ms)
+              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :dropped-trees dropped-trees :seeded seeded :caught-up caught-up :seed-ms (lib/r2 seed-ms)
                      :config-errors config-errors :digest digest :digest-ms (lib/r2 digest-ms)
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)
                      :stale-binary stale}}

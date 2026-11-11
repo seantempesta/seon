@@ -24,6 +24,14 @@
 # FAILED from its exit status alone, naming each red and anything that did not run; and prints its line
 # for the merge commit's message: the sha, the plan's counts, the verdicts, the reds, the src delta of
 # HEAD against its first parent and the keys left out against main's last merge message.
+#
+# bin/prove --root PORT [NS ...] — asks the root listening on PORT to prove this checkout's files
+# (docs/merging.md#a-session-proves-through-root): the server's :prove with this checkout and its tree id, streamed. Each test's
+# verdict prints as it lands (PASS ns/test N ms; RED ns/test and its failures; NO-VERDICT ns/test: why); the run ends on PROVE
+# OK (exit 0), or PROVE FAILED (exit 1) after the reds or the typed error that ended it (no root on PORT, the connection's
+# end before the answer: the socket's EOF, never a timer). The client is target/seon's prove mode (seon.main/prove-client).
+# The process tests, the check steps, the build and the seed are items of the same run (docs/merging.md#the-test-service),
+# run on this checkout by root's effect owner; no marker is written.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # a run is a process group of its own, and a stop (TERM, INT, HUP: a timeout, a ^C, bin/land stopped) ends the
 # whole group, so nothing it started outlives it (2026-11-08: a stopped landing left its prove, shards and check
@@ -56,6 +64,13 @@ merge_verdict() {
   [[ $verdict == "MERGE OK" ]]
 }
 [[ ${1:-} == --merge-verdict ]] && { merge_verdict "$2" "$3"; exit $? }
+if [[ ${1:-} == --root ]]; then
+  [[ -x $ROOT/target/seon ]] || { echo "prove: no target/seon; run bin/build seon"; echo "PROVE FAILED"; exit 1 }
+  PORT=$2; shift 2
+  # the binary's environment and its libraries (bin/env exports them), and its home, as bin/root runs it
+  . "$ROOT/bin/env"
+  cd "$ROOT/target" && SEON_CHECKOUT=$ROOT HOME=$ROOT/target/home exec ./seon prove "$PORT" "$ROOT" "$@"
+fi
 OUT=
 [[ ${1:-} == --out ]] && { OUT=$2; shift 2 }
 MERGE=0
