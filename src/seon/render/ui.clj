@@ -1510,7 +1510,7 @@
   (let [t (session/example-t db0 k)
         db (d/as-of db0 t)
         c (ctx/agent-ctx ix db (seon.db/eid db :seon.agent/key k))
-        placed (ctx/placed-messages db c)]
+        placed (ctx/placed-messages c)]
     (into [:details {}
            [:summary {:class "muted" :wire/for "page"} (str "example session " k)]
            [:p {} (session/example-open k (:seon.agent/description c))]]
@@ -1677,7 +1677,7 @@
         ;; working: a turn begun that has not ended (its branch holds both numbers)
         working? (> turn (or (ratom/realize (:seon.agent/ended-turn c)) 0))
         _ (let [v (get c :seon.message/_to)] (when (map? (ratom/untracked v)) (doall (keys v))))
-        placed (when k (ctx/placed-messages db c))
+        placed (when k (ctx/placed-messages c))
         person? (fn [m] (some? (get-in m [:seon.message/from :seon.user/name])))
         said-in (fn [n] (when-let [cid (ctx/call-of db n k)] (let [r (some-> (get-in c [:seon.model-call/_agent cid :seon.model-call/reply]) ratom/realize)] (when-not (str/blank? r) [cid r]))))
         asks (vec (for [n (sort (filter int? (keys placed)))
@@ -1851,7 +1851,7 @@
   (let [k (ratom/realize (:seon.agent/key c))
         turn (or (ratom/realize (:seon.agent/turn c)) 0)
         ;; where each message was read, once for every turn (a turn is given its own, so a message delivered runs this list and the turn it reached)
-        placed (when k (ctx/placed-messages db c))]
+        placed (when k (ctx/placed-messages c))]
     [:ol {:id "c-rows"}
      [#'system-message {}]
      [#'session-examples {}]

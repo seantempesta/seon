@@ -547,7 +547,7 @@
 (deftest an-owners-message-reaches-the-next-turn
   ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
   ;; root's delivery; the turn that takes them writes the message fact on its branch, so the
-  ;; conversation holds it in tx order (seon.ctx/turn-members), rendered by the message fact's
+  ;; conversation holds it in tx order (seon.ctx/placed-messages), rendered by the message fact's
   ;; own messages (seon.seon.fixtures/eval-messages; docs/render.md)
   (let [[m] (seon.fixtures/message-messages {} {:seon.message/from {:seon.agent/key "owner"} :seon.message/body "use demo/g, not a new helper"})]
     (is (= "user" (:role m)))

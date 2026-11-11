@@ -360,7 +360,7 @@
         [st outs] (#'prove/grant (assoc st :slots 1))]
     (is (= [:a2 #{'app.slow-test/u}] ((juxt #(get-in % [:req :id]) #(get-in % [:req :names])) (first (batches outs))))
         "the free slot goes to the turn's item")
-    (is (= 1 (get-in st [:items ['app.cheap-test/t "dc"] :skips])) "and the batch's item passed over ages a skip")))
+    (is (= 2.0 (prove/item-value (get-in st [:items ['app.cheap-test/t "dc"]]) (:bid st))) "and the batch's item passed over aged a grant: its one waiter plus one, over its 1 ms")))
 
 ;; every wait ends: a batch whose run errored (a test child that died) answers each of its askers with that error, never silence
 ;; no shards: a worker pulls one item, so two items of one namespace are two grants, and a second worker takes the second
@@ -378,3 +378,44 @@
     (is (false? (:green r)))
     (is (seon.contract/error? (get-in r [:results 'app.x-test/t])) "the asker holds the typed error for the item")
     (is (= 1 (:slots st)))))
+
+;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
+;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out
+(deftest each-asker-is-told-a-verdict-as-it-lands
+  (let [it {:agent :a1 :ms 5}
+        [st o1] (prove/ask-items (items-st 2) "k1" :batch {['app.x-test/t "d1"] it ['app.x-test/u "d2"] it})
+        [st _] (prove/ask-items st "k2" :batch {['app.x-test/t "d1"] it})
+        [bt bu] (sort-by #(str (get-in % [:req :names])) (batches o1))
+        [st vt] (step/answered st (:tag bt))
+        [st o2] (prove/batch-ended st (parse-long (second vt)) (green-of 'app.x-test/t))
+        [st vu] (step/answered st (:tag bu))
+        died {:seon.error/type :seon.test/fork-refused :seon.error/message "the test child could not be forked"}
+        [_ o3] (prove/batch-ended st (parse-long (second vu)) died)
+        told (fn [outs] (mapv #(select-keys % [:key :test :digest :status]) (filter #(= :prove-verdict (:op %)) outs)))]
+    (is (= [{:key "k1" :test 'app.x-test/t :digest "d1" :status :pass} {:key "k2" :test 'app.x-test/t :digest "d1" :status :pass}] (told o2))
+        "both askers of the one item are told its verdict")
+    (is (= ["k2"] (keys (answers o2))) "k2, whose only item it was, is answered; k1 still waits on u")
+    (is (< (.indexOf ^java.util.List (mapv :op o2) :prove-verdict) (.indexOf ^java.util.List (mapv :op o2) :asker-answered)) "told before it is answered")
+    (is (= [{:key "k1" :test 'app.x-test/u :digest "d2" :status :no-verdict}] (told o3)) "an item with no verdict is told so")))
+
+(defn queue-of
+  "Grant's argument at n: the service's state with n items queued for one batch asker and one free worker. See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
+  [n]
+  [(-> (items-st 1)
+       (assoc :items (into {} (for [i (range n)] [[(symbol "app.q-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms (inc (mod i 97)) :status :queued :waiters #{1} :at 0}]))
+              :askers {1 {:prio :batch :left #{} :results {}}}))])
+
+;; docs/merging.md#the-test-service: dispatch is one grant a free worker; what it costs per item queued
+(deftest a-grant-costs-what-is-queued
+  (seon.cost/proof
+    {:of 'seon.prove/grant :input 'seon.prove-test/queue-of
+     :n "items queued, one worker free"
+     :work "one pass over the queued items for the most valuable (item-value, its age read from the grant it was queued at, and its waiters read only when an asker is a turn's), and the one item granted written: nothing of the others (linear in reads, constant in writes)"
+     :growth :linear
+     ;; measured 2026-11-11 at 100 queued: 6,261 ticks and 19.0 KB a grant, where aging every item it passed over, by a lazy
+     ;; filter and apply max-key, took 43.2k ticks and 355.9 KB
+     :per-n {:ticks 100 :bytes 250}
+     :fixed {:ticks 2000 :bytes 2000}
+     :sizes [100 300 1000]}))
