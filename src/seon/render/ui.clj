@@ -1080,9 +1080,11 @@
    :open-problem "problems to clear" :no-proofs "no proof registered" :no-design "plan unchanged since the run began"
    :behind "judged before main moved"})
 
-(def ^:private state-words
-  "What a proof's verdict says in the status table."
-  {:pass "green" :fail "failed" :error "failed" :undefined "not written yet" :unknown "no verdict yet" :not-run "not run" :deferred "left to root's gate"})
+(defn- proof-state
+  "What proof state st says, k :seon.status/title (its word) or :seon.status/explain (Markdown: what it means and what to do next),
+  read from :seon.ctx.status/proof-state's schema: the words are data, the person's and the model's alike. See docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat :keyword :keyword] [:maybe :string]]}
+  [k st] (get (k (contract/properties :seon.ctx.status/proof-state)) st))
 
 (defn- as-text
   "A value of the status as one line of source: marked code as its text, a thrown error as its message, any other value by the printer."
@@ -1141,7 +1143,7 @@
      [:h2 "Your proofs"]
      (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
      (when (next proofs)
-       (into [:ul {:key :proofs}] (for [{:keys [test status]} proofs] [:li {:key test} [:code (str test)] ": " (get state-words status (kname status))])))
+       (into [:ul {:key :proofs}] (for [{:keys [test status]} proofs] [:li {:key test} [:code (str test)] ": " (or (proof-state :seon.status/title status) (kname status))])))
      ;; not written: where it goes, and a namespace's example once, its own, so a proof written moves neither
      (for [[n us] (group-by #(:ns (:shape %)) unwritten) :let [{:keys [requires helpers example]} (:shape (first us))]]
        (concat
@@ -1158,19 +1160,18 @@
             (when example [:pre [:code example]])]])))
      ;; red: which, every assertion that failed with what it got (never a count in place of them), and what it calls (the test's own
      ;; source is not repeated: the agent wrote it, or reads it by (source test))
-     (for [{:keys [test failures calls]} red]
+     (for [{:keys [test failures calls status]} red]
        [:div {:key test}
         [:p [:code (str test)] " fails."]
+        (markdown (proof-state :seon.status/explain status))
         (for [[i {a :assert as :asserts g :got m :message}] (map-indexed vector failures)]
           [:p {:key i} "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."])
         (when (seq calls)
           [:div {:key :calls} [:p "It calls " (str/join ", " (map #(str "`" (:var %) "`") calls)) "."]
            (for [{v :var src :source} calls :when src] [:pre {:key (str v)} [:code src]])])])
-     (let [names #(str/join ", " (map (fn [p] (str "`" (:test p) "`")) %))]
-       (list
-        (when (seq died) [:p {:key :died} "No verdict, because the test run failed (above): " (names died) ". Running it again fails the same way until what stopped it is fixed."])
-        (when (seq deferred) [:p {:key :deferred} "Run when your task merges, not in your turn (each starts a process): " (names deferred) ". Nothing to do for them now."])
-        (when (seq unknown) [:p {:key :not-run} "Not judged yet for your code as it is now: " (names unknown) ". " [:code "(prove)"] " runs them."])))
+     ;; each state with no verdict: what it means and what helps it, its schema's words, then its proofs
+     (for [[st ps] [[:not-run died] [:deferred deferred] [:unknown unknown]] :when (seq ps)]
+       [:div {:key st} (markdown (str (str/join ", " (map #(str "`" (:test %) "`") ps)) ": " (proof-state :seon.status/explain st)))])
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)
        [:div {:key :unmerged}
