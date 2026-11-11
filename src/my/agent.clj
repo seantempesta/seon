@@ -463,13 +463,15 @@
 (declare source-fn)
 
 (defn- text-of
-  "The text x names on this branch, as lines reads it: a var's or a namespace's source (source-fn), a section
+  "The text x names on this branch, as lines reads it: a var's source (source-fn), a namespace's file as the branch holds it
+  (seon.source/file-text: its ns form first, then every definition, so a line number is the file's), a section
   (\"docs/x.md#a\": its text, numbered as grep numbers it) or a page whole (seon.doc/markdown), a task's plan
   (its id). nil when it names none of them."
   {:malli/schema [:=> [:cat [:or :symbol :string]] [:maybe :string]]}
   [x]
   (let [db (agent/db)]
-    (cond (symbol? x) (source-fn x)
+    (cond (and (symbol? x) (not (namespace x)) (pdb/eid db :ns/name x)) (source/file-text db x)
+          (symbol? x) (source-fn x)
           ;; a section's own text, as grep reads and numbers it (its heading is the address's)
           (str/includes? x "#") (some->> (pdb/eid db :seon.doc/address x) (d/entity db) :seon.doc/text)
           (str/ends-with? x ".md") (doc/markdown db x)
@@ -478,8 +480,9 @@
 (defn lines
   "Like sed -n: the lines of x, whole or from line a to line b (1-based, inclusive), one row each
   {:at \"seon.task/accumulate:3\" :text \"...\"}, numbered as grep numbers them, and shown as one block of
-  numbered lines (`lines-text`, the model render of :my.agent/lines). x is a var or a namespace
-  ('seon.task/accumulate), a section (\"docs/x.md#anchor\"), a page (\"docs/x.md\") or a task's id. Each line
+  numbered lines (`lines-text`, the model render of :my.agent/lines). x is a var ('seon.task/accumulate) or a namespace
+  ('seon.task: its file as the branch holds it, so (lines 'seon.task 380 400) reads those lines of it, and line N of a namespace
+  is the line grep answers as N for it), a section (\"docs/x.md#anchor\"), a page (\"docs/x.md\") or a task's id. Each line
   as it is written, untrimmed (grep's rows are trimmed), so an edit's old text is copied from lines, not grep. A name that holds no text answers my.agent/no-var.
   See docs/agent.md#small-answers."
   {:malli/schema [:function [:=> [:cat [:or :symbol :string]] [:or [:vector :map] :my.agent/no-var]]

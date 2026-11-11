@@ -966,15 +966,30 @@
   [db s interns]
   (or (get interns (symbol (name s))) (find-var s)))
 
+(defonce ^{:private true :doc "What this process's binary was built from, as bin/build recorded it beside the binary (target/seon.program,
+  seon.root/built-program's answer), or nil when it recorded none: read once, by its first reader (root's boot, before it
+  forks the fork server, whose agents inherit it), and kept across a reload of this namespace, so a build that moves the
+  record later never changes what a running binary says it holds. See docs/source.md#the-binary-records-its-program."}
+  built
+  (delay (let [f (java.io.File. (str (cfg/checkout) "/target/seon.program"))]
+           (when (.isFile f) (sedn/decode (slurp f))))))
+
+(defn binary-program
+  "What the running binary was built from (built): {:program :inputs :forms}, :forms the ids of every form of the tree it was
+  built from, or nil when bin/build recorded none. See docs/source.md#the-binary-records-its-program."
+  {:malli/schema [:=> [:cat] [:maybe :map]]}
+  [] @built)
+
 (defn- held?
-  "Does this process already hold form row f compiled: imported from the source tree, in a
-  namespace it holds (the binary's own; test/ is imported but not built in), every var it
-  defines bound there? A form imported into a namespace loaded earlier (a test namespace
-  loaded at boot, then a re-import adding a deftest) defines a var this process does not
-  hold yet: it is loaded, never read as an unmap (seon.stage/stage-tx)."
+  "Does this process already hold form row f compiled: the binary was built from its text (its id among the binary's forms,
+  binary-program: a form imported from a file the checkout changed since is main's, never the binary's, though its vars are
+  bound), in a namespace it holds, every var it defines bound there? The binary's record holds test/'s forms too, which no
+  binary compiles: one is held once its namespace is loaded. A form imported into a namespace loaded earlier (a test namespace
+  loaded at boot, then a re-import adding a deftest) defines a var this process does not hold yet: it is loaded, never read
+  as an unmap (seon.stage/stage-tx). With no record, nothing is held. See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :seon.host/db :map] :boolean]}
   [db f]
-  (boolean (and (:form/source (d/entity db (:e f)))
+  (boolean (and (contains? (:forms (binary-program)) (:id f))
                 (when-let [n (find-ns (:ns f))]
                   (every? (fn [[k s]] (or (not= :var k) (some-> (process-var db s (ns-interns n)) bound?)))
                           (:defines f))))))
@@ -1337,14 +1352,16 @@
 (defn program-differs
   "What this process runs that db-to's program does not, over what db-to changed from db-from (diff-plan's load set, the
   diff an agent loads at its start): each var a changed form defines whose form this process last evaluated is another
-  (loaded), as {:var :form (db-to's) :loaded (this process's, nil when none)}; [] when the process runs db-to's program
+  (loaded), or, for a var it never loaded, whose form is not the binary's (held?), as {:var :form (db-to's) :loaded (this
+  process's, nil when none)}; [] when the process runs db-to's program
   there. The oracle a run asks before its first item (the runtime invariant: a process runs its branch's program). Costs
   the diff, never the program. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :map]]}
   [db-from db-to]
   (let [now @loaded]
     (vec (for [f (:load (diff-plan db-from db-to)) [k s] (:defines f)
-               :when (and (= :var k) (not= (:id f) (get now s)))]
+               ;; a var this process never loaded runs the binary's form: the changed form is held when it is that one (held?)
+               :when (and (= :var k) (not= (:id f) (get now s)) (not (and (nil? (get now s)) (held? db-to f))))]
            {:var s :form (:id f) :loaded (get now s)}))))
 
 (defn reload-dependents!

@@ -248,7 +248,7 @@
     {:graph g :inputs in
      ;; whether the binary target/seon is (its build record, target/seon.program) runs this tree's program as a build of it would:
      ;; nil, or what differs that it bakes (seon.root/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
-     :binary-current (seon.root/binary-current db (seon.root/binary-program) tree g)
+     :binary-current (seon.root/binary-current db (seon.program/binary-program) tree g)
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)

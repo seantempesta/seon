@@ -76,7 +76,8 @@ if bin/root status >/dev/null 2>&1; then
       printf '{:op :eval :agent "root" :code "(my.root/file-slow-tests! sys)"}\n' | bin/ask "$port" >/dev/null || print "filing the slow tests' tasks failed: run (my.root/file-slow-tests! sys) at root"
       print "UPDATE OK: kept running on tree $tree (no build, no restart: its agents go on)"; exit 0
     fi
-    print "restart: ${${kept#*:restart }%%\}*}"
+    # the reason restart-for gave (the {:restart "..."} answer's text), else the whole answer: a refused connection or an error
+    if [[ $kept == *':restart "'* ]]; then print -r -- "restart: ${${kept#*:restart \"}%%\"*}"; else print -r -- "restart: ${kept}"; fi
   else
     print "restart: the tree or the inputs of main's files could not be read"
   fi

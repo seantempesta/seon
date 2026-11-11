@@ -302,6 +302,28 @@
     (is (clojure.string/includes? r "seon.repl") r)
     (is (clojure.string/includes? r "(seon.repl/edit! 'seon.repl") r)))
 
+(deftest a-namespace-edit-names-the-var-that-holds-the-text
+  ;; docs/agent.md#changing-a-definition: loop PU (2026-11-12) spent e17-34 changing one function's tail: (lines 'the.ns 380 470) was empty
+  ;; (a namespace's text was its ns form alone) and (edit! 'the.ns old new) was :not-found, the text being in a var; loop D0 lost t35-44 so
+  (let [[_ in-var nowhere ls] (at/in-agent (fn [{:keys [ns]}]
+                                             (let [n (str ns ".held")]
+                                               [(str "(ns " n ") (defn f [a] (+ a 1)) (defn g [] (* 2 3))")
+                                                (str "(seon.repl/edit! '" n " \"(+ a 1)\" \"(+ a 2)\")")
+                                                (str "(seon.repl/edit! '" n " \"(defn h\" \"(defn- h\")")
+                                                (str "(mapv :text (my.agent/lines '" n "))")])))
+        n (fn [s] (re-find #"\S+\.held" s))]
+    (is (= :not-found (get-in in-var [:value :seon.repl/refused-because])) (pr-str in-var))
+    (let [m (get-in in-var [:value :seon.error/message])
+          ns (n m)]
+      (is (str/includes? m (str ns "/f")) (str "names the var whose source holds the text: " m))
+      (is (str/includes? m (str "(seon.repl/edit! '" ns "/f ")) (str "and the edit on it, ready: " m))
+      (is (= [(symbol (str ns "/f"))] (get-in in-var [:value :seon.repl/held-by])) "the holders as data: the refusal found them"))
+    (let [m (get-in nowhere [:value :seon.error/message])
+          ns (n m)]
+      (is (= :not-found (get-in nowhere [:value :seon.repl/refused-because])) (pr-str nowhere))
+      (is (str/includes? m (str "(in-ns '" ns ")")) (str "an insertion: a new definition is evaluated in its namespace: " m)))
+    (is (some #(str/includes? % "(+ a 1)") (:value ls)) (str "lines of a namespace are its file, its definitions with its ns form: " (pr-str ls)))))
+
 (deftest a-require-at-the-repl-is-no-program
   ;; deepseek-run3/4: an eval's (require '[seon.repl-test ...]) in seon.repl was recorded as a text form of that file, so seon.repl required a test
   ;; namespace and the gate's build failed 6 times; another agent retracted such forms by hand. A REPL's require is its own, and says so; an ns form stays program
