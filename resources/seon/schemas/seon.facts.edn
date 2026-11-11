@@ -359,11 +359,11 @@
                            [:seon.search/k {:optional true} :seon.search/k]]
  ;; what the cite's render (seon.render.ui/cite) reads of its owner from the db, by the owner's identity the cite holds: a function in
  ;; the task's namespace, or among its proofs' forms' refs, is one it will change (docs/references.md#an-entity-cites)
- :seon.cite/of-read [:map {:seon.ctx/pattern [:seon.task/id :seon.task/ns {[:seon.task/proofs :by :var/name :as :proved] [:var/name {:var/form [:form/refs]}]}]}]
+ :seon.cite/of-read [:map {:description "What a cite's render reads of the task that cites, from the db, by the identity the cite holds: its namespace and the vars its proofs name, so a cited function the task will change is said so. No entity holds this; it is a pattern with a name. See docs/references.md#an-entity-cites." :seon.ctx/pattern [:seon.task/id :seon.task/ns {[:seon.task/proofs :by :var/name :as :proved] [:var/name {:var/form [:form/refs]}]}]}]
  ;; what the cite's render reads of its target from the db, by the target's identity the cite holds: the union of what each kind
  ;; of target shows (a section with its sections below; a var with its form and newest callers, each caller with the vars it
  ;; defines; a task; a schema key's entry; a namespace), so ctx holds what is cited and the page what it says (docs/references.md#an-entity-cites)
- :seon.cite/target-read [:map {:seon.ctx/pattern [:seon.doc/address :seon.doc/heading :seon.doc/lead :seon.doc/text :seon.doc/references
+ :seon.cite/target-read [:map {:description "What a cite's render reads of what is cited, from the db, by the identity the cite holds: a section's text and the sections below it, a var's form and newest callers, a task, a schema entry, a namespace. No entity holds this; it is a pattern with a name, so an agent's context holds what is cited and its page what it says. See docs/references.md#an-entity-cites." :seon.ctx/pattern [:seon.doc/address :seon.doc/heading :seon.doc/lead :seon.doc/text :seon.doc/references
                                                   {:seon.doc/_parent [:seon.doc/address :seon.doc/heading]}
                                                   :var/name :var/ns :var/doc :var/meta :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes
                                                   {:var/form [:form/id :form/src :form/defines :form/refs :form/quoted :form/keywords]}
