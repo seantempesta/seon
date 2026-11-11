@@ -114,6 +114,10 @@ Of `seon.cost/measure` calling a function 17 to 60 times at each size: "oh god j
 
 "all agents before they compact should reflect on the work they did ... and report to their parent". And on what it leaves behind: "instruct agents to update docs and tasks in particular and to grep around and find the parts that might be out of date and not just edit an append log.md. I want to move away from just putting all the information in one place and into distributing the updates to bring the system up to date before each session is concluded. Over time I want to stop drift." Stated in AGENTS.md §2 and [sessions](sessions.md#the-way-improves).
 
+### Live agent runs harvest the system's problems; their good refinements reach disk (owner, 2026-11-11)
+
+"So context is basically farming for problems while they are testing. System improvemetns they should integrate and tell specific agents what they are seeing. Not teach to the test, recognize systemic failure and adapt over time". And of the refine step: "During the refine page agents are refining the tasks and docs. If after our claude agent reviews the work it's good additions I want those synced to disk. This isn't a metric I want to actually solve the tasks and improve the system." Stated in [sessions](sessions.md#live-agent-runs-find-the-systems-problems).
+
 ## 2026-11-10 rulings
 
 The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.

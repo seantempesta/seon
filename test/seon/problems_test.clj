@@ -786,6 +786,8 @@
     (is (= [[:catch v]] (unnamed db1)) "a catch the page does not name")
     (testing "a namespace outside src (an agent's app, a test: a deftest's `is` expands to a catch) is no failure point"
       (is (= [] (unnamed (d/db-with db1 [[:db/add ns-e :ns/file "test/app/x_test.clj"]])))))
+    (testing "a deftest is a test wherever it lives (its var's :test, the compiler's fact): one an agent defined in a namespace of src is no failure point"
+      (is (= [] (unnamed (d/db-with db1 [[:db/add (pdb/eid db1 :var/name v) :var/meta :test]])))))
     (testing "the page names it: no problem, nothing written to close it"
       (let [page (str "# Failure points\n\n| failure | edge |\n|---|---|\n| x | `" v "` |\n")]
         (is (= [] (unnamed (d/db-with db1 (seon.doc/load-tx db1 "docs" {"docs/failure-points.md" page})))))))))

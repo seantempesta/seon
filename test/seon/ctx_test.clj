@@ -903,7 +903,9 @@
         (let [[parts page] (try (enter-agent! {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)]
                                 (finally (end-agent!)))
               shown (:units parts)
-              top (remove :parent shown)
+              ;; in the lists' order the model reads them in (render-ctx-hiccup's), each list's members in the page's order; the page's
+              ;; own unit (its layout's output, seon.render/placed-units' first) is no part
+              top (mapcat (fn [sel] (filter #(and (nil? (:parent %)) (= sel (:container %))) shown)) ["#p-task" "#c-rows"])
               by (into {} (map (juxt :id identity)) shown)
               root-of (fn root-of [u] (if-let [p (by (:parent u))] (root-of p) u))]
           (is (= (remove #{"agent-state" "chat-ask" "chat-end" "page-rules"} (map :id top)) (keys page)) "every component placed in a list, the conversation's too, in order: nothing left out but what is the person's alone, which the model is sent none of")
@@ -1570,3 +1572,15 @@
           (is (= 1 (count (:seon.message/_to c))) "the pull holds the message")
           (is (= ["m1"] (mapv second (get (ctx/placed-messages db c) 1))) "and it is placed, at the turn that read it"))))))
 
+
+(deftest a-swap-at-a-key-the-join-does-not-hold-says-so
+  ;; docs/ctx.md#changing-it-swap: a join's members are keyed by their entity ids; a swap! whose path names a key the join holds no member
+  ;; at (a map entry, a string id) is refused saying that, with the keys it does hold, not only that a new member names its identity
+  ;; (Trial 2 run 4: an agent passed (first (filter .. join)), a map entry, and read the refusal as a forbidden write: six evals)
+  (let [db (:db-after (d/with (ts/test-db) [{:seon.agent/key k :seon.agent/turn 1}
+                                            {:seon.message/id "m1" :seon.message/from {:seon.agent/key "user"} :seon.message/body "hi" :seon.message/to [[:seon.agent/key k]]}]))
+        m (seon.db/eid db :seon.message/id "m1")
+        said (first (as-agent! db #(try (swap! ctx/ctx assoc-in [:seon.message/_to [m {:seon.message/body "hi"}] :seon.message/body] "edited") nil
+                                        (catch clojure.lang.ExceptionInfo e (pr-str (ex-data e))))))]
+    (is (str/includes? (str said) "no member is held at") said)
+    (is (str/includes? (str said) (str "at their entity ids: " m)) "and it names the keys the join holds")))

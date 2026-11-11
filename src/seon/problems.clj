@@ -135,11 +135,13 @@
   [{:law :catch :fact :form/catches :page "docs/failure-points.md" :except #{"seon.check" "seon.e2e"}}])
 
 (defn unnamed-sites
-  "Each site of a law (`laws`) its page does not name: a live form carrying the law's fact,
-  by the var it defines, in a namespace of Seon's own src (an agent's app and any test are not
-  failure points: a deftest's `is` expands to a catch), whose name no section of the page cites (:seon.doc/names), as an
-  :unnamed-site row. Cost: the forms carrying the fact (aevt) and the page's cited names, once.
-  With only (a set of form entity ids) just those forms are read (what `caused` asks)."
+  "Each site of a law (`laws`) its page does not name: a live form carrying the law's fact, by
+  the var it defines, in a namespace of Seon's own src, and no test's (a form defining a var whose
+  :var/meta holds :test, the compiler's fact of a deftest wherever it lives, an agent's REPL
+  namespace included: its `is` expands to a catch), whose name no section of the page cites
+  (:seon.doc/names), as an :unnamed-site row. Cost: the forms carrying the fact (aevt) and the
+  page's cited names, once. With only (a set of form entity ids) just those forms are read (what `caused` asks).
+  See docs/health.md#a-laws-unnamed-site."
   {:malli/schema [:function [:=> [:cat :seon.host/db :map] [:vector :seon.problems/row]]
                   [:=> [:cat :seon.host/db :map [:maybe [:set :int]]] [:vector :seon.problems/row]]]}
   ([db ans] (unnamed-sites db ans nil))
@@ -156,14 +158,17 @@
                                         (into {} (map (fn [{:keys [e v]}] [v (:impl/protocol (d/entity db e))])) (d/datoms db :aevt :impl/form))))]
              fe (distinct (if only (filter (fn [e] (seq (d/datoms db :eavt e fact))) only) (map :e (d/datoms db :aevt fact))))
              :when (program/live? db fe)
-             :let [f (d/entity db fe)
-                   ;; a catch is attributed to its form: the vars it defines, else the multimethod or
+             :let [f (d/entity db fe)]
+             ;; a test is no failure point: a deftest's var holds :test (its definition's metadata), in test/ or in a
+             ;; namespace an agent made at its REPL, which takes a file under src (seon.source/namespace-path)
+             :when (not-any? #(contains? (:var/meta %) :test) (:form/defines f))
+             :let [;; a catch is attributed to its form: the vars it defines, else the multimethod or
                    ;; protocol it extends, else the form's id: no site drops
                    sites (or (seq (map :var/name (:form/defines f))) (some-> (@owners fe) vector) [(:form/id f)])
                    nsym (:ns/name (:form/ns f))]
              v sites
-             ;; the law is Seon's own source's (bin/laws scans src): an agent's app, and a test's
-             ;; `is` (which expands to a catch), are not failure points of the system
+             ;; the law is Seon's own source's (bin/laws scans src): a namespace with no file, and a
+             ;; test helper's under test/, are not failure points of the system
              :when (and (not (except (str nsym))) (not (named v)) (contains? @program nsym))
              :let [s (str "unnamed-site " (name law) " " v)]]
          (derived-row ans s nsym (str v " has a " (name law) " site that " page " does not name")

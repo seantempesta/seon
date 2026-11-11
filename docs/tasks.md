@@ -60,7 +60,7 @@ How it is judged: the task you refined is worked again from where you began, by 
 A task is edited where the pull holds it, whoever's task it is: an edit at a path writes the entity ([the pattern](ctx.md#the-pattern)). Your own task is at `[:seon.agent/task]`, a task it needs at `[:seon.agent/task :seon.task/needs e]`, and any other task once you cite it:
 
 - **Put it in your pull:** `(my.agent/cite! "its.ns/its-name")`. It is then at `[:seon.cite/_of e :seon.cite/target]`, with its id, kind and plan.
-- **Edit its plan there:** ``(let [[e c] (first (filter #(= "its.ns/its-name" (:seon.task/id (:seon.cite/target (val %)))) (:seon.cite/_of @ctx)))] (swap! ctx assoc-in [:seon.cite/_of e :seon.cite/target :seon.task/plan] (str (:seon.task/plan (:seon.cite/target c)) "\n\n" "where to start")))``.
+- **Edit its plan there:** ``(let [[e c] (first (filter #(= "its.ns/its-name" (:seon.task/id (:seon.cite/target (val %)))) (:seon.cite/_of @ctx)))] (swap! ctx assoc-in [:seon.cite/_of e :seon.cite/target :seon.task/plan] (str (:seon.task/plan (:seon.cite/target c)) "\n\n" "where to start")))``. The path's key is `e`, the cite's key in the join's map (an entity id), never the map entry, the cite's `:seon.cite/id` or nil: a path whose key the join does not hold is read as a new member and refused with "a new member names its identity: :seon.cite/id", which means the key is wrong, not that the write is forbidden.
 - **Add a cite to it:** name the section or function in its plan. A plan cites by naming, so the write carries the cite.
 - **Add an example:** ``(my.db/transact! [{:seon.task/id "its.ns/its-name" :seon.task/examples [[:seon.agent/key k]]}])``. What the cite's pattern does not hold (its examples, its instructions) is written this way.
 

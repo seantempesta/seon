@@ -586,7 +586,9 @@
                                   ;; a new member, under any key a swap! names it by: written from its value,
                                                   ;; which holds its own identity, under a tempid unique in the transaction
                                   (and (nil? o) (some-> ((:schema-identities ix) ((:entity-schemas ix) attr)) (#(nil? (get m %)))))
-                                  (refuse acc (conj path k) (str "a new member names its identity: " ((:schema-identities ix) ((:entity-schemas ix) attr))))
+                                  (refuse acc (conj path k) (str (when (seq om) (str "no member is held at " k "; this join holds its members at their entity ids: "
+                                                                                   (str/join " " (keys om)) ". "))
+                                                                  "A new member names its identity: " ((:schema-identities ix) ((:entity-schemas ix) attr))))
                                   (nil? o) (let [t (str "ctx" (count (:tx acc)))]
                                              (-> (edits ix db sub {} m t (conj path k) acc)
                                                  (update :tx conj [:db/add t attr e])

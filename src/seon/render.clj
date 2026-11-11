@@ -331,10 +331,11 @@
   [style] (boolean (and style (str/includes? style "{"))))
 
 (defn rules
-  "The CSS rules of drawn, a walk's drawn renders, and of every other render of their namespaces (`css?`), [[render-name text] ...] by name: what is drawn decides which namespaces, not which rules, so a render's first draw, or a person's page asking for what only it draws, moves no rule. See docs/render.md#style."
+  "The CSS rules of drawn, a walk's drawn renders, and of every other var of their namespaces, private ones too, that states rules (`css?`:
+  a render's helper may carry the rules for what it draws; read from ns-publics, a private helper's were dropped silently), [[render-name text] ...] by name: what is drawn decides which namespaces, not which rules, so a render's first draw, or a person's page asking for what only it draws, moves no rule. See docs/render.md#style."
   {:malli/schema [:=> [:cat [:map-of :any :any]] [:vector [:tuple :symbol :string]]]}
   [drawn]
-  (let [vs (into (set (filter var? (keys drawn))) (comp (filter var?) (map (comp ns-name :ns meta)) (distinct) (mapcat (comp vals ns-publics))) (keys drawn))]
+  (let [vs (into (set (filter var? (keys drawn))) (comp (filter var?) (map (comp ns-name :ns meta)) (distinct) (mapcat (comp vals ns-interns))) (keys drawn))]
     (vec (keep (fn [f] (let [s (:seon.render/style (meta f))] (when (css? s) [(symbol f) s]))) (sort-by symbol vs)))))
 
 (defn- with-id
@@ -625,7 +626,11 @@
              (into (if attrs [head attrs] [head]) (map #(go % env)) kids))
            ;; a form drawn before whose component nothing queued: its marker, with nothing asked of it (a list's earlier
            ;; members cost the list a lookup each). Only plain arguments: a view's equality reads the source
-           (and (var? head) (when-let [k (get @(:forms w) x)] (and (contains? @(:cache w) k) (not (contains? @(:queue w) k)))))
+           ;; asked only of a call whose arguments are plain: a lookup hashes the form, and a view's hash reads its whole value in
+           ;; the parent's reaction (a layout that placed a list after the conversation ran again at any change of its ctx)
+           (and (var? head)
+                (loop [i 2] (or (>= i (count x)) (let [a (nth x i)] (and (or (number? a) (string? a) (keyword? a) (nil? a)) (recur (inc i))))))
+                (when-let [k (get @(:forms w) x)] (and (contains? @(:cache w) k) (not (contains? @(:queue w) k)))))
            (let [k (get @(:forms w) x)] (vswap! (:children env) conj k) [::child k])
            ;; whether it is a component, kept by its var's root (`inputs-in`): no contracted call for a plain call asked again
            (seq (cond (var? head) (let [[v0 rs] (get @(:inputs w) head)] (if (and rs (identical? (var-get head) v0)) rs (inputs-in w head)))
@@ -708,12 +713,18 @@
   datoms touch (:all: every db render), in mount order, parents first, none the root no longer reaches through who holds it (it runs only if a parent draws it
   again); then those it let go that no parent drew go (a child moved between parents stays, whichever ran first). Answers what it ran, {key :miss} for an output new
   and {key :same} for one = to the last, the components it skipped left out ({} when nothing a
-  render read changed). See docs/render.md#reactive-renders."
+  render read changed); none is left queued. See docs/render.md#reactive-renders."
   {:malli/schema [:function [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]]] [:map-of [:vector :any] [:enum :miss :same]]]
                   [:=> [:cat :map [:or [:= :all] [:maybe [:sequential :any]]] [:maybe :map]] [:map-of [:vector :any] [:enum :miss :same]]]]}
   ([w datoms] (flush! w datoms nil))
   ([w datoms ix]
-  (let [env {:children (volatile! []) :ran (volatile! {})}]
+  (let [env {:children (volatile! []) :ran (volatile! {})}
+        run-queued! (fn [held?]
+                      (loop []
+                        (when-let [k (first (sort-by #(:order (get @(:cache w) %))
+                                                     (filter #(and (contains? @(:cache w) %) (held? %)) @(:queue w))))]
+                          (let [{:keys [f opts args]} (get @(:cache w) k)] (render! w f opts args (assoc env :children (volatile! []))))
+                          (recur))))]
     (when ix (vreset! (:index w) ix))
     (if-let [root @(:out w)]
       (let [held? (fn held? [k] (or (= root k) (some held? (:parents (get @(:cache w) k)))))]
@@ -731,16 +742,14 @@
                 (if (contains? ks :all)
                   (vswap! (:queue w) into @(:db-keys w))
                   (doseq [rk ks] (vswap! (:queue w) into (get @(:readers w) rk #{})))))))
-          (loop []
-            (when-let [k (first (sort-by #(:order (get @(:cache w) %))
-                                         (filter #(and (contains? @(:cache w) %) (held? %)) @(:queue w))))]
-              (let [{:keys [f opts args]} (get @(:cache w) k)] (render! w f opts args (assoc env :children (volatile! []))))
-              (recur)))
+          (run-queued! held?)
           (doseq [k @(:gone w) :when (empty? (:parents (get @(:cache w) k)))] (unmount! w k))
           (vreset! (:gone w) #{})
           @(:ran env))
       (let [[f opts & children] (:root w) [_ k] (render! w f (or opts {}) (vec children) env)]
         (vreset! (:out w) k)
+        ;; a first draw leaves nothing queued
+        (run-queued! (constantly true))
         @(:ran env))))))
 
 (defn- tree-rev
@@ -787,27 +796,100 @@
     (go @(:out w) nil nil)
     (if sels (vec (mapcat (group-by first @found) sels)) @found))))
 
+(def root-container
+  "The container the frame places a walk's root unit in (`placed-units`' first: the root render's own output, the page), the one
+  slot seon.render.ui/page-chrome keeps for it. See docs/render.md#a-layout-places-its-lists."
+  "#p-page")
+
+(defn region
+  "Where the units placed in element id that no parent holds go, in a page's html: a marker the render proc fills with them, in the
+  page's order, each composed (seon.render.proc/compose). A unit's slot (seon.render.ui/slot) names one unit; a region names a
+  container. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :string] :map]}
+  [id] (h/raw (str "<!--c:" id "-->")))
+
+(defn regions
+  "Hiccup hc with a region (`region`) last in each element that has an id, and those ids in document order: [hc' ids], what a page's
+  layout gives the units placed in it. A local fn walks it: no contracted call a node. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :any] [:tuple :any [:vector :string]]]}
+  [hc]
+  (let [ids (volatile! [])]
+    [((fn go [x]
+        (cond (h/raw? x) x
+              (and (vector? x) (keyword? (first x)))
+              (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))
+                    id (:id attrs)
+                    _ (when id (vswap! ids conj (str id)))
+                    kids (mapv go (if attrs (drop 2 x) (rest x)))]
+                (cond-> (into (if attrs [(first x) attrs] [(first x)]) kids) id (conj (region (str id)))))
+              (seq? x) (doall (map go x))
+              :else x))
+      hc)
+     @ids]))
+
+(defn- page-unit
+  "Walk w's root unit, its component rk's output as the page writes it (`placed-units`' first), written and kept on its cache entry
+  with at, the revisions it was written at: each list drawn-list? says the root places is that list's own output, every element
+  with an id holds its `region`, and no other component is drawn into it. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :map [:vector :any] :int :seon.host/fn] :map]}
+  [w rk at drawn-list?]
+  (let [cache @(:cache w)
+        rc (get cache rk)
+        shell (fn shell [x]
+                (cond (and (vector? x) (= ::child (first x)))
+                      (let [c (get cache (second x))] (when (drawn-list? (second x)) (shell (styled (:out c) (:f c)))))
+                      (h/raw? x) x
+                      (and (vector? x) (keyword? (first x)))
+                      (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))]
+                        (into (if attrs [(first x) attrs] [(first x)]) (map shell) (if attrs (drop 2 x) (rest x))))
+                      (seq? x) (doall (map shell x))
+                      :else x))
+        [hc ids] (regions (shell (styled (:out rc) (:f rc))))
+        html (h/html hc)
+        u {:id (:id rc) :container root-container :parent nil :rev (hash html) :html html :regions ids}]
+    (vswap! (:cache w) update rk assoc :page-at at :page u)
+    u))
+
 (defn placed-units
-  "Walk w's render as the units root's render proc lays out (seon.render.ui/page-chrome): every component placed, at any depth
-  (`placed` nested), {:id :container :parent :rev :html}: its element id, its container's selector (a root list's, or its parent's
-  element), its parent's unit id (nil in a root list), its own revision (moved only when its own output changed: a child's change is
-  the child's unit alone) and its html with each child's slot (seon.render.ui/slot's marker, which the render proc composes with the
-  child's unit). A change costs the component that moved, at any depth. See docs/render.md#a-layout-places-its-lists."
-  {:malli/schema [:=> [:cat :map] [:vector [:map [:id :string] [:container :string] [:parent [:maybe :string]] [:rev :int] [:html :string]]]]}
+  "Walk w's render as the units root's render proc lays out (seon.render.ui/page-chrome): first the root's own, the page
+  (`page-unit`, written again only when the root's revision or a list's it places moved; its :rev is its html's, so a member added
+  never sends it), then every component placed, at any depth (`placed` nested), {:id :container :parent :rev :html}: its element id,
+  its container's selector (a root list's, or its parent's element), its parent's unit id (nil in a root list), its own revision
+  (moved only when its own output changed: a child's change is the child's unit alone) and its html with each child's slot
+  (seon.render.ui/slot's marker, which the render proc composes with the child's unit). A change costs the component that moved, at
+  any depth. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :map] [:vector [:map [:id :string] [:container :string] [:parent [:maybe :string]] [:rev :int] [:html :string]
+                                             [:regions {:optional true} [:vector :string]]]]]}
   [w]
-  (vec (for [[sel k parent] (placed w nil true) :let [c (get @(:cache w) k)]]
-           (let [r (:rev c)
-                 ;; its html written once a revision: kept on its cache entry, by its revision
-                 html (if (= r (:unit-rev c)) (:unit-html c)
-                          (let [slotted ((fn go [x] (cond (and (vector? x) (= ::child (first x)))
-                                                          (when-let [id (:id (get @(:cache w) (second x)))] (h/raw (str "<!--s:" id "-->")))
-                                                          (vector? x) (mapv go x)
-                                                          (seq? x) (doall (map go x))
-                                                          :else x))
-                                         (styled (:out c) (:f c)))
-                                h (h/html slotted)]
-                            (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
-             {:id (:id c) :container sel :parent (when parent (:id (get @(:cache w) parent))) :rev r :html html}))))
+  (let [pl (placed w nil true)
+        ;; read after `placed`, which keeps each placed component's and list's placements (:places) current
+        cache @(:cache w)
+        rk @(:out w)
+        rc (get cache rk)
+        drawn-list? (fn [k] (let [c (get cache k) f (:f c)] (and (var? f) (:seon.render/list (meta f)) (some? (:out c)))))
+        ;; the root's revision and those of the lists it places, through lists: when they stand, its page stands. Local fns, no
+        ;; lazy seq: a flush that moved one member pays a lookup a list
+        at-of (fn at-of [acc k] (reduce (fn [acc [_ ck]] (if (drawn-list? ck) (at-of (unchecked-add (unchecked-multiply 31 acc) (long (:rev (get cache ck) 0))) ck) acc)) acc (:places (get cache k))))
+        at (at-of (:rev rc 0) rk)
+        page (if (= at (:page-at rc))
+               (:page rc)
+               (page-unit w rk at drawn-list?))]
+    (into [page]
+          (map (fn [[sel k parent]]
+                 (let [c (get @(:cache w) k)
+                       r (:rev c)
+                       ;; its html written once a revision: kept on its cache entry, by its revision
+                       html (if (= r (:unit-rev c)) (:unit-html c)
+                                (let [slotted ((fn go [x] (cond (and (vector? x) (= ::child (first x)))
+                                                                (when-let [id (:id (get @(:cache w) (second x)))] (h/raw (str "<!--s:" id "-->")))
+                                                                (vector? x) (mapv go x)
+                                                                (seq? x) (doall (map go x))
+                                                                :else x))
+                                               (styled (:out c) (:f c)))
+                                      h (h/html slotted)]
+                                  (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
+                   {:id (:id c) :container sel :parent (when parent (:id (get @(:cache w) parent))) :rev r :html html})))
+          pl)))
 
 (defn- strip-attrs
   "An element's attributes as a reader of its hiccup reads them: its presentation (class, style) is the page's and its marks (:wire/*) the reading's; an id names it, so the model need not guess it."
