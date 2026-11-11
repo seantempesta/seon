@@ -1148,6 +1148,24 @@
         (is (= ["docs/small.md#small" "docs/small.md#below"] (mapv :seon.ref/address listing)) "a page lists its sections")
         (is (not-any? #(or (:seon.ref/references %) (:seon.ref/cited-by %)) listing) "each without its edges")))))
 
+;; docs/references.md#an-entity-cites: a cite holds its target by identity, and of a cited task also what an agent may edit there
+;; (its plan, instructions, proofs and cause: the task content a run's end carries to main), so a task that curates another
+;; reads and writes that task's plan at the cite's path, by a swap!, with no ref of its own
+(deftest a-cited-task-is-held-with-what-may-be-edited-there
+  (let [db0 (:db-after (d/with (seeded 0 nil)
+                               [{:seon.task/id "lab/other" :seon.task/ns 'app.x :seon.task/name "other" :seon.task/plan "The plan before."
+                                 :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :held :seon.task/branch :main/lab-other}
+                                {:seon.cite/id "lab/ctx lab/other" :seon.cite/of [:seon.task/id "lab/ctx"] :seon.cite/target [:seon.task/id "lab/other"]
+                                 :seon.cite/depth :doc :seon.cite/order 9}]))
+        path [:seon.agent/task :seon.cite/_of (id db0 [:seon.cite/id "lab/ctx lab/other"]) :seon.cite/target]
+        [[before said] db'] (as-agent! db0 #(let [b (get-in @ctx/ctx path)]
+                                              [b (try (swap! ctx/ctx assoc-in (conj path :seon.task/plan) "The plan after.") :written
+                                                      (catch clojure.lang.ExceptionInfo e (pr-str (ex-data e))))]))]
+    (is (= "lab/other" (:seon.task/id before)) "the cited task, by its identity")
+    (is (= "The plan before." (:seon.task/plan before)) "and its plan, which the agent may edit")
+    (is (= :written said) "a swap! at the cite's path is a write")
+    (is (= "The plan after." (:seon.task/plan (d/pull db' [:seon.task/plan] [:seon.task/id "lab/other"]))) "of the cited task's own plan")))
+
 (deftest a-cite-joins-its-target-and-a-symbol-joins-by-name
   ;; a cite's target is a ref (docs/references.md#an-entity-cites): the cite joins the var it names, its form and its
   ;; callers, which join by :by, ctx's one option beside Datahike's pull syntax (docs/ctx.md#the-pattern): a symbol a form

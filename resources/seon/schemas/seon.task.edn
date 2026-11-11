@@ -73,6 +73,8 @@
  ;; an agent as the reconciler's index holds it: what root decides on of its process and environment (the entity's attributes,
  ;; seon.task/agent-value)
  :seon.reconcile/agent [:map [:seon.agent/key :string] [:seon.agent/boot {:optional true} :string]
+                        ;; the id of the task it works now (its :seon.agent/task): a task it left at its cap no longer waits on it
+                        [:seon.agent/task {:optional true} :seon.task/id]
                         [:seon.agent/env {:optional true} :seon.task/env]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-limits [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]
@@ -102,10 +104,11 @@
  ;; reconciler takes the index, so a check of its entries would cost tasks on every call and
  ;; tasks x tasks a listing; each entry is checked once, where it enters (put-task's
  ;; :seon.task/own, put-run's :seon.run/run, the ids of derive-needs and refresh-ready)
- :seon.reconcile/index [:map {:gen/elements [{:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
+ :seon.reconcile/index [:map {:gen/elements [{:root nil :tasks {} :keys {} :needed-by {} :by-branch {} :acc {} :depth {} :claims {}
                                               :agents {} :done {} :ready #{} :ready-key {}
                                               :live #{} :reap #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}}]}
-                        [:root [:maybe :map]] [:tasks :map] [:keys :map] [:needed-by :map]
+                        ;; :by-branch, each branch's task ids (seon.reconcile/holder-of reads a branch's session from it)
+                        [:root [:maybe :map]] [:tasks :map] [:keys :map] [:needed-by :map] [:by-branch :map]
                         [:acc :map] [:depth :map] [:claims :map]
                         [:agents :map] [:done :map]
                         [:ready set?] [:ready-key :map]
