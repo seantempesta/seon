@@ -617,25 +617,30 @@
     (vec (concat both (onto-gone ko gt :ours :theirs) (onto-gone kt go :theirs :ours)))))
 
 (defn replay
-  "The source's net change since base as the transactions a merge writes on the branch that receives it: one
-  group for each of the source's transactions that made part of it, in the source's order, each {:tx the source
-  transaction :meta that transaction's own facts (which branch wrote it, which eval; never its time) :ops
-  [[:db/add e a v] | [:db/retract e a v] ...]}. Ops, never datoms, so the receiving branch writes each group
-  as a new transaction of its own with a new time; entity ids are kept (they are the store's, issued once:
-  docs/storage.md#ids). A fact the source asserted and retracted again since base is in no group. A retraction
-  whose transaction the source's history does not hold (an attribute that keeps no history) rides the last
-  group. See docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  "The source's transactions since base as the transactions a merge writes on the branch that receives it:
+  one group for each, in the source's order, each {:tx the source transaction :meta that transaction's own
+  facts (which branch wrote it, which eval; never its time) :ops [[:db/retract e a v] ... [:db/add e a v] ...]}:
+  ALL it wrote, the values a later transaction replaced included, so each state the receiving branch passes
+  through is one the source held (and passed the write check with); the net change cut by transaction is not
+  (a value written twice leaves its first transaction only the retraction of the base value: refused, 'requires
+  :task/plan'). Ops, never datoms, so each group is a new transaction of the receiving branch with a new time;
+  entity ids are kept (the store's, issued once: docs/storage.md#ids). A retraction the source's history does
+  not hold (an attribute that keeps no history) rides the last group. See docs/decisions.md, 'A merge replays
+  the source's transactions on the branch that receives it'."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector [:map [:tx :int] [:meta :map] [:ops [:vector :any]]]]]}
   [base src]
   (let [tx? (memoize (fn [e] (boolean (or (seq (d/datoms src :eavt e :db/txInstant)) (seq (d/datoms base :eavt e :db/txInstant))))))
-        [gone added] (d/datoms-diff base src :eavt [])
-        hist (d/history src)
-        ;; the source transaction that retracted a datom base holds: its last retraction after the datom's own
-        retracted-in (fn [dt] (:tx (last (filter #(and (not (:added %)) (> (:tx %) (:tx dt))) (d/datoms hist :eavt (:e dt) (:a dt) (:v dt))))))
-        adds (for [dt added :when (not (tx? (:e dt)))] [(:tx dt) [:db/add (:e dt) (:a dt) (:v dt)]])
-        rets (for [dt gone :when (not (tx? (:e dt)))] [(retracted-in dt) [:db/retract (:e dt) (:a dt) (:v dt)]])
-        last-tx (reduce max 0 (keep first (concat adds rets)))
-        by-tx (reduce (fn [m [t op]] (update m (or t last-tx) (fnil conj []) op)) (sorted-map) (concat rets adds))]
+        ;; every datom the source's history holds that base's does not: what its transactions since base wrote
+        wrote (remove #(tx? (:e %)) (second (d/datoms-diff (d/history base) (d/history src) :eavt [])))
+        op (fn [dt] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])
+        by-tx (reduce (fn [m dt] (update m (:tx dt) (fnil conj []) (op dt))) (sorted-map) wrote)
+        ;; what base holds and the source does not, with no retraction in its history
+        said (into #{} (comp (filter #(= :db/retract (first %))) (map rest)) (mapcat val by-tx))
+        unsaid (for [dt (first (d/datoms-diff base src :eavt [])) :when (and (not (tx? (:e dt))) (not (said [(:e dt) (:a dt) (:v dt)])))]
+                 [:db/retract (:e dt) (:a dt) (:v dt)])
+        by-tx (if (and (seq unsaid) (seq by-tx)) (update by-tx (key (last by-tx)) into unsaid) by-tx)]
     (vec (for [[t ops] by-tx]
-           {:tx t :ops ops
+           {:tx t
+            ;; retractions first: a value replaced in one transaction is retracted, then asserted
+            :ops (vec (sort-by #(if (= :db/retract (first %)) 0 1) ops))
             :meta (into {} (for [dt (d/datoms src :eavt t) :when (not= :db/txInstant (:a dt))] [(:a dt) (:v dt)]))}))))

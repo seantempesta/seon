@@ -464,11 +464,14 @@
        (apply! bc :branch [{:task/name :gen/gone :task/plan "made and retracted" :task/status :held}])
        (apply! bc :branch [[:db/retractEntity (pdb/eid @bc :task/name :gen/gone)]])
        (let [groups (pm/replay base @bc)
-             landed (reduce (fn [db g] (pdb/speculate-db db (:ops g))) @conn groups)]
-         (is (= 3 (count groups)) "one group for each source transaction that made part of the net change; the entity made and retracted is in none")
+             ;; through the write check, one transaction a group, as the writer's op will
+             refused (vec (keep (fn [g] (error-of #(apply! conn :main (:ops g)))) groups))
+             landed @conn]
+         (spit "/tmp/fsafe/replay-groups.out" (pr-str {:groups (mapv :ops groups) :refused refused}))
+         (is (= 5 (count groups)) "one group for each of the source's transactions since the base, the entity made and retracted included")
          (is (apply < (map :tx groups)) "in the source's order")
          (is (every? #(= br (:seon.tx/branch (:meta %))) groups) "each carries its source transaction's own facts: the branch that wrote it")
          (is (not-any? #(contains? (:meta %) :db/txInstant) groups) "and never its time: the receiving branch gives each a new one")
-         (spit "/tmp/fsafe/replay-groups.out" (pr-str {:groups (mapv :ops groups) :first-group-through-the-write-check (error-of #(apply! conn :main (:ops (first groups))))}))
+         (is (= [] refused) "every group passes the write check on main: each state it makes is one the branch held")
          (is (= (:keys (pm/net-change base @bc)) (:keys (pm/net-change base landed)))
              "main after the replay holds the branch's net change, key for key, by identity"))))))
