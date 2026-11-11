@@ -140,7 +140,7 @@ N=${1:-100}
 TIMEFMT='real %E user %U sys %S'
 OUT=$ROOT/target/check/$(date +%Y%m%dT%H%M%S)-$$
 mkdir -p "$OUT/stores"
-: > "$OUT/failed"; : > "$OUT/green"
+: > "$OUT/failed"; : > "$OUT/green"; : > "$OUT/overran"
 # want STEP: is STEP one this run runs? A step seon.proofs/check-steps does not name is FAILED.
 # (a selected run's steps were named by the plan from the same table: no binary asked)
 KNOWN= ONLY=
@@ -166,7 +166,8 @@ step() {
   [[ $name == seed ]] || want ${${name%-write}%-read} || return 0
   # its bound (bin/prove's plan, SEL/step-bounds: the step-end factor times its median measured ms; a step never measured has
   # none): past it, its evidence is captured (bin/evidence, with its root's stall state from the port its root wrote beside its
-  # store), then it is ended and red, STEP-OVERRAN, never retried (the owner's fourth clock exception, 2026-11-10:
+  # store), then it is ended: a signal, STEP-OVERRAN, no verdict and nothing failed (the owner, 2026-11-11: "The step bounds
+  # are signals not hard constraints"), not stored so it runs again (the owner's fourth clock exception, 2026-11-10:
   # docs/clocks.md#time-decides-the-owners-exceptions)
   local bound= W=
   [[ -n $SEL && -s $SEL/step-bounds ]] && bound=$(awk -v k="${${name%-write}%-read}" '$1 == k { print $2 }' "$SEL/step-bounds")
@@ -186,8 +187,15 @@ step() {
   [[ -n $SEL && -n $r ]] && printf "%s %.0f\n" "$name" $(( r * 1000 )) >> "$SEL/step-ms"
   if [[ -n $filter ]]; then grep -E "$filter" "$log"; else tail -1 "$log"; fi
   if [[ -e $OUT/$name.overran ]]; then
-    failed "$name (STEP-OVERRAN: ran past its bound, $(<$OUT/$name.overran) ms; its evidence in $OUT/$name-overran, $log)"
-    echo "FAILED $name: STEP-OVERRAN, ran past its bound of $(<$OUT/$name.overran) ms (:seon.config.check/step-end-factor times its median); evidence in $OUT/$name-overran"
+    # a signal, never a red (the owner, 2026-11-11: "The step bounds are signals not hard constraints"): the step was ended
+    # at its bound after its evidence, so it has no verdict: no green is stored (it runs again next time) and nothing
+    # fails. Its CPU seconds (user + sys, zsh's time) beside its wall bound and the load say whether it was working or
+    # waiting on the machine. A red is a step's own exit, as before
+    local cpu=$(awk '{for (i = 1; i < NF; i++) { if ($i == "user") u = $(i+1); if ($i == "sys") y = $(i+1) }} END {sub(/s$/, "", u); sub(/s$/, "", y); printf "%.1f", u + y}' "$OUT/$name.time" 2>/dev/null)
+    print -r -- "$name past its bound of $(<$OUT/$name.overran) ms (CPU ${cpu:-?} s, load $(sysctl -n vm.loadavg | awk '{print $3}')); evidence in $OUT/$name-overran" >> "$OUT/overran"
+    echo "SIGNAL $name: STEP-OVERRAN, ran past its bound of $(<$OUT/$name.overran) ms (:seon.config.check/step-end-factor times its median; CPU ${cpu:-?} s); ended, no verdict, not failed; evidence in $OUT/$name-overran"
+    # bin/prove's store-steps reads the selection's overran names: a signal, never one of its reds
+    [[ -n $SEL ]] && print -r -- "${${name%-write}%-read}" >> "$SEL/overran"
   elif (( st != expect )); then failed "$name (exit $st, expected $expect, $log)"; echo "FAILED $name (exit $st, expected $expect)"
   else green $name; fi
   return 0
@@ -368,6 +376,8 @@ FAILED=(${(f)"$(<$OUT/failed)"})
 [[ -n $SEL ]] && print -r -- "${GREEN[@]}" > "$SEL/green"
 echo
 (( NEEDS )) && echo "store $STORE: ${KB0} KB and ${BR0} branches before the run, ${KB1} KB and ${BR1} after; run directory $(du -sk "$OUT" | cut -f1) KB"
+# the steps that ran past their bound: signals, said whatever the verdict (each runs again next time: no green)
+[[ -s $OUT/overran ]] && { echo "STEP SIGNALS (past their bound, ended, not failed):"; sed 's/^/  /' "$OUT/overran" }
 if (( ${#FAILED} )); then
   echo "CHECK FAILED: ${#FAILED} step(s)"; for f in $FAILED; do echo "  $f"; done
   echo "outputs: $OUT"
