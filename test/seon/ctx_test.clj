@@ -319,11 +319,16 @@
         c3 (ctx/patch c db3 (:tx-data r3) :b)
         m2 (get-in (:tree c3) [:seon.message/_to (seon.db/eid db3 :seon.message/id "m2")])
         plain (ctx/build (seon.db/index) (:db-after (d/with db3 [{:seon.agent/key k :seon.ctx/pattern [:seon.agent/key :seon.agent/turn {:seon.message/_to [:seon.message/id :seon.message/to]}]}])) a :b)]
-    (is (= {:seon.message/to {a (tx-of db2 "m1")}} (:seon.ctx/t (m1 (:tree c)))) "a member holds the t of the datom that joined it")
+    (is (= {:seon.message/to {a {:db/id (tx-of db2 "m1")}}} (:seon.ctx/t (m1 (:tree c)))) "a member holds the transaction of the datom that joined it, as a ref the pattern does not join")
     (is (= #{{:db/id a}} (:seon.message/to (m1 (:tree c)))) "and its value as without it")
-    (is (= (:tx (first (d/datoms db2 :eavt a :seon.agent/turn))) (get-in (:tree c) [:seon.ctx/t :seon.agent/turn])) "a single-valued attribute's t")
-    (is (= {:seon.message/to {a (tx-of db3 "m2")}} (:seon.ctx/t m2)) "a patch holds the new member's t")
+    (is (= {:db/id (:tx (first (d/datoms db2 :eavt a :seon.agent/turn)))} (get-in (:tree c) [:seon.ctx/t :seon.agent/turn])) "a single-valued attribute's")
+    (is (= {:seon.message/to {a {:db/id (tx-of db3 "m2")}}} (:seon.ctx/t m2)) "a patch holds the new member's")
     (is (< (tx-of db2 "m1") (tx-of db3 "m2")) "each the transaction it arrived in")
+    (let [timed (ctx/build (seon.db/index) (:db-after (d/with db3 [{:seon.agent/key k :seon.ctx/pattern [:seon.agent/key {:seon.message/_to [:seon.message/id {[:seon.message/to :t true] [:db/txInstant]}]}]}])) a :b)
+          m1t (get-in (:tree timed) [:seon.message/_to (seon.db/eid db3 :seon.message/id "m1") :seon.ctx/t :seon.message/to a])]
+      (is (= (tx-of db2 "m1") (:db/id m1t)) "{[attr :t true] [...]}: the transaction, by its id")
+      (is (inst? (:db/txInstant m1t)) "with the attributes of it the pattern names: when it was written")
+      (is (= #{{:db/id a}} (get-in (:tree timed) [:seon.message/_to (seon.db/eid db3 :seon.message/id "m1") :seon.message/to])) "the ref itself not followed"))
     (is (identical? (m1 (:tree c)) (m1 (:tree c3))) "and keeps the member nothing touched")
     (is (not (str/includes? (pr-str (:tree plain)) ":seon.ctx/t")) "a pattern that asks no t holds none")
     (is (= :seon.ctx/invalid (first (as-agent! db2 #(try (swap! ctx/ctx assoc-in [:seon.ctx/t :seon.agent/turn] 1) nil

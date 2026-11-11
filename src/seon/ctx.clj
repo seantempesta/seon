@@ -33,7 +33,8 @@
   "Entity e on db, the attributes the pattern spec s names (nil, or a `*`: every one), and the ones its joins read (a forward
   join's attribute, a reverse lookup's name): a cardinality-many one as a set (pull answers a vector), a ref as {:db/id};
   {:db/id e} alone when db holds none of it. An attribute the pattern asks with its t ([attr :t true], s's :ts) holds beside its value the
-  transaction its datom was written in, under :seon.ctx/t ({attr t}; a cardinality-many one {attr {v t}}, v a ref's entity id): read off the
+  transaction its datom was written in, under :seon.ctx/t ({attr {:db/id tx}}, as a ref the pattern does not join is held; a cardinality-many one
+  {attr {v {:db/id tx}}}, v a ref's entity id; {[attr :t true] sub} holds sub's attributes of that transaction beside its id, :db/txInstant, :seon.tx/branch): read off the
   same datoms, so a pattern that asks none costs what it did (docs/ctx.md#the-pattern). One seek of e's datoms, a quarter of what the pull engine costs for the same answer."
   {:malli/schema [:function [:=> [:cat :seon.host/db pos-int?] :map] [:=> [:cat :seon.host/db pos-int? [:maybe :map]] :map]]}
   ([db e] (own db e nil))
@@ -45,16 +46,21 @@
                   any?
                   (into (set (:attrs s)) (for [j (:joins s) :when (not (:rev? j))] (:attr j))))]
      (if-let [ts (not-empty (:ts s))]
-       ;; the pattern asks the t of some attributes ([attr :t true]): each datom's :tx, beside its value, under :seon.ctx/t
-       (reduce (fn [m {:keys [a v tx]}]
-                 (if (named? a)
-                   (let [x (if (contains? ref a) {:db/id v} v)
-                         m (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x))]
-                     (cond (not (contains? ts a)) m
-                           (contains? many a) (assoc-in m [:seon.ctx/t a v] tx)
-                           :else (assoc-in m [:seon.ctx/t a] tx)))
-                   m))
-               {:db/id e} (d/datoms db :eavt e))
+       ;; the pattern asks the transaction of some attributes ([attr :t true]: {:db/id tx}; {[attr :t true] sub}: and sub's attributes of
+       ;; it, each transaction read once), beside each value, under :seon.ctx/t
+       (let [seen (volatile! {})
+             tx-of (fn [a tx] (if-let [ts' (get ts a)]
+                                (or (get @seen [ts' tx]) (let [x (own db tx ts')] (vswap! seen assoc [ts' tx] x) x))
+                                {:db/id tx}))]
+         (reduce (fn [m {:keys [a v tx]}]
+                   (if (named? a)
+                     (let [x (if (contains? ref a) {:db/id v} v)
+                           m (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x))]
+                       (cond (not (contains? ts a)) m
+                             (contains? many a) (assoc-in m [:seon.ctx/t a v] (tx-of a tx))
+                             :else (assoc-in m [:seon.ctx/t a] (tx-of a tx))))
+                     m))
+                 {:db/id e} (d/datoms db :eavt e)))
        (reduce (fn [m {:keys [a v]}]
                  (if (named? a)
                    (let [x (if (contains? ref a) {:db/id v} v)]

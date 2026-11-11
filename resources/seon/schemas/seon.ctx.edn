@@ -26,7 +26,7 @@
  :seon.render/no-render [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-render]] [:schema [:maybe :qualified-keyword]] [:identity [:vector :qualified-keyword]]]]
  ;; a pattern as the walk takes it (seon.render/pattern): '* or the attributes it names, those asked with their t (:ts), and its joins,
  ;; each with its own pattern under :sub
- :seon.ctx/spec [:map [:star? :boolean] [:attrs [:set :keyword]] [:ts {:optional true} [:set :keyword]]
+ :seon.ctx/spec [:map [:star? :boolean] [:attrs [:set :keyword]] [:ts {:optional true} [:map-of :keyword [:maybe :map]]]
                  [:joins [:vector [:map [:attr :qualified-keyword] [:key :keyword] [:rev? :boolean] [:by [:maybe :qualified-keyword]]
                                    [:reverse? :boolean] [:limit [:maybe nat-int?]] [:sub :map]]]]]
  ;; the walk's state beside a record's map (seon.ctx/node): every path each entity sits at (:at {e #{path}}, an entity
