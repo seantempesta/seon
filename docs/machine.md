@@ -18,7 +18,7 @@ A big cost has usually been one constant nobody looked at, so ask how a number c
 
 Check that a check ran what it claims:
 - `bin/test NS` printing `TEST OK` with no `SHARD` line ran nothing, as its digests did not move; `SEON_RESULTS_DIR=<fresh dir>` forces a run. A mutation only counts when it goes red with a `SHARD` line.
-- `bin/check MODE` does not run bin/check's `u-MODE` body; `bin/check --steps DIR`, with the step in `DIR/steps`, does.
+- `bin/check MODE` does not run bin/check's `u-MODE` body; `bin/check --steps DIR`, with the step in `DIR/steps` and no `DIR/steps-binary`, does (an empty `steps-binary` seeds no store: [checks](checks.md#running-steps-by-hand)).
 - A commit made in the same command as its check claims what nobody read ("seen red", when it was not): commit in a separate step, after reading the check's output.
 - A submodule checked out at a new commit and not yet committed as the pin goes back to the old pin on the next build: commit the pin before measuring.
 - A digest does not see a form with no var (seon.program/a-top-level-form-with-no-var-is-in-a-digest), and a mutation there runs nothing.

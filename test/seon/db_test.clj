@@ -1026,6 +1026,18 @@
                          (catch Exception e (some (comp :error ex-data) (take-while some? (iterate ex-cause e)))))))))
          (finally (d/release bc) (d/delete-branch! conn b)))))))
 
+(deftest a-nested-map-takes-its-content-id
+  ;; docs/storage.md#ids: a map nested under a ref takes its content id as a top-level map does, so an eval's
+  ;; result (seon.db/with-response, which names no id) is the entity at its hash's content id on every branch
+  (let [db (mt/world)
+        e (pdb/with-response {:seon.eval/code "x"} {:value 1})
+        h (get-in e [:seon.eval/result :seon.result/hash])
+        ce (dbt/content-eid :seon.result/hash h)]
+    (is (not (contains? (:seon.eval/result e) :db/id)) "with-response names no id")
+    (is (= ce (pdb/eid (d/db-with db [e]) :seon.result/hash h)))
+    (is (= (dbt/content-eid :seon.result/hash "h")
+           (pdb/eid (d/db-with db [{:seon.eval/code "x" :seon.eval/result {:seon.result/hash "h"}}]) :seon.result/hash "h")))))
+
 (deftest content-ids-cost-the-writes-the-model-says
   ;; content eids scatter a commit's new identities over the indexes (the content-eids pricing study, 2026-10-23, not kept
   ;; §3): nodes written per commit against counter eids, the ratio the model priced (1.3-1.7x at

@@ -89,7 +89,8 @@
                           [:turn :int] [:agent :string] [:origin :seon.model-call/origin] [:raw? :boolean] [:swept? {:optional true} :boolean] [:view {:optional true} :string] [:opened {:optional true} [:set :string]]
                           [:body :map] [:sources [:vector [:vector :any]]] [:new [:vector :boolean]]
                           [:usage [:map [:seon.model-call/tokens {:optional true} :int] [:seon.model-call/cache-hit-tokens {:optional true} :int]
-                                   [:seon.model-call/cache-miss-tokens {:optional true} :int]]]
+                                   [:seon.model-call/cache-miss-tokens {:optional true} :int] [:seon.model-call/ms {:optional true} :int]
+                                   [:seon.model-call/model {:optional true} :string]]]
                           [:error {:optional true} [:maybe :map]]]
  ;; its list's end: the older rows, counted and unrendered, and the view that asks for them
  :seon.render/page-more [:map {:seon.render/hiccup seon.render.ui/more} [:older nat-int?] [:view :string] [:click? {:optional true} :boolean]]

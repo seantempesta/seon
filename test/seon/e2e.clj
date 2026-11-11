@@ -143,7 +143,9 @@
         d (db sys)
         commits (vec (d/q '[:find ?a ?c :where [?e :seon.task/commit ?c] [?e :seon.task/id ?a]] d))]
     {:commit (second (first commits)) :commits commits
-     :commit-errors (vec (d/q '[:find ?a ?m :where [?e :seon.task/commit-error ?m] [?e :seon.task/id ?a]] d))
+     :commit-errors (vec (for [[a m] (d/q '[:find ?a ?m :where [?e :seon.task/error ?m] [?e :seon.task/id ?a]] d)
+                               :when (= :seon.git/commit-failed (:seon.error/type m))]
+                           [a (:seon.error/message m)]))
      :turn-ms turn-ms
      :spans (vec (sort (for [[a s e] (d/q '[:find ?a ?s ?e :where [?x :seon.agent/key ?a] [?x :seon.agent/started-ms ?s] [?x :seon.agent/ended-ms ?e]] d)]
                          [a (- s t0) (- e t0)])))

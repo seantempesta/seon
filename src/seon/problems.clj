@@ -764,7 +764,7 @@
       (seq waste)
       (assoc :waste [(assoc base :waste waste :evidence {:from id :waste waste})])
       ;; merged with its deferred process tests unasked (or no gate checkout declared): open until
-      ;; each is recorded passing (my.root/gate!; DECISIONS, Process tests are not automatic)
+      ;; each is recorded passing (the reconciler's :gate, docs/merging.md#a-merge-runs-what-the-change-reaches)
       (and (= :merged status) (seq (:seon.task/deferred p))
            (not-every? #(= :pass (get (:seon.task/deferred-results p) %)) (:seon.task/deferred p)))
       (assoc :unrun [(cond-> (assoc base :open? true :tests (vec (sort-by str (:seon.task/deferred p)))

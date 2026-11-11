@@ -227,7 +227,7 @@
   (let [conn *conn* k (str "kp" n) tid (str "demo/kp" n)
         point (fn [] (let [db @conn] {:commit (d/commit-id db) :t (:max-tx db)}))
         turn! (fn [i] (d/transact conn (conj (ts/turn-tx k i {})
-                                             {:seon.model-call/id (seon.lib/call-id k i) :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/ms 1
+                                             {:seon.model-call/id (seon.lib/call-id k i) :seon.model-call/forms 1 :seon.model-call/ms 1
                                               :seon.model-call/basis (assoc (point) :task tid :turn i :max-turns 999 :origin :model :agent k)})))
         ev! (fn [i] (d/transact conn [{:seon.eval/id (str k "-e" i) :seon.eval/by {:seon.agent/key k} :seon.eval/agent {:seon.agent/key k}
                                        :seon.eval/call (seon.task/call-ref k i) :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str k "e" i)) :value i}

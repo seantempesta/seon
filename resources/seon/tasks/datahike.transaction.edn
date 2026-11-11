@@ -1,4 +1,5 @@
 [{:seon.task/name "an-identity-costs-its-seek"
   :seon.task/plan "Filed 2026-11-10 (Deep fixes). A :db/unique identity datom costs 8.3k ticks and 19 KB and a content-id one 12.9k ticks and 43 KB (measured 2026-11-10 at 100 datoms) against a plain datom's 7.2k and 11.1 KB (docs/storage.md), because datahike.db.transaction resolves one [a v] by four seeks (content-tempids, the tempid branch, the content-id search, validate-datom-upsert) plus a sort-by and a hasch uuid an entity. Fix in the Datahike fork: resolve an identity's [a v] once a transaction and keep it in the report. Proof: seon.db-test/an-identity-costs-its-seek with its :overrun deleted."
   :seon.task/kind :work
-  :seon.task/proofs #{seon.db-test/an-identity-costs-its-seek}}]
+  :seon.task/proofs #{seon.db-test/an-identity-costs-its-seek}}
+]

@@ -196,41 +196,6 @@
     (cond-> (if (contract/error? r) r {:branch (when (seq tasks) (:branch req)) :sha (get-in r [:value :sha]) :tasks tasks :paths paths})
       (seq not-unsynced) (assoc :not-unsynced not-unsynced))))
 
-(defn gate!
-  "The process tests each of tasks ids' change reaches (a fork, a root, the binary) run on the
-  gate checkout (:seon.config.source/gate-checkout). A merge's gate runs them before it merges
-  with nobody asking (seon.reconcile's :gate), so the :seon.task/gate? this sets is no longer
-  read; it stays until THE PLAN step 0.7 has exercised the gate (task
-  seon.proofs/prove-is-the-one-runner). A task
-  that already merged unasked (its open :unrun problem) has them run now, through the
-  :tests effect on the merges branch's head, which holds its change; their results are
-  recorded on it (:seon.task/deferred-results), which closes the problem when each passed.
-  Answers {:asked ids :ran {task {test status}}}; without a gate checkout declared, the
-  merged ones' tests are each :error, with :seon.root/no-gate-checkout on the task."
-  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
-  [sys ids]
-  @(root/transact-main! sys (vec (for [id ids] {:seon.task/id id :seon.task/gate? true})))
-  (let [want (set ids)
-        db @(:conn sys)
-        unrun (for [id (sort want)
-                    :let [t (d/pull db [:seon.task/outcome :seon.task/deferred :seon.task/deferred-results] [:seon.task/id id])]
-                    :when (and (= :merged (:seon.task/outcome t))
-                               (seq (:seon.task/deferred t))
-                               (not-every? #(= :pass (get (:seon.task/deferred-results t) %)) (:seon.task/deferred t)))]
-                [id (vec (sort-by str (:seon.task/deferred t)))])
-        ran (into {} (for [[aid tests] unrun
-                           :let [repo (config/value :seon.config.source/gate-checkout)
-                                 r (if repo
-                                     @(root/effect! sys :tests {:repo repo :branch (config/value :seon.config.source/branch) :files {} :tests tests})
-                                     (contract/error :seon.root/no-gate-checkout #'my.root/gate!
-                                                     "no gate checkout declared (:seon.config.source/gate-checkout): the process tests cannot run here" {:tests tests}))
-                                 rs (if (contract/error? r) (zipmap tests (repeat :error)) (get-in r [:value :results]))]]
-                       (do @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.task/deferred-results
-                                                                   (cond-> [{:seon.task/id aid :seon.task/deferred-results rs}]
-                                                                     (contract/error? r) (conj {:seon.task/id aid :seon.task/error r}))))
-                           [aid rs])))]
-    {:asked (vec ids) :ran ran}))
-
 (defn tasks-read-tx
   "The write of outcome, the last read of the task files (:seon.root/tasks: {:files} or {:error}),
   on root. A refused read's error names it as its subject and is written with it, in one

@@ -136,7 +136,7 @@
   (let [checkout (seon.config/checkout)
         path (str checkout "/target/root-test-resume-" (random-uuid))
         later? #(or (str/starts-with? (namespace (:db/ident %)) "seon.config") (= "seon.ai.model" (namespace (:db/ident %)))
-                    (#{:ns/file :ns/tail :form/lead :form/source :seon.task/commit :seon.task/commit-error} (:db/ident %)))
+                    (#{:ns/file :ns/tail :form/lead :form/source :seon.task/commit} (:db/ident %)))
         cfg (pdb/store-cfg :lmdb path)
         _ (d/create-database cfg)
         c (pdb/connect cfg)

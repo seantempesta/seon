@@ -43,6 +43,8 @@ What happened before needs no entity either. A task's earlier states are read fr
 
 Before declaring a ref, ask what the fact means to whoever writes it: a statement about an entity that must exist, or an observation of a name. A statement is a ref: an eval belongs to an agent. An observation is a value: a form that mentions a function saw a name, and whether anything by that name exists is a separate question, so `:form/refs` holds symbols. A value survives what it names being deleted or renamed, and "names something with no entity" is one query. The tell for a name stored as a ref is machinery to survive a rename.
 
+When something happened is its transaction's time: read a datom's `:tx` and that transaction's ``:db/txInstant`` (a pull asks it with `[attr :tx true]`, [ctx](ctx.md#the-pattern)), and order by `[:db/txInstant, tx id]`, never by an entity or transaction id alone: ids are unique across every branch, but a merge carries a branch's transactions with their own ids and times, so id order on a branch is not the order things were written there ([history](storage.md#history)).
+
 ## Absence and retraction
 
 An attribute with no value has no datom, so a stored nil and an empty set do not exist: clear a value by retracting it, and omit what is absent. This has a consequence: "found nothing" and "never looked" are the same bytes. If a reader must tell them apart, the looking is a fact of its own, a positive one naming what it read.
