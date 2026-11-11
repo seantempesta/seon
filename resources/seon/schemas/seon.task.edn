@@ -70,6 +70,8 @@
  ;; an agent as the reconciler's index holds it: what root decides on of its process and environment (the entity's attributes,
  ;; seon.task/agent-value)
  :seon.reconcile/agent [:map [:seon.agent/key :string] [:seon.agent/boot {:optional true} :string]
+                        ;; the id of the task it works now (its :seon.agent/task): a task it left at its cap no longer waits on it
+                        [:seon.agent/task {:optional true} :seon.task/id]
                         [:seon.agent/env {:optional true} :seon.task/env]]
  ;; ---- the done rule and the reconciler's answer ----
  :seon.reconcile/merge-limits [:map [:max-conflicts nat-int?] [:max-merge-turns nat-int?]]

@@ -675,13 +675,22 @@
     (cond-> (select-keys a [:seon.agent/key :seon.agent/boot])
       (and branch max-turns) (assoc :seon.agent/env (cond-> {:branch branch :model model :max-turns max-turns} holder (assoc :holder holder))))))
 
+(defn- indexed-agent
+  "Agent entity e of db as the reconciler's index holds it (`agent-value`), with the id of the task it works now (:seon.agent/task):
+  a session's agent takes up the next task on its branch, and the task it left at its cap no longer waits on it
+  (seon.reconcile's readiness). See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  {:malli/schema [:=> [:cat :seon.host/db :int] :seon.reconcile/agent]}
+  [db e]
+  (let [tid (some-> (d/entity db e) :seon.agent/task :seon.task/id)]
+    (cond-> (agent-value (d/pull db agent-pull e)) tid (assoc :seon.agent/task tid))))
+
 (defn agents
   "Every agent root started on db, by key: the entities a start recorded (start-tx: :seon.agent/boot among them). See docs/reconcile.md#a-task-holds-how-its-work-ended."
   {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :seon.reconcile/agent]]}
   [db]
   (into {} (for [{e :e} (d/datoms db :aevt :seon.agent/boot)
-                 :let [a (d/pull db agent-pull e)]]
-             [(:seon.agent/key a) (agent-value a)])))
+                 :let [a (indexed-agent db e)]]
+             [(:seon.agent/key a) a])))
 
 (def finished
   "Outcomes that make its task done: a task's outcomes are declared once, on :seon.task/outcome's schema, and read
@@ -756,7 +765,7 @@
   (let [k (d/pull db [:seon.task/id :seon.agent/boot :seon.root/id] e)]
     (cond (:seon.task/id k) [:task (task-value (d/pull db task-pull e))]
           ;; an agent its start recorded: a branch's record of its own agent, with no boot, is none
-          (:seon.agent/boot k) [:agent (agent-value (d/pull db agent-pull e))]
+          (:seon.agent/boot k) [:agent (indexed-agent db e)]
           (:seon.root/id k) (some->> (root db) (vector :root)))))
 
 (defn tasks-of-agent

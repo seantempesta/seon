@@ -1829,3 +1829,16 @@
     (is (= [:wake :a-a] ((juxt :op :agent) (act idle-db))) "and the refine is a wake on it")
     (is (nil? (#'r/holder-of (r/index ending-db) "demo/a-refine")) "ending holder: no wake")
     (is (= :spawn (:op (act ending-db))) "the refine is a spawn, refused while the holder ends and asked again when it is stopped")))
+
+(deftest a-capped-task-its-agent-left-is-not-woken
+  ;; docs/tasks.md#a-refine-curates-its-own-task (loop D2-again, 2026-11-11: the refine's task-switch message woke its agent, and the work task
+  ;; it had left at its cap, still naming that agent, was started on it mid-refine): a task at its cap whose agent took up another task ended its
+  ;; wait; a stage's parked tasks still wake together (an-agents-boot-moving-re-derives-every-task-that-names-it)
+  (let [base (with-refine-section (db-of [(decl "a")] :extra (work "a" :cap)))
+        base (d/db-with base (task/refine-tx base "demo/a" false))
+        took-up (fn [outcome] (d/db-with base [{:seon.task/id "demo/a-refine" :seon.task/agent [:seon.agent/key (akey "a")] :seon.task/outcome outcome}
+                                               {:seon.agent/key (akey "a") :seon.agent/task [:seon.task/id "demo/a-refine"]}]))
+        tasks (fn [db] (set (map :task (actions-for db :woken [(akey "a")]))))]
+    (is (contains? (tasks base) "demo/a") "before its agent took up the refine, a message wakes it at its cap, as any capped task")
+    (is (not (contains? (tasks (took-up :running)) "demo/a")) "after, the task it left is not started by a message to it")
+    (is (= #{"demo/a-refine"} (tasks (took-up :cap))) "at the refine's own cap, a message wakes the refine alone")))

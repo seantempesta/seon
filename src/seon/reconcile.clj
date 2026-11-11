@@ -201,7 +201,12 @@
                   ;; the task's agent is its key (task-pull), so an agent no root has started yet (root's session at boot) wakes too
                   ;; and is spawned under that key (docs/users.md#roots-session)
                   (or (not (#{:parked :told :cap} o))
-                      (contains? (:woken idx) (:seon.task/agent t)))))))
+                      (and (contains? (:woken idx) (:seon.task/agent t))
+                           ;; a task at its cap whose agent took up another task (a refine continuing it) ended its wait: the agent's
+                           ;; messages are that task's now (loop D2-again: the capped task was started again mid-refine). A stage's
+                           ;; tasks are parked, never capped, and still wake together
+                           (not (and (= :cap o)
+                                     (let [cur (get-in idx [:agents (:seon.task/agent t) :seon.agent/task])] (and cur (not= cur id)))))))))))
 
 (defn- refresh-done
   "Re-derive task id's done state from its outcome; answers [idx flipped?]."
@@ -936,9 +941,9 @@
                                         now)))
                (into (:tx carried))
                ;; every end that holds or finishes the task gets its refine, the same agent continued on the same branch
-               ;; (docs/tasks.md#a-refine-curates-its-own-task): none while the agent goes on (parked, or told a verdict), none for a
+               ;; (docs/tasks.md#a-refine-curates-its-own-task): none while the agent goes on (parked, told a verdict, or behind main), none for a
                ;; refine, none twice (seon.task/refine-tx)
-               (into (when-not (#{:parked :told} outcome) (task/refine-tx main id (boolean (or (finished outcome) (judged-outcomes outcome))))))
+               (into (when-not (#{:parked :told :behind} outcome) (task/refine-tx main id (boolean (or (finished outcome) (judged-outcomes outcome))))))
                ;; a refine's end that changed the plan of the held task it cites runs that task again, fresh from main (seon.task/again-tx)
                (into (task/again-tx main id (:tx carried)))
                ;; marked failed (my.task/fail!): the failure on main and the task held for root (a compare-and-swap from :running),
