@@ -64,7 +64,7 @@ How much the test service runs at once is three optional keys, and any combinati
 |---|---|---|---|
 | `:seon.config.proofs/max-workers` | items running at once | no count of its own | an item waits in the queue until a running one ends |
 | `:seon.config.proofs/max-cores` | a share of `:seon.config.machine/cores` in (0,1], rounded down and at least 1 (a count is `max-workers`) | no core bound | the same |
-| `:seon.config.proofs/max-load` | the machine's 1-minute load average | the load admits everything | no further item is granted until a step reads the load under it |
+| `:seon.config.proofs/max-load` | the machine's 1-minute load average; shipped as the machine's cores (`#seon/cores`) | the load admits everything | no further item is granted until a step reads the load under it |
 
 - **The count** is the least of the two count keys that are set. With neither set it is the machine's cores (`:seon.config.machine/cores`, read by `#seon/cores` when the config is read and never written as a literal), so an empty config still has a bound.
 - **The load** is read only inside a step the service is already taking (an ask arrived, an item ended), never on a timer ([the machine's load admits work](clocks.md#the-machines-load-admits-work)). It never blocks the first item: with nothing running one item is always granted whatever the load, because nothing else would wake the queue.

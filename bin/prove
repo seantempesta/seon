@@ -1,4 +1,6 @@
 #!/bin/zsh
+# bin/prove [NS ...] | bin/prove --merge — ask the standing system to prove this checkout (below, "the standing system"); the
+# shell runner that follows is bin/prove --out DIR | --tests | --checks, until its deletion (docs/merging.md#the-test-service).
 # bin/prove [--out DIR] [--tests | --checks] [NS ...] — run exactly what the change reaches (docs/merging.md): every test (of the named
 # namespaces) and every bin/check step (seon.proofs/check-steps) whose reach digest has no green
 # result in the results directory every checkout shares runs; the rest are reused. An unchanged
@@ -70,6 +72,27 @@ if [[ ${1:-} == --root ]]; then
   # the binary's environment and its libraries (bin/env exports them), and its home, as bin/root runs it
   . "$ROOT/bin/env"
   cd "$ROOT/target" && SEON_CHECKOUT=$ROOT HOME=$ROOT/target/home exec ./seon prove "$PORT" "$ROOT" "$@"
+fi
+# bin/prove [NS ...] and bin/prove --merge ask the standing system (the main tree's root): it indexes this checkout's files
+# into a branch of its own, made from main (seon.root/prove-tree!), and its test service proves that branch under its one
+# admission (:seon.config.proofs/max-workers, max-cores, max-load) with every other asker's items: a session's, an agent's,
+# a landing's (docs/merging.md#a-session-proves-through-root). The client is the main tree's binary, so this checkout builds
+# nothing to be proved; the build its process tests and binary steps need is an item of the run. --tests, --checks and
+# --out run the shell runner below.
+if [[ ${1:-} != --tests && ${1:-} != --checks && ${1:-} != --out ]]; then
+  . "$ROOT/bin/env"
+  MERGE=0; [[ ${1:-} == --merge ]] && { MERGE=1; shift }
+  PORT=$(<"$MAIN_TREE/runs/root.port" 2>/dev/null)
+  if [[ -z $PORT || ! -x $MAIN_TREE/target/seon ]]; then
+    echo "prove: the standing system is not running (no $MAIN_TREE/runs/root.port or target/seon): bin/root status in $MAIN_TREE"
+    (( MERGE )) && echo "MERGE FAILED" || echo "PROVE FAILED"; exit 1
+  fi
+  OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; mkdir -p "$OUT"
+  echo "prove: run ${OUT:t}, logs in $OUT; asking the standing system on port $PORT"
+  ( cd "$MAIN_TREE/target" && SEON_CHECKOUT=$ROOT HOME=$MAIN_TREE/target/home ./seon prove "$PORT" "$ROOT" "$@"; print $? > "$OUT/prove.st" ) 2>&1 | tee "$OUT/prove.log" &
+  wait; st=$(<"$OUT/prove.st" 2>/dev/null) || st=1
+  if (( ! MERGE )); then (( st == 0 )) && "$ROOT/bin/remove-tree" "$OUT"; exit $st; fi
+  merge_verdict "$OUT" $st; exit $?
 fi
 OUT=
 [[ ${1:-} == --out ]] && { OUT=$2; shift 2 }
