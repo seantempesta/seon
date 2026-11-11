@@ -519,3 +519,15 @@
   (let [text (:text (seon/print-value (assoc breadth-rows 3 :odd) {:handle 'result/e1 :budget 1000}))]
     (clojure.test/is (= 0 (count (re-seq #"\{…" text))))
     (clojure.test/is (= 1 (count (re-seq #"…\d+ \(drop" text))) "one cut past the rows shown")))
+
+(deftest an-entity-prints-its-keys-in-one-order-and-a-view-in-its-own
+  ;; docs/render.md#one-printer (Point's ruling, after render.md#a-render-is-a-value-printed-once): an entity's attributes have no order,
+  ;; so an entity (a map holding :db/id) prints its keys sorted, the same bytes however it was made (a cold build, a patch that joined a key
+  ;; to a node it held); a view's array map is what matters in its author's order and keeps it
+  (let [built (array-map :db/id 1 :seon.eval/id "e1" :seon.eval/code "(f)" :at {:db/id 9})
+        patched (array-map :db/id 1 :at {:db/id 9} :seon.eval/code "(f)" :seon.eval/id "e1")
+        view (array-map :refused [] :proofs [] :plan "p")]
+    (is (= built patched) "one value")
+    (is (= (seon.print/text built) (seon.print/text patched)) "an entity made two ways: the same bytes")
+    (is (< (str/index-of (seon.print/text view) ":refused") (str/index-of (seon.print/text view) ":proofs")) "a view keeps its author's order")))
+
