@@ -1099,8 +1099,8 @@
         data (main-data-datoms sys)
         md (count data)
         ba (by-attr data)
-        ;; this boot has started no agent yet: every earlier boot's link to its agents is
-        ;; retracted, and the one agent linked is the user (seon.task/boot-tx)
+        ;; this boot has started no agent yet: every earlier boot's link to its WORK agents is
+        ;; retracted; the agents linked are the two that outlive a boot, the user and root's session (seon.task/earlier-agents-tx)
         linked (vec (for [dt (d/datoms @(:conn sys) :aevt :seon.agent/root)] (:seon.agent/key (d/pull @(:conn sys) [:seon.agent/key] (:e dt)))))
         [n rb rc] (spawn-ready! sys "born after the restart" {:task "resume b" :branch :dur-b} {:task "resume the clone" :branch :dur-clone})
         ;; each request's response is its last form's value: one vector of what each check reads
@@ -1122,7 +1122,7 @@
                 :merge-b [(select-keys mmb [:ok :applied]) (dissoc mb :ops)] :after-merging-b r-n2}
        :checks {:main-recovered (and (= (:main-datoms expect) md) (:recovered? (:store st)))
                 ;; what main-data-datoms leaves out, asserted: the boot retracted phase 1's links
-                :earlier-agents-are-not-this-roots (= [(seon.config/value :seon.config.root/user-name)] linked)
+                :earlier-agents-are-not-this-roots (= #{(seon.config/value :seon.config.root/user-name) "root"} (set linked))
                 ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
                 ;; main-data-datoms leaves the user out: it is still main's
                 :phase-1s-user-recovered (some? (seon.db/eid @(:conn sys) :seon.agent/key (:user expect)))

@@ -1676,7 +1676,7 @@
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
   [fd {id :agent branch :branch task :task cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index schema-registry :schema-registry session :key
-       marks0 :marks} db0 serve]
+       marks0 :marks program-errors :program-errors} db0 serve]
   ;; the spawn's phases on the one clock, each with what this thread allocated in it: the fork
   ;; server's marks (marks0), then this process's, sent with its hello (spawn-phases)
   (let [inherited (lib/generation-bytes)
@@ -1720,7 +1720,9 @@
           _ (when resumed
               (let [_ (pdb/install-missing! store-conn) tx (program/gained-tx @store-conn)]
                 (when (seq tx) (d/transact store-conn {:tx-data tx :tx-meta (pdb/tx-meta branch)}))))
-          load-errors (when resumed (program/load-diff! base @store-conn))
+          ;; what did not load in the program it was forked with (seon.fork-server/stood: main's, held by the server), then what of its
+          ;; resumed branch's does not load here: both go to root with its hello, each a recorded problem of this agent, never a silent start
+          load-errors (concat program-errors (when resumed (program/load-diff! base @store-conn)))
           _ (mark! :base)
           misaligned (when-not resumed (misaligned commit t @store-conn db0))
           _ (mark! :misaligned)]
