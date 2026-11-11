@@ -405,6 +405,25 @@
     (is (every? (set (keys (:results r))) '[app.p-test/one app.p-test/two app.p-test/three]) "every proof has its verdict")
     (is (= {} (:items st)) "nothing left queued")))
 
+;; docs/merging.md#the-test-service: a tree's run (:judge, a session's or a landing's) is a verdict of the whole, so past a red it
+;; still runs every item and names every red; an agent's turn with no proofs named is answered at its first red, as before
+(deftest a-whole-runs-asker-hears-every-red-and-a-turns-its-first
+  (let [one 'a.x-test/one two 'a.x-test/two
+        red (fn [t] {:pass 0 :fail 1 :error 0 :reports [{:type :fail :var (str "#'" t) :message "no"}]})
+        run (fn [mode]
+              (let [[st0 o0] (feed (assoc (prove/prove-proc {}) :workers 1) [[:req {:rid 1 :branch :b :t 5 :digest "d5" :agent :a1 :mode mode}]])]
+                (loop [st st0 all o0 seen 0]
+                  (if-let [m (first (filter :req (drop seen all)))]
+                    (let [r (if (get-in m [:req :plan?]) {:items {one "d1" two "d2"} :selected [one two]}
+                              (red (first (or (seq (get-in m [:req :names])) (keys (get-in m [:req :items]))))))
+                          [st o] (feed st [(answer-of m r)])]
+                      (recur st (into all o) (inc (.indexOf all m))))
+                    (:r (first (filter #(= :prove-answer (:op %)) all)))))))
+        whole (run :judge) turn (run :turn)]
+    (is (= [one two] (:red whole)) (pr-str (select-keys whole [:red :ran])))
+    (is (= 2 (:ran whole)) "both items ran though the first went red")
+    (is (= 1 (:ran turn)) "a turn that named no proofs stops at its first red")))
+
 ;; an agent's turn waits to act: its items go ahead of a batch's, however the batch's are valued
 (deftest a-turns-item-goes-ahead-of-a-batchs
   (let [[st _] (prove/ask-items (items-st 0) 1 :batch {['app.cheap-test/t "dc"] {:agent :a1 :ms 1}})
