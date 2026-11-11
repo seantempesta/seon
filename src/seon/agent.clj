@@ -876,17 +876,20 @@
   ([db base proofs] (test-plan db base proofs nil))
   ([db base proofs main]
   (let [[_ in] (test-inputs db)
-        b (when base (base-graph base in))
+        ;; one digest whichever runner plans a test (seon.prove/one-digest-whichever-runner-plans-it), and the SAME inputs for
+        ;; base and branch, or every test reads as changed by the branch: private contracts as the test child runs them,
+        ;; checked (check-private! at its fork), and a process test's config values its root's (index-answer reads them)
+        in (-> in (assoc-in [:config :seon.config.contract/private-checked?] "true")
+               (assoc :test-system-config (fx/config-input cfg/test-system-config (cfg/checkout))))
         ;; the reach graph is always the agent's base's updated to db, whether or not the selection has a base:
         ;; built from nothing it cost 853 MB of a 1 GiB eval budget where an update costs 290 (a plan of main's
         ;; run, mode :main, selects with no base; measured 2026-10-30, 1,169 tests)
         g (branch-graph db (or base (:base @state)) in)
+        ;; the index class the shell's runner takes (seon.program/with-index-code), from this graph, before base is indexed
+        in (cond-> in (nil? (get-in in [:config :seon.env/index])) (as-> x (program/with-index-code g x)))
+        b (when base (base-graph base in))
+        g (branch-graph db (or base (:base @state)) in)
         in (branch-inputs in db (or base (:base @state)) (:config (cfg/in-force)))
-        ;; one digest whichever runner plans a test (seon.prove/one-digest-whichever-runner-plans-it): the index class the shell's
-        ;; runner takes (seon.program/with-index-code over this graph), and private contracts as the test child runs them, checked
-        ;; (check-private! at its fork, whatever this process's own setting), never this process's value
-        in (cond-> (assoc-in in [:config :seon.config.contract/private-checked?] "true")
-             (nil? (get-in in [:config :seon.env/index])) (as-> x (program/with-index-code g x)))
         g (program/reach-indexed g in)
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
         idx (into {} (filter (fn [[t _]] (and (judges? t) (or (contains? proofs t) (not (template/stall-proofs t)))))) (program/index-of g))
