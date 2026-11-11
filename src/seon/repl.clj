@@ -1317,6 +1317,18 @@
 
 (declare defect-answer)
 
+(defn serve-item!
+  "Item request m (the test service's grant, :items) run by (run m) on a fiber of its own, each of its answers given to
+  send once it ends, a throw answered as a step's is (defect-answer); returns at once, so the agent runs as many items
+  at once as root grants it. nil. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map :seon.host/fn :seon.host/fn] :nil]}
+  [m run send]
+  (let [g (a/io-thread (run m)) died (a/go-monitor g)]
+    (a/io-thread (if-let [rs (a/<!! g)]
+                   (doseq [r rs] (send r))
+                   (when-let [r (defect-answer m (a/<!! died))] (send r))))
+    nil))
+
 (defn tests-step
   "The agent's :tests proc: root's :tests requests, one at a time, each run on this proc's fiber
   (seon.agent/handle!'s :tests: the plan, the forked children read to their end, the results
@@ -1325,7 +1337,7 @@
   work is this fiber's, never charged to the eval that waits. An item the test service granted (:items, one test at
   its plan's digest) runs on a fiber of its own instead, so the agent runs as many at once as root grants it (the
   service's workers bound them, :seon.config.proofs/test-workers), each answered when its child ends; it writes the
-  verdict cache only, nothing of the branch, and a throw is answered as a step's is (defect-answer). See
+  verdict cache only, nothing of the branch, and a throw is answered as a step's is (serve-item!). See
   docs/processes.md#the-agent-process, docs/merging.md#the-test-service."
   {:malli/schema :seon.step/step-fn}
   ([] {:ins {:in "root's :tests requests"} :outs {} :workload :io :ping-map-fn (fn [_] {})})
@@ -1333,11 +1345,7 @@
   ([st _] st)
   ([st _ m]
    (if (:items m)
-     (let [g (a/io-thread (agent/handle! m)) died (a/go-monitor g)]
-       (a/io-thread (if-let [rs (a/<!! g)]
-                      (doseq [r rs] (agent/send! r))
-                      (when-let [r (defect-answer m (a/<!! died))] (agent/send! r))))
-       [st nil])
+     (do (serve-item! m agent/handle! agent/send!) [st nil])
      ;; its results committed when the REPL is idle, before their answers; a request it runs commits them with its
      ;; own at its end, never half of it from here
      (let [rs (agent/handle! m)]

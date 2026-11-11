@@ -1364,3 +1364,21 @@
     (is (= :seon.render/drawn (:seon.eval/schema (repl/record-details "(chart)" {:handle 'result/e1 :value svg} {}))) "a map holding its hiccup")
     (is (= :seon.render/drawn (:seon.eval/schema (repl/record-details "(xs)" {:handle 'result/e2 :value meta-drawn} {}))) "a value holding it in its metadata")
     (is (nil? (:seon.eval/schema (repl/record-details "(+ 1 2)" {:handle 'result/e3 :value 3} {}))) "a plain value names none")))
+
+;; docs/merging.md#the-test-service: the items the test service grants one agent run at once (seon.repl/serve-item!, which
+;; tests-step calls for each), so test-workers bounds a run on one agent as it does across agents. Each run tells `started`,
+;; then waits on `release`: both must start before either is let go. Served one at a time, the first call would wait on a
+;; channel nothing can fill, and Jolt's all-asleep check throws its typed deadlock here: red, never a hang, and no clock
+(deftest two-granted-items-of-one-agent-run-at-once
+  (let [started (clojure.core.async/chan 2) release (clojure.core.async/chan) sent (clojure.core.async/chan 3)
+        run (fn [m] (clojure.core.async/>!! started (:id m)) (clojure.core.async/<!! release) [{:op :tests :id (:id m) :result {:pass 1 :fail 0 :error 0}}])
+        send (fn [r] (clojure.core.async/>!! sent r))]
+    (is (nil? (repl/serve-item! {:op :tests :id :a1 :items {'app.x-test/t "d1"}} run send)) "it returns at once")
+    (repl/serve-item! {:op :tests :id :a2 :items {'app.x-test/u "d2"}} run send)
+    (is (= #{:a1 :a2} (hash-set (clojure.core.async/<!! started) (clojure.core.async/<!! started))) "both items started while neither was let go")
+    (clojure.core.async/close! release)
+    (is (= #{:a1 :a2} (hash-set (:id (clojure.core.async/<!! sent)) (:id (clojure.core.async/<!! sent)))) "each answered once it ended")
+    (repl/serve-item! {:op :tests :id :a3 :items {'app.x-test/v "d3"}} (fn [_] (throw (ex-info "the item's run threw" {}))) send)
+    (let [r (clojure.core.async/<!! sent)]
+      (is (= [:tests :a3] [(:op r) (:id r)]) "a run that throws is answered, as a step's throw is")
+      (is (map? (:result r))))))
