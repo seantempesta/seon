@@ -612,18 +612,19 @@
  ;; The test service's admission (seon.prove/admission, docs/merging.md#the-test-service): three optional bounds, any
  ;; combination (the owner: "a fixed max number and a load max and core max ... any combination has a solution"). An unset
  ;; key binds nothing; with neither count set, the machine's cores (:seon.config.machine/cores) bound the items at once.
- ;; Unit: processes. The most items (a test child, a process test, a check step, a build or seed) running at once on this
+ ;; Unit: items. The most items (a test child, a process test, a check step, a build or seed) running at once on this
  ;; machine. Provenance: 2026-11-11, a forked test child is 16-35 MB of its own and about a core while it runs (fork + one
  ;; test + exit: ~10 ms); 18 cores, half kept for the roots and agents the tests drive: 8. At the bound: an item waits in
  ;; the queue for a running one to end. Set it to the machine (config/local.edn), as the owner asked: configurable.
  :seon.config.proofs/max-workers 8
- ;; Unit: a share of :seon.config.machine/cores in (0,1] (rounded down, at least 1), or a count of cores over 1. Unset: no
- ;; core bound. At the bound: as max-workers; the least of the two set holds.
+ ;; Unit: a share of :seon.config.machine/cores in (0,1] (rounded down, at least 1); a count of items is max-workers. Unset:
+ ;; no core bound. At the bound: as max-workers; the least of the two set holds.
  ;; :seon.config.proofs/max-cores 0.5
  ;; Unit: the machine's 1-minute load average. Unset: the load admits everything. Set, an item is granted only while the
  ;; load (read in a step the service already takes: an ask arrived, an item ended; never polled) is under it, except that
  ;; with nothing running one item is always granted, so the queue never stalls with nothing to wake it. Admission only,
  ;; never a verdict (docs/clocks.md#the-machines-load-admits-work).
+ ;; Set per machine (config/local.edn), never shipped: a load is absolute.
  ;; :seon.config.proofs/max-load 12.0
  ;; Unit: ms. The least work a shard of an incremental run is worth (seon.proofs/worth-shards). Provenance: a shard's start
  ;; costs about 5 s, and 8 s more for its process tests' root (docs/testing.md#a-root-costs-what-it-boots), so it saves its cost past

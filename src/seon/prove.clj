@@ -35,7 +35,8 @@
   head: what a run reads, so a write that changes no form never makes a second run), of the tests of
   namespaces names (nil: all it selects), in mode (:judge: the plan's tests; :turn: the proofs and
   what the branch changed, an agent's turn; :main: main's run, every test with no result at its
-  digest, the plan taking no base)."
+  digest, the plan taking no base). No checkout: two checkouts of one tree asking at once share a run, whose process items
+  and steps run on the first asker's checkout; a checkout removed while that run reads it answers its waiters :tree-moved."
   {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main :full]] :string]}
   [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn") (when (= :full mode) "!full")))
 
@@ -80,12 +81,12 @@
 (defn admission
   "The test service's admission from the config's three optional bounds (docs/merging.md#the-test-service), any combination
   (each nil when unset): {:workers n}, n the least of the count bounds set (max-workers; max-cores, a share in (0,1] of the
-  cores rounded down or a count, at least 1), the cores when neither is set; with :max-load when it is set."
+  cores rounded down, at least 1), the cores when neither is set; with :max-load when it is set."
   {:malli/schema [:=> [:cat [:map [:cores pos-int?] [:max-workers {:optional true} [:maybe pos-int?]]
-                             [:max-cores {:optional true} [:maybe number?]] [:max-load {:optional true} [:maybe number?]]]]
+                             [:max-cores {:optional true} [:maybe double?]] [:max-load {:optional true} [:maybe number?]]]]
                   [:map [:workers pos-int?] [:max-load {:optional true} number?]]]}
   [{:keys [max-workers max-cores max-load cores]}]
-  (let [by-cores (when max-cores (max 1 (if (<= max-cores 1) (long (Math/floor (* max-cores cores))) (long max-cores))))
+  (let [by-cores (when max-cores (max 1 (long (Math/floor (* max-cores cores)))))
         counts (filterv some? [max-workers by-cores])]
     (cond-> {:workers (if (seq counts) (reduce min counts) cores)}
       max-load (assoc :max-load max-load))))
@@ -190,7 +191,7 @@
   (docs/merging.md#the-test-service). Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :any :any] [:tuple :map [:vector :map]]]}
   [st k r]
-  (let [{:keys [waiters kind]} (get-in st [:items k])
+  (let [{:keys [waiters kind checkout]} (get-in st [:items k])
         st (update st :items dissoc k)
         [t d] k
         signal? (and (map? r) (some? (:signal r)))
@@ -198,6 +199,12 @@
             (contract/error :seon.prove/build-red #'seon.prove/item-ended (str "the " (name kind) " of tree " d " is red") {:tree d :kind kind :answer r})
             r)
         red? (and (not signal?) (or (contract/error? r) (not (proofs/green? r))))
+        ;; a green build or seed is the checkout's for its tree: a later run of that tree reuses it (ask-items), so no second
+        ;; one relinks the binary or remakes the store while the first run's items read them. One tree a checkout: a new
+        ;; tree's replaces it
+        st (if (and (#{:build :seed} kind) (not red?) (not signal?))
+             (update-in st [:made checkout] #(if (= d (:tree %)) (update % :items conj k) {:tree d :items #{k}}))
+             st)
         ms (or (get-in r [:answer :measured t :ms]) (when (map? r) (:ms r)))
         verdict (cond-> (cond (contract/error? r) {:test t :digest d :status :no-verdict :failures [(select-keys r [:seon.error/type :seon.error/message])]}
                               signal? {:test t :digest d :status :signal :signal (:signal r)}
@@ -226,10 +233,14 @@
   "Asker rid (prio :turn or :batch) waits on items ({[name digest] {:agent :ms :mode :kind ...}}, what its plan holds no
   verdict for; :kind :test (the default), :process, :step, :build or :seed, the others with the :tree and :checkout they
   run on, :binary? and :bound, and :needs, the set of items they wait for): an item queued or running gains it as a waiter, the rest
-  are queued once; then slots are granted (grant).
+  are queued once; then slots are granted (grant). A build or seed its checkout already made green for its tree (:made,
+  item-ended) is not queued again, and nothing waits on it.
   With no item it is answered green at once. Answers [st outputs]. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map :any [:enum :turn :batch] [:map-of :any :map]] [:tuple :map [:vector :map]]]}
   [st rid prio items]
+  (let [made? (fn [[k m]] (contains? (get-in st [:made (:checkout m) :items]) k))
+        done (into #{} (comp (filter made?) (map key)) items)
+        items (into {} (comp (remove made?) (map (fn [[k m]] [k (cond-> m (:needs m) (update :needs #(not-empty (reduce disj % done))))]))) items)]
   (if (empty? items)
     [st [{:op :asker-answered :asker rid :r {:green true :results {}}}]]
     (let [st (reduce (fn [st [k m]]
@@ -237,7 +248,7 @@
                          (update-in st [:items k :waiters] conj rid)
                          (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :binary? :bound]) :status :queued :waiters #{rid} :at (:bid st 0)))))
                      (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}}) items)]
-      (grant st))))
+      (grant st)))))
 
 (defn batch-ended
   "Batch bid's answer r (the agent's :tests answer: its :reports by test var, its :failures; or the error its run answered,

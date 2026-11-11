@@ -63,14 +63,14 @@ How much the test service runs at once is three optional keys, and any combinati
 | key | unit | unset means | at the bound |
 |---|---|---|---|
 | `:seon.config.proofs/max-workers` | items running at once | no count of its own | an item waits in the queue until a running one ends |
-| `:seon.config.proofs/max-cores` | a share of `:seon.config.machine/cores` in (0,1], rounded down and at least 1; or a count of cores over 1 | no core bound | the same |
+| `:seon.config.proofs/max-cores` | a share of `:seon.config.machine/cores` in (0,1], rounded down and at least 1 (a count is `max-workers`) | no core bound | the same |
 | `:seon.config.proofs/max-load` | the machine's 1-minute load average | the load admits everything | no further item is granted until a step reads the load under it |
 
 - **The count** is the least of the two count keys that are set. With neither set it is the machine's cores (`:seon.config.machine/cores`, read by `#seon/cores` when the config is read and never written as a literal), so an empty config still has a bound.
 - **The load** is read only inside a step the service is already taking (an ask arrived, an item ended), never on a timer ([the machine's load admits work](clocks.md#the-machines-load-admits-work)). It never blocks the first item: with nothing running one item is always granted whatever the load, because nothing else would wake the queue.
 - **These are signals, not hard constraints** (owner, 2026-11-11: "The step bounds are signals not hard constraints"). They decide when an item starts. They never decide a verdict, and reaching one is not an error: the item waits, and the service's reported state shows the queue and the load it last read.
 - **Every combination:** all three unset, the cores bound the count and the load admits everything. A count alone, that count. A load alone, the cores bound the count and the load gates each grant after the first. All three, the least count, gated by the load.
-- **Set them to the machine** in `config/local.edn` ([layers](#layers)): the shipped file holds `max-workers` with its provenance and leaves the other two unset, since a load that is right for 18 cores is wrong for 8.
+- **Set them to the machine** in `config/local.edn` ([layers](#layers)): the shipped file holds `max-workers` with its provenance and leaves the other two unset, since a load that is right for 18 cores is wrong for 8. `:seon.config.machine/cores` may be set there too, to admit as a machine of that many cores would (the 8-core target's admission on this machine).
 
 ## Constants
 

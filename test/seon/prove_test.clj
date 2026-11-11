@@ -466,6 +466,17 @@
         (is (= [1 0 0 []] ((juxt :pass :fail :error :deferred) r)) "counted as a test, nothing deferred")
         (is (= [:process] (mapv :kind (filter #(= 'a.p-test/t (:test %)) (filter #(= :prove-verdict (:op %)) o3)))) "its verdict streams with its kind")))))
 
+(deftest a-trees-green-build-and-seed-are-made-once-for-its-checkout
+  ;; Web's read of step 4: a second run of one tree (another key: names or mode) queued the seed again, which removes
+  ;; and remakes the store the first run's steps were cloning; the build alike relinks the binary its items run
+  (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? true}})
+        [st o1] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 900}})])
+        [st o2] (feed st [(answer-of (first (fx-asks o1)) {:value {:pass 1 :fail 0 :error 0 :ms 2000}})])
+        [st _] (feed st [(answer-of (first (fx-asks o2)) {:value {:pass 1 :fail 0 :error 0 :ms 40}})])
+        [st o3] (feed st [[:req {:rid 2 :branch :tree-T :digest "dT" :agent :a1 :checkout "/ck" :tree "T" :names '#{a.p-test}}]])
+        [_ o4] (feed st [(answer-of (first (asks o3 :tests)) {:items {} :process {'a.p-test/u "du"} :build {:tree "T" :needed? true}})])]
+    (is (= [:process] (mapv #(get-in % [:req :req :kind]) (fx-asks o4))) "the second run's process item is granted at once: no build, no seed")))
+
 ;; every wait ends: a red build is every item's that needs it, and none of them runs on a binary that was never built
 (deftest a-red-build-answers-what-needs-it-with-its-error
   (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :steps {"smoke" {:digest "ds" :binary? true :bound 5000}} :build {:tree "T" :needed? true}})
@@ -544,7 +555,7 @@
 ;; docs/merging.md#the-test-service: a share of the cores is a count of them, the least count set holds
 (deftest max-cores-is-a-share-of-the-cores
   (is (= 2 (five-asked (prove/admission {:max-cores 0.5 :cores 4}))) "half of four cores: two")
-  (is (= 3 (five-asked (prove/admission {:max-cores 3 :max-workers 4 :cores 18}))) "a count of cores, under max-workers")
+  (is (= 3 (five-asked (prove/admission {:max-cores 0.2 :max-workers 4 :cores 18}))) "a fifth of eighteen, under max-workers")
   (is (= {:workers 1} (prove/admission {:max-cores 0.1 :cores 4})) "at least one"))
 
 ;; docs/clocks.md#the-machines-load-admits-work: over max-load nothing more is granted while an item runs; with nothing

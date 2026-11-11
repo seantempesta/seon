@@ -1589,7 +1589,7 @@
   {step {:digest :binary? :bound}}, the bin/check steps with no green at their digest as bin/prove plans them
   (seon.proofs/plan-of over this branch's reach graph and inputs, every step that reaches a process kept, the generative
   check's keys left to the shards), :bound the step-end factor times the step's median measured ms floored at the stall
-  bound (none unmeasured), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
+  bound (a step never measured has none, as under bin/prove: it ends by its own waits' bounds, and that run measures it), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
   steps it names among them (bin/prove --root PORT seon.config-test config), as the plain bin/prove NS runs none; :missing, the steps with no digest here (one naming a
   function the program lacks; health, keyed by a base tree no branch holds); :build {:tree :needed?}, needed when a process
   test or a binary step is among them; :deferred, what it left that is no process item. Or {:unread error}: the cache
@@ -1639,7 +1639,7 @@
                    ;; digests (each item's run records what it ran); main's run is main's prove's to write
                    ;; held for the items it grants this agent (item-selection), each run at the digest planned here, and for
                    ;; the facts its answer writes on this branch (record-answer!)
-                   _ (when-not (:unread sel) (swap! state assoc :held-plan (held-plan sel)))]
+                   _ (when-not (or (:unread sel) (:unread pp)) (swap! state assoc :held-plan (held-plan sel)))]
                [{:op :tests :id (:id m) :mem-mb (mem-mb)
                  :result (or (:unread sel) (:unread pp)
                              (cond-> {:items (select-keys (:digests sel) (:run sel)) :selected (:selected sel) :deferred (:deferred sel)
