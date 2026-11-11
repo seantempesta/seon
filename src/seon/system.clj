@@ -233,7 +233,7 @@
         ;; its hello answers the spawn, whatever a request sent before it made its status
         (:ready m) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)
                                                               ;; the sections its config cites and its store lacks, by address
-                                                              (seq (:missing-cites m)) (assoc :missing-cites (vec (:missing-cites m)))
+                                                              (seq (:seon.agent/missing-cites m)) (assoc :seon.agent/missing-cites (vec (:seon.agent/missing-cites m)))
                                                               (get-in st [::restored id]) (assoc :not-restored not-restored)))
         ;; and it is the agent's first fact: a message from Seon (the system entity) to it, in its conversation as any message is, written
         ;; as a plain write (it wakes nothing): the agent's page and context show it from the pull they already make

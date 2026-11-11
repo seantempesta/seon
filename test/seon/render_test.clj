@@ -2487,7 +2487,7 @@
   :seon.agent/entry's pattern and one level of the agents it started): its hiccup, the started agents in it as the pulled maps a walk
   places as their own entries."
   [db key]
-  (let [;; the entry's own clauses: its join of the agents it started (asked to a depth, its key a vector with :below) is asked here one level
+  (let [;; the entry's own clauses: its join of the agents it started (asked to a depth, its key a vector with :seon.ctx/below) is asked here one level
         started? (fn [c] (and (map? c) (some #(= :seon.agent/agents (if (vector? %) (first %) %)) (keys c))))
         e (vec (remove started? (r/schema-property (seon.db/index) :seon.agent/entry :seon.ctx/pattern)))]
     (#'ui/agent-entry db (d/pull db (into [:db/id] (conj e {:seon.agent/agents (into [:db/id] e)})) [:seon.agent/key key]))))

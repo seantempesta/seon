@@ -33,6 +33,8 @@
  ;; a pattern the walk cannot read (seon.ctx/spec): no vector, an option neither pull's nor :by, a
  ;; join naming no attribute or with no pattern; the clause it stopped at
  :seon.ctx/invalid-pattern [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/invalid-pattern]] [:clause :any]]]
+ ;; a join's option in a pull pattern, [:attribute :seon.ctx/below pattern] (seon.render/again reads it)
+ :seon.ctx/below [:sequential {:description "A join's option in a pull pattern: what a join asked to a depth asks below its last level, in place of asking itself again. Read by seon.render/again. See docs/ctx.md#the-pattern."} :any]
  ;; a record whose identity attributes name entity schemas none of which extends the others (seon.render/entity-schema):
  ;; no one schema names it, so no pattern, render or layout does; the schemas it named
  :seon.render/no-one-schema [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-one-schema]] [:schemas [:vector :qualified-keyword]]]]
