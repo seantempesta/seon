@@ -1122,6 +1122,22 @@
       (contract/error :seon.turn/invalid-call #'call-problem
                       "this eval has no form: its code is empty; nothing was run" {:problem :forms :forms 0}))))
 
+(defn- repair-problem
+  "Why an eval call's code may not run as the forgiving reader repaired it (seon.reader/forgive's repairs of code), or nil: a repair
+  that only adds closers at the end is what the code plainly meant, and runs; one that drops text, comments a line out or inserts
+  inside the form changes what the form does (loop D2-again, 2026-11-11: a swap!'s lines were commented out and the let it was in ran
+  as nothing), so the call is not run, and its answer names the repairs. See docs/prompt.md."
+  {:malli/schema [:=> [:cat :string [:sequential :map]] [:maybe :seon.error/base]]}
+  [code repairs]
+  (let [end (count (clojure.string/trimr code))
+        closer? (fn [{:keys [at inserted dropped]}] (and (empty? dropped) (re-matches #"[)\]}]+" (str inserted)) (>= at end)))]
+    (when (and (seq repairs) (not-every? closer? repairs))
+      (contract/error :seon.turn/invalid-call #'repair-problem
+                      (str "this eval's code does not read as written, and making it read would change what it does (a line commented out, "
+                           "text dropped or inserted inside the form: under :repaired), so it was not run; fix the form and send it again "
+                           "(a newline inside a string is \\n, never a backslash at a line's end)")
+                      {:problem :repaired}))))
+
 (defn run-calls
   "Eval calls ({:id :intent :code}, a reply's or an insert's: docs/turn.md#an-eval-can-be-inserted) through the one REPL
   path in order, each answered as its own result: {:id :code :intent :not-run :response}. req-of is a call's id to its
@@ -1140,7 +1156,7 @@
                         (seq repairs) (assoc :repaired (search/repaired src repairs)))
                   why (if problem
                         (contract/error :seon.turn/invalid-call #'run-calls problem {:problem :arguments})
-                        (call-problem intent src))]
+                        (or (call-problem intent src) (repair-problem code repairs)))]
               (conj acc (if why
                           {:id id :code code :intent intent :not-run false
                            :response (let [r (unrun src req why)] (agent/commit!) r)}

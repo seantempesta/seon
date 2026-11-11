@@ -1387,3 +1387,14 @@
     (let [r (clojure.core.async/<!! sent)]
       (is (= [:tests :a3] [(:op r) (:id r)]) "a run that throws is answered, as a step's throw is")
       (is (map? (:result r))))))
+
+(deftest a-repair-that-changes-the-form-is-not-run
+  ;; docs/prompt.md (loop D2-again, 2026-11-11: a refine's swap! had its lines commented out by the reader's repair, and the let it was in ran
+  ;; as nothing): an eval call whose repair adds closers at the end runs; one whose repair drops text, comments a line out or inserts inside the
+  ;; form is not run, its answer naming the repairs
+  (let [rp #(#'seon.repl/repair-problem % (:repairs (seon.reader/forgive %)))]
+    (is (nil? (rp "(+ 1 2)")) "nothing repaired")
+    (is (nil? (rp "(let [a 1] (inc a)")) "a closer added at the end runs")
+    (is (= :repaired (:problem (rp "(+ 1 2))"))) "a closer dropped does not")
+    (is (= :repaired (:problem (rp "(let [s 1]\n# the plan, better\n  (swap! ctx assoc :x s))")))
+        "a line inside the form the reader would comment out (D2: the swap!'s lines) does not")))
