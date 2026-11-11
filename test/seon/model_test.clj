@@ -27,7 +27,7 @@
 (deftest each-eval-carries-its-place-in-the-reply
   ;; task seon.fx/an-effect-streams-what-it-reads: the stream reader files an eval's code under <call>/<k>/eval-0 (k the tool call's :index),
   ;; so its output must file under the same: reply-of puts [k 0] on each eval, as data, and the stream id is made from it, never from the eval's id
-  (let [tc (fn [index id code] {:index index :id id :function {:name "eval" :arguments (json/write-str {"intent" "i" "code" code})}})
+  (let [tc (fn [index id code] {:index index :id id :function {:name "repl" :arguments (json/write-str {"intent" "i" "code" code})}})
         r (model/reply-of {:usage {:prompt_tokens 1 :completion_tokens 1}
                            :choices [{:finish_reason "tool_calls" :message {:content "" :tool_calls [(tc 0 "ta" "(+ 1 1)") (tc 1 "tb" "(+ 2 2)") (tc 2 "tc" "(+ 3 3)")]}}]} 1 100)
         calls (:tool-calls r)
@@ -84,8 +84,8 @@
     (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":\"x\"}}],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":3}}" 12.0 2048)]
       (is (= [7 3] [(:prompt-tokens c) (:completion-tokens c)])))))
 
-(deftest a-reply-calls-the-one-tool-eval
-  ;; owner, 2026-10-22: a turn is native tool calls, one tool, eval, so the model sees each
+(deftest a-reply-calls-the-one-tool-repl
+  ;; owner, 2026-10-22: a turn is native tool calls, one tool, repl, so the model sees each
   ;; evaluation's answer before its next call (DeepSeek's OpenAI-compatible tool_calls)
   (testing "the request declares the one tool, and the conversation's calls and answers go as the API reads them"
     (let [b (model/request-body {:kind :openai-compat :base-url "x" :model "m" :api-key-env "HOME" :max-tokens 64}
@@ -93,31 +93,31 @@
                                             {:role "assistant" :content "" :tool-calls [{:id "c1" :code "(+ 1 2)"}]}
                                             {:role "tool" :tool-call-id "c1" :content "3"}]
                                  :task "t/x" :turn 1})]
-      (is (= ["eval"] (mapv #(get-in % [:function :name]) (:tools b))))
-      (is (= [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(+ 1 2)\"}"}}]
+      (is (= ["repl"] (mapv #(get-in % [:function :name]) (:tools b))))
+      (is (= [{:id "c1" :type "function" :function {:name "repl" :arguments "{\"code\":\"(+ 1 2)\"}"}}]
              (:tool_calls (second (:messages b)))))
       (is (= {:role "tool" :content "3" :tool_call_id "c1"} (nth (:messages b) 2)))))
   (testing "a streamed reply's call pieces join by index into its calls, each an eval with its intent, in order; the content is the message"
     (let [c (model/parse-reply
              (apply str (map chunk-line
                              [{:choices [{:delta {:content "Two steps."}}]}
-                              {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "eval" :arguments "{\"intent\":\"i\",\"code\":"}}]}}]}
+                              {:choices [{:delta {:tool_calls [{:index 0 :id "c1" :function {:name "repl" :arguments "{\"intent\":\"i\",\"code\":"}}]}}]}
                               {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "\"(def x 41)\"}"}}]}}]}
-                              {:choices [{:delta {:tool_calls [{:index 1 :id "c2" :function {:name "eval" :arguments "{\"intent\":\"j\",\"code\":\"(inc x)\"}"}}]}}]}
+                              {:choices [{:delta {:tool_calls [{:index 1 :id "c2" :function {:name "repl" :arguments "{\"intent\":\"j\",\"code\":\"(inc x)\"}"}}]}}]}
                               {:choices [{:delta {} :finish_reason "tool_calls"}] :usage {:prompt_tokens 9 :completion_tokens 4}}]))
              5.0 64)]
       (is (= [{:id "c1" :code "(def x 41)" :intent "i" :seon.model/at [0 0]} {:id "c2" :code "(inc x)" :intent "j" :seon.model/at [1 0]}] (:tool-calls c)))
       (is (= ["Two steps." "tool_calls"] [(:text c) (:finish-reason c)]))))
   (testing "a call with no content beside it, and a call cut mid-arguments: its arguments as they came"
-    (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
+    (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"repl\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
       (is (= "" (:text c)))
       (is (= ["c" "{\"code\":\"(+ 1"] ((juxt :id :code) (first (:tool-calls c)))) "its arguments as they came")
       (is (re-find #"not run: the arguments are cut off" (:problem (first (:tool-calls c)))) "and nothing runs: the agent is told why"))))
 
 (deftest a-reply-is-its-text-and-a-call-for-each-eval
-  ;; docs/model.md#one-tool-eval: the message is the reply's text; each eval is a call of its own, with an intent, answered by a tool message of its own
+  ;; docs/model.md#one-tool-repl: the message is the reply's text; each eval is a call of its own, with an intent, answered by a tool message of its own
   (let [provider {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10}
-        call (fn [id args] {:id id :function {:name "eval" :arguments (json/write-str args)}})
+        call (fn [id args] {:id id :function {:name "repl" :arguments (json/write-str args)}})
         reply (fn [text calls] (model/parse-reply (json/write-str {:choices [{:message {:content text :tool_calls calls} :finish_reason "tool_calls"}]}) 1.0 64))
         c (reply "Doing f, then g." [(call "ca" {:intent "f" :code "(f)"}) (call "cb" {:intent "g" :code "(g)"})])]
     (testing "stored shape: each eval its own call, the message the reply's text"
@@ -134,12 +134,12 @@
             sent (:messages (model/request-body provider {:messages neutral :task "t/x" :turn 1}))]
         (is (= ["assistant" "tool" "tool" "assistant" "tool"] (mapv :role sent)) "a reply, its two results, an insert's call and its result")
         (is (= "Doing f, then g." (get-in sent [0 :content])) "the text beside the calls")
-        (is (= [{:id "ca" :type "function" :function {:name "eval" :arguments (json/write-str {:intent "f" :code "(f)"})}}
-                {:id "cb" :type "function" :function {:name "eval" :arguments (json/write-str {:intent "g" :code "(g)"})}}]
+        (is (= [{:id "ca" :type "function" :function {:name "repl" :arguments (json/write-str {:intent "f" :code "(f)"})}}
+                {:id "cb" :type "function" :function {:name "repl" :arguments (json/write-str {:intent "g" :code "(g)"})}}]
                (get-in sent [0 :tool_calls])))
         (is (= [{:role "tool" :tool_call_id "ca" :content "{:handle result/e1, :value 1}"} {:role "tool" :tool_call_id "cb" :content "{:handle result/e2, :value 2}"}] (subvec sent 1 3)) "each with its handle")
         (is (= "{\"code\":\"(+ 1 2)\"}" (get-in sent [3 :tool_calls 0 :function :arguments])) "an insert's own: code and no intent")
-        (is (= (mapv #(dissoc % :seon.model/at) (:tool-calls c)) (mapv (fn [tc] (#'model/eval-of "eval" (get-in tc [:function :arguments]) (:id tc))) (get-in sent [0 :tool_calls])))
+        (is (= (mapv #(dissoc % :seon.model/at) (:tool-calls c)) (mapv (fn [tc] (#'model/eval-of "repl" (get-in tc [:function :arguments]) (:id tc))) (get-in sent [0 :tool_calls])))
             "what went out reads back as the reply it was")))
     (testing "a reply with text and no call is a message alone"
       (is (nil? (:tool-calls (reply "Hi" nil))))
@@ -147,7 +147,7 @@
     (testing "a call that is not this shape is a typed answer to that reply, nothing run"
       (is (re-find #"code is missing" (:problem (first (:tool-calls (reply "" [(call "c" {:message-md "Hi" :evals [{:intent "f" :code "(f)"}]})]))))) "the old shape's call runs nothing")
       (is (re-find #"code is missing" (:problem (second (:tool-calls (reply "Hi" [(call "ca" {:intent "f" :code "(f)"}) (call "cb" {:intent "g"})]))))) "an eval with no code, beside one that reads")
-      (is (re-find #"there is one tool, eval; message is not a tool" (:problem (first (:tool-calls (reply "" [{:id "c" :function {:name "message" :arguments "{\"message-md\":\"Hi\"}"}}])))))))))
+      (is (re-find #"there is one tool, repl; message is not a tool" (:problem (first (:tool-calls (reply "" [{:id "c" :function {:name "message" :arguments "{\"message-md\":\"Hi\"}"}}])))))))))
 
 (deftest a-request-lets-the-model-reply-with-no-call
   ;; docs/render.md (step 0 measured it live: four DeepSeek turns,
@@ -164,7 +164,7 @@
     (is (not (contains? b :temperature)) "absent: the provider's default")
     (is (= 0.5 (:temperature (model/request-body {:kind :openai-compat :base-url "" :model "m" :api-key-env "" :max-tokens 10 :temperature 0.5} {:messages [] :task "t/x" :turn 1}))) "set: as configured")
     (is (= {:role "assistant" :content "I read f." :reasoning_content "r"
-            :tool_calls [{:id "c1" :type "function" :function {:name "eval" :arguments "{\"code\":\"(f)\"}"}}]}
+            :tool_calls [{:id "c1" :type "function" :function {:name "repl" :arguments "{\"code\":\"(f)\"}"}}]}
            (first (:messages b))) "reply text, reasoning and the call, as returned")
     (is (= "c1" (:tool_call_id (second (:messages b)))) "the response answers its call by the provider's id")))
 
@@ -252,9 +252,9 @@
                   (for [r ["Think" "ing, " "then act."]] (chunk-line {:model "deepseek-flash" :choices [{:index 0 :delta {:reasoning_content r}}]}))
                   (for [c ["Caf\u00e9 " (str emoji " ok")]] (chunk-line {:choices [{:index 0 :delta {:content c}}]}))
                   (map-indexed (fn [i f] (chunk-line {:choices [{:index 0 :delta {:tool_calls [(cond-> {:index 0 :function {:arguments f}}
-                                                                                                 (zero? i) (-> (assoc :id "call_0" :type "function") (assoc-in [:function :name] "eval")))]}}]}))
+                                                                                                 (zero? i) (-> (assoc :id "call_0" :type "function") (assoc-in [:function :name] "repl")))]}}]}))
                                (pieces-of call-args 6))
-                  [(chunk-line {:choices [{:index 0 :delta {:tool_calls [{:index 1 :id "call_1" :function {:name "eval" :arguments "{\"intent\":\"th"}}]}}]})
+                  [(chunk-line {:choices [{:index 0 :delta {:tool_calls [{:index 1 :id "call_1" :function {:name "repl" :arguments "{\"intent\":\"th"}}]}}]})
                    (chunk-line {:choices [{:index 0 :delta {:tool_calls [{:index 1 :function {:arguments "en\",\"code\":\"(inc 1)\"}"}}]}}]})
                    (chunk-line {:choices [{:index 0 :delta {} :finish_reason "tool_calls"}]})
                    (chunk-line {:choices [] :usage {:prompt_tokens 120 :completion_tokens 30 :prompt_cache_hit_tokens 64}})]))
@@ -277,7 +277,7 @@
         whole (model/parse-reply deepseek-stream 1.0 2048)
         around (fn [i] (some #(or (= 10 %) (neg? %)) (map #(aget bs %) (range (max 0 (- i 3)) (min (alength bs) (+ i 4))))))
         cuts (filter #(or (zero? (mod % 17)) (around %)) (range 1 (alength bs)))]
-    (is (= ["eval" "eval"] (map #(get-in % [:function :name]) (get-in (model/sse-reply deepseek-stream) [:choices 0 :message :tool_calls]))))
+    (is (= ["repl" "repl"] (map #(get-in % [:function :name]) (get-in (model/sse-reply deepseek-stream) [:choices 0 :message :tool_calls]))))
     (is (= 2 (count (:tool-calls whole))) (pr-str whole))
     (is (= "tool_calls" (:finish-reason whole)))
     (doseq [c cuts
@@ -339,7 +339,7 @@
 (defn fragment-lines
   "The cost proof's input at n: [lines], a tool call's first line then n lines of 8 more characters of its eval's code."
   [n]
-  [(into [(str "data: " (json/write-str {:choices [{:delta {:tool_calls [{:index 0 :id "c" :function {:name "eval" :arguments "{\"intent\":\"i\",\"code\":\""}}]}}]}))]
+  [(into [(str "data: " (json/write-str {:choices [{:delta {:tool_calls [{:index 0 :id "c" :function {:name "repl" :arguments "{\"intent\":\"i\",\"code\":\""}}]}}]}))]
          (repeat n (str "data: " (json/write-str {:choices [{:delta {:tool_calls [{:index 0 :function {:arguments "(+ 1 2) "}}]}}]}))))])
 
 (deftest a-line-costs-its-bytes-not-the-lines-before-it
