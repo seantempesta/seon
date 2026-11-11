@@ -1478,7 +1478,9 @@
                   ;; a cache that cannot be read excuses nothing: the red stays the branch's
                   (assoc r :main-red (proofs/main-red reds digests bd (if (or (nil? stored) (contract/error? stored)) {} stored)))))
         (assoc :reused (count (filter reused selected)) :ran (count (distinct (keep :var (:reports res))))
-               :selected selected :deferred deferred :at-judge (count judge))
+               :selected selected :deferred deferred :at-judge (count judge)
+               ;; each deferred test's digest as main held it (the plan's base): what the merge gate reads main's own verdict of it by
+               :deferred-digests (into {} (for [t deferred] [t (get (:base-digests plan) t)])))
         ;; why each was left out: the process it reaches and the calls to it (seon.program/process-path)
         (cond-> (seq deferred) (assoc :why (into {} (for [t deferred] [t (program/process-path (:graph plan) t)])))))))]
     (finish (run-all send!))))))))

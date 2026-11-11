@@ -285,7 +285,11 @@
     (is (= "the gate's build failed: FileNotFoundException: Could not locate seon/repl_test.jolt, at src/seon/repl.clj:3, where your change wrote: (intern 'seon.repl-test\n  'let 1)"
            (fx/build-failure out files)))
     (is (clojure.string/ends-with? (fx/build-failure out {}) "a place your change's files don't hold"))
-    (is (= "the gate's build failed and named no exception" (fx/build-failure "nothing" files)))))
+    (is (= "the gate's build failed and named no exception; it ended: nothing" (fx/build-failure "nothing" files)))
+    ;; Context's loop D3: the gate's build failed eight times naming no exception, and its log was in the checkout the run
+    ;; removed, so the agent read a path that was gone: how it ended is in the error itself
+    (is (= "the gate's build failed and named no exception; it ended: b | c | d | e | f | killed: out of memory"
+           (fx/build-failure "a\nb\n\nc\nd\ne\nf\nkilled: out of memory\n" files)))))
 
 (deftest a-gates-answer-is-what-the-system-ran
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the gate is proved by the system (seon.system/prove-tree!), which is
@@ -325,6 +329,36 @@
         (is (= (:tree-now @asked) (:tree @asked)) "named by the checkout's tree")
         (is (not (.exists (java.io.File. (str (:checkout @asked))))) "and the checkout is removed after"))
       (finally (seon.lib/remove-tree! repo)))))
+
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: with :base (each deferred test's digest at the task's base), the
+;; :tests effect reads main's verdict at that digest from the cache (reds-at) and names the reds that are main's (:main-red):
+;; red at the base digest, or at a digest the change did not move; a red at a base digest main holds green, or a test new on
+;; the branch (no base digest), is the change's. Its probe verdicts are under a namespace of this run's, removed after
+(deftest a-gate-names-the-reds-that-are-mains
+  (let [repo (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-gate-main-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))
+        pn (str "gate-probe-" (random-uuid))
+        [mains own fresh] (map #(symbol pn %) ["mains" "own" "fresh"])
+        cache (cfg/value :seon.config.proofs/results-dir)
+        ;; main's verdicts at the base digests: red for mains, green for own
+        _ (fx/write-verdicts! cache {:id (str "probe " pn) :tree "t"}
+                              {mains {:test mains :digest (str pn "-b1") :pass 0 :fail 1 :error 0}
+                               own {:test own :digest (str pn "-b2") :pass 1 :fail 0 :error 0}}
+                              {mains [{:type :fail :message "red on main"}]})
+        ;; every test red on the candidate, each at a digest its change moved
+        prove (fn [_] {:red [mains own fresh] :reports (vec (for [t [mains own fresh]] {:type :fail :var (str "#'" t) :message "red"}))
+                       :digests {mains "c1" own "c2" fresh "c3"}})]
+    (try
+      (git "init" "-q" "-b" "main")
+      (spit (str repo "/.gitignore") "/target/\n/runs/\n") (spit (str repo "/f") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
+      (let [run (fn [base] (fx/run-tests {:req (cond-> {:repo repo :branch "main" :files {"src/a.clj" (str "(ns a) ; " (random-uuid))} :tests [mains own fresh]}
+                                                 base (assoc :base base))
+                                          :ctx {:prove-tree prove}}))
+            r (run {mains (str pn "-b1") own (str pn "-b2") fresh nil})]
+        (is (= {mains :fail own :fail fresh :fail} (get-in r [:value :results])) (pr-str r))
+        (is (= #{mains} (get-in r [:value :main-red])) "red on main at its base digest: main's; green there, or new on the branch: the change's")
+        (is (nil? (get-in (run nil) [:value :main-red])) "no base, no :main-red: every red the change's"))
+      (finally (seon.lib/remove-tree! repo) (seon.lib/remove-tree! (str cache "/" pn))))))
 
 (deftest a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
   ;; the restart test's first loop merge was held: "no commit of branch jolt/seon-merges-... in <clone>": the
@@ -434,7 +468,7 @@
     (is (clojure.string/includes? said "Unable to resolve symbol: h") said)
     (is (clojure.string/includes? said "src/app/a.clj:2") said)
     (is (clojure.string/includes? said "(defn f [] (h))") said))
-  (is (= "the gate's build failed and named no exception" (seon.fx/build-failure "nothing" {}))))
+  (is (= "the gate's build failed and named no exception; it ended: nothing" (seon.fx/build-failure "nothing" {}))))
 
 
 ;; ---- a streaming perform (docs/flow.md#effects-one-owner-and-its-workers-per-kind) ----

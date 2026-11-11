@@ -126,8 +126,8 @@
         judged (for [id ids :when (#{:ready :gate} (get-in v [:tasks id :seon.task/outcome]))
                      :let [t (get-in v [:tasks id])]]
                  (cond (not= :running (:seon.task/execution t)) {:op :close :task id}
-                       (= :gate (:seon.task/outcome t)) {:op :gate :task id
-                                                         :tests (vec (sort-by str (remove #(= (:started-by (:root v)) (str %)) (:seon.task/deferred t))))}
+                       (= :gate (:seon.task/outcome t)) (let [base (into {} (remove (fn [[k]] (= (:started-by (:root v)) (str k)))) (:seon.task/deferred t))]
+                                                         {:op :gate :task id :tests (vec (sort-by str (keys base))) :base base})
                        :else {:op :merge :task id}))
         live-after (- (count (filter #(live? v %) ids)) (count live-kills))
         room (max 0 (- (:max-running (:root v) default-max-running) live-after))

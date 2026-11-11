@@ -771,10 +771,10 @@
       ;; merged with its deferred process tests unasked (or no gate checkout declared): open until
       ;; each is recorded passing (the reconciler's :gate, docs/merging.md#a-merge-runs-what-the-change-reaches)
       (and (= :merged status) (seq (:seon.task/deferred p))
-           (not-every? #(= :pass (get (:seon.task/deferred-results p) %)) (:seon.task/deferred p)))
-      (assoc :unrun [(cond-> (assoc base :open? true :tests (vec (sort-by str (:seon.task/deferred p)))
+           (not-every? #(= :pass (get (:seon.task/deferred-results p) %)) (keys (:seon.task/deferred p))))
+      (assoc :unrun [(cond-> (assoc base :open? true :tests (vec (sort-by str (keys (:seon.task/deferred p))))
                             :reason (str "merged with " (count (:seon.task/deferred p)) " process tests unrun")
-                            :evidence {:from id :deferred (vec (sort-by str (:seon.task/deferred p)))})
+                            :evidence {:from id :deferred (vec (sort-by str (keys (:seon.task/deferred p))))})
                        ;; the changed namespaces its gate could not read, and why
                        (:seon.task/gate-unread p) (assoc :unread (:seon.task/gate-unread p)))]))))
 
