@@ -653,14 +653,27 @@
   "Why pattern p may not be entity e's (in the entity index ix): each clause its role requires (its schema's :seon.ctx/required,
   {attribute reason}: a join's attribute, or a plain one) that p no longer asks, as an :invalid entry naming it and what it is; []
   when it keeps them all. A clause is asked as a keyword, as [attribute & options] or as a join's key, in p `expanded` (a schema's
-  name keeps what that schema's pattern asks). A pattern is added to, never replaced. See docs/ctx.md#changing-it-swap."
+  name keeps what that schema's pattern asks). A required join is kept with the transaction its role asks of each member's link
+  (its key's :tx option): what orders a conversation is read from it, so a pattern that asks the join without it is refused too.
+  A pattern is added to, never replaced. See docs/ctx.md#changing-it-swap."
   {:malli/schema [:=> [:cat :map :map [:sequential :any]] [:vector :map]]}
   [ix e p]
-  (let [required (render/schema-property ix (render/entity-schema ix e nil) :seon.ctx/required)
+  (let [s (render/entity-schema ix e nil)
+        required (render/schema-property ix s :seon.ctx/required)
         attr (fn [k] (if (vector? k) (first k) k))
-        asked (into #{} (mapcat (fn [x] (if (map? x) (map attr (keys x)) [(attr x)]))) (render/expanded ix p))]
-    (vec (for [[k what] required :when (not (asked k))]
-           {:path [:seon.ctx/pattern] :why (str "your pattern must keep " k " (" what "): add to the pattern, never replace it")}))))
+        tx (fn [k] (when (vector? k) (some (fn [[o v]] (when (= :tx o) v)) (partition 2 (rest k)))))
+        ;; {attribute #{the :tx each clause asks it with, nil for none}} of a pattern's top-level clauses
+        clauses (fn [p] (reduce (fn [m k] (update m (attr k) (fnil conj #{}) (tx k))) {}
+                                (mapcat (fn [x] (if (map? x) (keys x) [x])) (render/expanded ix p))))
+        asked (clauses p)
+        role (clauses (or (render/schema-property ix s :seon.ctx/pattern) []))]
+    (vec (for [[k what] required
+               :let [want (first (remove nil? (role k)))]
+               :when (or (not (contains? asked k)) (and want (not (contains? (asked k) want))))]
+           {:path [:seon.ctx/pattern]
+            :why (if (contains? asked k)
+                   (str "your pattern must ask " k " with :tx " want " (" what ", each with the transaction that joined it): add to the pattern, never replace it")
+                   (str "your pattern must keep " k " (" what "): add to the pattern, never replace it"))}))))
 
 (defn write!
   "A swap! of the record to nv, written: its change from the record (edits) as one transaction,

@@ -1160,7 +1160,7 @@
         evals? (fn [x] (and (map? x) (some #(= :seon.eval/_agent (if (vector? %) (first %) %)) (keys x))))
         [[_ c0] _] (step db #(deref ctx/ctx))
         dropped (some #(when (and (keyword? %) (not (#{:seon.agent/key :seon.ctx/pattern} %)) (some? (get c0 %))) %) default)
-        edited (conj (vec (remove #(or (evals? %) (= dropped %)) default)) '{[:seon.eval/_agent :as :evals :limit 3 :reverse true] [*]})]
+        edited (conj (vec (remove #(or (evals? %) (= dropped %)) default)) '{[:seon.eval/_agent :as :evals :limit 3 :reverse true :tx :at] [*]})]
     (is (some? dropped) "the seeded agent holds an attribute its pattern asks")
     (let [[[_ c] db'] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern edited))]
       (is (= edited (:seon.ctx/pattern (d/entity db' [:seon.agent/key k]))) "the pattern, on the agent's entity")
@@ -1623,7 +1623,12 @@
     (let [said (str (tryit (vec (remove #(join? :seon.message/_to %) p))))]
       (is (str/includes? said "must keep :seon.message/_to") said)
       (is (str/includes? said "the messages sent to you") "and says what the join is"))
-    (is (str/includes? (str (tryit [:seon.agent/key])) "must keep") "a replacement is refused")))
+    (is (str/includes? (str (tryit [:seon.agent/key])) "must keep") "a replacement is refused")
+    ;; a required join keeps the transaction its role asks of each member's link ({[:seon.message/_to :tx :at] ..}): the page and
+    ;; the request order the conversation by it, so a pattern that asks the join without it is refused naming the join and the option
+    (let [bare (fn [x] (if (join? :seon.message/_to x) (into {} (for [[k sub] x] [(if (vector? k) (first k) k) sub])) x))
+          said (str (tryit (mapv bare p)))]
+      (is (str/includes? said "must ask :seon.message/_to with :tx :at") said))))
 
 (deftest a-schemas-name-in-a-pattern-keeps-what-its-pattern-asks
   ;; docs/ctx.md#the-pattern: an entity schema's name among a pattern's own clauses is that schema's pattern in its place
