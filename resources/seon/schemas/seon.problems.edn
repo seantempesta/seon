@@ -58,6 +58,8 @@
  ;; an agent's boot check found its SIGUSR1 handler never ran (seon.agent/interrupt-self-test)
  :seon.agent/interrupt-unreachable [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/interrupt-unreachable]]]]
  :seon.agent/load-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/load-failed]] [:ns :symbol]]]
+ ;; an agent forked from a program that did not load (seon.root's set-agent at its hello): every load error it was given; the agent runs
+ :seon.agent/started-without-program-error [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/started-without-program]] [:errors [:vector :seon.program/error]]]]
  ;; a new agent whose branch or forked image is not at the commit root branched it from
  ;; (the writer's :spawn names main's commit and t on :fork; seon.agent/init! compares)
  :seon.agent/fork-misaligned [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/fork-misaligned]]

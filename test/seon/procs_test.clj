@@ -464,7 +464,19 @@
       (let [ap0 (#'ap/agent-proc {:id :a1 :end {:out (a/chan 4) :in (a/chan)} :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
             [_ outs] (step #'ap/agent-proc ap0 :from {:op :hello :t 1 :start-ms 1.0 :mem-mb 1.0 :interrupt-ok true :load-errors [e]})
             pr (filter #(= :problem (:op %)) (:to-api outs))]
-        (is (= [[:a1 :seon.agent/load-failed 'app.t]] (mapv (juxt :agent (comp :seon.error/type :error) (comp :ns :error)) pr)))))))
+        (is (= [[:a1 :seon.agent/load-failed 'app.t]] (mapv (juxt :agent (comp :seon.error/type :error) (comp :ns :error)) pr)))))
+    (testing "root answers its spawn with the typed error, and it is a fact of the agent's (written with its view: record-agents)"
+      (let [p (promise)
+            st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                                 :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+            st (-> st (assoc-in [:view :agents :a1] {:status :spawning}) (assoc-in [:seon.root/spawning :a1] p))
+            o (volatile! {})
+            st' (#'root/set-agent st o :a1 {:ready true :load-errors [e]})
+            swp (:started-without-program (deref p 0 ::unanswered))]
+        (is (= :seon.agent/started-without-program (:seon.error/type swp)) (pr-str (deref p 0 ::unanswered)))
+        (is (= [e] (:errors swp)) "naming every load error")
+        (is (= swp (get-in st' [:view :agents :a1 :started-without-program])) "and held on the agent, whose recorded facts write it")
+        (is (= :idle (get-in st' [:view :agents :a1 :status])) "the agent runs")))))
 
 (deftest fork-server-events
   (let [st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :log []}]
