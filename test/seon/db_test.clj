@@ -317,23 +317,21 @@
       (is (= (set made) (disj (d/branches conn) :db)) "and every branch is listed")
       (finally (d/release conn) (seon.lib/remove-tree! path (str path "-x.err") (str path "-y.err"))))))
 
-(deftest a-deleted-store-leaves-no-semaphore-set
-  ;; docs/failure-points.md#lmdb-robust-locks: a store whose last user ended without closing it keeps its
-  ;; semaphore set until its next open, which never comes once its files are deleted. Five stores of this
-  ;; test's own (the race is between processes): two last used by a process that exits with them open, two
-  ;; by one SIGKILLed, one still open in this process; then seon.lib/remove-tree! deletes them. A hard link
-  ;; to each lock file, outside the tree, keeps its inode, so its identity (the set's semaphores 2 and 3)
-  ;; still names it after: the sets naming the five are counted by target/semsets before and after.
-  (let [base (str (seon.config/checkout) "/target/tmp/semset-test-" (random-uuid))
-        dir (str base "/stores") keep (str base "-locks") lst (str base "-locks.txt")
+(deftest a-deleted-store-leaves-nothing
+  ;; docs/failure-points.md#lmdb-locks: a store's locks are record locks on its lock file, so nothing of it
+  ;; outlives its files, whoever last used it and however it ended. Five stores of this test's own (the race is
+  ;; between processes): two last used by a process that exits with them open, two by one SIGKILLed, one still
+  ;; open in this process; seon.lib/remove-tree! deletes them: the tree is gone, this process holds no env
+  ;; under it, and a store made again at a removed path is a new store that opens and writes.
+  (let [base (str (seon.config/checkout) "/target/tmp/deleted-store-test-" (random-uuid))
+        dir (str base "/stores")
         paths (mapv #(str dir "/s" %) (range 5))
         jolt (str (seon.config/checkout) "/target/jolt/jolt")
         code (fn [ps end] (pr-str `(do (require 'seon.db 'datahike.api 'seon.lib)
                                        (doseq [p# ~ps] (datahike.api/transact (:conn (seon.db/open! :lmdb p# 0 :db)) [{:note/text "x" :note/agent :t}]))
                                        ~end)))
         child (fn [ps end] (str "'" jolt "' -A:test -e " (pr-str (code ps end)) " > /dev/null 2>&1; echo $?"))
-        named (fn [] (let [out (:out (clojure.java.shell/sh (str (seon.config/checkout) "/target/semsets") lst))]
-                       (or (some-> (re-find #"matched to a lock file (\d+)" out) second parse-long) out)))]
+        held-under? (fn [] (some #(str/starts-with? % dir) (keys @@#'konserve.jolt.lmdb/envs)))]
     (try
       (run! #(d/release (:conn (pdb/open! :lmdb % 0 :db))) paths)
       (let [ends (str/split-lines (str/trim (:out (clojure.java.shell/sh "nice" "-n" "10" "zsh" "-c"
@@ -342,14 +340,15 @@
                                                    :dir (seon.config/checkout)))))
             _held (pdb/open! :lmdb (paths 4) 0 :db)]
         (is (= ["0" "137"] ends) "one child exits with its stores open, the other is SIGKILLed")
-        (.mkdirs (java.io.File. ^String keep))
-        (spit lst (str/join "\n" (for [i (range 5) :let [l (str keep "/" i)]]
-                                   (do (clojure.java.shell/sh "ln" (str (paths i) "/lock.mdb") l) l))))
-        (is (= 5 (named)) "each store's set is there: four left by their dead last users, one held here")
+        (is (held-under?) "this process holds the fifth store")
         (seon.lib/remove-tree! dir)
-        (is (not (.exists (java.io.File. ^String dir))))
-        (is (= 0 (named)) "deleting them through seon.lib/remove-tree! leaves no set naming them"))
-      (finally (seon.lib/remove-tree! base keep lst)))))
+        (is (not (.exists (java.io.File. ^String dir))) "the tree is gone")
+        (is (not (held-under?)) "this process holds no env under it")
+        (let [{:keys [conn seeded?]} (pdb/open! :lmdb (paths 4) 0 :db)]
+          (is (true? seeded?) "a store made again at a removed path is made, not found")
+          (is (not-any? #(= "x" (:v %)) (d/datoms @conn :aevt :note/text)) "none of the removed store's facts")
+          (d/release conn true)))
+      (finally (seon.lib/remove-tree! base)))))
 
 (deftest opening-a-kept-store-installs-the-attributes-it-lacks
   ;; a store on disk of this test's own, the last resort: what is proved is what a root's
@@ -450,8 +449,8 @@
 
 (deftest a-read-after-release-is-a-typed-error
   ;; task seon.db/a-read-after-release-is-a-typed-error: a db value reads its nodes lazily from
-  ;; its store's LMDB env, and the last release closes the env (the process holds few: macOS
-  ;; gives each env SysV semaphores, kern.sysv.semume 10). A read after it was an invalid memory
+  ;; its store's LMDB env, and the last release closes the env (an open env costs descriptors and
+  ;; address space, docs/storage.md#a-value-is-read-before-its-last-release). A read after it was an invalid memory
   ;; reference that killed the process; it answers :lmdb-env-closed naming the store, and the
   ;; value is read before its last release. A store on disk of this test's own, the last
   ;; resort; removed at the end
