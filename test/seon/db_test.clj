@@ -1784,3 +1784,19 @@
      :per-n {:ticks 22 :bytes 13}
      :fixed {:ticks 7000 :bytes 4500 :calls 1}
      :sizes [100 300 1000]}))
+
+;; docs/storage.md#the-write-checks-every-entity-it-touches (the owner, 2026-11-11: "We should never record two transaction
+;; times that are the same"; Point's ruling, option A): the store stamps a transaction's time, after its branch's last, so the
+;; one write path refuses a supplied :db/txInstant, in tx-data (a speculation through seon.db/with) or in tx-meta (a
+;; connection's transact). Red before: both were written, the second back-dated before the branch's last
+(deftest a-transaction-never-supplies-its-own-time
+  (let [past (java.util.Date. 0)
+        refused (fn [f] (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))]
+    (is (= :db/txInstant (:attribute (refused #(pdb/with (ts/test-db) [{:seon.agent/key "t1"} [:db/add :db/current-tx :db/txInstant past]]))))
+        "in tx-data, through the one path a speculation takes")
+    (is (= :db/txInstant (:attribute (refused #(pdb/with (ts/test-db) [{:seon.agent/key "t2"} {:db/id :db/current-tx :db/txInstant past}]))))
+        "as a map on the current transaction")
+    (ts/test-branch! (fn [_ conn]
+      (is (= :db/txInstant (:attribute (refused #(d/transact conn {:tx-data [{:seon.agent/key "t3"}] :tx-meta {:db/txInstant past}}))))
+          "in tx-meta, through a connection's checked transact")
+      (is (some? (:db-after (d/transact conn {:tx-data [{:seon.agent/key "t4"}]}))) "and a write that supplies none is the store's to stamp")))))

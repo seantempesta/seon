@@ -238,6 +238,8 @@
  :seon.agent/reason :string
  :seon.agent/ended-turn :int
  :seon.ctx/pattern [:and [:vector :any] :seon.db/plain]
+ ;; an entity's own render, as :seon.ctx/pattern is its own pattern: what its page is drawn by in place of its schema's (seon.render/render-var-of; docs/render.md#an-entity-may-name-its-own-render)
+ :seon.render/hiccup :symbol
  ;; the doc sections its system message is, when it names its own (docs/render.md#the-models-context-a-cached-prefix-then-the-turn); with none, docs/prompt.md's
  :seon.agent/system [:set {:seon.db/to [:seon.doc/fact]} :seon.db/ref]
  ;; a person's name, a lookup ref, and its presence is what makes an agent a user: a location /user/<name> reads it (docs/users.md#what-each-thing-is)
@@ -269,7 +271,31 @@
                      [:seon.eval/response :seon.eval/response] [:seon.eval/result {:optional true} :seon.eval/result] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.agent/branch :seon.agent/status :seon.agent/description :seon.agent/max-turns :seon.agent/turn :seon.agent/test-error :seon.agent/outcome :seon.agent/reason :seon.agent/ended-turn :seon.ctx/pattern :seon.agent/main-commit :seon.agent/main-program :seon.agent/base-commit :seon.agent/ns {:seon.agent/agents [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {:seon.agent/agents [:db/id]}]} {:seon.agent/task :seon.task/task-fact} {:seon.agent/system [:db/id]} {[:seon.model-call/_agent :tx :at] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {:seon.eval/_call [:db/id :seon.eval/call-id :seon.eval/agent]}]} {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.root/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]} {[:seon.message/_to :tx :at] [:seon.message/id {:seon.message/from [:seon.agent/key :seon.root/id]} :seon.message/to :seon.message/body]} {:seon.cite/_of :seon.cite/cite-fact} {:seon.search/_of :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent :seon.render/openai-compat seon.ctx.wire/agent-msgs}
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [:seon.agent/key
+                               :seon.user/name
+                               :seon.render/hiccup
+                               :seon.agent/branch
+                               :seon.agent/status
+                               :seon.agent/description
+                               :seon.agent/max-turns
+                               :seon.agent/turn
+                               :seon.agent/test-error
+                               :seon.agent/outcome
+                               :seon.agent/reason
+                               :seon.agent/ended-turn
+                               :seon.ctx/pattern
+                               :seon.agent/main-commit
+                               :seon.agent/main-program
+                               :seon.agent/base-commit
+                               :seon.agent/ns
+                               {:seon.agent/agents [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {:seon.agent/agents [:db/id]}]}
+                               {:seon.agent/task :seon.task/task-fact}
+                               {:seon.agent/system [:db/id]}
+                               {[:seon.model-call/_agent :tx :at] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {:seon.eval/_call [:db/id :seon.eval/call-id :seon.eval/agent]}]}
+                               {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.root/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}
+                               {[:seon.message/_to :tx :at] [:seon.message/id {:seon.message/from [:seon.agent/key :seon.user/name :seon.root/id]} :seon.message/to :seon.message/body]}
+                               {:seon.cite/_of :seon.cite/cite-fact}
+                               {:seon.search/_of :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent :seon.render/openai-compat seon.ctx.wire/agent-msgs}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/agents {:optional true} :seon.agent/agents] [:seon.agent/system {:optional true} :seon.agent/system]
                        [:seon.agent/root {:optional true} :seon.agent/root] [:seon.agent/branch {:optional true} :seon.agent/branch]
                        [:seon.agent/status {:optional true} :seon.agent/status]
@@ -281,7 +307,7 @@
                        [:seon.agent/outcome {:optional true} :seon.agent/outcome] [:seon.agent/reason {:optional true} :seon.agent/reason]
                        [:seon.agent/ended-turn {:optional true} :seon.agent/ended-turn]
                        [:seon.agent/error {:optional true} :seon.agent/error] [:seon.agent/waste {:optional true} :seon.agent/waste]
-                       [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.agent/opened {:optional true} :seon.agent/opened]
+                       [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.render/hiccup {:optional true} :seon.render/hiccup] [:seon.agent/opened {:optional true} :seon.agent/opened]
                        [:seon.agent/main-commit {:optional true} :seon.agent/main-commit] [:seon.agent/main-program {:optional true} :seon.agent/main-program] [:seon.agent/base-commit {:optional true} :seon.agent/base-commit]
                        [:seon.agent/ns {:optional true} :seon.agent/ns]]
  ;; a user: an agent with a person's name (docs/users.md#what-each-thing-is), its own schema by extending the agent's, so its
@@ -383,7 +409,23 @@
  :seon.task/declared :string
  ;; a task may hold config keys as its overrides, by their own names; each key is defined once, by its own schema
  ;; (seon.config.agent.edn, seon.config.merge.edn), never listed here (an attribute is named by one entity schema)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:seon.task/id :seon.task/ns :seon.task/plan :seon.task/execution :seon.task/kind :seon.task/instructions :seon.task/evidence :seon.task/failure :seon.task/cause :seon.task/outcome :seon.task/reason :seon.task/started-by {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {:seon.task/needs [:seon.task/id :seon.task/ns :seon.task/plan :seon.task/execution :seon.task/kind :seon.task/instructions :seon.task/evidence :seon.task/failure :seon.task/cause :seon.task/outcome :seon.task/reason :seon.task/started-by {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {:seon.cite/_of :seon.cite/cite-fact}]} {:seon.cite/_of :seon.cite/cite-fact} {:seon.search/_of :seon.search/search-fact} {:seon.task/examples [:seon.agent/key :seon.agent/description {:seon.eval/_agent [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.root/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}]}] :seon.render/hiccup seon.render.ui/task-view}
+ :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:seon.task/id
+                                :seon.task/ns
+                                :seon.task/plan
+                                :seon.task/execution
+                                :seon.task/kind
+                                :seon.task/instructions
+                                :seon.task/evidence
+                                :seon.task/failure
+                                :seon.task/cause
+                                :seon.task/outcome
+                                :seon.task/reason
+                                :seon.task/started-by
+                                {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact}
+                                {:seon.task/needs [:seon.task/id :seon.task/ns :seon.task/plan :seon.task/execution :seon.task/kind :seon.task/instructions :seon.task/evidence :seon.task/failure :seon.task/cause :seon.task/outcome :seon.task/reason :seon.task/started-by {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {:seon.cite/_of :seon.cite/cite-fact}]}
+                                {:seon.cite/_of :seon.cite/cite-fact}
+                                {:seon.search/_of :seon.search/search-fact}
+                                {:seon.task/examples [:seon.agent/key :seon.agent/description {:seon.eval/_agent [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.root/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}]}] :seon.render/hiccup seon.render.ui/task-view}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]

@@ -24,6 +24,8 @@ One session manages the others; it owns no area of the code (owner, 2026-11-10: 
 - **It gives the simple version first.** When the owner says a design is too much, the data model is usually what is wrong, not his understanding (2026-11-10: a place declared on each join, against "render functions that recognize a top level render").
 - **It watches the clock on what it started:** a prove's expected end is written down when it starts, a run far past it is a hang to capture, and waits run in the background while other work goes on.
 - **A review goes to the session that owns the area** (owner, 2026-11-10: "reviewed by a competent agent in their speciality"): a task a Seon agent finished, a helper's diff in another session's namespace, a claim about another session's code.
+- **It delegates each landing** to a helper that builds the batch, proves, lands and bisects a red, and reports in a dozen lines; it names no cause that was not bisected on main plus each suspect.
+- **It keeps two ledgers in its schedule** (owner, 2026-11-11: "Keep track of systemic issues that we need to smooth over for our processes and our agents"): the bugs found, each followed to green on main, and the systemic issues of the process, each with its cost, its owner and the script or check that would fix it.
 
 **A change that moves every verdict is run whole once** (owner, 2026-11-10: "just run it once so the other runs don't duplicate all the tests"). Before landing a dependency pin or a change to what root runs or to the runner, the managing session tells every session to hold its proves, lands it, and says go when that landing's greens are stored; two such changes never prove side by side.
 
@@ -39,9 +41,19 @@ The standard is the best way known, written down, until a better one replaces it
 
 How to do it: name the cost with its number; find what allowed it; change the script, the check or the wiki section so the better thing is the default; delete the old way in the same change; tell every session what to stop doing. A lesson kept only in a session's memory is lost at its next compaction.
 
-A compaction is where a session's own lessons are most easily lost, so it is where they are handed up: before it compacts a session reflects on its stretch of work and reports to its parent what would have saved it time; the parent turns each suggestion into an owned item of the plan or a small change made at once, and the session writes its findings into its state note and its post-compaction prompt (owner, 2026-11-11: "lots of base hits rather than swinging for homeruns"). The managing session does the same toward the owner. A Seon agent's form of this is its task: what it learned goes into the task's plan, so its evals can be dropped and its context made again from the task and its entity's data.
+A compaction is where a session's own lessons are most easily lost, so it is where they are handed up: before it compacts a session reflects on its stretch of work and reports to its parent what would have saved it time, naming for each thing that cost time the script or check that would have caught it, not only a rule (owner, 2026-11-11, on reflections that became sentences in a rules file); the parent turns each suggestion into an owned item of the plan or a small change made at once, and the session writes its findings into its state note and its post-compaction prompt (owner, 2026-11-11: "lots of base hits rather than swinging for homeruns"). The managing session does the same toward the owner. A Seon agent's form of this is its task: what it learned goes into the task's plan, so its evals can be dropped and its context made again from the task and its entity's data.
 
 **A session leaves the system up to date where each fact lives** (owner, 2026-11-11: "grep around and find the parts that might be out of date and not just edit an append log.md ... Over time I want to stop drift"). Before it concludes or compacts, a session greps the wiki, the task files, the docstrings and the schema descriptions for every place that states what its work changed, makes each true where it is, removes the task entries it completed and rewrites the plans it changed. One new page that restates the rest is drift.
+
+## The mailbox
+
+Sessions reach each other through files, so what is said is data that can be watched (owner, 2026-11-11: "a communication system based on data that you guys can monitor for a mailbox like system ... keep it simple and reliable"). The mailbox is a folder in the managing session's notes folder, with one inbox a session (`mail/to-<session>/`).
+
+- **A message is one file** named `<HHMM>-<from>-<three-words>.md`, at most 8 lines. Line 1 says what is needed: a tip to land with its branch and commit, a ruling with the sender's pick, or a fact. Anything longer goes in the sender's own note, named in the mail.
+- **The sender ends its turn with one line, "TO POINT: ..."**. The managing session is told when any turn ends, and that has no cap, unlike the message tool's roughly twenty sends between the owner's own messages.
+- **Each session watches its own inbox** with a background command that blocks on the folder and exits when a file arrives (no timer). It reads the file, moves it to `mail/read/` and starts the watcher again. A file still in an inbox is unread.
+
+In Seon the same thing is a message on the recipient's branch, and a question goes to the parent ([processes](processes.md#the-agent-process)).
 
 ## No fan-out
 
