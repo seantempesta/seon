@@ -179,19 +179,19 @@
 
 (defn- keeps?
   "Whether a task whose agent ended with outcome keeps its agent's process at its end (:diffed): the agent ended on a park
-  outcome, and the task is no merge step (merge-step?, seon.task/merge-step?: it needs a task on its own branch; a merge step's
+  outcome, and the task is no merge step (merge-step?, seon.task/merge-step?: the last task on its branch, after another; a merge step's
   agent ends its process; a task that merges itself (seon.task/merges?: nothing on its branch needs it), keeps its process, since its
   own work is what parked). Its judge then parks it, or stops the kept process (stop-kept)."
   {:malli/schema [:=> [:cat :boolean [:maybe :keyword]] :boolean]}
   [merge-step? outcome] (boolean (and (park-outcomes outcome) (not merge-step?))))
 
 (defn- merge-step-in?
-  "Whether task id is the merge step of a task it needs (seon.task/merge-step?), its needs read from the index. See
+  "Whether task id is the merge step of a task it needs (seon.task/merge-step?), its needs and the tasks that need it read from the index. See
   docs/merging.md#a-branch-lands-with-binland."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] :boolean]}
   [idx id]
-  (let [t (get-in idx [:tasks id])]
-    (task/merge-step? (assoc t :seon.task/id id) (keep #(some-> (get-in idx [:tasks %]) (assoc :seon.task/id %)) (:seon.task/needs t)))))
+  (let [t (get-in idx [:tasks id]) held #(some-> (get-in idx [:tasks %]) (assoc :seon.task/id %))]
+    (task/merge-step? (assoc t :seon.task/id id) (keep held (:seon.task/needs t)) (keep held (get-in idx [:needed-by id])))))
 
 (defn- merges-in?
   "Whether task id merges its own work (seon.task/merges?), the tasks that need it read from the index. See
@@ -357,7 +357,7 @@
                        :task (let [id (or (:seon.task/id v) oid)
                                    needs? (not= (get-in idx [:tasks id :seon.task/needs]) (:seon.task/needs v))
                                    ;; whether a task merges its own work reads the tasks that need it on its branch (merges-in?), and whether it
-                                   ;; is a merge step reads the branches of the tasks it needs (merge-step-in?): where a task's needs or its branch
+                                   ;; is a merge step reads those and the branches of the tasks it needs (merge-step-in?): where a task's needs or its branch
                                    ;; moved, the tasks it needed or needs now are re-derived, and where its branch moved the tasks that need it too
                                    branch? (not= (get-in idx [:tasks id :seon.task/branch]) (:seon.task/branch v))
                                    moved? (or needs? branch?)

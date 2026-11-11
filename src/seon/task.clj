@@ -67,20 +67,24 @@
 
 (defn merge-step?
   "Whether task t is the merge step of a task it needs, by data, never its kind: when one of needs, the tasks t needs (each
-  {:seon.task/id :seon.task/branch}, a branch its own, else `default-branch` of its id), is on t's own branch. `merges?` says a task
-  merges its own work; this says it merges another's, on its branch. A task can be neither: one that needs nothing on its branch and
-  is needed by one there. See docs/merging.md#a-branch-lands-with-binland."
-  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:sequential [:map [:seon.task/id :seon.task/id]]]] :boolean]}
-  [t needs]
+  {:seon.task/id :seon.task/branch}, a branch its own, else `default-branch` of its id), is on t's own branch, and none of needers,
+  the tasks that need t, is (`merges?`): the last task on its branch, after another. `merges?` says a task merges its branch; this
+  says the branch holds another task's work. A task between two on its branch (a staged request's implement, after its design and
+  before its merge) is neither: it leaves the merge to the one that follows. See docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:sequential [:map [:seon.task/id :seon.task/id]]]
+                       [:sequential [:map [:seon.task/id :seon.task/id]]]] :boolean]}
+  [t needs needers]
   (let [br (fn [x] (or (:seon.task/branch x) (default-branch (:seon.task/id x))))]
-    (boolean (some #(= (br %) (br t)) needs))))
+    (boolean (and (merges? t needers) (some #(= (br %) (br t)) needs)))))
 
 (defn merge-step-on?
-  "`merge-step?` of task id as db holds it: its branch and the tasks it needs, one pull. See docs/merging.md#a-branch-lands-with-binland."
+  "`merge-step?` of task id as db holds it: its branch, the tasks it needs and the tasks that need it, one pull. See
+  docs/merging.md#a-branch-lands-with-binland."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
   [db id]
-  (let [t (d/pull db [:seon.task/id :seon.task/branch {:seon.task/needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id])]
-    (merge-step? (assoc t :seon.task/id id) (vec (:seon.task/needs t)))))
+  (let [t (d/pull db [:seon.task/id :seon.task/branch {:seon.task/needs [:seon.task/id :seon.task/branch]}
+                      {:seon.task/_needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id])]
+    (merge-step? (assoc t :seon.task/id id) (vec (:seon.task/needs t)) (vec (:seon.task/_needs t)))))
 
 (defn default-branch
   "The branch a task's runs check out when it names none: task-<ns>-<name>."
@@ -150,8 +154,8 @@
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:vector :map]]}
   [db id]
   (let [e (pdb/eid db :seon.task/id id)
-        pull-need #(d/pull db [:db/id :seon.task/id :seon.task/branch {:seon.task/needs [:seon.task/id :seon.task/branch]}] (:v %))
-        needs (when e (sort-by :seon.task/id (remove #(merge-step? % (vec (:seon.task/needs %))) (map pull-need (d/datoms db :eavt e :seon.task/needs)))))
+        pull-need #(d/pull db [:db/id :seon.task/id :seon.task/branch {:seon.task/needs [:seon.task/id :seon.task/branch]} {:seon.task/_needs [:seon.task/id :seon.task/branch]}] (:v %))
+        needs (when e (sort-by :seon.task/id (remove #(merge-step? % (vec (:seon.task/needs %)) (vec (:seon.task/_needs %))) (map pull-need (d/datoms db :eavt e :seon.task/needs)))))
         cs (concat (cites-of db e) (mapcat #(cites-of db (:db/id %)) needs))
         target #(get-in % [:seon.cite/target :db/id])
         by (group-by target cs)]
