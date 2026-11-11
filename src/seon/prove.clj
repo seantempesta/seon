@@ -5,11 +5,13 @@
 
   - A request names a branch, its tx (t) and the digest of what its run reads (seon.root/prove!,
     seon.agent/prove!); its key (run-key) is \"branch@digest\", so a write that changes nothing
-    the run reads (its own facts, the eval that asked) never makes a second run.
+    the run reads (its own facts, the eval that asked) never makes a second run. A run is shared by its key, and the key
+    holds the mode and the names asked: a session's tree run (mode judge, with a checkout, on its tree's branch) never joins
+    a turn's run (mode turn, no checkout, keyed with !turn), whose plan holds no process item, check step or build.
   - Runs of different keys are in flight at once. A request whose key is in flight joins its waiters; it never starts a
     second run. Each run is planned by the agent holding its branch (what it would run, at their digests), and its
     items, (test, digest) pairs, join one queue: an item many runs need is queued once and run once, granted to a free
-    worker (:seon.config.proofs/test-workers, the test children at once on the machine) one at a time, an agent's turn
+    worker (seon.prove/admission: :seon.config.proofs/max-workers, max-cores and max-load) one at a time, an agent's turn
     first, then by waiters and measured time. A run is answered at its first red item or its last green one.
   - Every waiter is answered exactly once, with the run's answer.
   A run is a chain of requests to the api (this proc's `:to-api`, answers on `:answers`): the
@@ -25,7 +27,7 @@
   (seon.program/moves-program?) is a request to prove main at it, with no waiter: main is proved
   at each program commit, whoever asks."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.program :as program] [seon.config :as cfg]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.step :as step] [seon.proofs :as proofs] [seon.program :as program] [seon.config :as cfg] [seon.lib :as lib]
             [clojure.core.async.flow :as flow] [clojure.string :as str] [seon.db :as pdb]))
 
 (defn run-key
@@ -33,7 +35,8 @@
   head: what a run reads, so a write that changes no form never makes a second run), of the tests of
   namespaces names (nil: all it selects), in mode (:judge: the plan's tests; :turn: the proofs and
   what the branch changed, an agent's turn; :main: main's run, every test with no result at its
-  digest, the plan taking no base)."
+  digest, the plan taking no base). No checkout: two checkouts of one tree asking at once share a run, whose process items
+  and steps run on the first asker's checkout; a checkout removed while that run reads it answers its waiters :tree-moved."
   {:malli/schema [:=> [:cat :keyword :string [:maybe [:set :symbol]] [:enum :turn :judge :main :full]] :string]}
   [branch dg names mode] (str (name branch) "@" dg (when (seq names) (str ":" (str/join "," (sort names)))) (when (= :turn mode) "!turn") (when (= :full mode) "!full")))
 
@@ -50,12 +53,64 @@
   {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge :main :full]]]}
   [{:keys [branch names mode]}] [branch names mode])
 
+(defn- remember
+  "st with run's green answer r remembered at its slot, and every slot of a branch that can no longer be asked dropped:
+  the run's branch's slots at another digest (a key holds its digest, so an ask of the branch's code as it now is never
+  matches them), and, for an answer :seon.root/ended, every slot of the branch (its agent ended). :done so holds the slots
+  at each live branch's latest digest, a few each."
+  {:malli/schema [:=> [:cat :map :map :any] :map]}
+  [st run r]
+  (let [ended? (= :seon.root/ended (:seon.error/type r))
+        keep? (fn [[[b] v]] (not (and (= b (:branch run)) (or ended? (not= (:digest v) (:digest run))))))
+        st (update st :done #(into {} (filter keep?) %))]
+    (if (or (contract/error? r) (some :exit (:reports r)) (seq (:red r)))
+      st
+      (assoc-in st [:done (slot run)] {:key (:key r) :digest (:digest run)
+                                       :r (-> r (dissoc :measured) (assoc :ran 0)
+                                              (update :reports (partial mapv #(assoc % :reused true)))
+                                              (as-> x (assoc x :reused (count (distinct (keep :var (:reports x)))))))}))))
+
 ;; ---- items: a (test, digest) pair, run once whoever asks ------------------------------------
 ;; The test service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2): an asker names the items its plan
 ;; has no verdict for; each item is queued once with every asker waiting on it, granted in batches to the agent holding
 ;; its branch one at a time while a worker is free (the machine's test children: the one bound), and each asker is answered at its first
 ;; red or its last green. State: :items {[test digest] {:status :waiters :agent :ms :mode :at}}, :askers {rid {:left
-;; :prio :results}}, :batches {bid #{item}}, :slots n. No clock: an item passed over is aged in skips.
+;; :prio :results}}, :batches {bid #{item}} (the items running), :workers n, :max-load x. No clock: an item passed over is
+;; aged in skips.
+
+(defn admission
+  "The test service's admission from the config's three optional bounds (docs/merging.md#the-test-service), any combination
+  (each nil when unset): {:workers n}, n the least of the count bounds set (max-workers; max-cores, a share in (0,1] of the
+  cores rounded down, at least 1), the cores when neither is set; with :max-load when it is set."
+  {:malli/schema [:=> [:cat [:map [:cores pos-int?] [:max-workers {:optional true} [:maybe pos-int?]]
+                             [:max-cores {:optional true} [:maybe double?]] [:max-load {:optional true} [:maybe number?]]]]
+                  [:map [:workers pos-int?] [:max-load {:optional true} number?]]]}
+  [{:keys [max-workers max-cores max-load cores]}]
+  (let [by-cores (when max-cores (max 1 (long (Math/floor (* max-cores cores)))))
+        counts (filterv some? [max-workers by-cores])]
+    (cond-> {:workers (if (seq counts) (reduce min counts) cores)}
+      max-load (assoc :max-load max-load))))
+
+(defn config-admission
+  "admission of the config this process holds: its optional keys as its branch states them, absent when unset. See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat] [:map [:workers pos-int?] [:max-load {:optional true} number?]]]}
+  []
+  (let [c (:config (cfg/in-force))]
+    (admission {:max-workers (:seon.config.proofs/max-workers c) :max-cores (:seon.config.proofs/max-cores c)
+                :max-load (:seon.config.proofs/max-load c) :cores (cfg/value :seon.config.machine/cores)})))
+
+(defn machine-load
+  "The machine's 1-minute load average, as grant reads it: the one reading of the load the service's step makes (a test
+  passes its own through this var). A reading of the machine, never a clock: docs/clocks.md#the-machines-load-admits-work."
+  {:malli/schema [:=> [:cat] number?]}
+  [] (lib/load-average))
+
+(defn- free-workers
+  "The items st may still start under its count bound: its :workers less the items running (its batches). See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] :int]}
+  [st] (- (:workers st 0) (count (:batches st))))
 
 (defn item-value
   "What running queued item it next is worth, bid grants made so far: the askers waiting on it, plus the times it was
@@ -65,6 +120,17 @@
   {:malli/schema [:=> [:cat :map nat-int?] :double]}
   [{:keys [waiters at ms]} bid]
   (/ (double (+ (count waiters) (- bid (or at bid)))) (double (max 1 (or ms 1)))))
+
+(defn- drop-waits
+  "Asker rid no longer waits on items ks: each loses it as a waiter, a queued one no one waits on leaves the queue, and they
+  leave its :left. What a red's asker does with the items that are no proofs of its own (item-ended)."
+  {:malli/schema [:=> [:cat :map :any [:sequential :any]] :map]}
+  [st rid ks]
+  (reduce (fn [st k]
+            (let [st (-> st (update-in [:items k :waiters] disj rid) (update-in [:askers rid :left] disj k))
+                  it (get-in st [:items k])]
+              (cond-> st (and it (empty? (:waiters it)) (= :queued (:status it))) (update :items dissoc k))))
+          st ks))
 
 (defn- answer-asker
   "Asker rid answered with its verdict (:green true, or the reds and errors it met first), and gone from every item's
@@ -80,92 +146,155 @@
     [st [{:op :asker-answered :asker rid :r r}]]))
 
 (defn- grant
-  "While a worker is free (a slot) and an item is queued: the most valuable queued item (a :turn asker's first, then
+  "While admission allows (a worker free under :workers; with :max-load, the load under it, read once a pass through
+  machine-load and kept as :load, or nothing running: the first item is always granted, so the queue never stalls with
+  nothing to wake it) and an item is queued: the most valuable queued item (a :turn asker's first, then
   item-value), alone (no shards: a worker pulls one item, so none idles while another holds a list), asked of the agent
   holding it as {:op :tests :id agent :mode m :names #{test} :items {test digest}} (a named test runs alone, at the digest
-  the agent's plan gave it: seon.agent/item-selection) tagged
+  the agent's plan gave it: seon.agent/item-selection), or, an item of another :kind (a build, a process test, a check
+  step, a tree's build or seed), of root's effect owner as {:op :fx :kind :item :req {:kind :tree :checkout :name :digest
+  :binary? :bound}}; an :alone? item (a step about the machine) only with nothing running, and nothing beside it; an item is not granted while an item it :needs (a set: its tree's build, seed) is queued or running;
+  tagged
   [:batch bid]; each queued item passed over ages a skip.
   Answers [st outputs]."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
   [st]
-  (loop [st st outs []]
+  (loop [st st outs [] ld nil]
     ;; the most valuable queued item, by one reduce over the items (no seq of them: a lazy filter and apply max-key
     ;; allocated 1.5 KB an item queued, each grant)
     (let [bid0 (:bid st 0)
           ;; the askers of a turn, once a grant: most grants have none, and then no item's waiters are read for them
           turns (into #{} (keep (fn [[r a]] (when (= :turn (:prio a)) r))) (:askers st))
-          [k it] (when (pos? (:slots st 0))
+          running (count (:batches st))
+          ;; a step about the machine itself (:alone?, seon.proofs/machine-steps) runs with nothing beside it: none is granted
+          ;; while one runs, and one is granted only with nothing running
+          alone (some (fn [[_ b]] (some #(:alone? (get-in st [:items %])) b)) (:batches st))
+          [k it] (when (and (pos? (free-workers st)) (not alone))
                    (reduce-kv (fn [best k it]
-                                (if (= :queued (:status it))
+                                ;; an item that needs its tree's build or seed waits while that is queued or running (a red one ends it)
+                                (if (and (= :queued (:status it)) (not-any? (:items st) (:needs it)) (or (not (:alone? it)) (zero? running)))
                                   (let [v (+ (if (and (seq turns) (some turns (:waiters it))) 1e12 0) (item-value it bid0))]
                                     (if (or (nil? best) (> v (nth best 2))) [k it v] best))
                                   best))
-                              nil (:items st)))]
-      (if (nil? k)
+                              nil (:items st)))
+          ;; the load is read only when it decides: an item to grant, one running, and a max-load set
+          ld (if (and k (nil? ld) (:max-load st) (pos? running)) (machine-load) ld)
+          st (cond-> st ld (assoc :load ld))]
+      (if (or (nil? k) (and ld (pos? running) (>= ld (:max-load st))))
         [st outs]
         (let [batch #{k}
               bid (inc (:bid st 0))
-              st (-> st (assoc :bid bid) (update :slots dec) (assoc-in [:batches bid] batch) (assoc-in [:items k :status] :running))
-              [st m] (step/ask st [:prove :answers] [:batch (str bid)] {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)})]
-          (recur st (conj outs m)))))))
+              st (-> st (assoc :bid bid) (assoc-in [:batches bid] batch) (assoc-in [:items k :status] :running))
+              [st m] (step/ask st [:prove :answers] [:batch (str bid)]
+                               (if (= :test (:kind it :test))
+                                 {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)}
+                                 ;; a build, a process test or a check step: root's effect owner runs it on the run's checkout
+                                 {:op :fx :kind :item :req {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
+                                                            :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
+                                                            :binary? (boolean (:binary? it)) :bound (:bound it)}}))]
+          (recur st (conj outs m) ld))))))
 
 (defn- item-ended
-  "Item k ended with result r ({:pass :fail :error} counts, its :failures; an error: its batch died): each asker waiting on
-  it loses it; one that met a red or an error is answered so at once; one with nothing left is answered green. The item
-  leaves the state: its verdict is the cache's now (its runner wrote it as it ended). Each asker is first told the
-  verdict as it lands, {:op :prove-verdict :key asker :test :digest :status (:pass :fail :error, or :no-verdict for an
-  error) :ms :failures}, which root puts on its events for a streaming :prove to write (docs/merging.md#the-test-service).
-  Answers [st outputs]."
+  "Item k ended with result r ({:pass :fail :error} counts, its :failures; an error: its batch died; a signal, {:signal
+  :overran :ms}: a step that ran past its bound, no verdict): each asker waiting on it loses it; one that met a red or an
+  error is answered so at once; one with nothing left is answered green, its signals listed (:signals). A signal is
+  neither red nor green. The item leaves the state: its verdict is the cache's now (its runner wrote it as it ended).
+  A build or seed that is not green is its typed error, and so is every item that needs it (none is granted). Each asker is
+  first told the verdict as it lands, {:op :prove-verdict :key asker :test :digest :kind :status (:pass :fail :error,
+  :signal, or :no-verdict for an error) :ms :failures}, which root puts on its events for a streaming :prove to write
+  (docs/merging.md#the-test-service). Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :any :any] [:tuple :map [:vector :map]]]}
   [st k r]
-  (let [waiters (get-in st [:items k :waiters])
+  (let [{:keys [waiters kind checkout]} (get-in st [:items k])
         st (update st :items dissoc k)
-        red? (or (contract/error? r) (not (proofs/green? r)))
         [t d] k
-        verdict (if (contract/error? r)
-                  {:test t :digest d :status :no-verdict :failures [(select-keys r [:seon.error/type :seon.error/message])]}
-                  (cond-> {:test t :digest d :status (proofs/status-of r)}
-                    (get-in r [:answer :measured t :ms]) (assoc :ms (get-in r [:answer :measured t :ms]))
-                    (seq (:failures r)) (assoc :failures (:failures r))))]
-    (reduce (fn [[st outs] rid]
-              (let [st (-> st (update-in [:askers rid :left] disj k) (assoc-in [:askers rid :results (first k)] r))
-                    {:keys [left results]} (get-in st [:askers rid])]
-                (cond red? (let [[st o] (answer-asker st rid {:green false :results results
-                                                               :red (vec (sort-by str (keep (fn [[t r]] (when (or (contract/error? r) (not (proofs/green? r))) t)) results)))})]
-                             [st (into outs o)])
-                      (empty? left) (let [[st o] (answer-asker st rid {:green true :results results})] [st (into outs o)])
-                      :else [st outs])))
-            [st (mapv #(assoc verdict :op :prove-verdict :key %) (sort-by str waiters))] waiters)))
+        signal? (and (map? r) (some? (:signal r)))
+        r (if (and (#{:build :seed} kind) (not signal?) (not (contract/error? r)) (not (proofs/green? r)))
+            (contract/error :seon.prove/build-red #'seon.prove/item-ended (str "the " (name kind) " of tree " d " is red") {:tree d :kind kind :answer r})
+            r)
+        red? (and (not signal?) (or (contract/error? r) (not (proofs/green? r))))
+        ;; a green build or seed is the checkout's for its tree: a later run of that tree reuses it (ask-items), so no second
+        ;; one relinks the binary or remakes the store while the first run's items read them. One tree a checkout: a new
+        ;; tree's replaces it
+        st (if (and (#{:build :seed} kind) (not red?) (not signal?))
+             (update-in st [:made checkout] #(if (= d (:tree %)) (update % :items conj k) {:tree d :items #{k}}))
+             st)
+        ms (or (get-in r [:answer :measured t :ms]) (when (map? r) (:ms r)))
+        verdict (cond-> (cond (contract/error? r) {:test t :digest d :status :no-verdict :failures [(select-keys r [:seon.error/type :seon.error/message])]}
+                              signal? {:test t :digest d :status :signal :signal (:signal r)}
+                              :else (cond-> {:test t :digest d :status (proofs/status-of r)} (seq (:failures r)) (assoc :failures (:failures r))))
+                  kind (assoc :kind kind)
+                  ms (assoc :ms ms))
+        [st outs] (reduce (fn [[st outs] rid]
+                            (let [st (cond-> (update-in st [:askers rid :left] disj k)
+                                       signal? (update-in [:askers rid :signals] (fnil conj []) (select-keys verdict [:test :digest :kind :signal :ms]))
+                                       (not signal?) (assoc-in [:askers rid :results t] r))
+                                  {:keys [left results signals]} (get-in st [:askers rid])]
+                              (cond
+                                    ;; a red, and a proof of the asker's still to hear: it keeps waiting for its proofs alone (Sean,
+                                    ;; 2026-11-11: an agent sees every proof's verdict, never :none because another went red); the
+                                    ;; other items it waited on it no longer needs (drop-waits)
+                                    (and (or red? (get-in st [:askers rid :red?])) (some (get-in st [:askers rid :proofs] #{}) left))
+                                    [(drop-waits (assoc-in st [:askers rid :red?] true) rid (remove (get-in st [:askers rid :proofs]) left)) outs]
+                                    (or red? (get-in st [:askers rid :red?])) (let [[st o] (answer-asker st rid (cond-> {:green false :results results
+                                                                                    :red (vec (sort-by str (keep (fn [[t r]] (when (or (contract/error? r) (not (proofs/green? r))) t)) results)))}
+                                                                             (seq signals) (assoc :signals signals)))]
+                                           [st (into outs o)])
+                                    (empty? left) (let [[st o] (answer-asker st rid (cond-> {:green true :results results} (seq signals) (assoc :signals signals)))] [st (into outs o)])
+                                    :else [st outs])))
+                          [st (mapv #(assoc verdict :op :prove-verdict :key %) (sort-by str waiters))] (sort-by str waiters))]
+    (if (and (#{:build :seed} kind) red?)
+      ;; every item still queued that needs this build or seed ends with its error (a seed that needs a red build passes it on)
+      (reduce (fn [[st outs] k2] (if (get-in st [:items k2]) (let [[st o] (item-ended st k2 r)] [st (into outs o)]) [st outs]))
+              [st outs] (sort-by str (keep (fn [[k2 it]] (when (contains? (:needs it) k) k2)) (:items st))))
+      [st outs])))
 
 (defn ask-items
-  "Asker rid (prio :turn or :batch) waits on items ({[test digest] {:agent :ms :mode}}, what its plan holds no verdict
-  for): an item queued or running gains it as a waiter, the rest are queued once; then slots are granted (grant).
+  "Asker rid (prio :turn or :batch) waits on items ({[name digest] {:agent :ms :mode :kind ...}}, what its plan holds no
+  verdict for; :kind :test (the default), :process, :step, :build or :seed, the others with the :tree and :checkout they
+  run on, :binary? and :bound, and :needs, the set of items they wait for): an item queued or running gains it as a waiter, the rest
+  are queued once; then slots are granted (grant). A build or seed its checkout already made green for its tree (:made,
+  item-ended) is not queued again, and nothing waits on it.
   With no item it is answered green at once. Answers [st outputs]. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat :map :any [:enum :turn :batch] [:map-of :any :map]] [:tuple :map [:vector :map]]]}
-  [st rid prio items]
+  {:malli/schema [:function [:=> [:cat :map :any [:enum :turn :batch] [:map-of :any :map]] [:tuple :map [:vector :map]]]
+                  [:=> [:cat :map :any [:enum :turn :batch] [:map-of :any :map] [:set :any]] [:tuple :map [:vector :map]]]]}
+  ([st rid prio items] (ask-items st rid prio items #{}))
+  ([st rid prio items proofs]
+  (let [made? (fn [[k m]] (contains? (get-in st [:made (:checkout m) :items]) k))
+        done (into #{} (comp (filter made?) (map key)) items)
+        items (into {} (comp (remove made?) (map (fn [[k m]] [k (cond-> m (:needs m) (update :needs #(not-empty (reduce disj % done))))]))) items)]
   (if (empty? items)
     [st [{:op :asker-answered :asker rid :r {:green true :results {}}}]]
     (let [st (reduce (fn [st [k m]]
                        (if (get-in st [:items k])
                          (update-in st [:items k :waiters] conj rid)
-                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode]) :status :queued :waiters #{rid} :at (:bid st 0)))))
-                     (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}}) items)]
-      (grant st))))
+                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :binary? :bound :alone?]) :status :queued :waiters #{rid} :at (:bid st 0)))))
+                     (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}
+                                                 ;; the items that are its proofs: past a red it still waits for these (item-ended)
+                                                 :proofs (into #{} (filter #(contains? proofs (first %))) (keys items))}) items)]
+      (grant st))))))
 
 (defn batch-ended
   "Batch bid's answer r (the agent's :tests answer: its :reports by test var, its :failures; or the error its run answered,
   a died child among them): each of its items ended with its own result, one the answer does not name with the typed
-  :seon.prove/no-verdict (never silence), every item of a batch that errored with that error; its slot is free again and
-  the next is granted. Answers [st outputs]."
+  :seon.prove/no-verdict (never silence), every item of a batch that errored with that error; or, for an item of root's
+  effect owner (a build, a process test, a step), its {:value {:pass :fail :error :failures :ms}}, a step's {:value
+  {:signal :overran :ms}}, or its typed error; its slot is free again and the next is granted. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :int :any] [:tuple :map [:vector :map]]]}
   [st bid r]
   (let [batch (get-in st [:batches bid])
-        st (-> st (update :batches dissoc bid) (update :slots inc))
-        fails (when-not (contract/error? r) (proofs/failures r))
-        reported (when-not (contract/error? r) (into #{} (keep #(some-> (:var %) (subs 2) symbol)) (:reports r)))
-        result (fn [[t _]] (cond (contract/error? r) r
-                                 (fails t) {:pass 0 :fail 1 :error 0 :failures (fails t) :answer r}
-                                 (reported t) {:pass 1 :fail 0 :error 0 :answer r}
+        fx? (not= :test (get-in st [:items (first batch) :kind] :test))
+        st (update st :batches dissoc bid)
+        fails (when-not (or fx? (contract/error? r)) (proofs/failures r))
+        reported (when-not (or fx? (contract/error? r)) (into #{} (keep #(some-> (:var %) (subs 2) symbol)) (:reports r)))
+        v (when fx? (:value r))
+        result (fn [[t d]] (cond (contract/error? r) r
+                                 ;; root's effect owner ran it: a step's signal is no verdict; a verdict reads as a test's
+                                 (and fx? (:signal v)) v
+                                 (and fx? (map? v)) (assoc v :answer {:pass (:pass v 0) :fail (:fail v 0) :error (:error v 0) :digests {t d}
+                                                                      :reports (if (seq (:failures v)) (mapv #(assoc % :var (str "#'" t)) (:failures v)) [{:type :pass :var (str "#'" t)}])})
+                                 (and (not fx?) (fails t)) {:pass 0 :fail 1 :error 0 :failures (fails t) :answer r}
+                                 (and (not fx?) (reported t)) {:pass 1 :fail 0 :error 0 :answer r}
                                  :else (contract/error :seon.prove/no-verdict #'seon.prove/batch-ended
                                                        (str t "'s batch answered no verdict for it") {:test t})))
         [st outs] (reduce (fn [[st outs] k] (let [[st o] (item-ended st k (result k))] [st (into outs o)])) [st []] (sort-by str batch))
@@ -221,10 +350,14 @@
   the grant that ran it; or the error its batch answered): the run-tests-forked shape the done rule and an agent's prove
   read: the plan's reused reports, each item's own reports, every digest, function cost and measure (:measured, which the
   asker's agent writes as its facts: seon.agent/record-answer!), the counts, what was selected, deferred and why, and
-  any verdict the cache would not take (:unstored)."
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [base results]
-  (let [own (fn [t r] (if (contract/error? r)
+  any verdict the cache would not take (:unstored). A process test's and a check step's results count as a test's; a
+  build's is no result of the run (an item that needed it answers its error); a step's signals are listed (:signals), no
+  verdict. :red names every red of the run by its item's name, a check step's (a string) among the tests (finish keeps it), as
+  its failing reports could not: a step's name is no test var. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map :map [:maybe [:vector :map]]] :map]}
+  [base results signals]
+  (let [results (into {} (remove (comp vector? key)) results)
+        own (fn [t r] (if (contract/error? r)
                         [{:type :error :var (str "#'" t) :message (:seon.error/message r) :seon.error/type (:seon.error/type r)}]
                         (filterv #(= (str "#'" t) (:var %)) (:reports (:answer r)))))
         reports (into (vec (:reused-reports base)) (mapcat (fn [[t r]] (own t r))) (sort-by (comp str key) results))
@@ -236,8 +369,12 @@
              :fns (into {} (for [[_ r] results :when (map? (:answer r)) [t f] (:fns (:answer r))] [t f]))
              :measured (into {} (for [[_ r] results :when (map? (:answer r)) [t m] (:measured (:answer r))] [t m]))
              :selected (vec (:selected base)) :deferred (vec (:deferred base)) :at-judge (:at-judge base 0)
-             :reused (count (filter :reused (:reused-reports base))) :ran (count results)}
+             :reused (count (filter :reused (:reused-reports base))) :ran (count results)
+             :red (vec (sort-by str (distinct (concat (keys (proofs/failures {:reports (vec (:reused-reports base))}))
+                                                      (keep (fn [[t r]] (when (or (contract/error? r) (not (proofs/green? r))) t)) results)))))}
       (seq (:why base)) (assoc :why (:why base))
+      (seq signals) (assoc :signals signals)
+      (seq (:missing base)) (assoc :missing (:missing base))
       ;; a verdict the cache would not take, named as its run named it
       (some (comp :unstored :answer) (vals results)) (assoc :unstored (vec (mapcat (comp :unstored :answer) (vals results)))))))
 
@@ -260,13 +397,10 @@
   (let [{:keys [waiters] :as run} (get-in st [:runs k])
         err? (contract/error? r)
         ended? (= :seon.root/ended (:seon.error/type r))
-        died? (and (not err?) (some :exit (:reports r)))
-        r (if err? r (assoc r :key k :red (vec (sort-by str (keys (proofs/failures r))))))
-        st (cond-> (-> st (update :runs dissoc k) (assoc :last (:branch run)))
-             ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
-             (not (or err? died? (seq (:red r)))) (assoc-in [:done (slot run)] {:key k :r (-> r (dissoc :measured) (assoc :ran 0)
-                                                                                         (update :reports (partial mapv #(assoc % :reused true)))
-                                                                                         (as-> x (assoc x :reused (count (distinct (keep :var (:reports x)))))))}))
+        ;; a run's items name their own reds (run-answer: a step's among them); any other answer, by its failing reports
+        r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (keys (proofs/failures r))))))))
+        ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
+        st (remember (-> st (update :runs dissoc k) (assoc :last (:branch run))) run r)
         [st kill] (runner-done st run)]
     [st (cond-> (into (reply [] waiters r) kill) (and err? (not ended?)) (conj {:op :problem :class :platform :error r}))]))
 
@@ -283,18 +417,21 @@
                   ;; that could not run answers; the verdicts that did land are the cache's
                   (let [rs (:results (:r o))
                         [st more] (finish st k (or (some (fn [[_ r]] (when (contract/error? r) r)) (sort-by (comp str key) rs))
-                                                   (run-answer (:base run) rs)))]
+                                                   (run-answer (:base run) rs (:signals (:r o)))))]
                     [st (into acc more)])
                   [st acc]))
               [st (conj acc o)]))
           [st []] outs))
 
 (defn- plan!
-  "Ask the agent holding run k's branch for its plan. Answers [st outputs]."
+  "Ask the agent holding run k's branch for its plan; a run of a session's checkout (:checkout) asks for its process tests,
+  check steps and build as items too (:process? true), which run on that checkout (docs/merging.md#the-test-service).
+  Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :string] [:tuple :map [:vector :map]]]}
   [st k]
-  (let [{:keys [agent mode names]} (get-in st [:runs k])
-        [st m] (step/ask st [:prove :answers] [:plan k] (cond-> {:op :tests :id agent :mode mode :plan? true} names (assoc :names names)))]
+  (let [{:keys [agent mode names checkout]} (get-in st [:runs k])
+        [st m] (step/ask st [:prove :answers] [:plan k] (cond-> {:op :tests :id agent :mode mode :plan? true} names (assoc :names names)
+                                                          (and checkout (not= :turn mode)) (assoc :process? true)))]
     [(assoc-in st [:runs k :stage] :plan) [m]]))
 
 (defn- request
@@ -307,7 +444,7 @@
         names (not-empty (:names m))
         mode (or (:mode m) :judge)
         key (run-key branch (:digest m) names mode)
-        req (-> m (select-keys [:branch :agent :proofs]) (assoc :key key :t t :names names :mode mode))
+        req (-> m (select-keys [:branch :digest :agent :proofs :checkout :tree]) (assoc :key key :t t :names names :mode mode))
         done (get-in st [:done (slot req)])]
     (cond
       ;; the daily full run, a run of its own
@@ -321,6 +458,34 @@
       :else (let [st (assoc-in st [:runs key] (assoc req :waiters rids :stage :spawn))
                   [st m] (step/ask st [:prove :answers] [:spawn key] {:op :spawn :opts {:branch :tests}})]
               [st [m]]))))
+
+(defn- plan-items
+  "The items of plan r ({:process {test digest} :steps {step {:digest :binary? :bound}} :build {:tree :needed?}}, seon.agent's
+  answer to a :process? plan) that root's effect owner runs on run's checkout (main's, the checkout this root runs from, for
+  a run that names none) at its tree (the run's, else the plan's): the build, [[:build tree] tree], once a tree when it is
+  needed; the seed, [[:seed tree] tree], needing the build when there is one, which brings the checkout's program store to the
+  tree (and, :binary?, seeds the check store and the process tests' store); each process test and each step, needing the seed. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map :map] [:map-of :any :map]]}
+  [run r]
+  (let [tree (or (:tree run) (get-in r [:build :tree]))
+        on {:tree tree :checkout (or (:checkout run) (cfg/checkout))}
+        bk [[:build tree] tree]
+        build? (get-in r [:build :needed?])
+        ;; the seed brings the checkout's plan program store to the tree first, which every process and step item clones
+        ;; (seon.fx/run-item), so each of them needs it; when a process test or a binary step runs, it also seeds the check
+        ;; store and makes the process tests' store (its :binary?)
+        seed? (boolean (or (seq (:process r)) (seq (:steps r))))
+        stores? (boolean (or (seq (:process r)) (some :binary? (vals (:steps r)))))
+        ;; a seed that seeds the stores is another item than one that only keeps the tree: a checkout's green one of the
+        ;; second (:made) never stands for the first
+        sk [[:seed tree (if stores? :stores :tree)] tree]]
+    (cond-> (into {}
+                  (concat (for [[t d] (:process r)] [[t d] (cond-> (assoc on :kind :process :binary? true) seed? (assoc :needs #{sk}))])
+                          (for [[s {:keys [digest binary? bound alone?]}] (:steps r)]
+                            [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?)) bound (assoc :bound bound) alone? (assoc :alone? true)
+                                          seed? (assoc :needs #{sk}))])))
+      build? (assoc bk (assoc on :kind :build))
+      seed? (assoc sk (cond-> (assoc on :kind :seed :binary? stores?) build? (assoc :needs #{bk}))))))
 
 (defn- answered
   "The api's answer r to the request of chain step: a prove agent spawned (main's run: it plans), a run's plan (its items
@@ -337,36 +502,37 @@
         (nil? run) [(update st :stale (fnil inc 0)) []]
         (contract/error? r) (finish st key r)
         (= :spawn step) (plan! (update-in st [:runs key] assoc :runner (:id r) :agent (:id r)) key)
-        (= :plan step) (let [st (assoc-in st [:runs key :base] (dissoc r :items :ms))
+        (= :plan step) (let [st (assoc-in st [:runs key :base] (dissoc r :items :ms :process :steps :build))
                              prio (if (= :turn (:mode run)) :turn :batch)
-                             items (into {} (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run)} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t])))]))
-                             [st outs] (ask-items (assoc-in st [:runs key :stage] :items) key prio items)]
+                             items (into (plan-items run r) (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run) :kind :test} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t])))]))
+                             [st outs] (ask-items (assoc-in st [:runs key :stage] :items) key prio items (set (:proofs run)))]
                          (settle st outs))
         :else [(update st :stale (fnil inc 0)) []]))))
 
 (defn- state-view
   "What the service holds, as data: the runs in flight (each key's stage and waiters), the queue (items queued and running),
-  the free workers, and the api's asks it has open. A hang in the chain is read from it (seon.root's stall task records it)."
+  the free workers, the load it last read (when a max-load is set), and the api's asks it has open. A hang in the chain is read from it (seon.root's stall task records it)."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
-  {:runs (into (sorted-map) (for [[k r] (:runs st)] [k {:stage (:stage r) :waiting (count (:waiters r))}]))
-   :queued (count (filter #(= :queued (:status %)) (vals (:items st)))) :running (count (filter #(= :running (:status %)) (vals (:items st))))
-   :slots (:slots st) :open (vec (sort-by str (vals (:pending st))))})
+  (cond-> {:runs (into (sorted-map) (for [[k r] (:runs st)] [k {:stage (:stage r) :waiting (count (:waiters r))}]))
+           :queued (count (filter #(= :queued (:status %)) (vals (:items st)))) :running (count (filter #(= :running (:status %)) (vals (:items st))))
+           :slots (free-workers st) :open (vec (sort-by str (vals (:pending st))))}
+    (some? (:load st)) (assoc :load (:load st))))
 
 (defn prove-proc
   "The test service (see the namespace doc). In :req (requests the api forwards, {:rid :branch :t :digest :agent :names
   :mode}), :answers (the api's answers to this proc's requests) and :main (the writer's commit notice); out :to-api (its
   requests; {:op :prove-answer :rid :r} for each waiter, one message each; {:op :problem} for a failed run; {:op
   :prove-state :r view} when what it holds changed, `state-view`, which root keeps for a stall's evidence). Its workers,
-  the test children running at once on the machine, are :seon.config.proofs/test-workers. Buffers (system.edn): :req and
+  the items running at once on the machine, are bounded by admission (:seon.config.proofs/max-workers, max-cores, max-load). Buffers (system.edn): :req and
   :answers are lossless and bounded (a full one parks the sender: the api); :main is a sliding buffer of one."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:conn "the store main's commit notices are read from (seon.db/at-commit)"} :ins {:req "requests to prove a branch at a tx" :answers "the api's answers" :main "main's commit notice, a sliding buffer of one"}
        :outs {:to-api "requests, and the answers to the waiters"}
        :workload :io
-       :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key) :queued (count (:items st)) :slots (:slots st)
+       :ping-map-fn (fn [st] {:runs (count (:runs st)) :full (some-> st :full :key) :queued (count (:items st)) :slots (free-workers st)
                               :main-t (:main-t st) :stale-answers (:stale st 0)})})
-  ([args] {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :slots (cfg/value :seon.config.proofs/test-workers) :conn (:conn args)})
+  ([args] (merge {:rid 0 :pending {} :runs {} :done {} :items {} :askers {} :batches {} :conn (:conn args)} (config-admission)))
   ([st _tr] st)
   ([st0 in m]
    (let [st st0

@@ -1360,7 +1360,7 @@
     (is (nil? (:seon.eval/schema (repl/record-details "(+ 1 2)" {:handle 'result/e3 :value 3} {}))) "a plain value names none")))
 
 ;; docs/merging.md#the-test-service: the items the test service grants one agent run at once (seon.repl/serve-item!, which
-;; tests-step calls for each), so test-workers bounds a run on one agent as it does across agents. Each run tells `started`,
+;; tests-step calls for each), so the service's admission bounds a run on one agent as it does across agents. Each run tells `started`,
 ;; then waits on `release`: both must start before either is let go. Served one at a time, the first call would wait on a
 ;; channel nothing can fill, and Jolt's all-asleep check throws its typed deadlock here: red, never a hang, and no clock
 (deftest two-granted-items-of-one-agent-run-at-once
