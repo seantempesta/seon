@@ -66,22 +66,22 @@ Each row is one tip, small enough to land alone, with who builds it, its proof a
 
 Kept current by the Data model session; the newest landed state runs on the standing system, http://127.0.0.1:7777/. "Running to see" is that system showing a live agent's session with hiccup drawn as html, Markdown drawn, structured evals, proofs and diffs, `@ctx` and the page at the first point, and the short system message.
 
-| # | tip | state (2026-11-11 16:45) |
+| # | tip | state (2026-11-11 17:00) |
 |---|---|---|
-| 1 | a cited schema drawn as what it is; the pattern's description and required parts | landed, main 61a2d46eb0 |
-| 2 | the role named in a pattern; a join to a depth | reviewed and approved by Context; two changes in build on `jolt/rolenames` (one join asked twice becomes one join; the form agents are told names the role) |
-| 3 | the boot writes and pattern functions deleted, with the check | not started; follows 2 |
-| 4 | descriptions on the answer's keys, a file's path, a task's proofs | proving in batch 62 (`jolt/descs`); the join-shape sentence not started |
-| 5 | the short system message | proving in batch 62 (`jolt/prompt`, 2.5 KB) |
+| 1 | a cited schema drawn as what it is; the pattern's description and required parts | landed |
+| 2 | the role named in a pattern; a join to a depth | built, reviewed by Data model and Context, named tests green, waiting for batch 63: `jolt/rolenames` da7b4f6004 |
+| 3 | the boot writes and pattern functions deleted, with the check | in build (`jolt/rolesource`, Data model's helper). Found on the way: a join to a depth could not say what the last level asks (today the ids below, so a count is never a silent cut); the depth form gains that before anything is deleted |
+| 4 | descriptions on the answer's keys, a file's path, a task's proofs | landed, main f56a85c416; the join-shape sentence not started |
+| 5 | the short system message | out of batch 62 on one red test (a date in a docstring); Context fixes and remails for batch 63 (`jolt/prompt`) |
 | 6 | `@ctx` and the hiccup at the first point; the cite's pull shortened | not started (Context; the cite's pull is Data model's) |
-| 7 | a proof's four states; every failure and what it calls | proving in batch 62 (`jolt/proofstates`) |
+| 7 | a proof's four states; every failure and what it calls | landed, main f56a85c416 (`jolt/proofstates`) |
 | 8 | move A, and with it text fields as Markdown by a `:seon.db/text` schema | not started. Its first commit is Web's: where the walk places an attribute, the render its schema declares draws its value (today only an entity is drawn by a schema lookup) |
 | 9 | move C, with the named sub-patterns | not started; waits on 2 and 3 |
 | 10 | move B | not started; a REPL trial with its cost comes first |
-| - | a turn's fold names each step's intent | proving in batch 62 (`jolt/stepintents`, Web) |
+| - | a turn's fold names each step's intent | out of batch 62 on a merge conflict; Web rebases for batch 63 (`jolt/stepintents`) |
 | - | a component's root carries `:render`, the full symbol, in place of a class | both halves built, not yet run together (`jolt/datarender`, Web; `jolt/rendername` on it, Context) |
 | - | a render's output named by a `:seon.render/hiccup-value` schema, so a value that is hiccup is drawn as html | in build (`jolt/hiccupvalue`, Web's helper) |
-| - | a role's standing cites as data: the cites an agent starts with are read from its task first (`:seon.config.agent/cites`, which a task may hold), so a worker's and a preparer's differ | built, named tests not yet run (`jolt/rolecites`, Context); the worker's "program is your branch's facts" section rides there |
+| - | a role's standing cites as data: the cites an agent starts with are read from its task first (`:seon.config.agent/cites`, which a task may hold), so a worker's and a preparer's differ | built and mailed, its proof red then green: `jolt/rolecites` 0ece40c25e (Context); the task's config admits the key |
 | - | a stuck agent is stopped: a judgment on its own evals ends it with the outcome `:stuck`, read by whoever started it | not started (Context); what "near" compares is open: the functions an eval called include plumbing and fire on plain reading, so the calls' targets must be part of it |
 | - | the turn budget shown once (a line in the turn part would be a diff every turn) | not started; Web's render of the agent's `max-turns` in the first page |
 | - | a task whose plan names code its branch does not hold is flagged before it is released (a cite that resolves to nothing is already data: the cite's target is unresolved) | not started; a class of the problems report, Tests |
