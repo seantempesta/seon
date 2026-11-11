@@ -41,6 +41,20 @@ A task may name example sessions, finished sessions of other tasks that its agen
 
 An example is an ended agent holding the records of the session it was made from, written by ```seon.ctx.session/session-tx``` (a vector of transactions, one per original transaction, ids and call ids prefixed with `example/<id>` so no example meets a live agent's or another example's, a model call's id `example/<id>/<n>` as any agent's, and the agent's `:seon.agent/turn` the last turn its records carry, which its page draws a component for each of) and transacted onto main by ```my.root/load-example!```, which writes nothing for a session main already holds. It is a copy rather than a ref to the finished agent because a session's records live on its branch, not main, and its call ids would collide. A refused file or an agent that cannot be shown is the error `:seon.root/example-refused` or `:seon.ctx/session-refused`, data and not a throw ([failure points](failure-points.md)). The task fact's pattern joins the examples, so ctx holds them: the conversation draws each, folded for the person and as messages for the model (```seon.ctx.session/examples-of``` names them, ```seon.render.ui/example-session``` draws them, [render](render.md#the-models-context-a-cached-prefix-then-the-turn)). An example has no branch (only the writer makes one), so its own pages open at `/agent/main/example-<id>` (chat, record and context tabs), the link of a branchless agent on main: ```seon.render.proc/location``` finds the agent of that id with no branch, and its page reads main, as the user's does. A task naming none is sent what it always was (```seon.ctx.wire-test/a-task-with-no-examples-reads-what-it-read-before```).
 
+## A refine curates its own task
+
+A refine is a task that needs the task you just finished, on the same branch, so it is worked by you, continued: your conversation goes on, and the task you need is shown inside your new task. It asks one thing: make the task you finished better for whoever works it next. It does not ask for more work on what you built.
+
+Read back through your own turns and find where one went that the task could have saved: something you had to look for, a form that failed before the one that worked, a section you read and did not need. Then change only these:
+
+- **Its plan:** what to do, in the order that worked, with the forms that mattered. The task you need is in your pull, so it is one `swap!`: ``(let [[e t] (first (:seon.task/needs (:seon.agent/task @ctx)))] (swap! ctx assoc-in [:seon.agent/task :seon.task/needs e :seon.task/plan] (str (:seon.task/plan t) "\n\n" "what would have saved a turn")))``.
+- **What it cites:** a plan cites by naming: name the section or the function you had to find, and take out a name you never used.
+- **The wiki sections you pulled,** where one was wrong or lacked the line you needed: edit the section, as any doc is changed ([changing a doc](agent.md#changing-a-doc)).
+
+Do not change the work, its tests or its proofs. End with a reply that says each change you made and the turn of yours it would have saved; a refine that found nothing says so and changes nothing.
+
+How it is judged: the task you refined is worked again from where you began, by a fresh agent, and the turns it takes are set beside yours. Until that runs by itself, a refine names the proofs of the task it needs.
+
 ## The agent knows its task
 
 An agent holds the task root started it for from its first form: `my.task/current` reads the task through `seon.turn/current-task`. Both ride `seon.root/spawn!`'s opts (`:branch`, `:task`) into the writer's `:spawn` request and the fork server's `:fork` message, and `seon.agent/init!` keeps them in the agent's state (nil for an agent forked with none). A turn loop, a context read and an attached outside agent read it the same way.
