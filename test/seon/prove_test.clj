@@ -357,6 +357,19 @@
     (is (= 4 (free st)) "its slot free again")))
 
 ;; an asker wants to know whether its tests pass: its first red answers it at once, and the work only it wanted is dropped
+(deftest a-run-held-for-the-load-is-told-so-and-told-when-it-resumes
+  ;; Point, 2026-11-11: a --root run held for the machine's load printed nothing, which reads as a hang. With max-load 0 any
+  ;; load holds the second item while the first runs: the asker is told once, and told again when the next grant goes
+  (let [held (fn [outs] (filterv #(= :prove-held (:op %)) outs))
+        [st o1] (prove/ask-items (assoc (items-st 2) :max-load 0.0) 1 :batch {['app.a-test/t "da"] {:agent :a1 :ms 10} ['app.b-test/u "db"] {:agent :a1 :ms 10}})
+        b (first (batches o1))
+        [st v] (step/answered st (:tag b))
+        [_ o2] (prove/batch-ended st (parse-long (second v)) (green-of (first (get-in b [:req :names]))))]
+    (is (= 1 (count (batches o1))) "one granted, the other held")
+    (is (= [[1 true 1]] (mapv (juxt :key :held :queued) (held o1))) "the asker told once that one item waits for the load")
+    (is (= [[1 false]] (mapv (juxt :key :held) (held o2))) "and told it resumed when the held item is granted")
+    (is (= 1 (count (batches o2))))))
+
 (deftest a-red-answers-its-asker-at-once-and-drops-what-only-it-wanted
   (let [[st o1] (prove/ask-items (items-st 1) 1 :batch {['app.a-test/t "da"] {:agent :a1 :ms 10} ['app.b-test/u "db"] {:agent :a1 :ms 10}})
         b (first (batches o1))

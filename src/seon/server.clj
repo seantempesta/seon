@@ -404,8 +404,8 @@
              (cond (= ch done) v
                    ;; root's events ended (it stopped): only the answer is left to wait on
                    (nil? v) (a/<!! done)
-                   :else (do (when (and (= :prove-verdict (:type v)) (str/starts-with? (str (:key v)) prefix))
-                               (*emit* (select-keys v [:type :key :test :digest :status :ms :failures])))
+                   :else (do (when (and (#{:prove-verdict :prove-held} (:type v)) (str/starts-with? (str (:key v)) prefix))
+                               (*emit* (select-keys v [:type :key :test :digest :status :ms :failures :held :load :max-load :queued])))
                              (recur)))))
          (finally (a/untap (:events-mult sys) ev)))))
 
