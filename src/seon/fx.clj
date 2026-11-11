@@ -1162,6 +1162,78 @@
       :else
       (run-held run-on-checkout sha req))))
 
+;; ---- a session's items (Flow step 4) -------------------------------------------------
+
+(defn- item-files!
+  "The files an item's run reads in dir, as bin/prove's plan writes them: a :process item's shard of one
+  (shard-0.edn, as test_runner's plan deals one), a :step item's steps, steps.edn, steps-binary (empty: the step
+  needs no target/seon) and step-bounds (its measured ms). See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :string :map] :nil]}
+  [dir {:keys [kind tree name digest binary? bound]}]
+  (case kind
+    :process (spit (str dir "/shard-0.edn") (sedn/encode {:tests [name] :mg {} :digests {name digest} :tree tree :rerun #{}}))
+    :step (do (spit (str dir "/steps") (str name "\n"))
+              (spit (str dir "/steps.edn") (sedn/encode {:tree tree :digests {name digest}}))
+              (when (false? binary?) (spit (str dir "/steps-binary") ""))
+              (when bound (spit (str dir "/step-bounds") (str name " " bound "\n"))))
+    :build nil)
+  nil)
+
+(defn run-item
+  "The :item effect: one item of a session's prove that the test service (seon.prove) granted, run on the session's
+  checkout at tree, niced: :build is bin/build seon there; :process is one test as a shard of one (bin/test --shard,
+  whose runner stores its verdict); :step is one check step (bin/check --steps, then bin/test --store-steps, which
+  stores it green at its digest). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the
+  cache by its digest, so an item asked again is reused there; a step's overrun of its bound is :signal :overran, never
+  a verdict. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
+  stored under a digest of files that are not there. A green already stored is answered at once, :reused, with no process
+  started. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [kind tree checkout name digest bound] :as req} :req}]
+  (let [t0 (profile/now-ns)
+        here (tree-id checkout)
+        ;; a green already stored at its digest is the answer: no process started (2.3 s a test's runner, only to reuse it)
+        held (when-not (= :build kind) (stored-results {name digest}))]
+    (cond
+      (not= here tree)
+      (error #'seon.fx/run-item :seon.fx/io-error (str "the checkout " checkout " is tree " here ", not the item's " tree ": its files moved since the plan")
+             {:path checkout :tree-moved true})
+      (contract/error? held) held
+      (proofs/green? (get held digest)) {:value (assoc (select-keys (get held digest) [:pass :fail :error]) :ms (profile/ms-since t0) :reused true)}
+      :else
+      (let [dir (str checkout "/target/prove/items/" (clojure.core/name kind) "-" digest)
+            log (str dir ".log")
+            _ (lib/remove-tree! dir)
+            _ (.mkdirs (java.io.File. ^String dir))
+            _ (item-files! dir req)
+            ;; the children write the cache this reads: the one this process names (a test's run names its own)
+            sh (fn [& argv] (let [r (apply lib/sh (concat child-env-scrub [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))]
+                                                          ["nice" "-n" "15"] argv [:dir checkout]))]
+                              (spit log (str "$ " (str/join " " argv) " (exit " (:exit r) ")\n" (:out r) (:err r)) :append true)
+                              r))
+            r (case kind
+                :build (sh "bin/build" "seon")
+                :process (sh "bin/test" "--shard" (str dir "/shard-0.edn"))
+                :step (let [c (sh "bin/check" "--steps" dir)] (sh "bin/test" "--store-steps" dir) c))
+            ms (profile/ms-since t0)
+            stored (when-not (= :build kind) (stored-results {name digest}))
+            v (when (map? stored) (get stored digest))
+            step-ms (when (= :step kind)
+                      (let [f (java.io.File. (str dir "/step-ms"))]
+                        (when (.isFile f) (reduce + 0 (keep #(some-> (re-matches #"\S+ (\d+)" %) second parse-long) (str/split-lines (slurp f)))))))]
+        (cond
+          (contract/error? stored) stored
+          (= :build kind) (if (zero? (:exit r))
+                            {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
+                            (error #'seon.fx/run-item :seon.fx/io-error (str (build-failure (str (:out r) (:err r)) nil) "; its log: " log) {:path checkout}))
+          ;; a step that ended red with no verdict stored, over its bound: the overrun is a signal, its verdict none
+          (and (= :step kind) (not (proofs/green? v)) bound step-ms (> step-ms bound))
+          {:value {:signal :overran :ms step-ms}}
+          v {:value (assoc (select-keys v [:pass :fail :error :failures]) :ms ms)}
+          (= :step kind) {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message (str "bin/check --steps " name ": " (runner-end (str (:out r) (:err r))))}] :ms ms}}
+          :else (error #'seon.fx/run-item :seon.fx/io-error (str "the shard stored no verdict for " name " (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log)
+                       {:path checkout}))))))
+
 ;; ---- the owner -----------------------------------------------------------------------
 
 (defn refill
