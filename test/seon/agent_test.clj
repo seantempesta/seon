@@ -2252,6 +2252,20 @@
     (is (= #{} (:value by-ns)) (str "a run naming only a namespace runs no step: " (pr-str by-ns)))
     (is (= #{"ids"} (:value by-step)) (str "and one naming a step runs it alone: " (pr-str by-step)))))
 
+;; docs/merging.md#verdicts-are-a-cache: base and branch are digested by the same inputs, so a branch that changed nothing selects
+;; nothing as changed. Red before: the inputs design added the private checks, the index class and a process test's config
+;; to the branch's inputs only, and an unchanged agent of the standing system selected 1,765 of 1,835 tests as changed
+(deftest an-unchanged-branch-reads-no-test-as-changed
+  (let [main (mt/world)
+        plan (agent/test-plan main main #{})
+        bd (:base-digests plan)]
+    (is (seq bd) "the world holds tests")
+    ;; the cause itself: base was indexed by the same inputs the branch was (a world's tests read no config, so their digests
+    ;; alone cannot show it); seon.agent/base-graph keeps the inputs it indexed by
+    (is (= (:inputs plan) (:inputs (:base-graph @agent/state))) "base and branch digested by one set of inputs")
+    (is (= bd (select-keys (update-vals (program/index-of (:graph plan)) :digest) (keys bd))) "every test's branch digest is its base digest")
+    (is (empty? (:selected plan)) (pr-str (take 5 (:selected plan))))))
+
 ;; "if another agent has already run the same exact test we remove those" (owner, 2026-11-07)
 (deftest a-process-test-green-at-its-digest-asks-no-gate
   ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not, and a schema the branch registers moves the

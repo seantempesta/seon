@@ -401,11 +401,11 @@
   [db]
   (not-empty (into {} (for [dt (d/datoms db :aevt :config/form)] [(:config/key (d/entity db (:e dt))) (:v dt)]))))
 
-(def test-root-config
+(def test-system-config
   "The config a process test's root runs with: the shipped file under the scripted profile (every test starts its roots
   under --profile scripted, with no config/local.edn and none of the planning process's layers), one value a process. What
   a process test's digest takes for what root runs (seon.program/roots-of) and for the config values its reach reads
-  (the planners' :root-config), so that digest is one whichever process plans it: an agent of the standing system, under
+  (the planners' :test-system-config), so that digest is one whichever process plans it: an agent of the standing system, under
   its own profile and local.edn, gave 103 of 180 process digests apart from the shell's (task
   seon.prove/one-digest-whichever-runner-plans-it). See docs/source.md#tests-run-by-reach."
   (read-layer (str (checkout) "/" shipped-file) :scripted (checkout)))
