@@ -78,12 +78,17 @@
   ;; one task again as the default: an experiment's choice, the design-build task (kind :work, the
   ;; :work instructions: red proof, then green, no merge of its own) and its merge task, needing it
   (let [d {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."}
-        [w m :as ds] (tpl/design-build d)]
+        [w m :as ds] (tpl/design-build d)
+        [w m] (map #(assoc % :seon.task/id (str (:seon.task/ns %) "/" (:seon.task/name %))) [w m])]
     (is (= [["w" :work] ["w-merge" :merge]] (mapv (juxt :seon.task/name :seon.task/kind) ds)) "exactly two tasks")
     (is (= #{"demo/w"} (:seon.task/needs m)) "the merge needs the work")
     (is (= [:task-demo-w :task-demo-w] (mapv :seon.task/branch ds)) "on one branch")
     (is (= [(:work tpl/instructions) (:merge tpl/instructions)] (mapv :seon.task/instructions ds)))
-    (is (not (task/merges? (:seon.task/kind w))) "the work task does not merge itself")
+    ;; merging is read from data, never the kind (seon.task/merges?: no task on its own branch needs it)
+    (is (not (task/merges? w [m])) "the work task does not merge itself: its merge task, on its branch, needs it")
+    (is (task/merges? m []) "its merge task merges, nothing needing it")
+    (is (task/merges? w []) "and a lone work task, which nothing needs, merges itself (rung 1's plain task, green and never merged)")
+    (is (task/merges? w [(assoc m :seon.task/branch :task-demo-other)]) "a task that needs it from another branch leaves it its own merge")
     (is (not (str/includes? (:work tpl/instructions) "merge-main!")) "nor is it told to")
     ;; a work agent merges main every turn main moved (2026-10-30), so a conflict meets it: swarm's scripted work agent
     ;; never resolved one (4 of 10 swarm runs red at 20 tasks); the old sentence left it to the merge task
