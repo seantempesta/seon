@@ -1455,7 +1455,8 @@
   (is (= "test/app/core_test.clj" (source/namespace-path 'app.core-test))))
 
 (deftest an-update-never-says-ok-on-a-merge-that-did-nothing
-  ;; 2026-11-11: the standing root's write-back (seon.fx/git-commit: plumbing, then update-ref) moved jolt/merges, the
+  ;; 2026-11-11: the standing root's write-back (seon.fx/git-commit: plumbing, then update-ref, until it committed through a
+  ;; checked-out tree) moved jolt/merges, the
   ;; branch the write-back tree has checked out, so that tree's index stayed at the parent: the merged files read as
   ;; staged deletions. bin/update's clean check read only the working tree (git diff), so the merge of main ran on a dirty
   ;; index, and eight updates said UPDATE OK while the tree stayed at batch 24 (the ninth failed). Its merge step
@@ -1470,9 +1471,15 @@
       (g "init" "-q" "-b" "main") (g "config" "user.name" "t") (g "config" "user.email" "t@t")
       (spit (str d "/a.txt") "a\n") (g "add" "a.txt") (g "commit" "-q" "-m" "one")
       (g "checkout" "-q" "-b" "jolt/merges")
-      ;; Seon's merge onto the checked-out branch, as the write-back commits it
-      (is (some? (:sha (:value (fx/git-commit {:req {:dir d :branch "jolt/merges" :files {"src/demo/half.clj" "(ns demo.half)\n"} :message "Seon merge"}})))))
-      (is (str/includes? (g "status" "--short") "D  src/demo/half.clj") "the write-back left the tree's index at the parent: a staged deletion")
+      ;; a commit moved under the checked-out branch by plumbing, as the write-back did before
+      ;; seon.fx-test/a-write-back-onto-a-checked-out-branch-leaves-that-tree-clean: its tree's index stays at the parent
+      (let [idx (str d "/.git/plumbing-index") env {"GIT_INDEX_FILE" idx}
+            gi (fn [& args] (let [r (apply sh/sh "git" "-C" d (concat args [:env (merge (into {} (System/getenv)) env)]))] (str/trim (:out r))))
+            parent (g "rev-parse" "HEAD")]
+        (gi "read-tree" parent)
+        (gi "update-index" "--add" "--cacheinfo" (str "100644," (str/trim (:out (sh/sh "git" "-C" d "hash-object" "-w" "--stdin" :in "(ns demo.half)\n"))) ",src/demo/half.clj"))
+        (g "update-ref" "refs/heads/jolt/merges" (g "commit-tree" (gi "write-tree") "-p" parent "-m" "Seon merge") parent))
+      (is (str/includes? (g "status" "--short") "D  src/demo/half.clj") "the tree's index left at the parent: a staged deletion")
       (is (zero? (:exit (sh/sh "git" "-C" d "diff" "--quiet"))) "the old check, the working tree against the index, passed this tree")
       ;; main moves on
       (g "update-ref" "refs/heads/main" (g "commit-tree" "-m" "two" "-p" "main" (g "rev-parse" "main^{tree}")))

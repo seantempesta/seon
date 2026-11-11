@@ -270,7 +270,8 @@
 
 (defonce ^:private kept-walk
   ;; the walk page-parts-through drew last, held at the point it reached, to advance from rather than draw again: nil, or
-  ;; {:id [store branch agent] :t :commit :at :c :r :w}. One a process (an agent's process draws one agent's pages); derived, never relied on
+  ;; {:id [store branch agent] :t :commit :at :c :r :w :first}, :first the point its last chain began at with that point's page
+  ;; ({:point [commit t] :hiccup}), which goes with the walk. One a process (an agent's process draws one agent's pages); derived, never relied on
   (atom nil))
 
 (defn- descends?
@@ -341,14 +342,26 @@
               ;; a point's t: its own, else its commit's (a db as of a t, a commit collection took, has no :max-tx of its own)
               t-of (fn [q d1] (or (:t q) (:max-tx d1)))
               t0 (t-of p d0)
+              later (rest (drop-while nil? chain))
+              ;; whether the kept walk can move on from where it is to point q (its t at or after the walk's, a later commit of its lineage)
+              reaches? (fn [k q d1] (and (<= (:t k) (t-of q d1)) (descends? db (:commit k) (:commit q))))
+              mine? (and k (= id (:id k)))
+              ;; this point is the one the kept walk's last chain began at, which it has moved past (a flush between turns drew the
+              ;; pending turn at the db's own point, one transaction past the last basis): its page is the one kept with the walk, and the
+              ;; walk moves on from where it is to the next point, never drawn again (it drew the page cold at every such turn, ~7M ticks)
+              held (when (and mine? (= [(:commit p) t0] (:point (:first k)))
+                              (if-let [q (first later)] (reaches? k q (db-at db q)) true))
+                     (:hiccup (:first k)))
               ;; the kept walk is advanced when this point is its own or a later commit of its lineage, else drawn again
-              k0 (if (and k (= id (:id k)) (<= (:t k) t0) (descends? db (:commit k) (:commit p)))
-                   (assoc (advance k d0 t0) :commit (:commit p))
-                   (do (some-> k :w render/dispose-walk!) (assoc (parts-walk d0 t0 a id) :commit (:commit p))))
+              k0 (cond held k
+                       (and mine? (reaches? k p d0)) (assoc (advance k d0 t0) :commit (:commit p))
+                       :else (do (some-> k :w render/dispose-walk!) (assoc (parts-walk d0 t0 a id) :commit (:commit p))))
+              h0 (or held (hiccup k0))
               ;; the first point, then each later one the walk advanced to
               [kn hs] (reduce (fn [[k hs] q] (let [d1 (db-at db q) k1 (assoc (advance k d1 (t-of q d1)) :commit (:commit q))] [k1 (conj hs (hiccup k1))]))
-                              [k0 [(hiccup k0)]] (rest (drop-while nil? chain)))]
-          (reset! kept-walk kn)
+                              [k0 [h0]] later)]
+          ;; kept with the walk, in its one slot: the page at this chain's first point, so a next chain that starts there again finds it
+          (reset! kept-walk (assoc kn :first {:point [(:commit p) t0] :hiccup h0}))
           (into (mapv (constantly nil) (take-while nil? chain)) hs))))
     (mapv (constantly nil) chain)))
 
