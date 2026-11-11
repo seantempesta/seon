@@ -4190,7 +4190,7 @@
   for agent lab/a1. Answers {:c the agent's pull :ix :page html :msgs the request's messages, printed}."
   []
   (let [reg (fn [db k form] (let [r (my.schema/registration db k form false)]
-                              (is (not (seon.contract/error? r)) (str k " registers: " (pr-str r)))
+                              (when (seon.contract/error? r) (is false (str k " registers: " (pr-str r))))
                               (d/db-with db (:tx r))))
         db (-> (ts/test-db)
                (reg :lab.planted.note/id [:and {:seon.db/identity true} :string])
@@ -4213,8 +4213,7 @@
   ;; docs/render.md#the-page: what an agent's pull joins reaches the page by its schema's html render, no code naming it.
   ;; Planted as data, as an agent would (planted-world). Red until task seon.render/a-planted-entity-reaches-the-page-and-the-request's page half is done
   (let [{:keys [c ix page]} (planted-world)]
-    (is (= ["the planted note"] (map :lab.planted.note/text (vals (:lab.planted.note/_agent c))))
-        (str "the agent's pull holds the note it joins: " (pr-str (:lab.planted.note/_agent c))))
+    (is (= ["the planted note"] (map :lab.planted.note/text (vals (:lab.planted.note/_agent c)))) "the agent's pull holds the note it joins")
     (is (= :lab.planted/note-fact (r/entity-schema ix (first (vals (:lab.planted.note/_agent c))) nil)) "the note is its planted schema's entity")
     (is (str/includes? page "PLANTED-HTML the planted note") "the note's html render draws it on the agent's page")))
 
@@ -4222,4 +4221,5 @@
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: what an agent's pull joins reaches the model's request by its schema's
   ;; model render, no code naming it (planted-world). Red until the task's request half is done
   (let [{:keys [msgs]} (planted-world)]
-    (is (str/includes? msgs "PLANTED-MODEL the planted note") (str "the note's model render puts it in the request's messages: " msgs))))
+    (when-not (is (str/includes? msgs "PLANTED-MODEL the planted note") "the note's model render puts it in the request's messages")
+      (println "the request's messages:" msgs))))
