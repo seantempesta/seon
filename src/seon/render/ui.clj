@@ -348,6 +348,8 @@
                                       :aria-current (when on? "page")} label])]
     [:nav {:class "seon-bar"}
      [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
+     ;; which system this is (`system-source`, the system walk's unit the frame places on every page)
+     [:span {:id "p-system"} (render/region "p-system")]
      (when focus
        (let [base (if (= :root focus) "/root" (str "/agent/" address))]
          [:div {:class "ml-auto flex items-baseline gap-1 text-xs"}
@@ -933,16 +935,29 @@
              (when (and (contains? (set (:var/meta v)) :test) src) (source-block src))))]))
 
 (defn- key-hiccup
-  "A cited attribute or setting by its schema entry. A setting: what it is for (its :description) and its value now. An
-  attribute: what it is (its :description, else its type) and a real value taken from this task's own data where it holds one
-  (lookups: lookup refs of the task and the functions it names), else the first the db has; for a ref, each attribute of the entity
-  it refers to, since that is what the agent reads next. Nothing of which entities hold it."
+  "A cited schema key by its schema entry, as what it is. A setting: what it is for (its :description) and its value now. An
+  attribute the db stores (the db's own schema holds it): what it is (its :description, else its type) and a real value taken
+  from this task's own data where it holds one (lookups: lookup refs of the task and the functions it names), else the first the
+  db has; for a ref, each attribute of the entity it refers to, since that is what the agent reads next. Any other key is the
+  schema of an entity or of a value (an error's, a render's input): its form whole, as the pull holds it (:schema/form), and
+  the renders its properties name, which is how a schema says what draws it. Nothing of which entities hold it."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :map [:sequential :any]] :any]}
   [db k sch lookups]
   (let [desc (:description (contract/properties k))
         setting? (str/starts-with? (str (namespace k)) "seon.config")]
     (if setting?
       [:section [:h3 (str k)] [:p (str "A setting your plan names." (when desc (str " " desc)))] [:p "Its value now: " [:code (print/text (config/value k))]]]
+      (if-not (get (d/schema db) k)
+        ;; no stored attribute: an entity's schema or a value's. Its form is the answer to "what is this and what draws it"
+        (let [props (contract/properties k)
+              renders (keep (fn [[p for-what]] (when-let [r (get props p)] (list for-what " " [:code (str r)])))
+                            [[:seon.render/hiccup "for a page"] [:seon.render/model "printed for the model by"] [:seon.render/openai-compat "as the model's messages by"]])]
+          [:section
+           [:h3 (str k)]
+           [:p (str (if (:seon.db/attributes props) "An entity's schema your plan names: the attributes written together as one entity." "A value's schema your plan names.")
+                    (when desc (str " " desc)))]
+           (when (seq renders) (into [:p "It names its renders: "] (interpose "; " renders)))
+           [:pre [:code (str (:schema/form sch))]]])
       (let [schema (get (d/schema db) k)
             ref? (= :db.type/ref (:db/valueType schema))
             typ (or (last (re-seq #":[^\s\]\}\)]+" (str/replace (str (:schema/form sch)) #"\{[^}]*\}" ""))) (:schema/form sch))
@@ -956,7 +971,7 @@
          (when (and datom (not ref?)) [:p "A real value: " [:code (print/text (:v datom))]])
          (when target
            (list [:p "Each entity points to another with it, which holds:"]
-                 (into [:ul] (for [[tk tv] (remove (comp #{:db/id} key) target)] [:li [:code (str tk " " (print/text tv))]]))))]))))
+                 (into [:ul] (for [[tk tv] (remove (comp #{:db/id} key) target)] [:li [:code (str tk " " (print/text tv))]]))))])))))
 
 (defn script
   "A script, as hiccup: what it's for and how to call it, in its own words (docs/source.md#a-program-file)."
@@ -1808,6 +1823,8 @@
      [:h1 (str (or (:seon.agent/key e) (:seon.user/name e) (:db/id e)) " as data")]
      [:p "Schema " [:code (str schema)] " · its pattern is " (if (= :entity source) "its own (:seon.ctx/pattern on the entity)" "its schema's")
       " · " (count (render/entity-pattern ix e)) " clauses"]
+     ;; what a pattern is, the warning and one form that adds a join: the attribute's own description, data on its schema
+     (when-let [d (:description (contract/properties :seon.ctx/pattern))] [:p d])
      [:p "Its schema's render for a person is " [:code (str (:hiccup renders))] (when (:model renders) (list " · for the model " [:code (str (:model renders))]))]
      [:h2 "What the pattern asks, and what the pull holds"]
      (into [:ul] (map #(pull-clause % (get e (:key %)))) clauses)
@@ -1957,8 +1974,7 @@
       (into [:div {:class "seon-stack"}] (for [[m id] ms] (get-in c [:seon.message/_to m]))))))
 
 (defn conversation-list
-  "The conversation of an agent's page (c-rows), what the model reads as messages (:seon.render/messages) and the person as the chat: its system message, the example sessions it reads, what opens its own session (every conversation opens on a user
-  message), what was asked (the person's: the model reads the plan in the task's part), a component for each of its turns (`conversation-turn`), then how it stands (the person's). It reads the agent's turn number, the turns' bases and the index of the messages to the agent (`seon.ctx/placed-messages`: where each was read, derived from when it was delivered, handed to each turn as its :messages) and nothing else of its records: a new eval runs its turn alone, and a new turn or message this list and a lookup of each earlier turn's marker; a turn runs again for its own messages alone.
+  "The conversation of an agent's page (c-rows), what the model reads as messages (:seon.render/messages) and the person as the chat: its system message, the example sessions it reads, what was asked (the person's: the model reads the plan in the task's part), a component for each of its turns (`conversation-turn`), then how it stands (the person's). It reads the agent's turn number, the turns' bases and the index of the messages to the agent (`seon.ctx/placed-messages`: where each was read, derived from when it was delivered, handed to each turn as its :messages) and nothing else of its records: a new eval runs its turn alone, and a new turn or message this list and a lookup of each earlier turn's marker; a turn runs again for its own messages alone.
   See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:seon.render/list "c-rows" :seon.render/messages true :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
@@ -1969,7 +1985,6 @@
     [:ol {:id "c-rows"}
      [#'system-message {}]
      [#'session-examples {}]
-     (when k [:li {} (session/session-open k)])
      (when (:seon.agent/task c) [#'chat-ask {:wire/for "page"}])
      ;; one past the turn in force: what was taken for the turn that reads it comes before that turn begins (seon.turn/take!, tell-error!); a turn no record names draws nothing
      (for [n (range 0 (+ 2 turn))] [#'conversation-turn (let [ms (get placed n (when (= n (inc turn)) (:pending placed)))] (cond-> {:key n} ms (assoc :messages ms)))])
@@ -2151,6 +2166,26 @@
      (when (pos? held) [:p {:class "seon-note"} (str held (if (= 1 held) " task" " tasks") " not released yet.")])
      (root-quiet {} (relevant :seon.root/root-fact c))]))
 
+(defn source-line
+  "Which system a page is (the declared html render of :seon.root/source): the checkout main was last indexed from, by its folder's
+  name, the branch checked out there and its commit, short; the whole path, commit and tree on hover. See docs/render.md#the-page."
+  {:seon.render/style ".source-line { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.6875rem; color: var(--color-text-400); white-space: nowrap; }
+.source-line .commit { display: inline-block; max-width: 10ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }"
+   :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_ {:keys [root branch commit tree]}]
+  ;; the commit whole (the page narrows it to its first characters, its text is all there: docs/render.md#no-clipping)
+  [:span {:class "source-line" :title (str/join " " (remove nil? [root (some->> commit (str "commit ")) (some->> tree (str "tree "))]))}
+   (str/join " · " (remove nil? [(last (str/split root #"/")) (or branch (when commit "detached"))]))
+   (when commit (list " · " [:span {:class "commit"} commit]))])
+
+(defn system-source
+  "The system's source as its schema draws it (`source-line`), a component over root's ctx: the frame places it on every page,
+  so a person always sees which checkout, branch and commit they are looking at. See docs/render.md#the-page. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx ix :seon.render/index}]
+  (when-let [src (some-> (:seon.root/source c) ratom/realize)]
+    (render/hiccup {:seon.render/index ix :schema :seon.root/source} src)))
+
 (defn problems-tile
   "Main's open problems (a component over root's ctx, its :health: the report the render proc keeps
   with root's process, seon.problems/health changed by each move of main, seon.render.proc/health!): what needs fixing by the report's render, and
@@ -2248,6 +2283,7 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :any] :any]}
   [_ _]
   [:div {:id "root-ctx"}
+   [:span {:id "p-system"} [#'system-source {}]]
    [:div {:id "p-head"} [#'root-head {}]]
    [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}] [#'root-evals {}]]])
 

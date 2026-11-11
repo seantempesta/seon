@@ -517,6 +517,12 @@
     (list-units (render/placed-units (:w kw)) "#c-side")
     []))
 
+(defn- system-units
+  "Which system a page is: the system walk's unit in #p-system (seon.render.ui/system-source), which the frame places in the top bar of
+  every page; none before the system walk is drawn. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [st] (if-let [w (some-> (:root-walk st) :w)] (list-units (render/placed-units w) "#p-system") []))
+
 (defn- agent-view
   "View's page when it names an agent (entity eid on main db): its components as its process drew
   them (ask-parts, seon.repl/render-ctx: the units of its walk) at the branch root read or later, else, with no process
@@ -600,13 +606,14 @@
         ;; the frame as the agents list is, the same mechanism
         system? (= "root" (:seon.agent/key e))
         ;; the system walk fills regions of this page, so its own root unit (its page) is not placed
-        system (when (and chat? system?) (some->> (:root-walk st) :w render/placed-units (remove #(= render/root-container (:container %)))))
+        ;; and its source line, which every page holds (system-units), is placed once
+        system (when (and chat? system?) (some->> (:root-walk st) :w render/placed-units (remove #(#{render/root-container "#p-system"} (:container %)))))
         head (cond-> (or (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid) {:seon.agent/key (:seon.agent/key e)})
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
                (not (task/this-boots db e)) (dissoc :processes))
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent-head {} head)])}]
-    (ui/page-chrome {:units (vec (concat sides [head-unit] system units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
+    (ui/page-chrome {:units (vec (concat (system-units st) sides [head-unit] system units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
@@ -731,7 +738,7 @@
      (and eid (= :debug (first-of view))) (debug-value st view)
      (and eid (= :chat (first-of view)) (agent-of db (second view))) (agent-view st view db eid)
      (and eid (agent-of db view)) (agent-view st view db eid)
-     (= :home (second-of view)) (ui/page-chrome {:units [{:id "p-sign-in" :container "#p-head" :rev 0 :html (h/html (ui/sign-in {:seon.db/db db}))}] :view (ui/view-param view) :tab :chat} :root)
+     (= :home (second-of view)) (ui/page-chrome {:units (conj (system-units st) {:id "p-sign-in" :container "#p-head" :rev 0 :html (h/html (ui/sign-in {:seon.db/db db}))}) :view (ui/view-param view) :tab :chat} :root)
      db (contract/error :seon.render/no-location #'seon.render.proc/page-value
                         (str "no " (let [v (if (vector? view) (second view) view)] (if (keyword? v) (str "agent " (address-of v)) (ui/kname v)))
                              " on main: an address names an agent by its key (boot/id), its id in this boot, its task or its branch; the home page lists every session")
