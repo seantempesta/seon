@@ -3,7 +3,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.string :as str] [seon.fixtures] [seon.agent-test :as at]
             [seon.intr :as intr] [seon.agent :as agent] [seon.contract :as contract]
             [seon.ref :as ref] [seon.template :as template] [seon.repl :as repl] [seon.ctx.wire :as wire] [seon.doc :as doc]
-            [seon.config :as cfg] [my.agent] [seon.program] [seon.render :as render] [seon.print :as print] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d]))
+            [seon.config :as cfg] [my.agent] [seon.program] [seon.render :as render] [seon.print :as print] [seon.render.ui :as ui] [seon.web.html :as h] [seon.test-store :as ts] [my.test] [datahike.api :as d] [seon.ctx] [seon.db]))
 
 (deftest an-eval-answers-its-value-as-clojure-does
   ;; owner, 2026-10-28 and 2026-10-29: match Clojure for the eval's output: top-level forms run in
@@ -156,9 +156,8 @@
   (let [[_ _ branch] (at/in-agent (fn [{:keys [ns task]}]
                                     ["(alter-var-root #'seon.agent/commit! (fn [f] (fn [] (Thread/sleep 500) (f))))"
                                      (str "(ns " ns ".rc) (defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)")
-                                     {:op :eval :agent "root"
-                                      :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                                 " (:form/src (:var/form (datahike.api/entity b [:var/name '" ns ".rc/f]))))")}]))]
+                                     ;; read here, from the store (seon.test-store/read-task-branch): no request to root
+                                     (fn [{:keys [root]}] (:form/src (:var/form (d/entity (ts/read-task-branch root task) [:var/name (symbol (str ns ".rc/f"))]))))]))]
     (is (clojure.string/includes? (str (:value branch)) "[] 1") (str "the branch holds what the reply said was done: " (pr-str branch)))))
 
 (deftest an-edit-in-an-agent-is-program-on-its-branch
@@ -167,10 +166,10 @@
   (let [[_ edit branch] (at/in-agent (fn [{:keys [ns task]}]
                                        [(str "(ns " ns ".ed) (defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] 1)")
                                         (str "(seon.repl/edit! '" ns ".ed/f \"[] 1\" \"[] 2\")")
-                                        {:op :eval :agent "root"
-                                         :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                                    " [(:form/src (:var/form (datahike.api/entity b [:var/name '" ns ".ed/f])))"
-                                                    "  (count (filter #(clojure.string/includes? % \"[] 2)\") (datahike.api/q '[:find [?c ...] :where [?e :seon.eval/code ?c] [?e :seon.eval/agent ?a] [?a :seon.agent/key _]] b)))])")}]))]
+                                        (fn [{:keys [root]}]
+                                          (let [b (ts/read-task-branch root task)]
+                                            [(:form/src (:var/form (d/entity b [:var/name (symbol (str ns ".ed/f"))])))
+                                             (count (filter #(clojure.string/includes? % "[] 2)") (d/q '[:find [?c ...] :where [?e :seon.eval/code ?c] [?e :seon.eval/agent ?a] [?a :seon.agent/key _]] b)))]))]))]
     (is (get-in edit [:value :edited]) (pr-str edit))
     (is (get-in edit [:value :recorded]) "what it recorded is in what it answers")
     (is (not-any? #(contains? (:value edit) %) [:handle :ms :ticks :bytes]) "and the outer eval's handle and cost are the outer eval's")
@@ -252,9 +251,7 @@
   (let [[_ gone branch] (at/in-agent (fn [{:keys [ns task]}]
                                        [(str "(ns " ns ".um) (defn scratch [] 1)")
                                         (str "(ns-unmap '" ns ".um 'scratch)")
-                                        {:op :eval :agent "root"
-                                         :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                                    " (:var/form (datahike.api/entity b [:var/name '" ns ".um/scratch])))")}]))]
+                                        (fn [{:keys [root]}] (:var/form (d/entity (ts/read-task-branch root task) [:var/name (symbol (str ns ".um/scratch"))])))]))]
     (is (str/includes? (:text gone) ":unmapped") (str "the answer says what it removed: " (pr-str gone)))
     (is (nil? (:value branch)) (str "the branch records no definition of it: " (pr-str branch)))))
 
@@ -323,10 +320,10 @@
   (let [[_ _ where] (at/in-agent (fn [{:keys [ns task]}]
                                    [(str "(ns " ns ".here)")
                                     "(+ 1 1)"
-                                    {:op :eval :agent "root"
-                                     :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))"
-                                                " a (datahike.api/q '[:find ?a . :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t] [_ :seon.eval/agent ?a]] b " (pr-str task) ")]"
-                                                " (seon.ctx/current-ns (:tree (seon.ctx/build (seon.db/index) b a :b))))")}]))]
+                                    (fn [{:keys [root]}]
+                                      (let [b (ts/read-task-branch root task)
+                                            a (d/q '[:find ?a . :in $ ?id :where [?t :seon.task/id ?id] [?a :seon.agent/task ?t] [_ :seon.eval/agent ?a]] b task)]
+                                        (seon.ctx/current-ns (:tree (seon.ctx/build (seon.db/index) b a :b)))))]))]
     (is (str/ends-with? (str (:value where)) ".here") (pr-str where))))
 
 ;; docs/agent.md#the-repl (owner, 2026-11-03: "fix the commands so they work intuitively everywhere"): one table the
@@ -438,15 +435,11 @@
   (let [[top nested branch] (at/in-agent (fn [{:keys [ns task agent]}]
                                            [(str "(ns " ns ".core) (def a 1)")
                                             (str "(in-ns '" ns ".core) (let [r (+ 1 1)] (def b r) r)")
-                                            {:op :eval :agent "root"
-                                             ;; the records are applied ahead of the agent's commit (seon.agent/transact!): read at its
-                                             ;; :commit events, the tap first, until a is there (b never is)
-                                             :code (str "(let [ev (c/events sys) a :" agent
-                                                        " read (fn [] (let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                                        " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/a " ns ".core/b])))"
-                                                        " r (loop [] (let [v (read)] (if (first v) v"
-                                                        " (do (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (= :commit (:type e)) (= a (:agent e))) (recur)))) (recur)))))]"
-                                                        " (clojure.core.async/untap (:events-mult sys) ev) r)")}]))]
+                                            ;; an agent commits a request's writes before it replies (seon.repl/agent-step): read once,
+                                            ;; here, from the store (b never is there)
+                                            (fn [{:keys [root]}]
+                                              (let [b (ts/read-task-branch root task)]
+                                                (mapv #(some? (d/entity b [:var/name (symbol (str ns ".core/" %))])) ["a" "b"])))]))]
     (is (some #(= "a" (name %)) (:recorded top)) (str "a top-level def is program: " (pr-str top)))
     (is (empty? (:recorded nested)) (pr-str nested))
     (is (clojure.string/includes? (str (:text nested)) "not program") "its record says why it stays an eval")
@@ -462,11 +455,11 @@
                         (str "(in-ns '" ns ".core) (do (do (def d 3)) (* d 2))")
                         (str "(in-ns '" ns ".core) (do (def e 1) (throw (ex-info \"boom\" {})) (def f 2))")
                         (str "[(some? (resolve '" ns ".core/e)) (some? (resolve '" ns ".core/f))]")
-                        {:op :eval :agent "root"
-                         ;; an agent commits a request's writes before it replies (seon.repl/agent-step): its
-                         ;; branch in the store holds them once the reply came, read once, no wait
-                         :code (str "(let [b (seon.db/head (:conn sys) (seon.db/on-main (seon.db/conn-main (:conn sys)) (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                    " (mapv #(some? (datahike.api/entity b [:var/name %])) '[" ns ".core/c " ns ".core/d]))")}]))]
+                        ;; an agent commits a request's writes before it replies (seon.repl/agent-step): its
+                        ;; branch in the store holds them once the reply came, read once, here
+                        (fn [{:keys [root]}]
+                          (let [b (ts/read-task-branch root task)]
+                            (mapv #(some? (d/entity b [:var/name (symbol (str ns ".core/" %))])) ["c" "d"])))]))]
     (is (some #(= "c" (name %)) (:recorded r)) (str "the def inside the do is program: " (pr-str r)))
     (is (= 2 (:value r)) "the do's value is its last form's")
     (is (= 6 (last (:value nested))) "a do inside a top-level do is its forms too (after the in-ns: each top-level form's value)")
@@ -483,11 +476,11 @@
                        [(str "(ns " ns ".core)")
                         (str "(do ; leads f\n  (seon.contract/defn f {:malli/schema [:=> [:cat :int] :int]} [x]   (inc x))\n"
                              "  ;; leads g-test\n  (clojure.test/deftest g-test (clojure.test/is (= 2 (f 1)))))")
-                        {:op :eval :agent "root"
-                         ;; an agent commits a request's writes before it replies (seon.repl/agent-step): its
-                         ;; branch in the store holds them once the reply came, read once, no wait
-                         :code (str "(let [b (seon.db/head (:conn sys) (seon.db/on-main (seon.db/conn-main (:conn sys)) (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                    " (mapv #(datahike.api/q '[:find ?src . :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/src ?src]] b %) '[" ns ".core/f " ns ".core/g-test]))")}]))]
+                        ;; an agent commits a request's writes before it replies (seon.repl/agent-step): its
+                        ;; branch in the store holds them once the reply came, read once, here
+                        (fn [{:keys [root]}]
+                          (let [b (ts/read-task-branch root task)]
+                            (mapv #(d/q '[:find ?src . :in $ ?s :where [?e :var/name ?s] [?e :var/form ?f] [?f :form/src ?src]] b (symbol (str ns ".core/" %))) ["f" "g-test"])))]))]
     (is (= 2 (count (:recorded r))) (str "both inner definitions are program: " (pr-str r)))
     (is (= ["(seon.contract/defn f {:malli/schema [:=> [:cat :int] :int]} [x]   (inc x))"
             "(clojure.test/deftest g-test (clojure.test/is (= 2 (f 1))))"]
@@ -983,10 +976,11 @@
         "and so the eval's attributes"))
   (let [[r recorded] (at/in-agent (fn [{:keys [task]}]
                                     ["(datahike.api/q '[:find ?y :where [?e :var/name _]] (my.db/db))"
-                                     {:op :eval :agent "root"
-                                      :code (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-                                                 " (vec (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/response _]] b) :let [rec (seon.db/response-of b (datahike.api/pull b '[:seon.eval/response :seon.eval/result] e))] :when (:ex rec)]"
-                                                 " (get-in rec [:ex :seon.error/message]))))")}]))]
+                                     (fn [{:keys [root]}]
+                                       (let [b (ts/read-task-branch root task)]
+                                         (vec (for [e (d/q '[:find [?e ...] :where [?e :seon.eval/response _]] b)
+                                                    :let [rec (seon.db/response-of b (d/pull b '[:seon.eval/response :seon.eval/result] e))] :when (:ex rec)]
+                                                (get-in rec [:ex :seon.error/message])))))]))]
     (is (:ex r) (pr-str r))
     (is (some #(clojure.string/includes? (str %) "unknown vars") (:value recorded)) (str "the eval is recorded with its error: " (pr-str recorded)))))
 
@@ -1245,21 +1239,21 @@
     (clojure.test/is (= "to err\n" (:seon.print/code (:err (eval-in "(binding [*out* *err*] (println \"to err\"))\n(/ 1 0)")))) "the form's *err* output is the error stream")))
 
 (defn- evals-held
-  "Root-REPL code answering, of the task's branch, each eval whose code is among codes: its id, code and response, and its result entity whole
-  (a pull of :seon.eval/result)."
-  {:malli/schema [:=> [:cat :string [:vector :string]] :string]}
+  "A read of the task's branch, run in the test (seon.test-store/read-task-branch): each eval whose code is among codes, its id,
+  code and response, and its result entity whole (a pull of :seon.eval/result)."
   [task codes]
-  (str "(let [b (:db @(seon.root/branch-db sys (:seon.task/branch (seon.task/task @(:conn sys) " (pr-str task) "))))]"
-       " (vec (for [e (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/code _]] b)"
-       "            :let [p (datahike.api/pull b '[:seon.eval/id :seon.eval/code :seon.eval/response {:seon.eval/result [*]}] e)]"
-       "            :when (contains? " (pr-str (set codes)) " (:seon.eval/code p))] p)))"))
+  (fn [{:keys [root]}]
+    (let [b (ts/read-task-branch root task)]
+      (vec (for [e (d/q '[:find [?e ...] :where [?e :seon.eval/code _]] b)
+                 :let [p (d/pull b '[:seon.eval/id :seon.eval/code :seon.eval/response {:seon.eval/result [*]}] e)]
+                 :when (contains? (set codes) (:seon.eval/code p))] p)))))
 
 (deftest two-evals-of-one-value-hold-one-result
   ;; docs/users.md#what-each-thing-is: a result is its own entity, so evaluating one value twice stores it once
   ;; and each eval keeps its own cost; a different value is another entity; an error is a result with :ex and no :value
   (let [same "(mapv inc (range 50))" other "(mapv dec (range 50))" boom "(/ 1 0)"
         all (at/in-agent (fn [{:keys [task]}]
-                                      [same same other boom {:op :eval :agent "root" :code (evals-held task [same other boom])}]))
+                                      [same same other boom (evals-held task [same other boom])]))
         held (peek all)
         evals (:value held)
         of (fn [code] (filterv #(= code (:seon.eval/code %)) evals))

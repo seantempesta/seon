@@ -66,6 +66,10 @@ Of `seon.cost/measure` calling a function 17 to 60 times at each size: "oh god j
 
 The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
 
+### The store may lose its last commits, never corrupt or exhaust the machine (owner, 2026-11-10)
+
+He first chose a safe copy of the store beside the fast write, then replaced that the same evening: "How about we just fix the corruption issue so we just deal with data loss in the worst case?" (to the session that owns the dependencies), and "I changed my mind and want to see if we can just fix the corruption issue with LMDB since we already own the dependency" (relayed by the managing session). After the machine ran out of semaphore sets that night: "Losing data is fine, but semaphore exhaustion and corrupt storage is not okay." So the fix is in our LMDB fork: its locks are record locks the kernel gives back, and a store opened ``MDB_SAFENOSYNC`` rolls back to its last sync after an OS crash, never past it. Stated in [failure points](failure-points.md#lmdb-locks), [failure points](failure-points.md#lmdb-crash-safety), [storage](storage.md#durability-is-continuous-group-commit) and [forks](forks.md#lmdb).
+
 ### A run far past its measured time is ended, after its evidence (owner, 2026-11-10)
 
 The fourth clock exception, relayed by the managing session at 20:35: a script may end a run that goes far past its measured time, after capturing the evidence (sample, logs, process list and the Seon state: root's stall check, each agent proc's), reported red with a typed reason, never retried; the cause still gets its task. Before it, a stuck step ran until someone noticed. Stated in [clocks](clocks.md#time-decides-the-owners-exceptions): `bin/check` ends a step past `:seon.config.check/step-end-factor` times its median measured run (STEP-OVERRAN), after `bin/evidence`.
