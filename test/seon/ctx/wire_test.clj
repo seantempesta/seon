@@ -2224,7 +2224,8 @@
   ;; "An attribute your plan names. It holds :any." (the last keyword a regex found in the form), and its agent spent five turns finding
   ;; how a schema declares its render. A key the db stores no attribute for is an entity's schema or a value's: its form, whole, and
   ;; the renders its properties name
-  (let [form (pr-str (get seon.config/schema-forms :seon.problems/report))
+  ;; the form as a schema file holds it (the stored :schema/form is that text)
+  (let [form "[:map {:seon.render/hiccup seon.render.ui/problems :seon.render/model seon.render.ui/problems-model} [:t :int] [:classes :map]]"
         db (d/db-with (db-with-program) [{:schema/key :seon.problems/report :schema/form form}
                                          {:schema/key :seon.db/agent-fact :schema/form "[:map {:seon.db/attributes true} [:seon.agent/key :seon.agent/key]]"}])
         text (fn [k] (seon.render/part-text ['seon.render.ui/cite {} (seon.render.ui/cite-hiccup db {:seon.cite/depth :doc :seon.cite/target (d/pull db '[*] [:schema/key k])})]))
