@@ -3817,6 +3817,49 @@
       (is (nil? (r/render-of (seon.db/index) v nil)))
       (is (str/includes? (pr-str (r/hiccup {:seon.render/index (seon.db/index)} v)) ":n")))))
 
+(deftest a-value-that-is-hiccup-is-drawn-on-the-page
+  ;; docs/render.md#a-value-draws-itself: an agent's call of a render at its REPL (seon.render.ui/pull-front, whose contract answers
+  ;; :seon.render/hiccup-value) answers hiccup; its eval names that schema from the contract alone, its value is drawn on the page as
+  ;; html with the data folded under it, and the model reads the value as the data it is, as before
+  (let [[_ branch eid] (paged-dbs)
+        k "a3"
+        v (ui/pull-front {:seon.ctx/ctx (d/pull branch '[*] eid) :seon.render/index (seon.db/index)})
+        code "(seon.render.ui/pull-front opts)"
+        rec (seon.repl/record-details code {:value v} {})
+        db (d/db-with branch (seon.repl/record-tx {:seon.agent/key k} "h1" (seon.task/sender "a3")
+                                                  (merge rec {:seon.eval/call (seon.task/call-ref k 1) :seon.eval/response {:handle 'result/h1 :value (get-in rec [:seon.eval/response :value])}})))
+        html (component-html db "evaluation-h1")
+        read (pr-str (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "h1"])))]
+    (is (= :seon.render/hiccup-value (:seon.eval/schema rec)) "the eval names the schema the called render's contract answers")
+    (is (some? html) "the eval, a component of the page")
+    (is (str/includes? html "<h1>a3 as data</h1>") (str "the value drawn as html: " html))
+    (is (re-find #"(?s)<details><summary>show as data</summary>.*:section" html) "and under it, folded, the value as data")
+    (is (str/includes? read "[:section") "the model reads the value as data")
+    (is (not (str/includes? read "<h1>")) "never as html")))
+
+(def ^:private called (atom 0))
+
+(defn planted-fn
+  "A system function an agent's value names: counts each call, so a test sees whether drawing a value called it."
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
+  [& _] (swap! called inc) [:p "CALLED"])
+
+(deftest an-agents-hiccup-value-calls-nothing
+  ;; docs/render.md#a-value-draws-itself: a value an agent's eval answered is drawn from the db, where a var is its symbol, and the walk
+  ;; calls only a var or a fn at a vector's head: a value naming a system function is drawn as data and calls nothing
+  (let [[_ branch _] (paged-dbs)
+        k "a3"
+        v [:section [:p "kept"] ['seon.render-test/planted-fn {} "x"]]
+        db (d/db-with branch (seon.repl/record-tx {:seon.agent/key k} "h2" (seon.task/sender "a3")
+                                                  {:seon.eval/code "(my-render)" :seon.eval/schema :seon.render/hiccup-value
+                                                   :seon.eval/call (seon.task/call-ref k 1) :seon.eval/response {:handle 'result/h2 :value v}}))
+        _ (reset! called 0)
+        html (component-html db "evaluation-h2")]
+    (is (some? html) "the eval is drawn")
+    (is (str/includes? html "kept") "its plain elements are drawn")
+    (is (= 0 @called) "the function the value names is never called")
+    (is (not (str/includes? html "CALLED")) "and nothing it would answer is on the page")))
+
 (deftest an-agents-own-draw-replaces-roots-at-the-same-revision
   ;; docs/render.md#a-value-draws-itself: root draws a live agent's page first, from its branch, and root holds no render the agent defined; the agent's answer must reach the page though each process counts revisions of its own
   (let [page (fn [u] (filter #(= "x" (:id %)) (:seon.render/units (ui/page-chrome {:units [u] :view "a1" :tab :chat} :a1))))
