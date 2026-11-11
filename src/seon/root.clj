@@ -1406,7 +1406,8 @@
         ;; the inputs of what this boot read come first (bin/root start's, runs/root-inputs.edn): they are the files the
         ;; system judges, whatever tree id the build or the last landing recorded; a root started with none (a test's) keys
         ;; by its binary's record when that is held's tree
-        inputs (or current-inputs (when one? (:inputs built)))]
+        ;; none on a stale binary: such a root forks no agent (seon.problems-test/a-root-on-a-stale-binary-is-a-problem)
+        inputs (when-not stale (or current-inputs (when one? (:inputs built))))]
     (cond-> (-> held (dissoc :inputs :binary :binary-tree :stale-binary) (assoc :boot boot :program (if one? (:program built) main-digest)))
       (:program built) (assoc :binary (:program built))
       (get-in built [:inputs :tree]) (assoc :binary-tree (get-in built [:inputs :tree]))
