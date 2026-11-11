@@ -1424,7 +1424,10 @@
   {:malli/schema [:=> [:cat :map :string [:maybe :map] :string :map [:maybe :map] [:maybe :map]] :map]}
   [held boot built main-digest config-input stale current-inputs]
   (let [one? (and (get-in built [:inputs :tree]) (= (get-in built [:inputs :tree]) (:tree held)))
-        inputs (if one? (:inputs built) (when-not stale current-inputs))]
+        ;; the inputs of what this boot read come first (bin/root start's, runs/root-inputs.edn): they are the files the
+        ;; system judges, whatever tree id the build or the last landing recorded; a root started with none (a test's) keys
+        ;; by its binary's record when that is held's tree
+        inputs (or current-inputs (when one? (:inputs built)))]
     (cond-> (-> held (dissoc :inputs :binary :binary-tree :stale-binary) (assoc :boot boot :program (if one? (:program built) main-digest)))
       (:program built) (assoc :binary (:program built))
       (get-in built [:inputs :tree]) (assoc :binary-tree (get-in built [:inputs :tree]))
@@ -1555,10 +1558,11 @@
             ;; binary is current for it by reach, as the plan that judged it current recorded them beside it (target/seon.inputs,
             ;; keyed by their :tree). A file read: root runs no git, since clojure.java.shell's futures are threads root does not
             ;; declare (seon.root-test/root-threads-are-what-root-declares, batch 28)
-            main-inputs (let [tree (:tree (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root])))
-                              f (java.io.File. (str (cfg/checkout) "/target/seon.inputs"))
-                              ins (when (and tree (.isFile f)) (sedn/decode (slurp f)))]
-                          (when (and (= tree (:tree ins)) (not= tree (get-in (binary-program) [:inputs :tree]))) ins))]
+            ;; the inputs of the files this boot read, as bin/root start computed them just before it (runs/root-inputs.edn,
+            ;; in its runs dir, written fresh each start, none under a starter: root runs no git, since clojure.java.shell's futures are threads root does not declare,
+            ;; seon.root-test/root-threads-are-what-root-declares, batch 28); none under a starter (a test's root)
+            main-inputs (let [f (java.io.File. (str (cfg/value :seon.config.root/runs-dir) "/root-inputs.edn"))]
+                          (when (.isFile f) (sedn/decode (slurp f))))]
         (warm! conn)
         (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         (lib/static!)
@@ -1695,8 +1699,8 @@
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
                                                                          held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (binary-program) digest (fx/config-input cfg/config (cfg/checkout)) stale
-                                                                                                    ;; a binary current for main's tree by reach, built from another: main's tree's inputs, read at boot
-                                                                                                    (when (and (not stale) (= (:tree held) (:tree main-inputs))) main-inputs))})
+                                                                                                    ;; the inputs of what this boot read, whatever tree id a build recorded
+                                                                                                    (when-not stale main-inputs))})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
