@@ -54,21 +54,17 @@
 ;; The test service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2): an asker names the items its plan
 ;; has no verdict for; each item is queued once with every asker waiting on it, granted in batches to the agent holding
 ;; its branch one at a time while a worker is free (the machine's test children: the one bound), and each asker is answered at its first
-;; red or its last green. State: :items {[test digest] {:status :waiters :agent :ms :mode :skips}}, :askers {rid {:left
+;; red or its last green. State: :items {[test digest] {:status :waiters :agent :ms :mode :at}}, :askers {rid {:left
 ;; :prio :results}}, :batches {bid #{item}}, :slots n. No clock: an item passed over is aged in skips.
 
 (defn item-value
-  "What running queued item it next is worth: the askers waiting on it, plus the times it was passed over (:skips, an age
-  counted in grants, never a clock), over its measured ms (a cheap item many need first: weighted shortest job first, the
-  least mean time to an answer). See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat :map] :double]}
-  [{:keys [waiters skips ms]}]
-  (double (/ (+ (count waiters) (or skips 0)) (max 1 (or ms 1)))))
-
-(defn- turn?
-  "Does an asker of a :turn (an agent's turn: someone is waiting to act) wait on item it? Such items go ahead of a batch's."
-  {:malli/schema [:=> [:cat :map :map] :boolean]}
-  [st it] (boolean (some #(= :turn (get-in st [:askers % :prio])) (:waiters it))))
+  "What running queued item it next is worth, bid grants made so far: the askers waiting on it, plus the times it was
+  passed over (an age counted in grants since it was queued at grant :at, never a clock, and never written: a grant
+  that aged every item it passed over copied each, 3.6 KB an item queued), over its measured ms (a cheap item many need
+  first: weighted shortest job first, the least mean time to an answer). See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map nat-int?] :double]}
+  [{:keys [waiters at ms]} bid]
+  (/ (double (+ (count waiters) (- bid (or at bid)))) (double (max 1 (or ms 1)))))
 
 (defn- answer-asker
   "Asker rid answered with its verdict (:green true, or the reds and errors it met first), and gone from every item's
@@ -93,15 +89,23 @@
   {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
   [st]
   (loop [st st outs []]
-    (let [queued (filter #(= :queued (:status (val %))) (:items st))]
-      (if (or (empty? queued) (< (:slots st 0) 1))
+    ;; the most valuable queued item, by one reduce over the items (no seq of them: a lazy filter and apply max-key
+    ;; allocated 1.5 KB an item queued, each grant)
+    (let [bid0 (:bid st 0)
+          ;; the askers of a turn, once a grant: most grants have none, and then no item's waiters are read for them
+          turns (into #{} (keep (fn [[r a]] (when (= :turn (:prio a)) r))) (:askers st))
+          [k it] (when (pos? (:slots st 0))
+                   (reduce-kv (fn [best k it]
+                                (if (= :queued (:status it))
+                                  (let [v (+ (if (and (seq turns) (some turns (:waiters it))) 1e12 0) (item-value it bid0))]
+                                    (if (or (nil? best) (> v (nth best 2))) [k it v] best))
+                                  best))
+                              nil (:items st)))]
+      (if (nil? k)
         [st outs]
-        (let [[k it] (apply max-key (fn [[_ it]] (+ (if (turn? st it) 1e12 0) (item-value it))) queued)
-              batch #{k}
+        (let [batch #{k}
               bid (inc (:bid st 0))
-              st (reduce (fn [st k2] (if (batch k2) (assoc-in st [:items k2 :status] :running) (update-in st [:items k2 :skips] (fnil inc 0))))
-                         (-> st (assoc :bid bid) (update :slots dec) (assoc-in [:batches bid] batch))
-                         (map key queued))
+              st (-> st (assoc :bid bid) (update :slots dec) (assoc-in [:batches bid] batch) (assoc-in [:items k :status] :running))
               [st m] (step/ask st [:prove :answers] [:batch (str bid)] {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)})]
           (recur st (conj outs m)))))))
 
@@ -135,7 +139,7 @@
     (let [st (reduce (fn [st [k m]]
                        (if (get-in st [:items k])
                          (update-in st [:items k :waiters] conj rid)
-                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode]) :status :queued :waiters #{rid} :skips 0))))
+                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode]) :status :queued :waiters #{rid} :at (:bid st 0)))))
                      (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}}) items)]
       (grant st))))
 
@@ -324,9 +328,9 @@
         (nil? run) [(update st :stale (fnil inc 0)) []]
         (contract/error? r) (finish st key r)
         (= :spawn step) (plan! (update-in st [:runs key] assoc :runner (:id r) :agent (:id r)) key)
-        (= :plan step) (let [st (assoc-in st [:runs key :base] (dissoc r :items))
+        (= :plan step) (let [st (assoc-in st [:runs key :base] (dissoc r :items :ms))
                              prio (if (= :turn (:mode run)) :turn :batch)
-                             items (into {} (for [[t d] (:items r)] [[t d] {:agent (:agent run) :mode (:mode run)}]))
+                             items (into {} (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run)} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t])))]))
                              [st outs] (ask-items (assoc-in st [:runs key :stage] :items) key prio items)]
                          (settle st outs))
         :else [(update st :stale (fnil inc 0)) []]))))
