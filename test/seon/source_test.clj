@@ -594,15 +594,17 @@
 (deftest an-agent-runs-its-branchs-change-to-imported-source
   (let [main (main-with-file)
         branch (pt/record main 'app.pt-src "(defn twice [x] (* 2 x))")]
-    ;; the process holds the imported namespace, as a binary built from that source does:
-    ;; every var it defines bound
+    ;; the process holds the imported namespace, as a binary built from that source does: every var it defines bound, and
+    ;; its forms among the binary's (seon.program/binary-program, the build's record)
     (hold! 'app.pt-src pt-text)
-    (let [add0 @(resolve 'app.pt-src/add)]
-      (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
-          "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
-      (is (= [] (program/load-diff! main branch)))
-      (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
-      (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again"))))
+    (let [add0 @(resolve 'app.pt-src/add)
+          built (assoc (program/binary-program) :forms (into (set (:forms (program/binary-program))) (comp (filter #(= 'app.pt-src (:ns %))) (map :id)) (program/live-forms main)))]
+      (with-redefs [program/binary-program (fn [] built)]
+        (is (= {:loaded (count (program/live-forms (empty-db))) :errors []} (program/load-all! main))
+            "main's imported text whose namespace this process holds is the binary's: never evaluated (the example program is)")
+        (is (= [] (program/load-diff! main branch)))
+        (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
+        (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again")))))
 
 (deftest an-agent-runs-its-branchs-change-to-imported-source-imported-too
   ;; Context's first bin/prove --root (2026-11-11) judged main's code: a tree branch's catch-up imports the checkout's changed
