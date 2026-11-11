@@ -140,7 +140,7 @@
 
 (def empty-index
   "The index of a db with no tasks."
-  {:root nil :tasks {} :keys {} :needed-by {} :acc {} :depth {} :claims {}
+  {:root nil :tasks {} :keys {} :needed-by {} :by-branch {} :acc {} :depth {} :claims {}
    :agents {} :done {} :ready (sorted-set) :ready-key {}
    :live #{} :reap #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}})
 
@@ -153,20 +153,6 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.reconcile/agent]]}
   [idx id] (get-in idx [:agents (get-in idx [:tasks id :seon.task/agent])]))
 
-(declare idle)
-
-(defn- session-idle
-  "The idle process of task id's session when id has no agent of its own: an agent parked or at its cap in this boot on id's
-  branch, working another task (a refine continues the agent of the task it cites on that branch). A session is one branch and
-  one process holds it, so its next task is a wake on that process, never a second fork the branch would refuse. nil otherwise.
-  Cost: the tasks on the index, read once a start. See docs/tasks.md#a-refine-curates-its-own-task."
-  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.reconcile/agent]]}
-  [idx id]
-  (when-not (get-in idx [:tasks id :seon.task/agent])
-    (let [br #(or (get-in idx [:tasks % :seon.task/branch]) (task/default-branch %))
-          b (br id)]
-      (some (fn [tid] (when (and (not= tid id) (= b (br tid))) (idle idx tid))) (keys (:tasks idx))))))
-
 (defn- idle
   "Task id's agent when its work is parked on its live process: parked or at its cap in this boot, by an agent (the
   judge parks only a task whose process is kept, keeps?). A wake reuses it; a cancel, a hold or a new branch for its
@@ -176,6 +162,20 @@
   (let [a (task-agent idx id)]
     (when (and a (#{:parked :cap} (get-in idx [:tasks id :seon.task/outcome])) (= (:boot (:root idx)) (:seon.agent/boot a)))
       a)))
+
+(defn- holder-of
+  "What holds task id's branch at a start, as the one rule of a session (a session is one branch, one process holds it): {:wake
+  agent} when its process is idle (parked or at its cap in this boot), its own or, for a task with no agent of its own, its branch's
+  (a refine continues the agent of the task it cites), so the start is a wake on it, never a second fork the branch would refuse;
+  else nil, a fork. A holder still ending is not idle: its refusal is answered by stopping it (`:spawned`'s refused branch). The
+  branch's tasks are read from the index's :by-branch, so a start costs its branch's tasks. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe [:map [:wake :seon.reconcile/agent]]]]}
+  [idx id]
+  (when-let [a (or (idle idx id)
+                   (when-not (get-in idx [:tasks id :seon.task/agent])
+                     (let [b (or (get-in idx [:tasks id :seon.task/branch]) (task/default-branch id))]
+                       (some #(when (not= % id) (idle idx %)) (sort (get-in idx [:by-branch b]))))))]
+    {:wake a}))
 
 (defn- keeps?
   "Whether a task of kind, whose agent ended with outcome, keeps its agent's process at its end (:diffed):
@@ -239,15 +239,21 @@
       (assoc idx :acc (dissoc (:acc idx) id) :claims claims :depth (dissoc (:depth idx) id)))))
 
 (defn- put-task
-  "Task value t (nil: gone) under id, with the reverse needs index moved."
+  "Task value t (nil: gone) under id, with the reverse needs index and the branch index moved."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id [:maybe :seon.task/own]] :seon.reconcile/index]}
   [idx id t]
   (let [old (get-in idx [:tasks id :seon.task/needs] #{})
         new (:seon.task/needs t #{})
         nb (as-> (:needed-by idx) nb
              (reduce (fn [nb n] (let [s (disj (get nb n #{}) id)] (if (seq s) (assoc nb n s) (dissoc nb n)))) nb (remove new old))
-             (reduce (fn [nb n] (update nb n (fnil conj #{}) id)) nb (remove old new)))]
-    (assoc idx :needed-by nb :tasks (if t (assoc (:tasks idx) id t) (dissoc (:tasks idx) id)))))
+             (reduce (fn [nb n] (update nb n (fnil conj #{}) id)) nb (remove old new)))
+        ;; each branch's task ids, moved where a task's branch moves (a refined task run again on a new branch)
+        branch-of #(or (:seon.task/branch %) (task/default-branch id))
+        ob (when-let [t0 (get-in idx [:tasks id])] (branch-of t0))
+        bb (cond-> (:by-branch idx)
+             (and ob (not= ob (some-> t branch-of))) (as-> b (let [s (disj (get b ob #{}) id)] (if (seq s) (assoc b ob s) (dissoc b ob))))
+             t (update (branch-of t) (fnil conj #{}) id))]
+    (assoc idx :needed-by nb :by-branch bb :tasks (if t (assoc (:tasks idx) id t) (dissoc (:tasks idx) id)))))
 
 (defn- put-agent
   {:malli/schema [:=> [:cat :seon.reconcile/index :string [:maybe :seon.reconcile/agent]] :seon.reconcile/index]}
@@ -504,7 +510,7 @@
                                        (recur more (inc n) (inc m) (when ks (into taken ks)) (conj acc id))
                                        (recur more n m taken acc)))
                        :else (recur more (inc n) m taken (conj acc id))))
-        spawns (for [id starts :let [t (get-in idx [:tasks id]) p (or (idle idx id) (session-idle idx id)) prior (task-agent idx id)
+        spawns (for [id starts :let [t (get-in idx [:tasks id]) p (:wake (holder-of idx id)) prior (task-agent idx id)
                                      ;; work a root restart lost was ended by nobody: a model's goes on
                                      lost? (= :lost (:seon.task/outcome t))
                                      env (desired-env t (when lost? (:seon.agent/env prior)))]

@@ -1714,6 +1714,8 @@
         (is (= 1 (count (filter #(and (= :spawn (:op %)) (= "demo/a" (:task %))) (actions-for db3)))) "one fresh run")
         (is (= [(:seon.task/branch a)] (keep #(when (= "demo/a" (:task %)) (get-in % [:env :branch])) (actions-for db3))) "from its new branch")
         (is (nil? (task/session-key db3 "demo/a")) "by a new agent: the old one's conversation is on the old branch")
+        (is (contains? (get-in (r/index db3) [:by-branch (:seon.task/branch a)]) "demo/a") "the index holds it under its new branch")
+        (is (not (contains? (get-in (r/index db3) [:by-branch old]) "demo/a")) "and no longer under its old one")
         (is (= (akey "a") (task/session-key db0 "demo/a")) "while the first run's agent is its session's on its own branch")))
     (testing "a refine that changed nothing"
       (let [{db3 :db} (judge! db2 "a-refine" {:outcome :green})]
