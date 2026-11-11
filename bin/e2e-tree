@@ -26,11 +26,11 @@ SCH_TEST=seon.config-test/every-key-is-documented-by-its-schema
 edit() { perl -e 'my ($f, $a, $b) = @ARGV; local $/; open my $h, "<", $f or die; my $t = <$h>; close $h;
   my $n = () = $t =~ /\Q$a\E/g; $n == 1 or die "$f holds \"$a\" $n times, not once\n";
   $t =~ s/\Q$a\E/$b/; open $h, ">", $f or die; print $h $t; close $h' "$@" }
-cleanup() { git -C "$ROOT" checkout -q -- "$SRC" "$SCH"; "$ROOT/bin/root" stop > /dev/null 2>&1 }
+cleanup() { git -C "$ROOT" checkout -q -- "$SRC" "$SCH"; "$ROOT/bin/system" stop > /dev/null 2>&1 }
 trap 'cleanup' EXIT
 trap 'exit 143' TERM INT HUP
 rm -rf "$SEON_RUNS"; mkdir -p "$SEON_RUNS"
-"$ROOT/bin/root" start 2>&1 | tail -2
+"$ROOT/bin/system" start 2>&1 | tail -2
 PORT=$(<"$SEON_RUNS/root.port") || { print "E2E FAILED: the system did not start (its log: $SEON_RUNS/root.log)"; exit 1 }
 BAD=()
 # check STEP WANT TEST: the system's verdict for TEST and bin/test's, against WANT (green or red)

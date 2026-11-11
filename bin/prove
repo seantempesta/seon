@@ -67,7 +67,7 @@ merge_verdict() {
 if [[ ${1:-} == --root ]]; then
   [[ -x $ROOT/target/seon ]] || { echo "prove: no target/seon; run bin/build seon"; echo "PROVE FAILED"; exit 1 }
   PORT=$2; shift 2
-  # the binary's environment and its libraries (bin/env exports them), and its home, as bin/root runs it
+  # the binary's environment and its libraries (bin/env exports them), and its home, as bin/system runs it
   . "$ROOT/bin/env"
   cd "$ROOT/target" && SEON_CHECKOUT=$ROOT HOME=$ROOT/target/home exec ./seon prove "$PORT" "$ROOT" "$@"
 fi

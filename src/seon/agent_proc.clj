@@ -78,10 +78,10 @@
 
 (defn- stop!
   "Stop the agent: an eval in flight interrupted (SIGUSR1: it ends at its next safe point, a
-  blocking host call too, seon.root/interrupt!), then :stop, which the agent answers after the
+  blocking host call too, seon.system/interrupt!), then :stop, which the agent answers after the
   requests before it by exiting; one its interrupt cannot reach, with an eval in flight, killed;
   with no process, root's end hung up; a dead one, nothing. One that never exits is a stall,
-  which ends it while root stops (seon.root/back-op's :stalled). Answers st."
+  which ends it while root stops (seon.system/back-op's :stalled). Answers st."
   {:malli/schema [:=> [:cat :map] :map]}
   [st]
   (cond (or (:stop-sent st) (:dead? st)) st
@@ -119,7 +119,7 @@
                                           (= kind :eval) (assoc :running {:form (:forms msg)
                                                                           :since-ms (System/currentTimeMillis)})))]})]))
     :write [(cond-> (to-proc! st (:msg m)) (= :fx-reply (:op (:msg m))) (update :fx-out (fnil dec 1))) nil]
-    ;; root's stall check (seon.root's timer): a request in flight, no frame from the agent
+    ;; root's stall check (seon.system's timer): a request in flight, no frame from the agent
     ;; for longer than the stall bound and no effect of its outstanding is a stall, observed once
     ;; per quiet spell
     :stall? (let [quiet (- (:now-ms m) (:last-frame-ms st (:now-ms m)))]
@@ -180,7 +180,7 @@
                    (step/out! o :to-api {:op :problem :class :agent :agent id
                                          :error (contract/error :seon.agent/cite-missing #'seon.agent-proc/agent-frame
                                                                 (str "the store lacks section " a ", which this agent's config cites: it was made without that cite. "
-                                                                     "The store is older than its wiki; a reindexing start (bin/root start --reindex) erases the store")
+                                                                     "The store is older than its wiki; a reindexing start (bin/system start --reindex) erases the store")
                                                                 {:address a})}))
                  ;; its socket to root cannot raise SIGIO: it ends with root only when it next reads
                  (when-let [e (:unwatched m)] (step/out! o :to-api {:op :problem :class :agent :agent id :error e}))

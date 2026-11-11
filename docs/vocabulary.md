@@ -12,9 +12,9 @@ The words for processes, in core.async Flow's terms, and the namespace that owns
 |---|---|---|
 | **proc** | a Flow process: one step-fn Var with four arities (describe, init, transition, transform) | `seon.step` |
 | **step-fn** | the four-arity function a proc runs; the one process abstraction | `seon.step` |
-| **root** | the control process: one Flow graph of nine procs (api, writer, fork-server, flusher, reconciler, prove, vectors, render, web), one worker proc per effect kind (`:fx` in `resources/seon/system.edn`), and one proc per agent ([root](root.md#the-root-graph)) | `seon.root` |
-| **root graph** | that one Flow graph, changed in place by `flow/update!` | `seon.root/start!` |
-| **api** | root's request server proc: callers' reply promises, routing by request id | `seon.root/api-proc` |
+| **root** | the control process: one Flow graph of nine procs (api, writer, fork-server, flusher, reconciler, prove, vectors, render, web), one worker proc per effect kind (`:fx` in `resources/seon/system.edn`), and one proc per agent ([root](root.md#the-root-graph)) | `seon.system` |
+| **root graph** | that one Flow graph, declared in `resources/seon/system.edn` and built by `seon.graph` (Flow's word for it), changed in place by `flow/update!` | `seon.system/start!` |
+| **api** | root's request server proc: callers' reply promises, routing by request id | `seon.system/api-proc` |
 | **writer** | root's writes to main (group commit), `d/branch!`, and every merge into main; an agent commits its own branch | `seon.writer/writer-proc` |
 | **run-ahead write** | an agent's own write on its own branch: applied at once, committed when idle or at a turn's end and always before the answer that reports it (a reply says what it did is on the branch: `seon.repl-test/a-reply-comes-after-its-commit`), and synced by the next group commit | `seon.agent/transact!`, `seon.agent/commit!`, `datahike.writer/apply!` |
 | **ids** | the store's entity ids and transaction ids, each issued once across every branch and process, from one shared page (a file beside a durable store, an anonymous page for one in memory; [storage](storage.md#ids)) | `seon.db/ids!`, `datahike.ids`, `native/ids.c` |
@@ -29,7 +29,7 @@ The words for processes, in core.async Flow's terms, and the namespace that owns
 | **run-loop** | the step-fn contract run on one thread, lifecycle as messages | `seon.step/run-loop` |
 | **effect worker** | a proc performing one kind of effect (a file, a git commit, a build, a model call) off root's graph, its answer data | `seon.fx/procs`, `seon.fx/worker-proc` |
 | **server** (was door) | root's request server: the `:op`s a caller sends over the socket, and the `seon_*` MCP tools `bin/mcp` relays ([server](server.md#ops)) | `seon.server/ops` |
-| **holder** | a live agent holding a branch; a spawn on a held branch, or past the live-agent cap, is refused ([root](root.md#holders-and-refused-spawns)) | `seon.root/spawn!` |
+| **holder** | a live agent holding a branch; a spawn on a held branch, or past the live-agent cap, is refused ([root](root.md#holders-and-refused-spawns)) | `seon.system/spawn!` |
 | **dashboard** | the web page root serves, a render of main's facts pushed as they change ([dashboard](dashboard.md)) | `seon.web/web-proc`, `seon.render.proc/render-proc` |
 | **config key** (was dial) | a config key: one documented value in `resources/seon/config/default.edn` (unit, provenance, bound), validated by its `seon.config.*` schema, read once at boot and written as facts on main | `seon.config`, `seon.config/from-db` |
 
@@ -72,7 +72,7 @@ The words for data and branches, in Datahike's and git's terms, and the namespac
 | **entity schema** | a Malli map with `{:seon.db/attributes true}`; its members are Datahike attributes | `seon.schema.datahike/declarations` |
 | **recording** | an eval request's evaluations (on its agent entity, each eval's attributes: `:seon.eval/code`, `:seon.eval/response` and the rest) and its defs, written by the agent on its own branch | `seon.repl/record-tx` |
 | **observation** | data on the branch that observed it (evaluations, answered t), never merged: every `seon.*` attribute but the carried task content is a platform record | `seon.merge/carried-platform-attrs` |
-| **generation** | a build of Seon's own source: the running binary is one, and the next is the merges commit built by the `:build` effect, recorded on main (`:seon.root/generation`) and started on the same store by `bin/root next` ([source](source.md#the-next-generation)) | `seon.fx/build`, `my.root/generation`, `my.root/next-generation` |
+| **generation** | a build of Seon's own source: the running binary is one, and the next is the merges commit built by the `:build` effect, recorded on main (`:seon.system/generation`) and started on the same store by `bin/system next` ([source](source.md#the-next-generation)) | `seon.fx/build`, `my.root/generation`, `my.root/next-generation` |
 | **prove** | run what a change reaches and reuse every test and check step green at its reach digest: `bin/prove` in a checkout, ``(my.agent/prove)`` in an agent (the process tests it reaches run at the judge's merge gate, on a checkout, or when they are a proof; [merging](merging.md#a-merge-runs-what-the-change-reaches)) | `seon.proofs/plan`, `my.agent/prove` |
 
 ## Words we do not use
@@ -104,7 +104,7 @@ The words for tasks and their prerequisites, and the namespace that owns each.
 | **accumulated** | a task's plan and proofs with its prerequisites', derived along `:needs` | `seon.task/tasks` |
 | **outcome** (a run was an attempt) | how a task's work stands or ended, an attribute of the task root writes when it starts and judges it: `:running`, `:parked`, `:told`, `:cap`, `:done`, `:ready`, `:gate`, `:merged`, `:behind`, `:dead`, `:lost`, `:killed`, `:refused` (root refused the start: named by `seon.reconcile/root-causes` at quiescence and asked again only once main moves for another reason), `:closed`. There is no run: say task, agent, work, wake, end. An agent's turns, model calls and tokens are what its end measured: absent when unknown, never 0 ([reconcile](reconcile.md#a-task-holds-how-its-work-ended)) | `seon.task/outcome-tx` |
 | **test run** | one clojure.test run of some tests (a shard, an agent's test fork): its report data is what the proofs read, never the work of an agent | `seon.proofs/run-tests!` |
-| **root's run** | one process of root on a store; what `runs/` keeps (`:seon.config.root/runs-dir`), never the work of an agent | `seon.root/start!` |
+| **root's run** | one process of root on a store; what `runs/` keeps (`:seon.config.root/runs-dir`), never the work of an agent | `seon.system/start!` |
 | **template** | a task kind's defaults: work, design, implement, test, merge | `seon.template` |
 | **merge task** | an ordinary task (kind `:merge`) whose new agent merges main into the branch and goes green | `seon.template/with-merge` |
 | **request** | what someone asked, as one task one agent designs, builds and merges, written in one transaction | `my.root/request!`, `seon.template/request` |

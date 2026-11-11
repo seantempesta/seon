@@ -1,7 +1,7 @@
 (ns seon.check-test
   "bin/check's store (owner, 2026-10-21: one store, many branches, as in production): the run
   seeds one store (seon.check/seed); every step's root opens it on a main of its own, a
-  branch of the seed (seon.db/open!, as seon.root/start! does), names its agents' branches
+  branch of the seed (seon.db/open!, as seon.system/start! does), names its agents' branches
   under that main, and a recovery step reopens the same store on the same main."
   (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
@@ -10,7 +10,7 @@
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
 
 (deftest what-a-held-command-left-running-ends-with-it
-  ;; deepseek-run4, 2026-11-07: bin/root stop left about 26 of a gate's test processes running. CMD's group ends at CMD's end, so a
+  ;; deepseek-run4, 2026-11-07: bin/system stop left about 26 of a gate's test processes running. CMD's group ends at CMD's end, so a
   ;; --drain holder is answered then, not when they would have finished. A token names the process this test started
   (let [token (str "held-left-" (random-uuid))
         r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/held") "--drain" "/bin/bash" "-c"
@@ -161,7 +161,7 @@
 (deftest every-test-root-starts-through-start-root!
   ;; read from the program of test/ (the
   ;; compiler's references, not a text search over files), no test var but the helper's one
-  ;; launcher runs bin/root or `./seon root` through binary-sh, so every test root names its
+  ;; launcher runs bin/system or `./seon root` through binary-sh, so every test root names its
   ;; store and main and waits on its listening line
   ;; only the files that name the primitive are analyzed (a launcher's source holds its name, in a call or a
   ;; refer): the analysis of the whole of test/ was most of this test's time
@@ -173,9 +173,9 @@
                                              [?f :form/refs seon.test-store/binary-sh] [?f :form/src ?s]] db)
                              ;; binary-sh is the primitive the one launcher calls; this test names both in its query
                              :when (not (#{'seon.test-store/binary-sh 'seon.check-test/every-test-root-starts-through-start-root!} v))
-                             ;; the launch is a literal argument ("bin/root", or "./seon" "root"), never text that
-                             ;; names the script (a test that writes a config file mentioning bin/root)
-                             :when (some #(clojure.string/includes? src %) ["\"bin/root\"" "\"./seon\" \"root\""])]
+                             ;; the launch is a literal argument ("bin/system", or "./seon" "root"), never text that
+                             ;; names the script (a test that writes a config file mentioning bin/system)
+                             :when (some #(clojure.string/includes? src %) ["\"bin/system\"" "\"./seon\" \"root\""])]
                          v))]
     (is (seq files))
     (is (= #{'seon.test-store/root-sh} launchers))))
@@ -204,7 +204,7 @@
       (finally (seon.lib/remove-tree! dir)))))
 
 (deftest a-stop-ends-on-its-holders-end-and-a-gone-holder-answers-at-once
-  ;; the first bin/update hung for 10 minutes in `bin/root stop`: it read a fifo it held open
+  ;; the first bin/update hung for 10 minutes in `bin/system stop`: it read a fifo it held open
   ;; read-write itself, so EOF could never come, and a holder that never wrote left it waiting for
   ;; ever. bin/held --end signals the holder and waits on the fifo the holder keeps open for its
   ;; life: its status line, or its last writer closing (the holder's end). A holder that is gone
@@ -298,7 +298,7 @@
 
 ;; docs/health.md#checks-are-callers-of-seon: the base's program is built by the base's own code in a process of its own, never in the
 ;; image that holds the head's. Analysis evaluates each file's ns form in the live namespace, so a base whose ns form aliases a
-;; namespace this image has loaded under another target (across the rename of seon.root to seon.system, seon.server's `c` names
+;; namespace this image has loaded under another target (across the rename of seon.system to seon.graph, seon.server's `c` names
 ;; one in each tree) is a retargeted alias, which Jolt refuses. This image has loaded seon.check-test, `contract` naming
 ;; seon.contract; a clone of this checkout's HEAD gets a base commit where that alias names seon.error, and a head restoring it
 (deftest the-health-step-reads-a-base-whose-alias-the-head-retargets
@@ -609,7 +609,7 @@
     (is (seon.check/left? {:pid 9 :ppid 1 :stat "S"} true self) "a row still running: left")
     (is (not (seon.check/left? {:pid 9 :ppid 1 :stat "Z"} true self)) "a row that can run nothing more: not left")))
 
-;; docs/machine.md#builds-and-checks: a wait on main runs its predicate in main's writer at every commit (seon.root/await-db's
+;; docs/machine.md#builds-and-checks: a wait on main runs its predicate in main's writer at every commit (seon.system/await-db's
 ;; watch; datahike's writer resets the connection), so a predicate that reads main's whole problems report costs the report
 ;; once a commit and holds every commit behind it: batches 32 and 38 lost the `problems` step to it, root at 98.6% CPU for
 ;; 71 s while p1 and p2's proofs committed. The step's waits read the one class they wait on, and the reconciler's quiet;
@@ -626,7 +626,7 @@
                     seon.problems/health (counted seon.problems/health)]
         (testing "the stall's wait: n commits with no stall, then the eval's answer ends it"
           (let [answered (promise)
-                w (future (seon.root/await-db sys #(or (seq (#'seon.check/stalled-rows %)) (realized? answered))))]
+                w (future (seon.system/await-db sys #(or (seq (#'seon.check/stalled-rows %)) (realized? answered))))]
             (dotimes [_ n] (commit!))
             (deliver answered true)
             (commit!)

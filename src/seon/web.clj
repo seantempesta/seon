@@ -14,15 +14,15 @@
   composed page, morphed by id: inputs and DOM identity survive); a closed one is dropped.
 
   Callbacks are data (DECISIONS): one stateless /call route whose payload is the call
-  (fn, agent, args, a form's fields). Root's functions (seon.root/spawn!, submit!, run-tests!,
+  (fn, agent, args, a form's fields). Root's functions (seon.system/spawn!, submit!, run-tests!,
   merge!, merge-main!, clone!, interrupt!, kill!) become the requests their fns send
-  (seon.root/request), each recorded on main as root's evaluation, origin :ui; any other fn
+  (seon.system/request), each recorded on main as root's evaluation, origin :ui; any other fn
   runs in the agent as an eval of (seon.web/ui-call 'fn args), origin :ui, refused as data
   unless the var is marked ^:seon/callable."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [clojure.string :as str] [clojure.set] [clojure.edn :as edn]
             [clojure.core.async :as a] [clojure.core.async.flow :as flow] [ring-chez.adapter :as adapter]
-            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.root :as c] [seon.reader :as reader]))
+            [seon.lib :as lib] [seon.contract :as contract] [seon.config :as config] [seon.render :as render] [seon.render.ui :as ui] [seon.web.html :as h] [seon.step :as step] [seon.system :as c] [seon.reader :as reader]))
 
 ;;; --- the files it serves ------------------------------------------------------------
 
@@ -79,23 +79,23 @@
 
 (defn requests
   "A UI call as root's requests: [[req target-agent] ...]. Root's function is the request it
-  sends (seon.root/request; its refused answer when root refuses it); any other fn is an eval of it in
+  sends (seon.system/request; its refused answer when root refuses it); any other fn is an eval of it in
   the agent, through the allowlist (ui-call). index {agent {:pid :branch :status}}."
   {:malli/schema [:=> [:cat :seon.render/call :map] [:vector [:tuple :map [:maybe :keyword]]]]}
   [{f :var :keys [agent args forms]} index]
   (let [one (fn [op id args] [[(c/request op id args (get index id)) id]])]
     (case f
-      seon.root/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
+      seon.system/spawn! (vec (repeat (min 100 (max 1 (or (:n args) 1))) [(c/request 'spawn! nil (cond-> {} (not (str/blank? (:task args))) (assoc :task (:task args))) nil) nil]))
       ;; what a person types: its words a message the agent reads, its forms its REPL's, told apart by the one reader (seon.reader/words-and-forms); to every agent, forms alone
-      seon.root/submit! (cond (str/blank? forms) []
+      seon.system/submit! (cond (str/blank? forms) []
                               (= :all agent) (vec (for [[id a] (sort-by (comp str key) index) :when (not (c/gone-statuses (:status a)))] [(c/request 'submit! id {:forms forms :origin :ui} a) id]))
                               :else (let [{:keys [words] code :forms} (reader/words-and-forms forms)]
                                       (cond-> []
                                         (not (str/blank? words)) (into (one 'message! agent {:body words}))
                                         (not (str/blank? code)) (into (one 'submit! agent {:forms code :origin :ui})))))
-      ;; seon.root/interrupt! is no request: an effect on a process, performed by this proc
-      seon.root/interrupt! []
-      (if (= "seon.root" (namespace f))
+      ;; seon.system/interrupt! is no request: an effect on a process, performed by this proc
+      seon.system/interrupt! []
+      (if (= "seon.system" (namespace f))
         (one (symbol (name f)) agent args)
         (one 'submit! agent {:origin :ui :forms (sedn/encode (list 'seon.web/ui-call (list 'quote f) (merge args (dissoc (:fields args) :forms))))})))))
 
@@ -440,7 +440,7 @@
     :stats (do (deliver (:p m) (stats st)) st)
     :call (let [c (:call m)
                 reqs (requests c (:index st {}))]
-            (when (= 'seon.root/interrupt! (:var c))
+            (when (= 'seon.system/interrupt! (:var c))
               (some-> (get-in st [:index (:agent c) :pid]) (lib/kill! lib/SIGUSR1)))
             ;; answered to the render proc, which shows each in the stream by its tag; root's
             ;; function is root's evaluation, its form in the tag: the render proc records it on
@@ -448,7 +448,7 @@
             ;; on a page (opened!) is a reader's view of it, never root's work, so it is no eval of root's
             (doseq [[req target] reqs
                     :let [{f :var :keys [agent args forms]} c
-                          form (when (and (= "seon.root" (namespace f)) (not (#{'seon.root/opened! 'seon.root/again!} f)))
+                          form (when (and (= "seon.system" (namespace f)) (not (#{'seon.system/opened! 'seon.system/again!} f)))
                                  (sedn/encode (cond-> (list f) agent (concat [agent]) (seq args) (concat [args]) forms (concat [forms]))))]]
               (let [tag (cond-> [:web f target] form (conj form))]
                 (if (contract/error? req)

@@ -275,7 +275,7 @@
    (fn [cfg conn]
      (let [main (:branch cfg) b (keyword (str (name main) "-a3"))
            k "a3"]
-       (d/transact conn [{:seon.root/id :root :seon.root/boot "b1"}])
+       (d/transact conn [{:seon.system/id :root :seon.system/boot "b1"}])
        (d/transact conn [{:seon.task/id "demo/f" :seon.task/ns 'demo :seon.task/name "f" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :task-demo-f :seon.task/kind :work}])
        (d/transact conn (task/agent-tx :a3 {:status :idle :pid 77 :running {:form "(f 2)"}}))
        (d/branch! conn main b)
@@ -293,7 +293,7 @@
                     (:seon.agent/_root (d/pull @conn '[{:seon.agent/_root [:seon.agent/key :seon.agent/status
                                                                            {:seon.process/_agent [:seon.process/pid :seon.process/running]}
                                                                            {:seon.task/_agent [:seon.task/id]}]}]
-                                               [:seon.root/id :root])))))
+                                               [:seon.system/id :root])))))
            (testing "the message is to the agent by its key, on main"
              (is (= ["check g"] (d/q (quote [:find [?b ...] :in $ ?k :where [?a :seon.agent/key ?k] [?m :seon.message/to ?a] [?m :seon.message/body ?b]]) @conn k))))
            (testing "on the branch: the agent's model calls and the message it took, the agent's evaluations"
@@ -311,26 +311,26 @@
 (deftest an-agents-live-state-is-facts-on-its-entity
   ;; what root observes of an agent is recorded on the agent's entity: a member no longer true
   ;; is retracted, and an agent is named by its key, whatever boot
-  (let [db0 (d/db-with (ts/test-db) [{:seon.root/id :root :seon.root/boot "b1"}])
+  (let [db0 (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/boot "b1"}])
         db1 (d/db-with db0 (task/agent-tx :a3 {:status :running :pid 77 :running {:form "(f 2)" :since-ms 5} :mem-mb 120.5}))
         db2 (d/db-with db1 (task/agent-tx :a3 {:status :idle :pid 77 :running nil}))
         db3 (d/db-with db2 (task/agent-tx :a3 {:status :spawning}))
-        pull (fn [db] (d/pull db [:seon.agent/status {:seon.agent/root [:seon.root/id]}
+        pull (fn [db] (d/pull db [:seon.agent/status {:seon.agent/root [:seon.system/id]}
                                    {:seon.process/_agent [:seon.process/pid :seon.process/running]}]
                                    [:seon.agent/key "a3"]))
         proc (fn [m] {:seon.agent/status (:seon.agent/status m) :seon.agent/root (:seon.agent/root m) :p (first (:seon.process/_agent m))})]
-    (is (= {:seon.agent/status :running :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77 :seon.process/running "(f 2)"}} (proc (pull db1))))
-    (is (= {:seon.agent/status :idle :seon.agent/root {:seon.root/id :root} :p {:seon.process/pid 77}} (proc (pull db2)))
+    (is (= {:seon.agent/status :running :seon.agent/root {:seon.system/id :root} :p {:seon.process/pid 77 :seon.process/running "(f 2)"}} (proc (pull db1))))
+    (is (= {:seon.agent/status :idle :seon.agent/root {:seon.system/id :root} :p {:seon.process/pid 77}} (proc (pull db2)))
         "the form returned: no longer running")
     (is (= :spawning (:seon.agent/status (pull db3))) "a later fact of the same agent")))
 
 (deftest a-new-boot-keeps-the-earlier-boots-agents
   ;; docs/users.md#roots-session: a boot keeps each earlier boot's agent linked to root (root's page holds every boot's
   ;; sessions), marking one still shown live :dead; red before: a boot retracted every link but the user's and root's session's
-  (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1"}] (task/agent-tx :a1 {:status :idle})))
+  (let [db (d/db-with (ts/test-db) (into [{:seon.system/id :root :seon.system/boot "b1"}] (task/agent-tx :a1 {:status :idle})))
         db2 (d/db-with db (into (task/boot-tx "b2" "sean") (task/earlier-agents-tx db)))
         db3 (d/db-with db2 (task/agent-tx :a2 {:status :spawning}))
-        agents (fn [db] (set (map :seon.agent/key (:seon.agent/_root (d/pull db '[{:seon.agent/_root [:seon.agent/key]}] [:seon.root/id :root]))))) ]
+        agents (fn [db] (set (map :seon.agent/key (:seon.agent/_root (d/pull db '[{:seon.agent/_root [:seon.agent/key]}] [:seon.system/id :root]))))) ]
     (is (= #{"a1"} (agents db)))
     (is (= #{"sean" "a1"} (agents db2)) "the new boot keeps the earlier boot's agent, beside its user")
     (is (= :dead (:seon.agent/status (d/entity db2 [:seon.agent/key "a1"]))) "though its process ended with that boot")
@@ -359,15 +359,15 @@
       (is (= #{'demo-test/t-test} (set (:seon.task/proofs (task/task after "demo/t")))) "written, the task holds it"))))
 
 (deftest a-root-before-its-first-boot-is-no-entity-value
-  ;; a store an earlier build left (seon.root-test/a-root-resumes-a-store-an-earlier-build-wrote):
+  ;; a store an earlier build left (seon.system-test/a-root-resumes-a-store-an-earlier-build-wrote):
   ;; root's entity holds a quiescent fact and no boot, so (task/root db) is nil, and
   ;; entity-value answered [:root nil] against its own contract: the reconciler's step read it as
   ;; a :platform defect on every resume. Before its boot root is no value the index holds.
-  (let [db (d/db-with (ts/test-db) [{:seon.root/id :root :seon.root/quiescent {:t 536870914 :root-causes []}}])
-        e (:db/id (d/entity db [:seon.root/id :root]))]
+  (let [db (d/db-with (ts/test-db) [{:seon.system/id :root :seon.system/quiescent {:t 536870914 :root-causes []}}])
+        e (:db/id (d/entity db [:seon.system/id :root]))]
     (is (nil? (task/root db)))
     (is (nil? (task/entity-value db e)))
-    (let [booted (d/db-with db [{:seon.root/id :root :seon.root/boot "b1"}])]
+    (let [booted (d/db-with db [{:seon.system/id :root :seon.system/boot "b1"}])]
       (is (= :root (first (task/entity-value booted e))))
       (is (= "b1" (:boot (second (task/entity-value booted e))))))))
 
@@ -382,7 +382,7 @@
 
 (deftest a-started-agent-is-linked-to-who-started-it
   ;; docs/users.md#what-each-thing-is: a task names who started it; its agent, when it starts, is in that one's :seon.agent/agents, a user or an agent alike
-  (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1"} {:seon.agent/key "sean" :seon.user/name "sean"}]
+  (let [db (d/db-with (ts/test-db) (into [{:seon.system/id :root :seon.system/boot "b1"} {:seon.agent/key "sean" :seon.user/name "sean"}]
                                          (task/create-tx (ts/test-db) [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "A." :seon.task/kind :work}])))
         db (d/db-with db [{:seon.task/id "demo/a" :seon.task/started-by [:seon.agent/key "sean"]}])
         started (d/db-with db (task/start-tx db "demo/a" "b1" :a1 {:branch :task-demo-a :model nil :max-turns 40} 1000))

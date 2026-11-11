@@ -4,7 +4,7 @@
   each key by its own schema's render. Run: bin/test seon.ctx-test"
   (:refer-clojure :exclude [defn defn-])
   (:require [clojure.test :refer [deftest is testing]] [seon.contract :refer [defn defn-]] [seon.fixtures] [seon.cost :as cost]
-            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [my.render] [seon.repl] [seon.agent] [seon.web.html] [seon.root] [my.schema] [my.test] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [seon.config] [clojure.string :as str] [clojure.walk :as walk] [clojure.set] [malli.core])) 
+            [seon.test-store :as ts] [datahike.api :as d] [seon.ctx :as ctx] [seon.db :as pdb] [seon.task :as task] [seon.vector :as vector] [seon.render :as render] [seon.render.ui] [my.render] [seon.repl] [seon.agent] [seon.web.html] [seon.system] [my.schema] [my.test] [clojure.test.check :as tc] [clojure.test.check.generators :as gen] [clojure.test.check.properties :as prop] [seon.proofs :as proofs] [seon.config] [clojure.string :as str] [clojure.walk :as walk] [clojure.set] [malli.core])) 
 
 (def ^:private k "The test agent's key." "test-boot/a1")
 
@@ -298,7 +298,7 @@
               fault))))
 
 (deftest a-pattern-joins-refs-by-their-attribute
-  (let [ps (for [s (distinct (vals (:entity-schemas (pdb/index)))) :when (not= :seon.root/root-fact s)
+  (let [ps (for [s (distinct (vals (:entity-schemas (pdb/index)))) :when (not= :seon.system/root-fact s)
                  :let [p (:seon.ctx/pattern (seon.contract/properties s))] :when p] [s p])]
     (is (seq ps) "entity schemas with a pattern")
     (is (some #(= :seon.db/agent-fact (first %)) ps) "the agent's is one")

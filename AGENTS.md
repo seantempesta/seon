@@ -15,7 +15,7 @@ You are in `next/`, **Seon on Jolt, built to replace Seon** (`~/src/seon`, the J
 4. `docs/decisions.md`, for a ruling's own words;
 5. the header comment of a `bin/` script, which is that command's manual.
 
-**The running system:** `bin/root status` (the owner's main tree: server port 7888, dashboard http://127.0.0.1:7777/). The standing system and its store (`runs/store`) are for use (owner, 2026-11-11: "Just use it!"): agents work and merge there, and a session reaches it through the MCP tools (§6); erasing the store is the owner's act. The Web session owns servers and demos. Experiments use a worktree's own root and stores (`bin/worktree NAME`). Once a root is up its store is the source of truth: a boot resumes it and reads no file, and files reach it only by a landing, a re-index or `bin/root start --reindex` ([files and the db](docs/source.md#files-and-the-db-two-directions)).
+**The running system:** `bin/system status` (the owner's main tree: server port 7888, dashboard http://127.0.0.1:7777/). The standing system and its store (`runs/store`) are for use (owner, 2026-11-11: "Just use it!"): agents work and merge there, and a session reaches it through the MCP tools (§6); erasing the store is the owner's act. The Web session owns servers and demos. Experiments use a worktree's own root and stores (`bin/worktree NAME`). Once a root is up its store is the source of truth: a boot resumes it and reads no file, and files reach it only by a landing, a re-index or `bin/system start --reindex` ([files and the db](docs/source.md#files-and-the-db-two-directions)).
 
 ## 1. What Seon is for, and what moving forward means
 
@@ -55,8 +55,8 @@ Asking the owner, helpers by the shape of the work, briefs and reviews: [session
 
 What a session does from its first command to its last.
 
-- **On start:** read §0's list and the newest entries of `docs/decisions.md`; run `git log --oneline --first-parent -10`, `uptime` and `bin/root status`; tell the owner in a few lines what you will do.
-- **The system follows main through `bin/update`**, never `bin/root stop/start` ([merging](docs/merging.md#a-branch-lands-with-binland)).
+- **On start:** read §0's list and the newest entries of `docs/decisions.md`; run `git log --oneline --first-parent -10`, `uptime` and `bin/system status`; tell the owner in a few lines what you will do.
+- **The system follows main through `bin/update`**, never `bin/system stop/start` ([merging](docs/merging.md#a-branch-lands-with-binland)).
 - **A hang is evidence:** capture it before killing the process ([machine](docs/machine.md#reading-a-hang)).
 - **Step back** when about three rounds of tool calls have not answered a question, the work is a detail no step of THE PLAN names, or a fix keeps growing or needs edge cases in several places: write down what is known and tell the owner.
 - **Before a compaction, reflect and report up** (owner, 2026-11-11: "all agents before they compact should reflect on the work they did ... and report to their parent"; "The goal isn't radical change, but refinement over time. Think lots of base hits rather than swinging for homeruns"). A session about to compact writes, in a few lines: what it finished and its tips, what cost it time and why, and what change to a script, a check, a wiki section or this file would have saved that time. It sends that to its parent, the session that started it (the managing session for an area session; an area session for its helper). The parent puts each suggestion into the plan with an owner, or makes the change at once when it is small. The session then writes its own findings into its state note and its post-compaction prompt, so the next context starts from them. For a Seon agent the same act is an edit to its task: a compaction may then zero its evals, and its context is made again from the task and the rest of the data on its entity ([sessions](docs/sessions.md#the-way-improves)).
@@ -140,13 +140,13 @@ The laws every change is held to; a check or a test reads each of them, and its 
 
 ## 6. The running system, as a Seon agent sees it
 
-Each checkout runs its own standing system: `bin/root start | status | stop | next | kill`, detached, on the checkout's ports (`bin/ports`), its store under `runs/`.
+Each checkout runs its own standing system: `bin/system start | status | stop | next | kill`, detached, on the checkout's ports (`bin/ports`), its store under `runs/`.
 
 Reach it through the `seon` MCP server (`bin/mcp`, a stdio relay): every op of `seon.server/ops` is a tool ``seon_<op>`` ([server](docs/server.md#ops)). `seon_context` is what the model reads now; `seon_eval` evaluates in an agent's own REPL or in `root`; `seon_attach` and `seon_done` work a task as a Seon agent.
 
 **A helper in a worktree uses its own root, never the session's:** `bin/mcp call OP KEY=VALUE` is the same tool on this checkout's root ([working a task from a worktree](docs/server.md#working-a-task-from-a-worktree)). Without MCP, one request line: ``printf '{:op :agents}\n' | bin/ask PORT``.
 
-A system whose binary is another program than its main's forks no agent and says so (its problems tile, the last line of `bin/root start` and `bin/update`), naming the acts that bring them into agreement ([files and the db](docs/source.md#files-and-the-db-two-directions)).
+A system whose binary is another program than its main's forks no agent and says so (its problems tile, the last line of `bin/system start` and `bin/update`), naming the acts that bring them into agreement ([files and the db](docs/source.md#files-and-the-db-two-directions)).
 
 ## 7. The wiki is the one home for how the system works
 

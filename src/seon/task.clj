@@ -36,7 +36,7 @@
 
 (defn request-words
   "The name a request's text gives its task: its first sentence's words (`request-sentence`), lower case, joined by -; \"work\" for none.
-  seon.root/request-name numbers it when the name is taken. See docs/users.md#roots-session."
+  seon.system/request-name numbers it when the name is taken. See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :string] :string]}
   [text] (str/join "-" (or (seq (re-seq #"[a-z0-9]+" (str/lower-case (request-sentence text)))) ["work"])))
 
@@ -310,9 +310,9 @@
              (into (for [{p :e} (d/datoms db :aevt :seon.process/stall)] [:db.fn/retractAttribute p :seon.process/stall])))))
 
 (defn boot-of
-  "Root's boot on main db, as its entity records it (:seon.root/boot), or nil before root's boot fact."
+  "Root's boot on main db, as its entity records it (:seon.system/boot), or nil before root's boot fact."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :string]]}
-  [db] (:seon.root/boot (d/entity db [:seon.root/id :root])))
+  [db] (:seon.system/boot (d/entity db [:seon.system/id :root])))
 
 (defn this-boots
   "Agent entity e's id when it is an agent of root's boot on main db, else nil: an agent's id is its key
@@ -360,7 +360,7 @@
                     (recur (conj seen (:db/id e)) (into (rest todo) (filter #(= br (:seon.task/branch %)) (:seon.task/needs e)))))
                   seen))
         ;; only an agent on the task's branch: a session is one branch, so a run on a new branch (a refined task run again,
-        ;; seon.task/again-tx) is a new agent, while a go back moves the agent and the task to its branch together (seon.root)
+        ;; seon.task/again-tx) is a new agent, while a go back moves the agent and the task to its branch together (seon.system)
         on (or br (default-branch id))
         newest (->> chain
                     (keep #(:seon.task/agent (d/entity db %)))
@@ -376,13 +376,13 @@
   (:seon.process/*, one per spawn, pointing at the agent) its pid, memory, the form running, when it
   forked and ended and a stall it shows: each member of root's view m, written when set and retracted
   when m holds it as nil (the form running, once it returned). Root writes it when its
-  view of the agent changes (seon.root/record-agents)."
+  view of the agent changes (seon.system/record-agents)."
   {:malli/schema [:=> [:cat :seon.agent/id :map] [:vector :any]]}
   [id m]
   (let [k (name id)
         v (fn [member x] (case member :running (:form x) :forked-ms (double x) x))
         pk (some->> (:pid m) (str k "/"))]
-    (-> [(into {:seon.agent/key k :seon.agent/root [:seon.root/id :root]}
+    (-> [(into {:seon.agent/key k :seon.agent/root [:seon.system/id :root]}
                (for [[member a] agent-attrs :let [x (some->> (get m member) (v member))] :when (some? x)] [a x]))]
         (into (for [[member a] agent-attrs :when (and (contains? m member) (nil? (get m member)))]
                 [:db.fn/retractAttribute [:seon.agent/key k] a]))
@@ -402,12 +402,12 @@
   "Config c and its sources as facts on main (platform records: never carried by a merge in
   either direction): the config as an entity of its own, named by the content id of c (`:seon.config/id`, so the same config
   is one entity on every branch), holding every key (each collection-valued key, the manifest among them, as data);
-  main's root entity with the layer each key came from and its one ref to that entity (`:seon.root/config`); and an
+  main's root entity with the layer each key came from and its one ref to that entity (`:seon.system/config`); and an
   entity per provider and per model (:seon.ai.model/provider-id, :seon.ai.model/id). Root's boot writes it
   with the boot fact, and again when a config entry moves (seon.config/moved). See docs/config.md#facts-on-main."
   {:malli/schema [:=> [:cat :seon.config/config :seon.config/sources] [:vector :map]]}
   [c srcs]
-  (into [{:seon.root/id :root :seon.config/sources srcs :seon.root/config "config"}
+  (into [{:seon.system/id :root :seon.config/sources srcs :seon.system/config "config"}
          (assoc c :db/id "config" :seon.config/id (lib/id (lib/digest (sedn/encode (canonical c)))))]
         (concat (for [[id p] (:seon.config.ai/providers c)]
                   (-> (select-keys p [:seon.config.ai/base-url :seon.config.ai/api-key-variable :seon.ai.model/output-token-wire-key])
@@ -418,12 +418,12 @@
 (defn boot-tx
   "Root's boot: its id for this process lifetime (the config in force, max-running among its keys, is written with it,
   config-tx), and the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
-  makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.root/signed-in). The user
+  makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.system/signed-in). The user
   stores no pattern: its pull is its schema's (:seon.db/user-fact's :seon.ctx/pattern). See docs/users.md#what-each-thing-is."
   {:malli/schema [:=> [:cat :string :string] [:vector :any]]}
   [boot name]
   (into [{:db/id "user" :seon.agent/key name :seon.user/name name}
-         {:seon.root/id :root :seon.root/boot boot :seon.root/signed-in "user"}]
+         {:seon.system/id :root :seon.system/boot boot :seon.system/signed-in "user"}]
         (agent-tx (keyword name) {})))
 
 (defn call-ref
@@ -433,9 +433,9 @@
   [k n] {:seon.model-call/id (lib/call-id k n) :seon.model-call/agent {:seon.agent/key k} :seon.model-call/n n})
 
 (def system-sender
-  "The sender of a message no agent sent: the system entity (:seon.root/root-fact) by its identity. The reconciler's notices, a verdict,
+  "The sender of a message no agent sent: the system entity (:seon.system/root-fact) by its identity. The reconciler's notices, a verdict,
   a stage boundary, the turn's own note: a mechanical message comes from the system, not an agent (the owner's ruling, docs/users.md#messages). See docs/users.md#messages."
-  {:seon.root/id :root})
+  {:seon.system/id :root})
 
 (defn sender
   "Who sent a message or ran an eval, as the ref's value a write gives it: the entity by its identity alone, an agent (a user is an agent)
@@ -449,7 +449,7 @@
   "The name a sender is read by, from its entity as a pull or an entity holds it: an agent's key (a user's is its name), \"seon\" for the
   system. What the model reads of who sent a message or ran an eval, as it read them when they were strings. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :any] [:maybe :string]]}
-  [x] (cond (:seon.agent/key x) (:seon.agent/key x) (:seon.root/id x) "seon" :else nil))
+  [x] (cond (:seon.agent/key x) (:seon.agent/key x) (:seon.system/id x) "seon" :else nil))
 
 (defn message-tx
   "Message mid from from (the sender's lookup, `sender`) to the agents with keys tos, its body, sent at sent-ms: the one message entity (mid in seon.lib/id's form: a fresh unique id for a message sent, seon.lib/unique-id, or a content id where the same facts must make the one message, as the reconciler's ask of a task at a t), `to` naming each
@@ -754,18 +754,18 @@
 
 (defn root
   "Root's boot and the config keys it reads on db: {:boot :max-running :max-merging :gate-checkout :started-by}, the config's
-  from the entity :seon.root/config refs (a key it lacks is absent), nil before the first boot."
+  from the entity :seon.system/config refs (a key it lacks is absent), nil before the first boot."
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe [:map [:boot :string] [:max-running {:optional true} :int] [:max-merging {:optional true} :int]
                                                      [:gate-checkout {:optional true} :string] [:started-by {:optional true} :string]]]]}
   [db]
-  (when-let [r (d/pull db [:seon.root/boot :seon.root/started-by {:seon.root/config [:seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout]}]
-                       [:seon.root/id :root])]
-    (let [c (:seon.root/config r)]
-      (cond-> {:boot (:seon.root/boot r)}
+  (when-let [r (d/pull db [:seon.system/boot :seon.system/started-by {:seon.system/config [:seon.config.agent/max-running :seon.config.merge/max-running :seon.config.source/gate-checkout]}]
+                       [:seon.system/id :root])]
+    (let [c (:seon.system/config r)]
+      (cond-> {:boot (:seon.system/boot r)}
         (:seon.config.agent/max-running c) (assoc :max-running (:seon.config.agent/max-running c))
         (:seon.config.merge/max-running c) (assoc :max-merging (:seon.config.merge/max-running c))
         (:seon.config.source/gate-checkout c) (assoc :gate-checkout (:seon.config.source/gate-checkout c))
-        (:seon.root/started-by r) (assoc :started-by (:seon.root/started-by r))))))
+        (:seon.system/started-by r) (assoc :started-by (:seon.system/started-by r))))))
 
 (defn proof?
   "Does task t (as `task` answers it) owe test var v green: its accumulated proofs, each a test var, never excused as main's red. See docs/merging.md#a-merge-runs-what-the-change-reaches."
@@ -775,7 +775,7 @@
 (defn unjudged
   "Of tests, the process tests this branch's change reaches, those no gate will run for task t on db, and why:
   {:tests :why}, or nil when the gate runs them all. A design task may leave its proofs red; a root with no checkout has
-  nowhere to run them; a test can't be its own gate (:seon.root/started-by). See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  nowhere to run them; a test can't be its own gate (:seon.system/started-by). See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :seon.host/db [:maybe :map] [:sequential :qualified-symbol]] [:maybe [:map [:tests [:vector :qualified-symbol]] [:why :string]]]]}
   [db t tests]
   (let [{:keys [gate-checkout started-by]} (root db)
@@ -795,11 +795,11 @@
   {:malli/schema [:=> [:cat :seon.host/db :int]
                   [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :agent] :seon.reconcile/agent] [:tuple [:= :root] :map]]]]}
   [db e]
-  (let [k (d/pull db [:seon.task/id :seon.agent/boot :seon.root/id] e)]
+  (let [k (d/pull db [:seon.task/id :seon.agent/boot :seon.system/id] e)]
     (cond (:seon.task/id k) [:task (task-value (d/pull db task-pull e))]
           ;; an agent its start recorded: a branch's record of its own agent, with no boot, is none
           (:seon.agent/boot k) [:agent (indexed-agent db e)]
-          (:seon.root/id k) (some->> (root db) (vector :root)))))
+          (:seon.system/id k) (some->> (root db) (vector :root)))))
 
 (defn tasks-of-agent
   "The task entities db names agent entity e as their agent (:seon.task/agent): the tasks whose state an agent's boot moves.
@@ -812,7 +812,7 @@
   "Every task, agent and root entity of db (the reconciler's list, before it watches)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :int]]}
   [db]
-  (vec (concat (map :e (d/datoms db :aevt :seon.root/id)) (map :e (d/datoms db :aevt :seon.task/id))
+  (vec (concat (map :e (d/datoms db :aevt :seon.system/id)) (map :e (d/datoms db :aevt :seon.task/id))
                (map :e (d/datoms db :aevt :seon.agent/boot)))))
 
 ;; ---- task files: declarations as reviewable data -----------------------------------
@@ -984,7 +984,7 @@
   not) and whose plan the refine changed runs again, fresh from main: a new branch, released (a compare-and-swap from the execution
   it has) with root's last reasons retracted, so a fresh agent works the refined plan. A refine that changed no plan, a task that
   finished or still runs, a cancelled one, and a task that is no refine's start no run. The new branch is named by main's t, as a go
-  back names one (seon.root/back-point). See docs/tasks.md#a-refine-curates-its-own-task."
+  back names one (seon.system/back-point). See docs/tasks.md#a-refine-curates-its-own-task."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:sequential :any]] [:vector :any]]}
   [main id carried]
   (if-not (refine? main id)
