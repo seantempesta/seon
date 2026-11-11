@@ -432,8 +432,8 @@
                                             (when (keyword? x) (when (not= :root x) (some->> (location db x) (d/entity db) :seon.user/name))))) (keys (:views st)))))))
 
 (defn- user-sides
-  "The agents list every page shows: the signed-in user's (root's :seon.root/signed-in), as that user's kept walk drew it (seon.render.ui/user's
-  c-side): root, then what the user started, each with what it started under it. Nothing before main is read or with no one signed in.
+  "The agents list every page shows: the signed-in user's (root's :seon.root/signed-in), as that user's kept walk drew it (seon.render.ui/agents-list,
+  its page's c-side): root, then what the user started, each with what it started under it. Nothing before main is read or with no one signed in.
   See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat :map [:maybe :seon.host/db]] [:vector :map]]}
   [st db]
@@ -513,7 +513,10 @@
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/hiccup {:seon.render/index (seon.db/index)} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
         ;; the signed-in user's agents list, the one every page shows (`user-sides`), and the agent's head from its facts on main
-        sides (when-not (some #(= "#c-side" (:container %)) units) (user-sides st db))
+        ;; every agent's page draws its own agents list; the frame shows the signed-in user's on every page, one walk's (`user-sides`)
+        own-side (set (map :id (list-units (or units []) "#c-side")))
+        units (vec (remove (comp own-side :id) units))
+        sides (user-sides st db)
         head (cond-> (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
                (not (task/this-boots db e)) (dissoc :processes))
