@@ -19,7 +19,7 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 
 ## Now
 
-**The constraint (owner, 2026-11-10): the pull → ratom → render path does not change; the work is the data on entities and the renders.** Five sessions each own an area, and the managing session batches their ready branches: each session proves its own branch with `bin/prove` (everything its change reaches, the check steps included, every green at its digest reused: the whole suite at the cost of what changed), and the managing session merges the tips into one branch, proves it once and lands it ([merging](merging.md#a-branch-lands-with-binland)). Every session and agent checks its whole work before handing it over (owner, 2026-11-10: "make the entire suite run very fast so every agent can fully check their work", replacing "nobody proves a small change alone").
+**The constraint (owner, 2026-11-10): the pull → ratom → render path does not change; the work is the data on entities and the renders.** Six sessions each own an area (Context, Web, Optimization, Tests, Deep fixes, and since 2026-11-11 the Data model, which owns no code: it holds the data model as one design and reviews every attribute, ref, pattern and render input before it is built), and the managing session batches their ready branches: each session proves its own branch with `bin/prove` (everything its change reaches, the check steps included, every green at its digest reused: the whole suite at the cost of what changed), and the managing session merges the tips into one branch, proves it once and lands it ([merging](merging.md#a-branch-lands-with-binland)). Every session and agent checks its whole work before handing it over (owner, 2026-11-10: "make the entire suite run very fast so every agent can fully check their work", replacing "nobody proves a small change alone").
 
 **First: the time from a change to main** (owner, 2026-11-10: "I don't want to keep wasting time running tests all day. This is the main bottleneck for progress"). Measured that day: an agent's `done` on a one-function change 455 s against about 5 s designed; one process test 0.9-1.2 s against 60 ms, nearly all of it waiting on root; a whole prove 9-15 minutes against 60-90 s.
 
@@ -32,6 +32,41 @@ What Seon is for, where it stands, the one step being worked now, and the steps 
 What the model reads and a person sees is one design ([render](render.md#the-models-context-a-cached-prefix-then-the-turn)): an agent's history is its own pulled data as native messages; what is looked up or computed is computed once, in the hiccup render, shown styled and read by the model stripped; the conversation's display is never sent to the model twice.
 
 Open with the owner, each brought when it blocks work: whether typing on home is a message to root; whether an agent's render edit shows before its merge; task kinds; restating in ticks the cost proofs whose call bounds count contract checks, and tightening five that sit far above what is measured; whether new entity ids from a content hash are worth the index pages they scatter (303 datoms dirtied 350 leaves); the fork commits of 2026-11-10 that carry AI trailers against docs/forks.md; whether an agent's busy and idle belong on main.
+
+## The plan
+
+**The system goal (owner, 2026-11-11):** "get the system ready for a recursive self improvment of the entire codebase. Correctness, perf, complexity (how many functions are interwoven? we have the graph...), number of steps for agents to solve their tasks". And how: "The goal isn't radical change, but refinement over time. Think lots of base hits rather than swinging for homeruns." Each ruling behind a part is in [decisions](decisions.md#2026-11-11-rulings).
+
+**Held to:** the pull → ratom → render path does not change, and the data is designed for the pull; one agent mechanism for every role, root included; no hand-rolled system and no hard-coded word or role ("We need system based rules"); nothing is built from a design the Data model session has not reviewed.
+
+The parts, in the order they unblock each other. Parts 4 to 7 run beside the others.
+
+1. **The data model** (Data model session; designed 2026-11-11, not yet agreed whole by the owner).
+   - A session is an agent: no session entity. An agent names the agent whose conversation it continues, a fork's branch is the cut, and the words that open a conversation are data.
+   - An agent holds a set of tasks, and all must pass.
+   - The hierarchy is `:seon.agent/agents` at any depth; a question goes to whoever started the task; `:seon.agent/root` goes.
+   - What is observed is a fact on the thing observed; what is computed from facts (a score, a problem, a standing against a bound) is a render, never stored.
+   - Open with the owner: how the turn that read a message is known (he deferred it on 2026-11-11 to work through with the Data model session). Until then nothing is built on either answer.
+   - One store erase carries every change of a stored attribute. Debt: 34 sites in `src` branch on `:seon.task/kind` against the 2026-11-08 ruling; no template adds a value to it.
+2. **The self-improvement loop** (Context, once part 1 is agreed).
+   - A chain by `:seon.task/needs`, each step a fresh agent handed what the one before produced: work → refine → review.
+   - Refine: the worker's conversation continued, with the task to curate its own task and bring the docs it pulled up to date, so the work would have gone better.
+   - Review: a separate agent with its own proofs. It judges and files tasks, and never edits the work it reviews. Green merges a change to the system itself; the owner gets a digest and can revert.
+   - A refinement is tried by running the work again from the earlier point in the store's history, beside the original, which is never overwritten.
+   - Mid-task, a fork with a small task reflects on the work so far, more often early.
+   - A reviewed conversation is written to an import area in the repository, read as the task files are, so a store erase loses nothing. None exists yet: no task file names an example, and `runs/curated` holds one file in a shape the import refuses (read 2026-11-11).
+   - Done: the finishing agent's reply says what would have saved it turns (batch 34).
+3. **Root as the strategic layer** (Web, with Optimization).
+   - The user talks to root; root picks direction and presents; a focus agent for each area (context, web, tests, storage, runtime to begin) is an ordinary long-running agent; a sub-agent's contact is whoever started its task.
+   - A page is a stage: a layout is a render over the same pulled data, and the chat beside its tiles is the default one. First: root on a fresh system.
+   - Done: root's and the user's pages are the agent's render over their pulls (pages from data, steps 1 to 3).
+4. **Agents stop asking root for what they can read** (Optimization). An agent's process already reads every branch itself; the reads that still go through root come from tests, the MCP relay and root's own branch reads. Then the removal of `:seon.agent/root`, with part 1's erase.
+5. **The test system inside the runtime, as a Flow** (Tests, with Optimization): one service keyed by a test at a digest, as many workers as the cores hold, each pulling one item; every item run once for every asker; an asker answered at its first red or its last green; `bin/prove` a thin client that sends a branch. No shards, no locks, no timers ([merging](merging.md#the-test-service)).
+6. **Measures as a system** (Tests, with Context): a measurement is one call, and precision accumulates from normal use; a measure past its threshold is a problem, root files a task with the evidence, an agent works it, a review judges, the measure moves ([cost](cost.md#a-bound-in-the-contract)).
+7. **The store** (Deep fixes): done, LMDB's locks are the kernel's and a crash with sync off never corrupts (batch 35). Next, what a commit and a diff cost.
+8. **How we work** is [AGENTS.md](../AGENTS.md) §2 and §3 and [sessions](sessions.md).
+
+**Waiting on the owner:** how a message's turn is known (part 1); whether verdicts are store facts or stay the evictable cache he ruled on 2026-10-28 (part 5); how the three waived request cost proofs are bounded (part 6).
 
 ## After that
 
