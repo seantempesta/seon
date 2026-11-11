@@ -1176,12 +1176,13 @@
               (spit (str dir "/steps.edn") (sedn/encode {:tree tree :digests {name digest}}))
               (when (false? binary?) (spit (str dir "/steps-binary") ""))
               (when bound (spit (str dir "/step-bounds") (str name " " bound "\n"))))
-    :build nil)
+    (:build :seed) nil)
   nil)
 
 (defn run-item
   "The :item effect: one item of a session's prove that the test service (seon.prove) granted, run on the session's
-  checkout at tree, niced: :build is bin/build seon there; :process is one test as a shard of one (bin/test --shard,
+  checkout at tree, niced: :build is bin/build seon there; :seed seeds the checkout's check store fresh, once a tree (each binary
+  step takes a clone of it, as bin/check's steps do); :process is one test as a shard of one (bin/test --shard,
   whose runner stores its verdict); :step is one check step (bin/check --steps, then bin/test --store-steps, which
   stores it green at its digest). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the
   cache by its digest, so an item asked again is reused there; a step's overrun of its bound is :signal :overran, never
@@ -1193,7 +1194,7 @@
   (let [t0 (profile/now-ns)
         here (tree-id checkout)
         ;; a green already stored at its digest is the answer: no process started (2.3 s a test's runner, only to reuse it)
-        held (when-not (= :build kind) (stored-results {name digest}))]
+        held (when-not (#{:build :seed} kind) (stored-results {name digest}))]
     (cond
       (not= here tree)
       (error #'seon.fx/run-item :seon.fx/io-error (str "the checkout " checkout " is tree " here ", not the item's " tree ": its files moved since the plan")
@@ -1207,16 +1208,23 @@
             _ (.mkdirs (java.io.File. ^String dir))
             _ (item-files! dir req)
             ;; the children write the cache this reads: the one this process names (a test's run names its own)
-            sh (fn [& argv] (let [r (apply lib/sh (concat child-env-scrub [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))]
+            ;; and the steps' one seeded store is the checkout's own, never a store this process was handed
+            store (str checkout "/target/check-store")
+            sh (fn [& argv] (let [r (apply lib/sh (concat child-env-scrub [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))
+                                                                           (str "SEON_STORE=" store)]
                                                           ["nice" "-n" "15"] argv [:dir checkout]))]
                               (spit log (str "$ " (str/join " " argv) " (exit " (:exit r) ")\n" (:out r) (:err r)) :append true)
                               r))
             r (case kind
                 :build (sh "bin/build" "seon")
+                ;; the store every binary step of this tree branches from (each step takes a clone of it, bin/check's unit),
+                ;; seeded once, fresh, as bin/check's seed step seeds it: so steps at once never race to make it
+                :seed (do (lib/remove-tree! store)
+                          (sh "zsh" "-c" "ROOT=$PWD; . bin/env; cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-"))
                 :process (sh "bin/test" "--shard" (str dir "/shard-0.edn"))
                 :step (let [c (sh "bin/check" "--steps" dir)] (sh "bin/test" "--store-steps" dir) c))
             ms (profile/ms-since t0)
-            stored (when-not (= :build kind) (stored-results {name digest}))
+            stored (when-not (#{:build :seed} kind) (stored-results {name digest}))
             v (when (map? stored) (get stored digest))
             step-ms (when (= :step kind)
                       (let [f (java.io.File. (str dir "/step-ms"))]
@@ -1226,6 +1234,9 @@
           (= :build kind) (if (zero? (:exit r))
                             {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
                             (error #'seon.fx/run-item :seon.fx/io-error (str (build-failure (str (:out r) (:err r)) nil) "; its log: " log) {:path checkout}))
+          (= :seed kind) (if (and (zero? (:exit r)) (.isFile (java.io.File. (str store "/data.mdb"))))
+                           {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
+                           (error #'seon.fx/run-item :seon.fx/io-error (str "the seed of " store " failed (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log) {:path checkout}))
           ;; a step that ended red with no verdict stored, over its bound: the overrun is a signal, its verdict none
           (and (= :step kind) (not (proofs/green? v)) bound step-ms (> step-ms bound))
           {:value {:signal :overran :ms step-ms}}
