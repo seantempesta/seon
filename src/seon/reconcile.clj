@@ -145,6 +145,13 @@
    :live #{} :reap #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}})
 
 (def ^:private finished task/finished)
+(def ^:private behind-types
+  "The merge refusals that a merge of main into the branch first resolves, so the merge task runs again (its outcome
+  :behind, bounded by :seon.config.merge/max-behind): main changed what the branch's merge reads (:seon.merge/behind),
+  or main's write check refused a replayed transaction because main moved since the base (:seon.merge/replay-refused). A
+  conflict and an entity with no identity are held (no rerun resolves them). See docs/reconcile.md#a-task-holds-how-its-work-ended."
+  #{:seon.merge/behind :seon.merge/replay-refused})
+
 (def ^:private judged-outcomes "The outcomes that wait for root's next step on a merge (task/judged). See docs/reconcile.md#a-task-holds-how-its-work-ended."
   task/judged)
 
@@ -1054,7 +1061,7 @@
                                     id (if back? :write-back :done)
                                     (vec (mapcat (fn [{:keys [task]} r]
                                                    (let [n (behinds (:db st) task)
-                                                         problem (if (= :seon.merge/behind (:seon.error/type r))
+                                                         problem (if (behind-types (:seon.error/type r))
                                                                    (str "merge behind main " (inc n) " times (past :seon.config.merge/max-behind): " (:seon.error/message r))
                                                                    (str "merge refused: " (:seon.error/message r)))
                                                          t (get-in st [:idx :tasks task])]
@@ -1066,7 +1073,7 @@
                                                                                     (assoc :seon.task/error (contract/error :seon.git/commit-failed #'seon.reconcile/commit-tx "not on disk yet: (my.root/write-back! sys) syncs it" {:seon.git/files (vec (:files r))}))))
                                                        ;; behind again and again: a merge that main moves under every time it runs is root's
                                                        ;; (:seon.config.merge/max-behind), never a rerun without end
-                                                       (and (= :seon.merge/behind (:seon.error/type r)) (< n (cfg/value :seon.config.merge/max-behind)))
+                                                       (and (behind-types (:seon.error/type r)) (< n (cfg/value :seon.config.merge/max-behind)))
                                                        (task/move-tx task :ready :behind {:seon.task/reason (:seon.error/message r) :seon.task/error r})
                                                        :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
                                                                       problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))))
