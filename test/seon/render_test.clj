@@ -3234,7 +3234,12 @@
         (is (str/includes? t "<details") "its thinking folded")
         (is (str/includes? t "Read select first."))
         (is (not (str/includes? t "turn 1")) "its turn and tokens are for the debug tab"))
-      (is (nil? (ui/model-call-view {} (get-in c [:seon.model-call/_agent 3]))) "a turn that said nothing draws no bubble"))
+      (is (nil? (ui/model-call-view {} (get-in c [:seon.model-call/_agent 3]))) "a turn that said nothing draws no bubble")
+      (let [t (h (ui/model-call-view {} {:seon.model-call/n 3 :seon.model-call/origin :model :seon.model-call/reply ""
+                                         :seon.model-call/reasoning "First I read **it**.\n\nThen I check.\n\nThen I write."}))]
+        (is (str/includes? t "First I read <strong>it</strong>.") "a turn with no reply but reasoning: its first paragraph is the agent's words")
+        (is (str/includes? t "2 more paragraphs of thinking") "the rest folded under how much more there is")
+        (is (re-find #"(?s)<details>.*Then I check" t) "folded")))
     (testing "a message is a bubble with its sender"
       (let [m (h (ui/message {} (get-in c [:seon.message/_to 4])))]
         (is (str/includes? m "user"))

@@ -622,9 +622,19 @@
       (or (said? call) flying?)
       (cond->
         [:section {:class "flex w-full flex-col gap-1"}
-         (when-not (str/blank? reasoning)
-           [:details [:summary {:class "text-xs text-text-500"} "thinking"]
-            [:div {} [#'markdown reasoning {:inline? true}]]])
+         (if (and (str/blank? reply) (not (str/blank? reasoning)))
+           ;; a call that said nothing but thought (reasoning on: its words go to its reasoning): its first paragraph is the agent's
+           ;; words, marked as thinking, and the rest folded under a line that says how much more there is
+           (let [[first-p & more] (remove str/blank? (str/split reasoning #"\n\s*\n"))]
+             [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"}
+              [:span {:class "text-xs text-text-500"} "thinking"]
+              [#'markdown first-p {:inline? true}]
+              (when (seq more)
+                [:details [:summary {:class "text-xs text-text-500"} (str (count more) (if (= 1 (count more)) " more paragraph" " more paragraphs") " of thinking")]
+                 [:div {} [#'markdown (str/join "\n\n" more) {:inline? true}]]])])
+           (when-not (str/blank? reasoning)
+             [:details [:summary {:class "text-xs text-text-500"} "thinking"]
+              [:div {} [#'markdown reasoning {:inline? true}]]]))
          (when-not (str/blank? reply)
            [:div {:class "seon-message max-w-[85%] self-start rounded-2xl rounded-tl-sm bg-base-900 px-4 py-2.5 text-text-100"} [#'markdown reply {:inline? true}]])
          (when truncated [:span {:class "text-2xs text-error"} "cut at the token limit"])]
