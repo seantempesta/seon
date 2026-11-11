@@ -597,7 +597,6 @@
               (update :seon.task/kind #(or % :work)))
     (:seon.task/agent t) (update :seon.task/agent :seon.agent/key)
     ;; a pull answers a card-many attribute as a vector; these are sets on the task's schema
-    (:seon.task/deferred t) (update :seon.task/deferred set)
     (:seon.task/changed t) (update :seon.task/changed set)
     (:seon.task/unmerged t) (update :seon.task/unmerged set)))
 

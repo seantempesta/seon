@@ -513,7 +513,7 @@
   ;; the judged attributes are the end's, never an earlier end's: an error and deferred results a task held from its last judging
   ;; do not survive a later one that has none (seon.task/outcome-tx)
   (let [stale {:seon.task/error {:seon.error/type :seon.fx/io-error :seon.error/message "the last gate failed"}
-               :seon.task/deferred #{'seon.root-test/boots} :seon.task/deferred-results {'seon.root-test/boots :error}
+               :seon.task/deferred {'seon.root-test/boots "d-boots"} :seon.task/deferred-results {'seon.root-test/boots :error}
                :seon.task/waste {'seon.doc/resolve-ref {:forms 2 :turns 1}}}
         db (db-of [(decl "a")] :extra (work "a" :running :members stale))
         {after :db} (judge! db "a" {:outcome :green} :results {(t "a") :pass})
@@ -690,8 +690,8 @@
     (testing ":ready is the octopus merge"
       (is (= [octopus] (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready)))))))
     (testing ":gate is the gate, with the tests its judging deferred"
-      (is (= [{:op :gate :task "demo/a-merge" :tests [boots]}]
-             (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (ts/root-tx gate) (work "a-merge" :gate :members {:seon.task/deferred #{boots}})))))))
+      (is (= [{:op :gate :task "demo/a-merge" :tests [boots] :base {boots "d-boots"}}]
+             (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (ts/root-tx gate) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots"}})))))))
     (testing "a judged task no longer running is closed, never merged"
       (is (= [{:op :close :task "demo/a-merge"}]
              (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready) (task/execution-tx ["demo/a-merge"] :cancelled)))))))
@@ -964,8 +964,8 @@
                                                 "a-merge" {:end {:outcome :green} :results {(t "a") :pass} :deferred deferred}))
         ;; ... and gated: its outcome :gate, the gate's answer in
         gated (fn [root rs unread err]
-                (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred #{boots}}) (when root (ts/root-tx root))))]
-                  (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err))))
+                (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots"}}) (when root (ts/root-tx root))))]
+                  (d/db-with db (#'r/gated (st-of db) "demo/a-merge" rs unread err #{}))))
         octopus [{:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}]]
     (is (= {:outcome :gate :reasons [] :deferred [boots]} (judged gate [boots])) "unrun: gated first")
     (is (= {:outcome :gate :reasons [] :deferred []} (judged gate [])) "none deferred: its tree is still analyzed, with no checkout (docs/merging.md#a-merge-runs-what-the-change-reaches)")
@@ -995,8 +995,8 @@
     (testing "the test whose process started this root is left out: a test cannot be its own gate (:seon.root/started-by)"
       (is (= {:outcome :gate :reasons [] :deferred []} (judged self [boots])) "the only deferred test is the root's own: no test runs, and the tree is still analyzed")
       (is (= {:outcome :gate :reasons [] :deferred [other]} (judged self [boots other])) "another test beside it is still gated, itself not named")
-      (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (ts/root-tx self) (work "a-merge" :gate :members {:seon.task/deferred #{boots other}})))]
-        (is (= [{:op :gate :task "demo/a-merge" :tests [other]}] (actions-for db)))))
+      (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (ts/root-tx self) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots" other nil}})))]
+        (is (= [{:op :gate :task "demo/a-merge" :tests [other] :base {other nil}}] (actions-for db)))))
     (testing "no checkout to run them on (a root with no source): held, never merged with them unrun"
       (let [j (judged nil [boots])]
         (is (= :closed (:outcome j)))
@@ -1690,6 +1690,34 @@
       (is (some #(= {'seon.root-test/boots :error} (:seon.task/deferred-results %)) tx)
           (str "each deferred test :error: " (pr-str tx)))
       (is (some #(= refused (:seon.task/error %)) tx) "with why it was refused as the task's error"))))
+
+(deftest a-test-red-on-main-at-its-base-decides-nothing-at-the-gate
+  ;; docs/tasks.md#the-done-rule: a deferred test red on main at the task's base digest (the :tests effect's :main-red,
+  ;; seon.proofs/main-red) is main's: recorded with the rest, left out of the gate's decision, and told once as the system's
+  ;; problem (:seon.prove/full-run-red); a red of the task's own still holds it
+  (let [id "demo/a-merge"
+        boots 'seon.root-test/boots other 'seon.root-test/other
+        db (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :gate :members {:seon.task/deferred {boots "d-boots" other "d-other"}})))
+        st (assoc (st-of db) :flights {id {:act {:op :gate :task id :tests [boots other] :base {boots "d-boots" other "d-other"}}}})
+        answer (fn [rs mains] {:value {:results rs :main-red mains}})
+        after (fn [outs] (d/db-with db (some #(get-in % [:req :req :tx-data]) outs)))]
+    (testing "its only red is main's: the task is ready, its results kept whole, and the system told"
+      (let [[_ outs] (#'r/advance st id :gated (answer {boots :fail other :pass} #{boots}))
+            tk (task/task (after outs) id)]
+        (is (= :ready (:seon.task/outcome tk)))
+        (is (= {boots :fail other :pass} (:seon.task/deferred-results tk)))
+        (is (= [[:platform :seon.prove/full-run-red [boots]]]
+               (for [o outs :when (= :problem (:op o))] [(:class o) (get-in o [:error :seon.error/type]) (get-in o [:error :tests])])))))
+    (testing "a red of its own beside main's: held, naming only its own"
+      (let [[_ outs] (#'r/advance st id :gated (answer {boots :fail other :fail} #{boots}))
+            tk (task/task (after outs) id)]
+        (is (= [:closed :held] ((juxt :seon.task/outcome :seon.task/execution) tk)))
+        (is (str/includes? (get-in tk [:seon.task/failure :reason]) (str other " fail")))
+        (is (not (str/includes? (get-in tk [:seon.task/failure :reason]) (str boots))))))
+    (testing "no :main-red: every red is the task's, and no problem is told"
+      (let [[_ outs] (#'r/advance st id :gated (answer {boots :fail other :pass} nil))]
+        (is (= :closed (:seon.task/outcome (task/task (after outs) id))))
+        (is (not-any? #(= :problem (:op %)) outs))))))
 
 (clojure.test/deftest
  an-observed-retraction-leaves-no-residue

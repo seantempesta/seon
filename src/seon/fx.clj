@@ -1193,8 +1193,10 @@
 (defn run-tests
   "The :tests effect: tests on a checkout of the merge candidate (run-on-checkout), proved by the system through its :ctx's
   :prove-tree (seon.root/prove-tree!, which root binds), its answer {:value {:results :ms :log :digests :failures :kept}} or
-  its declared error; a named run reuses what this candidate already answered (run-held). See
-  docs/merging.md#a-merge-runs-what-the-change-reaches."
+  its declared error; a named run reuses what this candidate already answered (run-held). With :base (each test's digest as
+  main held it at the task's base, seon.task's :seon.task/deferred), the answer's :main-red names its reds that are main's,
+  not the change's (seon.proofs/main-red: the change does not reach the test, or main's verdict at that digest is red,
+  read by reds-at), which the gate never holds the task on. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [repo branch all?] :as req} :req {:keys [prove-tree]} :ctx}]
   (let [repo (or repo (when all? (str (cfg/checkout))))
@@ -1208,7 +1210,16 @@
       (contract/error? sha) sha
       (or all? (:built? req)) (run-on-checkout nil sha req)
       :else
-      (run-held (partial run-on-checkout prove-tree) sha req))))
+      (let [r (run-held (partial run-on-checkout prove-tree) sha req)
+            {:keys [results digests]} (:value r)
+            base (into {} (filter val) (:base req))
+            ;; main's verdict at each red test's base digest: the one reader (reds-at), an io-error excusing nothing
+            found (when (seq base)
+                    (let [at (reds-at (into {} (for [[t s] results :let [b (get base t)] :when (and b (not= :pass s))] [t b])))]
+                      (when-not (contract/error? at) (into {} (for [[t f] at] [(get base t) {:pass 0 :fail 1 :error 0 :failures [f]}])))))]
+        (if (and (seq base) (map? results))
+          (assoc-in r [:value :main-red] (proofs/main-red results (or digests {}) base (or found {})))
+          r)))))
 
 ;; ---- a session's items (Flow step 4) -------------------------------------------------
 

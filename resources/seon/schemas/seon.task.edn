@@ -57,7 +57,7 @@
                  [:seon.task/reason {:optional true} :string] [:seon.task/reasons {:optional true} :seon.task/reasons]
                  [:seon.task/commit {:optional true} :string] [:seon.task/merged-t {:optional true} :int]
                  [:seon.task/error {:optional true} :map]
-                 [:seon.task/deferred {:optional true} [:set :qualified-symbol]] [:seon.task/deferred-results {:optional true} :seon.proof/results]
+                 [:seon.task/deferred {:optional true} :seon.task/deferred] [:seon.task/deferred-results {:optional true} :seon.proof/results]
                  [:seon.task/gate-unread {:optional true} :seon.task/gate-unread] [:seon.task/changed {:optional true} :seon.task/changed]
                  [:seon.task/conflicts {:optional true} [:vector :seon.merge/conflict]] [:seon.task/unmerged {:optional true} [:set :string]]]
  ;; its plan and proofs accumulated along :needs (derived by the reader)
@@ -150,7 +150,9 @@
                          ;; a ready merge whose change reaches process tests: they run on a checkout of the
                          ;; merge candidate first (seon.fx/run-tests), and gate it like proofs
                          [:gate [:map {:closed true} [:op [:= :gate]] [:task :seon.task/id]
-                                 [:tests [:vector :qualified-symbol]]]]
+                                 [:tests [:vector :qualified-symbol]]
+                                 ;; each test's digest at the task's base (:seon.task/deferred): main's verdict of it is read by this
+                                 [:base [:map-of :qualified-symbol [:maybe :string]]]]]
                          ;; a judged task whose execution is no longer running: closed
                          [:close [:map {:closed true} [:op [:= :close]] [:task :seon.task/id]]]
                          [:spawn [:map {:closed true} [:op [:= :spawn]] [:task :seon.task/id] [:env :seon.task/env]]]
