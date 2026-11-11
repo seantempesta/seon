@@ -11,11 +11,13 @@
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/the-agent-page-shows-what-its-merge-will-carry}}
  {:seon.task/name "spend-has-a-render"
-  :seon.task/plan "What exists: the effect owner, seon.fx (its proc's state), keeps what each budget key has spent, :spent {budget-key amount}, and refuses a request past its budget (:seon.fx/budget-spent); its ping map carries :spent. Nothing shows it: the page sums the run's tokens only.
+  :seon.task/plan "What exists: every paid model request is a fact, a model-call entity holding its agent, its :seon.model-call/tokens and the cache-hit and cache-miss counts; a request's budget key is its agent's id unless one is named (seon.agent-proc). So what an agent has spent is the sum over its model calls, a value derived from its pull and computed where it is read, never stored (docs/decisions.md, 2026-11-11: no derived value is stored). The effect owner, seon.fx, keeps the same sum in its proc's state (:spent {budget-key amount}) to admit a request in one read and refuses one past its budget (:seon.fx/budget-spent); that counter is no entity's data, no pull holds it, and a render is never handed it. Nothing shows spend: the page sums the run's tokens only.
 
-The change: a spend value, {budget-key {:spent n :budget b}}, with its own schema whose :seon.render/hiccup render draws it on root's page and whose model render prints it for an agent, the way :seon.render/process is drawn by seon.render.ui/process-tile (a schema naming its renders: docs/render.md#one-rendering-system-drawn-from-the-data). Read at root's REPL as the same value.
+The change: spend is drawn from an entity's pull. (1) The agent's pattern asks :seon.model-call/tokens in its model-call join (resources/seon/schemas/seon.facts.edn, the :seon.db/agent-fact pattern: one clause). (2) A render of an agent's pulled calls draws what it has spent beside the budget its agent or task holds (the config key, by the one resolver), as a part of the agent's page, the same hiccup for the person and the model; it reads nothing but the pull (docs/render.md#a-render-does-no-work-of-its-own). (3) Root's page shows each agent's by the same render, nested.
 
-Proof: seon.render-test/spend-reads-by-its-render (a spend value of two keys renders each key's spent and budget in the hiccup and in what the model reads). A render is tested as seon.render-test/the-problem-report-reads-by-class tests the problem report's."
+Not covered, and said on the page as absent rather than shown as zero: a charged request that is not an agent's model call (an embedding call; the judge's, whose cost is inside :seon.judge/score) has no entity of its own, and a running agent's calls are on its branch until it merges, so main cannot sum them before the one merge's sync.
+
+Proof: seon.render-test/spend-reads-by-its-render (an agent's pull holding two model calls with tokens renders their sum and its budget in the hiccup and in what the model reads; an agent with no call renders no spend). A render is tested as seon.render-test/the-problem-report-reads-by-class tests the problem report's."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/spend-reads-by-its-render}}
  {:seon.task/name "namespace-agent-debug-and-data-pages"
