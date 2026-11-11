@@ -4172,3 +4172,42 @@
     (is (str/includes? tiles "href=\"/agent/a5\"") "the started agent's entry, a link to its page, among the tiles")
     (is (some #(= "agent-a5" (:id %)) units) "a unit of its own, keyed by the agent's key")
     (is (not (str/includes? (pr-str model) "a5")) "the model's page holds no entry")))
+
+(defn planted-note
+  "The html render of the planted world's note (:lab.planted/note-fact, seon.render-test/a-planted-entity-reaches-the-page-and-the-request),
+  an agent's own defn: its text behind a marker."
+  {:malli/schema [:=> [:cat :map :map] :any]}
+  [_ e] [:p (str "PLANTED-HTML " (:lab.planted.note/text e))])
+
+(defn planted-note-msgs
+  "The model render of the planted world's note: one user message, its text behind a marker of its own."
+  {:malli/schema [:=> [:cat :map :map] [:vector :seon.model/message]]}
+  [_ e] [{:role "user" :content (str "PLANTED-MODEL " (:lab.planted.note/text e))}])
+
+(deftest a-planted-entity-reaches-the-page-and-the-request
+  ;; docs/render.md#the-page: what an agent's pull joins reaches the page and the request by its schema's renders, no code naming it.
+  ;; Planted as data, as an agent would: a schema with both renders, joined by the agent's own pattern. Red until its task is done
+  (let [reg (fn [db k form] (let [r (my.schema/registration db k form false)]
+                              (is (not (seon.contract/error? r)) (str k " registers: " (pr-str r)))
+                              (d/db-with db (:tx r))))
+        db (-> (ts/test-db)
+               (reg :lab.planted.note/id [:and {:seon.db/identity true} :string])
+               (reg :lab.planted.note/text :string)
+               (reg :lab.planted.note/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref])
+               (reg :lab.planted/note-fact [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/planted-note
+                                                  :seon.render/openai-compat 'seon.render-test/planted-note-msgs}
+                                            [:lab.planted.note/id :lab.planted.note/id] [:lab.planted.note/text :lab.planted.note/text] [:lab.planted.note/agent :lab.planted.note/agent]]))
+        pattern (conj (r/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) {:lab.planted.note/_agent [:db/id :lab.planted.note/id :lab.planted.note/text]})
+        db (d/db-with db [{:seon.agent/key "lab/a1" :seon.ctx/pattern pattern}])
+        db (d/db-with db [{:lab.planted.note/id "n1" :lab.planted.note/text "the planted note" :lab.planted.note/agent [:seon.agent/key "lab/a1"]}])
+        db (d/db-with db (seon.doc/load-tx db "docs" {seon.doc/system-page "# A stub of the system prompt\n\nBe brief."}))
+        ix (seon.program/index-of-db db)
+        c (:tree (seon.ctx/build ix db (seon.db/eid db :seon.agent/key "lab/a1") :b))
+        w (draw c seon.ctx/changes db #'ui/agent {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})
+        [page msgs] (try [(apply str (map :html (seon.fixtures/page-units w))) (pr-str (:messages (seon.ctx.wire/request w)))]
+                         (finally (r/dispose-walk! w)))]
+    (is (= ["the planted note"] (map :lab.planted.note/text (vals (:lab.planted.note/_agent c))))
+        (str "the agent's pull holds the note it joins: " (pr-str (:lab.planted.note/_agent c))))
+    (is (= :lab.planted/note-fact (r/entity-schema ix (first (vals (:lab.planted.note/_agent c))) nil)) "the note is its planted schema's entity")
+    (is (str/includes? page "PLANTED-HTML the planted note") "the note's html render draws it on the agent's page")
+    (is (str/includes? msgs "PLANTED-MODEL the planted note") (str "the note's model render puts it in the request's messages: " msgs))))
