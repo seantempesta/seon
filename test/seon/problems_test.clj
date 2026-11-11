@@ -402,7 +402,7 @@
     (testing "the reconciler's commit: a failed :git, then the next merge's sha"
       (let [git (assoc (contract/error :seon.fx/io-error 'seon.fx/git-commit "git commit: index.lock exists" {}) :seon.fx/at-ms 2000)
             db0 (world)
-            db (d/db-with db0 (err/asked-tx db0 git :seon.task/commit [{:seon.task/id "t/r1" :seon.task/commit-error (:seon.error/message git)}]))
+            db (d/db-with db0 (err/asked-tx db0 git :seon.task/commit [{:seon.task/id "t/r1" :seon.task/error (contract/error :seon.git/commit-failed 'seon.reconcile/commit-tx (:seon.error/message git) {:seon.git/files ["src/a.clj"]})}]))
             fixed (d/db-with db (err/asked-tx db {:value {:sha "abc"}} :seon.task/commit [{:seon.task/id "t/r2" :seon.task/commit "abc"}]))]
         (is (= 1 (count (rows db))))
         (is (open? db) "a failed commit writes no sha: open")
