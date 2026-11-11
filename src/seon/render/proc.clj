@@ -286,10 +286,11 @@
   (cond (vector? view) (location db (second view))
         ;; root's page is root's agent's (its session, the agent keyed "root", made at boot), drawn as any agent's is
         (= :root view) (or (:db/id (d/entity db [:seon.agent/key "root"])) (:db/id (d/entity db [:seon.root/id :root])))
-        ;; home: whoever is signed in (docs/users.md#whats-on-screen)
+        ;; home: the signed-in person's focus (docs/users.md#whats-on-screen); with none, root's page, which presents the system
+        ;; to them (owner, 2026-11-11: "the goal is mostly root running the presentation"); no one signed in, the sign-in page
         (= :home view) (let [u (:seon.root/signed-in (d/entity db [:seon.root/id :root])) f (:seon.user/focus u)]
-                         ;; a focused task is its agent's page once its agent exists, else the person's own
-                         (:db/id (or (if (:seon.task/id f) (:seon.task/agent f) f) u)))
+                         ;; a focused task is its agent's page once its agent exists
+                         (when u (or (:db/id (if (:seon.task/id f) (:seon.task/agent f) f)) (location db :root))))
         (keyword? view) (session-of db (address-of view))
         :else view))
 

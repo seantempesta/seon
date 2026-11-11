@@ -2545,12 +2545,13 @@
       (is (= "(+ 1 2)" (str/trim (:forms (second mixed))))))))
 
 (deftest home-is-whoever-is-signed-in
-  ;; docs/users.md#whats-on-screen: / is the signed-in user's page, whoever root's :seon.root/signed-in names; with no one, a sign-in page; root's own page is /root
+  ;; docs/users.md#whats-on-screen: / is for whoever root's :seon.root/signed-in names (their focus, else root's page); with no one, a sign-in page
   (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
         db (d/db-with db0 [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean" :seon.agent/agents [(:db/id (d/entity db0 [:seon.agent/key "b2/a1"]))]}
                            {:seon.root/id :root :seon.root/signed-in "u"}])
         sean (:db/id (d/entity db [:seon.user/name "sean"]))]
-    (is (= sean (#'p/location db [:chat :home])) "home is the user signed in")
+    (is (some? sean) "a user signed in")
+    (is (= (#'p/location db :root) (#'p/location db [:chat :home])) "home, with no focus, is root's page")
     (is (= [:chat :home] (#'seon.web/view-of (ui/view-param [:chat :home]))) "and its feed names it again")
     (is (nil? (#'p/location db0 [:chat :home])) "no one signed in: no home")
     (is (str/includes? (apply str (map :html (:seon.render/units (#'p/page-value {:main-db db0} [:chat :home])))) "sign in") "but a page saying so")
@@ -3742,16 +3743,17 @@
         (is (= [[:db.fn/retractAttribute [:seon.user/name "sean"] :seon.user/focus]] (txs o3)) "opening home retracts it")))
     (is (some? st1))))
 
-(deftest home-is-the-users-focus-else-the-user
+(deftest home-is-the-users-focus-else-roots-page
+  ;; docs/users.md#whats-on-screen: home is the signed-in person's focus, else root's page, which presents the system to them
+  ;; (owner, 2026-11-11: "the goal is mostly root running the presentation"; before, the person's own page)
   (let [[main _ _] (paged-dbs)
-        user-of (fn [db] (:db/id (d/entity db [:seon.user/name "sean"])))
         a3 (fn [db] (:db/id (d/entity db [:seon.agent/key "a3"])))]
-    (is (= (user-of (signed-in-main main nil)) (#'p/location (signed-in-main main nil) :home)) "no focus: the user")
+    (is (= (#'p/location (signed-in-main main nil) :root) (#'p/location (signed-in-main main nil) :home)) "no focus: root's page")
     (is (= (a3 (signed-in-main main "a3")) (#'p/location (signed-in-main main "a3") :home)) "a focus: its agent")
-    ;; a focused task (an agent launched it; its agent is made a moment later): the user's page until its agent exists, then that agent's
+    ;; a focused task (an agent launched it; its agent is made a moment later): root's page until its agent exists, then that agent's
     (let [db (d/db-with (signed-in-main main nil) (seon.task/create-tx (signed-in-main main nil) [{:seon.task/ns 'request :seon.task/name "w" :seon.task/plan "Make w."}]))
           db (d/db-with db [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.task/id "request/w"]]])]
-      (is (= (user-of db) (#'p/location db :home)) "a focused task with no agent yet: the user's own page")
+      (is (= (#'p/location db :root) (#'p/location db :home)) "a focused task with no agent yet: root's page")
       (let [db (d/db-with db [[:db/add [:seon.task/id "request/w"] :seon.task/agent [:seon.agent/key "a3"]]])]
         (is (= (a3 db) (#'p/location db :home)) "its agent made: that agent's page")))))
 
