@@ -271,7 +271,8 @@
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, the
   --config layers its command line names, the #env values, the profile), as {key text}: each
-  value with the checkout's own path written as <checkout>, and the keys that say where a
+  value naming a file by its path written as <file>/ and its name (what the file is, never where the machine keeps it: the
+  embed model's name is its id), any other value with the checkout's own path written as <checkout>, and the keys that say where a
   process runs left out (their schemas' :seon.config/place: its ports, main, store, runs,
   source tree and results directory, and the profile it runs under and what that picks, its provider, script and whether it is its store's sole writer: each checkout's and each root's own by design, as a test reads nothing of its runner, while
   :tree covers the source's content). What a result depends on that git does not see: a
@@ -281,8 +282,15 @@
   {:malli/schema [:=> [:cat :map :string] [:map-of :qualified-keyword :string]]}
   [cfg checkout]
   ;; a plain map: the store encodes no sorted one, and the digest sorts its keys (seon.program/graph-index)
-  (into {} (for [[k v] cfg :when (not (get-in cfg/schema-forms [k 1 :seon.config/place]))]
-                       [k (str/replace (sedn/encode v) checkout "<checkout>")])))
+  ;; a value that names a file enters as what the file is, its name, never where this machine keeps it (what the file holds
+  ;; reaches a digest by the tree, the pins or its own name): the embed model, in the main tree's shared cache, read
+  ;; "<checkout>/..." from the main tree and its absolute path from any other checkout, and 103 of 181 process digests
+  ;; differed between the standing system and a worktree
+  (let [outside? #(and (string? %) (str/starts-with? % "/"))]
+    (into {} (for [[k v] cfg :when (not (get-in cfg/schema-forms [k 1 :seon.config/place]))]
+               [k (if (outside? v)
+                    (str "<file>/" (last (str/split v #"/")))
+                    (str/replace (sedn/encode v) checkout "<checkout>"))]))))
 
 (defn declared-refs
   "{seon.system/read-decl #{symbol}}: every qualified symbol the system declaration's text names
