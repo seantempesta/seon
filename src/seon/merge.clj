@@ -29,7 +29,7 @@
   ours and theirs as data, until the branch's content for its key changes or it is
   resolved (`resolve-tx`). Every function here is pure over db values."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.datom :as dd] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg]))
 
 (def carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
@@ -559,3 +559,59 @@
                 (for [[kind v] (:remove (program/diff-plan db-from db-to)) :when (= :var kind)
                       dt (d/datoms db-to :avet :form/refs v) :when (program/live? db-to (:e dt))]
                   {:ref v :form (:form/id (d/entity db-to (:e dt)))}))))
+
+;; ---- the one merge: each side's net change, and what of it conflicts (task seon.merge/a-merge-replays-the-sources-net-change) ----
+
+(defn- identity-of
+  "Entity e's identity on db: [attribute value] of its upsert key (seon.db/identity-attr?), or nil when it
+  bears none. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:tuple :keyword :any]]]}
+  [db e] (some (fn [dt] (when (pdb/identity-attr? (:a dt)) [(:a dt) (:v dt)])) (d/datoms db :eavt e)))
+
+(defn net-change
+  "What db holds that base does not, and what base held that db does not, by identity, never by entity id:
+  {:keys {key now} :unidentified #{schema-less entity's attributes}}. A key of an attribute of cardinality one is
+  [identity-attr identity-value attribute] and its now is the value on db, or ::gone; of cardinality many it is
+  [identity-attr identity-value attribute value] and its now is true (asserted) or ::gone (retracted). A ref's
+  value is its target's identity. A transaction's own facts are no change of the branch's data (a merge writes
+  new transactions). An entity that bears no identity is named in :unidentified by its attributes: it cannot
+  cross (docs/decisions.md, 'A merge replays the source's transactions')."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:keys :map] [:unidentified [:set [:set :keyword]]]]]}
+  [base db]
+  (let [schema (:schema db)
+        many? (fn [a] (= :db.cardinality/many (:db/cardinality (get schema a))))
+        ref? (fn [a] (= :db.type/ref (:db/valueType (get schema a))))
+        id (memoize (fn [e] (or (identity-of db e) (identity-of base e))))
+        tx? (memoize (fn [e] (boolean (or (seq (d/datoms db :eavt e :db/txInstant)) (seq (d/datoms base :eavt e :db/txInstant))))))
+        value (fn [dt] (if (ref? (:a dt)) (or (id (:v dt)) [:db/id (:v dt)]) (:v dt)))
+        [gone added] (d/datoms-diff base db :eavt [])
+        step (fn [now]
+               (fn [acc dt]
+                 (let [e (:e dt) a (:a dt)]
+                   (cond (tx? e) acc
+                         (nil? (id e)) (update acc :unidentified conj (into #{} (map :a) (concat (d/datoms db :eavt e) (d/datoms base :eavt e))))
+                         (many? a) (assoc-in acc [:keys (conj (id e) a (value dt))] (if (= ::gone now) ::gone true))
+                         :else (assoc-in acc [:keys (conj (id e) a)] (if (= ::gone now) ::gone (value dt)))))))]
+    ;; retractions first, so a value replaced (a retraction and an assertion of one key) ends as its new value
+    (reduce (step ::now) (reduce (step ::gone) {:keys {} :unidentified #{}} gone) added)))
+
+(defn conflicts
+  "The conflicts of two sides' net changes since their base (net-change of each): every key both changed to
+  different ends, and every key one side changed on an entity whose identity the other side retracted (a write
+  to an entity the other side deleted, a ref to one). Each is {:key k :ours v :theirs v}, a missing end ::gone
+  and an untouched one ::same; [] when the two merge. Computed, never stored."
+  {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
+  [ours theirs]
+  (let [ko (:keys ours) kt (:keys theirs)
+        ;; the identities each side retracted: its own identity key ended ::gone
+        gone-ids (fn [ks] (into #{} (for [[k now] ks :when (and (= ::gone now) (= 3 (count k)) (= (first k) (nth k 2)))] [(first k) (second k)])))
+        go (gone-ids ko) gt (gone-ids kt)
+        entity (fn [k] [(first k) (second k)])
+        ;; a ref's value is its target's identity pair
+        target (fn [k now] (let [v (if (= 4 (count k)) (nth k 3) now)] (when (and (vector? v) (= 2 (count v)) (keyword? (first v))) v)))
+        both (for [[k o] ko :let [t (get kt k ::same)] :when (and (not= ::same t) (not (dd/value= o t)))] {:key k :ours o :theirs t})
+        onto-gone (fn [ks gone side other]
+                    (for [[k now] ks :when (and (not= ::gone now) (not (contains? (if (= side :ours) kt ko) k))
+                                                (or (gone (entity k)) (some-> (target k now) gone)))]
+                      {:key k side now other ::gone}))]
+    (vec (concat both (onto-gone ko gt :ours :theirs) (onto-gone kt go :theirs :ours)))))
