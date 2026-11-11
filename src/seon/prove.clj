@@ -1,5 +1,5 @@
 (ns seon.prove
-  "The test service (docs/proofs.md#the-test-service): one `:prove` proc admits every request to
+  "The test service (docs/merging.md#the-test-service): one `:prove` proc admits every request to
   run tests, whoever asks (a Claude session through the `prove` server op / seon_prove, an agent's
   turn), so a change is proved once.
 
@@ -17,7 +17,8 @@
   prove agent forked from the fork server's main (its program, the tests among them:
   :seon.config.source/dirs) and killed after. The agent that ran them caches each verdict by its
   digest (seon.fx/write-verdicts!) before it answers, so every run after finds them
-  (seon.fx/stored-results) and runs none of them again; nothing is written to the store.
+  (seon.fx/stored-results) and runs none of them again; the asker's agent writes the run's facts on its own branch once
+  it is answered (seon.agent/record-answer!), and nothing else is written to the store.
   `:main` is the writer's commit notice (a sliding buffer of one: a notice is replaced by the next,
   a reader catches up from main's head): it keeps the latest main t for a request that names
   none, and with :seon.config.proofs/prove-main-on-commit a commit that moves main's program
@@ -44,8 +45,8 @@
   [outs rids r] (into outs (for [rid rids] {:op :prove-answer :rid rid :r r})))
 
 (defn- slot
-  "The identity of what a request asks for apart from its digest: the branch, the namespaces named and the mode.
-  A newer request of one slot replaces an older pending one; requests of different slots never do."
+  "The identity of what a request asks for apart from its digest: the branch, the namespaces named and the mode, under
+  which a run answered green is remembered (:done), so asking again at the same key is answered from it."
   {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge :main :full]]]}
   [{:keys [branch names mode]}] [branch names mode])
 

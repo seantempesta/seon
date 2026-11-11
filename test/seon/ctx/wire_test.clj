@@ -576,7 +576,7 @@
                                               [{:seon.eval/id "e1" :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" 1)
                                                 :seon.eval/code "(f 3)" :seon.eval/response {:value 9} :seon.eval/call-id "c1" :seon.eval/intent "f triples."}]))
         ;; the call as ctx holds it: its pull, with the evals that name it
-        call (assoc (d/pull db '[*] [:seon.model-call/id (seon.lib/call-id "a1" 1)]) :seon.eval/_call {(pdb/eid db :seon.eval/id "e1") {}})
+        call (assoc (d/pull db '[*] [:seon.model-call/id (seon.lib/call-id "a1" 1)]) :seon.eval/_call {(pdb/eid db :seon.eval/id "e1") (d/pull db [:db/id :seon.eval/call-id :seon.eval/agent] [:seon.eval/id "e1"])})
         reply (seon.fixtures/turn-messages db call)
         evals (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "e1"]))
         ms (into reply evals)]
@@ -1529,6 +1529,35 @@
         (is (= h2 (wire/page-parts-at @conn a p2)) "what a cold draw at that point answers")
         (is (not (identical? w1 (kept))) "a point with no kept walk to advance is drawn")
         (is (not= h1 h2))))))
+
+(deftest a-flush-between-turns-leaves-the-next-turns-pair-to-advance
+  ;; docs/render.md#a-page-is-a-kept-walk: a flush between turns (a :context read, a person's page, an eval's own) draws the pending
+  ;; turn's page at the db's own point, past the last basis; the next turn's pair starts at that basis, behind the kept walk, and drew
+  ;; the page cold at every such turn (2026-11-11: ~7.1M ticks, the :context read's 80 ms). The page at the chain's first point is kept
+  ;; with the walk, so that pair advances the same walk, and answers what a cold draw does
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask! ev! plan!] (parts-session conn)
+            _ (ask! 0)
+            a (pdb/eid @conn :seon.agent/key "a1")
+            point (fn [] (let [db @conn] {:commit (d/commit-id db) :t (:max-tx db)}))
+            kept #(:w @@#'seon.ctx.wire/kept-walk)
+            pb (point)
+            _ (wire/page-parts-through @conn a [nil pb])
+            _ (ev! "e1")
+            here (point)
+            ;; the flush between turns: the pending turn's pair, to the db's own point
+            _ (wire/page-parts-through @conn a [pb here])
+            w (kept)
+            _ (ev! "e2")
+            _ (plan! "Make f, then g.")
+            pn (point)
+            [h0 h1] (wire/page-parts-through @conn a [pb pn])]
+        (is (some? w))
+        (is (identical? w (kept)) "the next turn's pair advanced the walk the flush left, not a page drawn again")
+        (is (str/includes? (pr-str h1) "Make f, then g.") "it shows what moved")
+        (reset! @#'seon.ctx.wire/kept-walk nil)
+        (is (= [h0 h1] (wire/page-parts-through @conn a [pb pn])) "what a cold draw of the pair answers")))))
 
 (deftest a-write-reruns-the-placing-render-and-no-earlier-page-pair
   ;; docs/render.md#a-page-is-a-kept-walk: a turn's page message reads only db values at fixed past points, so its reads are not

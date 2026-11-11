@@ -364,6 +364,37 @@
 
 (declare entity-schema)
 
+(defn misfits
+  "What hiccup output out holds that the intermediate refuses, by kind (:seon.render/misfits): each element's attributes against
+  :seon.render/hiccup-attrs, walked through its own elements and never into a child's (a marker is the child's own output). {} when it
+  fits. See docs/render.md#the-hiccup-is-checked."
+  {:malli/schema [:=> [:cat :any] :seon.render/misfits]}
+  [out]
+  (let [n (volatile! {})
+        kind (fn [k v] (cond (= :class k) :class (= :style k) :style
+                             (and (keyword? k) (= "wire" (namespace k))) :wire
+                             (and (keyword? k) (namespace k)) :qualified
+                             (not (or (string? v) (number? v) (boolean? v) (nil? v) (keyword? v) (symbol? v) (uuid? v))) :value))]
+    ((fn walk [x]
+       (cond (and (vector? x) (= ::child (first x))) nil
+             (and (vector? x) (keyword? (first x)))
+             (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))]
+               (when (and attrs (not (contract/fits? :seon.render/hiccup-attrs attrs)))
+                 (doseq [[k v] attrs :let [c (kind k v)] :when c] (vswap! n update c (fnil inc 0))))
+               (doseq [y (if attrs (drop 2 x) (rest x))] (walk y)))
+             (sequential? x) (doseq [y x] (walk y))
+             :else nil))
+     out)
+    @n))
+
+(defn misfits-by-render
+  "Walk w's misfits (`misfits`) by the render that drew them, each component's own output as it last ran, summed: {render-sym
+  misfits}, the renders that fit left out. What a render still writes that the intermediate refuses, read at the REPL and pinned by
+  seon.render-test/every-render-fits-the-hiccup. See docs/render.md#the-hiccup-is-checked."
+  {:malli/schema [:=> [:cat :map] [:map-of :symbol :seon.render/misfits]]}
+  [w]
+  (reduce (fn [m [_ c]] (let [f (misfits (:out c))] (if (seq f) (update m (symbol (:f c)) #(merge-with + % f)) m))) {} @(:cache w)))
+
 (defn- places
   "The components output out places, in order, [[sel k]]: each child's marker with the selector of the nearest element above it in out
   that has an id (nil when none does), never walking into a child's own output: what `placed` reads of each component, kept on its cache
@@ -1174,7 +1205,7 @@
   :joins [{:attr :key :rev? :limit :reverse? :by :sub}]}, each join's attribute read forward, its
   key its :as else the attribute, its limit a count or a config key's value; :attrs also the name a
   reverse :by join reads. Throws :seon.ctx/invalid-pattern naming the clause it cannot read: no
-  vector, a clause that is no '*, attribute or join, a reverse attribute outside a join, an option
+  vector, a clause that is no '*, attribute, [attribute :tx true] (its value and the transaction it was written in, :txs) or {[attribute :tx true] [...]} (and those attributes of that transaction) or join, a reverse attribute outside a join, an option
   neither pull's nor :by, a :limit with no :reverse (a window is newest first), a join with no
   pattern, an entity schema with none or whose pattern reaches itself. An entity schema's name is read in the entity index ix (seon.db/index-of)."
   {:malli/schema [:function [:=> [:cat :map :any] :seon.ctx/spec] [:=> [:cat :map :any [:set :qualified-keyword]] :seon.ctx/spec]]}
@@ -1186,8 +1217,19 @@
      (doseq [x p] (cond (= '* x) nil
                         (keyword? x) (when (reverse? x) (bad "a reverse attribute is read by a join: {:ns/_name pattern}" x))
                         (map? x) nil
+                        ;; an attribute with options, as pull's [attr :as x]: :tx true, the transaction each of its datoms was written in, beside its value
+                        (vector? x) (let [[a & opts] x]
+                                      (when-not (and (qualified-keyword? a) (not (reverse? a))) (bad "an attribute clause names an attribute: [:ns/name :tx true]" x))
+                                      (when-not (= [:tx true] (vec opts)) (bad "an attribute's one option is :tx true" x)))
                         :else (bad "a clause is '*, an attribute or a join" x)))
-     (let [joins (vec (for [clause p :when (map? clause) [k sub] clause]
+     (let [;; {[attr :tx true] sub}: the attributes sub names of the transaction that wrote attr's datom, never the ref followed
+           t-clause? (fn [k] (and (vector? k) (= [:tx true] (vec (rest k)))))
+           tx-subs (into {} (for [clause p :when (map? clause) [k sub] clause :when (t-clause? k)]
+                              (let [a (first k)]
+                                (when-not (and (qualified-keyword? a) (not (reverse? a))) (bad "a transaction's clause names an attribute: {[:ns/name :tx true] [...]}" k))
+                                (when-not (vector? sub) (bad "a transaction's pattern is a vector of its attributes" k))
+                                [a (pattern ix sub seen)])))
+           joins (vec (for [clause p :when (map? clause) [k sub] clause :when (not (t-clause? k))]
                         (let [[a & opts] (if (vector? k) k [k])
                               o (if (even? (count opts)) (apply hash-map opts) (bad "a join's options are pairs" k))
                               _ (when-let [x (first (remove join-options (keys o)))] (bad (str "no join option " x) k))
@@ -1204,5 +1246,7 @@
                                                            (conj seen sub)))
                                       :else (bad "a join's pattern is a vector, or an entity schema's name" clause))})))]
        {:star? (boolean (some #{'*} p))
-        :attrs (into (into #{} (filter keyword?) p) (keep #(when (:rev? %) (:by %))) joins)
+        :attrs (-> #{} (into (filter keyword?) p) (into (keep #(when (vector? %) (first %))) p) (into (keys tx-subs)) (into (keep #(when (:rev? %) (:by %))) joins))
+        ;; each attribute asked with its transaction: nil, its id alone; else the pattern of the transaction's attributes
+        :txs (merge (into {} (keep #(when (vector? %) [(first %) nil])) p) tx-subs)
         :joins joins}))))
