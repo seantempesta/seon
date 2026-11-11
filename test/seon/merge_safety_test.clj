@@ -195,7 +195,7 @@
           (is (= :unmerged (:refused up)) (str msg " refused " k))))
       (swap! seen conj (if (:refused up) :refused :merged))
       (if (:refused up)
-        (testing "a refused merge leaves main as it was"
+        (testing "(4) nothing is written on a refusal"
           (is (not= :behind (:refused up)) msg)
           (is (= (d/commit-id main0) (d/commit-id after)) msg))
         (let [{:keys [r head rep tx]} up merge-t (:max-tx after) carried (set (map (juxt :e :a :v :tx :added) tx))]
@@ -549,18 +549,28 @@
         (doseq [k ks :when (conflict? k)] (is refused? (str msg " refused " k))))
       (swap! seen conj (if refused? :refused :merged))
       (if refused?
-        (testing "a refused merge leaves main as it was"
+        (testing "(4) nothing is written on a refusal"
           (is (= (d/commit-id main0) (d/commit-id after)) msg))
-        (let [nb (:keys (pm/net-change base head0)) na (:keys (pm/net-change base after))]
-          (testing "no silent overwrite: each datum is the side that changed it, or both sides' one value"
-            (doseq [k ks] (is (= (expected k) (value after k)) (str msg " datum " k))))
-          (testing "the branch's net change, data included, is main's after the merge, and main moved nowhere else"
-            (is (every? (fn [[k v]] (= v (get na k ::none))) nb) msg)
+        ;; the four promised after a merge (Data model, 2026-11-12); a retraction main gains where a replayed assertion replaces
+        ;; its cardinality-one value is how that assertion is recorded, and is not asserted against
+        (let [nb (:keys (pm/net-change base head0)) na (:keys (pm/net-change base after))
+              changed? (fn [k] (not= (value base k) (value head0 k)))]
+          (testing "(1) main's value of every key the branch changed is the branch's final value"
+            (doseq [k ks :when (changed? k)] (is (= (value head0 k) (value after k)) (str msg " key " k)))
+            (is (every? (fn [[k v]] (= v (get na k ::none))) nb) msg))
+          (testing "(2) every key the branch did not change is as main had it"
+            (doseq [k ks :when (not (changed? k))] (is (= (value main0 k) (value after k)) (str msg " key " k)))
             (is (every? #(contains? nb %) (keys (:keys (pm/net-change main0 after)))) msg))
-          (testing "every datom main gained is one the branch wrote, its e kept (its transaction is main's own, new)"
-            (let [wrote (into #{} (map (juxt :e :a :v :added)) (second (d/datoms-diff (d/history base) (d/history head0) :eavt [])))
-                  tx? (fn [e] (seq (d/datoms after :eavt e :db/txInstant)))]
-              (is (every? #(wrote ((juxt :e :a :v :added) %)) (remove #(tx? (:e %)) (second (d/datoms-diff (d/history main0) (d/history after) :eavt [])))) msg)))
+          (testing "(3) each datom a replayed transaction asserts was asserted by that source transaction on the branch, same eval and branch"
+            (let [new-txs (sort (filter #(> % (:max-tx main0)) (map :e (d/datoms after :aevt :db/txInstant))))
+                  by-tx (fn [from to] (reduce (fn [m dt] (if (and (:added dt) (not= (:tx dt) (:e dt))) (update m (:tx dt) (fnil conj #{}) [(:e dt) (:a dt) (:v dt)]) m))
+                                              {} (second (d/datoms-diff (d/history from) (d/history to) :eavt []))))
+                  gained (by-tx main0 after) wrote (by-tx base head0)
+                  asserted (fn [db t] (get (if (identical? db after) gained wrote) t #{}))
+                  who (fn [db t] (select-keys (d/entity db t) [:seon.tx/branch :seon.tx/eval]))]
+              (doseq [[t g] (map vector new-txs (:groups up))]
+                (is (clojure.set/subset? (asserted after t) (asserted head0 (:tx g))) (str msg " transaction " t " of source " (:tx g)))
+                (is (= (who head0 (:tx g)) (who after t)) (str msg " who made " t)))))
           (testing "every ref the merge wrote names an entity main holds"
             (is (every? #(seq (d/datoms after :eavt (:v %))) (filter #(many-attrs (:a %)) (added-by main0 after))) msg))
           (testing "merging the same branch again changes nothing"
@@ -597,6 +607,12 @@
 ;; docs/storage.md#merges-read-what-changed: the same property with every write, the broken ones included, on the one merge
 (deftest any-branch-with-any-write-merges-to-main-safely
   (doseq [seed (seeds)] (property-up seed (into safe-ops broken-ops))))
+
+;; the same property at the two seeds that were red against a claim the ruling never made ("every datom main gained is one the
+;; branch wrote"): both sides end one key on the same value, the branch through another, so main's value is replaced by the
+;; branch's earlier one for one replayed transaction and comes back
+(deftest any-branch-with-any-write-merges-to-main-safely-at-seeds-once-red
+  (doseq [seed [648157791624536068 760273206766611146]] (property-up seed (into safe-ops broken-ops))))
 
 ;; docs/source.md#schemas-at-the-repl: a branch registers an entity of its own (my.schema/registration, as my.schema/register! writes
 ;; it: the schema entries and the Datahike declarations of their attributes) and writes one; merged up by the one merge, main holds

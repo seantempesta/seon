@@ -641,7 +641,9 @@
   ALL it wrote, the values a later transaction replaced included, so each state the receiving branch passes
   through is one the source held (and passed the write check with); the net change cut by transaction is not
   (a value written twice leaves its first transaction only the retraction of the base value: refused, 'requires
-  :task/plan'); `plan` leaves out a transaction the receiving branch wrote itself. Ops, never datoms, so each group is a new transaction of the receiving branch with a new time;
+  :task/plan'); `plan` leaves out a transaction the receiving branch wrote itself. No reader the system makes stands between two
+  replayed transactions (a reference to a branch is a commit, and the merge commits once at its end); only a raw as-of at a t
+  inside the merge does, and it reads, for those keys, a state the source really held. Ops, never datoms, so each group is a new transaction of the receiving branch with a new time;
   entity ids are kept (the store's, issued once: docs/storage.md#ids). A retraction the source's history does
   not hold (an attribute that keeps no history) rides the last group. See docs/decisions.md, 'A merge replays
   the source's transactions on the branch that receives it'."
