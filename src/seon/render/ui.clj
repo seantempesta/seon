@@ -1937,8 +1937,7 @@
       (into [:div {:class "seon-stack"}] (for [[m id] ms] (get-in c [:seon.message/_to m]))))))
 
 (defn conversation-list
-  "The conversation of an agent's page (c-rows), what the model reads as messages (:seon.render/messages) and the person as the chat: its system message, the example sessions it reads, what opens its own session (every conversation opens on a user
-  message), what was asked (the person's: the model reads the plan in the task's part), a component for each of its turns (`conversation-turn`), then how it stands (the person's). It reads the agent's turn number, the turns' bases and the index of the messages to the agent (`seon.ctx/placed-messages`: where each was read, derived from when it was delivered, handed to each turn as its :messages) and nothing else of its records: a new eval runs its turn alone, and a new turn or message this list and a lookup of each earlier turn's marker; a turn runs again for its own messages alone.
+  "The conversation of an agent's page (c-rows), what the model reads as messages (:seon.render/messages) and the person as the chat: its system message, the example sessions it reads, what was asked (the person's: the model reads the plan in the task's part), a component for each of its turns (`conversation-turn`), then how it stands (the person's). It reads the agent's turn number, the turns' bases and the index of the messages to the agent (`seon.ctx/placed-messages`: where each was read, derived from when it was delivered, handed to each turn as its :messages) and nothing else of its records: a new eval runs its turn alone, and a new turn or message this list and a lookup of each earlier turn's marker; a turn runs again for its own messages alone.
   See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:seon.render/list "c-rows" :seon.render/messages true :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
@@ -1949,7 +1948,6 @@
     [:ol {:id "c-rows"}
      [#'system-message {}]
      [#'session-examples {}]
-     (when k [:li {} (session/session-open k)])
      (when (:seon.agent/task c) [#'chat-ask {:wire/for "page"}])
      ;; one past the turn in force: what was taken for the turn that reads it comes before that turn begins (seon.turn/take!, tell-error!); a turn no record names draws nothing
      (for [n (range 0 (+ 2 turn))] [#'conversation-turn (let [ms (get placed n (when (= n (inc turn)) (:pending placed)))] (cond-> {:key n} ms (assoc :messages ms)))])
