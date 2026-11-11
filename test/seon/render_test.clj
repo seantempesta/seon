@@ -2463,8 +2463,22 @@
 
 (deftest a-task-title-is-its-name-in-words
   ;; docs/render.md#the-page: a task's id as its title
-  (is (= "A long string" (ui/task-title "seon.print/a-long-string")))
-  (is (= "REPL reads" (ui/task-title "seon.repl/REPL-reads")) "capitals kept"))
+  (is (= "A long string" (ui/task-title {:seon.task/id "seon.print/a-long-string" :seon.task/plan "What exists: a long string."})))
+  (is (= "REPL reads" (ui/task-title {:seon.task/id "seon.repl/REPL-reads"})) "capitals kept"))
+
+;; docs/render.md#the-page: a person's request is titled by its first sentence as written (Data model, 2026-11-11): its task's name is that
+;; sentence's words (seon.root/request-name, seon.task/request-words), so the title is computed from the plan, never stored
+(deftest a-requests-title-is-its-first-sentence-as-written
+  (let [ask "Prove the already-merged demo.math/half function and its test: verify demo.math/half is on main. Then report."
+        id (str "request/" (seon.task/request-words ask))]
+    (is (= "Prove the already-merged demo.math/half function and its test: verify demo.math/half is on main"
+           (ui/task-title {:seon.task/id id :seon.task/plan ask})) "demo.math/half and the colon intact")
+    (is (= "Prove the already-merged demo.math/half function and its test: verify demo.math/half is on main"
+           (ui/task-title {:seon.task/id (str id "-2") :seon.task/plan ask})) "a name numbered because it was taken")
+    (is (= "Make things" (ui/task-title {:seon.task/id "request/make-things" :seon.task/plan "Something else entirely."}))
+        "a plan no longer opening with its name's words: the name, never a stale sentence")
+    (is (= "A long string" (ui/task-title {:seon.task/id "seon.print/a-long-string" :seon.task/plan "What exists: a long string."}))
+        "a task file's name, written by a person as its title, reads as itself")))
 
 (declare sessions-db tree-db)
 

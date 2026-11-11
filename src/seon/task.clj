@@ -27,6 +27,19 @@
                         (for [x new :when (not (old x))] [:db/add e a x]))]
          tx)))
 
+(defn request-sentence
+  "A person's request text as its first sentence, as written: up to a . ! or ? before a space or the end (a dot inside a name,
+  demo.math/half, is part of it), else the first line. What a request task is named by (`request-words`) and titled by. See
+  docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [text] (str/trim (re-find #"(?:[^.!?\n]|[.!?](?=[^\s.!?]))*" (str/triml text))))
+
+(defn request-words
+  "The name a request's text gives its task: its first sentence's words (`request-sentence`), lower case, joined by -; \"work\" for none.
+  seon.root/request-name numbers it when the name is taken. See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [text] (str/join "-" (or (seq (re-seq #"[a-z0-9]+" (str/lower-case (request-sentence text)))) ["work"])))
+
 (defn task-id
   "The task's handle, ns/name: its identity, derived from its namespace and name."
   {:malli/schema [:=> [:cat :seon.task/ns :seon.task/name] :seon.task/id]}

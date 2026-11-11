@@ -532,8 +532,7 @@
   See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db :string] :string]}
   [db text]
-  (let [words (re-seq #"[a-z0-9]+" (str/lower-case (re-find #"(?:[^.!?\n]|[.!?](?=[^\s.!?]))*" (str/triml text))))
-        said (str/join "-" (or (seq words) ["work"]))
+  (let [said (task/request-words text)
         free? #(nil? (pdb/eid db :seon.task/id (task/task-id 'request %)))]
     (if (free? said) said (some #(let [n (str said "-" %)] (when (free? n) n)) (iterate inc 2)))))
 

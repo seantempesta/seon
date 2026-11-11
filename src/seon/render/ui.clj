@@ -90,12 +90,19 @@
     (if (string? p) (emit/marked-hiccup :seon.print/code p) [:pre {:class "text-text-100"} [:code p]])))
 
 (defn task-title
-  "A task's id as a person reads it: its name in words, its first letter capital (seon.print/a-long-string
-  becomes \"A long string\");  See docs/render.md#the-page."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [id]
-  (let [s (str/replace (name (symbol id)) "-" " ")]
-    (str (str/upper-case (subs s 0 (min 1 (count s)))) (subs s (min 1 (count s))))))
+  "Task t as a person reads its title. A task whose name is its plan's first sentence in words (a person's request: seon.root/request-name
+  names it by seon.task/request-words, numbered when taken) is titled by that sentence as written, demo.math/half and its colon intact; any
+  other, or one whose plan no longer opens with those words, by its name in words, first letter capital (seon.print/a-long-string becomes
+  \"A long string\"). Computed from the data, never stored. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [t]
+  (let [nm (name (symbol (:seon.task/id t)))
+        plan (ratom/realize (:seon.task/plan t))
+        said (when (and (string? plan) (not (str/blank? plan))) (task/request-words plan))]
+    (if (and said (or (= nm said) (and (str/starts-with? nm (str said "-")) (re-matches #"\d+" (subs nm (inc (count said)))))))
+      (task/request-sentence plan)
+      (let [s (str/replace nm "-" " ")]
+        (str (str/upper-case (subs s 0 (min 1 (count s)))) (subs s (min 1 (count s))))))))
 
 (defn- inline
   "The hiccup of text between offsets from and to, a stretch of a Markdown block, by the one parse: spans, seon.ref/scan's, drawn as code and
@@ -685,7 +692,7 @@
         (str "task · " (namespace (symbol id))
              (cond (:seon.task/outcome t) (str " · " (:text (standing nil {:seon.task/outcome (:seon.task/outcome t)})))
                    execution (str " · " (kname execution))))]
-       [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
+       [:p {:class "text-lg font-bold text-text-100"} (task-title t)]
        (when instructions [:details [:summary "how the agent works it"] (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/instructions} instructions)])
        (when plan (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/plan} plan))
        ;; its id, which an agent names its task by (my.task/*)
@@ -1247,7 +1254,7 @@
         running (d/q '[:find ?r . :in $ ?a :where [?p :seon.process/agent ?a] [?p :seon.process/running ?r]] db (:db/id c))]
     [:div {:wire/for "page"}
      [:p (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))) (when (:reason stands) (str " · " (:reason stands))))]
-     (when-let [id (:seon.task/id t)] [:p "task " (task-title id)])
+     (when (:seon.task/id t) [:p "task " (task-title t)])
      (when running [:p "running " [:code running]])
      (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green")])]))
 
@@ -2119,7 +2126,7 @@
     [:div {:class "seon-stack"}
      [:div {:class "flex items-baseline gap-3"}
       [:h1 {:class "text-base font-bold text-signal" :title (str/join " · " (remove nil? [(kname id) (when branch (str "on branch " (kname branch))) (when pid (str "pid " pid))]))}
-       (if-let [t (some-> (ratom/realize (or (:task v) (:seon.agent/task v))) :seon.task/id)] (task-title t) (or (:seon.user/name v) (kname id)))]
+       (if-let [t (some-> (ratom/realize (or (:task v) (:seon.agent/task v))) (#(when (:seon.task/id %) %)))] (task-title t) (or (:seon.user/name v) (kname id)))]
       ;; how its work stands, at a glance and in a person's words (standing): working, waiting for you only where a message
       ;; is taken, stopped at its cap, merged; the reason it stands so beside it
       (when-not (:seon.user/name v)
@@ -2183,7 +2190,7 @@
   "What an agent works on, in words: its task's title, else its branch's name; nil for neither."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:maybe :string]]}
   [a t]
-  (cond (:seon.task/id t) (task-title (:seon.task/id t))
+  (cond (:seon.task/id t) (task-title t)
         (:seon.agent/branch a) (kname (:seon.agent/branch a))))
 
 (def ^:private session-attrs
