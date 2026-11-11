@@ -406,7 +406,7 @@
   "A recorded model turn n (the agent b/a1's) with basis b: its number and its model call (the
   maps of one transaction)."
   [b n]
-  (ts/turn-tx "a1" n {:seon.model-call/reply (str "reply " n) :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0
+  (ts/turn-tx "a1" n {:seon.model-call/reply (str "reply " n) :seon.model-call/basis b :seon.model-call/forms 1
                                    :seon.model-call/ms 1}))
 
 (defn- page-call?
@@ -726,7 +726,7 @@
             basis (fn [task n] {:commit (d/commit-id @conn) :task task :turn n :max-turns 9 :origin :model
                                 :agent "a1"})
             ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
-            turn! (fn [b] (d/transact conn (ts/turn-tx "a1" (:turn b) {:seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/ms 1}))
+            turn! (fn [b] (d/transact conn (ts/turn-tx "a1" (:turn b) {:seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/ms 1}))
                     (wire/render @conn (assoc b :commit (d/commit-id @conn))))
             _ (work! "demo/d")
             _ (ev! "e0" "a1" 0)
@@ -801,7 +801,7 @@
                                           :origin :model :agent "a1"}]
                                    (d/transact conn (conj (ts/turn-tx "a1" n {})
                                                           {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis (assoc b :commit (d/commit-id @conn)) :seon.model-call/forms 1
-                                                           :seon.model-call/errors 0 :seon.model-call/ms 1}))
+                                                           :seon.model-call/ms 1}))
                                    (let [ms (:messages (wire/render @conn (assoc b :commit (d/commit-id @conn))))]
                                      ;; its reply comes of its request
                                      (when (seq more) (d/transact conn [(assoc more :seon.model-call/id (seon.lib/call-id "a1" n))]))
@@ -1322,7 +1322,7 @@
              b {:commit (d/commit-id @conn) :task "demo/f" :turn n :max-turns 9 :origin :model :agent "a1"}
              _ (d/transact conn (conj (ts/turn-tx "a1" n {})
                                       {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1
-                                       :seon.model-call/errors 0 :seon.model-call/ms 1}))]
+                                       :seon.model-call/ms 1}))]
          (wire/render @conn (assoc b :commit (d/commit-id @conn)))))
      ;; a record of the turn in force
      (fn ev! [id] (d/transact conn [{:seon.eval/id id :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" @turn)
@@ -1707,7 +1707,7 @@
   (let [n (inc n)
         b {:commit (d/commit-id @conn) :task "demo/g" :session "demo/g#1" :turn n :max-turns 9 :origin :model :agent "a1"}
         _ (d/transact conn (conj (ts/turn-tx "a1" n {})
-                                 {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/ms 1}))]
+                                 {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/ms 1}))]
     (wire/render @conn (assoc b :commit (d/commit-id @conn)))))
 
 (deftest a-task-with-an-example-reads-it-between-the-system-prompt-and-its-own-session
@@ -1955,7 +1955,7 @@
                 (d/transact conn (ts/turn-tx "a1" n more))
                 (let [b {:commit (d/commit-id @conn) :task "demo/f" :turn n :max-turns 4 :origin :model :agent "a1"}
                       _ (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1
-                                           :seon.model-call/errors 0 :seon.model-call/ms 1}])
+                                           :seon.model-call/ms 1}])
                       ms (:messages (wire/render @conn b))]
                   (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/sent-hash (seon.lib/digest (seon.edn/encode ms))}])
                   ms))
@@ -2296,7 +2296,7 @@
                                               {:seon.task/ns 'demo :seon.task/name "g-refine" :seon.task/plan "Refine demo/g." :seon.task/needs #{"demo/g"}}]))
       (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
       (let [turn (fn [n task] (let [b {:commit (d/commit-id @conn) :task task :session "demo/g#1" :turn n :max-turns 9 :origin :model :agent "a1"}]
-                                (d/transact conn (conj (ts/turn-tx "a1" n {}) {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/ms 1}))
+                                (d/transact conn (conj (ts/turn-tx "a1" n {}) {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/ms 1}))
                                 (wire/render @conn (assoc b :commit (d/commit-id @conn)))))
             r1 (turn 1 "demo/g")
             r2 (turn 2 "demo/g")

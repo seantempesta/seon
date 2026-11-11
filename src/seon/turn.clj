@@ -288,12 +288,11 @@
             _ (swap! agent/state assoc :requests messages)
             _ (when-let [miss (cache-miss prev messages c (cfg/value :seon.config.ai/cache-block-tokens {:task t :model model-name}))]
                 (swap! agent/state update :errors err/note miss :effect id (System/currentTimeMillis)))
-            ;; what it answered and how it stopped (its reply, reasoning and finish), the reply's usage and model (seon.model-call, beside the basis it
+            ;; what it answered (its reply and reasoning), the reply's usage and model (seon.model-call, beside the basis it
             ;; read: seon.ctx.wire/render makes the text from it), as soon as it answered: an eval of this reply that never ends leaves the call
             ;; recorded and its cost counted, never reading as a call nobody answered (deepseek-run6's records agent)
             _ (agent/transact! [(cond-> (merge (usage c) {:seon.model-call/id id :seon.model-call/reply (:text c) :seon.model-call/ms model-ms})
                                   (:truncated? c) (assoc :seon.model-call/truncated true)
-                                  (:finish-reason c) (assoc :seon.model-call/finish (:finish-reason c))
                                   (:reasoning c) (assoc :seon.model-call/reasoning (:reasoning c))
                                   (:model c) (assoc :seon.model-call/model (:model c)))])
             t2 (profile/now-ns)
@@ -317,7 +316,6 @@
         (when (and (empty? calls) (not (str/blank? (:text c))) (not (:truncated? c))) (request-stop! :waiting (:text c)))
         ;; its evals' counts, and the time with them
         (agent/transact! [{:seon.model-call/id id :seon.model-call/forms (count calls)
-                           :seon.model-call/errors (count (filter :ex (map :response (remove :not-run calls))))
                            :seon.model-call/ms (+ model-ms eval-ms)}])
         (cond-> (-> (assoc st :turn (inc turn))
                     ;; what this turn's parts showed, by producer, and what it evaluated (waste)
@@ -381,8 +379,7 @@
         rs (repl/run-calls (mapv #(dissoc % :message-md) calls) (fn [cid] {:origin :outside :call-id cid}) evaluated!)]
     (when turn?
       (agent/transact! [{:seon.model-call/id id :seon.model-call/forms (count rs) :seon.model-call/model "outside"
-                         :seon.model-call/reply (or message "")
-                         :seon.model-call/errors (count (filter :ex (map :response (remove :not-run rs))))}])
+                         :seon.model-call/reply (or message "")}])
       (agent/commit!))
     (print (sedn/encode (mapv agent/on-the-wire (map :response rs))))
     nil))
