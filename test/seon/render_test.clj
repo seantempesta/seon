@@ -646,8 +646,7 @@
               u (:seon.render/units l) :when (:parent u) :let [p (by (:parent u))]]
         (is (some? p) (str (:id u) ": a nested unit's parent is a unit of the page"))
         (is (str/includes? (:html p) (str "id=\"" (subs (:container u) 1) "\"")) (str (:id u) ": its container is an element of its parent"))
-        (is (str/includes? (:html p) (str "<!--s:" (:id u) "-->")) (str (:id u) ": its parent holds its slot")))
-      (is (str/includes? (apply str (map :html (in root "#p-task"))) "Sessions") "root's sessions among its agent's tiles (the system entity its pull joins, nested)"))
+        (is (str/includes? (:html p) (str "<!--s:" (:id u) "-->")) (str (:id u) ": its parent holds its slot"))))
     (testing "the agents list is the signed-in user's, the same on every page: root first, then what the user started"
       (is (= 2 (count (in root "#c-side")) (count (in agent "#c-side"))))
       (is (= (map :html (in root "#c-side")) (map :html (in agent "#c-side"))))
@@ -985,12 +984,13 @@
   ;; page's own units: an agent the user started is on root's page twice (the list, root's sessions), so the user's walk names its elements
   ;; apart. Red before: agent-a3 twice, one unit overwriting the other in the view, a patch for one landing on the other
   (let [[main branch eid] (paged-dbs)
-        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "a3" :seon.agent/root [:seon.root/id :root]}])
+        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern (seon.root/root-session-pattern)}
+                                                {:seon.agent/key "user" :seon.agent/agents [[:seon.agent/key "root"]]}])
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st :root)
         html (p/view-html st1 :root)
         ids (map second (re-seq #" id=\"([^\"]+)\"" html))]
-    (is (= 2 (count (re-seq #"href=\"/agent/a3\"" html))) "a3's entry is drawn twice: the list and root's sessions")
+    (is (= 2 (count (re-seq #"href=\"/agent/a3\"" html))) "a3's entry is drawn twice: the list and under the person on root's page")
     (is (empty? (for [[id n] (frequencies ids) :when (> n 1)] id)) (str "no element id twice: " (pr-str (for [[id n] (frequencies ids) :when (> n 1)] id))))
     (r/dispose-walk! (get-in st [:root-walk :w]))))
 
@@ -999,21 +999,22 @@
   ;; :wire marks, other qualified keys, attribute values that are no plain value), counted on the pages the test world draws (an agent's,
   ;; root's, the user's), pinned so a count only goes down: each later change moves a render's look to CSS and its count to none
   (let [[main branch eid] (paged-dbs)
-        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "a3" :seon.agent/root [:seon.root/id :root]}])
+        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern (seon.root/root-session-pattern)}
+                                                {:seon.agent/key "user" :seon.agent/agents [[:seon.agent/key "root"]]}])
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st :root)
         [st2 _] (pass-view st1 [:chat :a3])
         ws (concat [(get-in st2 [:root-walk :w])] (keep #(some-> (:walk (val %)) deref :w) (:branch-reads st2)) (map :w (vals @(:user-walks st2))))
         seen (apply merge-with #(merge-with + %1 %2) (map r/misfits-by-render ws))
+        ;; root's session is in this world, so root's page draws the user's tree (the person, a3 under it): more agent renders, and root's nested sessions render, deleted, 3 classes fewer
         ;; measured 2026-11-11, the walk's own class on each component's root (its render's name) among them: it goes when data-render replaces it
-        pinned '{seon.render.ui/agent {:wire 2 :class 11} seon.render.ui/agent-parts {:class 2} seon.render.ui/agent-state {:wire 2 :class 2}
+        pinned '{seon.render.ui/agent {:wire 4 :class 22} seon.render.ui/agent-parts {:class 2} seon.render.ui/agent-state {:wire 2 :class 2}
                  seon.render.ui/agents-list {:class 1} seon.render.ui/conversation-list {:class 2} seon.render.ui/eval-output {:class 7}
                  seon.render.ui/evaluation {:class 5} seon.render.ui/page-rules {:class 2} seon.render.ui/problems-tile {:class 1}
-                 seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 4 :wire 1} seon.render.ui/root-evals {:class 3}
+                 seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 1} seon.render.ui/root-evals {:class 3}
                  seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 2}
-                 seon.render.ui/system-message {:class 4 :wire 2}
-                 ;; root's session drawn by its stage (2026-11-11): the walk's own class on each of its three components' roots
-                 seon.render.ui/stage {:class 1} seon.render.ui/stage-list {:class 1} seon.render.ui/stage-front {:class 1}}]
+                 ;; the tree fixture's root session names no own render, so it is drawn by agent here, not by its stage
+                 seon.render.ui/system-message {:class 4 :wire 2}}]
     (try (is (= pinned seen) (str "a count moved: write the new one here when it went down, never when it went up\n"
                                   (with-out-str (clojure.pprint/pprint (into (sorted-map) seen)))))
          (finally (doseq [w ws] (r/dispose-walk! w))))))
@@ -2267,7 +2268,7 @@
   (is (= "A long string" (ui/task-title "seon.print/a-long-string")))
   (is (= "REPL reads" (ui/task-title "seon.repl/REPL-reads")) "capitals kept"))
 
-(declare sessions-db)
+(declare sessions-db tree-db)
 
 (defn- entry-of
   "Agent key's entry as a page draws it where its starter's pull joins it (seon.render.ui/agent nested, its pull by
@@ -2453,13 +2454,14 @@
       (is (= :parked (:seon.task/outcome (d/entity fresh [:seon.task/id "request/root"]))) "parked until a message"))))
 
 (deftest roots-session-page-lists-no-sessions
-  ;; docs/users.md#roots-session: root's session's record holds root's sessions (its pattern's :root join), and its task list shows each
-  ;; by its address and how it stands; another agent's record holds none
+  ;; docs/users.md#roots-session: root's session's record holds the user's tree (its pattern's :seon.agent/_agents join); its model reads none of
+  ;; it in its page (it asks at its REPL); another agent's record holds none
   (let [db0 (booted)
         db (d/db-with db0 [{:seon.task/id "request/greet" :seon.task/ns 'request :seon.task/name "greet" :seon.task/plan "Say hi.\nOne line." :seon.task/kind :user
                             :seon.task/branch :task-request-greet :seon.task/outcome :parked}
-                           {:seon.agent/key "b1/a2" :seon.agent/root [:seon.root/id :root] :seon.agent/task [:seon.task/id "request/greet"]}
-                           ;; a session of an earlier boot: a new boot unlinks it from root (seon.task/earlier-agents-tx), and root's session still sees it
+                           {:seon.agent/key "b1/a2" :seon.agent/task [:seon.task/id "request/greet"]}
+                           {:seon.agent/key "user" :seon.agent/agents [[:seon.agent/key "b1/a2"]]}
+                           ;; a session of an earlier boot, started by no agent of the user's tree: root's session does not see it
                            {:seon.task/id "request/older" :seon.task/ns 'request :seon.task/name "older" :seon.task/plan "An older ask." :seon.task/kind :user
                             :seon.task/branch :task-request-older :seon.task/outcome :parked}
                            {:seon.agent/key "b0/a9" :seon.agent/task [:seon.task/id "request/older"]}
@@ -2475,18 +2477,19 @@
     (is (not (str/includes? root-text "/agent/b1/a2")) "root's session's page lists no other session")
     (is (not (str/includes? root-text "/agent/b0/a9")) "nor one of an earlier boot")
     (is (not (str/includes? root-text ":seon.config.")) "and none of root's config")
-    (is (not (str/includes? (part "b1/a2") "Sessions")) "another agent reads no sessions")
+    (is (not (str/includes? (part "b1/a2") "the person Seon works for")) "another agent's page holds no tree of the user's")
     ;; its status answers: it threw "Duplicate key: root" when a set literal held "root" and the agent's own key, root's session's
     ;; being "root" too (seen live on a demo root, 2026-11-08)
     (is (map? (seon.ctx.status/status db (seon.ctx/agent-ctx (seon.db/index) db (:db/id (d/entity db [:seon.agent/key "root"]))) {})) "and how its work stands")))
 
 (deftest roots-session-asks-for-its-sessions
   ;; docs/users.md#roots-session: root's session's page lists no sessions (its model reads none in each request); it asks at its REPL,
-  ;; (my.user/sessions), which reads them from its record's join through root: every session linked to root, how each stands, by key; an
+  ;; (my.user/sessions), which reads them from its record's join to the user who started it: every session in the user's tree, how each stands, by key; an
   ;; agent whose pattern holds no such join has none
   (let [db (d/db-with (booted) [{:seon.task/id "request/greet" :seon.task/ns 'request :seon.task/name "greet" :seon.task/plan "Say hi." :seon.task/kind :user
                                  :seon.task/branch :task-request-greet :seon.task/outcome :parked}
-                                {:seon.agent/key "b1/a2" :seon.agent/root [:seon.root/id :root] :seon.agent/task [:seon.task/id "request/greet"] :seon.agent/status :waiting}])
+                                {:seon.agent/key "b1/a2" :seon.agent/task [:seon.task/id "request/greet"] :seon.agent/status :waiting}
+                                {:seon.agent/key "user" :seon.agent/agents [[:seon.agent/key "b1/a2"]]}])
         as (fn [k] (let [c (seon.ctx/agent-ctx (seon.db/index) db (:db/id (d/entity db [:seon.agent/key k])))]
                      (try (binding [seon.ctx/*installing* true] (reset! seon.ctx/ctx c)) (my.user/sessions)
                           (finally (binding [seon.ctx/*installing* true] (reset! seon.ctx/ctx nil))))))
@@ -2500,10 +2503,10 @@
   (let [db0 (booted)
         mk (fn [i] [{:seon.task/id (str "request/t" i) :seon.task/ns 'request :seon.task/name (str "t" i) :seon.task/plan "Plan." :seon.task/kind :user
                      :seon.task/branch (keyword (str "task-request-t" i)) :seon.task/outcome :parked}
-                    {:seon.agent/key (str "b1/a" i) :seon.agent/root [:seon.root/id :root] :seon.agent/status :running :seon.agent/task [:seon.task/id (str "request/t" i)]}])
-        db (d/db-with db0 (mapcat mk [1 2 3]))
+                    {:seon.agent/key (str "b1/a" i) :seon.agent/status :running :seon.agent/task [:seon.task/id (str "request/t" i)]}])
+        db (d/db-with (d/db-with db0 (mapcat mk [1 2 3])) [{:seon.agent/key "user" :seon.agent/agents (for [i [1 2 3]] [:seon.agent/key (str "b1/a" i)])}])
         tree (seon.ctx/agent-ctx (seon.db/index) db (seon.db/eid db :seon.agent/key "root"))
-        agents (vals (get-in tree [:seon.agent/root :seon.agent/_root]))
+        agents (mapcat (comp vals :seon.agent/agents) (vals (:seon.agent/_agents tree)))
         by-key (into {} (map (juxt :seon.agent/key identity)) agents)]
     (is (every? by-key ["b1/a1" "b1/a2" "b1/a3"]) (pr-str (keys by-key)))
     (is (= [:running :running :running] (mapv #(:seon.agent/status (by-key %)) ["b1/a1" "b1/a2" "b1/a3"])))
@@ -2589,7 +2592,7 @@
 (deftest root-reads-what-is-going-on
   ;; docs/render.md#the-page: root's head says what is going on, in words; its page lists every session root holds, each by its entry,
   ;; those that need the person first (the entry's group, a datum the page orders by)
-  (let [db (sessions-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1] ["b2/a2" :a2 :running "x/works" :running :t2] ["b2/a3" :a3 :ended "x/done" :merged :t3]])
+  (let [db (tree-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1] ["b2/a2" :a2 :running "x/works" :running :t2] ["b2/a3" :a3 :ended "x/done" :merged :t3]])
         c (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.root/id :root) :db))
         html (root-page-html db)]
     (is (every? #(str/includes? html (str "href=\"/agent/" % "\"")) ["b2/a1" "b2/a2" "b2/a3"]) "every session with a task")
@@ -2641,24 +2644,32 @@
 
 (defn- sessions-db
   "A main db whose root is at boot, holding sessions, each [key id status task-id outcome branch] (a part left nil is not written):
-  the agents of any boot, as a store holds them after a root restarts, each agent linked to root (:seon.agent/root: the boot keeps every
-  link, so root's session's pull reaches them all), the person's session (id :user) not."
+  the agents of any boot, as a store holds them after a root restarts; none has started any other."
   [boot sessions]
   (reduce d/db-with (ts/test-db)
           (concat
-          [[{:seon.root/id :root :seon.root/boot boot}]
-           (vec (for [[tid o b] (distinct (for [[_ _ _ tid o b] sessions :when tid] [tid o b]))]
-                  (cond-> {:seon.task/id tid :seon.task/ns (symbol (namespace (symbol tid))) :seon.task/name (name (symbol tid)) :seon.task/plan "p"
-                           :seon.task/execution :running :seon.task/branch (or b :task-b) :seon.task/kind :work}
-                    o (assoc :seon.task/outcome o)
-                    (= :cap o) (assoc :seon.task/reason "proof-red seon.ref-test/an-alias"))))
-           ]
-          ;; one transaction each, the last listed first: the list reads newest first, as the store's transaction ids order it
-          (for [[k id status tid _ b] (reverse sessions)]
-            [(cond-> (if (= :user id) {:seon.agent/key k} {:seon.agent/key k :seon.agent/boot (first (str/split k #"/")) :seon.agent/max-turns 40 :seon.agent/branch (or b :task-b)
-                                                            :seon.agent/root [:seon.root/id :root]})
-               status (assoc :seon.agent/status status) b (assoc :seon.agent/branch b)
-               tid (assoc :seon.agent/task [:seon.task/id tid]))]))))
+           [[{:seon.root/id :root :seon.root/boot boot}]
+            (vec (for [[tid o b] (distinct (for [[_ _ _ tid o b] sessions :when tid] [tid o b]))]
+                   (cond-> {:seon.task/id tid :seon.task/ns (symbol (namespace (symbol tid))) :seon.task/name (name (symbol tid)) :seon.task/plan "p"
+                            :seon.task/execution :running :seon.task/branch (or b :task-b) :seon.task/kind :work}
+                     o (assoc :seon.task/outcome o)
+                     (= :cap o) (assoc :seon.task/reason "proof-red seon.ref-test/an-alias"))))]
+           (for [[k id status tid _ b] (reverse sessions)]
+             [(cond-> (if (= :user id) {:seon.agent/key k} {:seon.agent/key k :seon.agent/boot (first (str/split k #"/")) :seon.agent/max-turns 40 :seon.agent/branch (or b :task-b)})
+                status (assoc :seon.agent/status status) b (assoc :seon.agent/branch b)
+                tid (assoc :seon.agent/task [:seon.task/id tid]))]))))
+
+(defn- tree-db
+  "`sessions-db` with the one tree (docs/users.md#who-started-whom): the person (:seon.user/name \"sean\", its pattern `seon.task/user-pattern`)
+  started root's session (the agent keyed \"root\", its pattern `seon.root/root-session-pattern`) and the agents of started (keys; default every
+  session listed), which root's page reads through its session's pull."
+  ([boot sessions] (tree-db boot sessions (map first sessions)))
+  ([boot sessions started]
+   (d/db-with (sessions-db boot sessions)
+              [{:seon.agent/key "root" :seon.ctx/pattern (seon.root/root-session-pattern)}
+               {:seon.agent/key "sean" :seon.user/name "sean" :seon.ctx/pattern (seon.task/user-pattern)
+                :seon.agent/agents (vec (cons [:seon.agent/key "root"] (for [k started] [:seon.agent/key k])))}])))
+
 
 (defn- session-eid [db k] (seon.db/eid db :seon.agent/key k))
 
@@ -2690,7 +2701,7 @@
 (deftest roots-sessions-list-an-agent-once-under-its-starter
   ;; docs/users.md#roots-session: root holds every agent, and an entry draws the agents it started under it, so the top level is what
   ;; root's pull holds that no held agent started (Point's ruling, 2026-11-11); red before: a2 was listed twice, at the top and under a1
-  (let [db (sessions-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1] ["b2/a2" :a2 :running "x/works" :running :t2]])
+  (let [db (tree-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1] ["b2/a2" :a2 :running "x/works" :running :t2]] ["b2/a1"])
         db (d/db-with db [{:db/id (session-eid db "b2/a1") :seon.agent/agents (session-eid db "b2/a2")}])
         html (root-page-html db)
         hrefs (re-seq #"href=\"/agent/b2/a2\"" html)]
@@ -2700,8 +2711,7 @@
 (deftest roots-sessions-show-the-user-as-the-person-seon-works-for
   ;; docs/users.md#roots-session: root holds the user as it holds every agent, and nothing started it; its entry says what the data says
   ;; it is (it holds :seon.user/name), the person Seon works for, never a session with a standing (Point's ruling, 2026-11-11)
-  (let [db (sessions-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1]])
-        db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/root [:seon.root/id :root] :seon.agent/agents [[:seon.agent/key "b2/a1"]]}])
+  (let [db (tree-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1]])
         html (root-page-html db)
         person (re-find #"(?s)<section[^>]*data-standing=\"person\".*?</section>" html)]
     (is (some? person) html)
@@ -2709,6 +2719,19 @@
     (is (str/includes? person "href=\"/agent/sean\"") "its page")
     (is (not (re-find #"data-standing=\"finished\"[^>]*id=\"agent-sean\"" html)) "not a finished session")
     (is (str/includes? html "href=\"/agent/b2/a1\"") "what the person asked for stays in root's list (red before: the user's join hid it)")))
+
+(deftest roots-page-follows-the-person-starting-an-agent
+  ;; docs/users.md#roots-session: root's page is a kept walk; an agent the person starts afterwards is placed under them as it happens
+  ;; (red before: the person's entry read its started agents untracked, so a live page never placed one)
+  (let [db (tree-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1]] [])
+        st (root-state (branch-state db db) db)
+        [st1 _] (pass-view st :root)
+        main' (d/db-with (:main-db st1) [{:seon.agent/key "sean" :seon.agent/agents [[:seon.agent/key "b2/a1"]]}])
+        st2 (#'p/advance-main st1 main')
+        [st3 _] (pass-view st2 :root)]
+    (try (is (not (str/includes? (p/view-html st1 :root) "href=\"/agent/b2/a1\"")) "before: not started by the person")
+         (is (str/includes? (p/view-html st3 :root) "href=\"/agent/b2/a1\"") "after: under the person, live")
+         (finally (r/dispose-walk! (get-in st [:root-walk :w]))))))
 
 (deftest a-stopped-agent-does-not-read-as-waiting-in-its-head-or-its-lists
   (let [a {:seon.agent/id :a6 :seon.agent/status :idle :seon.agent/max-turns 40 :seon.agent/key "b2/a6"}
@@ -2751,8 +2774,8 @@
 (deftest every-session-on-main-is-listed-across-boots
   ;; coordinator, 2026-11-05: after a root restarts its agents list drew "agent-side threw" and no agent; the person (user), with no status
   ;; and no task, made standing throw. Step 3: root's page lists every session root holds (its session's pull through the system entity,
-  ;; seon.root/root-session-pattern), this boot's first, earlier boots' under one fold, each by its entry
-  (let [db (sessions-db "b2" [["b2/user" :user nil nil nil nil]
+  ;; seon.root/root-session-pattern), each by its entry under the user who started it
+  (let [db (tree-db "b2" [["b2/user" :user nil nil nil nil]
                               ["b2/a1" :a1 :busy "seon.x/now" :running :task-now]
                               ["b1/a1" :a1 :dead "seon.x/old" :cap :task-old]
                               ["b1/a2" :a2 :ended "seon.x/older" :merged :task-older]
@@ -2761,10 +2784,9 @@
     (testing "an agent with no status and no task reads nothing, and draws"
       (is (= :status/none (:state (ui/standing {:seon.agent/id :user} nil))))
       (is (str/includes? (h/html (entry-of db "b2/user")) "href=\"/agent/b2/user\"")))
-    (testing "this boot's sessions are on root's page; earlier boots' under one fold, each linked by its key"
+    (testing "every boot's sessions are on root's page, each linked by its key"
       (is (not (str/includes? html "defect")) html)
       (is (str/includes? html "href=\"/agent/b2/a1\""))
-      (is (str/includes? html "<summary class=\"seon-note\">Earlier</summary>") "the earlier boots are one fold")
       (is (and (str/includes? html "href=\"/agent/b1/a1\"") (str/includes? html "href=\"/agent/b1/a2\"") (str/includes? html "href=\"/agent/b0/a1\"")))
       (is (str/includes? html "stopped at its cap") "each with its standing, no process needed")
       (is (str/includes? html "merged"))

@@ -1122,29 +1122,33 @@
   "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/sessions) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
 (defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through the system entity to the sessions root
-  holds, newest first to :seon.config.ctx/window, each with what its entry reads, its boot and the agents it started as the user's pull joins them (seon.task/entry-pattern,
-  seon.task/agents-join: root's page draws each under its starter, not again at the top), which root's page
-  draws (seon.render.ui/root nested) and root's model asks for at its REPL (my.user/sessions). See docs/users.md#whats-on-screen."
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join to whoever started it (:seon.agent/_agents, the
+  user: its :seon.agent/agents holds root's session as one of the agents it started), pulled as the user's own pull is (seon.task/user-pattern: the
+  agents it started, each with the ones it started, to :seon.config.render/agent-tree-depth levels). Root's page draws that tree (seon.render.ui/agent's
+  person entry, the agents under it) and root's model asks for it at its REPL (my.user/sessions). See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat] [:vector :any]]}
   [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
-           {:seon.agent/root [:seon.root/id {[:seon.agent/_root :limit :seon.config.ctx/window :reverse true] (conj task/entry-pattern :seon.agent/boot (task/agents-join (cfg/value :seon.config.render/agent-tree-depth)))}]}))
+           {:seon.agent/_agents (task/user-pattern)}))
 
 (defn root-session-tx
   "Root's session, made at the boot of a main that has none (`root-session-boot-tx`), an ordinary agent made the ordinary way: an agent
   entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern
-  `root-session-pattern`, its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the chat template (seon.template/request-tx), parked, its agent that entity, so
-  the first message's wake spawns it. Root's own entity is untouched: an entity's id derives from its identity, so it cannot take a
-  key too. See docs/users.md#roots-session."
+  `root-session-pattern`, its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
+  chat template (seon.template/request-tx), parked, its agent that entity, so the first message's wake spawns it. The user started it
+  (:seon.task/started-by, the user's :seon.agent/agents: docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
+  derives from its identity, so it cannot take a key too. See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db]
   (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))]
     (if (contract/error? tx)
       (throw (ex-info (str "root's session task was refused: " (:seon.error/message tx)) tx))
-      ;; drawn as a stage (seon.render.ui/stage, its own render, which a person turns back to the conversation): the page a fresh system opens on
-      (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)
-              :seon.render/hiccup 'seon.render.ui/stage}]
-            (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked})))))
+      ;; started by the user: the user's tree holds root's session and what it launches (docs/users.md#who-started-whom); drawn as a
+      ;; stage (seon.render.ui/stage, its own render, which a person turns back to the conversation): the page a fresh system opens on
+      (let [user (task/sender (cfg/value :seon.config.root/user-name))]
+        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)
+                :seon.render/hiccup 'seon.render.ui/stage}
+               (assoc user :seon.agent/agents "root-session")]
+              (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
 (defn root-session-boot-tx
   "At boot, root's session: made when main has none (`root-session-tx`; the owner's ruling, root's agent is there from boot), else
