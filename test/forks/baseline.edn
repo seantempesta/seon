@@ -84,7 +84,7 @@ datahike.test.value-content-test {:test 2, :pass 13, :fail 0, :error 0}
 datahike.test.valid-at-test {:test 41, :pass 73, :fail 0, :error 0}
 datahike.test.valid-time-test {:test 9, :pass 44, :fail 0, :error 0}
 datahike.test.versioning-test {:test 13, :pass 97, :fail 0, :error 0}
-datahike.test.writer-error-test {:test 11, :pass 152, :fail 0, :error 0}
+datahike.test.writer-error-test {:test 12, :pass 154, :fail 0, :error 0}
 reference-code/konserve/test/konserve/jolt/fasl_test.jolt {:test 11, :pass 192, :fail 0, :error 0}
 reference-code/konserve/test/konserve/jolt/lmdb_test.jolt {:test 4, :pass 148, :fail 0, :error 0}
 datahike.test.run-ahead-merge-test {:test 2, :pass 16, :fail 0, :error 0}

@@ -16,6 +16,7 @@
 #      2026-11-08: "Why are we always having to do cleanup?"), unless something in it is uncommitted
 #      or untracked, or a process other than this landing's own works there: then it is kept, and
 #      the line says why. The next change starts in a new worktree (bin/worktree NAME).
+#   6. bin/worktree --prune removes every other finished worktree (landed, clean, unused; docs/machine.md#disk-stays-bounded).
 # MSGFILE is the merge message (what it completes, its numbers: AGENTS §3); bin/prove's line is added.
 # SEON_UPDATE_ARGS: bin/update's arguments, the standing root's (default --profile deepseek).
 # The last line is LANDED or LAND FAILED, and the exit status says the same.
@@ -126,7 +127,12 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
     nice -n 15 "$MAIN/bin/update" $UARGS | tail -1
     # the net under every landing (docs/merging.md#the-full-run-is-the-net)
     "$MAIN/bin/full-run" "$NEW"
-    tidy; print LANDED; exit 0
+    tidy
+    # every other finished worktree goes too (bin/worktree --prune: landed, clean, unused). Cleanup only: a failure of it never
+    # fails the landing, which is done; its error line is printed. Run from the landed worktree when it was kept, so it is not pruned.
+    ( cd "$HERE" 2>/dev/null || cd "$MAIN"; "$MAIN/bin/worktree" --prune 2>&1 | grep -E '^(removed |would remove )|^removed [0-9]+ worktrees' ) ||
+      print "land: bin/worktree --prune failed (cleanup only; the landing stands): run it by hand"
+    print LANDED; exit 0
   fi
 done
 fail "main moved under ten merges in a row"

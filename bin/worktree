@@ -1,9 +1,19 @@
 #!/bin/zsh
 # bin/worktree NAME [BASE]    a worktree of the main tree on branch jolt/NAME (a new one from BASE, default
-#                             main; an existing one as it is), at <root>/.worktrees/NAME (gitignored: a
+#                             main; an existing BRANCH as it is, said on stderr with its last commit; an existing worktree is refused, naming it), at <root>/.worktrees/NAME (gitignored: a
 #                             worktree is inside the root it belongs to)
 # bin/worktree --path NAME    that path
 # bin/worktree --remove NAME  remove that worktree and its submodule worktrees (the branch is kept)
+# bin/worktree --prune [--dry-run]  remove every finished worktree under <main tree>/.worktrees (branches kept), one
+#                             line each, `removed NAME (jolt/NAME SHA landed)` or `kept NAME: REASON`, then a total (bin/land
+#                             runs it after each landing; --dry-run says `would remove` and removes nothing). A worktree is
+#                             removed when all hold: its HEAD is an ancestor of main; nothing in it is uncommitted (nor in its
+#                             reference-code checkouts); it is finished (its HEAD is not on main's first-parent chain, so its
+#                             branch landed by a merge, or its HEAD commit is over 24 hours old, a tree cut from main and never
+#                             used); nothing uses it (no process whose command line holds its path or whose working directory
+#                             is inside it, no running system of its own, bin/root's runs/root.pids); and it is not the one this
+#                             runs from or one config/local.edn names (.worktrees/merges). The disk freed is not totalled:
+#                             `du` counts each APFS clone whole (docs/machine.md#disk-stays-bounded)
 # bin/worktree --at DIR COMMIT [REPO [FROM]]  a detached worktree of REPO (default next/) at COMMIT in DIR, set
 #                             up as below, its target/ products cloned from FROM's (default the main tree's): what a generation
 #                             is built in (seon.fx/build, docs/source.md), and a gate's checkout, from its root's checkout (seon.fx/run-tests)
@@ -115,6 +125,69 @@ unsub() {
   done
 }
 
+if [[ ${1:-} == --prune ]]; then
+  DRY=; [[ ${2:-} == --dry-run ]] && DRY=1
+  [[ -z ${2:-} || -n $DRY ]] || die "usage: bin/worktree --prune [--dry-run]"
+  SELF=${0:A}; HERE=$(git rev-parse --show-toplevel 2>/dev/null || true); HERE=${HERE:A}
+  TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+  git -C "$MAIN" rev-list --first-parent main > "$TMP/chain"   # once, not per worktree
+  NOW=$(date +%s); WTS="$MAIN_TREE/.worktrees"
+  # the users of every worktree, read once: a process whose command line holds a worktree's path and "/", and one whose cwd is inside
+  typeset -A users
+  ps -axo pid=,command= | while read -r pid cmd; do
+    [[ $pid == $$ ]] && continue
+    rest=$cmd
+    while [[ $rest == *"$WTS/"* ]]; do
+      rest=${rest#*"$WTS/"}; n=${rest%%[/ ]*}
+      [[ $rest == "$n/"* ]] && users[$n]="${users[$n]:-} $pid"
+    done
+  done
+  lsof -a -d cwd -Fpn 2>/dev/null | while read -r l; do
+    case $l in p*) pid=${l#p} ;; n$WTS/*) n=${l#$WTS/}; users[${n%%/*}]="${users[${n%%/*}]:-} $pid" ;; esac
+  done
+  setopt extendedglob; nrem=0 nkept=0; typeset -A why
+  for WT in $WTS/*(N/); do
+    NAME=${WT:t}
+    git -C "$WT" rev-parse --git-dir >/dev/null 2>&1 || continue
+    reason=
+    sha=$(git -C "$WT" rev-parse HEAD); br=$(git -C "$WT" branch --show-current)
+    if ! git -C "$MAIN" merge-base --is-ancestor "$sha" main; then
+      reason="unmerged $(git -C "$MAIN" rev-list --count main.."$sha") commits ahead"
+    fi
+    if [[ -z $reason ]]; then
+      files=$(git -C "$WT" status --short --ignore-submodules=all | wc -l | tr -d ' ')
+      git -C "$WT" ls-tree HEAD reference-code/ | while read -r mode type csha sub; do
+        [[ $type == commit && -e $WT/$sub/.git ]] || continue
+        git -C "$WT/$sub" status --porcelain -uno --ignore-submodules=all | read -r _ && files=$((files + 1)) || true
+      done
+      (( files == 0 )) || reason="uncommitted $files files"
+    fi
+    if [[ -z $reason ]] && grep -qx "$sha" "$TMP/chain"; then
+      age=$(( (NOW - $(git -C "$WT" log -1 --format=%ct)) / 3600 ))
+      (( age >= 24 )) || reason="cut from main $age hours ago"
+    fi
+    if [[ -z $reason ]]; then
+      if [[ -n ${users[$NAME]:-} ]]; then reason="in use by pid ${${=users[$NAME]}[1]}"
+      elif [[ -f $WT/runs/root.pids ]] && read -r _t _r < "$WT/runs/root.pids" && kill -0 "$_r" 2>/dev/null; then reason="a system is running (pid $_r)"
+      elif [[ $WT == $HERE ]]; then reason="this command runs from it"
+      elif [[ -f $MAIN_TREE/config/local.edn ]] && grep -qF ".worktrees/$NAME" "$MAIN_TREE/config/local.edn"; then reason="config/local.edn names it"
+      fi
+    fi
+    if [[ -n $reason ]]; then
+      print "kept $NAME: $reason"; nkept=$((nkept + 1)); r=${reason//[0-9]##/N}; why[$r]=$(( ${why[$r]:-0} + 1 ))
+    else
+      if [[ -n $DRY ]]; then print "would remove $NAME (${br:-detached} ${sha:0:10} landed)"
+      else
+        "$SELF" --remove "$NAME" >/dev/null && print "removed $NAME (${br:-detached} ${sha:0:10} landed)" || { print "kept $NAME: removing it failed"; continue }
+      fi
+      nrem=$((nrem + 1))
+    fi
+  done
+  print "${${DRY:+would remove}:-removed} $nrem worktrees, kept $nkept"
+  for r in ${(ko)why}; do print "  kept for \"$r\": ${why[$r]}"; done
+  exit 0
+fi
+
 if [[ ${1:-} == --at ]]; then
   WT=${2:-} SHA=${3:-} REPO=${4:-$MAIN} FROM=${5:-$MAIN}
   [[ -n $WT && -n $SHA ]] || die "usage: bin/worktree --at DIR COMMIT [REPO [FROM]]"
@@ -185,11 +258,15 @@ NAME=${1:-}; BASE=${2:-main}
 [[ -n $NAME && $NAME != seon* ]] || die "usage: bin/worktree NAME [BASE] (a name not starting with seon)"
 WT=$(wt_path "$NAME")
 BR=jolt/$NAME
-[[ ! -e $WT ]] || die "$WT exists"
+# whose it is: the branch's last commit and its age, so a session that picked a name another already
+# uses sees at once that the work there is not its own (two sessions chose "uncaught" within half an hour)
+last() { git -C "$MAIN" log -1 --format='%h %s (%cr)' "refs/heads/$BR" 2>/dev/null | cut -c1-120 }
+[[ ! -e $WT ]] || die "$WT exists, on $BR: $(last). If that is not your work, it is another session's: take another name"
 
 # a branch that exists (a worktree recreated after a move, a branch with unmerged work) is checked out
 # as it is; BASE only names the start of a new one
 if git -C "$MAIN" show-ref -q --verify "refs/heads/$BR"; then
+  print -u2 "worktree: $BR EXISTS and is checked out as it is: $(last). If that is not your work: bin/worktree --remove $NAME, and take another name"
   git -C "$MAIN" worktree add -q "$WT" "$BR"
 else
   git -C "$MAIN" worktree add -q -b "$BR" "$WT" "$BASE"
