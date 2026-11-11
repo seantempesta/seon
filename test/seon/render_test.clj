@@ -4184,9 +4184,11 @@
   {:malli/schema [:=> [:cat :map :map] [:vector :seon.model/message]]}
   [_ e] [{:role "user" :content (str "PLANTED-MODEL " (:lab.planted.note/text e))}])
 
-(deftest a-planted-entity-reaches-the-page-and-the-request
-  ;; docs/render.md#the-page: what an agent's pull joins reaches the page and the request by its schema's renders, no code naming it.
-  ;; Planted as data, as an agent would: a schema with both renders, joined by the agent's own pattern. Red until its task is done
+(defn- planted-world
+  "The planted world (docs/render.md#the-page): on a test db, as an agent would make it, a schema with both renders
+  (:lab.planted/note-fact, drawn by planted-note and planted-note-msgs), joined by the agent's own :seon.ctx/pattern, and one note
+  for agent lab/a1. Answers {:c the agent's pull :ix :page html :msgs the request's messages, printed}."
+  []
   (let [reg (fn [db k form] (let [r (my.schema/registration db k form false)]
                               (is (not (seon.contract/error? r)) (str k " registers: " (pr-str r)))
                               (d/db-with db (:tx r))))
@@ -4203,11 +4205,21 @@
         db (d/db-with db (seon.doc/load-tx db "docs" {seon.doc/system-page "# A stub of the system prompt\n\nBe brief."}))
         ix (seon.program/index-of-db db)
         c (:tree (seon.ctx/build ix db (seon.db/eid db :seon.agent/key "lab/a1") :b))
-        w (draw c seon.ctx/changes db #'ui/agent {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})
-        [page msgs] (try [(apply str (map :html (seon.fixtures/page-units w))) (pr-str (:messages (seon.ctx.wire/request w)))]
-                         (finally (r/dispose-walk! w)))]
+        w (draw c seon.ctx/changes db #'ui/agent {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
+    (try {:c c :ix ix :page (apply str (map :html (seon.fixtures/page-units w))) :msgs (pr-str (:messages (seon.ctx.wire/request w)))}
+         (finally (r/dispose-walk! w)))))
+
+(deftest a-planted-entity-reaches-the-page
+  ;; docs/render.md#the-page: what an agent's pull joins reaches the page by its schema's html render, no code naming it.
+  ;; Planted as data, as an agent would (planted-world). Red until task seon.render/a-planted-entity-reaches-the-page-and-the-request's page half is done
+  (let [{:keys [c ix page]} (planted-world)]
     (is (= ["the planted note"] (map :lab.planted.note/text (vals (:lab.planted.note/_agent c))))
         (str "the agent's pull holds the note it joins: " (pr-str (:lab.planted.note/_agent c))))
     (is (= :lab.planted/note-fact (r/entity-schema ix (first (vals (:lab.planted.note/_agent c))) nil)) "the note is its planted schema's entity")
-    (is (str/includes? page "PLANTED-HTML the planted note") "the note's html render draws it on the agent's page")
+    (is (str/includes? page "PLANTED-HTML the planted note") "the note's html render draws it on the agent's page")))
+
+(deftest a-planted-entity-reaches-the-request
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: what an agent's pull joins reaches the model's request by its schema's
+  ;; model render, no code naming it (planted-world). Red until the task's request half is done
+  (let [{:keys [msgs]} (planted-world)]
     (is (str/includes? msgs "PLANTED-MODEL the planted note") (str "the note's model render puts it in the request's messages: " msgs))))
