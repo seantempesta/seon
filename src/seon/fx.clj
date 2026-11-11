@@ -159,7 +159,7 @@
   :tree, the id of the whole tree as it is on disk (tree-id: git's own index makes it the cost of
   what changed), which stands for every file's content.
   With :since (the tree id of the last import, and no :paths; :since-dirs, the dirs that import read), only the files under dirs that differ from it, and every file of a dir it didn't read, are read, so what main merged and the tree never held stays main's. A tree git can no longer find reads whole.
-  Answers {:value {path text} :modes {path git mode, of each file the allow-list names} :commit sha :tree id :paths paths-when-read-by-them :pins {path sha}} or :seon.fx/io-error."
+  Answers {:value {path text} :modes {path git mode, of each file the allow-list names} :commit sha :branch name (nil when detached) :tree id :paths paths-when-read-by-them :pins {path sha}} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [root dirs paths since since-dirs]} :req}]
   (try
@@ -186,6 +186,8 @@
                                                  :when (source? p)]
                                              [p (slurp f)])))}
                      head (assoc :commit head
+                                 ;; the branch checked out, none when HEAD is detached: which system a page is (seon.render.ui/source-line)
+                                 :branch (git-try base ["symbolic-ref" "--short" "-q" "HEAD"])
                                  :tree now
                                  :pins (into {}
                                              (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
