@@ -1361,7 +1361,7 @@
                                                                                 :seon.error/message "no model provider"}}])
                 html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-o2"})) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
-            (is (str/includes? html "my.render/ctx") "beside what it sent: the record, the turn's first generated eval")))))))
+            (is (str/includes? html "my.agent/describe") "beside what it sent: the record described, the turn's first generated eval")))))))
 
 (deftest a-page-opened-before-its-first-turn-takes-it
   ;; the browser check of 4bc612cf89: a debug page opened at "no model turn yet" never showed the turns that
@@ -1537,7 +1537,7 @@
              :producer 'demo/f :owner-ns 'demo :evidence {:kind :error} :proofs [] :at-ms nil}]
     (is (= "<p class=\"text-xs\">error ×3 demo/f: boom (answered by demo/fix)</p>" (h/html (ui/problem-row {} row))))
     (let [html (h/html (ui/problems {:seon.render/index (seon.db/index)} {:t 1 :classes {:error {:n 1 :rows [(dissoc row :class)]} :red {:n 0 :rows []}}}))]
-      (is (str/includes? html "<summary class=\"cursor-pointer\">error 1</summary>"))
+      (is (str/includes? html "<summary class=\"cursor-pointer\" title=\"error\">errors: 1</summary>"))
       (is (str/includes? html "error ×3 demo/f") "its rows, each by the row's view")
       (is (not (str/includes? html ">red 0<")) "a class with no rows is left out"))
     (is (= ["none open"] (re-seq #"none open" (h/html (ui/problems {:seon.render/index (seon.db/index)} {:t 1 :classes {}})))))
@@ -2463,8 +2463,22 @@
 
 (deftest a-task-title-is-its-name-in-words
   ;; docs/render.md#the-page: a task's id as its title
-  (is (= "A long string" (ui/task-title "seon.print/a-long-string")))
-  (is (= "REPL reads" (ui/task-title "seon.repl/REPL-reads")) "capitals kept"))
+  (is (= "A long string" (ui/task-title {:seon.task/id "seon.print/a-long-string" :seon.task/plan "What exists: a long string."})))
+  (is (= "REPL reads" (ui/task-title {:seon.task/id "seon.repl/REPL-reads"})) "capitals kept"))
+
+;; docs/render.md#the-page: a person's request is titled by its first sentence as written (Data model, 2026-11-11): its task's name is that
+;; sentence's words (seon.root/request-name, seon.task/request-words), so the title is computed from the plan, never stored
+(deftest a-requests-title-is-its-first-sentence-as-written
+  (let [ask "Prove the already-merged demo.math/half function and its test: verify demo.math/half is on main. Then report."
+        id (str "request/" (seon.task/request-words ask))]
+    (is (= "Prove the already-merged demo.math/half function and its test: verify demo.math/half is on main"
+           (ui/task-title {:seon.task/id id :seon.task/plan ask})) "demo.math/half and the colon intact")
+    (is (= "Prove the already-merged demo.math/half function and its test: verify demo.math/half is on main"
+           (ui/task-title {:seon.task/id (str id "-2") :seon.task/plan ask})) "a name numbered because it was taken")
+    (is (= "Make things" (ui/task-title {:seon.task/id "request/make-things" :seon.task/plan "Something else entirely."}))
+        "a plan no longer opening with its name's words: the name, never a stale sentence")
+    (is (= "A long string" (ui/task-title {:seon.task/id "seon.print/a-long-string" :seon.task/plan "What exists: a long string."}))
+        "a task file's name, written by a person as its title, reads as itself")))
 
 (declare sessions-db tree-db)
 
@@ -3524,6 +3538,23 @@
     (is (str/includes? text "before you prove again") "to its last step")))
 
 ;; docs/render.md#a-citation-says-why-it-is-there: each kind of cite read cold
+(deftest a-cites-part-shows-a-callable-form
+  ;; docs/references.md#an-entity-cites: what a cite shows of how a function is called is a form an agent can evaluate. A call inside a
+  ;; macro's syntax-quote holds an unquote and is a template, never a call; a search hit whose line is only its own definition's opening
+  ;; says nothing its name does not, and shows its arglist
+  (let [macro "(defmacro doc [x] `(do (println (my.agent/doc-of ~x)) nil))"
+        both (str macro "\n(defn g [] (my.agent/doc-of \"docs/x.md\"))")
+        v {:var/doc "What it names, as data." :var/form {:form/src "(defn doc-of [x] x)"}
+           :callers {1 {:form/src macro :form/defines {2 {:var/name 'my.agent/doc :var/meta #{:macro}}}}}}
+        part (r/part-text ['seon.render.ui/cite {} (#'ui/var-hiccup 'my.agent/doc-of v false)])
+        hit-line #'ui/hit-line]
+    (is (nil? (ui/call-in macro 'my.agent/doc-of)) "a template is no call")
+    (is (= "(my.agent/doc-of \"docs/x.md\")" (ui/call-in both 'my.agent/doc-of)) "a real call after it in the same source is the one shown")
+    (is (not (str/includes? part "~")) (str "a cited function's part holds no template: " part))
+    (is (not (str/includes? part "A real call")) "and says nothing of a call when it has none to show")
+    (is (= "([v])" (hit-line "(defn- doc-view" 'my.agent/doc-view (constantly "(defn- doc-view [v] v)"))) "a hit whose line is its own definition's opening shows its arglist")
+    (is (= "a line that says why it matters" (hit-line "a line that says why it matters" 'my.agent/doc-view #(throw (ex-info "read" {})))) "any other line is shown as it is, its source never read")))
+
 (deftest a-cited-thing-is-drawn-by-what-it-is
   (let [[db aid] (cited-world)
         tree (:tree (seon.ctx/build (seon.db/index) db aid :b))
@@ -4397,7 +4428,8 @@
     (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "1233 forms loaded"))
     (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "40"))
     (is (str/includes? (tile {:boot {:program {:loaded 0 :ms 5}}}) "image held main's program"))
-    (is (str/includes? (tile {}) "program load not measured"))))
+    (is (str/includes? (tile {:boot {}}) "image held main's program") "a boot that loaded nothing over its image")
+    (is (not (str/includes? (tile {}) "program")) "no boot read yet: nothing said")))
 
 
 (deftest a-sender-is-drawn-by-who-it-is
@@ -4450,3 +4482,61 @@
     (is (not (str/includes? r "proof-red")) "no keyword read raw")
     (is (= "root restarted" (:reason (ui/standing {} {:seon.task/outcome :cap :seon.task/reason "root restarted"})))
         "a reason with no data behind it is its string")))
+
+(deftest describe-says-what-a-value-holds-by-path
+  ;; docs/agent.md#looking-at-what-you-pulled (owner, 2026-11-11: "Instead of dumping the whole @ctx value we are now doing this more
+  ;; metadata approach"): a value's paths and what each holds, never the value shown; keys, never positions; a plain value has no schema
+  (let [v {:a 1 :n "demo/f" :s (apply str (repeat 20 "a word ")) :m {:b [1 2 3]} :ms (sorted-map 5 {:db/id 5 :x 1} 3 {:db/id 3 :x 2})}
+        es (r/describe (seon.db/index) v [] 2)
+        by (into {} (map (juxt :path :holds)) es)]
+    (is (= 1 (by [:a])) "a scalar as itself")
+    (is (= "demo/f" (by [:n])) "a name as itself")
+    (is (= {:chars 140} (by [:s])) "text as its size, however short: what it says is read by its path")
+    (is (= {:map 1 :keys [:b]} (by [:m])) "a map as its count and keys")
+    (is (= {:vector 3} (by [:m :b])) "one level in, at depth 2")
+    (is (= {:members 2 :ids [3 5]} (by [:ms])) "a map keyed by ids as its members")
+    (is (every? #(not= ::none (get-in v (:path %) ::none)) es) "every entry's path reads back by get-in")
+    (is (not-any? :schema es) "a plain value has no schema")
+    (is (= [{:path [:a] :holds 1}] (r/describe (seon.db/index) v [:a] 2)) "a path to a scalar describes it alone")))
+
+(deftest an-answer-says-what-it-is-and-what-reads-more
+  ;; docs/render.md#a-render-is-a-value-printed-once (Point's ruling 2026-11-11, one way for every tool's answer): a value whose schema
+  ;; says what brings more (:seon.render/more) prints as what it is (its description's first sentence), the value, and the forms that
+  ;; act on it, each naming the answer by its handle; a plain value prints as itself: (+ 1 1) answers 2
+  (let [ix (seon.db/index)
+        render #(r/model ix %)
+        es (with-meta [{:path [:a] :holds 1}] {:seon.render/schema :my.agent/described})
+        text (seon.print/response-text {:handle 'result/e1 :value es} render)
+        plain (seon.print/response-text {:handle 'result/e2 :value 2} render)]
+    (is (str/includes? text "What a value holds, by path") (str "what it is, from its schema: " text))
+    (is (not (str/includes? text "See docs/")) "the first sentence only")
+    (is (str/includes? text "[:a]") "the value")
+    (is (str/includes? text "(get-in result/e1 path)") "a form that reads more, naming the answer by its handle")
+    (is (not (str/includes? text "(get-in v path)")) "never by a placeholder")
+    (is (and (str/includes? plain ":value 2") (not (str/includes? plain ":is"))) (str "a plain value is itself: " plain))))
+
+;; docs/ctx.md#the-pattern: root's evals are a window (the newest :seon.config.ctx/window); its line says how many it did not pull, in the printer's words
+(deftest roots-evals-say-what-their-window-left-out
+  (let [evals (fn [held joined] (with-meta (into {} (for [i (range held)] [(- 1000 i) {:seon.eval/id (str "e" i)}])) {:seon.ctx/count joined}))
+        summary (fn [v] (let [[_ _ [_ _ s]] (seon.render.ui/root-evals {:seon.ctx/ctx {:evals v}})] s))]
+    (is (= "20 evals sent to root, 92 not pulled" (summary (evals 20 112))))
+    (is (= "20 evals sent to root" (summary (evals 20 20))) "a window holding every member says nothing left out")
+    (is (= "20 evals sent to root" (summary (with-meta (evals 20 20) nil))))))
+
+;; docs/health.md: a problem class reads in words, said after its count ("168 tasks that cite no section"), from :seon.problems/class's
+;; :seon.status/title; the keyword stays the data (Point, 2026-11-11: the problems tile listed "uncited-task 168")
+(deftest a-problem-class-reads-in-words
+  (let [classes (drop 2 (get seon.contract/forms :seon.problems/class))
+        words (:seon.status/title (seon.contract/properties :seon.problems/class))
+        html (seon.web.html/html (ui/problems {} {:t 1 :open #{} :classes {:uncited-task {:n 168 :rows [{:producer nil :owner-ns nil :evidence {} :proofs [] :answered-by [] :at-ms nil}]}}}))]
+    (is (= #{} (set (remove words classes))) "every class has its words: a new class is never a bare keyword")
+    (is (str/includes? html "tasks that cite no section: 168") html)
+    (is (not (re-find #">uncited-task" html)) "no bare keyword drawn")))
+
+;; docs/render.md#the-page: a number the system's process tile shows says what it measures (Point and Web, 2026-11-11: "fork lag 23952 ms"
+;; read as broken, "program load not measured" read as a gap): fork lag carries its meaning, and a boot that loaded no forms says so
+(deftest the-process-tile-says-what-fork-lag-is
+  (let [html (h/html (ui/process-tile {:seon.ctx/ctx {:process {:fork-server {:lag-ms 23952} :boot {}} :seon.root/boot "b1"}}))]
+    (is (str/includes? html "how long a commit takes to reach the fork server") html)
+    (is (not (str/includes? html "not measured")) "no gap where the boot loaded nothing")
+    (is (str/includes? html "the image held main") html)))
