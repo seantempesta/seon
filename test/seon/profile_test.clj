@@ -188,11 +188,13 @@
   (let [deep (fn deep [n] (if (zero? n) 0 (inc (deep (dec n)))))
         window #(let [a0 (profile/alloc-bytes) _ (deep 20000) a1 (profile/alloc-bytes)] (- a1 a0))
         warm (do (window) (window))
-        cold (do (System/gc) (window))]
-    ;; under 32 KB, not equal: a collection landing inside the call cuts its stack into 64 B continuations the runtime still
-    ;; counts to the caller (7,040 B seen; task seon.profile/a-stack-cuts-continuations-are-not-the-callers-bytes), while a stack
-    ;; segment counted is 65 KB or more, what this test is named for
-    (is (<= (Math/abs (- cold warm)) 32768) (str "warm " warm " B, after a collection " cold " B")))
+        cold (do (System/gc) (window))
+        ;; a collection landing INSIDE the call: it finds the stack 20,000 frames deep and makes it one multi-shot
+        ;; continuation, which the way back cuts piece by piece, a 64 B continuation a cut (7,040 B read here before
+        ;; the runtime left a stack cut's continuation out of the count, as it leaves the stack out)
+        collects (fn collects [n] (if (zero? n) (do (System/gc) 0) (inc (collects (dec n)))))
+        inside (let [a0 (profile/alloc-bytes) _ (collects 20000) a1 (profile/alloc-bytes)] (- a1 a0))]
+    (is (= warm cold inside) (str "warm " warm " B, after a collection " cold " B, a collection inside the call " inside " B")))
   ;; a try is a call/1cc, which takes a new stack when the cache is empty: 144 B warm and
   ;; 65,664 B after a collection, so seon.vector/near read 65.5 KB more for each collection
   ;; in its window (datahike.datom/compare-value's try, on every f16 datom it compares)
