@@ -202,6 +202,58 @@ Asked by the question tool whether an agent's fibers take the safe paths at 11 t
 
 "We can monitor the system though and can detect when this happens ... let's schedule adding good checks in when we deploy it and we have it write to health/problems." To be stated in [health](health.md) by the Tests and Optimization sessions.
 
+### The standing system and its store are for use; erasing it stays his (owner, 2026-11-11)
+
+Asked whether agents may work on the standing store once the merge gate is right, since it was treated as read-only: "What? the database is read only? Why? No. Just use it!" Agents work and merge on the standing system, sessions attach and evaluate through the MCP tools, and the tree branches of a session live there; the rule of read-only evals is gone. What stays the owner's is erasing the store. Stated in AGENTS.md §0 and [sessions](sessions.md#sessions-own-their-areas).
+
+### The test suite is for the online version, in the db, and the workflow is the agents' (owner, 2026-11-11)
+
+"Confirm we are building the test suite for the runtime version of seon not the offline test version that's processing files, but the online version that's processing our code in the db". And, of the worktree path a session had been proving through: "Nope. I don't want the worktrees version that's a temporary workaround for you and your agents, but we are designing this for seon agents or claude agents using the mcp tools". So the branch in the db is the program under test and an agent on it works through `seon_attach`, `seon_eval`, `seon_prove` and `seon_done`, its changes evals and facts, never files. Not yet stated in the wiki.
+
+### Worktrees stay for real work; one session is pushed through the MCP tools to mine problems (owner, 2026-11-11)
+
+"Yeah keep pushing a session through and use it to mine problems. Don't slow down real work though I know your agents prefer file editing. Just keep the worktrees and index it like I said into a branch and then you can run it from the mcp tools". A worktree is imported into a branch, then loaded and run from the MCP tools; every fall-back to a file is a finding mailed to the session that owns the cause. Not yet stated in the wiki.
+
+### Seon's own calls carry an intent and a good model message (owner, 2026-11-11)
+
+"Seon's own calls should carry an intent too. So when we have an openai-compat render we need them for all the parts. We should have a good model message too. Set a good example for the agent". And, of the tool's name, asked by the question tool: "repl" (he had asked "Isn't the model tool called eval? Update all of the old docs"). Stated in [render](render.md) (the page as a call Seon made) and [model](model.md#one-tool-repl).
+
+### Seon's calls are stored evals, and deterministic (owner, 2026-11-11)
+
+First, of the page and diff calls: "I just want them to be dynamically there always even if we wipe the context so it feels like rendered to me and we should be able to render all the way down into the model's generated tool calls and responses right?" Then, of whether they are stored: "if they are evals of course we store the results just like a normal eval"; "return useful data the agent can even reuse ... by referencing the result/id"; and "I just want it to be deterministic and to work" (relayed by the managing session), which made equal values print the same bytes. Stated in [ctx](ctx.md) (an eval of `@ctx` is kept as its basis); the system making the calls as stored evals is not yet built.
+
+### A render shows that context exists and how to pull more (owner, 2026-11-11)
+
+"Don't display the functions in full. Make sure the renders are all smart and adaptable. Agents need to know that context exists and we need explanations and short instructions that the agent can use to pull in more context." Not yet stated in the wiki (the managing session's reading: each render says what it shows, how much it left out, and the form that brings the rest).
+
+### An agent's entity holds what is present; a render derives the rest (owner, 2026-11-11)
+
+"If just displaying the agents ctx value is too huge then we are shoving entirely too much data in the agents record and we need to have the data model agent do an audit for data that needs to be present vs derived in a render function". The audit is the Data model session's. Not yet stated in the wiki as a rule.
+
+### The first point shows `describe` of the agent's context, a general skill for any value (owner, 2026-11-11)
+
+"Okay so we are going with this. Instead of dumping the whole @ctx value we are now doing this more metadata approach and context is to iterate on this until they get signal for an agent understanding what the fuck we are talking about and updating data in the @ctx atom". Before it, of how: "I mean we need to make a function to render this and we just call that instead of doing @ctx"; of its reach: "We explain that the @ctx atom output can be large, but here's how the agent can extract metadata about the value! How about that we teach them a general skill and learn how to fish on any other value."; and "Can we lookup schemas and docs through it too so it really is a good description of what the data is without displaying the data?" The function is `describe`, on any value. The default printer prints a value as the value. Not yet stated in the wiki.
+
+### A tool's answer is the plain value, its instructions printed with it from its schema (owner, 2026-11-11)
+
+Having read two forms side by side: "oh I like yours better already", of this one: "the value is the plain entries, and the instructions are printed with it from its schema." Not yet stated in the wiki.
+
+### An agent is set up in its task's namespace on purpose, and the namespace says so (owner, 2026-11-11)
+
+"I think we need to be clearer that we are setting them up in that namespace because we are auto pulling in context from that namespace. So we need a namespace render that pulls in useful data for the agent about their namespace and be clear that any def and defn defn- deftest schema register! and .. I forget what else it works as a real repl works." Not yet stated in the wiki.
+
+### Every state converts to a completed task (owner, 2026-11-11)
+
+"Why is the plan stale? Every state should be convertable to a completed task. Where are we with the context edit agent course correcting and restarting the agent with better context and then reviewing it (the chained tasks)?" Stated in part in [tasks](tasks.md#a-refine-curates-its-own-task); the rerun is not yet automatic.
+
+### The fiber fix lands with its bytes named (owner, 2026-11-11)
+
+The fiber tip costs +18% bytes (16 MB on a lazy-heavy eval) beside its +5% ticks, which he had already agreed to pay ("Pay it", above); asked about the bytes, he answered "sure" (relayed by the managing session; no further quote kept). It lands as a named regression with its owner. Stated in [forks](forks.md#jolt) by the Deep fixes session.
+
+### AGENTS.md is not an append log (owner, 2026-11-12)
+
+"You don't have to update AGENTS.md at the time. I do not want a long append log of instructions that won't be evergreen. Definitely check it for out of date information and don't put in things that aren't important that agents might not find in the wiki on their own". Stated in [sessions](sessions.md#the-way-improves).
+
 ## 2026-11-10 rulings
 
 The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
