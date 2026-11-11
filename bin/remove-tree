@@ -1,11 +1,6 @@
 #!/bin/zsh
-# bin/remove-tree PATH ...   remove each path and all it holds, as `rm -rf`, after releasing the locks of
-# every LMDB store in it: the shell's way to delete a directory that may hold a store (seon.lib/remove-tree!
-# is the program's). A store whose last user exited without closing it (a kill, an exit with the store
-# open) keeps its SysV semaphore set until its next open, which never comes once its files are gone:
-# deleted with a plain rm, its set stays until reboot, and at kern.sysv.semmns every open fails (ENOSPC).
-# A store a live process still holds is left to it: its own close removes the set
-# (docs/failure-points.md#lmdb-robust-locks). Runs target/remove-tree (native/remove_tree.c, bin/build lmdb).
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
-[[ -x $ROOT/target/remove-tree ]] || nice -n 15 "$ROOT/bin/build" lmdb >&2 || exit 1
-exec "$ROOT/target/remove-tree" "$@"
+# bin/remove-tree PATH ...   remove each path and all it holds, as `rm -rf` (a symbolic link removed, never entered):
+# the shell's way to delete a directory that may hold a store; seon.lib/remove-tree! is the program's, which first
+# closes the stores its own process has open there. Nothing of an LMDB store outlives its files: its locks are
+# record locks on its lock file (docs/failure-points.md#lmdb-locks).
+exec rm -rf -- "$@"
