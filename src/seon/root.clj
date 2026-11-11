@@ -130,6 +130,13 @@
 
 (declare deliver-rid answer-taken)
 
+(def ^:private not-restored
+  "What a spawn at a commit (:commit in its opts) does not restore, as the spawn's answer says it: only a session's definitions are in the store.
+  See docs/storage.md#compiled-code."
+  ["the system's own code (src): the binary is main's"
+   "main's changes since the session's base"
+   "host state: atoms, open files, sockets, fibers"])
+
 (declare answer-spawn insert-evals start-spawn no-room binary-program binary-current kill!)
 
 (defn- record-death
@@ -160,7 +167,7 @@
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :any] :seon.root/api-state]}
   [st o id r]
   (if-let [p (get-in st [::spawning id])]
-    (-> (reply! st o p r) (update ::spawning dissoc id))
+    (-> (reply! st o p r) (update ::spawning dissoc id) (update ::restored dissoc id))
     st))
 
 (defn- deliver-rid
@@ -224,7 +231,8 @@
         e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))
         ;; its hello: the spawn is answered now, the agent ready
         ;; its hello answers the spawn, whatever a request sent before it made its status
-        (:ready m) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)))
+        (:ready m) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)
+                                                              (get-in st [::restored id]) (assoc :not-restored not-restored)))
         ;; and it is the agent's first fact: a message from Seon (the system entity) to it, in its conversation as any message is, written
         ;; as a plain write (it wakes nothing): the agent's page and context show it from the pull they already make
         ;; once per standing set of errors: its id is the agent's and the errors', so a resume or a second hello that meets the same
@@ -443,10 +451,13 @@
   (let [[st aid fd] (start-agent st opts)
       branch (get-in st [:agents aid :branch])]
   ;; the agent's key named here, in root's boot: the child reads none from main
-  (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}
-                           :key (name aid)})
+  (step/out! o :to-writer (cond-> {:op :spawn :agent aid :branch branch :task (:task opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}
+                           :key (name aid)}
+                    ;; a restore at a commit of a session's branch (docs/storage.md#compiled-code): the writer makes the branch from it
+                    (:commit opts) (assoc :commit (:commit opts))))
   ;; answered at its hello (set-agent's :ready), or the end it meets first
   (cond-> (assoc-in st [::spawning aid] p)
+    (:commit opts) (assoc-in [::restored aid] true)
     (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts)))))
 
 (defn stale-binary
@@ -1790,7 +1801,8 @@
   "Fork an agent from the fork server onto a new branch of main; answers its id once it is
   ready (its hello), so what is sent to it next reaches a live agent; an agent that ends first
   (refused, stopped, or died, with its exit status) throws that end. opts {:branch kw :task
-  string}; an existing :branch is resumed."
+  string}; an existing :branch is resumed; :commit (a uuid) with a new :branch restores the session at that commit of its branch,
+  the answer of request! naming what is not restored (not-restored)."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/spawn-opts] :seon.agent/id]}
   [sys opts]
   (let [r @(request! sys 'spawn! nil opts)]
