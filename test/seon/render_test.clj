@@ -1346,7 +1346,7 @@
                                                                                 :seon.error/message "no model provider"}}])
                 html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-o2"})) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
-            (is (str/includes? html "my.render/page") "beside what it sent: the page, the turn's generated eval")))))))
+            (is (str/includes? html "my.render/ctx") "beside what it sent: the record, the turn's first generated eval")))))))
 
 (deftest a-page-opened-before-its-first-turn-takes-it
   ;; the browser check of 4bc612cf89: a debug page opened at "no model turn yet" never showed the turns that
@@ -1716,16 +1716,16 @@
   ;; docs/render.md#the-debug-page-is-the-wire-request: a row a message, typed by its wire role, and opening a row
   ;; replaces its line; its calls' arguments are the wire's JSON read as data
   (let [ms [{:role "system" :content "# Help\n\nread this"}
-            {:role "assistant" :tool_calls [{:id "a" :function {:name "eval" :arguments "{\"intent\":\"Read it\",\"code\":\"(first-call)\"}"}}]}
+            {:role "assistant" :tool_calls [{:id "a" :function {:name "repl" :arguments "{\"intent\":\"Read it\",\"code\":\"(first-call)\"}"}}]}
             {:role "tool" :tool_call_id "a" :content (str/join " " (repeat 8000 "word"))}]
         draw (fn [opened] (h/html (ui/debug-turn {:seon.render/index (seon.db/index) :unit "d-turn"} {:turn 1 :agent "a1" :view "a1" :origin :model :usage {} :opened opened
                                                                    :body {:messages ms} :sources [[[:section 1 1]] [[:eval "e1"]] [[:eval "e1"]]] :new [false false true]})))
         h (draw #{})]
     (is (= ["system" "assistant" "tool"] (mapv second (re-seq #"data-role=\"(\w+)\"" h))) "a row a message, in the wire's order, by its role")
     (is (not-any? #(str/includes? h %) ["tool_calls[0]" "arguments.code"]) "a closed row is its line: its fields are drawn when opened")
-    (is (str/includes? h "eval {") "an assistant's line is its calls as sent")
+    (is (str/includes? h "repl {") "an assistant's line is its calls as sent")
     (let [o (draw #{"d-turn-o1"})]
-      (is (str/includes? o "tool_calls[0] · eval · a") "opened, the call's fields as sent")
+      (is (str/includes? o "tool_calls[0] · repl · a") "opened, the call's fields as sent")
       (is (str/includes? o "arguments.code") "its arguments by their wire names")
       (is (str/includes? o "(first-call)"))
       (is (str/includes? o "group-open:hidden") "the line gives way to the fields, so nothing is shown twice"))

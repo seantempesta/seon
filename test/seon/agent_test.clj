@@ -1127,9 +1127,9 @@
         "the page is no call; each request holds the one before and the records added")
     (is (= [true true] prefix) "byte for byte")
     (is (= [] by) "Seon ran no eval: the page is its message")
-    (is (= [1 1 1] pages) "the page whole once, in the first request; nothing it shows moved after, so no other message")
+    (is (= [2 2 2] pages) "the record and the page whole once, in the first request; nothing they show moved after, so no other message")
     (is (every? (fn [[sent redraw]] (and (string? sent) (= sent redraw))) hashes) (str "the hash a turn recorded is its redraw's: " (pr-str hashes)))
-    (is (str/starts-with? first-code "(my.render/page {:commit #uuid \"") "the first request holds the page as the call (my.render/page p)")
+    (is (str/starts-with? first-code "(my.render/ctx {:commit #uuid \"") "the first request holds the record first, as the call (my.render/ctx p), then the page")
     (is (str/includes? first-page "Your task") "the task's part")))
 
 (deftest a-printed-page-call-runs-at-the-agents-repl
@@ -1219,6 +1219,24 @@
     (is (= t was) "the commit at t itself needs no walk")
     (is (true? as-of?) "past what collection kept, a db as of t")))
 
+;; docs/ctx.md#what-the-model-reads-and-what-the-page-renders: the record the first request shows as (my.render/ctx p) is the agent's own
+;; @ctx, the live atom, printed whole: the same thing it reads when it types @ctx, never a filtered copy (owner, 2026-11-11)
+(deftest the-record-shown-is-the-live-ctx
+  ;; after a turn, inside one eval: the live atom and (my.render/ctx p) at the agent's db's own point are the same value (red
+  ;; before: the cold read named no branch, and a patch dropped a member's link transaction). Their printed bytes can still differ
+  ;; by a map's key order (an array map prints in the order its keys were added: :same-bytes), the printer's to settle
+  (let [[_ same]
+        (in-agent (fn [{:keys [task]}]
+                    [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
+                     (str "(let [db (seon.agent/db) whole #(seon.print/text (vary-meta % assoc :seon.print/full true))"
+                          " lv @seon.ctx/ctx sv (my.render/ctx {:commit (datahike.api/commit-id db) :t (:max-tx db)}) live (whole lv) shown (whole sv)]"
+                          " {:equal (= lv sv) :same-bytes (= live shown) :sizes [(count live) (count shown)] :conversation? (some? (:seon.model-call/_agent @seon.ctx/ctx))"
+                          " :at (when (not= live shown) (let [i (or (first (keep-indexed (fn [i [a b]] (when (not= a b) i)) (map vector live shown))) (min (count live) (count shown)))]"
+                          " [(subs live (max 0 (- i 100)) (min (count live) (+ i 150))) (subs shown (max 0 (- i 100)) (min (count shown) (+ i 150)))]))})")])
+                  {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})]
+    (is (:conversation? (:value same)) (str "a turn in, so the record holds the conversation's joins: " (pr-str same)))
+    (is (true? (:equal (:value same))) (str "the record shown at a point is the live @ctx there, as a value: " (pr-str (:value same))))))
+
 ;; docs/render.md#a-change-is-edits-by-name: a wake is told what moved since the page it last showed, never the page again: a second whole page
 ;; costs about 4k tokens a wake
 (deftest a-wake-shows-what-moved-not-the-page-again
@@ -1230,7 +1248,7 @@
                      "(count (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/origin :model]] (seon.agent/db)))"])
                   {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})]
     (is (= 2 (:value calls)) "the second wake took a turn, so it had the chance to show the page")
-    (is (= 1 (:value whole)) "the page whole once, across both wakes: nothing moved, so the second turn adds no page message")))
+    (is (= 2 (:value whole)) "the record and the page whole once, across both wakes: nothing moved, so the second turn adds no page message")))
 
 (deftest a-call-after-one-that-threw-still-runs
   ;; docs/prompt.md: a reply's calls run in order, each whatever came before it (owner, 2026-11-08: "I want us to run every eval. Turns are precious
@@ -2494,13 +2512,13 @@
     (is (apply = turns) (str "no more turns while nothing arrives: " (pr-str turns)))))
 
 (deftest a-reply-with-no-evals-stops-with-turns-left
-  ;; docs/model.md#one-tool-eval: a reply with text and no call is its message alone: nothing runs and the
+  ;; docs/model.md#one-tool-repl: a reply with text and no call is its message alone: nothing runs and the
   ;; agent waits, with turns left
   (let [reply (fn [text calls] {:usage {:prompt_tokens 10 :completion_tokens 2}
                                 :choices [{:finish_reason "stop" :message (cond-> {:content text} calls (assoc :tool_calls calls))}]})
         text-only (seon.model/reply-of (reply "Nothing to run; I wait for you." nil) 1 100)
-        one-eval (seon.model/reply-of (reply "Reading." [{:id "c1" :function {:name "eval" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
-        no-text (seon.model/reply-of (reply nil [{:id "c1" :function {:name "eval" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
+        one-eval (seon.model/reply-of (reply "Reading." [{:id "c1" :function {:name "repl" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
+        no-text (seon.model/reply-of (reply nil [{:id "c1" :function {:name "repl" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
         [end] (in-agent #(vector (str "(seon.turn/work! {:task " (pr-str (:task %)) " :max-turns 5})"))
                           {:config {:seon.config.ai/script 'seon.fixtures/text-reply}})]
     (is (= ["Nothing to run; I wait for you." nil] [(:text text-only) (:tool-calls text-only)]) "text and no call: its message, no call")
@@ -2561,7 +2579,7 @@
     (is (= :error (:outcome (:value end))) (pr-str end))
     (is (= 16 (count (:sent-hash (:value turn)))) "the hash of the bytes it sent, written before the call")
     (is (= (:sent-hash (:value turn)) (:redrawn (:value turn))) "and its request made again from its records is those bytes")
-    (is (= ["system" "user" "assistant" "tool"] (:roles (:value turn))) "the system message, what opens the session, then the page as the call Seon made and its answer (seon.ctx.wire/page-diff-msgs)")
+    (is (= ["system" "user" "assistant" "tool" "assistant" "tool"] (:roles (:value turn))) "the system message, what opens the session, then the page as the call Seon made and its answer (seon.ctx.wire/page-diff-msgs)")
     (is (not (str/includes? (str (peek (:read (:value turn)))) "turns")) (str "the page announces no cap: " (peek (:read (:value turn)))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 
