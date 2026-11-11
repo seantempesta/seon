@@ -817,20 +817,24 @@
     (when (.isFile f) (parse-long (str/trim (slurp f))))))
 
 (defn- verdict-listing
-  "Every verdict file under dir as [file bytes mtime-ms]: the one count of the cache, by metadata
-  alone (a staged file or the .size ledger is not a verdict)."
+  "Every verdict file under dir as [file bytes mtime-ms red?]: the one count of the cache, by metadata alone. A verdict is a
+  test's green or red, <ns>/<name>/<digest>.pass.edn or .red.edn; nothing else is (a staged file, the .size ledger, the last
+  full run's record full-run.edn beside them)."
   {:malli/schema [:=> [:cat :string] [:vector :any]]}
   [dir]
-  (vec (for [^java.io.File f (files-under dir) :when (str/ends-with? (.getName f) ".edn")]
-         [f (.length f) (.lastModified f)])))
+  (vec (for [^java.io.File f (files-under dir)
+             :let [n (.getName f) red? (str/ends-with? n ".red.edn")]
+             :when (or red? (str/ends-with? n ".pass.edn"))]
+         [f (.length f) (.lastModified f) red?])))
 
 (defn- evict!
   "Keep the cache at dir within max-bytes after a write of added bytes (the files at kept, never
   removed). The size is kept in the cache's .size ledger, so a write that leaves the cache under the
   bound reads and rewrites one small file and counts nothing; past it (or with no ledger) the
-  verdict files are counted once, and the least recently used (the oldest mtime: seon.fx/stored-results
-  touches a verdict it reads) go first, greens and reds alike, until the cache is :seon.config.proofs/results-evict-percent
-  under the bound, so the writes after it count nothing, and the ledger is set to the true size. Other writers' additions and removals make the ledger a lower or
+  verdict files are counted once, and the least recently used greens (the oldest mtime: seon.fx/stored-results
+  touches a verdict it reads) go first, until the cache is :seon.config.proofs/results-evict-percent under the bound, so the
+  writes after it count nothing, and the ledger is set to the true size. A red is counted and never deleted (the owner's
+  ruling: a red's fix is a new digest, docs/merging.md#verdicts-are-a-cache): reds alone past the bound leave the cache over it. Other writers' additions and removals make the ledger a lower or
   higher guess, corrected by the next count. A file that would not delete stays (a cache a little
   over, never an error). Answers nil."
   {:malli/schema [:=> [:cat :string :int [:set :string] :int] :nil]}
@@ -843,7 +847,7 @@
       (let [files (verdict-listing dir)
             size (reduce + (map second files))
             low (- max-bytes (quot (* max-bytes (cfg/value :seon.config.proofs/results-evict-percent)) 100))]
-        (ledger! (loop [[[^java.io.File f n] & more] (if (> size max-bytes) (sort-by #(nth % 2) (remove #(kept (str (first %))) files)) []) size size]
+        (ledger! (loop [[[^java.io.File f n] & more] (if (> size max-bytes) (sort-by #(nth % 2) (remove #(or (nth % 3) (kept (str (first %)))) files)) []) size size]
                    (if (and f (> size low))
                      (recur more (if (.delete f) (- size n) size))
                      size)))))))
