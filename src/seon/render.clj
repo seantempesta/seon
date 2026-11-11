@@ -23,7 +23,7 @@
     3. the one value printer (seon.print/print-value), the default render.
   A nested value renders by a call ([render opts v] in hiccup, or render's result)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.db :as pdb :refer [parents own-keys extends? most-specific]] [seon.program :as program] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.error :as err] [seon.db :as pdb :refer [parents own-keys extends? most-specific]] [seon.program :as program] [seon.print :as print] [seon.print.select :as select] [seon.config :as config]
             [clojure.string :as str] [clojure.walk] [datahike.api :as d] [datahike.reads :as reads] [datahike.db.utils :as dbu] [seon.web.html :as h] [seon.ratom :as ratom] [seon.profile :as profile] [editscript.core :as ed]))
 
 (defn props
@@ -413,6 +413,15 @@
      out nil)
     @found))
 
+(defn- thrown-line
+  "Render r's throw e said in one line a reader takes as text: the render, what was thrown, and the fn it was thrown in when that is
+  another (seon.error/thrown-in), so whoever reads a component's defect, the model or a person, sees what threw and where without
+  walking its data. See docs/errors.md#nothing-crashes-and-nothing-hangs."
+  {:malli/schema [:=> [:cat :symbol :seon.host/throwable] :string]}
+  [r e]
+  (let [in (err/thrown-in e)]
+    (str r " threw: " (or (ex-message e) (str e)) (when (and in (not= in r)) (str " (in " in ")")))))
+
 (defn render!
   "Component [f opts & children] drawn in walk w: its marker [::child key], its output kept in w's
   cache. Skipped when its children are = to last time's (views by source and path) and nothing it
@@ -446,7 +455,8 @@
             ;; in the entity's own component alone, the one its schema's render runs (`declared-var`, the branch's own when it
             ;; redefines it): a part handed the same view ([#'agent-parts {} c]) draws a piece of the entity's page and answers no
             ;; output for it, so the model render runs once a walk, never once a part
-            fs (when (and s0 (= f (declared-var ix s0))) (into {} (keep (fn [o] (some->> (render-for ix s0 o) requiring-resolve (vector o)))) others))
+            ;; or the entity's own render (its :seon.render/hiccup, render-var-of): a stage is the entity's component as its schema's render is
+            fs (when (and s0 (or (= f (declared-var ix s0)) (= f (some-> (ratom/realize (:seon.render/hiccup e0)) resolve)))) (into {} (keep (fn [o] (some->> (render-for ix s0 o) requiring-resolve (vector o)))) others))
             ;; output o's answer: its values, and each entity or call it places run as a component (the one the hiccup placed is a
             ;; hit; a call answers o), kept as its marker, so the parent orders and each child's answer stays its own
             place (fn [o env' xs] (mapv (fn [x] (if-let [[ef eo] (entity-render ix x)]
@@ -498,7 +508,7 @@
                                        (catch Throwable e
                                          (when (:interrupted (ex-data e)) (throw e))
                                          (let [defect (contract/error :seon.render/component-defect #'render!
-                                                                      (str (symbol of) " threw: " (or (ex-message e) (str e)))
+                                                                      (thrown-line (symbol of) e)
                                                                       (cond-> {:seon.error/in (symbol of)} (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
                                            (vswap! (:defects w) conj defect)
                                            ;; the error answers this output by the render its schema names for it (a model render of an error, as
@@ -514,13 +524,15 @@
                         ;; an interrupt is no defect of this render: it passes
                         (when (:interrupted (ex-data e)) (throw e))
                         (let [defect (contract/error :seon.render/component-defect #'render!
-                                                     (str (symbol f) " threw: " (or (ex-message e) (str e)))
+                                                     (thrown-line (symbol f) e)
                                                      (cond-> {:seon.error/in (symbol f)}
                                                        (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
                           (vreset! kept nil)
                           ;; health sees it (`take-defects!`)
                           (vswap! (:defects w) conj defect)
-                          (with-id [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index @(:index w)} defect]
+                          ;; its line first, as text (what threw and where), then the error as data
+                          (with-id [:section [:p (:seon.error/message defect)]
+                                    [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index @(:index w)} defect]]
                                    {:id id :class "err" :wire/role "user"}))))
             draw #(if (and db? (not (:once w))) (let [[out rs] (d/with-reads one)] (vreset! reads rs) out) (one))
             a0 (profile/alloc-bytes)
@@ -1176,13 +1188,15 @@
   [ix e] (when e (or (:seon.ctx/pattern e) (some->> (entity-schema ix e nil) (#(schema-property ix % :seon.ctx/pattern))))))
 
 (defn render-var-of
-  "The render var of entity e (a ctx's tree, an entity pulled by its pattern): its entity schema's :seon.render/hiccup (`entity-schema`,
-  `declared-var`, so a branch that redefines that var renders by its own), the render a walk of e is rooted on as [f {} view]. An entity
-  no schema names a render for throws :seon.render/no-render naming its identity attributes. See docs/render.md#the-page."
+  "The render var of entity e (a ctx's tree, an entity pulled by its pattern): its own :seon.render/hiccup when it names one this process
+  has (an entity's own render, as its own :seon.ctx/pattern is its own pattern: an agent's stage, docs/render.md#an-entity-may-name-its-own-render),
+  else its entity schema's (`entity-schema`, `declared-var`, so a branch that redefines that var renders by its own), the render a walk of e
+  is rooted on as [f {} view]. An entity no schema names a render for throws :seon.render/no-render naming its identity attributes. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [ix e]
   (let [s (entity-schema ix e nil)]
-    (or (some->> s (declared-var ix))
+    (or (some-> (ratom/realize (:seon.render/hiccup e)) resolve)
+        (some->> s (declared-var ix))
         (throw (ex-info (str "no render renders this entity: its schema " s " names none")
                         (contract/error :seon.render/no-render #'render-var-of "no entity schema of this entity names a render (:seon.render/hiccup)"
                                         {:schema s :identity (vec (filter (:identity-schemas ix) (keys e)))}))))))

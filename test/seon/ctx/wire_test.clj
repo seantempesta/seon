@@ -456,7 +456,7 @@
         (is (str/starts-with? (page-code r0) "(my.render/page {:commit #uuid \"") "the page is the call (my.render/page p)")
         (is (every? #(re-find % (:content (peek r0))) [#":class \"cite\"" #"Doubles\." #":class \"status\""]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (str/starts-with? (page-code r1) "(my.render/diff {:commit #uuid \"") "what moved is a generated eval of its own at the end, after turn 1's own eval")
-        (is (re-find #"\[\"page\" \"task-view-demo_2Ff\" \"cite-[^\"]*demo_2Ff\" :pre\]" (:content (peek r1)))
+        (is (re-find #"\[\"page\" \"p-task\" \"task-view-demo_2Ff\" \"cite-[^\"]*demo_2Ff\" :pre\]" (:content (peek r1)))
             "the cited var's edit at its own part, nested in its task's as the pull nests it: the ids name each render and what it shows, and only what moved inside the cite is sent")
         (is (not (str/includes? (:content (peek r1)) "Your proofs")) "one edit at the part that moved, never the page whole")
         (is (str/includes? (:content (peek r1)) "Triples."))
@@ -1476,6 +1476,55 @@
                   "request 3 holds request 2 whole: the message stays at turn 2's start, before turn 2's eval, never moved after it")))
           (finally (d/release main)))))))
 
+(deftest a-stage-changes-nothing-the-model-reads
+  ;; docs/render.md#an-entity-may-name-its-own-render: an agent's own render (the stage) is a layout: its request and its parts are byte
+  ;; for byte the ones its schema's render makes (the Data model session's condition: a stage that changed them would move the cached prefix); the
+  ;; model output a request is made of (seon.ctx.wire/request), compared before the system message this world holds none of
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask! ev!] (parts-session conn)]
+        (ask! 0)
+        (ev! "e1")
+        (ask! 1)
+        (let [db0 @conn ix (seon.db/index) a (pdb/eid db0 :seon.agent/key "a1")
+              ;; drawn as a page is: by the render its entity names (its own when it holds one, seon.render/render-var-of)
+              drawn (fn [db] (let [t (:tree (ctx/build ix db a :b))
+                                   w (render/draw t ctx/changes db (render/render-var-of ix t) {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
+                              (try [(pr-str (mapv first (render/answer-sources w :seon.render/openai-compat))) (pr-str (render/placed-hiccup w (render/page-lists w)))]
+                                   (finally (render/dispose-walk! w)))))
+              staged (d/db-with db0 [{:db/id a :seon.render/hiccup 'seon.render.ui/stage}])
+              [m0 p0] (drawn db0)
+              [m1 p1] (drawn staged)]
+          (is (= #'seon.render.ui/stage (render/render-var-of ix (:tree (ctx/build ix staged a :b)))) "the agent names its stage")
+          (is (pos? (count m0)) "a request was made")
+          (is (= m0 m1) "the same messages, byte for byte")
+          (is (= p0 p1) "the same parts, byte for byte"))))))
+
+(deftest a-stage-shows-the-last-ask-and-its-answer
+  ;; docs/render.md#an-entity-may-name-its-own-render: the stage (seon.render.ui/stage-front) shows what a person asked last and what the
+  ;; agent said last before they asked again, the turns between it working out; with nothing asked, a welcome. Red before: an ask was
+  ;; paired with the reply of the turn that read it, and the sender's user name was not in the pull, so no ask was a person's
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask! _] (parts-session conn)
+            staged #(let [db @conn ix (seon.db/index) a (pdb/eid db :seon.agent/key "a1")
+                          db (d/db-with db [{:db/id a :seon.render/hiccup 'seon.render.ui/stage}])
+                          t (:tree (ctx/build ix db a :b))
+                          w (render/draw t ctx/changes db (render/render-var-of ix t) {:index ix})]
+                      (try (apply str (map :html (filter #(= "#p-head" (:container %)) (seon.fixtures/page-units w)))) (finally (render/dispose-walk! w))))]
+        (is (str/includes? (staged) "Hello.") "nothing asked: the welcome")
+        (d/transact conn [{:seon.agent/key "sean" :seon.user/name "sean"}])
+        (d/transact conn [{:seon.message/id "q1" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from {:seon.agent/key "sean"} :seon.message/body "What is f?"}])
+        (ask! 0)
+        (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" 1) :seon.model-call/reply "Let me look."}])
+        (ask! 1)
+        (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" 2) :seon.model-call/reply "f is the identity."}])
+        (let [html (staged)]
+          (is (str/includes? html "What is f?") (str "the ask, in front: " html))
+          (is (str/includes? html "f is the identity.") "the answer: the last thing said before the next ask")
+          (is (not (str/includes? html "Let me look.")) "not the turn that only began the work")
+          (is (not (str/includes? html "Hello.")) "no welcome once something was asked"))))))
+
 (deftest the-chat-and-the-request-walk-one-sequence
   ;; docs/turn.md#the-turn-is-a-number: the page's chat and the model's request are one walk of the agent's entities, so they hold
   ;; its messages and evals in one order: turn 1's eval of the model's, an eval of another hand in turn 1, a message delivered mid-turn
@@ -2284,3 +2333,29 @@
           (is (nil? (d/commit-as-db (pdb/store-of db) (:commit collected))) "the store holds no such commit: its point is read as of its t")
           (is (seq held) "the state moved the page")
           (is (= held (wire/page-edits-between db ix a collected p1)) "from the collected basis: the same edits"))))))
+
+(defn lab-list
+  "A list a test render places, read by the model as a part. See docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/list "p-lab" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] [:div {:id "p-lab"} [:p (str "LAB-PART at turn " (get c :seon.agent/turn))]])
+
+(defn lab-view
+  "An agent's own render for a test: the agent's page and one list of its own after it. See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
+  [opts c] (if (:seon.render/nested opts) (seon.render.ui/agent opts c) (conj (seon.render.ui/agent opts c) [#'lab-list {}])))
+
+(deftest an-own-renders-list-is-in-the-models-page
+  ;; docs/render.md#an-entity-may-name-its-own-render: the page parts the model reads are the lists of the entity's own render (seon.ctx.wire/model-parts),
+  ;; so an agent that names a render of its own reads what that render's list draws, in its request, as it reads its task's part
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
+      (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"} :seon.render/hiccup 'seon.ctx.wire-test/lab-view}}])
+      (let [r0 (turn! conn 0)
+            page (apply str (map :content (:messages r0)))
+            r1 (turn! conn 1)
+            diff (:content (peek (:messages r1)))]
+        (is (str/includes? page "LAB-PART at turn 1") "the own render's list is in what the model reads")
+        (is (str/includes? page "task-view") "beside the task's part, as before")
+        (is (str/includes? diff "LAB-PART at turn 2") "and what it draws next is in the next turn's page edits, as the task's part's are")))))
