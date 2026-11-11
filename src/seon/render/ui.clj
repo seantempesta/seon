@@ -1094,12 +1094,11 @@
                            [:li [:details {:data-preserve-attr "open"} [:summary [:code (str name)]] [:p line]]]
                            [:li [:code (str name)]])))])))))
 
-(def ^:private reason-words
-  "What each of the done rule's reasons (seon.reconcile/done-explain) says to a person reading the page (docs/agent.md#what-you-read: `:refused`)."
-  {:proof-red "proof red" :proof-unknown "proof has no verdict" :regression "green on main, red here"
-   :stray-red "red test that is no proof" :contract-gap "functions without a contract" :unmerged "unmerged entries"
-   :open-problem "problems to clear" :no-proofs "no proof registered" :no-design "plan unchanged since the run began"
-   :behind "judged before main moved"})
+(defn- reason-title
+  "What reason r of the done rule (seon.reconcile/done-explain, a :seon.reconcile/reason) says to a person and the model, read from that
+  enum's :seon.status/title: the words are data (docs/render.md#how-the-work-stands)."
+  {:malli/schema [:=> [:cat :keyword] :string]}
+  [r] (or (get (:seon.status/title (contract/properties :seon.reconcile/reason)) r) (kname r)))
 
 (defn- proof-state
   "What proof state st says, k :seon.status/title (its word) or :seon.status/explain (Markdown: what it means and what to do next),
@@ -1145,7 +1144,7 @@
         green? (and (seq proofs) (every? #(= :pass (state %)) proofs))
         blocks (cond-> []
                  (seq refused) (into (for [r refused :when (not (and (= :proof-unknown (:reason r)) (some #(= (:test r) (:test %)) unwritten)))]
-                                       [(get reason-words (:reason r) (kname (:reason r))) (or (:test r) (:vars r) (:keys r) (:problems r)) (:do r)]))
+                                       [(reason-title (:reason r)) (or (:test r) (:vars r) (:keys r) (:problems r)) (:do r)]))
                  (seq without-a-contract) (conj ["functions without a contract" without-a-contract nil])
                  (seq caused) (conj ["problems to clear" caused nil])
                  (seq attention) (into (for [a attention] [a nil nil])))
@@ -1629,7 +1628,7 @@
   as root's message to them carries it: the owner's ruling on home tiles, docs/decisions.md), and under it, by this same
   render, the agents it started (its :seon.agent/agents); at the depth its parent's pull stopped (members held as ids alone), how many
   there are below, never a silent cut. Its group (`where-stands`) orders it, those that need the person first (CSS order). Drawn from the
-  view alone: the joining pattern pulls what it reads (seon.task/entry-pattern). For the page alone (:wire/for \"page\"). See
+  view alone: the joining pattern pulls what it reads (:seon.agent/entry's pattern). For the page alone (:wire/for \"page\"). See
   docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :any] :any]}
   [db c]
@@ -2062,7 +2061,7 @@
 
 (defn standing
   "How an agent's work stands, one answer for its head and its lists, from data: the agent's attributes a and its
-  task's t (:seon.task/outcome, :seon.task/reason), each a map of the attributes it holds (a missing one is nothing).
+  task's t (:seon.task/outcome, :seon.task/reasons, :seon.task/reason), each a map of the attributes it holds (a missing one is nothing).
   The task's outcome says it where a judge has written one (a capped task is stopped, a parked one waits for a
   message); else the agent's own end (:seon.agent/outcome, counted while the agent is at the turn it ended on); else its
   process's status (an agent with none of them, a person's like the user, reads nothing: its state is :status/none). A process that is
@@ -2090,7 +2089,12 @@
                     (= k :told) "ended, said how"
                     (and (= from task-stands) (= k :running) (= :idle status)) "between turns")
         waiting? (or (= :waiting end) (#{:parked :told} o))
-        reason (when-not waiting? (some #(when-not (str/blank? %) %) [(:seon.task/reason t) (:reason (:seon.task/failure t)) (when end (:seon.agent/reason a))]))]
+        ;; the done rule's reasons as the task holds them (:seon.task/reasons, data), each in its schema's words with what it is about as code;
+        ;; a string only where no data stands behind it (a restart, a process gone): docs/render.md#how-the-work-stands
+        said (some->> (seq (:seon.task/reasons t))
+                      (map (fn [r] (str (reason-title (:reason r)) (some->> (or (:symbol r) (:key r) (:behind r)) (str " `") (#(str % "`"))))))
+                      (str/join "; "))
+        reason (when-not waiting? (some #(when-not (str/blank? %) %) [said (:seon.task/reason t) (:reason (:seon.task/failure t)) (when end (:seon.agent/reason a))]))]
     (cond-> {:state (keyword (cond (= from task-stands) "task" (= from end-stands) "end" :else "status") (name (or k :none)))
              :text text :tone tone :lit? (= :live tone)}
       turns (assoc :detail (str turns (if (= 1 turns) " turn" " turns")))
@@ -2124,7 +2128,7 @@
       ;; what it evaluates now, while its process runs one: the newest thing it does, live
       (when-let [r (and pid (:seon.process/running proc))]
         [:code {:class "min-w-0 truncate text-text-300"} r])]
-     (when-let [r (:reason stands)] [:p {:class "min-w-0 break-words text-text-300"} r])
+     (when-let [r (:reason stands)] [:p {:class "min-w-0 break-words text-text-300"} [#'markdown r {:inline? true}]])
      (when-not (str/blank? description) [:p {:class "text-text-300"} (plain description (part))])]))
 
 (defn root-quiet

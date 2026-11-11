@@ -742,9 +742,11 @@
         ;; the entry's line as the file has it (a property added to the entry moves with it), and
         ;; its form with :paused added, as an edit would write it
         status-line (some #(when (str/starts-with? % " :seon.task/reason ") %) (str/split-lines text))
-        paused (str/trim (subs (str/replace status-line ":string" "[:string {:min 1}]") (count " :seon.task/reason ")))
+        paused "[:string {:min 1}]"
+        ;; another entry's whole line, whatever its form holds (a description rides the entry)
+        merged-line (some #(when (str/starts-with? % " :seon.task/merged-t ") %) (str/split-lines text))
         edit (fn [tx] (get (source/files (d/db-with db tx) [facts-path]) facts-path))]
-    (is (str/ends-with? status-line " :string") "the entry's line is its plain value, as the edit expects")
+    (is (and status-line merged-line) "the two entries the edits name are lines of the file")
     (testing "every schema resource imported and written back unchanged is the same text"
       (let [dir (java.io.File. (str here "/resources/seon/schemas"))
             files (into {} (for [f (.listFiles dir) :when (str/ends-with? (.getName f) ".edn")]
@@ -754,11 +756,11 @@
         (is (seq files) "the schemas directory holds resources")
         (is (= files (source/files db (source/source-files db))))))
     (testing "a replaced value: only its changed part"
-      (is (= (str/replace text status-line (str/replace status-line ":string" "[:string {:min 1}]"))
+      (is (= (str/replace text status-line (str " :seon.task/reason " paused))
              (edit [{:schema/key :seon.task/reason
                      :schema/form paused}]))))
     (testing "a removed entry takes its line"
-      (is (= (str/replace text "\n :seon.task/merged-t :int" "")
+      (is (= (str/replace text (str "\n" merged-line) "")
              (edit [[:db/retractEntity [:schema/key :seon.task/merged-t]]]))))
     (testing "a new key after the last entry, read back as written"
       (let [out (edit [{:schema/key :seon.task/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]
