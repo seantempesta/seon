@@ -85,15 +85,15 @@
 
 (def ^:private observed-keys
   "The members of an agent's view entry recorded on its entity (seon.task/agent-tx)."
-  [:status :pid :mem-mb :running :task :branch :forked-ms :ended-ms :stalled])
+  [:status :pid :mem-mb :running :branch :forked-ms :ended-ms :stalled])
 
 (defn- observed
-  "What root records of agent entry a: its observed-keys, less :task and :branch for an agent started on a task:
-  its :task is its task's id (its record names its task, :seon.agent/task; recording it again pulled the task
-  into every walk of the agent twice) and its :branch is the one its start wrote (seon.task/start-tx; a second
-  writer under the store's name for the branch would change what the index reads of its environment)."
+  "What root records of agent entry a: its observed-keys, less :branch for an agent started on a task: its :branch is
+  the one its start wrote (seon.task/start-tx; a second writer under the store's name for the branch would change
+  what the index reads of its environment). Its task is named by its record (:seon.agent/task), never recorded again
+  from the view."
   {:malli/schema [:=> [:cat [:maybe :map]] :map]}
-  [a] (cond-> (select-keys a observed-keys) (:task a) (dissoc :task :branch)))
+  [a] (cond-> (select-keys a observed-keys) (:task a) (dissoc :branch)))
 
 (defn- record-agents
   "What root observed of its agents in this step, written to main as one transaction: an
