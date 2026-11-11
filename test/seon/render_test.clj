@@ -742,6 +742,20 @@
     (is (empty? (added root root0)) "and no other but its layout's own")
     (r/dispose-walk! (get-in st2 [:root-walk :w]))))
 
+(deftest a-branchs-own-schema-property-is-read-from-its-index
+  ;; docs/render.md#one-rendering-system-drawn-from-the-data: a schema's properties are read from the entity index alone (seon.render/props),
+  ;; so a schema registered on a branch, as an agent registers one, is read whole there: its pattern as well as its render
+  (let [reg (fn [db k form] (let [r (my.schema/registration db k form false)]
+                              (when (seon.contract/error? r) (is false (str k " registers: " (pr-str r))))
+                              (d/db-with db (:tx r))))
+        db (-> (ts/test-db)
+               (reg :lab.props/name :string)
+               (reg :lab.props/thing-fact [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render.ui/evaluation :seon.ctx/pattern [:db/id :lab.props/name]}
+                                           [:lab.props/name :lab.props/name]]))
+        ix (seon.program/index-of-db db)]
+    (is (= 'seon.render.ui/evaluation (r/render-for ix :lab.props/thing-fact :seon.render/hiccup)) "its render, read from the index")
+    (is (= [:db/id :lab.props/name] (r/schema-property ix :lab.props/thing-fact :seon.ctx/pattern)) "and its pattern, from the same index")))
+
 (deftest every-page-says-which-system-it-is
   ;; docs/render.md#the-page: the system's source (root's :seon.root/source, as an index of the checkout writes it) is drawn by its
   ;; schema's render in the top bar of every page, an agent's and root's alike, from the system walk once
