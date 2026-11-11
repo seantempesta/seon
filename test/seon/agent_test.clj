@@ -2903,7 +2903,7 @@
     (is (= 1 (:index-builds (seon.agent/schema-moved moved #{:seon.eval/id}))) "and a later write of another attribute builds no other")))
 
 (deftest a-session-restored-at-an-older-commit-runs-that-commits-definitions
-  ;; docs/storage.md#compiled-code, task seon.program/a-session-is-restored-at-any-commit-of-its-branch: a spawn with {:branch b :commit C}
+  ;; docs/storage.md#compiled-code: a spawn with {:branch b :commit C}
   ;; makes b from the session's commit C and forks it from main's image with the program at C loaded over it, the way a resumed
   ;; agent loads its tip. Red before: a spawn took no commit, so the new agent held main's program and f was unbound. The answer says what
   ;; is not restored.
@@ -2926,7 +2926,7 @@
     (is (= 3 (count (:not-restored v))) (pr-str v))))
 
 (deftest a-restore-at-a-commit-the-store-no-longer-holds-is-refused
-  ;; docs/failure-points.md (the :spawn edge in seon.writer), task seon.program/a-session-is-restored-at-any-commit-of-its-branch: a commit
+  ;; docs/failure-points.md (the :spawn edge in seon.writer), docs/storage.md#compiled-code: a commit
   ;; the store holds no more (collected) is answered as a typed error naming it, no branch made and nothing crashed. Red before: the
   ;; commit was ignored and an agent on a branch from main's head answered a success.
   (let [[r] (in-agent (fn [{:keys [ns]}]
