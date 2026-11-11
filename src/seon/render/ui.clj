@@ -933,16 +933,29 @@
              (when (and (contains? (set (:var/meta v)) :test) src) (source-block src))))]))
 
 (defn- key-hiccup
-  "A cited attribute or setting by its schema entry. A setting: what it is for (its :description) and its value now. An
-  attribute: what it is (its :description, else its type) and a real value taken from this task's own data where it holds one
-  (lookups: lookup refs of the task and the functions it names), else the first the db has; for a ref, each attribute of the entity
-  it refers to, since that is what the agent reads next. Nothing of which entities hold it."
+  "A cited schema key by its schema entry, as what it is. A setting: what it is for (its :description) and its value now. An
+  attribute the db stores (the db's own schema holds it): what it is (its :description, else its type) and a real value taken
+  from this task's own data where it holds one (lookups: lookup refs of the task and the functions it names), else the first the
+  db has; for a ref, each attribute of the entity it refers to, since that is what the agent reads next. Any other key is the
+  schema of an entity or of a value (an error's, a render's input): its form whole, as the pull holds it (:schema/form), and
+  the renders its properties name, which is how a schema says what draws it. Nothing of which entities hold it."
   {:malli/schema [:=> [:cat :seon.host/db :qualified-keyword :map [:sequential :any]] :any]}
   [db k sch lookups]
   (let [desc (:description (contract/properties k))
         setting? (str/starts-with? (str (namespace k)) "seon.config")]
     (if setting?
       [:section [:h3 (str k)] [:p (str "A setting your plan names." (when desc (str " " desc)))] [:p "Its value now: " [:code (print/text (config/value k))]]]
+      (if-not (get (d/schema db) k)
+        ;; no stored attribute: an entity's schema or a value's. Its form is the answer to "what is this and what draws it"
+        (let [props (contract/properties k)
+              renders (keep (fn [[p for-what]] (when-let [r (get props p)] (list for-what " " [:code (str r)])))
+                            [[:seon.render/hiccup "for a page"] [:seon.render/model "printed for the model by"] [:seon.render/openai-compat "as the model's messages by"]])]
+          [:section
+           [:h3 (str k)]
+           [:p (str (if (:seon.db/attributes props) "An entity's schema your plan names: the attributes written together as one entity." "A value's schema your plan names.")
+                    (when desc (str " " desc)))]
+           (when (seq renders) (into [:p "It names its renders: "] (interpose "; " renders)))
+           [:pre [:code (str (:schema/form sch))]]])
       (let [schema (get (d/schema db) k)
             ref? (= :db.type/ref (:db/valueType schema))
             typ (or (last (re-seq #":[^\s\]\}\)]+" (str/replace (str (:schema/form sch)) #"\{[^}]*\}" ""))) (:schema/form sch))
@@ -956,7 +969,7 @@
          (when (and datom (not ref?)) [:p "A real value: " [:code (print/text (:v datom))]])
          (when target
            (list [:p "Each entity points to another with it, which holds:"]
-                 (into [:ul] (for [[tk tv] (remove (comp #{:db/id} key) target)] [:li [:code (str tk " " (print/text tv))]]))))]))))
+                 (into [:ul] (for [[tk tv] (remove (comp #{:db/id} key) target)] [:li [:code (str tk " " (print/text tv))]]))))])))))
 
 (defn script
   "A script, as hiccup: what it's for and how to call it, in its own words (docs/source.md#a-program-file)."
