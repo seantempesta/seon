@@ -11,8 +11,8 @@
 (defn sh
   "Run a command as clojure.java.shell/sh does (args, its options among them; answers {:exit :out :err}), always on a fiber: there
   Jolt's sh copies the child's pipes on fibers parked on their readiness and waits for its exit as an event, starting no thread.
-  Called from a thread (root's boot, a proc's step) it ran its copies on futures, threads of Clojure's send-off pool that no
-  proc declares and that outlived root's stop. A thread's call runs on a fiber of its own here, joined. Every shell of Seon's runs
+  Called from a thread (a server connection's, seon.server/serve!) it ran its copies on futures, threads of Clojure's
+  send-off pool that no proc declares and that outlive the call. A thread's call runs on a fiber of its own here, joined. Every shell of Seon's runs
   through it. See docs/machine.md#processes."
   {:malli/schema [:=> [:cat [:* :any]] :map]}
   [& args]
