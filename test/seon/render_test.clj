@@ -4572,3 +4572,10 @@
     (is (re-find #"--font-sans: var\(--font-mono\)" css) "the chrome's face stays mono, which is why no font utility reaches prose")
     (is (str/includes? md "seon-md") md)
     (is (not (str/includes? md "font-sans")) "no utility that resolves to the mono face")))
+
+
+(deftest a-cites-words-read-in-the-text-face
+  ;; docs/render.md#the-page: the words a cite says of what it names ("A function your plan names.", "2 tests reach it") read in the text
+  ;; face, as Markdown prose does; its code stays mono. A rule on the cite component's own style, page-only: nothing the model reads moves
+  (let [rs (into {} (r/rules {#'ui/cite nil}))]
+    (is (str/includes? (get rs 'seon.render.ui/cite "") ".cite > p { font-family: var(--font-text); }") (pr-str (get rs 'seon.render.ui/cite)))))
