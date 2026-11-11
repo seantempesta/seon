@@ -389,7 +389,7 @@
                                 :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}
                                {:seon.model-call/id "lab/ctx#1/0" :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 0 :seon.model-call/reply "I will check f0."
                                 :seon.model-call/tokens 1200 :seon.model-call/cache-hit-tokens 1000 :seon.model-call/cache-miss-tokens 100
-                                :seon.model-call/ms 7 :seon.model-call/model "scripted" :seon.model-call/forms 1 :seon.model-call/errors 0
+                                :seon.model-call/ms 7 :seon.model-call/model "scripted" :seon.model-call/forms 1
                                 :seon.model-call/sent-hash "0123456789abcdef"}
                                {:seon.process/id (str k "/77") :seon.process/agent [:seon.agent/key k] :seon.process/pid 77
                                 :seon.process/forked-ms 5.0}
@@ -399,9 +399,9 @@
         keys-in (fn keys-in [x] (cond (map? x) (concat (keys x) (mapcat keys-in (vals x))) (coll? x) (mapcat keys-in x)))]
     (is (= ["I will check f0."] (map :seon.model-call/reply (vals (:seon.model-call/_agent t)))) "the model call is in the record, with its reply")
     (is (empty? (remove #{:seon.model-call/_agent :seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning
-                          :seon.model-call/finish :seon.model-call/truncated :seon.model-call/error
+                          :seon.model-call/truncated :seon.model-call/error
                           ;; how many forms its reply ran, written when the last has run: the call's end as a fact, which the turn's
-                          ;; in-flight element waits on (docs/render.md#in-flight-output-streams), as :finish is how it stopped
+                          ;; in-flight element waits on (docs/render.md#in-flight-output-streams)
                           :seon.model-call/forms}
                         (filter #(and (keyword? %) (= "seon.model-call" (namespace %))) (keys-in t))))
         "no telemetry of a model call anywhere in the record: no tokens, sent, cost or model")
