@@ -120,4 +120,4 @@
                      [:appends {:optional true} [:vector [:tuple :string :string]]]
                      [:prepends {:optional true} [:vector [:tuple :string :string]]]
                      [:afters {:optional true} [:vector [:tuple :string :string]]]
-                     [:moves {:optional true :description "Units that changed place among the held ones of their container, in order: [id selector mode html], the element removed then put back after its new neighbour (mode after) or first in its container (mode prepend), so a reorder sends what moved, never its container whole. See docs/render.md#a-layout-places-its-lists."} [:vector [:tuple :string :string :string :string]]]]}
+                     [:moves {:optional true :description "Units that changed place among the held ones of their container, in order: [id selector mode html], the element removed then put back after the unit now before it (mode after) or before the one now after it (mode before), so a reorder sends what moved, never its container whole. See docs/render.md#a-layout-places-its-lists."} [:vector [:tuple :string :string :string :string]]]]}

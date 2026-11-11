@@ -175,11 +175,11 @@
 (def ^:private slot-re #"<!--s:([^>]*?)-->")
 
 (defn- order-only?
-  "Whether html differs from was only in the order of its slots: the same text around them and the same slots. See
-  docs/render.md#a-layout-places-its-lists."
+  "Whether html differs from was only in which child each slot holds: the same text with every slot where it was, and the same slots.
+  A slot that moved into another element is no reorder. See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] :boolean]}
   [was html]
-  (boolean (and was html (not= was html) (= (str/replace was slot-re "") (str/replace html slot-re ""))
+  (boolean (and was html (not= was html) (= (str/replace was slot-re "<!--s-->") (str/replace html slot-re "<!--s-->"))
                 (= (sort (map second (re-seq slot-re was))) (sort (map second (re-seq slot-re html)))))))
 
 (defn- kept-run
@@ -197,7 +197,7 @@
 (defn- moves
   "The units that changed place among those view held in their container, as order (container -> ids, this step's) has them against
   was (the last step's): in each container the held ones that stay in order are the longest run that keeps it (`kept-run`), each
-  other is taken out and put back after the unit now before it, or first in its container. [[id container]] in order. See
+  other is taken out and put back after the unit now before it, or before the one now after it. [[id container]] in order. See
   docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector [:tuple :string :string]]]}
   [was order]
@@ -233,7 +233,8 @@
         under? (fn under? [id] (when-let [p (get-in view [:units id :parent])] (or (contains? moved p) (under? p))))
         own (fn [k xs] (vec (remove #(or (inside? (nth % k)) (moved (nth % k)) (under? (nth % k))) xs)))
         patch (-> patch (update :frags #(own 0 %)) (update :appends #(own 1 %)) (update :prepends #(own 1 %)) (update :afters #(own 1 %)))
-        before (fn [id c] (let [ids (get order c) i (.indexOf ^java.util.List ids id)] (when (pos? i) (nth ids (dec i)))))]
+        ;; its neighbours in the container's new order: by element id, so a unit whose parent element has no id of its own lands in it
+        beside (fn [id c] (let [ids (get order c) i (.indexOf ^java.util.List ids id)] [(when (pos? i) (nth ids (dec i))) (get ids (inc i))]))]
     [view (-> patch
               (dissoc :was)
               ;; each sent unit's html with its children's composed into its slots
@@ -242,7 +243,7 @@
               (update :prepends (fn [ps] (vec (for [[c group] (group-by first ps)] [c (apply str (map (comp html second) group))]))))
               ;; a unit placed after its sibling: by the sibling's element id
               (update :afters (fn [as] (vec (for [[sib el] as] [(str "#" sib) (html el)]))))
-              (assoc :moves (vec (for [[id c] mv] (if-let [b (before id c)] [id (str "#" b) "after" (html id)] [id c "prepend" (html id)]))))
+              (assoc :moves (vec (for [[id c] mv :let [[b a] (beside id c)]] (if b [id (str "#" b) "after" (html id)] [id (str "#" a) "before" (html id)]))))
               (assoc :removes (vec gone)))]))
 
 ;;; --- a location's page ------------------------------------------------------------------------
