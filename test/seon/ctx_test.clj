@@ -1133,6 +1133,21 @@
     (is (str/includes? text "What x does.") "the page shows the section's text, read by the render")
     (is (str/includes? text "(defn f0 [x] x)") "and the function's source")))
 
+;; docs/references.md#a-section-read-at-a-depth-with-its-edges: doc reads the value a local names as it reads a literal (a macro
+;; sees its locals), and a page's listing names each of its sections (address, heading, summary) and leaves their edges to
+;; (doc address). Found by working the task as an agent: a let-bound address printed "names no var or namespace", and one page's
+;; listing was 239,943 characters with every section's references and citers
+(deftest doc-reads-a-local-and-a-page-lists-its-sections-without-their-edges
+  (let [db (my.test/with (my.test/world) (my.test/page "docs/small.md" "# Small\n\nThe lead of small, citing app.calc/add.\n\n## Below\n\nThe text below, citing app.calc/total.\n"))]
+    (with-redefs [seon.agent/db (fn [] db)]
+      (let [printed (with-out-str (let [a "docs/small.md#small"] (my.agent/doc a)))
+            listing (my.agent/doc-of "docs/small.md")]
+        (is (clojure.string/includes? printed "The lead of small") "a let-bound address is read as a literal is")
+        (is (clojure.string/includes? printed "docs/small.md#below") "and names the section below")
+        (is (not (clojure.string/includes? printed "The text below")) "without its text")
+        (is (= ["docs/small.md#small" "docs/small.md#below"] (mapv :seon.ref/address listing)) "a page lists its sections")
+        (is (not-any? #(or (:seon.ref/references %) (:seon.ref/cited-by %)) listing) "each without its edges")))))
+
 (deftest a-cite-joins-its-target-and-a-symbol-joins-by-name
   ;; a cite's target is a ref (docs/references.md#an-entity-cites): the cite joins the var it names, its form and its
   ;; callers, which join by :by, ctx's one option beside Datahike's pull syntax (docs/ctx.md#the-pattern): a symbol a form
