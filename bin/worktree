@@ -1,6 +1,6 @@
 #!/bin/zsh
 # bin/worktree NAME [BASE]    a worktree of the main tree on branch jolt/NAME (a new one from BASE, default
-#                             main; an existing one as it is), at <root>/.worktrees/NAME (gitignored: a
+#                             main; an existing BRANCH as it is, said on stderr with its last commit; an existing worktree is refused, naming it), at <root>/.worktrees/NAME (gitignored: a
 #                             worktree is inside the root it belongs to)
 # bin/worktree --path NAME    that path
 # bin/worktree --remove NAME  remove that worktree and its submodule worktrees (the branch is kept)
@@ -185,11 +185,15 @@ NAME=${1:-}; BASE=${2:-main}
 [[ -n $NAME && $NAME != seon* ]] || die "usage: bin/worktree NAME [BASE] (a name not starting with seon)"
 WT=$(wt_path "$NAME")
 BR=jolt/$NAME
-[[ ! -e $WT ]] || die "$WT exists"
+# whose it is: the branch's last commit and its age, so a session that picked a name another already
+# uses sees at once that the work there is not its own (two sessions chose "uncaught" within half an hour)
+last() { git -C "$MAIN" log -1 --format='%h %s (%cr)' "refs/heads/$BR" 2>/dev/null | cut -c1-120 }
+[[ ! -e $WT ]] || die "$WT exists, on $BR: $(last). If that is not your work, it is another session's: take another name"
 
 # a branch that exists (a worktree recreated after a move, a branch with unmerged work) is checked out
 # as it is; BASE only names the start of a new one
 if git -C "$MAIN" show-ref -q --verify "refs/heads/$BR"; then
+  print -u2 "worktree: $BR EXISTS and is checked out as it is: $(last). If that is not your work: bin/worktree --remove $NAME, and take another name"
   git -C "$MAIN" worktree add -q "$WT" "$BR"
 else
   git -C "$MAIN" worktree add -q -b "$BR" "$WT" "$BASE"
