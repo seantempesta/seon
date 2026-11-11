@@ -76,7 +76,8 @@ FAST=(); if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then
   if (( ${#FAST} )); then
     mkdir -p "$OUT/fast"; print -r -- "$FAST" > "$OUT/fast/steps"; : > "$OUT/fast/steps-binary"
     [[ -s $OUT/step-bounds ]] && cp "$OUT/step-bounds" "$OUT/fast/step-bounds"
-    REST=(${${=ALL}:|FAST}); print -r -- "$REST" > "$OUT/steps"
+    # the rest, when laws and health were all there was: an empty file, so no bin/check runs with nothing selected
+    REST=(${${=ALL}:|FAST}); if (( ${#REST} )); then print -r -- "$REST" > "$OUT/steps"; else : > "$OUT/steps"; fi
     ( "$ROOT/bin/check" --steps "$OUT/fast" > "$OUT/fast.log" 2>&1 || { : > "$OUT/stopped"; [[ -s $OUT/shards.pid ]] && kill $(<$OUT/shards.pid) 2>/dev/null; [[ -s $OUT/check.pid ]] && kill $(<$OUT/check.pid) 2>/dev/null } ) & A=$!
   fi
 fi

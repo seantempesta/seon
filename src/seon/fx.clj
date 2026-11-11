@@ -295,13 +295,13 @@
   [root from to]
   (let [f (java.io.File. (str root "/target/tree-diffs/" from "-" to ".edn"))]
     (if (.isFile f)
-      (edn/read-string (slurp f))
+      (sedn/decode (slurp f))
       (let [r (git-run {} root ["diff" "--raw" "--no-renames" from to] nil)]
         (if (zero? (:exit r))
           (let [d (vec (for [l (str/split-lines (:out r)) :when (not (str/blank? l))
                              :let [[meta p] (str/split l #"\t" 2) [om nm] (str/split (subs meta 1) #" ")]]
                          [p om nm]))]
-            (write-file {:req {:path (.getPath f) :text (pr-str d)}})
+            (write-file {:req {:path (.getPath f) :text (sedn/encode d)}})
             d)
           (error #'seon.fx/tree-diff :seon.fx/io-error (str "git diff " from " " to ": " (str/trim (str (:err r)))) {:path root}))))))
 
