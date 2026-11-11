@@ -65,6 +65,23 @@
   (let [t (d/pull db [:seon.task/id :seon.task/branch {:seon.task/_needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id])]
     (merges? (assoc t :seon.task/id id) (vec (:seon.task/_needs t)))))
 
+(defn merge-step?
+  "Whether task t is the merge step of a task it needs, by data, never its kind: when one of needs, the tasks t needs (each
+  {:seon.task/id :seon.task/branch}, a branch its own, else `default-branch` of its id), is on t's own branch. `merges?` says a task
+  merges its own work; this says it merges another's, on its branch. A task can be neither: one that needs nothing on its branch and
+  is needed by one there. See docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:sequential [:map [:seon.task/id :seon.task/id]]]] :boolean]}
+  [t needs]
+  (let [br (fn [x] (or (:seon.task/branch x) (default-branch (:seon.task/id x))))]
+    (boolean (some #(= (br %) (br t)) needs))))
+
+(defn merge-step-on?
+  "`merge-step?` of task id as db holds it: its branch and the tasks it needs, one pull. See docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
+  [db id]
+  (let [t (d/pull db [:seon.task/id :seon.task/branch {:seon.task/needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id])]
+    (merge-step? (assoc t :seon.task/id id) (vec (:seon.task/needs t)))))
+
 (defn default-branch
   "The branch a task's runs check out when it names none: task-<ns>-<name>."
   {:malli/schema [:=> [:cat :seon.task/id] :seon.task/branch]}
@@ -127,13 +144,14 @@
 
 (defn task-cites
   "What task id's page draws of what it cites, read on db: its own cites, then each need's (one level, a
-  merge task's left out, as the task-fact's :needs join holds them), each target once at the strongest depth
+  merge step's left out, as the task-fact's :needs join holds them), each target once at the strongest depth
   it is cited at, in that order. What a reader that is no draw takes (my.task/data, the turn's waste log);
   the page reads the same from @ctx. See docs/references.md#task-references."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:vector :map]]}
   [db id]
   (let [e (pdb/eid db :seon.task/id id)
-        needs (when e (sort-by :seon.task/id (remove #(= :merge (:seon.task/kind %)) (map #(d/pull db [:db/id :seon.task/id :seon.task/kind] (:v %)) (d/datoms db :eavt e :seon.task/needs)))))
+        pull-need #(d/pull db [:db/id :seon.task/id :seon.task/branch {:seon.task/needs [:seon.task/id :seon.task/branch]}] (:v %))
+        needs (when e (sort-by :seon.task/id (remove #(merge-step? % (vec (:seon.task/needs %))) (map pull-need (d/datoms db :eavt e :seon.task/needs)))))
         cs (concat (cites-of db e) (mapcat #(cites-of db (:db/id %)) needs))
         target #(get-in % [:seon.cite/target :db/id])
         by (group-by target cs)]

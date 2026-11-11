@@ -255,7 +255,7 @@
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn max-turns merge? merge-task?] :as st} obs s model-name]
+  [{:keys [turn max-turns merge? merge-step?] :as st} obs s model-name]
   (let [t (:task obs)
         ;; the turn this is: the agent's number, one past the one in force, which the messages taken now and every record
         ;; this turn writes take
@@ -323,10 +323,10 @@
                                                  :shown {'seon.render.ui/cite (set (keep task/cited-name (task/task-cites db (:seon.task/id t))))
                                                          'seon.ctx.status/status (set (map :test (:proofs s)))}
                                                  :items (mapv (fn [{:keys [code response]}] {:form code :error (:ex response)}) calls)}))
-          ;; a merge turn: each turn of a merge task; a task that merges its own work does that work first, so
-          ;; only a turn with what both sides changed still to resolve (merge-task?: the one place the kind still says what a
-          ;; turn is, since a merge task's every turn is merge work)
-          (and merge? (or merge-task? (seq (:unmerged s)))) (update :merge-turns inc))))))
+          ;; a merge turn: each turn of a merge step (seon.task/merge-step?, read from its needs and branch, since a merge
+          ;; step's every turn is merge work); a task that merges its own work does that work first, so only a turn with what
+          ;; both sides changed still to resolve
+          (and merge? (or merge-step? (seq (:unmerged s)))) (update :merge-turns inc))))))
 
 (defn context-block
   "The request of task as a model is sent it on this branch now, as one text: the system prompt, its conversation and its page.
@@ -460,7 +460,7 @@
     ;; the branch's db, its base and this process hold one program (its tests' digests are the
     ;; program it runs); a branch at main's head brings nothing
     (branch/merge-main!)
-    (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :merge-task? (= :merge (:seon.task/kind t0-task))
+    (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :merge-step? (task/merge-step-on? (agent/db) task)
                :max-turns max-turns :merge? merge?}]
       ;; each turn under the branch's schemas as they are now (repl/with-branch-schemas): work! is one eval,
       ;; bound when it began, and a schema the agent registers since must be the one Seon's code checks its

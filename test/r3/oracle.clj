@@ -133,8 +133,13 @@
         room (max 0 (- (:max-running (:root v) default-max-running) live-after))
         ;; git's merge queue: a merge task working, or judged and awaiting root's merge,
         ;; holds the queue, so the main a merge agent merged last is the main root merges into
-        merge? (fn [id] (= :merge (get-in v [:tasks id :seon.task/kind])))
-        merging (count (filter #(and (merge? %) (or (live? v %) (#{:ready :gate} (get-in v [:tasks % :seon.task/outcome])))) ids))
+        ;; a merge step is read from data (seon.task/merge-step?: it needs a task on its own branch), never its kind; one that
+        ;; merges its own work (seon.task/merges?: nothing on its branch needs it) holds the queue once judged
+        as-task (fn [id] (assoc (get-in v [:tasks id]) :seon.task/id id))
+        merge? (fn [id] (task/merge-step? (as-task id) (map as-task (:seon.task/needs (get-in v [:tasks id])))))
+        merges-own? (fn [id] (task/merges? (as-task id) (map as-task (filter #(contains? (:seon.task/needs (get-in v [:tasks %])) id) ids))))
+        judged? (fn [id] (#{:ready :gate} (get-in v [:tasks id :seon.task/outcome])))
+        merging (count (filter #(or (and (merge? %) (or (live? v %) (judged? %))) (and (merges-own? %) (judged? %))) ids))
         merge-room (max 0 (- (:max-merging (:root v) default-max-merging) merging))
         starts (loop [[id & more] (should-run-in v) n 0 m 0 acc []]
                  (cond (or (nil? id) (>= n room)) acc
