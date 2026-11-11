@@ -147,6 +147,19 @@
            (mapv (juxt task/cited-name :seon.cite/depth) (task/cites-of db (pdb/eid db :seon.agent/key "a1"))))
         "on the agent's record, in the config's order (the references it is told it can read, not pulled into its context whole)")))
 
+(deftest a-task-may-name-what-its-agent-cites
+  ;; docs/config.md: a task holds a config key as its own setting, read before the shipped value; a role's standing cites are
+  ;; :seon.config.agent/cites on its task (its template sets it), so a worker and a preparer can read different sections
+  (let [own ["docs/testing.md#testing-in-the-world"]
+        base (d/db-with (db-with-program) (for [a (seon.config/value :seon.config.agent/cites)] {:seon.doc/address a :seon.doc/heading a}))
+        cited (fn [config]
+                (let [db (d/db-with base (task/create-tx base [(cond-> (decl "Do.") config (assoc :seon.task/config config))]))
+                      db (pdb/db-with db (task/start-tx db "demo/t" "b1" :a1 {:branch :b :model nil :max-turns 4} 0))
+                      db (pdb/db-with db (task/agent-cites-tx db [:seon.agent/key "a1"] "a1"))]
+                  (mapv task/cited-name (task/cites-of db (pdb/eid db :seon.agent/key "a1")))))]
+    (is (= own (cited {:seon.config.agent/cites own})) "the task's own set, not the shipped four")
+    (is (= (seon.config/value :seon.config.agent/cites) (cited nil)) "a task holding none: the shipped set, in its order")))
+
 (deftest the-writer-cites-what-names-something
   ;; audit item 2a: a reproduction's text names a test helper (demo-test/fixture) and a handle (result/e-none) that name
   ;; nothing: a text word is cited only when it names something (seon.ref/kept); the program's names among the cites
