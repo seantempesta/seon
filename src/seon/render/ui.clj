@@ -1789,15 +1789,18 @@
   "Clause m of an entity's data model (seon.render/pulled) as the pull view draws it: what it asks and what the pull holds for it, the
   transaction of its datom when the pull holds that; a join by its members' count, the pattern its sub-pattern stands for (a schema's name
   read as that schema's pattern) clause by clause with how many members hold each, and the members themselves (held, what the pull holds
-  at the clause's key) folded under it, never cut. It lays the map out and computes nothing. See
+  at the clause's key) folded under it, never cut; and what its attribute is, desc, its schema's own :description, so an agent reads
+  what a key means and how to use it where its pull holds it. It lays the map out and computes nothing. See
   docs/render.md#an-entity-may-name-its-own-render."
-  {:malli/schema [:=> [:cat :map :any] :any]}
-  [{:keys [clause value tx members sub] :as m} held]
+  {:malli/schema [:=> [:cat :map :any [:maybe :string]] :any]}
+  [{:keys [clause value tx members sub] :as m} held desc]
   (if (contains? m :members)
     [:li [:code (print/text clause)] " " (str members (if (= 1 members) " member" " members"))
+     (when desc [:p {:class "seon-note"} desc])
      (into [:ul] (for [{c :clause n :held} sub] [:li [:code (print/text c)] " " (str n " of " members)]))
      (when (pos? members) [:details [:summary "members"] [:pre (print/text held)]])]
     [:li [:code (print/text clause)] " " (pulled-summary value) (when tx (str " · tx " tx))
+     (when desc [:p {:class "seon-note"} desc])
      (when (coll? value) [:details [:summary "value"] [:pre (print/text value)]])]))
 
 (defn pull-front
@@ -1823,7 +1826,8 @@
      (when-let [d (:description (contract/properties :seon.ctx/pattern))] [:p d])
      [:p "Its schema's render for a person is " [:code (str (:hiccup renders))] (when (:model renders) (list " · for the model " [:code (str (:model renders))]))]
      [:h2 "What the pattern asks, and what the pull holds"]
-     (into [:ul] (map #(pull-clause % (get e (:key %)))) clauses)
+     ;; each clause with its attribute's own words, read from the index (one reader of a schema's properties)
+     (into [:ul] (map #(pull-clause % (get e (:key %)) (when (keyword? (:key %)) (:description (render/props ix (:key %)))))) clauses)
      [:h2 (str "What its schema names that the pattern does not ask (" (count unasked) ")")]
      (into [:ul] (for [a unasked] [:li [:code (print/text a)]]))
      [:details {:data-as "conversation" :data-preserve-attr "open"} [:summary [:span {:data-when "closed"} "Show as the conversation"] [:span {:data-when "open"} "Show as data"]]]]))

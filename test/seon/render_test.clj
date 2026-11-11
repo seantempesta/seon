@@ -2797,7 +2797,8 @@
     (is (str/includes? front "its own (:seon.ctx/pattern on the entity)") "its pattern is its own")
     (is (str/includes? front ":seon.agent/key") "a clause it asks")
     (is (str/includes? front ":seon.agent/_agents") "a join it asks, with its members: who started it")
-    (is (str/includes? front "does not ask") "what its schema names beside")))
+    (is (str/includes? front "does not ask") "what its schema names beside")
+    (is (str/includes? front "Your own render: the function your page is drawn by") "a clause says what its attribute is, in the attribute's own words")))
 
 (deftest an-entity-as-its-data-model-has-one-producer
   ;; docs/render.md#an-entity-may-name-its-own-render: seon.render/pulled is the one reading of a pulled entity as its data model, which the
