@@ -217,6 +217,10 @@
 
 (defn- css-class {:malli/schema [:=> [:cat :keyword] :string]} [kind] (str "seon-print-" (name kind)))
 
+;; a separator span's class, read once at load: a member split asks it of every child, and a contracted call there
+;; would be a call a child (the printer's cost proof)
+(def ^:private separator-class (css-class :seon.print/separator))
+
 (defn- text-op
   {:malli/schema [:function [:=> [:cat :keyword :string] :seon.print/op] [:=> [:cat :keyword :string :any] :seon.print/op]]}
   ([css text] {:op :text :text text :seon.print/class css})
@@ -482,10 +486,11 @@
   (boolean (and (vector? h) (= :span (nth h 0 nil)) (punctuation-classes (:class (nth h 1 nil))))))
 
 (defn- grid
-  "Map node's hiccup from its frame's children: a grid of key and value rows, each entry (an entry
-  frame's, marked :seon.print/val) paired with its node's entry in order (one frame per entry);
-  what else it holds (a cut) a row of its own; a namespace-lifted map's `#:ns` its caption. Its
-  metadata holds its cells by key and its other rows, which a table reads."
+  "Map node's hiccup from its frame's children: a definition list (`<dl>`, laid out as a grid) of
+  key and value rows, each entry (an entry frame's, marked :seon.print/val) paired with its node's
+  entry in order (one frame per entry); what else it holds (a cut) a row of its own; a
+  namespace-lifted map's `#:ns` its caption. Its metadata holds its cells by key and its other
+  rows, which a table reads. See docs/render.md#a-value-on-the-page-is-its-structure."
   {:malli/schema [:=> [:cat :map [:sequential :any]] :seon.print/hiccup]}
   [node children]
   (let [open (first children)
@@ -496,23 +501,23 @@
         ks (keep #(when (vector? %) (:seon.print/value (nth % 0))) (:seon.print/entries node))
         row (fn [r] (if (contains? (meta r) :seon.print/val)
                       r
-                      [:div {:class (css-class :seon.print/entry)} [:span {:class (css-class :seon.print/key)}] [:span {:class (css-class :seon.print/val)} r]]))]
-    (with-meta (into (cond-> [:div {:class (css-class :seon.print/grid)}] lifted (conj [:div {:class (css-class :seon.print/caption)} lifted]))
+                      [:div {:class (css-class :seon.print/entry)} [:dt {:class (css-class :seon.print/key)}] [:dd {:class (css-class :seon.print/val)} r]]))]
+    (with-meta (into (cond-> [:dl {:class (css-class :seon.print/grid)}] lifted (conj [:div {:class (css-class :seon.print/caption)} lifted]))
                      (map row) rows)
       {:seon.print/cells (mapv vector ks (map #(:seon.print/val (meta %)) entries)) :seon.print/rest (vec others)})))
 
 (defn- close-frame
-  "One collection's hiccup: a map as a grid of key and value rows (grid), folded as any
-  collection is; maps sharing keys as a table; the value printed (its root) or a collection of
-  scalars inline, as text reads them; any other nested collection a `<details>` that folds it,
-  its summary saying what it holds. A map entry (its frame's node :seon.print/entry) is its key
+  "One collection's hiccup: a map as a definition list of key and value rows (grid), folded as any
+  collection is; maps sharing keys as a table; a vector, list or set as a list of its members
+  (close-frame-inline); the value printed (its root) or a collection of scalars unfolded; any other
+  nested collection a `<details>` that folds it, its summary saying what it holds. A map entry (its frame's node :seon.print/entry) is its key
   and its value, the value kept in its metadata."
   {:malli/schema [:=> [:cat :any [:sequential :any]] :seon.print/hiccup]}
   [node children]
   (cond
     (= :seon.print/entry node)
     (let [v (peek (vec children))]
-      (with-meta [:div {:class (css-class :seon.print/entry)} [:span {:class (css-class :seon.print/key)} (first children)] [:span {:class (css-class :seon.print/val)} v]]
+      (with-meta [:div {:class (css-class :seon.print/entry)} [:dt {:class (css-class :seon.print/key)} (first children)] [:dd {:class (css-class :seon.print/val)} v]]
         {:seon.print/val v}))
     (and (= :seon.print/map (:seon.print/face node)) (seq (:seon.print/entries node)))
     (let [g (grid node children)]
@@ -550,17 +555,40 @@
                            [[:tr [:td {:colspan n} h]]])))
                members)]))))
 
+(defn- members
+  "A vector's, list's or set's frame children as its members: its delimiters dropped and the rest
+  split at each line's separator (its class read once at load, separator-class), so a member is its one
+  element (a scalar's span, a nested collection's, a cut's marker) or a tag and the value it tags."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:sequential [:sequential :any]]]}
+  [children]
+  (let [separator? #(and (vector? %) (= :span (nth % 0 nil)) (= separator-class (:class (nth % 1 nil))))]
+    (->> (subvec (vec children) 1 (dec (count children)))
+         (partition-by separator?)
+         (remove (comp separator? first)))))
+
 (defn- close-frame-inline
-  "A collection other than a map as hiccup: its root, or one of scalars, inline; any other folds."
+  "A collection other than a map as hiccup: a vector or list an `<ol>`, a set a `<ul>`, an `<li>`
+  per member (members), a cut a member of its own; its root, or one of scalars, unfolded (laid
+  out inline, its delimiters drawn by CSS); any other folds. An empty map, and a quoted form (`'x`),
+  stay their printed spans. See docs/render.md#a-value-on-the-page-is-its-structure."
   {:malli/schema [:=> [:cat :map [:sequential :any]] :seon.print/hiccup]}
   [node children]
-  (if (or (empty? (:seon.print/path node)) (flat? node))
-    (into [:span {:class (str "seon-print-node seon-print-inline " (css-class (:seon.print/face node)))}] children)
-    ;; open: a closed <details> hides its content however it is styled
-    [:details {:class (str "seon-print-node " (css-class (:seon.print/face node))) :open true
-               :data-seon-path (literal (:seon.print/path node))}
-     [:summary {:class "seon-print-summary"} (summary node (:seon.print/path node))]
-     (into [:span {:class "seon-print-content"}] children)]))
+  (let [face (:seon.print/face node)
+        unfolded? (or (empty? (:seon.print/path node)) (flat? node))
+        listed? (and (#{:seon.print/vector :seon.print/list :seon.print/set} face) (not= "'" (peek (first children))))
+        shown (cond
+                listed? (into [(if (= :seon.print/set face) :ul :ol)
+                               {:class (str "seon-print-members " (when unfolded? "seon-print-inline ") (css-class face))}]
+                              (map #(into [:li] %)) (members children))
+                unfolded? (into [:span {:class (str "seon-print-node seon-print-inline " (css-class face))}] children)
+                :else (into [:span {:class "seon-print-content"}] children))]
+    (if unfolded?
+      shown
+      ;; open: a closed <details> hides its content however it is styled
+      [:details {:class (str "seon-print-node " (css-class face)) :open true
+                 :data-seon-path (literal (:seon.print/path node))}
+       [:summary {:class "seon-print-summary"} (summary node (:seon.print/path node))]
+       shown])))
 
 ;; A span's attributes for each class a text op carries, made once (hiccup is immutable data,
 ;; so every span of a class shares its map).

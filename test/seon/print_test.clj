@@ -402,12 +402,34 @@
 
 (deftest a-map-is-key-and-value-rows
   (let [{:keys [text html]} (seon/print-value {:a 1 :b "x" :c {:d 2}} {:outputs #{:text :hiccup}})
-        grids (elements html :div "seon-print-grid")]
+        grids (elements html :dl "seon-print-grid")]
     (is (= {:a 1 :b "x" :c {:d 2}} (clojure.edn/read-string text)) "the text is the printer's, reading back as the value")
     (is (= 2 (count grids)) "the map and the map in it, each a grid")
     (is (= 3 (count (filter #(and (vector? %) (= "seon-print-entry" (:class (second %)))) (first grids)))) "a row per entry")
     (is (empty? (elements html :details)) "a map of scalars nested in the value printed folds nowhere")
     (is (empty? (elements (first grids) :span "seon-print-delimiter")) "no braces or commas: the grid is the layout")))
+
+(deftest a-value-is-drawn-by-its-shape
+  ;; docs/render.md#a-value-on-the-page-is-its-structure: a map a definition list, a vector a list
+  ;; of its members, each drawn the same way; the text the model reads is the printer's, unchanged
+  (let [v {:a 1 :b {:c [1 2]}}
+        {:keys [text html]} (seon/print-value v {:outputs #{:text :hiccup}})
+        [outer inner] (elements html :dl)
+        [ol] (elements html :ol)]
+    (is (= "{:a 1, :b {:c [1 2]}}" text) "the text is unchanged")
+    (is (= [":a" ":b"] (map #(last (last (nth % 2))) (drop 2 outer))) "a <dt> per key")
+    (is (= [":c"] (map #(last (last %)) (elements inner :dt))) "the nested map its own <dl>")
+    (is (= ["1" "2"] (map #(last (last %)) (elements ol :li))) "the vector an <ol>, an <li> per member")
+    (is (empty? (elements html :span "seon-print-delimiter")) "no brackets drawn as text"))
+  (let [{:keys [html]} (seon/print-value [{:x 1} {:y 2} #{:s}] {:outputs #{:hiccup}})
+        [ol] (elements html :ol)]
+    (is (= 3 (count (filter #(and (vector? %) (= :li (first %))) ol))) "a vector of maps a list of entries")
+    (is (= 2 (count (elements ol :dl))) "each map its <dl>")
+    (is (seq (elements ol :ul)) "a set a <ul>"))
+  (let [{:keys [text html]} (seon/print-value (vec (range 400)) {:outputs #{:text :hiccup} :handle 'result/h1 :budget 40})
+        lis (elements html :li)]
+    (is (str/includes? text "result/h1") text)
+    (is (some #(seq (elements % :button "seon-print-cut")) lis) "the cut a member of its own, and it opens")))
 
 (deftest maps-sharing-keys-are-a-table
   (let [v [{:test 'demo/a :status :fail :n 1} {:test 'demo/b :status :pass}]
@@ -450,7 +472,7 @@
         rows (rest (elements table :tr))]
     (is table)
     (is (some #(str/includes? (pr-str %) "seon-print-elision") rows) "the collection's cut is a row of its own")
-    (is (seq (elements table :div "seon-print-grid")) "a nested map is its cell, a grid")
+    (is (seq (elements table :dl "seon-print-grid")) "a nested map is its cell, a grid")
     (is (some #(str/includes? (pr-str %) "demo-test/t") rows) "a row's cells under their keys")))
 
 (deftest a-lifted-map-keeps-its-namespace
