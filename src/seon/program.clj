@@ -1327,14 +1327,17 @@
 (defn load-diff!
   "Make this process run db-to's program where it holds db-from's (diff-plan): each
   definition db-from had that db-to has none of is removed, and each live form db-to has
-  that db-from had not is loaded (but the binary's own), with what it reaches (load!), and
+  that db-from had not is loaded, every one, with what it reaches (load!), and
   what the changed schema keys reach, and it holds db-to's config (hold-config!). Answers the load errors. Costs the diff (diff-plan);
   it read both programs whole before: 400-450 ms a spawn on an existing branch, measured."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.program/error]]}
   [db-from db-to]
   (let [{:keys [remove load schemas]} (diff-plan db-from db-to)]
     (run! remove-definition! remove)
-    (into (vec (load! db-to (filterv #(not (held? db-to %)) load) schemas true)) (hold-config! db-to))))
+    ;; every form the diff names is the branch's own: this process holds db-from's definition of it, never the branch's,
+    ;; though its var is bound and the form was imported from a source tree (a tree branch's catch-up imports the checkout's
+    ;; changed files: held? read those as the binary's own and kept main's code, and a --root run judged main's code, 2026-11-11)
+    (into (vec (load! db-to load schemas true)) (hold-config! db-to))))
 
 (defn load-changes!
   "Load what resolved tx-data ops change, read against db (after them): each definition
