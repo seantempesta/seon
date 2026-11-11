@@ -2139,6 +2139,21 @@
     (is (= {t :pass} (:proofs (:value again))))
     (is (= 2 (:value asks)) "one ask for each change: at the same digest its verdict stands, and no gate is asked")))
 
+;; docs/merging.md#the-test-service: a run on a checkout plans its process tests, check steps and build as items of the service, each at
+;; the digest this branch gives it, so nothing is left to a gate
+(deftest a-checkouts-plan-names-its-process-tests-steps-and-build
+  (let [t 'seon.repl-test/a-process-item-of-the-plan
+        plan (str "(let [r (:result (first (seon.agent/handle! {:op :tests :id :x :plan? true :process? true :mode :judge})))]"
+                  " {:process (:process r) :deferred (:deferred r) :ids (get-in r [:steps \"ids\"]) :build (:build r)})")
+        [_ before _ after] (in-agent (fn [_] [(process-proof "a-process-item-of-the-plan" 2) plan
+                                              "(do (in-ns 'seon.check) (clojure.core/defn ids [] :changed) (in-ns 'user) :ok)" plan]))
+        {:keys [process deferred ids build]} (:value before)]
+    (is (string? (get process t)) (str "the process test the branch wrote is an item, at its digest: " (pr-str before)))
+    (is (not-any? #{t} deferred) "and is no longer left to the gate")
+    (is (and (string? (:digest ids)) (true? (:binary? ids))) (str "a check step with no green at its digest is an item, on the binary: " (pr-str ids)))
+    (is (true? (:needed? build)) "so the tree's build is needed")
+    (is (not= (:digest ids) (get-in after [:value :ids :digest])) (str "a change to what the step reaches moves its digest: " (pr-str after)))))
+
 ;; "if another agent has already run the same exact test we remove those" (owner, 2026-11-07)
 (deftest a-process-test-green-at-its-digest-asks-no-gate
   ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not, and a schema the branch registers moves the

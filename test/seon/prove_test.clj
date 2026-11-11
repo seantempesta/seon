@@ -419,3 +419,81 @@
      :per-n {:ticks 100 :bytes 250}
      :fixed {:ticks 2000 :bytes 2000}
      :sizes [100 300 1000]}))
+
+;; ---- a checkout's process tests, check steps and build as items (notes test-system-as-a-flow-2026-11-10.md, step 4) ----
+
+(defn- tree-run
+  "A session's run of checkout /ck at tree T (agent a1 holds its branch), with slots workers, its plan answered with plan:
+  [st outputs of the plan's answer, the plan ask]."
+  [slots plan]
+  (let [[st o] (feed (items-st slots) [[:req {:rid 1 :branch :tree-T :digest "dT" :agent :a1 :checkout "/ck" :tree "T"}]])
+        ask (first (asks o :tests))
+        [st o2] (feed st [(answer-of ask plan)])]
+    [st o2 ask]))
+(defn- fx-asks [outs] (filterv #(= :fx (get-in % [:req :op])) outs))
+(defn- run-answers [outs] (mapv :r (filter #(= :prove-answer (:op %)) outs)))
+
+;; docs/merging.md#the-test-service: a process test runs on its checkout's binary, so it waits for its tree's build
+(deftest a-process-item-waits-for-its-trees-build
+  (let [[st o ask] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? true}})
+        [b] (fx-asks o)]
+    (is (true? (get-in ask [:req :process?])) "a checkout's run asks its agent for its process items")
+    (is (= [{:kind :build :tree "T" :checkout "/ck" :name :build :digest "T" :binary? false :bound nil}] (mapv #(get-in % [:req :req]) (fx-asks o)))
+        "the build alone is granted, though three workers are free")
+    (let [[st o2] (feed st [(answer-of b {:value {:pass 1 :fail 0 :error 0 :ms 900}})])
+          [p] (fx-asks o2)]
+      (is (= {:kind :process :name 'a.p-test/t :digest "dp" :checkout "/ck"} (select-keys (get-in p [:req :req]) [:kind :name :digest :checkout])) "the build green: its process test is granted")
+      (let [[_ o3] (feed st [(answer-of p {:value {:pass 1 :fail 0 :error 0 :ms 40}})])
+            [r] (run-answers o3)]
+        (is (= [1 0 0 []] ((juxt :pass :fail :error :deferred) r)) "counted as a test, nothing deferred")
+        (is (= [:process] (mapv :kind (filter #(= 'a.p-test/t (:test %)) (filter #(= :prove-verdict (:op %)) o3)))) "its verdict streams with its kind")))))
+
+;; every wait ends: a red build is every item's that needs it, and none of them runs on a binary that was never built
+(deftest a-red-build-answers-what-needs-it-with-its-error
+  (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :steps {"smoke" {:digest "ds" :binary? true :bound 5000}} :build {:tree "T" :needed? true}})
+        [b] (fx-asks o)
+        [_ o2] (feed st [(answer-of b {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message "bin/build exited 1"}]}})])
+        [r] (run-answers o2)]
+    (is (= 1 (count (fx-asks o))) "only the build was granted")
+    (is (= [] (fx-asks o2)) "and after it, nothing")
+    (is (= :seon.prove/build-red (:seon.error/type r)) (pr-str r))))
+
+;; docs/merging.md#the-test-service: one bound, the workers, for every kind: a build holds a worker while it runs
+(deftest one-bound-covers-builds-and-tests
+  (let [[st o] (tree-run 1 {:items {'a.b-test/t "dt"} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? true}})
+        granted (fn [outs] (+ (count (fx-asks outs)) (count (remove #(get-in % [:req :plan?]) (asks outs :tests)))))]
+    (is (= 1 (granted o)) "one worker: one item granted, of a build and a test queued")
+    (let [first-ask (first (concat (fx-asks o) (asks o :tests)))
+          r (if (seq (fx-asks o)) {:value {:pass 1 :fail 0 :error 0}} {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.b-test/t"}]})
+          [_ o2] (feed st [(answer-of first-ask r)])]
+      (is (= 1 (granted o2)) "it ended: the next one alone"))))
+
+;; a step past its bound is a signal (docs/clocks.md#time-decides-the-owners-exceptions), never a verdict: its asker is answered
+;; on the rest, and the answer names it
+(deftest a-step-that-overran-is-a-signal-not-a-red
+  (let [[st o] (tree-run 4 {:items {'a.b-test/t "dt"} :steps {"laws" {:digest "dl" :binary? false :bound 100}} :build {:tree "T" :needed? false}})
+        [s] (fx-asks o)
+        [t] (remove #(get-in % [:req :plan?]) (asks o :tests))
+        [st o2] (feed st [(answer-of s {:value {:signal :overran :ms 150}})])
+        [_ o3] (feed st [(answer-of t {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.b-test/t"}]})])
+        [r] (run-answers o3)]
+    (is (= {:kind :step :name "laws" :bound 100 :binary? false} (select-keys (get-in s [:req :req]) [:kind :name :bound :binary?])) "no build: none is needed")
+    (is (empty? (run-answers o2)) "the signal answers no one")
+    (is (= [:signal] (mapv :status (filter #(= :prove-verdict (:op %)) o2))) "it streams as a signal")
+    (is (= [[] 1 0] ((juxt :red :pass :fail) r)) (pr-str r))
+    (is (= [{:test "laws" :digest "dl" :kind :step :signal :overran :ms 150}] (:signals r)))))
+
+;; docs/merging.md#the-test-service: a step on the binary needs its tree's seeded store, made once a tree after the build; a red seed is its steps'
+(deftest a-binary-step-waits-for-the-seed-and-a-red-seed-is-its-error
+  (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :steps {"smoke" {:digest "ds" :binary? true :bound 5000}} :build {:tree "T" :needed? true}})
+        [b] (fx-asks o)
+        [st o2] (feed st [(answer-of b {:value {:pass 1 :fail 0 :error 0}})])
+        kinds (fn [outs] (sort (map #(get-in % [:req :req :kind]) (fx-asks outs))))]
+    (is (= [:build] (kinds o)))
+    (is (= [:process :seed] (kinds o2)) "the build green: the seed and the process test, not the step")
+    (let [seed (first (filter #(= :seed (get-in % [:req :req :kind])) (fx-asks o2)))
+          [_ o3] (feed st [(answer-of seed {:value {:pass 0 :fail 1 :error 0}})])
+          [r] (run-answers o3)]
+      (is (= {:kind :seed :name :seed :digest "T"} (select-keys (get-in seed [:req :req]) [:kind :name :digest])))
+      (is (= [] (fx-asks o3)) "the step is never granted")
+      (is (= [:seon.prove/build-red :seed] [(:seon.error/type r) (:kind r)]) (pr-str r)))))

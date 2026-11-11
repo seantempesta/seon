@@ -98,7 +98,9 @@
  ;; full run is seen the next day, never a day skipped in silence
  :seon.prove/full-run-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-red]] [:tests [:vector :qualified-symbol]]]]
  :seon.prove/full-run-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-running]] [:running :string]]]
- :seon.prove/no-verdict [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/no-verdict]] [:test :qualified-symbol]]]
+ :seon.prove/no-verdict [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/no-verdict]] [:test [:or :qualified-symbol :string]]]]
+ ;; a tree's build or seed that is not green (seon.prove/item-ended): every item that needs it answers it, none granted
+ :seon.prove/build-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/build-red]] [:tree :string] [:kind [:enum :build :seed]]]]
  :seon.root/no-source-text [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-source-text]] [:paths [:vector :string]]]]
  ;; my.root/hold! of a task that is not running (held, cancelled, unknown): nothing to take back
  :seon.root/not-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/not-running]] [:task :string]

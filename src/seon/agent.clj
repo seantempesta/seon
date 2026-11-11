@@ -856,7 +856,7 @@
   With no base (a tree with nothing to diff against: root's on-change runs), the proofs and
   every test with no green at its digest, of which those with no result run (seon.proofs/plan's own rule). Answers the plan with
   :digests {test digest}, :graph (the reach graph it
-  walked) and :process, the tests that reach a process of their own (seon.program/graph-index, the
+  walked), :inputs (the branch's inputs it digested by: its root's boot's, with what the branch changed) and :process, the tests that reach a process of their own (seon.program/graph-index, the
   same walk as the digests): never run automatically, only when named (DECISIONS, Process tests
   are not automatic). The tests base holds that the branch removed (seon.merge/divergence's
   :removed, each a test var on base) are selected too, with their source as base holds it
@@ -880,7 +880,8 @@
         ;; built from nothing it cost 853 MB of a 1 GiB eval budget where an update costs 290 (a plan of main's
         ;; run, mode :main, selects with no base; measured 2026-10-30, 1,169 tests)
         g (branch-graph db (or base (:base @state)) in)
-        g (program/reach-indexed g (branch-inputs in db (or base (:base @state)) (:config (cfg/in-force))))
+        in (branch-inputs in db (or base (:base @state)) (:config (cfg/in-force)))
+        g (program/reach-indexed g in)
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
         idx (into {} (filter (fn [[t _]] (and (judges? t) (or (contains? proofs t) (not (template/stall-proofs t)))))) (program/index-of g))
         cd (update-vals idx :digest)
@@ -906,7 +907,7 @@
       (cond-> (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (if unread {} found) proofs)
                   (update :selected into (keys removed))
                   (update :run into (keys removed))
-                  (assoc :digests cd :base-digests (some-> b :index (update-vals :digest)) :graph g :removed removed
+                  (assoc :digests cd :base-digests (some-> b :index (update-vals :digest)) :graph g :inputs in :removed removed
                          :process (into (program/process-tests idx) removed-process)))
         unread (assoc :unread unread))))))
 
@@ -1582,6 +1583,33 @@
 
 (declare clone!)
 
+(defn process-plan
+  "Of sel (run-plan's), what a run on a checkout runs beside its in-process items, each at the digest this branch gives it
+  (docs/merging.md#the-test-service): :process {test digest}, the process tests it left (:deferred) that have one; :steps
+  {step {:digest :binary? :bound}}, the bin/check steps with no green at their digest as bin/prove plans them
+  (seon.proofs/plan-of over this branch's reach graph and inputs, every step that reaches a process kept, the generative
+  check's keys left to the shards), :bound the step-end factor times the step's median measured ms floored at the stall
+  bound (none unmeasured), :binary? seon.proofs/step-needs-binary?; :missing, the steps with no digest here (one naming a
+  function the program lacks; health, keyed by a base tree no branch holds); :build {:tree :needed?}, needed when a process
+  test or a binary step is among them; :deferred, what it left that is no process item. Or {:unread error}: the cache
+  could not be read."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [sel]
+  (let [plan (:plan sel)
+        unread (volatile! nil)
+        p (proofs/plan-of {:graph (:graph plan) :inputs (:inputs plan)} "checks" :merge nil nil
+                          (fn [cand] (let [r (fx/stored-results cand)] (if (contract/error? r) (do (vreset! unread r) {}) r))))
+        process (into {} (for [t (:deferred sel) :let [d (get-in sel [:digests t])] :when (and d (contains? (:process plan) t))] [t d]))
+        run (vec (remove proofs/mg-key? (:run-steps p)))
+        ms (if (seq run) (fx/typical-ms run) {})
+        k (cfg/value :seon.config.check/step-end-factor) floor (cfg/value :seon.config.agent/stall-ms)
+        steps (into {} (for [s run] [s (cond-> {:digest (get (:steps p) s) :binary? (proofs/step-needs-binary? s) :bound nil}
+                                         (ms s) (assoc :bound (max floor (* k (ms s)))))]))]
+    (if-let [u @unread]
+      {:unread u}
+      {:process process :steps steps :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))
+       :build {:tree (:tree (:inputs plan)) :needed? (boolean (or (seq process) (some :binary? (vals steps))))}})))
+
 (defn handle!
   "One Seon platform request; answers the messages to send back (a vector). (REPL
   requests are nREPL's: seon.repl.)"
@@ -1603,19 +1631,23 @@
              (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                    mode (or (:mode m) :judge)
                    sel (run-plan proofs mode (some-> (:names m) set))
+                   ;; a run on a checkout (:process?): its process tests, check steps and build are items of the service's too
+                   pp (when (and (:process? m) (not (:unread sel))) (process-plan sel))
+                   sel (cond-> sel pp (assoc :deferred (:deferred pp)))
                    ;; the plan's own facts on this branch, once a run: what it reuses and what it defers to the gate, at their
                    ;; digests (each item's run records what it ran); main's run is main's prove's to write
                    ;; held for the items it grants this agent (item-selection), each run at the digest planned here, and for
                    ;; the facts its answer writes on this branch (record-answer!)
                    _ (when-not (:unread sel) (swap! state assoc :held-plan (held-plan sel)))]
                [{:op :tests :id (:id m) :mem-mb (mem-mb)
-                 :result (or (:unread sel)
+                 :result (or (:unread sel) (:unread pp)
                              (cond-> {:items (select-keys (:digests sel) (:run sel)) :selected (:selected sel) :deferred (:deferred sel)
                                       ;; each item's measured ms, or its class's estimate (seon.proofs/estimated-ms): what the service orders by
                                       :ms (proofs/estimated-ms (:run sel) (fx/typical-ms (:run sel)) (:process (:plan sel)))
                                       :at-judge (count (:judge sel)) :reused-reports (:reused-reports sel)
                                       :digests (select-keys (:digests sel) (filter (:reused sel) (:selected sel)))}
-                               (seq (:deferred sel)) (assoc :why (into {} (for [t (:deferred sel)] [t (program/process-path (:graph (:plan sel)) t)])))))}])
+                               (seq (:deferred sel)) (assoc :why (into {} (for [t (:deferred sel)] [t (program/process-path (:graph (:plan sel)) t)])))
+                               pp (merge (select-keys pp [:process :steps :build :missing]))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                  r (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                      proofs
