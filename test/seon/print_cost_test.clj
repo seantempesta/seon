@@ -213,3 +213,16 @@
          :fixed {:ticks 2.5e5 :ns 5.0e5 :bytes 4.5e5}
          :sizes [250 500 1000 10000 100000]})
       (finally (when armed? (contract/instrument! '[seon.print seon.print.select seon.print.emit]))))))
+
+;; See docs/render.md#a-render-is-a-value-printed-once
+(deftest a-nested-maps-key-namespace-costs-nothing-more
+  ;; task seon.print/a-one-key-map-costs-what-its-key-prints: a message whose sender was the one-key map {:seon.agent/key ..} measured
+  ;; ~200 calls a message more than one whose sender was {:db/id 5}, through seon.render/hiccup before a printed reference became its
+  ;; identity value; the printer alone shows no such cost: a nested map's key costs the same whatever its namespace (an agent's, another,
+  ;; the outer map's own), and an attribute key against a bare :db/id the 13 calls a message of one more qualified key printed
+  (let [mk (fn [inner] (vec (for [i (range 20)] {:seon.message/id (str "m" i) :seon.message/from inner :seon.message/body "hello"})))
+        calls (fn [v outs] (seon.profile/begin!) (seon.print/print-value v {:budget 200000 :outputs outs}) (seon.profile/calls))]
+    (doseq [outs [#{:text} #{:hiccup}]]
+      (let [agent (calls (mk {:seon.agent/key "u"}) outs)]
+        (is (= agent (calls (mk {:x.y/key "u"}) outs) (calls (mk {:seon.message/key "u"}) outs)) (str "one cost whatever the key's namespace, " outs))
+        (is (<= (- agent (calls (mk {:db/id 5}) outs)) (* 20 13)) (str "and at most 13 calls a message over a bare :db/id, " outs))))))

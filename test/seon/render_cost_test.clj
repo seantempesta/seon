@@ -77,7 +77,7 @@
      ;; 30,495 at 180 (168 a message and 255 once).
      ;; 2026-11-10, step 2 (senders as refs): bound 170 -> 171 calls a message, the +1 the one call of seon.render/reference-value per
      ;; sender (a printed reference is its identity value); measured 3,657 at 20 and 10,497 at 60 (170.6 a message, 168 before). Ruled
-     ;; by Point for the owner on 2026-11-10, awaiting his word; what should take it back down: task seon.print/a-one-key-map-costs-what-its-key-prints
+     ;; by Point for the owner on 2026-11-10, awaiting his word. The +1 is the reference rule's own call, which no other fix removes: the ~200 calls a message of a one-key sender map were seon.render's hook path before that rule, and the printer alone shows no namespace cost (seon.print-cost-test/a-nested-maps-key-namespace-costs-nothing-more)
      :per-n {:calls 171}
      :fixed {:calls 260}
      :sizes [20 60 180]}))
