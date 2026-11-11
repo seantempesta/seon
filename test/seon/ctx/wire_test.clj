@@ -410,8 +410,9 @@
                                    :seon.model-call/ms 1}))
 
 (defn- page-call?
-  "Whether message m is a call Seon generated to show the page: an assistant message whose one call's code is (my.render/page ..) or (my.render/diff ..)."
-  [m] (boolean (and (= "assistant" (:role m)) (some #(re-find #"^\(my\.render/(page|diff) " (str (:code %))) (:tool-calls m)))))
+  "Whether message m is a call Seon generated to show the record or the page: an assistant message whose one call's code is (my.render/ctx ..),
+  (my.render/page ..) or (my.render/diff ..)."
+  [m] (boolean (and (= "assistant" (:role m)) (some #(re-find #"^\(my\.render/(ctx|page|diff) " (str (:code %))) (:tool-calls m)))))
 
 (defn- page-code
   "The code of the generated page call before the last message of ms (the tool message holding its result), else nil."
@@ -455,7 +456,11 @@
         (is (= ["system" "user" "assistant" "tool" "assistant" "tool"] (mapv :role r0)) "the first request: the system prompt, what opens the session, then the record and the page whole, each a generated eval and its result")
         (is (str/starts-with? (get-in r0 [2 :tool-calls 0 :code]) "(my.render/ctx {:commit #uuid \"") "the record whole first, as data (owner, 2026-11-11: the @ctx and the hiccup in full)")
         (is (str/includes? (:content (nth r0 3)) ":seon.agent/task") "the record holds the agent's task")
-        (is (not (str/includes? (:content (nth r0 3)) ":seon.eval/_agent")) "and not its conversation, which it reads as its own messages")
+        (is (= (let [c (get-in r0 [2 :tool-calls 0 :code])
+                   d0 (#'wire/db-at @conn (clojure.edn/read-string (subs c (count "(my.render/ctx ") (dec (count c)))))]
+               (print/text (vary-meta (seon.ctx/agent-ctx (seon.program/index-of-db d0) d0 (pdb/eid @conn :seon.agent/key "a1")) assoc :seon.print/full true)))
+               (:content (nth r0 3)))
+            "exactly @ctx at that point, as the agent would read it (owner, 2026-11-11: the same thing, not a filtered copy)")
         (is (= 1 (count (filter #(str/starts-with? (str (get-in % [:tool-calls 0 :code])) "(my.render/ctx") r2))) "shown once, at the first point")
         (is (str/starts-with? (page-code r0) "(my.render/page {:commit #uuid \"") "the page is the call (my.render/page p)")
         (is (every? #(re-find % (:content (peek r0))) [#":class \"cite\"" #"Doubles\." #":class \"status\""]) "the page whole, each part by the function that drew it: how the work stands too")
@@ -814,15 +819,15 @@
             _ (ev! "e2" "a1" "(f 1)" 1 {:call-id "call-0" :turn 1})
             _ (d/transact conn [{:var/name 'demo-test/f-test :seon.test/status :red}])
             r1 (request 2 {})]
-        (is (= ["system" "user" "assistant" "tool"] (mapv :role r0)) "turn 1: the system prompt, what opens the session, then the page whole as a generated eval")
-        (is (= ["system" "user" "assistant" "tool" "assistant" "assistant" "tool" "assistant" "tool"] (mapv :role r1)) (pr-str (mapv :role r1)))
-        (is (= {:role "assistant" :content "I call f." :reasoning "why" :reply 1} (nth r1 4)) "the reply: its text and the reasoning as returned")
-        (is (= {:role "assistant" :content "" :tool-calls [{:id "e2" :code "(f 1)"}] :reply 1} (nth r1 5)) "then its call")
+        (is (= ["system" "user" "assistant" "tool" "assistant" "tool"] (mapv :role r0)) "turn 1: the system prompt, what opens the session, then the record and the page whole, each a generated eval")
+        (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "assistant" "assistant" "tool" "assistant" "tool"] (mapv :role r1)) (pr-str (mapv :role r1)))
+        (is (= {:role "assistant" :content "I call f." :reasoning "why" :reply 1} (nth r1 6)) "the reply: its text and the reasoning as returned")
+        (is (= {:role "assistant" :content "" :tool-calls [{:id "e2" :code "(f 1)"}] :reply 1} (nth r1 7)) "then its call")
         (is (= [{:role "assistant" :content "I call f." :reasoning_content "why" :tool_calls [{:id "e2" :type "function" :function {:name "repl" :arguments "{\"code\":\"(f 1)\"}"}}]}
                 {:role "tool" :content "{:handle result/e2, :value 1}" :tool_call_id "e2"}]
-               (subvec (seon.model/wire-messages true r1) 4 6)) "one assistant message on the wire")
-        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 6))) "the call's response, its recorded value printed as it is sent")
-        (is (= r0 (subvec r1 0 4)) "the whole earlier request is the prefix: its page stays, appended")
+               (subvec (seon.model/wire-messages true r1) 6 8)) "one assistant message on the wire")
+        (is (= "{:handle result/e2, :value 1}" (:content (nth r1 8))) "the call's response, its recorded value printed as it is sent")
+        (is (= r0 (subvec r1 0 6)) "the whole earlier request is the prefix: its record and page stay, appended")
         (is (str/starts-with? (page-code r1) "(my.render/diff {:commit #uuid \"") "turn 2's page diff is the last")
         (is (re-find #"\"status\"" (:content (peek r1))) "a verdict recorded after turn 1: how the work stands, told again")
         ;; (the task's data draws each proof's recorded status too, so it moves with a verdict: reported)
@@ -1354,7 +1359,7 @@
     (fn [_ conn]
       (let [[ask!] (parts-session conn)
             {:keys [messages parts]} (ask! 0)]
-        (is (= ["system" "user" "assistant" "tool"] (mapv :role messages)) "the system prompt, what opens the session (a conversation never opens on a blank assistant message), then the page as a generated eval and its result")
+        (is (= ["system" "user" "assistant" "tool" "assistant" "tool"] (mapv :role messages)) "the system prompt, what opens the session (a conversation never opens on a blank assistant message), then the page as a generated eval and its result")
         (is (= [:section :session :page] (mapv (comp first first) parts)) "the entities it was made of")
         (is (str/starts-with? (page-code messages) "(my.render/page {:commit #uuid \"") "the page whole, as the call (my.render/page p)")
         (is (str/includes? (:content (peek messages)) "Task: ") "the task's part is in it, by its own render")))))
@@ -1392,7 +1397,9 @@
         (is (= [:eval "e1"] (some #(when (= [:eval "e1"] (first %)) (first %)) (:parts r1))) "before: e1 is in")
         (is (not-any? #(= [:eval "e1"] (first %)) (:parts r2)) "after: the trimmed record is gone")
         (is (= [:eval "e2"] (first (some #(when (= [:eval "e2"] (first %)) %) (:parts r2)))) "and the rest remains")
-        (is (not-any? #(str/includes? (str (:content %)) "e1") (rest (:messages r2))) "nothing of it is read")))))
+        ;; the record shown at the first point is @ctx as it was there, e1 in it: a function of that point, so the prefix holds; only a
+        ;; compaction shows the record again (docs/ctx.md#what-the-model-reads-and-what-the-page-renders)
+        (is (not-any? #(str/includes? (str (:content %)) "e1") (drop 4 (:messages r2))) "nothing after the first point's record reads it")))))
 
 (deftest a-cut-reply-is-no-message-in-the-history
   ;; task seon.ctx/the-context-is-the-agents-evals-and-seons R1 (review): a turn's message reply with
@@ -1442,9 +1449,9 @@
             _ (d/transact conn [{:seon.message/id "mid" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "note taken in turn 1"}])
             r1 (ask! 1)]
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "request 2 starts with request 1 whole, its page the first request's")
-        (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "user"] (mapv :role (:messages r1)))
+        (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "assistant" "tool" "user"] (mapv :role (:messages r1)))
             "the page, turn 1's eval and its result, then the message taken in turn 1, a user message: the page's parts did not move (the message is history, never a part), so no change follows")
-        (is (str/includes? (:content (nth (:messages r1) 6)) "note taken in turn 1") "the message, read at the next turn, after the turn's evals")))))
+        (is (str/includes? (:content (nth (:messages r1) 8)) "note taken in turn 1") "the message, read at the next turn, after the turn's evals")))))
 
 (deftest a-message-delivered-mid-turn-reads-after-that-turns-evals-on-a-branch-that-merged-main
   ;; docs/turn.md#the-turn-is-a-number: a message sent on main before turn 1 was made (so its id, issued once across every branch,
@@ -1471,9 +1478,9 @@
             (is (= (:db/id m) (pdb/eid @conn :seon.message/id "early")) "the branch holds main's entity, its id the content id main minted")
             (is (> (:db/id m) call1) "which says nothing of when it came: by ids it would sit after every call")
             (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "request 2 starts with request 1 whole")
-            (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "user"] (mapv :role (:messages r1)))
+            (is (= ["system" "user" "assistant" "tool" "assistant" "tool" "assistant" "tool" "user"] (mapv :role (:messages r1)))
                 "the page, turn 1's eval and its result, then the message, read at turn 2")
-            (is (str/includes? (:content (nth (:messages r1) 6)) "sent before turn 1") "the message, after turn 1's evals")
+            (is (str/includes? (:content (nth (:messages r1) 8)) "sent before turn 1") "the message, after turn 1's evals")
             (ev! "e2")
             (let [r2 (ask! 2)]
               (is (= (:messages r1) (subvec (:messages r2) 0 (count (:messages r1))))
@@ -1811,7 +1818,7 @@
             _ (d/transact conn [[:db/retract [:seon.task/id "demo/g"] :seon.task/examples a]])
             b (:seon.model-call/basis (d/pull @conn [:seon.model-call/basis] [:seon.model-call/id (seon.lib/call-id "a1" 1)]))
             empty-set (wire/render @conn b)]
-        (is (= ["system" "user" "assistant" "tool"] (mapv :role (:messages none))) "the system prompt, what opens the session, then the page as a generated eval")
+        (is (= ["system" "user" "assistant" "tool" "assistant" "tool"] (mapv :role (:messages none))) "the system prompt, what opens the session, then the page as a generated eval")
         (is (= (:messages none) (:messages empty-set)) "an emptied :seon.task/examples reads as none")
         (is (not-any? #(str/includes? (:content %) "kind=\"example\"") (:messages none)))
         (is (not-any? #(= :example (ffirst %)) (:parts none)))))))
@@ -1883,7 +1890,7 @@
       (let [{:keys [r0]} (no-example-requests! conn)
             ms (:messages r0)]
         (is (= {:role "system" :content (wire/system-text @conn)} (first ms)))
-        (is (= ["system" "user" "assistant" "tool"] (mapv :role ms)) "the system prompt, what opens the session, then the page whole as a generated eval")
+        (is (= ["system" "user" "assistant" "tool" "assistant" "tool"] (mapv :role ms)) "the system prompt, what opens the session, then the page whole as a generated eval")
         (is (str/includes? (:content (peek ms)) "Task: ") "the task's part, by its own render")
         (is (re-find #"demo-test/g-test" (:content (peek ms))) "and its proof")))))
 
@@ -1990,8 +1997,10 @@
   (let [seen (volatile! {})
         renumber (fn [s re prefix] (clojure.string/replace s re (fn [n] (or (get @seen n) (let [k (str prefix (count @seen))] (vswap! seen assoc n k) k)))))]
     (-> (pr-str (mapv #(if (= "system" (:role %)) (assoc % :content "<system>") %) (seon.model/wire-messages true ms)))
-        ;; a commit's uuid, and the id of a page call made from its point (seon.lib/id of a digest), differ run to run
+        ;; a commit's uuid, and the id of a page call made from its point (seon.lib/id of a digest), differ run to run; and a transaction's
+        ;; instant, which the record shown at the first point holds under each conversation join's :at
         (renumber #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" "U")
+        (renumber #"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z" "T")
         (renumber #"(?<![0-9a-zA-Z])[a-z][0-9a-f]{15}(?![0-9a-zA-Z])" "I")
         (renumber #"(?<![0-9.])[0-9]{3,}(?![0-9.])" "N"))))
 
@@ -2157,8 +2166,8 @@
             before (codes (:messages r3))
             _ (d/transact conn [[:db/retract [:seon.model-call/id (seon.lib/call-id "a1" 2)] :seon.model-call/agent [:seon.agent/key "a1"]]])
             after (:messages (wire/render @conn {:commit (d/commit-id @conn) :task "demo/f" :turn 3 :max-turns 9 :origin :model :agent "a1"}))]
-        (is (= [(str "(my.render/page " (point 1) ")") (str "(my.render/diff " (point 1) " " (point 2) ")") (str "(my.render/diff " (point 2) " " (point 3) ")")] before) "three turns: the page, then a diff at each")
-        (is (= [(str "(my.render/page " (point 1) ")") (str "(my.render/diff " (point 1) " " (point 3) ")")] (codes after)) "the middle call unlinked: the page at turn 1's point, then one diff from it to turn 3's")
+        (is (= [(str "(my.render/ctx " (point 1) ")") (str "(my.render/page " (point 1) ")") (str "(my.render/diff " (point 1) " " (point 2) ")") (str "(my.render/diff " (point 2) " " (point 3) ")")] before) "three turns: the page, then a diff at each")
+        (is (= [(str "(my.render/ctx " (point 1) ")") (str "(my.render/page " (point 1) ")") (str "(my.render/diff " (point 1) " " (point 3) ")")] (codes after)) "the middle call unlinked: the page at turn 1's point, then one diff from it to turn 3's")
         (is (not (str/includes? (pr-str after) (point 2))) "and nothing names the point removed")
         (is (str/includes? (:content (peek after)) "quadruple") "the diff holds what moved over both turns, the plan's last text")))))
 
@@ -2209,7 +2218,7 @@
             all (pr-str (:messages r1))]
         (is (not (re-find #"turns" (:content (peek (:messages r0))))) "the page announces no cap")
         (is (not (re-find #"Turn \d" all)) "no message holds a turn number as a line")
-        (is (= 1 (count (filter page-call? (:messages r1)))) "and turn 2 adds no page message of its own")
+        (is (= 2 (count (filter page-call? (:messages r1)))) "and turn 2 adds no page message of its own")
         (is (= (:messages r0) (subvec (:messages r1) 0 (count (:messages r0)))) "the prefix before it is byte-identical")))))
 
 (deftest a-cited-attribute-says-what-it-is-and-shows-a-real-value

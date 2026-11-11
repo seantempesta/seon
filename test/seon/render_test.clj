@@ -1323,7 +1323,7 @@
                                                                                 :seon.error/message "no model provider"}}])
                 html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-o2"})) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
-            (is (str/includes? html "my.render/page") "beside what it sent: the page, the turn's generated eval")))))))
+            (is (str/includes? html "my.render/ctx") "beside what it sent: the record, the turn's first generated eval")))))))
 
 (deftest a-page-opened-before-its-first-turn-takes-it
   ;; the browser check of 4bc612cf89: a debug page opened at "no model turn yet" never showed the turns that

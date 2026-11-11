@@ -1127,9 +1127,9 @@
         "the page is no call; each request holds the one before and the records added")
     (is (= [true true] prefix) "byte for byte")
     (is (= [] by) "Seon ran no eval: the page is its message")
-    (is (= [1 1 1] pages) "the page whole once, in the first request; nothing it shows moved after, so no other message")
+    (is (= [2 2 2] pages) "the record and the page whole once, in the first request; nothing they show moved after, so no other message")
     (is (every? (fn [[sent redraw]] (and (string? sent) (= sent redraw))) hashes) (str "the hash a turn recorded is its redraw's: " (pr-str hashes)))
-    (is (str/starts-with? first-code "(my.render/page {:commit #uuid \"") "the first request holds the page as the call (my.render/page p)")
+    (is (str/starts-with? first-code "(my.render/ctx {:commit #uuid \"") "the first request holds the record first, as the call (my.render/ctx p), then the page")
     (is (str/includes? first-page "Your task") "the task's part")))
 
 (deftest a-printed-page-call-runs-at-the-agents-repl
@@ -1230,7 +1230,7 @@
                      "(count (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/origin :model]] (seon.agent/db)))"])
                   {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})]
     (is (= 2 (:value calls)) "the second wake took a turn, so it had the chance to show the page")
-    (is (= 1 (:value whole)) "the page whole once, across both wakes: nothing moved, so the second turn adds no page message")))
+    (is (= 2 (:value whole)) "the record and the page whole once, across both wakes: nothing moved, so the second turn adds no page message")))
 
 (deftest a-call-after-one-that-threw-still-runs
   ;; docs/prompt.md: a reply's calls run in order, each whatever came before it (owner, 2026-11-08: "I want us to run every eval. Turns are precious
@@ -2539,7 +2539,7 @@
     (is (= :error (:outcome (:value end))) (pr-str end))
     (is (= 16 (count (:sent-hash (:value turn)))) "the hash of the bytes it sent, written before the call")
     (is (= (:sent-hash (:value turn)) (:redrawn (:value turn))) "and its request made again from its records is those bytes")
-    (is (= ["system" "user" "assistant" "tool"] (:roles (:value turn))) "the system message, what opens the session, then the page as the call Seon made and its answer (seon.ctx.wire/page-diff-msgs)")
+    (is (= ["system" "user" "assistant" "tool" "assistant" "tool"] (:roles (:value turn))) "the system message, what opens the session, then the page as the call Seon made and its answer (seon.ctx.wire/page-diff-msgs)")
     (is (not (str/includes? (str (peek (:read (:value turn)))) "turns")) (str "the page announces no cap: " (peek (:read (:value turn)))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 

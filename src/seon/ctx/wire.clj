@@ -316,13 +316,13 @@
     (assoc-in (ctx/build ix0 d0 a branch (render/page-pattern ix0 (or (render/entity-pattern ix0 (d/pull d0 '[*] a)) []))) [:ix :own-index?] true)))
 
 (defn ctx-at
-  "Agent a's record at point p of its branch, on db's store, as data: what `@ctx` held there, without the conversation's joins (its
-  calls, evals and messages, which the model reads as its own messages, never twice). What the model is shown whole at its first point,
-  before its page (`page-diff-msgs`), and what my.render/ctx answers. See docs/ctx.md#what-the-model-reads-and-what-the-page-renders."
+  "Agent a's record at point p of its branch, on db's store, as data: exactly what `@ctx` held there (seon.ctx/agent-ctx, its own pattern
+  whole, its conversation's joins included: the owner, 2026-11-11, the same thing, never a filtered copy). What the model is shown whole at
+  its first point, before its page (`page-diff-msgs`), and what my.render/ctx answers. See
+  docs/ctx.md#what-the-model-reads-and-what-the-page-renders."
   {:malli/schema [:=> [:cat :seon.host/db :int :map] :map]}
   [db a p]
-  (let [d0 (db-at db p)]
-    (:tree (page-ctx d0 a (get-in (or (:origin-db d0) d0) [:config :branch])))))
+  (let [d0 (db-at db p)] (ctx/agent-ctx (program/index-of-db d0) d0 a)))
 
 (defn- parts-walk
   "Agent a's page-parts walk drawn at db d0 (its branch's own, at t), cold: {:id :t :at :c :r :w}, the walk the model reads (:model-only:
