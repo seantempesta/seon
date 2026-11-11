@@ -263,6 +263,18 @@
       ;; :unfiled, the changed forms of namespaces with no file, which no write-back can write
       :results (mapv #(or (:refused %) (merge {:merged? true :tx t :keys (count (:ours (:r %)))} (written db (:ours (:r %))))) members)}]))
 
+(defn- pending-refused
+  "The refusal of op (:octopus-merge, :merge-candidate), which applies on main's connection's run-ahead and abandons what it
+  applied, when transactions are pending on that connection already, or nil. Nothing is pending when an op runs (writer-one
+  commits the batch first), so this is that invariant broken: the op writes nothing and abandons nothing, and the pending
+  transactions are left as they were for whoever applied them. See docs/storage.md#durability-is-continuous-group-commit."
+  {:malli/schema [:=> [:cat :seon.host/conn :keyword] [:maybe :seon.writer/pending]]}
+  [conn op]
+  (when (dw/pending? conn)
+    (contract/error :seon.writer/pending #'seon.writer/pending-refused
+                    (str "transactions are pending on main's connection when " (name op) " starts: nothing is written or abandoned")
+                    {:op op})))
+
 (defn- octopus-merge
   "Merge branches into main in ONE commit (an octopus merge, session R3, as git's, every
   member a parent): each member that holds main's program head and is not refused merges, in
@@ -273,13 +285,16 @@
   after its transactions were applied (judged-members) is answered so, and the others merge
   without it. Nothing is pending on main's connection when it starts: writer-one runs
   (commit-batch st o) before any op but :tx (commit-batch ends committed or abandoned), and the writer proc runs one
-  request at a time; whatever this op leaves pending, by any exit, is abandoned (the finally).
+  request at a time; that is checked (pending-refused), and whatever this op leaves pending,
+  by any exit, is abandoned (the finally).
   Answers [st {:results [answer per branch, in order]}]. See docs/decisions.md, 'A merge
   replays the source's transactions on the branch that receives it'."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile [:vector :seon.db/branch] :seon.merge/data-attrs] [:tuple :seon.writer/state :map]]}
   [st o branches data-attrs]
   (let [conn (:conn st)
         main @conn]
+    (if-let [e (pending-refused conn :octopus-merge)]
+      [st e]
     (try
       (let [judged (judged-members st branches data-attrs)
             ok (remove :refused (:members judged))]
@@ -292,7 +307,7 @@
           (not-any? (comp seq :reps) ok)
           [st {:results (mapv #(or (:refused %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
           :else (committed! st o main ok (:members judged))))
-      (finally (when (dw/pending? conn) (dw/abandon-pending! conn))))))
+      (finally (when (dw/pending? conn) (dw/abandon-pending! conn)))))))
 
 (defn- answer
   "The answer r for dest, as data on :to-api."
@@ -409,7 +424,9 @@
       ;; the merge gate's candidate: branch b merged over main as the octopus merge would merge it, applied to
       ;; a value and never committed, and the files that merge would write, with their text as it holds them
       ;; (written, source/files): what the gate tests is what the merge writes, schema resources included
-      :merge-candidate (reply st (if (exists? (:branch m))
+      :merge-candidate (reply st (cond
+                                   (pending-refused conn :merge-candidate) (pending-refused conn :merge-candidate)
+                                   (exists? (:branch m))
                                    ;; what the merge would write (member-applied!, as the octopus merge applies it), applied on main's
                                    ;; connection and abandoned, never committed: nothing is pending when an op runs (writer-one)
                                    (let [[head r base] (branch-merge st (:branch m) (:data-attrs m #{}))
@@ -419,7 +436,7 @@
                                      (or (:refused a)
                                          (let [w (written db (:ours r)) text (doc/files db (:files w))]
                                            (or (unanalyzable db text) (assoc w :ok true :text text)))))
-                                   (refused (str "no branch " (:branch m)) {})))
+                                   :else (refused (str "no branch " (:branch m)) {})))
       ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
       :branch-diff (reply st (if (exists? (:branch m))
                                (let [[head r base] (branch-merge st (:branch m) (:data-attrs m #{}))]

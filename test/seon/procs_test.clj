@@ -1359,3 +1359,26 @@
     (is (= :seon.merge/unidentified (:seon.error/type re)) (pr-str re))
     (is (= #{#{:note/text :note/agent}} (:unidentified re)) "named by its attributes")
     (is (= t0 (:max-tx @conn)) "and nothing is written")))))
+
+(deftest a-merge-leaves-anothers-pending-transactions-as-they-were
+  ;; seon.writer/pending-refused: the octopus merge and the gate's candidate apply on main's connection's run-ahead and abandon
+  ;; what they applied; found transactions pending at their start (an invariant broken), they write and abandon nothing
+  ;; (docs/storage.md#durability-is-continuous-group-commit)
+  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
+        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+        b (pdb/on-main (:branch cfg) :pend)
+        _ (d/branch! conn (:branch cfg) b)
+        bc (pdb/connect (assoc cfg :branch b))
+        _ (try (d/transact bc [{:task/name :gen/pend-b :task/plan "b" :task/status :held}]) (finally (d/release bc)))
+        rep (dw/apply! conn {:tx-data [{:task/name :gen/pending :task/plan "p" :task/status :held}] :tx-meta (pdb/tx-meta (:branch cfg))})
+        ask (fn [st req] (let [[st outs] (step #'writer/writer-proc st :in (assoc req :dest {:rid 1}))] [st (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs))))]))
+        [st merged] (ask st {:op :octopus-merge :branches [b]})
+        [_ cand] (ask st {:op :merge-candidate :branch b})]
+    (is (map? rep))
+    (is (= [:seon.writer/pending :octopus-merge] ((juxt :seon.error/type :op) merged)) (pr-str merged))
+    (is (= [:seon.writer/pending :merge-candidate] ((juxt :seon.error/type :op) cand)) (pr-str cand))
+    (is (dw/pending? conn) "the pending transaction is still pending")
+    (let [c (dw/commit-pending! conn)]
+      (is (= (:max-tx (:db-after rep)) (:max-tx (:db c))) "the same one: its commit is main at the report's t")
+      (is (some? (d/entity (:db c) [:task/name :gen/pending])) "holding its write")
+      (is (nil? (d/entity (:db c) [:task/name :gen/pend-b])) "and nothing of the merge"))))))
