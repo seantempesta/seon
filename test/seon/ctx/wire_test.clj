@@ -1530,6 +1530,35 @@
         (is (not (identical? w1 (kept))) "a point with no kept walk to advance is drawn")
         (is (not= h1 h2))))))
 
+(deftest a-flush-between-turns-leaves-the-next-turns-pair-to-advance
+  ;; docs/render.md#a-page-is-a-kept-walk: a flush between turns (a :context read, a person's page, an eval's own) draws the pending
+  ;; turn's page at the db's own point, past the last basis; the next turn's pair starts at that basis, behind the kept walk, and drew
+  ;; the page cold at every such turn (2026-11-11: ~7.1M ticks, the :context read's 80 ms). The page at the chain's first point is kept
+  ;; with the walk, so that pair advances the same walk, and answers what a cold draw does
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask! ev! plan!] (parts-session conn)
+            _ (ask! 0)
+            a (pdb/eid @conn :seon.agent/key "a1")
+            point (fn [] (let [db @conn] {:commit (d/commit-id db) :t (:max-tx db)}))
+            kept #(:w @@#'seon.ctx.wire/kept-walk)
+            pb (point)
+            _ (wire/page-parts-through @conn a [nil pb])
+            _ (ev! "e1")
+            here (point)
+            ;; the flush between turns: the pending turn's pair, to the db's own point
+            _ (wire/page-parts-through @conn a [pb here])
+            w (kept)
+            _ (ev! "e2")
+            _ (plan! "Make f, then g.")
+            pn (point)
+            [h0 h1] (wire/page-parts-through @conn a [pb pn])]
+        (is (some? w))
+        (is (identical? w (kept)) "the next turn's pair advanced the walk the flush left, not a page drawn again")
+        (is (str/includes? (pr-str h1) "Make f, then g.") "it shows what moved")
+        (reset! @#'seon.ctx.wire/kept-walk nil)
+        (is (= [h0 h1] (wire/page-parts-through @conn a [pb pn])) "what a cold draw of the pair answers")))))
+
 (deftest a-write-reruns-the-placing-render-and-no-earlier-page-pair
   ;; docs/render.md#a-page-is-a-kept-walk: a turn's page message reads only db values at fixed past points, so its reads are not
   ;; recorded and a later write runs no earlier pair again; the render that places them (the agent's model render, turn-entities)
