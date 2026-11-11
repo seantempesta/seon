@@ -665,3 +665,59 @@
         (doseq [^java.io.File l links] (.delete l))
         (clojure.java.shell/sh "git" "-C" here "worktree" "remove" "--force" wt)
         (seon.lib/remove-tree! tmp)))))
+
+(deftest two-sessions-proving-one-tree-at-once-each-get-every-verdict
+  ;; docs/merging.md#a-session-proves-through-root (Flow step 4, two askers of one tree): two clients ask root for the same tree at
+  ;; the same time, each through seon.server/ask-streamed as bin/prove --root does, from two futures of this process released together.
+  ;; Red before the Jolt pin ec4c1e44: two of them first using a socket at once threw "No dependency provides java.net.Socket".
+  ;; One run, each item once: a second asker arriving after the run would be answered from :done with :ran 0, so :ran 2 in
+  ;; both answers and one :key say both joined the run in flight. The checkout is a
+  ;; worktree of this tree with one test namespace of two green tests added (a run id in it, so no verdict is reused)
+  (let [here (seon.config/checkout)
+        root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str here))])
+        tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-two-askers-" (random-uuid))) (.mkdirs)))
+        wt (str tmp "/wt")
+        run (str (random-uuid))
+        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" here "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                           (is (zero? (:exit r)) (str args (:err r))) (clojure.string/trim (:out r))))
+        links (for [f ["seon" "lib" "home"]] (java.io.File. (str wt "/target/" f)))]
+    (try
+      (git "worktree" "add" "-q" "--detach" wt (git "commit-tree" (seon.fx/tree-id here) "-p" "HEAD" "-m" "two askers' fixture"))
+      (spit (str wt "/test/seon/two_askers_test.clj")
+            (str "(ns seon.two-askers-test (:require [clojure.test :refer [deftest is]]))\n\n(def run " (pr-str run) ")\n\n"
+                 "(deftest one (is (string? run)))\n(deftest two (is (string? run)))\n"))
+      (.mkdirs (java.io.File. (str wt "/target")))
+      (doseq [^java.io.File l links]
+        (java.nio.file.Files/createSymbolicLink (.toPath l) (.toPath (java.io.File. (str here "/target/" (.getName l)))) (make-array java.nio.file.attribute.FileAttribute 0)))
+      (let [port (:port root)
+            tree (seon.fx/tree-id wt)
+            go (promise)
+            asker (fn [] (let [events (atom [])]
+                           ;; both released together; the wait ends at the answer or the connection's end (ask-streamed)
+                           (future @go
+                                   (let [answer (seon.server/ask-streamed port {:op :prove :checkout wt :tree tree :mode "judge" :stream true :names ["seon.two-askers-test"]}
+                                                                          #(swap! events conj %))]
+                                     {:answer answer :events @events}))))
+            a (asker)
+            b (asker)
+            _ (deliver go true)
+            ;; each wait ends with ask-streamed's: its answer or the connection's end (no clock of its own)
+            ra @a
+            rb @b
+            tests (fn [r] (->> (:events r) (filter #(= :prove-verdict (:type %))) (filter :test)))]
+        (do
+          (is (not (contract/error? (:answer ra))) (pr-str (:answer ra)))
+          (is (not (contract/error? (:answer rb))) (pr-str (:answer rb)))
+          (is (= #{'seon.two-askers-test/one 'seon.two-askers-test/two} (set (map :test (tests ra)))) (pr-str (:events ra)))
+          (is (= (set (map (juxt :test :status) (tests ra))) (set (map (juxt :test :status) (tests rb))))
+              "both askers got the same verdicts")
+          (is (= [:pass :pass] (map :status (tests ra))) "each verdict once, green")
+          (is (= 2 (count (tests ra)) (count (tests rb))) "every test's verdict once for each asker, none twice")
+          (is (= (:key (:answer ra)) (:key (:answer rb))) "one run of the tree for both")
+          (is (= 2 (:ran (:answer ra)) (:ran (:answer rb))) (pr-str [(:answer ra) (:answer rb)]))
+          (is (empty? (:red (:answer ra))))
+          (is (empty? (:red (:answer rb))))))
+      (finally
+        (doseq [^java.io.File l links] (.delete l))
+        (clojure.java.shell/sh "git" "-C" here "worktree" "remove" "--force" wt)
+        (seon.lib/remove-tree! tmp)))))
