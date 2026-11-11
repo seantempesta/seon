@@ -413,7 +413,7 @@
                                          (let [w (written db (:ours r)) text (doc/files db (:files w))]
                                            (or (unanalyzable db text) (assoc w :ok true :text text)))))
                                    :else (refused (str "no branch " (:branch m)) {})))
-      ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and merges
+      ;; one derivation (seon.merge/three-way) for the dashboard, the done rule and the judgment of a merge up
       :branch-diff (reply st (if (exists? (:branch m))
                                (let [[head r base] (branch-merge st (:branch m) (:data-attrs m #{}))]
                                  {:ok true :db head :base base :base-t (:max-tx base)

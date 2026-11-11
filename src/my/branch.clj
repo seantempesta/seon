@@ -1,7 +1,7 @@
 (ns my.branch
-  "The merge agent's functions (git's words): merge main into this branch, see what is still
-  unmerged, resolve an entry. The writer does the merge (seon.merge/three-way, the one
-  derivation); this branch sees main's changes only through these functions."
+  "The merge agent's functions (git's words): merge main into this branch, see its
+  conflicts with main, settle them by merging again with resolutions. The merge is the one merge
+  (seon.agent/merge-main!, docs/agent.md#merging); this branch sees main's changes only through these functions."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.fx :as fx] [seon.source :as source] [seon.config :as cfg] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.stage :as stage] [seon.program :as program]))
 
