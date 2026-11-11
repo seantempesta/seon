@@ -1507,14 +1507,22 @@
             config-errors (program/hold-config! @conn)
             digest (program/program-digest @conn)
             digest-ms (profile/ms-since t2)
-            contracts (contract/instrument! contract/boot-nss)]
+            contracts (contract/instrument! contract/boot-nss)
+            ;; a binary built from another tree than main's: main's tree's inputs, which booted-source hands agents when the
+            ;; binary is current for it by reach, as the plan that judged it current recorded them beside it (target/seon.inputs,
+            ;; keyed by their :tree). A file read: root runs no git, since clojure.java.shell's futures are threads root does not
+            ;; declare (seon.root-test/root-threads-are-what-root-declares, batch 28)
+            main-inputs (let [tree (:tree (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root])))
+                              f (java.io.File. (str (cfg/checkout) "/target/seon.inputs"))
+                              ins (when (and tree (.isFile f)) (sedn/decode (slurp f)))]
+                          (when (and (= tree (:tree ins)) (not= tree (get-in (binary-program) [:inputs :tree]))) ins))]
         (warm! conn)
         (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         (lib/static!)
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
                  {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained
-                  :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts}))))))
+                  :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
 
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
@@ -1558,7 +1566,7 @@
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
-        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors digest digest-ms contracts pid fd compacted retained]}
+        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors digest digest-ms contracts pid fd compacted retained main-inputs]}
         (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
@@ -1639,9 +1647,8 @@
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
                                                                          held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (binary-program) digest (fx/config-input cfg/config (cfg/checkout)) stale
-                                                                                                    ;; a binary current for main's tree by reach, built from another: main's tree's inputs
-                                                                                                    (when (and (not stale) (:tree held) (not= (:tree held) (get-in (binary-program) [:inputs :tree])))
-                                                                                                      (fx/inputs (str (cfg/checkout)) cfg/config (cfg/checkout) (:tree held))))})
+                                                                                                    ;; a binary current for main's tree by reach, built from another: main's tree's inputs, read at boot
+                                                                                                    (when (and (not stale) (= (:tree held) (:tree main-inputs))) main-inputs))})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))

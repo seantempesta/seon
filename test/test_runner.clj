@@ -511,6 +511,9 @@
         ;; out/build: what bin/test builds target/seon for, empty when the binary is current for this tree (seon.root/binary-current):
         ;; a change that reaches nothing root runs from its binary builds nothing (rule (a), docs/source.md#the-binary-records-its-program)
         _ (write! (str out "/build") (build-text bin-keys binary-current))
+        ;; this tree's inputs beside the binary (target/seon.inputs, keyed by their :tree): what a root booting on this tree with a
+        ;; binary current for it by reach hands its agents (seon.root/booted-source), read as a file: root runs no git
+        _ (write! (str (config/checkout) "/target/seon.inputs") (sedn/encode inputs))
         _ (when (and (seq bin-keys) (not binary-current))
             (println "prove: target/seon is current for this tree by reach (seon.root/binary-current): no build"))
         ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms)
