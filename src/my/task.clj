@@ -54,6 +54,12 @@
     (turn/request-stop! :failed reason)
     f))
 
+(defn- proof-as-read
+  "A proof's entry x of the status as (my.task/status) answers it: one that does not pass keeps its :source and the :calls it makes, as
+  the page's status part draws them (docs/agent.md: the same answer as the page); a passing one neither. Never its :shape."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [x] (if (= :pass (:status x)) (dissoc x :calls :shape :source) (dissoc x :shape)))
+
 (defn status
   "How this agent's work on its task stands now, as its page and its model read it
   (seon.ctx.status/status, drawn by seon.render.ui/status): each proof by the verdict its branch holds (a red one
@@ -65,8 +71,8 @@
   []
   ;; from the agent's record (@seon.ctx/ctx: its run, its task's proofs), as the page's status part reads it; never
   ;; the walk from inside an eval (drawing the page within an eval spun the agent: seon.server-test's my.task/status)
-  (let [slim (fn [x] (cond-> (dissoc x :calls :shape) (:source x) (dissoc :source)))
-        st (dissoc (status/status (agent/db) @seon.ctx/ctx {}) :reasons)]
-    ;; what an agent reads as data: its proofs and what blocks, not the sources of the helpers they call
-    (cond-> (update st :proofs #(mapv slim %)) (:refused st) (update :refused #(mapv slim %)))))
+  (let [st (dissoc (status/status (agent/db) @seon.ctx/ctx {}) :reasons)]
+    ;; what an agent reads as data: its proofs and what blocks; a proof that does not pass keeps its :source and the :calls it
+    ;; makes, as the page's status part draws them (docs/agent.md: the same answer as the page), a passing one neither
+    (cond-> (update st :proofs #(mapv proof-as-read %)) (:refused st) (update :refused #(mapv proof-as-read %)))))
 

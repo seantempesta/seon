@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.fixtures :refer [flush! draw]] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.ctx] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx]))
+            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx] [malli.registry]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -773,6 +773,17 @@
       (is (= 1 (count (re-seq #"class=\"[^\"]*\bsource-line\b" html))) (str v ": once")))
     (r/dispose-walk! (get-in st2 [:root-walk :w]))))
 
+(deftest a-turns-steps-say-what-each-was-for
+  ;; docs/render.md#the-page: a turn's steps fold their code and output, and the fold's line says what each was for (its intent), so a
+  ;; person reading the chat sees what the agent did, and a run that repeats a step reads as one
+  (let [summary (fn [h] (second (re-find #"(?s)<summary>(.*?)</summary>" h)))
+        two (h/html (ui/steps 3 [[:li "e1"] [:li "e2"]] ["Read the plan." "Write the test."]))
+        none (h/html (ui/steps 4 [[:li "e3"]] []))]
+    (is (str/includes? (summary two) "2 steps") "how many")
+    (is (re-find #"Read the plan\..*Write the test\." (summary two)) "and each step's intent, in order, on the line")
+    (is (not (str/includes? (summary two) "e1")) "never its code or output, which stay folded")
+    (is (= "1 step" (summary none)) "a step with no intent names none")))
+
 (deftest each-proof-state-says-what-helps-it
   ;; docs/render.md#how-the-work-stands: a proof with no verdict is told the one thing that helps its state (Data model, 2026-11-11: four
   ;; facts, never one word); a red proof shows every assertion it failed, its source and what it calls (the physics audit's high 1-3)
@@ -787,10 +798,22 @@
     (is (not (str/includes? red "(deftest r")) "the test's own source is not repeated (owner, 2026-11-05)")
     (is (str/includes? red "`demo/f`") "what it calls")
     (is (str/includes? red "(defn helper [] 3)") "a helper of its own namespace, with its source")
-    (is (re-find #"test run failed[^<]*`demo-test/d`" st) "a proof the dead run left: the run is what to fix")
-    (is (re-find #"merges[^<]*`demo-test/p`[^<]*Nothing to do" st) "a deferred proof: it runs at the merge, nothing to do now")
-    (is (re-find #"Not judged yet[^<]*`demo-test/u`" st) "a proof not judged yet: (prove) runs it")
-    (is (= 1 (count (re-seq #"\(prove\)" st))) "(prove) is offered for that one alone")))
+    (let [explain (:seon.status/explain (seon.contract/properties :seon.ctx.status/proof-state))]
+      (doseq [[k t] [[:not-run 'demo-test/d] [:deferred 'demo-test/p] [:unknown 'demo-test/u]]]
+        (is (str/includes? st (str "<code>" t "</code>: ")) (str t ": its name, drawn as code"))
+        (is (str/includes? st (first (str/split (get explain k) #"`"))) (str t ": then what its state means and what helps it, the schema's words"))))
+    (is (str/includes? red (first (str/split (:fail (:seon.status/explain (seon.contract/properties :seon.ctx.status/proof-state))) #"`"))) "a red proof says what red means and what to do")
+    (is (= 1 (count (re-seq #"<code>\(prove\)</code>" st))) "(prove) is offered, as code, for the proof not judged yet alone")))
+
+(deftest every-proof-state-has-its-words
+  ;; docs/render.md#how-the-work-stands: each state a proof is shown in carries its title and its explanation as data on its schema, so a
+  ;; state added without words is red here, never a blank on the page
+  (let [props (seon.contract/properties :seon.ctx.status/proof-state)
+        members (seon.contract/enum-values :seon.ctx.status/proof-state)]
+    (is (seq members) "the enum's members")
+    (doseq [m members]
+      (is (not (str/blank? (get (:seon.status/title props) m))) (str m ": a title"))
+      (is (not (str/blank? (get (:seon.status/explain props) m))) (str m ": an explanation")))))
 
 (deftest a-location-names-root-an-agent-or-an-entity
   (is (= [:root :root [:chat :a3] :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "a3/ctx" "474"])) "an agent's path is its chat; /debug every render of its ctx"))
@@ -2856,6 +2879,36 @@
       (is (= :entity (:source mo)) "an entity holding its own pattern is read by it")
       (is (= [:seon.agent/task :seon.agent/turn] (:held-unasked mo)) "what the entity holds on the db that its pattern does not ask"))))
 
+(deftest a-pulled-entity-reads-a-schemas-name-in-its-pattern-as-that-schemas-pattern
+  ;; docs/ctx.md#the-pattern: seon.render/pulled reads an entity's own pattern expanded (seon.render/expanded): a schema's name among its
+  ;; clauses lists the clauses that schema's pattern asks, never the name, and the pattern is still the entity's own
+  (let [k "inspect/named"
+        db (:db-after (d/with (ts/test-db) [{:seon.agent/key k :seon.agent/turn 1}]))
+        ix (seon.db/index)
+        own [:seon.db/agent-fact :seon.agent/started-ms]
+        node {:db/id (seon.db/eid db :seon.agent/key k) :seon.agent/key k :seon.ctx/pattern own}
+        m (r/pulled db ix node nil)
+        asked (set (map :clause (:clauses m)))]
+    (is (= :entity (:source m)) "its own pattern")
+    (is (= (:clauses (r/pulled db ix node (conj (vec (r/schema-property ix :seon.db/agent-fact :seon.ctx/pattern)) :seon.agent/started-ms)))
+           (:clauses m))
+        "clause by clause, the schema's pattern and the added clause")
+    (is (every? asked [:seon.agent/key :seon.agent/started-ms]) "the schema's clauses and the added one")
+    (is (some #(and (contains? % :members) (= :seon.agent/task (:attr %))) (:clauses m)) "the joins the schema's pattern asks")
+    (is (not (asked :seon.db/agent-fact)) "never the schema's name as an attribute")))
+
+(deftest a-schemas-name-whose-pattern-reaches-itself-is-refused
+  ;; docs/ctx.md#the-pattern: a schema's name among a pattern's clauses is spliced by its pattern (seon.render/expanded); one whose pattern
+  ;; names it again, through another, is refused with a typed error naming it, as a join's schema that reaches itself is
+  (let [forms {:lab.loop/a-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:lab.loop/b-fact :lab.loop/x]} [:lab.loop/x :lab.loop/x]]
+               :lab.loop/b-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:lab.loop/a-fact :lab.loop/y]} [:lab.loop/y :lab.loop/y]]
+               :lab.loop/x :string :lab.loop/y :string}
+        ix (seon.db/index-of {:forms forms})
+        said (binding [malli.registry/*registry* (seon.contract/registry-of forms)]
+               (try (r/pattern ix [:lab.loop/a-fact]) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))]
+    (is (= :seon.ctx/invalid-pattern (:seon.error/type said)) (pr-str said))
+    (is (str/includes? (str said) "reaches itself") (pr-str said))))
+
 (deftest an-own-renders-part-is-the-models-unless-marked-for-the-page
   ;; docs/render.md#an-entity-may-name-its-own-render: the lists a walk reads as parts (seon.render/page-lists, what the model reads) hold
   ;; the pull view's front, a part like any, and not the stage's, which its render marks for the page alone (red before: the pull view's
@@ -3394,7 +3447,7 @@
         fold (last reply)
         ids (map #(get % :seon.eval/id) (last (last fold)))]
     (is (not-any? #(and (map? %) (get % :seon.eval/id)) (drop 2 turn)) "the chat is messages: no step stands beside them")
-    (is (and (= :details (first fold)) (not (:open (second fold))) (= "3 steps" (last (nth fold 2)))) "the turn's steps fold, closed, under one line saying how many")
+    (is (and (= :details (first fold)) (not (:open (second fold))) (= "3 steps" (second (nth fold 2)))) "the turn's steps fold, closed, under one line saying how many (then what each was for)")
     (is (= "e3" (first ids)) "the agent's own step first")
     (is (= #{"e2" "e3" "e4"} (set ids)) "then those of other hands, Seon's among them")
     (let [t (h/html (ui/model-call-view {} (d/pull db '[*] call)))]
@@ -3719,7 +3772,7 @@
     (is (= :h2 (first (second h))) "headed")
     (is (str/includes? t "Your proofs") "headed to the agent")
     (is (str/includes? t "<ul><li><code>seon.program-test/a-vars-history</code>") "several proofs: a list of their states")
-    (is (str/includes? t "not written yet") "each proof's state")
+    (is (str/includes? t (:undefined (:seon.status/title (seon.contract/properties :seon.ctx.status/proof-state)))) "each proof's state, its schema's title")
     (is (str/includes? t "Unknown class program") "a failure in a line")
     (is (not (str/includes? t "(deftest a-vars-history")) "the failing proof's source is the agent's own: not repeated")
     (is (str/includes? t "seon.program/history is public") "what blocks merging")
@@ -3775,6 +3828,49 @@
     (let [v {:n 1 :seon.render/hiccup 'agent.nobody/chart}]
       (is (nil? (r/render-of (seon.db/index) v nil)))
       (is (str/includes? (pr-str (r/hiccup {:seon.render/index (seon.db/index)} v)) ":n")))))
+
+(deftest a-value-that-is-hiccup-is-drawn-on-the-page
+  ;; docs/render.md#a-value-draws-itself: an agent's call of a render at its REPL (seon.render.ui/pull-front, whose contract answers
+  ;; :seon.render/hiccup-value) answers hiccup; its eval names that schema from the contract alone, its value is drawn on the page as
+  ;; html with the data folded under it, and the model reads the value as the data it is, as before
+  (let [[_ branch eid] (paged-dbs)
+        k "a3"
+        v (ui/pull-front {:seon.ctx/ctx (d/pull branch '[*] eid) :seon.render/index (seon.db/index)})
+        code "(seon.render.ui/pull-front opts)"
+        rec (seon.repl/record-details code {:value v} {})
+        db (d/db-with branch (seon.repl/record-tx {:seon.agent/key k} "h1" (seon.task/sender "a3")
+                                                  (merge rec {:seon.eval/call (seon.task/call-ref k 1) :seon.eval/response {:handle 'result/h1 :value (get-in rec [:seon.eval/response :value])}})))
+        html (component-html db "evaluation-h1")
+        read (pr-str (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "h1"])))]
+    (is (= :seon.render/hiccup-value (:seon.eval/schema rec)) "the eval names the schema the called render's contract answers")
+    (is (some? html) "the eval, a component of the page")
+    (is (str/includes? html "<h1>a3 as data</h1>") (str "the value drawn as html: " html))
+    (is (re-find #"(?s)<details><summary>show as data</summary>.*:section" html) "and under it, folded, the value as data")
+    (is (str/includes? read "[:section") "the model reads the value as data")
+    (is (not (str/includes? read "<h1>")) "never as html")))
+
+(def ^:private called (atom 0))
+
+(defn planted-fn
+  "A system function an agent's value names: counts each call, so a test sees whether drawing a value called it."
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
+  [& _] (swap! called inc) [:p "CALLED"])
+
+(deftest an-agents-hiccup-value-calls-nothing
+  ;; docs/render.md#a-value-draws-itself: a value an agent's eval answered is drawn from the db, where a var is its symbol, and the walk
+  ;; calls only a var or a fn at a vector's head: a value naming a system function is drawn as data and calls nothing
+  (let [[_ branch _] (paged-dbs)
+        k "a3"
+        v [:section [:p "kept"] ['seon.render-test/planted-fn {} "x"]]
+        db (d/db-with branch (seon.repl/record-tx {:seon.agent/key k} "h2" (seon.task/sender "a3")
+                                                  {:seon.eval/code "(my-render)" :seon.eval/schema :seon.render/hiccup-value
+                                                   :seon.eval/call (seon.task/call-ref k 1) :seon.eval/response {:handle 'result/h2 :value v}}))
+        _ (reset! called 0)
+        html (component-html db "evaluation-h2")]
+    (is (some? html) "the eval is drawn")
+    (is (str/includes? html "kept") "its plain elements are drawn")
+    (is (= 0 @called) "the function the value names is never called")
+    (is (not (str/includes? html "CALLED")) "and nothing it would answer is on the page")))
 
 (deftest an-agents-own-draw-replaces-roots-at-the-same-revision
   ;; docs/render.md#a-value-draws-itself: root draws a live agent's page first, from its branch, and root holds no render the agent defined; the agent's answer must reach the page though each process counts revisions of its own

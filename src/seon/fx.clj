@@ -134,11 +134,12 @@
   {:malli/schema [:=> [:cat :int] :string]}
   [pid] (str (cfg/value :seon.config.agent/cwd) "/tests/" pid))
 
-(def ^:private child-env-scrub
+(def child-env-scrub
   "The `env -u` argv that gives a child process the tree's own environment (docs/source.md#the-next-generation):
   bin/env and bin/root export names for this root's checkout, runs and home, and a child inheriting
   SEON_SOURCE_ROOT listed its test namespaces from that checkout, not the tree it ran in (a full run's plan
-  named a test of the root's working tree that main does not hold, and its shard died at once). Used by build and run-tests."
+  named a test of the root's working tree that main does not hold, and its shard died at once). Used by build, run-tests
+  and the health step's base (test-runner/base-program)."
   ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
    "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"])
 
@@ -669,16 +670,6 @@
           (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
         (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
-(defn test-command
-  "The runner the :tests effect calls in a checkout, as argv, for tests (qualified names, or a
-  namespace's bare name for all its tests): prove's one entry, each named test with no green at
-  its reach digest run, the rest reused, its run written under out (bin/prove --out: the effect
-  reads the plan there, never from a path the run did not name). A gate names exactly the
-  tests the change reached (:seon.task/deferred), never their namespaces' other tests
-  (docs/merging.md#a-merge-runs-what-the-change-reaches)."
-  {:malli/schema [:=> [:cat [:sequential :symbol] :string] [:vector :string]]}
-  [tests out] (into ["nice" "-n" "15" "bin/prove" "--out" out "--tests"] (map str tests)))
-
 (defn full-run-command
   "The runner of the daily full run, as argv: every test, green or not (bin/test --all: the
   plan ignores the results already recorded, runs the process tests, and measures each cost proof
@@ -984,7 +975,7 @@
            (if (seq form) (str ", where your change wrote: " form) ", a place your change's files don't hold")))
     "the gate's build failed and named no exception"))
 
-(defn- runner-end
+(defn runner-end
   "The last lines of what a runner said, joined, enough to hold what stopped it: its error, where, and the verdict lines after them. Three lost the error, leaving
   only where and the two verdicts."
   {:malli/schema [:=> [:cat :string] :string]}
@@ -1000,20 +991,34 @@
       (vec (remove str/blank? (str/split-lines (:out r))))
       (error #'seon.fx/uncommitted :seon.fx/io-error (str "git status in " dir ": " (:err r)) {:path dir}))))
 
+(defn gate-answer
+  "The system's answer a to the gate's run of tests (seon.root/prove-tree!'s, the run-tests-forked shape: :reports, :red,
+  :digests) as run-on-checkout answers it: {:results {test :pass|:fail} :failures {test [failure ...]} :digests}. A test
+  the run never reached (it is answered at its first red) is in none, so its branch keeps it deferred and asks again: never a
+  red it did not show. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat :map [:sequential :qualified-symbol]] :map]}
+  [a tests]
+  (let [red (set (:red a))
+        fails (proofs/failures a)
+        passed (into #{} (keep #(when (= :pass (:type %)) (proofs/test-symbol (:var %)))) (:reports a))
+        results (into {} (for [t tests :let [s (cond (red t) :fail (passed t) :pass)] :when s] [t s]))]
+    {:results results
+     :failures (into {} (for [[t s] results :when (= :fail s) :let [fs (get fails t)] :when (seq fs)] [t (vec fs)]))
+     :digests (select-keys (:digests a) (keys results))}))
+
 (defn- run-on-checkout
-  "One run of the :tests effect (run-tests): tests (qualified names) on a checkout of the merge candidate: a
-  detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
-  ({relative path text}, the candidate's changed files) written over it, then the runner
-  (test-command) over exactly the tests named there, niced, in that tree's own environment;
-  the worktree removed after (its run's logs kept beside its log when it is not all green). The tree's
-  binary is built first (bin/build seon), so its process tests run this candidate. Answers {:value {:results {test status} :ms :log}}, or
-  :seon.fx/io-error naming the step and its log. The answer also holds :digests {test digest} and
-  :failures {test [failure ...]} of its reds (the failures their results recorded, which the run's
-  shard logs, removed with the worktree, also held). With :all? (the daily full run, seon.prove's
-  :full mode) the runner is full-run-command, tests are every test the plan names; repo defaults
-  to this checkout and branch to git's main (:seon.config.source/main)."
-  {:malli/schema [:=> [:cat :string :map] :map]}
-  [sha {:keys [repo files tests all?]}]
+  "One run of the :tests effect (run-tests) on a checkout of the merge candidate: a detached worktree of repo at
+  branch's head (bin/worktree --at, as a generation's), files ({relative path text}, the candidate's changed files)
+  written over it, root's binary and kept stores cloned into it; the worktree removed after. The gate (tests, qualified
+  names) is proved by the system through prove (seon.root/prove-tree!, mode :judge, named by exactly those tests): its
+  process tests run as items on the checkout (docs/merging.md#a-session-proves-through-root), and its answer is read by
+  gate-answer: {:value {:results {test status} :failures {test [failure ...]} :digests {test digest} :ms :log}}, or the
+  run's typed error. With :all? (the daily full run, seon.prove's :full mode) the tree's binary is built first
+  (bin/build seon) and the runner is full-run-command, tests every test its plan names, each read from the verdict
+  cache (test-results), a run not all green keeping its logs beside its log; repo defaults to this checkout and branch
+  to git's main (:seon.config.source/main); its failure is :seon.fx/io-error naming the step and its log."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/fn] :string :map] :map]}
+  [prove sha {:keys [repo files tests all?]}]
   (let [t0 (profile/now-ns)
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
@@ -1073,15 +1078,26 @@
           (if (not (zero? (:exit b)))
             (do (spit log (str (:out b) (:err b)))
                 (error #'seon.fx/run-on-checkout :seon.fx/io-error (str (build-failure (str (:out b) (:err b)) files) "; its log: " log) {:path dir}))
-            ;; the tree's shards cache their verdicts in this checkout's verdict cache, named to them,
+            (if-not all?
+              ;; the gate: the system proves the candidate's checkout (prove, seon.root/prove-tree!, which root binds to this
+              ;; effect's :ctx), named by exactly the deferred tests; its process tests run as items on dir, by the :item owner
+              (let [a (if prove
+                        (prove {:checkout dir :tree (tree-id dir) :names (set tests) :mode :judge})
+                        (error #'seon.fx/run-on-checkout :seon.fx/io-error "the gate has no system to prove its candidate on (the :tests effect's :ctx names no :prove-tree)" {:path dir}))]
+                (if (contract/error? a)
+                  a
+                  (let [v (gate-answer a tests)]
+                    (vreset! green? (= (set tests) (set (keep (fn [[t s]] (when (= :pass s) t)) (:results v)))))
+                    {:value (assoc v :ms (profile/ms-since t0) :log log)})))
+            ;; the full run's shards cache their verdicts in this checkout's verdict cache, named to them,
             ;; so the verdicts read below are the ones its run wrote
             (let [out (str dir "/target/prove/run")
                   r (apply lib/sh (concat clean [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))]
-                                         (if all? (full-run-command out) (test-command (sort-by str (distinct tests)) out))
+                                         (full-run-command out)
                                          [:dir dir]))
                   plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
                   _ (spit log (str (:out r) (:err r)))
-                  tests (if all? (vec (sort-by str (keys (:digests plan)))) tests)
+                  tests (vec (sort-by str (keys (:digests plan))))
                   found (when plan (stored-results (:digests plan)))]
               (cond
                 ;; no plan (out/tests.edn): the runner never got to its tests (its build, its plan or its start failed): that is the
@@ -1103,7 +1119,7 @@
                                                             :let [fs (some->> (get-in plan [:digests t]) found :failures not-empty vec)]
                                                             :when fs]
                                                         [t fs]))}
-                            (not @green?) (assoc :kept kept))})))))
+                            (not @green?) (assoc :kept kept))}))))))
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [run (java.io.File. (str dir "/target/prove/run"))
                        mv (when (and (not @green?) (.isDirectory run)) (lib/sh "mv" (.getPath run) kept))
@@ -1146,16 +1162,19 @@
             (if (contract/error? w)
               w
               {:value (assoc v
-                             :results (into {} (for [t tests] [t (or (get results t) (if (proofs/green? (was t)) :pass :fail))]))
+                             ;; a test the run never reached and none held is in no result: its branch keeps it deferred
+                             :results (into {} (for [t tests :let [s (or (get results t) (when (was t) (if (proofs/green? (was t)) :pass :fail)))] :when s] [t s]))
                              :failures (into (or failures {}) (for [t tests :let [fs (:failures (was t))] :when fs] [t (vec fs)]))
                              :digests (into {} (for [t tests] [t (digest-of t)]))
                              :ms (:ms v 0))})))))))
 
 (defn run-tests
-  "The :tests effect: tests on a checkout of the merge candidate (run-on-checkout), its answer {:value {:results :ms :log
-  :digests :failures :kept}} or its declared error; a named run reuses what this candidate already answered (run-held). See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  "The :tests effect: tests on a checkout of the merge candidate (run-on-checkout), proved by the system through its :ctx's
+  :prove-tree (seon.root/prove-tree!, which root binds), its answer {:value {:results :ms :log :digests :failures :kept}} or
+  its declared error; a named run reuses what this candidate already answered (run-held). See
+  docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [repo branch all?] :as req} :req}]
+  [{{:keys [repo branch all?] :as req} :req {:keys [prove-tree]} :ctx}]
   (let [repo (or repo (when all? (str (cfg/checkout))))
         branch (or branch (when all? (cfg/value :seon.config.source/main)))
         req (assoc req :repo repo :branch branch)
@@ -1165,9 +1184,130 @@
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))]
     (cond
       (contract/error? sha) sha
-      all? (run-on-checkout sha req)
+      all? (run-on-checkout nil sha req)
       :else
-      (run-held run-on-checkout sha req))))
+      (run-held (partial run-on-checkout prove-tree) sha req))))
+
+;; ---- a session's items (Flow step 4) -------------------------------------------------
+
+(defn- item-files!
+  "The files an item's run reads in dir, as bin/prove's plan writes them: a :process item's shard of one
+  (shard-0.edn, as test_runner's plan deals one), a :step item's steps, steps.edn, steps-binary (empty: the step
+  needs no target/seon) and step-bounds (its measured ms). See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :string :map] :nil]}
+  [dir {:keys [kind tree name digest binary? bound]}]
+  (case kind
+    :process (spit (str dir "/shard-0.edn") (sedn/encode {:tests [name] :mg {} :digests {name digest} :tree tree :rerun #{}}))
+    :step (do (spit (str dir "/steps") (str name "\n"))
+              (spit (str dir "/steps.edn") (sedn/encode {:tree tree :digests {name digest}}))
+              (when (false? binary?) (spit (str dir "/steps-binary") ""))
+              (when bound (spit (str dir "/step-bounds") (str name " " bound "\n"))))
+    (:build :seed) nil)
+  nil)
+
+(defn- clone-program-store!
+  "The checkout's plan program store (its own :seon.config.proofs/program-store, each base-<digest> under it, as kept-store!
+  keys them) cloned under base, an item's own (cp -c, APFS copy-on-write, as each check step clones the seeded store): items
+  running at once share no mutable store, and a clone's writes are cache, dropped with it. Answers base. See
+  docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [checkout base]
+  (let [v (cfg/value :seon.config.proofs/program-store)
+        root (str (cfg/checkout) "/")
+        ;; the key resolves against this root's checkout; the item's store is the same path in the item's checkout
+        src (if (str/starts-with? v root) (str checkout "/" (subs v (count root))) v)
+        from (java.io.File. ^String src)
+        stem (.getName from)]
+    (doseq [^java.io.File d (some-> (.getParentFile from) .listFiles seq)
+            :when (and (.isDirectory d) (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}")) (.getName d)))
+            :let [to (str base (subs (.getName d) (count stem)))]]
+      (lib/sh "mkdir" "-p" to)
+      (doseq [n ["data.mdb" "reach-graph.fasl"] :when (.isFile (java.io.File. d ^String n))]
+        (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))
+    base))
+
+(defn run-item
+  "The :item effect: one item of a session's prove that the test service (seon.prove) granted, run on the session's
+  checkout at tree, niced: :build is bin/build seon there; :seed brings the checkout's program store to the tree and, :binary?,
+  seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :process is one test as a shard of one (bin/test --shard,
+  whose runner stores its verdict); :step is one check step (bin/check --steps, then bin/test --store-steps, which
+  stores it green at its digest). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the
+  cache by its digest, so an item asked again is reused there; a step bin/check ended past its bound (its DIR/overran) is
+  :signal :overran, never a verdict. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
+  stored under a digest of files that are not there. A green already stored is answered at once, :reused, with no process
+  started. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [{{:keys [kind tree checkout name digest bound] :as req} :req}]
+  (let [t0 (profile/now-ns)
+        here (tree-id checkout)
+        ;; a green already stored at its digest is the answer: no process started (2.3 s a test's runner, only to reuse it)
+        held (when-not (#{:build :seed} kind) (stored-results {name digest}))]
+    (cond
+      (not= here tree)
+      (error #'seon.fx/run-item :seon.fx/io-error (str "the checkout " checkout " is tree " here ", not the item's " tree ": its files moved since the plan")
+             {:path checkout :tree-moved true})
+      (contract/error? held) held
+      (proofs/green? (get held digest)) {:value (assoc (select-keys (get held digest) [:pass :fail :error]) :ms (profile/ms-since t0) :reused true)}
+      :else
+      (let [dir (str checkout "/target/prove/items/" (clojure.core/name kind) "-" digest)
+            log (str dir ".log")
+            _ (lib/remove-tree! dir)
+            _ (.mkdirs (java.io.File. ^String dir))
+            _ (item-files! dir req)
+            ;; a store of its own for each item that runs tests (clone-program-store!): a step reads it through DIR/config.edn
+            ;; (bin/check --steps passes it to every ./seon it runs), a shard through --set
+            pstore (when (#{:process :step} kind) (clone-program-store! checkout (str dir "/program-store")))
+            _ (when (= :step kind) (spit (str dir "/config.edn") (sedn/encode {:seon.config.proofs/program-store pstore})))
+            ;; the children write the cache this reads: the one this process names (a test's run names its own)
+            ;; and the steps' one seeded store is the checkout's own, never a store this process was handed
+            store (str checkout "/target/check-store")
+            sh (fn [& argv] (let [r (apply lib/sh (concat child-env-scrub [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))
+                                                                           (str "SEON_STORE=" store)]
+                                                          ["nice" "-n" "15"] argv [:dir checkout]))]
+                              (spit log (str "$ " (str/join " " argv) " (exit " (:exit r) ")\n" (:out r) (:err r)) :append true)
+                              r))
+            r (case kind
+                :build (sh "bin/build" "seon")
+                ;; the store every binary step of this tree branches from (each step takes a clone of it, bin/check's unit),
+                ;; seeded once, fresh, as bin/check's seed step seeds it: so steps at once never race to make it
+                ;; and the process tests' store, made by this checkout's own runtime (its path is its schema's digest), as
+                ;; bin/test's plan makes it before any shard: a process item on a fresh checkout found none
+                ;; first of all the checkout's plan program store, brought to the tree by the plan's own path (program-db with its
+                ;; max-bytes, the one caller that may remove it), so the items that clone it import nothing
+                :seed (let [prog (str "(require 'seon.test-store 'test-runner) (test-runner/program-db \\\"$PWD\\\" (seon.test-store/kept-program-store)"
+                                      " (seon.fx/tree-id \\\"$PWD\\\") (seon.config/value :seon.config.proofs/program-store-max-bytes))"
+                                      (when (:binary? req) " (seon.test-store/make-process-store! \\\"$PWD\\\")"))]
+                        (when (:binary? req) (lib/remove-tree! store))
+                        (sh "zsh" "-c" (str "ROOT=$PWD; . bin/env; "
+                                            (when (:binary? req) "(cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-) && ")
+                                            "HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test -e \"" prog "\"")))
+                :process (sh "bin/test" "--shard" (str dir "/shard-0.edn") "--set" (str ":seon.config.proofs/program-store=" (sedn/encode pstore)))
+                :step (let [c (sh "bin/check" "--steps" dir)] (sh "bin/test" "--store-steps" dir) c))
+            ms (profile/ms-since t0)
+            stored (when-not (#{:build :seed} kind) (stored-results {name digest}))
+            _ (when pstore (doseq [^java.io.File d (some-> (java.io.File. ^String dir) .listFiles seq)
+                                   :when (str/starts-with? (.getName d) "program-store")]
+                             (lib/remove-tree! (.getPath d))))
+            v (when (map? stored) (get stored digest))
+            ;; bin/check's own judgement of the step's bound, a signal it writes (DIR/overran): this measures nothing itself
+            overran? (when (= :step kind)
+                       (let [f (java.io.File. (str dir "/overran"))]
+                         (and (.isFile f) (contains? (set (str/split-lines (slurp f))) name))))]
+        (cond
+          (contract/error? stored) stored
+          (= :build kind) (if (zero? (:exit r))
+                            {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
+                            (error #'seon.fx/run-item :seon.fx/io-error (str (build-failure (str (:out r) (:err r)) nil) "; its log: " log) {:path checkout}))
+          (= :seed kind) (if (and (zero? (:exit r)) (or (not (:binary? req)) (.isFile (java.io.File. (str store "/data.mdb")))))
+                           {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
+                           (error #'seon.fx/run-item :seon.fx/io-error (str "the seed of " store " failed (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log) {:path checkout}))
+          ;; a step that ended red with no verdict stored, over its bound: the overrun is a signal, its verdict none
+          (and overran? (not (proofs/green? v)))
+          {:value {:signal :overran :ms ms}}
+          v {:value (assoc (select-keys v [:pass :fail :error :failures]) :ms ms)}
+          (= :step kind) {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message (str "bin/check --steps " name ": " (runner-end (str (:out r) (:err r))))}] :ms ms}}
+          :else (error #'seon.fx/run-item :seon.fx/io-error (str "the shard stored no verdict for " name " (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log)
+                       {:path checkout}))))))
 
 ;; ---- the owner -----------------------------------------------------------------------
 

@@ -1080,9 +1080,11 @@
    :open-problem "problems to clear" :no-proofs "no proof registered" :no-design "plan unchanged since the run began"
    :behind "judged before main moved"})
 
-(def ^:private state-words
-  "What a proof's verdict says in the status table."
-  {:pass "green" :fail "failed" :error "failed" :undefined "not written yet" :unknown "no verdict yet" :not-run "not run" :deferred "left to root's gate"})
+(defn- proof-state
+  "What proof state st says, k :seon.status/title (its word) or :seon.status/explain (Markdown: what it means and what to do next),
+  read from :seon.ctx.status/proof-state's schema: the words are data, the person's and the model's alike. See docs/render.md#how-the-work-stands."
+  {:malli/schema [:=> [:cat :keyword :keyword] [:maybe :string]]}
+  [k st] (get (k (contract/properties :seon.ctx.status/proof-state)) st))
 
 (defn- as-text
   "A value of the status as one line of source: marked code as its text, a thrown error as its message, any other value by the printer."
@@ -1141,7 +1143,7 @@
      [:h2 "Your proofs"]
      (when test-run [:p "The tests could not run: " (str/join "; " (:failed test-run))])
      (when (next proofs)
-       (into [:ul {:key :proofs}] (for [{:keys [test status]} proofs] [:li {:key test} [:code (str test)] ": " (get state-words status (kname status))])))
+       (into [:ul {:key :proofs}] (for [{:keys [test status]} proofs] [:li {:key test} [:code (str test)] ": " (or (proof-state :seon.status/title status) (kname status))])))
      ;; not written: where it goes, and a namespace's example once, its own, so a proof written moves neither
      (for [[n us] (group-by #(:ns (:shape %)) unwritten) :let [{:keys [requires helpers example]} (:shape (first us))]]
        (concat
@@ -1158,19 +1160,18 @@
             (when example [:pre [:code example]])]])))
      ;; red: which, every assertion that failed with what it got (never a count in place of them), and what it calls (the test's own
      ;; source is not repeated: the agent wrote it, or reads it by (source test))
-     (for [{:keys [test failures calls]} red]
+     (for [{:keys [test failures calls status]} red]
        [:div {:key test}
         [:p [:code (str test)] " fails."]
+        (markdown (proof-state :seon.status/explain status) {:inline? true})
         (for [[i {a :assert as :asserts g :got m :message}] (map-indexed vector failures)]
           [:p {:key i} "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."])
         (when (seq calls)
           [:div {:key :calls} [:p "It calls " (str/join ", " (map #(str "`" (:var %) "`") calls)) "."]
            (for [{v :var src :source} calls :when src] [:pre {:key (str v)} [:code src]])])])
-     (let [names #(str/join ", " (map (fn [p] (str "`" (:test p) "`")) %))]
-       (list
-        (when (seq died) [:p {:key :died} "No verdict, because the test run failed (above): " (names died) ". Running it again fails the same way until what stopped it is fixed."])
-        (when (seq deferred) [:p {:key :deferred} "Run when your task merges, not in your turn (each starts a process): " (names deferred) ". Nothing to do for them now."])
-        (when (seq unknown) [:p {:key :not-run} "Not judged yet for your code as it is now: " (names unknown) ". " [:code "(prove)"] " runs them."])))
+     ;; each state with no verdict: what it means and what helps it, its schema's words, then its proofs
+     (for [[st ps] [[:not-run died] [:deferred deferred] [:unknown unknown]] :when (seq ps)]
+       [:div {:key st} (markdown (str (str/join ", " (map #(str "`" (:test %) "`") ps)) ": " (proof-state :seon.status/explain st)) {:inline? true})])
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)
        [:div {:key :unmerged}
@@ -1261,7 +1262,7 @@
   [ix c]
   (let [joined (set (map first (pattern-joins (or (when ix (render/entity-pattern ix c)) []))))
         ;; what its schema's own pattern names (a user's :seon.user/name) is the entity's, never a key it added
-        declared (set (filter keyword? (when ix (render/schema-property ix (render/entity-schema ix c nil) :seon.ctx/pattern))))]
+        declared (set (filter keyword? (when ix (some->> (render/schema-property ix (render/entity-schema ix c nil) :seon.ctx/pattern) (render/expanded ix)))))]
     (filter #(and (qualified-keyword? %) (not (#{"seon.agent" "db" "seon.ctx"} (namespace %))) (not (str/starts-with? (name %) "_")) (not (joined %)) (not (declared %)))
             (sort-by str (keys c)))))
 
@@ -1395,6 +1396,17 @@
        (when (and (not err) (or basis? (contains? (:seon.eval/response e) :value)) (not (and (nil? v) (or (seq printed)))))
          (let [k (:seon.eval/schema e)]
            [:div (render/hiccup (cond-> {:seon.render/index ix :budget (budget v) :handle handle :db db} k (assoc :as :block :schema k)) (whole v))]))])))
+
+(defn hiccup-value
+  "Value v that is hiccup (:seon.render/hiccup-value: what a render answers, as an agent's call of one at its REPL answers it) drawn as
+  the html it is, and under it, folded, the value as data as the one printer shows it, which is what the model reads of it; in one
+  line (:as :inline), the printer's line alone. See docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat :seon.render/opts :any] :any]}
+  [opts v]
+  (if (= :inline (:as opts))
+    (render/print-hiccup opts v)
+    ;; the fold is the person's: the model reads the value itself as data once, never a second printed copy
+    [:div v [:details {:wire/for "page"} [:summary "show as data"] (render/print-hiccup (dissoc opts :schema :as) v)]]))
 
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
@@ -1823,7 +1835,7 @@
 .pull-front ul { margin-left: 1.25rem; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
 .pull-front details pre { max-height: 20rem; overflow: auto; font-size: 0.75rem; color: var(--color-text-300); white-space: pre-wrap; }
 .pull-front code { color: var(--color-signal); }"
-   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :seon.render/hiccup-value]}
   [{c :seon.ctx/ctx ix :seon.render/index}]
   (let [e (ratom/realize c)
         {:keys [schema source clauses unasked renders]} (render/pulled nil ix e nil)]
@@ -1947,14 +1959,17 @@
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])
 
 (defn steps
-  "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many: the
-  chat shows the messages and a person opens the steps; nothing for none. See docs/render.md#the-page."
-  {:seon.render/style ".seon-steps > summary { cursor: pointer; font-size: 0.75rem; color: var(--color-text-500); list-style: none; } .seon-steps > summary::before { content: '▸ '; } .seon-steps[open] > summary::before { content: '▾ '; }"
-   :malli/schema [:=> [:cat :int [:sequential :any]] :any]}
-  [n xs]
+  "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many and
+  what each was for, its intent (intents, in xs' order; one with none is not named): the chat shows the messages and what was done,
+  a person opens the steps for their code and output; nothing for none. See docs/render.md#the-page."
+  {:seon.render/style ".seon-steps > summary { cursor: pointer; font-size: 0.75rem; color: var(--color-text-500); list-style: none; } .seon-steps > summary::before { content: '▸ '; } .seon-steps[open] > summary::before { content: '▾ '; }
+.seon-steps > summary .intent { color: var(--color-text-300); } .seon-steps[open] > summary .intent { display: none; }"
+   :malli/schema [:=> [:cat :int [:sequential :any] [:sequential :string]] :any]}
+  [n xs intents]
   (when-let [xs (seq xs)]
     [:details {:class "seon-steps" :id (str "steps-" n)}
-     [:summary (str (count xs) (if (= 1 (count xs)) " step" " steps"))]
+     (into [:summary (str (count xs) (if (= 1 (count xs)) " step" " steps")) (when (seq intents) ": ")]
+           (interpose " · " (for [i intents] [:span {:class "intent"} i])))
      [:ol {:class "seon-turn flex flex-col"} xs]]))
 
 (defn conversation-turn
@@ -1976,7 +1991,7 @@
                                                   ;; want them (owner, 2026-11-10: "only show messages by default and have the evals ... not shown unless
                                                   ;; they are expanded"); a call that said nothing, ran nothing and is not in flight is no element
                                                   [(when (or (seq evals) (said? call) (in-flight? call c))
-                                                     [:section {:class "flex w-full flex-col gap-1"} call (steps n (map item evals))])])))]
+                                                     [:section {:class "flex w-full flex-col gap-1"} call (steps n (map item evals) (keep #(some-> (item %) :seon.eval/intent ratom/realize) evals))])])))]
           (into [:div {:class "seon-stack"}] kids))))
     ;; the turn now opening has no call yet: what was delivered since the last turn's edge reads here, before the turn begins
     (when-let [ms (seq messages)]
