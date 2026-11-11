@@ -144,13 +144,15 @@
   with no commit (a run-ahead value) is never held. [] when main is at base. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db [:maybe :seon.host/db]] [:vector :seon.merge/data-conflict]]}
   [base db main]
-  (let [k (mapv pdb/point [base db main])
-        {held :key cs :conflicts} (:main-conflicts @state)]
-    (cond (or (nil? base) (nil? main) (= (d/commit-id base) (d/commit-id main))) []
-          (= k held) cs
-          :else (let [cs (mapv #(assoc % :resolve (resolving-form (:key %))) (pm/conflicts (pm/net-change base db) (pm/net-change base main)))]
-                  (when (every? (comp some? first) k) (swap! state assoc :main-conflicts {:key k :conflicts cs}))
-                  cs))))
+  (if (or (nil? base) (nil? main) (= (d/commit-id base) (d/commit-id main)))
+    []
+    (let [k (mapv pdb/point [base db main])
+          {held :key cs :conflicts} (:main-conflicts @state)]
+      (if (= k held)
+        cs
+        (let [cs (mapv #(assoc % :resolve (resolving-form (:key %))) (pm/conflicts (pm/net-change base db) (pm/net-change base main)))]
+          (when (every? (comp some? first) k) (swap! state assoc :main-conflicts {:key k :conflicts cs}))
+          cs)))))
 
 (defn main-line
   "How main differs from branch b, both cut from base (dbs), as one line, or nil when main changed
