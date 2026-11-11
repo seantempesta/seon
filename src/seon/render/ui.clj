@@ -1947,14 +1947,17 @@
    [#'agent-state {:at [:seon.agent/status] :wire/for "page"}]])
 
 (defn steps
-  "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many: the
-  chat shows the messages and a person opens the steps; nothing for none. See docs/render.md#the-page."
-  {:seon.render/style ".seon-steps > summary { cursor: pointer; font-size: 0.75rem; color: var(--color-text-500); list-style: none; } .seon-steps > summary::before { content: '▸ '; } .seon-steps[open] > summary::before { content: '▾ '; }"
-   :malli/schema [:=> [:cat :int [:sequential :any]] :any]}
-  [n xs]
+  "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many and
+  what each was for, its intent (intents, in xs' order; one with none is not named): the chat shows the messages and what was done,
+  a person opens the steps for their code and output; nothing for none. See docs/render.md#the-page."
+  {:seon.render/style ".seon-steps > summary { cursor: pointer; font-size: 0.75rem; color: var(--color-text-500); list-style: none; } .seon-steps > summary::before { content: '▸ '; } .seon-steps[open] > summary::before { content: '▾ '; }
+.seon-steps > summary .intent { color: var(--color-text-300); }"
+   :malli/schema [:=> [:cat :int [:sequential :any] [:sequential :string]] :any]}
+  [n xs intents]
   (when-let [xs (seq xs)]
     [:details {:class "seon-steps" :id (str "steps-" n)}
-     [:summary (str (count xs) (if (= 1 (count xs)) " step" " steps"))]
+     (into [:summary (str (count xs) (if (= 1 (count xs)) " step" " steps")) (when (seq intents) ": ")]
+           (interpose " · " (for [i intents] [:span {:class "intent"} i])))
      [:ol {:class "seon-turn flex flex-col"} xs]]))
 
 (defn conversation-turn
@@ -1976,7 +1979,7 @@
                                                   ;; want them (owner, 2026-11-10: "only show messages by default and have the evals ... not shown unless
                                                   ;; they are expanded"); a call that said nothing, ran nothing and is not in flight is no element
                                                   [(when (or (seq evals) (said? call) (in-flight? call c))
-                                                     [:section {:class "flex w-full flex-col gap-1"} call (steps n (map item evals))])])))]
+                                                     [:section {:class "flex w-full flex-col gap-1"} call (steps n (map item evals) (keep #(some-> (item %) :seon.eval/intent ratom/realize) evals))])])))]
           (into [:div {:class "seon-stack"}] kids))))
     ;; the turn now opening has no call yet: what was delivered since the last turn's edge reads here, before the turn begins
     (when-let [ms (seq messages)]

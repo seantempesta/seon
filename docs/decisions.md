@@ -118,6 +118,90 @@ Of `seon.cost/measure` calling a function 17 to 60 times at each size: "oh god j
 
 "So context is basically farming for problems while they are testing. System improvemetns they should integrate and tell specific agents what they are seeing. Not teach to the test, recognize systemic failure and adapt over time". And of the refine step: "During the refine page agents are refining the tasks and docs. If after our claude agent reviews the work it's good additions I want those synced to disk. This isn't a metric I want to actually solve the tasks and improve the system." Stated in [sessions](sessions.md#live-agent-runs-find-the-systems-problems).
 
+### Embeddings stay in the store (owner, 2026-11-11)
+
+Of a request to hold them beside the store, withdrawn: "Oh it's more robust than I thought ignore my previous request I think this is fine?" Stated in [vector](vector.md#a-vector-is-its-own-entity).
+
+### Check-step bounds are signals, not hard constraints (owner, 2026-11-11)
+
+"The step bounds are signals not hard constraints." Stated in [merging](merging.md#a-merge-runs-what-the-change-reaches).
+
+### `bin/root` becomes `bin/system` (owner, 2026-11-11)
+
+Asked by the question tool whether the command takes the system's name, his pick: "Rename to bin/system". To be stated in [vocabulary](vocabulary.md) by Optimization's rename tip, which follows the erase ruling above.
+
+### When lines of work collide: proving, the product loop, renders as data, Jolt fiber safety (owner, 2026-11-11)
+
+Asked by the question tool for an order, his pick: "B, A, D, C", that is B all proving through the system, A the product loop, D renders as data, C Jolt fiber safety. Stated in [the plan](plan.md#now).
+
+### A stuck agent is stopped, analyzed and fixed; repeating is a breakdown in the model (owner, 2026-11-11)
+
+"Stop it and analyze and fix. Repeating is a problem with our context and instructions." And: "Repeating is a breakdown in the model and it's not a hard vs easy problem issue". To be stated in [agent](agent.md) by the Context session.
+
+### The system message is only for what every agent is told (owner, 2026-11-11)
+
+"Most info about an agent should be pull pattern and render functions. The system context is literally only for universal explanations that every agent in the system should get." And: "Any begging or pleading ripped out. Less is more as it's just more rope to hang ourselves with." To be stated in [model](model.md) by the Context session.
+
+### The Data model session is in charge of schemas and pull patterns (owner, 2026-11-11)
+
+"I want them in charge of our data model updates for schemas, pull patterns and working with web and context (both focused on those outputs) to re-arrange data so the pull is simplified and the context gets more expressive"; and "I want the solutions to be based on data so make sure the data model agent is consulted." Stated in [sessions](sessions.md#sessions-own-their-areas).
+
+### The page reaches the model as evals, at commit points (owner, 2026-11-11)
+
+"I want the @ctx and the hiccup displayed in full at some point in the agents evals (usually first, but we can introduce it later if we want to do more caching and the model has already moved past that point) ... These are functions we are evaling at whatever commit points we want so we can correctly rebuild if I compact ... without busting it's cache unless we are intentionally busting the cache with a compaction." To be stated in [ctx](ctx.md) by the Context session.
+
+### The model reads data, and the render's output as hiccup data (owner, 2026-11-11)
+
+"I want data and not rendered html shown the model"; "the hiccup contains the output of the render functions and the model needs to see this for most of it's context"; "(the model of course gets the stripped out CSS and the hiccup as data version)". To be stated in [render](render.md) by the Web session.
+
+### The website renders the hiccup by default (owner, 2026-11-11)
+
+"The point of the website is to render this part ... Can we by default render the hiccup?" To be stated in [render](render.md) by the Web session.
+
+### A diff is an editscript, and a delete is simple (owner, 2026-11-11)
+
+"I want editscript diffs and I think simpler deletes since the agent already has the data in their previous context". To be stated in [render](render.md) by the Web and Context sessions.
+
+### A pull pattern is stored with the agent, rendered by it, and different for each agent type (owner, 2026-11-11)
+
+"the pull pattern should be stored with the agent and the agent should be rendering it so it knows about it and the pull pattern should have a concise explanation of what this means and the agent can literally swap their ctx atom and update it and we will re-render the UI and their context for the next turn"; "The agent can break their context. We include a warning and a good example of how to insert/update and not replace it and I want a way to detect that there are problems"; "we can make a schema for a functioning agent ... and that can include the pull pattern has required parts that we can check"; "The schema is different for different agents I think for the @ctx schema. It's the result of the pull so it should be defined for each agent type and that's what makes it that agent". To be stated in [ctx](ctx.md#the-pattern) by the Data model session.
+
+### What a render may read of the page is the previous point's tree (owner, 2026-11-11)
+
+Asked by the question tool what a render may read of the page, his pick: "The previous point's tree". To be stated in [render](render.md#what-a-render-is-handed) by the Web session; that section says "never" today, which this ruling replaces.
+
+### A render's output has rules, but its content is not constrained (owner, 2026-11-11)
+
+"The page hiccup can have rules I suppose, but we don't want to constrain the content". To be stated in [render](render.md) by the Data model and Web sessions.
+
+### A text field is Markdown (owner, 2026-11-11)
+
+"In general if it's a text field it's assumed to be markdown." To be stated in [render](render.md) by the Data model session.
+
+### Break the agent's physics and the agent breaks; keep auditing (owner, 2026-11-11)
+
+"If we break the \"physics\" of what the agent is expecting like the agent can't see it's context and we keep telling it to look at the rendered function it breaks agents. We need to keep auditing and finding our failures and fixing them". To be stated in [agent](agent.md) by the Context session.
+
+### Reasoning is the development microscope; the system is built to work without it (owner, 2026-11-11)
+
+"I want to keep tuning the model for deepseek flash without reasoning, but let's doing some tests with reasoning turned on ... The goal is to maybe understand via the reasoning what the model is finding confusing and then we fix it and demo it on no reasoning"; "it's gold for understanding how clear we are about the system. They can easily mine this and iterate with the prompt". To be stated in [model](model.md) by the Context session.
+
+### Disregard an LLM's estimates of time (owner, 2026-11-11)
+
+"Disregard all LLM estimates they are always based on human output and we'll reach it much sooner." Stated in [sessions](sessions.md#the-managing-session).
+
+### An agent's fibers take the safe paths, and a guard is a finding, not a fix (owner, 2026-11-11)
+
+Asked by the question tool whether an agent's fibers take the safe paths at 11 ticks an element for a lazy sequence instead of 8, his pick: "Pay it". And on guards: "This sounds like a guard. You can use this to find the issue, but i want the classes eliminated so the guard is unnecessary." To be stated in [forks](forks.md#jolt) by the Deep fixes session.
+
+### The machine stays cool: runs are throttled by load, and worker limits combine (owner, 2026-11-11)
+
+"My laptop is cooking my lap. I want load based runs that we are throttling via the flow channels"; of worker limits: "We need a config options for a fixed max number and a load max and core max I think and any combination has a solution". To be stated in [machine](machine.md) and [config](config.md) by the Tests session.
+
+### Health checks watch the queues and write to health/problems (owner, 2026-11-11)
+
+"We can monitor the system though and can detect when this happens ... let's schedule adding good checks in when we deploy it and we have it write to health/problems." To be stated in [health](health.md) by the Tests and Optimization sessions.
+
 ## 2026-11-10 rulings
 
 The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.

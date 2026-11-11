@@ -142,13 +142,16 @@
 
 (defn agent-cites-tx
   "The cites a new agent (of, its lookup ref or the tempid of the write that makes it; k its key) is made
-  with: what every agent cites, :seon.config.agent/cites, each address read by seon.ref/address-citation,
+  with: :seon.config.agent/cites as its task holds it (a role's own set, set by its template as any config key a task may
+  hold), else the shipped value, each address read by seon.ref/address-citation,
   written on its record once, by its first run on its branch (seon.agent/begin-run!), so its own my.agent/cite!
   and uncite! change them. See
   docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db :any :string] [:vector :any]]}
   [db of k]
-  (vec (map-indexed (fn [i c] (cite-tx db of k c i)) (keep ref/address-citation (cfg/value :seon.config.agent/cites)))))
+  ;; the task's own set when the agent is on db with its task (seon.agent/begin-run!), the resolver's order (docs/config.md: task first)
+  (let [own (some->> (pdb/eid db :seon.agent/key k) (d/pull db [{:seon.agent/task [:seon.config.agent/cites]}]) :seon.agent/task :seon.config.agent/cites)]
+    (vec (map-indexed (fn [i c] (cite-tx db of k c i)) (keep ref/address-citation (or own (cfg/value :seon.config.agent/cites)))))))
 
 (defn- cycle-in
   "A task id on a needs cycle among decls (plus the needs already on main, which cannot

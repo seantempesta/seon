@@ -773,6 +773,17 @@
       (is (= 1 (count (re-seq #"class=\"[^\"]*\bsource-line\b" html))) (str v ": once")))
     (r/dispose-walk! (get-in st2 [:root-walk :w]))))
 
+(deftest a-turns-steps-say-what-each-was-for
+  ;; docs/render.md#the-page: a turn's steps fold their code and output, and the fold's line says what each was for (its intent), so a
+  ;; person reading the chat sees what the agent did, and a run that repeats a step reads as one
+  (let [summary (fn [h] (second (re-find #"(?s)<summary>(.*?)</summary>" h)))
+        two (h/html (ui/steps 3 [[:li "e1"] [:li "e2"]] ["Read the plan." "Write the test."]))
+        none (h/html (ui/steps 4 [[:li "e3"]] []))]
+    (is (str/includes? (summary two) "2 steps") "how many")
+    (is (re-find #"Read the plan\..*Write the test\." (summary two)) "and each step's intent, in order, on the line")
+    (is (not (str/includes? (summary two) "e1")) "never its code or output, which stay folded")
+    (is (= "1 step" (summary none)) "a step with no intent names none")))
+
 (deftest each-proof-state-says-what-helps-it
   ;; docs/render.md#how-the-work-stands: a proof with no verdict is told the one thing that helps its state (Data model, 2026-11-11: four
   ;; facts, never one word); a red proof shows every assertion it failed, its source and what it calls (the physics audit's high 1-3)
@@ -3394,7 +3405,7 @@
         fold (last reply)
         ids (map #(get % :seon.eval/id) (last (last fold)))]
     (is (not-any? #(and (map? %) (get % :seon.eval/id)) (drop 2 turn)) "the chat is messages: no step stands beside them")
-    (is (and (= :details (first fold)) (not (:open (second fold))) (= "3 steps" (last (nth fold 2)))) "the turn's steps fold, closed, under one line saying how many")
+    (is (and (= :details (first fold)) (not (:open (second fold))) (= "3 steps" (second (nth fold 2)))) "the turn's steps fold, closed, under one line saying how many (then what each was for)")
     (is (= "e3" (first ids)) "the agent's own step first")
     (is (= #{"e2" "e3" "e4"} (set ids)) "then those of other hands, Seon's among them")
     (let [t (h/html (ui/model-call-view {} (d/pull db '[*] call)))]
