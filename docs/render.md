@@ -329,6 +329,7 @@ Text for the wire, storage, a digest, a file, a URL, a command line or code to e
 
 - `seon.edn/encode`: EDN for storage and the wire, whole.
 - `seon.program/form-ids`: the text of a form's code digest (`:form/code`), the form `pr-str` writes under `seon.edn/encode`'s bindings, whole: a digest's text, not output; inline, not `seon.edn/encode`, because that is one contracted call more than the `account` proof's estimate holds ([source](source.md#what-a-test-takes-of-a-forms-text)).
+- `seon.render.ui/table-cells`: each cell's text read to tell a Markdown table's rule row from its rows (`subs` of the cell's offsets), a cut of data, not of output: the cells are drawn whole from the one scan's spans.
 - `seon.render/result-text`: the EDN envelope of a user message (`{:by .. :code .. :response ..}`) around a response the one printer already printed: the wire, not output.
 - `seon.ctx.search/search`: the call in its last hit's `:more` (`(my.agent/search q {opts})`, q and the options as `pr-str` writes them): code to evaluate that returns the hits it left out, not output.
 - `my.schema/registration`: the part of a schema form that is no EDN, and where it is, in the invalid registration's message (`pr-str` of the value and its path, whole): the message tells the agent what to quote.

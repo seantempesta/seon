@@ -2207,6 +2207,19 @@
       (is (= :seon.test/proved (r/schema-of (seon.db/index) picked nil)))
       (is (str/includes? (h/html (r/hiccup {:seon.render/index (seon.db/index)} picked)) "app.okt/bad-test") "a picked prove draws what it holds"))))
 
+(deftest a-markdown-table-is-a-table-for-a-person
+  ;; docs/render.md#text-and-the-one-string-cutter: a table is drawn as one for a person (:inline?), its cells' marks drawn, and kept as its
+  ;; lines for the model (red before: a person read the pipes and the rule row)
+  (let [md "Counts:\n\n| class | n |\n|---|---|\n| `:stale-section` | 369 |\n| `:eval` | 1 |\n"
+        person (h/html (ui/markdown md {:inline? true}))
+        model (h/html (ui/markdown md))]
+    (is (str/includes? person "<table>") person)
+    (is (str/includes? person "<th>class</th>") person)
+    (is (= 2 (count (re-seq #"<tr><td>" person))) "two rows, the rule row left out")
+    (is (str/includes? person "<code") "a cell's code span drawn")
+    (is (not (str/includes? person "|---|")))
+    (is (str/includes? model "|---|---|") "the model reads its lines")))
+
 (deftest markdown-draws-each-block
   ;; docs/render.md#text-and-the-one-string-cutter: a plan or a reply drawn by its blocks, none dropped,
   ;; each block's text as written (its backticks pick what a citation pulls, and the model reads it)
@@ -2648,6 +2661,31 @@
                tid (assoc :seon.agent/task [:seon.task/id tid]))]))))
 
 (defn- session-eid [db k] (seon.db/eid db :seon.agent/key k))
+
+(deftest a-render-name-that-resolves-to-nothing-is-said
+  ;; docs/render.md#an-entity-may-name-its-own-render: an entity naming a render of its own that this process has no var for is drawn by
+  ;; its schema's render with the typed error naming the symbol where its own would be (red before: the default, and nothing said why)
+  (let [db (booted)
+        a (seon.db/eid db :seon.agent/key "root")
+        db (d/db-with db [{:db/id a :seon.render/hiccup 'no.such/stage}])
+        ix (seon.db/index)
+        t (:tree (seon.ctx/build ix db a :db))
+        w (r/draw t seon.ctx/changes db (r/render-var-of ix t) {:index ix})
+        units (try (seon.fixtures/page-units w) (finally (r/dispose-walk! w)))
+        html (apply str (map :html units))]
+    (is (= 'no.such/stage (:seon.render/hiccup t)) (str "its pull holds the name: " (pr-str (take 6 (:seon.ctx/pattern (d/pull db '[:seon.ctx/pattern] a))))))
+    (is (= #'ui/agent (r/render-var-of ix t)) "drawn by its schema's render")
+    (is (some #(= #'ui/unresolved-list %) (flatten (ui/agent {:seon.render/index ix :seon.ctx/ctx t} t))) (pr-str (ui/agent {:seon.render/index ix :seon.ctx/ctx t} t)))
+    (is (str/includes? html "no.such/stage names no render this process has") (pr-str (map :id units)))))
+
+(deftest an-agents-input-keeps-its-place-as-it-goes-busy-and-idle
+  ;; docs/render.md#an-entity-may-name-its-own-render: the interrupt button is there while the process lives, disabled when nothing runs,
+  ;; so the field keeps its width (red before: it came and went with the agent's status, and the field jumped three times in one turn)
+  (let [in (fn [busy?] (h/html (ui/agent-input {:unit "p-input"} {:id :a1 :address :a1 :live? true :focus? false :busy? busy? :talks? true})))]
+    (is (str/includes? (in true) "data-interrupt"))
+    (is (str/includes? (in false) "data-interrupt") "idle: still there")
+    (is (str/includes? (in false) "disabled") "idle: disabled")
+    (is (not (str/includes? (in true) "disabled")) "busy: it interrupts")))
 
 (deftest roots-sessions-list-an-agent-once-under-its-starter
   ;; docs/users.md#roots-session: root holds every agent, and an entry draws the agents it started under it, so the top level is what

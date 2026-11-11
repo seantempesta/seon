@@ -129,6 +129,25 @@
           out (conj out [start nl])]
       (if (< nl to) (recur (inc nl) out) out))))
 
+(defn- table-cells
+  "A Markdown table's rows in text from to, each its cells as [a b] offsets of their text (trimmed), the rule row under the head left out:
+  for a person's reading of the table (`markdown`'s :inline?), each cell's inline marks drawn from the one scan's spans. See
+  docs/render.md#text-and-the-one-string-cutter."
+  {:malli/schema [:=> [:cat :string :int :int] [:vector [:vector [:tuple :int :int]]]]}
+  [text from to]
+  (let [trim (fn [a b] (let [a (loop [a a] (if (and (< a b) (Character/isWhitespace (.charAt ^String text a))) (recur (inc a)) a))
+                             b (loop [b b] (if (and (> b a) (Character/isWhitespace (.charAt ^String text (dec b)))) (recur (dec b)) b))] [a b]))
+        lines (loop [a from out []] (if (>= a to) out (let [nl (or (str/index-of text "\n" a) to) e (min nl to)] (recur (inc e) (conj out [a e])))))]
+    (vec (for [[a b] lines
+               :let [bars (filter #(= \| (.charAt ^String text %)) (range a b))
+                     edges (concat [(dec a)] bars [b])
+                     cells (vec (keep (fn [[x y]] (let [[c d] (trim (inc x) y)] (when (< x y) [c d]))) (partition 2 1 edges)))
+                     ;; a leading and a trailing bar make an empty first and last cell
+                     cells (cond-> cells (and (seq bars) (= a (first (trim a b))) (= (first bars) (first (trim a b)))) (subvec 1))
+                     cells (cond-> cells (and (seq cells) (= (first (peek cells)) (second (peek cells)))) pop)]
+               :when (and (seq cells) (not (every? (fn [[c d]] (re-matches #":?-+:?" (subs text c d))) cells)))]
+           cells))))
+
 (defn markdown
   "Markdown text (a plan, an agent's message, a message) as a person reads it: its blocks by the one
   parse (seon.ref/scan): a heading at its level, a paragraph, a list of the scan's items (numbered
@@ -153,6 +172,10 @@
                                     (for [[a b] items] (into [:li] (run a b))))
                (and inline? (= :quote kind)) (into [:blockquote {:class "border-l-2 border-base-700 pl-3 text-text-300"}]
                                                   (for [[a b] (quote-lines text from to)] (into [:p] (run a b))))
+               ;; a table, for a person: its head and its rows, each cell's marks drawn; for the model, as its lines
+               (and inline? (= :table kind)) (let [[head & rows] (table-cells text from to)]
+                                               [:table [:thead (into [:tr] (for [[a b] head] (into [:th] (run a b))))]
+                                                (into [:tbody] (for [r rows] (into [:tr] (for [[a b] r] (into [:td] (run a b))))))])
                (#{:quote :table} kind) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
                (= :break kind) [:hr]
                :else (into [:p] (run from to))))))))
@@ -412,7 +435,8 @@
   :address :live? :held :focus? :busy? :talks?}: address, its key, whom a word goes to in any boot; talks?, it has a task, so what's said wakes it, process or none; live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
   focus?, its field takes focus as the page loads (the chat's:
   @ctx's page is long and the field ends it)."
-  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
+  {:seon.render/style "#p-input button[data-interrupt][disabled] { visibility: hidden; }"
+   :malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
   [opts {:keys [id address live? held focus? busy? talks?]}]
   [:section {:id (:unit opts) :class "seon-stack-2"}
    (if (or live? talks?)
@@ -426,10 +450,12 @@
                                        :else "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)")}
                    ;; the chat takes focus (it follows its tail); a browser scrolls a focused field into view, and this one ends the page
                    focus? (assoc :autofocus true))]
-      ;; a form to interrupt only while its process runs one (status :busy)
-      (when busy?
-        [:button {:type "button" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
-                  :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"])]
+      ;; a form to interrupt, usable only while its process runs one (status :busy): there, disabled and unseen, while its process lives,
+      ;; so the field keeps its width as the agent goes busy and idle within a turn (it came and went, and the field jumped each time)
+      (when (or live? busy?)
+        [:button (cond-> {:type "button" :data-interrupt "" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
+                          :seon/call 'seon.root/interrupt! :seon/agent id}
+                   (not busy?) (assoc :disabled true)) "⏹ interrupt"])]
      [:p {:class "muted"} "This agent isn't running, so it can't answer. What it did is above."])
    (when held
      [:button {:class "self-start rounded border border-base-700 px-2" :title (str "release " held ": the reconciler runs its next run (my.root/run!)")
@@ -1575,6 +1601,23 @@
      (when (seq shown) (into [:div {:class "started"}] shown))
      (when (seq below) [:p {:class "seon-note"} (str (count below) (if (= 1 (count below)) " more it started, below" " more it started, below"))])]))
 
+(defn unresolved-render
+  "The page's head when its entity names a render of its own (:seon.render/hiccup) that names no var this process has: the typed error,
+  naming the symbol, where that render would draw, and the page drawn by the schema's render beneath it (never a quiet return to the
+  default: the Data model session's condition). See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx ix :seon.render/index}]
+  (let [r (ratom/realize (get c :seon.render/hiccup))
+        e (contract/error :seon.render/no-render #'unresolved-render
+                          (str r " names no render this process has, so this page is drawn by its schema's render")
+                          {:schema (render/entity-schema ix (ratom/untracked c) nil) :identity [:seon.agent/key]})]
+    [:section [:p (:seon.error/message e)] (render/hiccup {:seon.render/index ix :as :block} e)]))
+
+(defn unresolved-list
+  "The list (p-head) `unresolved-render` is placed in, for the page alone. See docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/list "p-head" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div {:id "p-head"} [#'unresolved-render {}]])
+
 (defn agent
   "An agent's page, the render of its pull c, the one tree the model and the person read (the declared html render of
   :seon.db/agent-fact, which an agent overrides on its branch like any render): components placed in its
@@ -1596,6 +1639,8 @@
       (agent-entry (:seon.db/db opts) c))
     [:div {:id "render-ctx"} [#'agent-parts {} c] [#'conversation-list {}]
      [#'rules-list {}]
+     ;; it names a render of its own this process has none of: drawn by this, its schema's, the reason said where its own would be
+     (when-let [r (some-> (get c :seon.render/hiccup) ratom/realize)] (when-not (resolve r) [#'unresolved-list {:wire/for "page"}]))
      ;; a user's (it holds :seon.user/name): its agents list, which the frame shows on every page (seon.render.proc/user-sides)
      (when (get c :seon.user/name) [#'agents-list {}])]))
 
@@ -1611,6 +1656,11 @@
 .stage-front > p, .stage-front blockquote { font-size: 1.375rem; line-height: 1.5; }
 .stage-front blockquote { color: var(--color-text-300); border-left: 3px solid var(--color-base-700); padding-left: 1rem; }
 .stage-front > div { font-size: 1.125rem; line-height: 1.6; }
+.stage-front table { border-collapse: collapse; font-size: 0.9375rem; }
+.stage-front :is(th, td) { text-align: left; padding: 0.25rem 1rem 0.25rem 0; border-bottom: 1px solid var(--color-base-800); }
+.stage-front [data-working] { color: var(--color-text-300); }
+.stage-front [data-working]::after { content: '…'; display: inline-block; animation: stage-pulse 1.2s ease-in-out infinite; }
+@keyframes stage-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 .stage-front section { font-size: 0.9375rem; }
 .stage-front details { font-size: 0.875rem; color: var(--color-text-300); }
 .stage-front details li { margin: 0.5rem 0; }
@@ -1624,6 +1674,8 @@
   (let [k (ratom/realize (:seon.agent/key c))
         ;; read as the conversation reads them, tracked: a turn begun or a message delivered draws this again
         turn (or (ratom/realize (:seon.agent/turn c)) 0)
+        ;; working: a turn begun that has not ended (its branch holds both numbers)
+        working? (> turn (or (ratom/realize (:seon.agent/ended-turn c)) 0))
         _ (let [v (get c :seon.message/_to)] (when (map? (ratom/untracked v)) (doall (keys v))))
         placed (when k (ctx/placed-messages db c))
         person? (fn [m] (some? (get-in m [:seon.message/from :seon.user/name])))
@@ -1634,27 +1686,34 @@
         ;; each ask and its answer: the last thing said before the next ask (the turns between work it out), with that turn's values
         exchanges (vec (for [[[n asked] [n' _]] (map vector asks (concat (rest asks) [[(inc turn) nil]]))
                              :let [[cid reply] (some said-in (range (dec n') (dec n) -1))]]
-                         {:n n :cid cid :asked asked :reply reply}))
+                         {:n n :until n' :cid cid :asked asked :reply reply}))
         waiting (keep (fn [[m _]] (let [x (ratom/realize (get-in c [:seon.message/_to m]))] (when (person? x) (:seon.message/body x)))) (:pending placed))
         now (last exchanges)
         ;; the sessions its pull holds through root, the person and itself aside
         self (ratom/realize (:db/id c))
         held (count (remove (fn [m] (or (= self (:db/id m)) (:seon.user/name m))) (vals (or (ratom/realize (get-in c [:seon.agent/root :seon.agent/_root])) {}))))
-        values (when (:cid now) (for [[e _] (ctx/turn-evals c (:cid now)) :let [k (:seon.eval/schema (d/entity db e))] :when (and k (render/declared ix k))]
-                           [#'eval-tile {:key (str (:n now) "-" e) :eid e}]))]
+        ;; the values the exchange made, in every turn of it (the one that answered is often not the one that evaluated)
+        values (when now (for [m (range (:n now) (:until now)) :let [cid (ctx/call-of db m k)] :when cid
+                               [e _] (ctx/turn-evals c cid) :let [sk (:seon.eval/schema (d/entity db e))] :when (and sk (render/declared ix sk))]
+                           [#'eval-tile {:key (str m "-" e) :eid e}]))]
     ;; for the page alone, as its list's call says (stage-list is placed :wire/for "page")
     [:section
      (cond
-       (seq waiting) (list [:blockquote (str/join "\n\n" waiting)] [:p "Working on it."])
-       now (list [:blockquote (:asked now)] (if (str/blank? (:reply now)) [:p "Working on it."] [#'markdown (:reply now) {:inline? true}]) (seq values))
+       (seq waiting) (list [:blockquote (str/join "\n\n" waiting)] [:p {:data-working ""} "Working on it"])
+       now (list [:blockquote (:asked now)]
+                 (cond (not (str/blank? (:reply now))) [#'markdown (:reply now) {:inline? true}]
+                       working? [:p {:data-working ""} "Working on it"]
+                       :else [:p "It ended its turn without an answer. Its steps are in the conversation."])
+                 (seq values))
        :else (list [:h1 "Hello."]
                    [:p "Say what you would like done, in a sentence. The answer comes back here, with whatever it makes drawn as it is."]
                    (when (pos? held) [:p (str held (if (= 1 held) " session is" " sessions are") " in the list beside: ask about any of them.")])))
      (when (> (count exchanges) (if (seq waiting) 0 1))
-       [:details [:summary (str (dec (count exchanges)) " earlier")]
+       [:details {:id "stage-earlier"} [:summary (str (dec (count exchanges)) " earlier")]
         (into [:ol] (for [x (if (seq waiting) exchanges (butlast exchanges))] [:li [:p (:asked x)] (when-not (str/blank? (:reply x)) [#'markdown (:reply x) {:inline? true}])]))])
      ;; the person's view of the page, kept as any fold's (never a write: the render is the agent's own fact): the same data as the conversation
-     [:details {:data-as "conversation" :data-preserve-attr "open"} [:summary [:span {:data-when "closed"} "Show as the conversation"] [:span {:data-when "open"} "Show as the stage"]]]]))
+     ;; each fold named, so a fold that appears before another (the earlier exchanges) is no morph of it: the open one stays open
+     [:details {:id "stage-as" :data-as "conversation" :data-preserve-attr "open"} [:summary [:span {:data-when "closed"} "Show as the conversation"] [:span {:data-when "open"} "Show as the stage"]]]]))
 
 (defn stage-list
   "The stage's own list (p-head), for the page alone: `stage-front` over the agent's pull. See docs/render.md#an-entity-may-name-its-own-render."
