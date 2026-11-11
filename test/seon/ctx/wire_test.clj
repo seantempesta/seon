@@ -2150,6 +2150,13 @@
     (is (= :seon.ctx/unworded (try (wire/page-message id 'clojure.core/inc ["1"] 2) nil (catch clojure.lang.ExceptionInfo e (:seon.error/type (ex-data e)))))
         "a function with no words is refused, never an empty message")))
 
+(deftest a-diffs-reply-names-what-moved
+  ;; loop 2 (2026-11-11): a model copied the diff's fixed reply word for word (call 16); the reply is a function of the edits, the parts
+  ;; that moved by their names in the edits' paths, so it differs with what moved and says something true when copied
+  (is (= "My page changed: status." (wire/diff-reply [[["page" "p-task" "status" :own] :r [:p "x"]] [["page" "p-task" "status"] :r [:p "y"]]])))
+  (is (= "My page changed: status, cite-x." (wire/diff-reply [[["page" "p-task" "status"] :-] [["page" "p-task" "cite-x" :pre] :r "s"]])))
+  (is (= "My page changed: page." (wire/diff-reply [[["page"] :r [:div]]])) "the page whole, by its own name"))
+
 (deftest every-call-seon-writes-is-a-whole-reply
   ;; the law (owner, 2026-11-11: "Set a good example for the agent"): each function a Seon-made call names holds its reply and its
   ;; intent, and every assistant message of a request that holds no record of the model's own has text and each call an intent
@@ -2435,3 +2442,27 @@
         (is (str/includes? page "LAB-PART at turn 1") "the own render's list is in what the model reads")
         (is (str/includes? page "task-view") "beside the task's part, as before")
         (is (str/includes? diff "LAB-PART at turn 2") "and what it draws next is in the next turn's page edits, as the task's part's are")))))
+
+(deftest a-call-answering-the-request-that-throws-is-in-the-request
+  ;; docs/failure-points.md (a component's render): a call placed to answer the model's output (turn-entities places task-msgs where an agent's
+  ;; calls change task) that throws answers that output with its error, by the error schema's model render (defect-msgs), naming what threw:
+  ;; never left out of what the model reads (Context, 2026-11-11: task-msgs failed its contract and the task boundary vanished with no trace)
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page "# A stub of the system prompt\n\nBe brief."}))
+      ;; two turns whose bases name different tasks: turn-entities places task-msgs between them
+      (doseq [[n task] [[1 "demo/g"] [2 "demo/h"]]]
+        (let [b {:commit (d/commit-id @conn) :task task :turn n :max-turns 9 :origin :model :agent "a1"}]
+          (d/transact conn (ts/turn-tx "a1" n {:seon.model-call/basis b :seon.model-call/reply (str "Reply " n ".") :seon.model-call/forms 0 :seon.model-call/ms 1}))))
+      (let [db @conn
+            ix (seon.db/index)
+            c (ctx/agent-ctx ix db (pdb/eid db :seon.agent/key "a1"))
+            ;; task-msgs throwing as a contract refusal does (Context's case: its arguments refused), the call the walk places left as it is
+            w (with-redefs [wire/task-msgs (fn [_ before id] (throw (ex-info "seon.ctx.wire/task-msgs invalid-input" {:seon.error/type :seon.instrument/contract-error :in [before id]})))]
+                (render/draw c ctx/changes db (render/render-var-of ix c) {:model-only true :once true :index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}}))]
+        (try
+          (let [said (pr-str (:messages (wire/request w)))]
+            (is (str/includes? said "seon.ctx.wire/task-msgs") (str "the model reads which call threw: " said))
+            (is (and (str/includes? said "Reply 1.") (str/includes? said "Reply 2.")) "the other parts are still there")
+            (is (= [:seon.render/component-defect] (map :seon.error/type (render/take-defects! w))) "one defect, recorded once"))
+          (finally (render/dispose-walk! w)))))))

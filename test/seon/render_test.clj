@@ -1537,7 +1537,7 @@
              :producer 'demo/f :owner-ns 'demo :evidence {:kind :error} :proofs [] :at-ms nil}]
     (is (= "<p class=\"text-xs\">error ×3 demo/f: boom (answered by demo/fix)</p>" (h/html (ui/problem-row {} row))))
     (let [html (h/html (ui/problems {:seon.render/index (seon.db/index)} {:t 1 :classes {:error {:n 1 :rows [(dissoc row :class)]} :red {:n 0 :rows []}}}))]
-      (is (str/includes? html "<summary class=\"cursor-pointer\">error 1</summary>"))
+      (is (str/includes? html "<summary class=\"cursor-pointer\" title=\"error\">errors: 1</summary>"))
       (is (str/includes? html "error ×3 demo/f") "its rows, each by the row's view")
       (is (not (str/includes? html ">red 0<")) "a class with no rows is left out"))
     (is (= ["none open"] (re-seq #"none open" (h/html (ui/problems {:seon.render/index (seon.db/index)} {:t 1 :classes {}})))))
@@ -2463,8 +2463,22 @@
 
 (deftest a-task-title-is-its-name-in-words
   ;; docs/render.md#the-page: a task's id as its title
-  (is (= "A long string" (ui/task-title "seon.print/a-long-string")))
-  (is (= "REPL reads" (ui/task-title "seon.repl/REPL-reads")) "capitals kept"))
+  (is (= "A long string" (ui/task-title {:seon.task/id "seon.print/a-long-string" :seon.task/plan "What exists: a long string."})))
+  (is (= "REPL reads" (ui/task-title {:seon.task/id "seon.repl/REPL-reads"})) "capitals kept"))
+
+;; docs/render.md#the-page: a person's request is titled by its first sentence as written (Data model, 2026-11-11): its task's name is that
+;; sentence's words (seon.root/request-name, seon.task/request-words), so the title is computed from the plan, never stored
+(deftest a-requests-title-is-its-first-sentence-as-written
+  (let [ask "Prove the already-merged demo.math/half function and its test: verify demo.math/half is on main. Then report."
+        id (str "request/" (seon.task/request-words ask))]
+    (is (= "Prove the already-merged demo.math/half function and its test: verify demo.math/half is on main"
+           (ui/task-title {:seon.task/id id :seon.task/plan ask})) "demo.math/half and the colon intact")
+    (is (= "Prove the already-merged demo.math/half function and its test: verify demo.math/half is on main"
+           (ui/task-title {:seon.task/id (str id "-2") :seon.task/plan ask})) "a name numbered because it was taken")
+    (is (= "Make things" (ui/task-title {:seon.task/id "request/make-things" :seon.task/plan "Something else entirely."}))
+        "a plan no longer opening with its name's words: the name, never a stale sentence")
+    (is (= "A long string" (ui/task-title {:seon.task/id "seon.print/a-long-string" :seon.task/plan "What exists: a long string."}))
+        "a task file's name, written by a person as its title, reads as itself")))
 
 (declare sessions-db tree-db)
 
@@ -3524,6 +3538,23 @@
     (is (str/includes? text "before you prove again") "to its last step")))
 
 ;; docs/render.md#a-citation-says-why-it-is-there: each kind of cite read cold
+(deftest a-cites-part-shows-a-callable-form
+  ;; docs/references.md#an-entity-cites: what a cite shows of how a function is called is a form an agent can evaluate. A call inside a
+  ;; macro's syntax-quote holds an unquote and is a template, never a call; a search hit whose line is only its own definition's opening
+  ;; says nothing its name does not, and shows its arglist
+  (let [macro "(defmacro doc [x] `(do (println (my.agent/doc-of ~x)) nil))"
+        both (str macro "\n(defn g [] (my.agent/doc-of \"docs/x.md\"))")
+        v {:var/doc "What it names, as data." :var/form {:form/src "(defn doc-of [x] x)"}
+           :callers {1 {:form/src macro :form/defines {2 {:var/name 'my.agent/doc :var/meta #{:macro}}}}}}
+        part (r/part-text ['seon.render.ui/cite {} (#'ui/var-hiccup 'my.agent/doc-of v false)])
+        hit-line #'ui/hit-line]
+    (is (nil? (ui/call-in macro 'my.agent/doc-of)) "a template is no call")
+    (is (= "(my.agent/doc-of \"docs/x.md\")" (ui/call-in both 'my.agent/doc-of)) "a real call after it in the same source is the one shown")
+    (is (not (str/includes? part "~")) (str "a cited function's part holds no template: " part))
+    (is (not (str/includes? part "A real call")) "and says nothing of a call when it has none to show")
+    (is (= "([v])" (hit-line "(defn- doc-view" 'my.agent/doc-view (constantly "(defn- doc-view [v] v)"))) "a hit whose line is its own definition's opening shows its arglist")
+    (is (= "a line that says why it matters" (hit-line "a line that says why it matters" 'my.agent/doc-view #(throw (ex-info "read" {})))) "any other line is shown as it is, its source never read")))
+
 (deftest a-cited-thing-is-drawn-by-what-it-is
   (let [[db aid] (cited-world)
         tree (:tree (seon.ctx/build (seon.db/index) db aid :b))
@@ -4397,7 +4428,8 @@
     (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "1233 forms loaded"))
     (is (str/includes? (tile {:boot {:program {:loaded 1233 :ms 40}}}) "40"))
     (is (str/includes? (tile {:boot {:program {:loaded 0 :ms 5}}}) "image held main's program"))
-    (is (str/includes? (tile {}) "program load not measured"))))
+    (is (str/includes? (tile {:boot {}}) "image held main's program") "a boot that loaded nothing over its image")
+    (is (not (str/includes? (tile {}) "program")) "no boot read yet: nothing said")))
 
 
 (deftest a-sender-is-drawn-by-who-it-is
@@ -4501,3 +4533,29 @@
     (is (not-any? #(= 5 (get (:path %) 2)) top) "a first look at the whole is the overview: no member walked")
     (is (not-any? (fn [e] (some #(some #{'v 'id 'path} (filter symbol? (tree-seq coll? seq (second %)))) (:to-use e))) (concat at top))
         "no form shown holds a placeholder it could not fill")))
+
+;; docs/ctx.md#the-pattern: root's evals are a window (the newest :seon.config.ctx/window); its line says how many it did not pull, in the printer's words
+(deftest roots-evals-say-what-their-window-left-out
+  (let [evals (fn [held joined] (with-meta (into {} (for [i (range held)] [(- 1000 i) {:seon.eval/id (str "e" i)}])) {:seon.ctx/count joined}))
+        summary (fn [v] (let [[_ _ [_ _ s]] (seon.render.ui/root-evals {:seon.ctx/ctx {:evals v}})] s))]
+    (is (= "20 evals sent to root, 92 not pulled" (summary (evals 20 112))))
+    (is (= "20 evals sent to root" (summary (evals 20 20))) "a window holding every member says nothing left out")
+    (is (= "20 evals sent to root" (summary (with-meta (evals 20 20) nil))))))
+
+;; docs/health.md: a problem class reads in words, said after its count ("168 tasks that cite no section"), from :seon.problems/class's
+;; :seon.status/title; the keyword stays the data (Point, 2026-11-11: the problems tile listed "uncited-task 168")
+(deftest a-problem-class-reads-in-words
+  (let [classes (drop 2 (get seon.contract/forms :seon.problems/class))
+        words (:seon.status/title (seon.contract/properties :seon.problems/class))
+        html (seon.web.html/html (ui/problems {} {:t 1 :open #{} :classes {:uncited-task {:n 168 :rows [{:producer nil :owner-ns nil :evidence {} :proofs [] :answered-by [] :at-ms nil}]}}}))]
+    (is (= #{} (set (remove words classes))) "every class has its words: a new class is never a bare keyword")
+    (is (str/includes? html "tasks that cite no section: 168") html)
+    (is (not (re-find #">uncited-task" html)) "no bare keyword drawn")))
+
+;; docs/render.md#the-page: a number the system's process tile shows says what it measures (Point and Web, 2026-11-11: "fork lag 23952 ms"
+;; read as broken, "program load not measured" read as a gap): fork lag carries its meaning, and a boot that loaded no forms says so
+(deftest the-process-tile-says-what-fork-lag-is
+  (let [html (h/html (ui/process-tile {:seon.ctx/ctx {:process {:fork-server {:lag-ms 23952} :boot {}} :seon.root/boot "b1"}}))]
+    (is (str/includes? html "how long a commit takes to reach the fork server") html)
+    (is (not (str/includes? html "not measured")) "no gap where the boot loaded nothing")
+    (is (str/includes? html "the image held main") html)))

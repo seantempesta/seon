@@ -562,6 +562,28 @@
         c (ctx/build (seon.db/index) db (aid db) :b) rep (d/with db (eval-tx (inc n)))]
     [c (:db-after rep) (:tx-data rep) :b]))
 
+;; docs/ctx.md#the-pattern: a window holds the newest n of a join's members and says, as metadata on the join's value
+;; (:seon.ctx/count), how many the join has in the db, so what it left out is data: at its build, after a member joins
+;; (the window moves, the count grows), after one the window never held leaves (the same members, one fewer joined),
+;; and when the window is not full (the count is the members held)
+(deftest a-window-says-how-many-members-its-join-has
+  (let [windowed (fn [n lim] (:db-after (d/with (seeded n) [[:db/add [:seon.agent/key k] :seon.ctx/pattern [(symbol "*") {[:seon.eval/_agent :as :evals :limit lim :reverse true] [(symbol "*")]}]]])))
+        db (windowed 30 5)
+        c (ctx/build (seon.db/index) db (aid db) :b)
+        held #(count (:evals (:tree %))) joined #(:seon.ctx/count (meta (:evals (:tree %))))
+        more (d/with db (eval-tx 31)) c1 (ctx/patch c (:db-after more) (:tx-data more) :b)
+        less (d/with (:db-after more) [[:db/retract (id db [:seon.eval/id "e3"]) :seon.eval/agent [:seon.agent/key k]]])
+        c2 (ctx/patch c1 (:db-after less) (:tx-data less) :b)
+        short (windowed 30 40) cs (ctx/build (seon.db/index) short (aid short) :b)]
+    (is (= [5 30] [(held c) (joined c)]) "built: the newest five held, thirty joined")
+    (is (= [5 31] [(held c1) (joined c1)]) "a member joined: the window moved, one more joined")
+    (is (= [5 30] [(held c2) (joined c2)]) "a member the window never held left: the same five, one fewer joined")
+    (is (= (keys (:evals (:tree c1))) (keys (:evals (:tree c2)))) "and the window's members are the ones they were")
+    (is (= [30 30] [(held cs) (joined cs)]) "a window not full: the count is the members held")
+    (let [all (:db-after (d/with (seeded 30) [[:db/add [:seon.agent/key k] :seon.ctx/pattern [(symbol "*") {[:seon.eval/_agent :as :evals :reverse true] [(symbol "*")]}]]]))
+          ca (ctx/build (seon.db/index) all (aid all) :b)]
+      (is (= [30 nil] [(held ca) (joined ca)]) "a join with no :limit carries none: its count is its count"))))
+
 (deftest an-agents-own-record-holds-every-message-and-turn
   ;; (the owner, 2026-10-30: "deliver all messages and errors"): an
   ;; agent's own record, pulled by its schema's pattern, holds every message and every turn it has,
@@ -1111,6 +1133,21 @@
     (is (str/includes? text "What x does.") "the page shows the section's text, read by the render")
     (is (str/includes? text "(defn f0 [x] x)") "and the function's source")))
 
+;; docs/references.md#a-section-read-at-a-depth-with-its-edges: doc reads the value a local names as it reads a literal (a macro
+;; sees its locals), and a page's listing names each of its sections (address, heading, summary) and leaves their edges to
+;; (doc address). Found by working the task as an agent: a let-bound address printed "names no var or namespace", and one page's
+;; listing was 239,943 characters with every section's references and citers
+(deftest doc-reads-a-local-and-a-page-lists-its-sections-without-their-edges
+  (let [db (my.test/with (my.test/world) (my.test/page "docs/small.md" "# Small\n\nThe lead of small, citing app.calc/add.\n\n## Below\n\nThe text below, citing app.calc/total.\n"))]
+    (with-redefs [seon.agent/db (fn [] db)]
+      (let [printed (with-out-str (let [a "docs/small.md#small"] (my.agent/doc a)))
+            listing (my.agent/doc-of "docs/small.md")]
+        (is (clojure.string/includes? printed "The lead of small") "a let-bound address is read as a literal is")
+        (is (clojure.string/includes? printed "docs/small.md#below") "and names the section below")
+        (is (not (clojure.string/includes? printed "The text below")) "without its text")
+        (is (= ["docs/small.md#small" "docs/small.md#below"] (mapv :seon.ref/address listing)) "a page lists its sections")
+        (is (not-any? #(or (:seon.ref/references %) (:seon.ref/cited-by %)) listing) "each without its edges")))))
+
 (deftest a-cite-joins-its-target-and-a-symbol-joins-by-name
   ;; a cite's target is a ref (docs/references.md#an-entity-cites): the cite joins the var it names, its form and its
   ;; callers, which join by :by, ctx's one option beside Datahike's pull syntax (docs/ctx.md#the-pattern): a symbol a form
@@ -1486,7 +1523,9 @@
                   :entity entity
                   :collection (merge-with - (per coll-at 100 1000) (per str-at 100 1000) (update-vals entry #(* 2 %)))
                   :eq (update-vals (merge-with - (per eq-at 100 1000) entity (update-vals entry #(* 2 %)) (update-vals key #(* 12 %))) #(/ % (:eq rec-size)))}]
-    (doseq [[step dims] measured [d v] dims :let [stated (get-in ctx/change-steps [step d])]]
+    ;; a step's cost is a difference of measured rates: floating arithmetic leaves 3e-15 B where the bytes cancel (Jolt
+    ;; 6a8df52a, when a forced lazy node stopped allocating its claim), and that is zero: a billionth of a unit is not a cost
+    (doseq [[step dims] measured [d v0] dims :let [stated (get-in ctx/change-steps [step d]) v (if (< (Math/abs (double v0)) 1e-9) 0.0 v0)]]
       ;; within the slack above (the bound would be under), and not past a third below (it would be loose)
       (is (<= (* cost/loose stated) v (* (get cost/slack d) stated)) (str step " " d ": measured " v " against " stated " stated")))))
 

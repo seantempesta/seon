@@ -490,6 +490,30 @@
                (is (= :seon.agent/started-without-program (:seon.error/type (:started-without-program (deref p2 0 ::unanswered)))) "its spawn still answers typed")
                (is (not-any? #(= :tx (:op %)) (:to-writer @o2)) "and no second message is written")))))))))
 
+;; docs/references.md#an-entity-cites: an agent whose config cites a wiki section its store does not hold (a store older than its wiki) is
+;; made citing the rest and says which are missing in its hello: each a recorded :seon.agent/cite-missing problem of that agent naming the
+;; address, and its spawn's answer names them. Red before: the cite's lookup threw inside the fork server's step and no agent started
+(deftest an-agent-whose-store-lacks-a-cited-section-says-so-at-its-start
+  (let [gone "docs/nowhere.md#never-written"]
+    (testing "its hello carries the addresses, and each is a recorded problem of that agent"
+      (let [ap0 (#'ap/agent-proc {:id :a1 :end {:out (a/chan 4) :in (a/chan)} :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
+            [_ outs] (step #'ap/agent-proc ap0 :from {:op :hello :t 1 :start-ms 1.0 :mem-mb 1.0 :interrupt-ok true :missing-cites [gone]})
+            pr (filter #(= :problem (:op %)) (:to-api outs))]
+        (is (= [[:a1 :seon.agent/cite-missing gone]] (mapv (juxt :agent (comp :seon.error/type :error) (comp :address :error)) pr)))
+        (is (clojure.string/includes? (:seon.error/message (:error (first pr))) "erases the store") "and says what a reindexing start does")
+        (is (some #(and (map? %) (= [gone] (:missing-cites %))) (tree-seq coll? seq (:to-api outs))) "its status carries them to root")))
+    (testing "root answers its spawn naming them, and the agent runs"
+      (ts/test-branch!
+       (fn [_ conn]
+         (let [p (promise) o (volatile! {})
+               st (-> (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                                        :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+                      (assoc :conn conn)
+                      (assoc-in [:view :agents :a1] {:status :spawning}) (assoc-in [:seon.root/spawning :a1] p))
+               st' (#'root/set-agent st o :a1 {:ready true :missing-cites [gone]})]
+           (is (= [gone] (:missing-cites (deref p 0 ::unanswered))) (pr-str (deref p 0 ::unanswered)))
+           (is (= :idle (get-in st' [:view :agents :a1 :status])) "the agent runs")))))))
+
 (deftest fork-server-events
   (let [st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :log []}]
     (testing "a stats event answers the oldest waiter, by rid"

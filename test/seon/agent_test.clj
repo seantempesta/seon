@@ -1241,8 +1241,8 @@
 ;; @ctx, the live atom, printed whole: the same thing it reads when it types @ctx, never a filtered copy (owner, 2026-11-11)
 (deftest the-record-shown-is-the-live-ctx
   ;; after a turn, inside one eval: the live atom and (my.render/ctx p) at the agent's db's own point are the same value (red
-  ;; before: the cold read named no branch, and a patch dropped a member's link transaction). Their printed bytes can still differ
-  ;; by a map's key order (an array map prints in the order its keys were added: :same-bytes), the printer's to settle
+  ;; before: the cold read named no branch, and a patch dropped a member's link transaction), and print the same bytes (red before:
+  ;; an entity's array map printed in the order its keys were added, which a patch and a build differ in)
   (let [[_ same]
         (in-agent (fn [{:keys [task]}]
                     [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
@@ -1253,7 +1253,8 @@
                           " [(subs live (max 0 (- i 100)) (min (count live) (+ i 150))) (subs shown (max 0 (- i 100)) (min (count shown) (+ i 150)))]))})")])
                   {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})]
     (is (:conversation? (:value same)) (str "a turn in, so the record holds the conversation's joins: " (pr-str same)))
-    (is (true? (:equal (:value same))) (str "the record shown at a point is the live @ctx there, as a value: " (pr-str (:value same))))))
+    (is (true? (:equal (:value same))) (str "the record shown at a point is the live @ctx there, as a value: " (pr-str (:value same))))
+    (is (true? (:same-bytes (:value same))) (str "and the same bytes: an entity prints its keys in one order (seon.print.select/held-order): " (pr-str (:value same))))))
 
 ;; docs/render.md#a-change-is-edits-by-name: a wake is told what moved since the page it last showed, never the page again: a second whole page
 ;; costs about 4k tokens a wake
