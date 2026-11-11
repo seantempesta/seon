@@ -924,6 +924,14 @@
       (testing "before root listens: kept, for its start to fail on"
         (boom "early boom")
         (is (= ["early boom"] (map #(re-find #"early boom" (:message %)) (:early @u))) (pr-str @u)))
+      (testing "a go block's uncaught throw reaches the same handler (the Jolt pin 75eec622: never only stderr)"
+        ;; its record is the wait's end: the handler's own write. A jolt.fibers/spawn body's throw does NOT reach it (held for a
+        ;; joiner, measured 2026-11-12): with Deep fixes, not asserted here
+        (let [before (count (:early @u)) p (promise) k (gensym)]
+          (add-watch u k (fn [_ _ _ v] (when (some #(re-find #"go boom" (str (:message %))) (drop before (:early v))) (deliver p true))))
+          (a/go (throw (ex-info "go boom" {:n 3})))
+          @p (remove-watch u k)
+          (is (some #(re-find #"go boom" (str (:message %))) (drop before (:early @u))) (str "the go block's: " (pr-str @u)))))
       (testing "after: on root's :back, and the api records it as a defect naming it"
         (let [back (a/chan 4) _ (swap! u assoc :back back)
               _ (boom "late boom")
