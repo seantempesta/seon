@@ -4219,7 +4219,9 @@
 
 (deftest a-planted-entity-reaches-the-request
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: what an agent's pull joins reaches the model's request by its schema's
-  ;; model render, no code naming it (planted-world). Red until the task's request half is done
+  ;; renders, no code naming it (planted-world): by its model render where it is history, by its html inside the page eval
+  ;; (my.render/page) where it is a part. Red until the task's request half is done
   (let [{:keys [msgs]} (planted-world)]
-    (when-not (is (str/includes? msgs "PLANTED-MODEL the planted note") "the note's model render puts it in the request's messages")
+    (when-not (is (or (str/includes? msgs "PLANTED-MODEL the planted note") (str/includes? msgs "PLANTED-HTML the planted note"))
+                  "the note reaches the request's messages, as history or in the page")
       (println "the request's messages:" msgs))))
