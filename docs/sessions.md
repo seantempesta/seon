@@ -49,6 +49,20 @@ The managing session's context is spent on deciding, so it hands off what only h
 - **It keeps the owner's words.** A ruling goes to the sessions with his sentence quoted, and into [decisions](decisions.md) the same day; its own reading of the sentence is labelled as its reading.
 - **It keeps the machine in mind.** It counts what is running before it starts a second heavy thing, and a session that needs a rule to stay within the machine's cores is a missing mechanism, to be built into the system's own queue.
 
+## Work at full strength
+
+A capable model does its best work when it is asked for it and told what that looks like, so these are the habits that separate finished work from plausible work, for a session, a helper and a Seon agent alike, whatever the model (owner, 2026-11-11: "let's set a higher bar of excellence everywhere you see"). Each names its failure, because the failure is what to watch for in your own turn.
+
+- **Finish the scope.** Say what done is before starting: the acceptance checks, by name. Work until each is closed; a plausible checkpoint is not the end. Then stop: nothing unasked is added. *Failure:* a summary of progress offered as a result; a stub left where a requirement stood.
+- **Never end a turn on a promise.** "Starting X now" is followed by the call that starts it, in the same turn, or by a plain statement that you are stopped and what you wait for. *Failure:* on 2026-11-11 the managing session sat idle for 70 minutes with tips waiting.
+- **State lives in files, never only in the conversation.** Before work is handed out and before a compaction, the contract, what depends on what, and what is done are written where the next reader looks: the task, the wiki section, the branch. A worker reads them, commits one change that can be checked, and says where it stands. *Failure:* a decision that lived in a chat and was rebuilt differently after a compaction.
+- **Split what is independent, and only that.** Pieces that share no files and need none of each other's results go to helpers, each with its inputs, its outputs and what to report in a dozen lines; whoever split the work checks the seams and reviews every line. As many helpers as the work has independent pieces, never more ([no fan-out](#no-fan-out)). *Failure:* one long context doing six unrelated things; ten helpers on overlapping files.
+- **Put something that can decide in the loop.** Where a compiler, a contract, a property test, a query on the store or `bin/laws` can say yes or no, ask it after every change. Break a claim into its smallest checkable pieces first, prove each, then compose them; see each proof red. *Failure:* a sample test passing beside an invariant nobody checked; a proof that compared a function with itself.
+- **Look at what you made.** A page is opened in a browser, a number is read from its own log line, a value is printed at the REPL. Name the specific defect you see, fix it, look again. *Failure:* a page written blind; "10 keys" passed on when the log's first line said 1,410 tests ran.
+- **Measure before you say a number, and say what you do not know.** A cost, a count, a size, a cause: run the probe, or label the claim "read, not run" or "inferred". Ask what an aggregate counts before trusting it. A claim of your own found unverified is withdrawn in so many words. *Failure:* four causes named in one day without a bisect; a sha typed from memory.
+- **Speed never comes from less checking.** Faster means work in parallel, less work, or a better design. A test removed, weakened, skipped or moved later so a step looks done is a regression. *Failure:* "ready" on a hand-picked part of the suite.
+- **Think before spending.** Plan the few reads and runs that decide the question, read what a decision rests on, and never rerun what is green: careful work costs less than careless work done twice.
+
 ## The way improves
 
 The standard is the best way known, written down, until a better one replaces it ([AGENTS.md §1](../AGENTS.md)). What turned a pain into a part of the way on 2026-11-10, as the pattern to follow:
