@@ -928,3 +928,23 @@
       (let [tx (create-tx db [(refine-decl t)])]
         (when (vector? tx)
           (into tx (execution-tx [(task-id (:seon.task/ns t) (str (:seon.task/name t) "-refine"))] :running)))))))
+
+(defn again-tx
+  "Refine id's end on main, as its carried facts (seon.task/carry-tx's :tx) leave it: each task it needs on its own branch that
+  root holds (its work ended and was not merged) and whose plan the refine changed runs again, fresh from main: a new branch,
+  released (a compare-and-swap from :held) with root's last reasons retracted, so a fresh agent works the refined plan. A refine
+  that changed no plan, a task not held, and a task that is no refine's start no run. The new branch is named by main's t, as a
+  go back names one (seon.root/back-point). See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:sequential :any]] [:vector :any]]}
+  [main id carried]
+  (if-not (refine? main id)
+    []
+    (let [br (:seon.task/branch (task main id))
+          planned (set (for [x carried :when (and (vector? x) (= :db/add (first x)) (= :seon.task/plan (nth x 2 nil)))] (second (second x))))]
+      (vec (for [{w :seon.task/id} (:seon.task/needs (d/pull main [{:seon.task/needs [:seon.task/id]}] [:seon.task/id id]))
+                 :let [t (task main w) wb (or (:seon.task/branch t) (default-branch w))]
+                 :when (and (planned w) (= br wb) (= :held (:seon.task/execution t)))
+                 x (concat (env-tx w {:branch (keyword (namespace wb) (str (name wb) "-again-" (:max-tx main)))})
+                           [[:db/cas [:seon.task/id w] :seon.task/execution :held :running]
+                            [:db.fn/retractAttribute [:seon.task/id w] :seon.task/reasons]])]
+             x)))))

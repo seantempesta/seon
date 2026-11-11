@@ -1683,3 +1683,28 @@
     (is (task/refine? db1 "demo/a-refine") (str "a refine by its cite of the section: " (pr-str (task/cites-of db1 (seon.db/eid db1 :seon.task/id "demo/a-refine")))))
     (is (nil? (task/refine-tx db1 "demo/a")) "none twice")
     (is (nil? (task/refine-tx db1 "demo/a-refine")) "a refine gets none")))
+
+(deftest a-refined-plan-starts-one-fresh-run-from-main
+  ;; docs/tasks.md#a-refine-curates-its-own-task (the owner, 2026-11-11: the refinement is tried from the earlier point, beside the
+  ;; original): a work task's failed end is held and gets its refine on its branch; the refine's end that changed the task's plan
+  ;; carries the plan to main and releases the task on a new branch from main; a refine that changed nothing starts no run
+  (let [red [{:reason :proof-red :symbol (t "a")}]
+        db0 (mdb [(decl "a")] :extra (work "a" :running :members {:seon.task/reasons red}))
+        {db1 :db} (judge! db0 "a" {:outcome :red} :results {(t "a") :fail})
+        old (:seon.task/branch (task/task db1 "demo/a-refine"))
+        db2 (d/db-with db1 (work "a-refine" :running))
+        better "Make a true. Start from (source demo/a): the red was its arity."]
+    (is (= :held (:seon.task/execution (task/task db1 "demo/a"))) "the failed work is held for root")
+    (is (task/refine? db1 "demo/a-refine") "and its refine is written with its end")
+    (testing "a refine that changed the plan"
+      (let [{db3 :db} (judge! db2 "a-refine" {:outcome :green} :on-branch [{:seon.task/id "demo/a" :seon.task/plan better}])
+            a (task/task db3 "demo/a")]
+        (is (= better (:seon.task/plan a)) "main holds the refined plan")
+        (is (= :running (:seon.task/execution a)) "the work is released")
+        (is (and (:seon.task/branch a) (not= old (:seon.task/branch a))) (str "on a new branch: " (:seon.task/branch a) " (was " old ")"))
+        (is (nil? (:seon.task/reasons a)) "root's last reasons are no news to the fresh run")
+        (is (= 1 (count (filter #(and (= :spawn (:op %)) (= "demo/a" (:task %))) (actions-for db3)))) "one fresh run")
+        (is (= [(:seon.task/branch a)] (keep #(when (= "demo/a" (:task %)) (get-in % [:env :branch])) (actions-for db3))) "from its new branch")))
+    (testing "a refine that changed nothing"
+      (let [{db3 :db} (judge! db2 "a-refine" {:outcome :green})]
+        (is (= :held (:seon.task/execution (task/task db3 "demo/a"))) "starts no run")))))

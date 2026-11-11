@@ -53,7 +53,7 @@ Read back through your own turns and find where one went that the task could hav
 
 Do not change the work, its tests or its proofs. End with a reply that says each change you made and the turn of yours it would have saved; a refine that found nothing says so and changes nothing.
 
-How it is judged: the task you refined is worked again from where you began, by a fresh agent, and the turns it takes are set beside yours. Until that runs by itself, a refine names the proofs of the task it needs.
+How it is judged: when the task you refined did not merge (root holds it), a plan you changed releases it again, fresh from main: a new branch, a fresh agent, your plan, and the turns it takes set beside yours (```seon.task/again-tx```, `seon.reconcile-test/a-refined-plan-starts-one-fresh-run-from-main`). A refine that changed nothing starts no run. A task that merged is not run again: where it started is not data yet.
 
 ## An agent edits a task its pull holds
 
