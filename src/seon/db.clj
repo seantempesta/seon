@@ -1036,7 +1036,9 @@
   derived something from (a graph, a diff), in place of the db, which pins its own version of the
   index; the thing derived is a cache keyed by the point, and the db is made again with at-commit
   when it must be read. Two values of one commit differ by their t (a run-ahead branch is ahead of
-  its last commit). See docs/machine.md#roots-heap."
+  its last commit). A value never committed (d/db-with of a fresh db, a test's world) has no commit id, so [nil t] names
+  no one value: a cache keyed by a point reuses only a point with a commit (seon.agent's graphs and diff). See
+  docs/machine.md#roots-heap."
   {:malli/schema [:=> [:cat :seon.host/db] [:tuple [:maybe :uuid] :int]]}
   [db] [(d/commit-id db) (:max-tx db)])
 
