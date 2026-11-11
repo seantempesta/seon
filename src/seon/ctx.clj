@@ -958,6 +958,8 @@
   :at, the transaction that linked each, which the pattern asks ({[:ns/_attr :tx :at] ..}: docs/ctx.md#the-pattern), whose target is
   history (seon.render/history?, the entity index ix's :history-schemas), read from its attribute: a reverse join's members are of the
   schema that owns the attribute, a forward join's of its targets (a join of cites or started agents asked with :at is no conversation).
+  A join is recognized by its key being its attribute, so one an agent's own pattern renames (:as) is no conversation: a schema's pattern
+  never renames one (seon.ctx-test/a-pattern-joins-refs-by-their-attribute).
   The joins whose
   members carry a turn number (:seon.model-call/n) make the turns; a turn's edge is the :t of its basis (seon.turn/basis!, the commit its
   request is made from), else, for a turn with no basis (an example session's), the transaction that linked its call; so one linked after a
