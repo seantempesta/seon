@@ -1016,7 +1016,7 @@
                  ;; the tree fixture's root session names no own render, so it is drawn by agent here, not by its stage
                  seon.render.ui/system-message {:class 4 :wire 2}}]
     (try (is (= pinned seen) (str "a count moved: write the new one here when it went down, never when it went up\n"
-                                  (with-out-str (clojure.pprint/pprint (into (sorted-map) seen)))))
+                                  (pr-str (into (sorted-map) seen))))
          (finally (doseq [w ws] (r/dispose-walk! w))))))
 
 (deftest a-part-that-sorts-into-the-middle-goes-there
