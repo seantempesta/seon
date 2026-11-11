@@ -331,10 +331,11 @@
   [style] (boolean (and style (str/includes? style "{"))))
 
 (defn rules
-  "The CSS rules of drawn, a walk's drawn renders, and of every other render of their namespaces (`css?`), [[render-name text] ...] by name: what is drawn decides which namespaces, not which rules, so a render's first draw, or a person's page asking for what only it draws, moves no rule. See docs/render.md#style."
+  "The CSS rules of drawn, a walk's drawn renders, and of every other var of their namespaces, private ones too, that states rules (`css?`:
+  a render's helper may carry the rules for what it draws; read from ns-publics, a private helper's were dropped silently), [[render-name text] ...] by name: what is drawn decides which namespaces, not which rules, so a render's first draw, or a person's page asking for what only it draws, moves no rule. See docs/render.md#style."
   {:malli/schema [:=> [:cat [:map-of :any :any]] [:vector [:tuple :symbol :string]]]}
   [drawn]
-  (let [vs (into (set (filter var? (keys drawn))) (comp (filter var?) (map (comp ns-name :ns meta)) (distinct) (mapcat (comp vals ns-publics))) (keys drawn))]
+  (let [vs (into (set (filter var? (keys drawn))) (comp (filter var?) (map (comp ns-name :ns meta)) (distinct) (mapcat (comp vals ns-interns))) (keys drawn))]
     (vec (keep (fn [f] (let [s (:seon.render/style (meta f))] (when (css? s) [(symbol f) s]))) (sort-by symbol vs)))))
 
 (defn- with-id

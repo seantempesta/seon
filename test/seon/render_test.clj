@@ -3149,6 +3149,13 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
   [_] [:div [:div {:id "parts"} [#'interrupted-view {}]]])
 
+(deftest a-private-helpers-rules-reach-the-page
+  ;; docs/render.md#style: the rules of every var of a drawn render's namespace reach the page, a private helper's too (red before: read
+  ;; from ns-publics, the stage's rules on its private helpers stage-now and stage-folds never reached a page)
+  (let [rs (into {} (r/rules {#'ui/stage-front nil}))]
+    (is (str/includes? (get rs 'seon.render.ui/stage-now "") ".stage-front h1") (pr-str (keys rs)))
+    (is (str/includes? (get rs 'seon.render.ui/stage-folds "") "details[data-as]"))))
+
 (deftest a-component-that-throws-is-a-part-holding-its-error
   ;; owner, 2026-10-29: "the UI components are all separately rendered so it's okay if some are
   ;; errors just make sure it's visible to the agent": a call of the error's render on the error as data, which the model
