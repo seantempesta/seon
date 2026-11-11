@@ -1519,12 +1519,12 @@
             opened (pdb/open! backend path datoms main)
             ;; before any agent: a tree's branch left by an earlier root's end, its last run cut short, is dropped as that run would have
             dropped-trees (pdb/drop-trees! (:conn opened) main)
-            ;; still the only process: old snapshots swept when enough commits have landed, and the freed pages compacted at once
+            ;; still the only process: old snapshots swept when enough commits have landed
+            ;; what it sweeps is compacted at the NEXT boot, first of all (compact-if-due!, above, before any connection): never here
+            ;; between a release and a reopen of the store, where a connection still referenced had its environment closed and its file
+            ;; renamed under it, and the boot's own transact then dispatched on a released one (Context's two failed starts, 2026-11-11)
             retained (when sole? (pdb/retain! (:conn opened) (cfg/value :seon.config.store/keep-commits)))
-            compacted (if (pos? (:swept retained 0))
-                        (do (d/release (:conn opened)) (pdb/compact-if-due! path))
-                        compacted)
-            {store-cfg :cfg conn :conn :as opened} (if (pos? (:swept retained 0)) (pdb/open! backend path datoms main) opened)
+            {store-cfg :cfg conn :conn} opened
             ;; each agent's stderr goes to a file here (seon.agent/stderr-path), read at its death
             agents-dir (pdb/agents-dir store-cfg)
             _ (.mkdirs (java.io.File. agents-dir))
