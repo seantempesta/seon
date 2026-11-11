@@ -1265,7 +1265,8 @@
 
 (defn agent-state
   "The agent's state for the person (a component over ctx and the db), nothing of it for the model: how its work stands
-  (`standing`, from the task's outcome where it holds one), its task, the form it is running and its proofs green."
+  (`standing`, from the task's outcome where it holds one), its task, the form it is running and its proofs green at their last run (a verdict is what a run saw at its program, not the
+  state now: the status judges that; seon.ctx.status, docs/render.md#how-the-work-stands)."
   {:seon.render/style ".agent-state {border-radius: 0.375rem; background: var(--color-base-900); padding: 0.5rem; min-width: 0; overflow-x: auto; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (let [task (:seon.agent/task c)
@@ -1279,7 +1280,7 @@
      [:p (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))) (when (:reason stands) (str " · " (:reason stands))))]
      (when (:seon.task/id t) [:p "task " (task-title t)])
      (when running [:p "running " [:code running]])
-     (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green")])]))
+     (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green at their last run")])]))
 
 (defn own-problems
   "The open problems of the agent (a component over its branch db, seon.problems/own: its newest run's,

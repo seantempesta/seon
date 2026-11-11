@@ -4540,3 +4540,11 @@
     (is (str/includes? html "how long a commit takes to reach the fork server") html)
     (is (not (str/includes? html "not measured")) "no gap where the boot loaded nothing")
     (is (str/includes? html "the image held main") html)))
+
+;; docs/render.md#how-the-work-stands: a proof's verdict is what its last run saw at that run's program, not its state now (Tests' task
+;; seon.render/a-verdict-shown-is-at-the-tests-digest; Data model: outside a status, a verdict reads as at its last run), so the agent's
+;; state never says green now of a test edited since
+(deftest the-agents-proofs-read-as-at-their-last-run
+  (let [html (h/html (ui/agent-state {:seon.ctx/ctx {:db/id 1 :seon.agent/task {:seon.task/id "demo/g" :proved {'demo-test/g-test {:seon.test/status :green}}}}
+                                      :seon.db/db (ts/test-db)}))]
+    (is (str/includes? html "1 of 1 proofs green at their last run") html)))
