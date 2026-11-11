@@ -24,11 +24,11 @@
  ;; an entity no render renders (seon.render/render-var-of): its schema, nil when none names it, names no :seon.render/hiccup and extends none that does
  ;; its schema and its identity attributes
  :seon.render/no-render [:and :seon.error/base [:map [:seon.error/type [:= :seon.render/no-render]] [:schema [:maybe :qualified-keyword]] [:identity [:vector :qualified-keyword]]]]
- ;; a pattern as the walk takes it (seon.render/pattern): '* or the attributes it names, those asked with their transaction (:txs), and its joins,
+ ;; a pattern as the walk takes it (seon.render/pattern): '* or the attributes it names, those asked with their transaction (:txs: the key each fills), the keys the db fills at this path (:ro), and its joins,
  ;; each with its own pattern under :sub
- :seon.ctx/spec [:map [:star? :boolean] [:attrs [:set :keyword]] [:txs {:optional true} [:map-of :keyword [:maybe :map]]]
+ :seon.ctx/spec [:map [:star? :boolean] [:attrs [:set :keyword]] [:txs {:optional true} [:map-of :keyword :keyword]] [:ro {:optional true} [:set :keyword]]
                  [:joins [:vector [:map [:attr :qualified-keyword] [:key :keyword] [:rev? :boolean] [:by [:maybe :qualified-keyword]]
-                                   [:reverse? :boolean] [:limit [:maybe nat-int?]] [:sub :map]]]]]
+                                   [:reverse? :boolean] [:limit [:maybe nat-int?]] [:tx {:optional true} :keyword] [:sub :map]]]]]
  ;; the walk's state beside a record's map (seon.ctx/node): every path each entity sits at (:at {e #{path}}, an entity
  ;; built whole at each, as d/pull holds it), each path's pattern (:spec {path spec}: two paths can pull one entity by
  ;; different sub-patterns), what each join [e key] watches ([attribute value] keys, :watch) and its reverse (:watching);

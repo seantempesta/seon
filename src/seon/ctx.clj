@@ -29,13 +29,29 @@
 
 ;; ---- db -> map ---------------------------------------------------------------------------
 
+(declare own)
+
+(def ^:dynamic *txs*
+  "The transactions a build or a patch read, {tx entity}, bound for each (`build`, `patch`): a transaction is one object in it however
+  many members hold it, read once. A transaction never changes after it is written, so nothing it holds is ever stale."
+  nil)
+
+(defn- tx-entity
+  "Transaction tx on db as the pull holds it: its id and every attribute it holds (:db/txInstant, :seon.tx/branch, :seon.tx/runtime),
+  one seek, once a build or patch (*txs*). What a pattern's :tx option fills its key with. See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int?] :map]}
+  [db tx]
+  (if-let [c *txs*]
+    (or (get @c tx) (let [t (own db tx nil)] (vswap! c assoc tx t) t))
+    (own db tx nil)))
+
 (defn- own
   "Entity e on db, the attributes the pattern spec s names (nil, or a `*`: every one), and the ones its joins read (a forward
   join's attribute, a reverse lookup's name): a cardinality-many one as a set (pull answers a vector), a ref as {:db/id};
-  {:db/id e} alone when db holds none of it. An attribute the pattern asks with its transaction ([attr :tx true], s's :txs) holds beside its value the
-  transaction its datom was written in, under :seon.db/tx ({attr {:db/id tx}}, as a ref the pattern does not join is held; a cardinality-many one
-  {attr {v {:db/id tx}}}, v a ref's entity id; {[attr :tx true] sub} holds sub's attributes of that transaction beside its id, :db/txInstant, :seon.tx/branch): read off the
-  same datoms, so a pattern that asks none costs what it did (docs/ctx.md#the-pattern). One seek of e's datoms, a quarter of what the pull engine costs for the same answer."
+  {:db/id e} alone when db holds none of it. An attribute the pattern asks with its transaction ([attr :tx k], s's :txs) holds under k the
+  transaction its datom was written in, the transaction entity whole (`tx-entity`: :db/id, :db/txInstant, :seon.tx/branch); a cardinality-many one
+  a vector of those in the order they were written (by time, a millisecond's ties by id), each with its value under :v. Read off the same datoms, so a pattern that asks none costs what it did
+  (docs/ctx.md#the-pattern). One seek of e's datoms, a quarter of what the pull engine costs for the same answer."
   {:malli/schema [:function [:=> [:cat :seon.host/db pos-int?] :map] [:=> [:cat :seon.host/db pos-int? [:maybe :map]] :map]]}
   ([db e] (own db e nil))
   ([db e s]
@@ -46,21 +62,18 @@
                   any?
                   (into (set (:attrs s)) (for [j (:joins s) :when (not (:rev? j))] (:attr j))))]
      (if-let [ts (not-empty (:txs s))]
-       ;; the pattern asks the transaction of some attributes ([attr :tx true]: {:db/id tx}; {[attr :tx true] sub}: and sub's attributes of
-       ;; it, each transaction read once), beside each value, under :seon.db/tx
-       (let [seen (volatile! {})
-             tx-of (fn [a tx] (if-let [ts' (get ts a)]
-                                (or (get @seen [ts' tx]) (let [x (own db tx ts')] (vswap! seen assoc [ts' tx] x) x))
-                                {:db/id tx}))]
-         (reduce (fn [m {:keys [a v tx]}]
-                   (if (named? a)
-                     (let [x (if (contains? ref a) {:db/id v} v)
-                           m (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x))]
-                       (cond (not (contains? ts a)) m
-                             (contains? many a) (assoc-in m [:seon.db/tx a v] (tx-of a tx))
-                             :else (assoc-in m [:seon.db/tx a] (tx-of a tx))))
-                     m))
-                 {:db/id e} (d/datoms db :eavt e)))
+       ;; the pattern asks the transaction of some attributes ([attr :tx k]): under k, the transaction entity whole
+       ;; (`tx-entity`); a many-valued attribute's a vector in the order written (time, then id), each its value under :v
+       (let [m (reduce (fn [m {:keys [a v tx]}]
+                         (if (named? a)
+                           (let [x (if (contains? ref a) {:db/id v} v)
+                                 m (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x))]
+                             (if-let [k (get ts a)]
+                               (if (contains? many a) (update m k (fnil conj []) (assoc (tx-entity db tx) :v x)) (assoc m k (tx-entity db tx)))
+                               m))
+                           m))
+                       {:db/id e} (d/datoms db :eavt e))]
+         (reduce (fn [m [a k]] (if (and (contains? many a) (vector? (get m k))) (update m k #(vec (sort-by (juxt :db/txInstant :db/id) %))) m)) m ts))
        (reduce (fn [m {:keys [a v]}]
                  (if (named? a)
                    (let [x (if (contains? ref a) {:db/id v} v)]
@@ -178,6 +191,8 @@
 
 (declare node)
 
+(declare linked)
+
 (defn- window-moves
   "Join j's new members (r: the record's state) from moves, the datoms that touched it, when j is a
   reverse join with no limit, or a window of ids issued in time order (rseek's newest first), and old
@@ -198,7 +213,7 @@
           ;; in one transaction stays, the same object)
           gone (into #{} (comp (remove :added) (map :e) (filter #(contains? old %)) (remove asserted)) moves)
           leave (fn [[v r] x] [(dissoc v x) (forget r (get v x) (conj p x))])
-          enter (fn [[v r] x] (let [[n r] (node db x (:sub j) (conj p x) r nil touched)] [(assoc v x n) r]))
+          enter (fn [[v r] x] (let [[n r] (node db x (:sub j) (conj p x) r nil touched)] [(assoc v x (linked db e j x n)) r]))
           [v r] (reduce leave [old r] gone)
           ;; every member an assertion names that the window does not hold
           come (sort > (remove #(contains? v %) asserted))
@@ -216,6 +231,17 @@
           [v r] (reduce enter [v r] older)]
       [v r (into (set come) older)])))
 
+(defn- linked
+  "Member node n (entity x) of join j of entity e, holding under j's :tx key the transaction that wrote their link (a reverse join's
+  [x attr e], a forward one's [e attr x]), as the pattern asks; n itself when it asks none. See docs/ctx.md#the-pattern."
+  {:malli/schema [:=> [:cat :seon.host/db pos-int? :map pos-int? :map] :map]}
+  [db e j x n]
+  (if-let [k (:tx j)]
+    (if-let [tx (:tx (first (if (:rev? j) (d/datoms db :eavt x (:attr j) e) (d/datoms db :eavt e (:attr j) x))))]
+      (let [t (tx-entity db tx)] (if (= t (get n k)) n (assoc n k t)))
+      n)
+    n))
+
 (defn- join
   "Join j of entity e (m, its own attributes) at path p: [value r], value its members' nodes (a
   collection: a map by their ids, newest first; else the one node), r the record's state gaining
@@ -232,7 +258,7 @@
       (if-let [[v r entered] (when (seq moves) (window-moves db e j p old-map r moves touched))]
         ;; members a datom touched as entities (their own attributes), not just built, built again in place
         (reduce (fn [[v r] x] (if (and (contains? v x) (not (entered x)) (touched x))
-                                (let [[n r] (node db x (:sub j) (conj p x) r (get v x) touched)] [(assoc v x n) r])
+                                (let [[n r] (node db x (:sub j) (conj p x) r (get v x) touched)] [(assoc v x (linked db e j x n)) r])
                                 [v r]))
                 [v r] (filter integer? (keys touched)))
         (let [es (members (:index r) db e m j)
@@ -243,7 +269,7 @@
                                   (let [o (get old-map x)]
                                     (if (and o (not (touched x)))
                                       [(conj ps [x o]) r]
-                                      (let [[n r] (node db x (:sub j) (conj p x) r o touched)] [(conj ps [x n]) r]))))
+                                      (let [[n r] (node db x (:sub j) (conj p x) r o touched)] [(conj ps [x (linked db e j x n)]) r]))))
                                 [[] r] es)]
           ;; the same members, each the same object: the map as it was
           [(if (and (= (count pairs) (count old-map)) (every? (fn [[x n]] (identical? n (get old-map x))) pairs))
@@ -254,7 +280,7 @@
         (cond
           (nil? x) [nil (if (map? old) (forget r old p) r)]
           (and o (not (touched x))) [o r]
-          :else (let [r (if (and (map? old) (not o)) (forget r old p) r)] (node db x (:sub j) p r o touched)))))))
+          :else (let [r (if (and (map? old) (not o)) (forget r old p) r) [n r] (node db x (:sub j) p r o touched)] [(linked db e j x n) r]))))))
 
 (defn- same-node?
   "Does rebuilt node n hold what o held, every key's value the same object (identical?)?"
@@ -326,9 +352,10 @@
   ([ix db e branch] (build ix db e branch nil))
   ;; pattern p, given, in place of the entity's own: what a render that reads less of it pulls (a render's :seon.ctx/pattern)
   ([ix db e branch p]
-   (let [m (when e (own db e))
-         [tree r] (if (and m (< 1 (count m))) (node db e (render/pattern ix (or p (pattern-of ix m))) [] {:index ix} nil {}) [{} {:index ix}])]
-     {:tree (with-environment tree db branch) :ix r})))
+   (binding [*txs* (or *txs* (volatile! {}))]
+     (let [m (when e (own db e))
+           [tree r] (if (and m (< 1 (count m))) (node db e (render/pattern ix (or p (pattern-of ix m))) [] {:index ix} nil {}) [{} {:index ix}])]
+       {:tree (with-environment tree db branch) :ix r}))))
 
 (defn made-by
   "Who made attribute a of entity e as db holds it: the tx-meta of the transaction of its newest
@@ -397,6 +424,7 @@
                   [:=> [:cat [:map [:tree :map] [:ix :seon.ctx/ix]] :seon.host/db [:sequential :any] :any [:maybe :map]] [:map [:tree :map] [:ix :seon.ctx/ix]]]]}
   ([c db datoms branch] (patch c db datoms branch nil))
   ([c db datoms branch ix]
+  (binding [*txs* (or *txs* (volatile! {}))]
   (let [r (cond-> (:ix c)
             ix (assoc :index ix)
             (and (nil? ix) (:own-index? (:ix c)) (some #(= "schema" (namespace (:a %))) datoms)) (assoc :index (program/index-of-db db)))
@@ -434,7 +462,7 @@
                                 [(:tree c) r] sites)]
         (if (or (not (seq (dissoc tree :db/id))) (empty? (d/datoms db :eavt root)))
           (fresh)
-          {:tree (with-environment tree db branch) :ix r}))))))
+          {:tree (with-environment tree db branch) :ix r})))))))
 
 ;; the record and its index, beside the atom: the agent is one thread, and its state's watch runs
 ;; on it, so each patch follows the one before
@@ -496,12 +524,15 @@
     acc
     (let [many (get (dbi/-rschema db) :db.cardinality/many #{})
           js (:joins s)
-          skip (cond-> (into #{:db/id :seon.db/tx} (map :key) js) (empty? p) (into environment-keys))
+          ;; the keys a pattern's :tx fills (this node's own, and its join's link's: :ro) are the db's, read-only as the record's basis is
+          ro (into (set (:ro s)) (vals (:txs s)))
+          skip (cond-> (into (into #{:db/id} ro) (map :key) js) (empty? p) (into environment-keys))
           bad (fn [acc path a v] (if-let [w (why a v)] (update acc :invalid conj {:path path :why w}) acc))
           refuse (fn [acc path w] (update acc :invalid conj {:path path :why w}))
-          ;; the transaction a pulled attribute was written in ([attr :tx true]) is the db's, as the record's basis is: never written
-          acc (if (= (get old :seon.db/tx) (get new :seon.db/tx)) acc
-                (refuse acc (conj p :seon.db/tx) "the transaction an attribute was written in is the db's (the pattern's [attr :tx true]): it is read, never written"))
+          ;; a transaction the pull holds (a pattern's :tx key) is the db's, as the record's basis is: never written
+          acc (reduce (fn [acc k] (if (= (get old k) (get new k)) acc
+                                    (refuse acc (conj p k) "a transaction the pull holds is the db's (the pattern's :tx): it is read, never written")))
+                      acc ro)
           own-ks (remove skip (distinct (concat (keys old) (keys new))))
           ;; this entity's change here: each attribute that differs, each join whose members differ (by id, or the swap!'s key)
           change (as-> {} c
