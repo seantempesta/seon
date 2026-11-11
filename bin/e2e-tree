@@ -1,0 +1,56 @@
+#!/bin/zsh
+# bin/e2e-tree — the end-to-end check that the system proves a session's tree as the tree is (docs/merging.md#a-session-proves-through-root):
+# that a --root verdict is the changed code's, never main's. Run in a clean checkout; it starts a system of its own on a fresh
+# store (SEON_RUNS=target/e2e-tree) on the CLEAN tree first, then, in order:
+#   src     an existing definition changed so an in-process test goes red (seon.fx/gate-answer counts a red test a pass):
+#           bin/prove --root must answer RED for seon.fx-test/a-gates-answer-is-what-the-system-ran, as bin/test does
+#   schema  a schema resource changed so an in-process test goes red (:seon.config.proofs/seeds loses its :seon.config/unit):
+#           RED for seon.config-test/every-key-is-documented-by-its-schema, as bin/test does
+#   green   both reverted: GREEN both ways
+# One line a step, "STEP root=V test=V want=V"; it ends E2E OK when every step's two verdicts agree with each other and with
+# what the step wants, else E2E FAILED naming each step that did not. The edits are reverted and its system stopped however it
+# ends. A heavy run (a build when the binary is stale, a system, its proves): check the machine first, as every heavy run.
+# Its cases were missed once: the first e2e's probes changed only code the tree agent never runs (2026-11-11, Point 1858).
+setopt pipefail
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+cd "$ROOT"
+[[ -z $(git status --porcelain --ignore-submodules) ]] || { print "E2E FAILED: $ROOT has uncommitted changes: commit them first"; exit 1 }
+export SEON_RUNS=$ROOT/target/e2e-tree
+SRC=src/seon/fx.clj
+SRC_FROM='(cond (red t) :fail (passed t) :pass)' SRC_TO='(cond (red t) :pass (passed t) :pass)'
+SRC_TEST=seon.fx-test/a-gates-answer-is-what-the-system-ran
+SCH=resources/seon/schemas/seon.config.proofs.edn
+SCH_FROM=':seon.config.proofs/seeds [:int {:min 1 :seon.config/unit "seeds (a count)"' SCH_TO=':seon.config.proofs/seeds [:int {:min 1'
+SCH_TEST=seon.config-test/every-key-is-documented-by-its-schema
+# edit FILE FROM TO: FROM must occur exactly once, so an edit that matched nothing is the run's failure, never a silent green
+edit() { perl -e 'my ($f, $a, $b) = @ARGV; local $/; open my $h, "<", $f or die; my $t = <$h>; close $h;
+  my $n = () = $t =~ /\Q$a\E/g; $n == 1 or die "$f holds \"$a\" $n times, not once\n";
+  $t =~ s/\Q$a\E/$b/; open $h, ">", $f or die; print $h $t; close $h' "$@" }
+cleanup() { git -C "$ROOT" checkout -q -- "$SRC" "$SCH"; "$ROOT/bin/root" stop > /dev/null 2>&1 }
+trap 'cleanup' EXIT
+trap 'exit 143' TERM INT HUP
+rm -rf "$SEON_RUNS"; mkdir -p "$SEON_RUNS"
+"$ROOT/bin/root" start 2>&1 | tail -2
+PORT=$(<"$SEON_RUNS/root.port") || { print "E2E FAILED: the system did not start (its log: $SEON_RUNS/root.log)"; exit 1 }
+BAD=()
+# check STEP WANT TEST: the system's verdict for TEST and bin/test's, against WANT (green or red)
+check() {
+  local step=$1 want=$2 t=$3 log=$SEON_RUNS/$1
+  "$ROOT/bin/prove" --root "$PORT" "$t" > "$log.root.log" 2>&1
+  local r=green; grep -q '^PROVE OK' "$log.root.log" || r=red
+  grep -qE "^(RED|NO-VERDICT) " "$log.root.log" || [[ $r == green ]] || r="error($(grep '^prove: ' "$log.root.log" | tail -1 | cut -c1-120))"
+  env -u SEON_RUNS "$ROOT/bin/test" "$t" > "$log.test.log" 2>&1
+  local b=green; grep -q '^TEST OK' "$log.test.log" || b=red
+  print "$step root=$r test=$b want=$want"
+  [[ $r == $want && $b == $want ]] || BAD+=("$step (root $r, bin/test $b, want $want: $log.root.log)")
+}
+edit "$SRC" "$SRC_FROM" "$SRC_TO" || exit 1
+check src red "$SRC_TEST"
+git checkout -q -- "$SRC"
+edit "$SCH" "$SCH_FROM" "$SCH_TO" || exit 1
+check schema red "$SCH_TEST"
+git checkout -q -- "$SCH"
+check green-src green "$SRC_TEST"
+check green-schema green "$SCH_TEST"
+if (( $#BAD )); then print "E2E FAILED: ${(j:; :)BAD}"; exit 1; fi
+print "E2E OK"
