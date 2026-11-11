@@ -209,11 +209,12 @@
 (deftest a-measure-is-the-call-at-its-steady-state
   ;; task seon.cost/a-call-allocates-the-same-bytes-each-time: a call allocates more on its first calls
   ;; (seon.merge/delta-three-way: 3,776 2,752 1,536 3,584 B over its settled bytes, down to 320 by the
-  ;; 14th); the measure is the settled call's, never one the warm-up is still in
+  ;; 14th); the measure an agent asks for with more calls (a perf problem: one is the default) is the settled call's, never
+  ;; one the warm-up is still in
   (let [calls (atom 0)
         f (fn [calls] (fn [] (swap! calls inc) (count (vec (range (if (< @calls 10) 3000 100))))))
-        warming (seon.cost/measure (f calls) [])
-        steady (seon.cost/measure (f (atom 100)) [])]
+        warming (seon.cost/measure (f calls) [] 60)
+        steady (seon.cost/measure (f (atom 100)) [] 60)]
     (is (< 10 @calls) "the measure went on past the warm-up")
     (is (= (:bytes steady) (:bytes warming)) (str "the warm-up is not the cost: " warming " against " steady))))
 
@@ -222,12 +223,15 @@
   ;; the least of its calls and marks it (an error here failed by chance on a large call whose noise lowers the
   ;; least now and then: seon.cost-test/the-unit-table-is-current, once in three runs)
   (let [calls (atom 0)
-        cap (seon.config/value :seon.config.proofs/cost-max-samples)
-        m (seon.cost/measure (fn [] (swap! calls inc) (count (vec (range (- 100000 (* 100 @calls)))))) [])]
+        cap 60
+        m (seon.cost/measure (fn [] (swap! calls inc) (count (vec (range (- 100000 (* 100 @calls)))))) [] cap)]
     (is (= cap @calls) "it stopped at its cap")
     (is (= {:calls cap :lowered-at cap} (:unsettled (meta m))) "and marks the answer")
     (is (pos? (:bytes m)))
-    (is (nil? (:unsettled (meta (seon.cost/measure (fn [] (count (vec (range 100)))) [])))) "a settled call carries no mark")))
+    (is (nil? (:unsettled (meta (seon.cost/measure (fn [] (count (vec (range 100)))) [] cap)))) "a settled call carries no mark")
+    (let [calls (atom 0)]
+      (seon.cost/measure (fn [] (swap! calls inc)) [])
+      (is (= 1 @calls) "by default a measure is one call"))))
 
 (deftest a-measure-is-one-number-beside-another-thread
   ;; the same call measured ten times while another thread allocates reads one byte count

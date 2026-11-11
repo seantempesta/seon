@@ -293,7 +293,10 @@
            (reduce (fn [acc m] (merge-with min acc m)) (repeatedly 5 #(once f []))))))
 
 (defn measure
-  "f on args, measured at its steady state: calls until `:seon.config.proofs/cost-settled` calls
+  "f on args, measured by one call, or by at most cap calls (`:seon.config.proofs/cost-max-samples`, one by default: owner,
+  2026-11-11, a measure's precision comes from what accumulates as the system is exercised, and more calls only when an
+  agent working a perf problem asks for them, by this argument or that config). With more than one,
+  at its steady state: calls until `:seon.config.proofs/cost-settled` calls
   after the one that allocated the fewest bytes so far allocate no fewer; each dimension's minimum over
   all of them (bytes are the steady state's; ticks and calls their least, which noise only adds
   to), less what measuring itself costs. A call allocates more on its first calls (Jolt compiles
@@ -306,10 +309,11 @@
   then without end (a 32 MB call: the last new low at call 53 of 60), so \"no new low in a run of
   calls\" is a test that fails by chance, not a defect of the call; a call that never reaches a floor
   shows in that mark and in the spread of its bytes."
-  {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
-  [f args]
+  {:malli/schema [:function [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]
+                  [:=> [:cat :seon.host/fn [:sequential :any] pos-int?] :seon.cost/dims]]}
+  ([f args] (measure f args (config/value :seon.config.proofs/cost-max-samples)))
+  ([f args cap]
   (let [need (config/value :seon.config.proofs/cost-settled)
-        cap (config/value :seon.config.proofs/cost-max-samples)
         b @baseline
         [best n low-at] (loop [n 1 best (once f args) low-at 1]
                           (if (or (>= (- n low-at) need) (>= n cap))
@@ -317,7 +321,8 @@
                             (let [m (once f args) n (inc n)]
                               (recur n (merge-with min best m) (if (< (:bytes m) (:bytes best)) n low-at)))))
         dims (into {} (for [[d v] best] [d (max 0.0 (- v (if (= d :calls) 0.0 (get b d 0.0))))]))]
-    (cond-> dims (< (- n low-at) need) (vary-meta assoc :unsettled {:calls n :lowered-at low-at}))))
+    ;; one call is the measure asked for, not an unsettled one
+    (cond-> dims (and (< 1 cap) (< (- n low-at) need)) (vary-meta assoc :unsettled {:calls n :lowered-at low-at})))))
 
 (declare units)
 
