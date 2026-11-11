@@ -1789,6 +1789,25 @@
     (is (= [long] (titles without)) "no form: the title holds the whole")
     (is (not-any? nil? (tree-seq vector? seq with)) "and no empty child")))
 
+(defn- outside-code
+  "The text html shows outside its <code> and <pre> elements (where a backtick or a string's quote is the code's own)."
+  [html] (-> html (str/replace #"(?s)<pre[^>]*>.*?</pre>" " ") (str/replace #"(?s)<code[^>]*>.*?</code>" " ") (str/replace #"<[^>]+>" " ")))
+
+(deftest a-person-reads-no-markup
+  ;; docs/render.md#the-page: what a person reads is drawn, never the marks that describe it: no Markdown delimiter, no escaped quote of
+  ;; a printed form, no printer's tree heading, outside code (the owner, on the session pages: "we still aren't rendering html")
+  (let [db (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (seon.template/request {:seon.task/ns 'demo :seon.task/name "w"
+                                                                                              :seon.task/plan "Make w true:\n\n1. read the field `x`\n2. write **one** test"})))
+        task (h/html (ui/task-view {} (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.task/id "demo/w") nil))))
+        red (h/html (ui/status-hiccup {} {:proofs [{:test 'demo-test/w :status :fail
+                                                     :failures [{:assert {:seon.print/code "(str/includes? h \"[:code \\\"x\\\"]\")"} :got false}]}]}))
+        value (h/html (r/print-hiccup {:seon.render/index (seon.db/index)} {:a {:b [1 {:c 2}]}}))]
+    (doseq [[what html] [["a task's plan" task] ["a red proof" red] ["a value" value]]
+            :let [t (outside-code html)]]
+      (is (not (str/includes? t "`")) (str what ": no backtick outside code: " t))
+      (is (not (str/includes? t "\\\"")) (str what ": no escaped quote outside code"))
+      (is (not (str/includes? t "items, depth")) (str what ": no printer's tree heading")))))
+
 (deftest a-whole-tasks-page-holds-its-instructions
   ;; the task part drew the plan and dropped the task's own data, its instructions with it, so no
   ;; agent read how its kind is worked (reproduce first, fail! when already right, stop reading once

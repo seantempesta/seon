@@ -160,7 +160,7 @@
   ([text {:keys [inline?]}]
    (let [{:seon.ref/keys [blocks spans]} (ref/scan text)
          run (fn [a b] (if inline? (inline text a b spans) [(subs text a b)]))]
-     (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
+     (into [:div {:class "seon-md font-sans flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
            (for [{:seon.ref/keys [kind from to heading heading-level text-from text-to items ordered]} blocks
                  :let [body (subs text from to)]]
              (cond
@@ -1165,7 +1165,11 @@
         [:p [:code (str test)] " fails."]
         (markdown (proof-state :seon.status/explain status) {:inline? true})
         (for [[i {a :assert as :asserts g :got m :message}] (map-indexed vector failures)]
-          [:p {:key i} "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."])
+          ;; what it asserted and what it got, each a value of its own, never a sentence holding them
+          [:dl {:key i :class "seon-failure"}
+           [:dt "asserted"] [:dd [:pre [:code (str/join "\n" (map #(as-text %) (or as [a])))]]]
+           [:dt "got"] [:dd [:pre [:code (as-text g)]]]
+           (when m [:dd m])])
         (when (seq calls)
           [:div {:key :calls} [:p "It calls " (str/join ", " (map #(str "`" (:var %) "`") calls)) "."]
            (for [{v :var src :source} calls :when src] [:pre {:key (str v)} [:code src]])])])
