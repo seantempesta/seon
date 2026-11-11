@@ -50,7 +50,7 @@
   join's attribute, a reverse lookup's name): a cardinality-many one as a set (pull answers a vector), a ref as {:db/id};
   {:db/id e} alone when db holds none of it. An attribute the pattern asks with its transaction ([attr :tx k], s's :txs) holds under k the
   transaction its datom was written in, the transaction entity whole (`tx-entity`: :db/id, :db/txInstant, :seon.tx/branch); a cardinality-many one
-  a vector of those in link order, each with its value under :v. Read off the same datoms, so a pattern that asks none costs what it did
+  a vector of those in the order they were written (by time, a millisecond's ties by id), each with its value under :v. Read off the same datoms, so a pattern that asks none costs what it did
   (docs/ctx.md#the-pattern). One seek of e's datoms, a quarter of what the pull engine costs for the same answer."
   {:malli/schema [:function [:=> [:cat :seon.host/db pos-int?] :map] [:=> [:cat :seon.host/db pos-int? [:maybe :map]] :map]]}
   ([db e] (own db e nil))
@@ -63,7 +63,7 @@
                   (into (set (:attrs s)) (for [j (:joins s) :when (not (:rev? j))] (:attr j))))]
      (if-let [ts (not-empty (:txs s))]
        ;; the pattern asks the transaction of some attributes ([attr :tx k]): under k, the transaction entity whole
-       ;; (`tx-entity`); a many-valued attribute's a vector in link order, each its value under :v
+       ;; (`tx-entity`); a many-valued attribute's a vector in the order written (time, then id), each its value under :v
        (let [m (reduce (fn [m {:keys [a v tx]}]
                          (if (named? a)
                            (let [x (if (contains? ref a) {:db/id v} v)
@@ -73,7 +73,7 @@
                                m))
                            m))
                        {:db/id e} (d/datoms db :eavt e))]
-         (reduce (fn [m [a k]] (if (and (contains? many a) (vector? (get m k))) (update m k #(vec (sort-by :db/id %))) m)) m ts))
+         (reduce (fn [m [a k]] (if (and (contains? many a) (vector? (get m k))) (update m k #(vec (sort-by (juxt :db/txInstant :db/id) %))) m)) m ts))
        (reduce (fn [m {:keys [a v]}]
                  (if (named? a)
                    (let [x (if (contains? ref a) {:db/id v} v)]

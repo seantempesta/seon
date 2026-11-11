@@ -311,13 +311,14 @@
            {[:seon.model-call/_agent :tx :at] [:seon.model-call/n]}]
         msg (fn [id] {:seon.message/id id :seon.message/from {:seon.agent/key "user"} :seon.message/body id :seon.message/to [[:seon.agent/key k]]})
         call (fn [n] {:seon.model-call/id (str k "/" n) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n n})
-        db (reduce (fn [db tx] (:db-after (d/with db tx)))
+        ;; each transaction at its own instant, a second apart, as a production write's own clock gives it
+        db (reduce (fn [db [i tx]] (:db-after (d/with db (conj tx [:db/add :db/current-tx :db/txInstant (java.util.Date. (+ 1767225600000 (* 1000 i)))]))))
                    (ts/test-db)
-                   [[{:seon.agent/key k :seon.agent/turn 1 :seon.ctx/pattern p}] [(call 1)] [(msg "m1")] [(call 2)] [(msg "m2")] [(call 3)]])
+                   (map-indexed vector [[{:seon.agent/key k :seon.agent/turn 1 :seon.ctx/pattern p}] [(call 1)] [(msg "m1")] [(call 2)] [(msg "m2")] [(call 3)]]))
         a (aid db)
         t (:tree (ctx/build (seon.db/index) db a :b))
         msgs (vals (:seon.message/_to t)) calls (vals (:seon.model-call/_agent t))
-        first-msg (first (sort-by (comp :db/id :at) msgs))
+        first-msg (first (sort-by (comp :db/txInstant :at) msgs))
         since (:db/txInstant (:at first-msg))
         link-tx (fn [id] (:tx (first (d/datoms db :eavt (seon.db/eid db :seon.message/id id) :seon.message/to a))))]
     (is (= (link-tx "m1") (:db/id (:at first-msg))) "a member holds its link's transaction under the key its join names")
@@ -327,13 +328,12 @@
     (is (= [{:db/id a}] (mapv :v (:to-at first-msg))) "each value under :v")
     (is (= (:tx (first (d/datoms db :eavt a :seon.agent/turn))) (:db/id (:turned t))) "a single-valued attribute's, under its key")
     ;; the five forms
-    (is (= [1 "m1" 2 "m2" 3] (map #(or (:seon.message/body %) (:seon.model-call/n %)) (sort-by (comp :db/id :at) (concat msgs calls))))
-        "1. messages and model calls in one sequence, by when each reached the branch")
-    (is (= ["m2"] (map :seon.message/body (filter #(pos? (compare (:db/id (:at %)) (:db/id (:at first-msg)))) msgs))))
-    (is (every? #(not (neg? (compare (:db/txInstant (:at %)) since))) msgs) "2. the messages since an inst")
+    (is (= [1 "m1" 2 "m2" 3] (map #(or (:seon.message/body %) (:seon.model-call/n %)) (sort-by (comp :db/txInstant :at) (concat msgs calls))))
+        "1. messages and model calls in one sequence, by when each reached the branch (owner, 2026-11-11: time orders, not transaction ids)")
+    (is (= ["m2"] (map :seon.message/body (filter #(pos? (compare (:db/txInstant (:at %)) since)) msgs))) "2. the messages since an inst")
     (is (= {nil 5} (update-vals (group-by (comp :seon.tx/branch :at) (concat msgs calls)) count)) "3. by the branch that wrote each (none in a test db)")
-    (is (= {:db/id a} (:v (last (sort-by :db/id (:to-at first-msg))))) "4. a many-valued attribute's newest value")
-    (is (= [2 3] (map :seon.model-call/n (take-last 2 (sort-by (comp :db/id :at) calls)))) "5. a join's members in link order, the last n")
+    (is (= {:db/id a} (:v (last (sort-by :db/txInstant (:to-at first-msg))))) "4. a many-valued attribute's newest value")
+    (is (= [2 3] (map :seon.model-call/n (take-last 2 (sort-by (comp :db/txInstant :at) calls)))) "5. a join's members in the order they were linked, the last n")
     (let [r (d/with db [(msg "m3")])
           c (ctx/patch (ctx/build (seon.db/index) db a :b) (:db-after r) (:tx-data r) :b)
           m3 (get-in (:tree c) [:seon.message/_to (seon.db/eid (:db-after r) :seon.message/id "m3")])]
