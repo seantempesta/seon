@@ -41,6 +41,16 @@
           (is (= {:exit 0} (lib/wait-status (second answer))))))
       (finally (sock/write-line! w "go") (lib/c-close r) (lib/c-close w)))))
 
+(defn- machine-pressure
+  "The machine's memory pressure as the kernel reports it (kern.memorystatus_vm_pressure_level: 1 normal, 2 warn, 4
+  critical) and vm_stat's page counts: what a gauge reading under a full run's load is read beside (task
+  seon.lib/the-memory-gauges-proof-measures-the-block-alone). Read, never applied: memory_pressure with no option makes
+  pressure. See docs/cost.md#what-is-measured."
+  {:malli/schema [:=> [:cat] :string]}
+  []
+  (str "pressure level " (clojure.string/trim (:out (clojure.java.shell/sh "sysctl" "-n" "kern.memorystatus_vm_pressure_level")))
+       "; vm_stat:\n" (:out (clojure.java.shell/sh "vm_stat"))))
+
 (defn- fork-case
   "Fork case k's answer (seon.check/fork-cases), in a fresh process of the built binary
   (target/seon forks k): a process forks from its main carrier, where it is the one thread,
@@ -96,16 +106,6 @@
   ;; task seon.lib/a-child-ends-with-its-starter (docs/failure-points.md#physics-who-may-run-threads):
   ;; the watcher is a C thread Chez never made, so 200 forks beside it each run their child
   (is (= {{:exit 0} 200} (fork-case "forks-beside-the-watch"))))
-
-(defn- machine-pressure
-  "The machine's memory pressure as the kernel reports it (kern.memorystatus_vm_pressure_level: 1 normal, 2 warn, 4
-  critical) and vm_stat's page counts: what a gauge reading under a full run's load is read beside (task
-  seon.lib/the-memory-gauges-proof-measures-the-block-alone). Read, never applied: memory_pressure with no option makes
-  pressure. See docs/cost.md#what-is-measured."
-  {:malli/schema [:=> [:cat] :string]}
-  []
-  (str "pressure level " (clojure.string/trim (:out (clojure.java.shell/sh "sysctl" "-n" "kern.memorystatus_vm_pressure_level")))
-       "; vm_stat:\n" (:out (clojure.java.shell/sh "vm_stat"))))
 
 (deftest the-memory-gauge-reads-what-macos-charges-across-a-fork
   ;; task seon.lib/real-mb-reads-what-macos-charges: the gauge is the task's phys_footprint, what
