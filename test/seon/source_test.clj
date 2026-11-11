@@ -13,7 +13,7 @@
             [seon.merge :as pm]
             [seon.program :as program]
             [seon.source :as source]
-            [seon.program-test :as pt] [seon.stage :as stage] [seon.root :as root] [seon.doc] [seon.system] [test-runner]))
+            [seon.program-test :as pt] [seon.stage :as stage] [seon.root :as root] [seon.doc] [seon.system] [seon.agent] [test-runner]))
 
 (defn- empty-db [] (ts/test-db))
 
@@ -224,6 +224,13 @@
     (is (nil? (current tree)) "the same tree")
     (is (nil? (current (built-with "test/seon/required_whole.clj" #(str % "\n;; a test changed\n")))) "a test's change: a process loads it from main")
     (is (nil? (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form's change: the agent loads it from main")
+    ;; batch 90 (Point, 2026-11-12): the plan judged the binary current for a change root runs none of, built nothing, and each
+    ;; test's system refused every spawn, judging the same two trees over its own store, which holds another program: one answer
+    ;; for two trees, the one the plan judged over the tree's program, whatever db reads it after
+    (let [from (built-with "src/seon/agent.clj" (tweak "(defn test-plan"))]
+      (is (nil? (current from)) "judged over the tree's program: current")
+      (is (nil? (root/binary-current (pdb/empty-db false) {:inputs {:tree from}} tree))
+          "a store holding none of that program (a test's system) reads the same answer, never its own guess"))
     (let [r (current (built-with "src/seon/writer.clj" (tweak "(defn writer-proc")))]
       (is (some #{'seon.writer/writer-proc} (:reaches r)) (str "a root proc's step is root's own code: not current " (pr-str r)))
       ;; rule (a), as bin/test reads it (the plan's out/build): a process test selected, and a build only for a binary not current
@@ -433,6 +440,32 @@
     (is (not= "d0" (:digest fact)) "its digest is the landed tree's")
     (is (= ["/r" ["src"]] [(:root fact) (:dirs fact)]) "what the import read from stays")
     (is (some? (d/entity db1 [:var/name 'app.landed/f])) "and the landed file's facts are main's")))
+
+(deftest a-landing-keeps-the-system-running-only-when-nothing-calls-for-a-restart
+  ;; docs/source.md#a-landing-enters-main-as-data: after the bridge moved main's source fact to the landed tree, bin/update keeps
+  ;; the system running (my.root/landed!) when its binary is current for that tree and the inputs of the files were written;
+  ;; 7 of 11 landings on 2026-11-11 changed nothing the binary runs, and each restarted, ending every agent's work
+  (let [held {:root "/r" :dirs ["src"] :tree "t1" :commit "c1"}
+        inputs {:tree "t1m" :env "e" :code "c" :config {}}
+        why #(root/restart-for %1 %2 %3 %4)]
+    (is (nil? (why held "t1" nil inputs)) "main holds the files' tree, the binary is current for it, inputs written: keep running")
+    (is (re-find #"no landing brought it in" (why held "t2" nil inputs)) "main is not at the files' tree (no bridge ran): restart, whose boot catches up")
+    (is (re-find #"reaches seon.writer/commit-batch" (why held "t1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]} inputs))
+        "what the landing changed reaches code root runs from its binary: restart, naming it")
+    (is (re-find #"git said no" (why held "t1" {:binary "t0" :tree "t1" :error "git said no"} inputs)) "a diff git could not make is no answer of current")
+    (is (re-find #"stale at its boot" (why (assoc held :stale-binary {:binary "t0"}) "t1" nil inputs)) "a binary stale since its boot: restart")
+    (is (re-find #"no inputs" (why held "t1" nil nil)) "no inputs written for the files: restart")
+    (is (re-find #"no source fact" (why nil "t1" nil inputs)) "main never brought to a tree: restart"))
+  ;; kept, root writes its source fact again for this boot (my.root/landed!, booted-source): an agent's plan keys its tests by
+  ;; the landed files' inputs once its db holds that fact (a fork of main, or a merge of main), with no restart
+  (let [db0 (pdb/empty-db false)
+        old {:root "/r" :dirs ["src"] :tree "t1" :commit "c1" :files 1 :forms 0 :ms 1.0 :inputs {:tree "t0m" :env "e" :code "c" :config {}}}
+        db (:db-after (pdb/with db0 [{:seon.root/id :root :seon.root/boot "b1" :seon.root/source (assoc old :boot "b1")}]))
+        landed {:tree "t1m" :env "e" :code "c2" :config {}}
+        src (root/booted-source old "b1" nil "p1" {} nil landed)
+        db1 (:db-after (pdb/with db [{:seon.root/id :root :seon.root/source src}]))]
+    (is (= "t0m" (:tree (first (seon.agent/test-inputs db)))) "before: the boot's inputs")
+    (is (= "t1m" (:tree (first (seon.agent/test-inputs db1)))) "after the kept landing, the landed files' inputs, under the same boot")))
 
 (deftest a-landing-through-the-bridge-is-a-zero-diff
   ;; task seon.root/a-boot-resumes-from-the-db: a Claude session's landing enters main as data, the changed files' facts

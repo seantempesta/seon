@@ -25,6 +25,7 @@
 # root of this checkout runs (bin/root stop first); otherwise it erases this checkout's store (SEON_STORE, else
 # <SEON_RUNS>/store, and its -agents dir) and starts, so the fresh store's first boot seeds main from the tree
 # (the program, the wiki and the task files). It stops nothing and touches no other checkout's store.
+# `inputs [ARGS]` writes runs/root-inputs.edn for the files as they are now (write_inputs, below), what `start` does first.
 # bin/root run CHECKOUT PORT WEB [ARGS]   one root of CHECKOUT's build in the foreground, until
 # stdin closes (what `start` and `next` run).
 #
@@ -37,6 +38,24 @@ export SEON_RUNS=${SEON_RUNS:-$ROOT/runs}
 # a root started here builds main from this checkout's source when its store is new (and follows it
 # after): :seon.config.source/root's default; config/local.edn or --set names another tree
 export SEON_SOURCE_ROOT=${SEON_SOURCE_ROOT:-$ROOT}
+# the inputs of the files checkout G's root reads (its source root, else G), written to G's runs/root-inputs.edn by G's binary's
+# `inputs` mode, here where git runs (root runs none): what a boot hands its agents (seon.root/held-inputs), and what a landing
+# kept in place hands them again (bin/update, my.root/landed!). ARGS: the root's config arguments
+write_inputs() {
+  local G=$1; shift
+  mkdir -p "$G/runs"; rm -f "$G/runs/root-inputs.edn"
+  ( cd "$G/target" && SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
+      JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib ./seon inputs "$@" ) > "$G/runs/root-inputs.edn.new" 2>/dev/null &&
+    tail -1 "$G/runs/root-inputs.edn.new" > "$G/runs/root-inputs.edn"
+  local ok=$?
+  rm -f "$G/runs/root-inputs.edn.new"
+  return $ok
+}
+# bin/root inputs [ARGS]: write_inputs for this checkout, with its config/local.edn as `start` passes it
+if [[ ${1:-} == inputs ]]; then
+  shift; L=$ROOT/config/local.edn; [[ -f $L ]] && set -- --config "$L" "$@"
+  write_inputs "$ROOT" "$@"; exit
+fi
 if [[ ${1:-} == run ]]; then
   # the tree's own build, config and caches (bin/env, read from that tree); the ports over the
   # config's (local.edn honours these)
@@ -57,13 +76,7 @@ if [[ ${1:-} == run ]]; then
   # runs none): the boot hands them to its agents, which key test results by them (seon.root/boot-inputs). A root under a
   # starter (a test's, a check step's) is handed none and keys by its binary's record, as before
   # (runs/root-inputs.edn: the runs dir this checkout's root keeps its store and port in, which a test's root does not share)
-  if [[ -z ${SEON_STARTER_FIFO:-} ]]; then
-    rm -f "$G/runs/root-inputs.edn"
-    ( cd "$G/target" && SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
-        JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib ./seon inputs "$@" ) > "$G/runs/root-inputs.edn.new" 2>/dev/null &&
-      tail -1 "$G/runs/root-inputs.edn.new" > "$G/runs/root-inputs.edn"
-    rm -f "$G/runs/root-inputs.edn.new"
-  fi
+  if [[ -z ${SEON_STARTER_FIFO:-} ]]; then write_inputs "$G" "$@"; fi
   cd "$G/target" && SEON_CHECKOUT=${SEON_RUN_CHECKOUT:-$G} HOME=$G/target/home JOLT_LMDB_LIB=$G/target/lib/liblmdb.dylib \
     JOLT_LZ4_LIB=$G/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$G/target/lib/libzstd.dylib \
     SEON_SERVER_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"

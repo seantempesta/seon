@@ -137,13 +137,19 @@
                ;; an attach that made no agent (refused: its fork server lost) ends the test with
                ;; that answer, never a wait for a hello that cannot come
                (nil? agent) {::attach-made-no-agent attach}
-               :else (do (eval-root (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :" agent " (:agent e))) :ready (recur))))"))
-                         (f {:names names :ask ask :eval-root eval-root :root root}))))
+               ;; its hello, or its end (refused, died) first: an agent that ended answers the test with that end, never a wait
+               ;; for a hello that cannot come until the test's bound (Optimization's reading of batch 90, 2026-11-12)
+               :else (let [came (value-of (:response (eval-root (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ready :ended :dead :killed} (:type e)) (= :" agent " (:agent e))) (:type e) (recur))))"))))]
+                       (if (= :ready came)
+                         (f {:names names :ask ask :eval-root eval-root :root root})
+                         {::agent-ended-before-ready {:agent agent :end came}}))))
           (finally (vreset! stopped (end!))))]
     (when-let [a (and (map? out) (::attach-made-no-agent out))]
       (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a))
                       {:attach a})))
     (when-let [e (and (map? out) (::no-root out))] (throw (ex-info (str "with-agent: the root did not listen: " (pr-str e)) e)))
+    (when-let [e (and (map? out) (::agent-ended-before-ready out))]
+      (throw (ex-info (str "with-agent: the agent ended before its hello: " (pr-str e)) e)))
     out))
 
 (defn- root-value
@@ -2251,6 +2257,20 @@
     (is (not= (:digest ids) (get-in after [:value :ids :digest])) (str "a change to what the step reaches moves its digest: " (pr-str after)))
     (is (= #{} (:value by-ns)) (str "a run naming only a namespace runs no step: " (pr-str by-ns)))
     (is (= #{"ids"} (:value by-step)) (str "and one naming a step runs it alone: " (pr-str by-step)))))
+
+;; docs/merging.md#verdicts-are-a-cache: base and branch are digested by the same inputs, so a branch that changed nothing selects
+;; nothing as changed. Red before: the inputs design added the private checks, the index class and a process test's config
+;; to the branch's inputs only, and an unchanged agent of the standing system selected 1,765 of 1,835 tests as changed
+(deftest an-unchanged-branch-reads-no-test-as-changed
+  (let [main (mt/world)
+        plan (agent/test-plan main main #{})
+        bd (:base-digests plan)]
+    (is (seq bd) "the world holds tests")
+    ;; the cause itself: base was indexed by the same inputs the branch was (a world's tests read no config, so their digests
+    ;; alone cannot show it); seon.agent/base-graph keeps the inputs it indexed by
+    (is (= (:inputs plan) (:inputs (:base-graph @agent/state))) "base and branch digested by one set of inputs")
+    (is (= bd (select-keys (update-vals (program/index-of (:graph plan)) :digest) (keys bd))) "every test's branch digest is its base digest")
+    (is (empty? (:selected plan)) (pr-str (take 5 (:selected plan))))))
 
 ;; "if another agent has already run the same exact test we remove those" (owner, 2026-11-07)
 (deftest a-process-test-green-at-its-digest-asks-no-gate

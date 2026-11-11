@@ -367,6 +367,24 @@
        (into ["--profile" (name (config/value :seon.config.root/profile))])
        (into (when-let [t (:started-by (task/root @(:conn sys)))] ["--started-by" t])))))
 
+(defn landed!
+  "A landing kept in place (bin/update after bin/land's bridge): when nothing calls for a restart (seon.root/restart-for of main's
+  source fact, tree, the binary's answer for it and the inputs bin/update wrote), main's source fact is written again as a boot
+  writes it (seon.root/booted-source: this boot, main's program digest now, the inputs of the files now), so agents key their
+  results by the landed files and every agent keeps running. Answers {:kept boot :tree} or {:restart why}, which bin/update
+  restarts on. See docs/source.md#a-landing-enters-main-as-data."
+  {:malli/schema [:=> [:cat :seon.root/sys :string] :map]}
+  [sys tree]
+  (let [db @(:conn sys)
+        held (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root]))
+        inputs (root/held-inputs)
+        why (root/restart-for held tree (when (= tree (:tree held)) (root/stale-binary db)) inputs)]
+    (if why
+      {:restart why}
+      (let [src (root/booted-source held (:boot sys) (root/binary-program) (program/program-digest db) (fx/config-input config/config (config/checkout)) nil inputs)
+            r @(root/transact-main! sys [{:seon.root/id :root :seon.root/source src}])]
+        (if (contract/error? r) r {:kept (:boot sys) :tree tree})))))
+
 (defn build!
   "Build the next generation from main's last merges commit, for what cannot load in place
   (a Jolt, Chez or dependency pin, deps.edn, native code; a merge loads in place:
