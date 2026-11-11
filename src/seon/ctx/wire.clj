@@ -420,14 +420,28 @@
   one printer, no wrapper. The call's id is a function of the points alone, so the bytes are the same at every render; no eval entity is
   written for it. A function whose var lacks either word is :seon.ctx/unworded, never an empty message
   (docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup)."
-  {:malli/schema [:=> [:cat :string :qualified-symbol [:sequential :string] :any] [:vector :seon.model/message]]}
-  [id f args v]
-  (let [{:seon.model-call/keys [reply] :seon.eval/keys [intent]} (meta (requiring-resolve f))]
+  {:malli/schema [:function [:=> [:cat :string :qualified-symbol [:sequential :string] :any] [:vector :seon.model/message]]
+                  [:=> [:cat :string :qualified-symbol [:sequential :string] :any [:maybe :string]] [:vector :seon.model/message]]]}
+  ([id f args v] (page-message id f args v nil))
+  ([id f args v said]
+  (let [{:seon.model-call/keys [reply] :seon.eval/keys [intent]} (meta (requiring-resolve f))
+        reply (or said reply)]
     (when-not (and (string? reply) (seq reply) (string? intent) (seq intent))
       (throw (ex-info (str f " has no :seon.model-call/reply and :seon.eval/intent on its var: a call Seon writes for the model is a whole reply")
                       (contract/error :seon.ctx/unworded #'page-message (str "add both to " f "'s metadata") {:function f}))))
     [{:role "assistant" :content reply :tool-calls [{:id id :intent intent :code (str "(" (str/join " " (cons f args)) ")")}]}
-     {:role "tool" :tool-call-id id :content (print/text (vary-meta v assoc :seon.print/full true))}]))
+     {:role "tool" :tool-call-id id :content (print/text (vary-meta v assoc :seon.print/full true))}])))
+
+(defn diff-reply
+  "What a diff's reply says, a function of its edits alone: the parts that moved, each by its name in the edit's path (the
+  first name past the page and its lists, \"p-...\"), in the order they first move: \"My page changed: status, cite.\". Said
+  in a few words that differ with what moved, since a model copies its history word for word and a fixed sentence becomes
+  filler in its mouth (loop 2, call 16); what a diff is, is said once, at the first point (`my.render/page`'s reply). See
+  docs/render.md#the-render-is-an-eval."
+  {:malli/schema [:=> [:cat [:sequential :any]] :string]}
+  [edits]
+  (let [part (fn [[path]] (or (first (remove #(or (= "page" %) (and (string? %) (str/starts-with? % "p-"))) path)) "page"))]
+    (str "My page changed: " (str/join ", " (distinct (map (comp str part) edits))) ".")))
 
 (defn page-edits-between
   "The edits that take agent a's page parts at basis p0 (nil: nothing before, so the parts whole) to its parts at basis p1, on
@@ -480,9 +494,16 @@
               edits (render/page-edits ix (render/forms-moved (if q0 {"page" h0} {}) {"page" h1}))]
           (cond (empty? edits) []
                 ;; the page whole, unless it shows nothing (what moved from nothing to it is no edits: a pull holding no page)
-                q0 (page-message id 'my.render/diff [q0 q1] edits)
+                q0 (page-message id 'my.render/diff [q0 q1] edits (diff-reply edits))
                 ;; the first point: the record whole as data (Sean, 2026-11-11: "the @ctx and the hiccup displayed in full"), then the page
-                :else (into (page-message (lib/id (lib/digest (str "ctx " q1))) 'my.render/ctx [q1] (ctx-at db a p1))
+                :else (into (page-message (lib/id (lib/digest (str "ctx " q1))) 'my.agent/describe ["@ctx"]
+                                          ;; the record described, never printed whole (owner, 2026-11-11: "Instead of dumping the whole @ctx value we are
+                                          ;; now doing this more metadata approach"): what (describe @ctx) answers at this point
+                                          (let [d0 (db-at db p1) ix0 (program/index-of-db d0)
+                                                es (with-meta (render/describe ix0 (ctx-at db a p1) [] (cfg/value :seon.config.agent/describe-depth))
+                                                     {:seon.render/schema :my.agent/described})]
+                                            ;; printed as an eval of it prints, through its schema's model render (seon.render/model)
+                                            (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es)))
                             (page-message id 'my.render/page [q1] h1))))))
 
 (defn model-call-msgs
