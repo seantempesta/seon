@@ -157,61 +157,114 @@
                         (str "with an earlier member of the octopus merge, " said ": merge main into the branch first") {:tx (:max-tx main) :behind (count ds)})
         (contract/error :seon.merge/dangling #'seon.writer/dangling-refused said {:tx (:max-tx main) :dangling (vec ds)})))))
 
+(defn- plan-refused
+  "The refusal of a merge whose plan (seon.merge/plan) writes nothing: the two sides' net changes conflict (:conflicts), or
+  the branch changed an entity that bears no identity (:unidentified); nil when the plan is groups to write. See
+  docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  {:malli/schema [:=> [:cat :seon.host/db :map] [:maybe :seon.merge/refused]]}
+  [main p]
+  (cond (seq (:conflicts p))
+        (contract/error :seon.merge/refused #'seon.writer/plan-refused
+                        (str "main and the branch changed " (count (:conflicts p)) " key(s) to different ends since their base: "
+                             (str/join "; " (map (comp sedn/encode :key) (:conflicts p))))
+                        {:tx (:max-tx main) :conflicts (:conflicts p)})
+        (seq (:unidentified p))
+        (contract/error :seon.merge/refused #'seon.writer/plan-refused
+                        (str "the branch changed " (count (:unidentified p)) " entit(ies) that bear no identity, which cannot cross: attributes "
+                             (str/join "; " (map (comp sedn/encode sort) (:unidentified p))))
+                        {:tx (:max-tx main) :unidentified (:unidentified p)})))
+
+(defn- applied!
+  "Branch b's plan's groups applied on main's connection after what is pending (datahike.writer/apply!, through the write
+  check), each its own transaction, not committed: its tx-meta main's with the source transaction's own :seon.tx/branch,
+  :seon.tx/eval and :seon.tx/merged (who made it; never its runtime or its time). Answers {:db the value after them (db
+  when there are none) :reps their reports}, or {:refused why} for the first one the write check refuses. See
+  docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :seon.host/db [:sequential :map]] [:or [:map [:db :seon.host/db] [:reps [:vector :map]]] [:map [:refused :seon.merge/refused]]]]}
+  [conn main db groups]
+  (let [meta0 (pdb/tx-meta (pdb/conn-main conn))]
+    (reduce (fn [acc g]
+              (let [rep (dw/apply! conn {:tx-data (:ops g) :tx-meta (merge meta0 (select-keys (:meta g) [:seon.tx/branch :seon.tx/eval :seon.tx/merged]))})]
+                (if (map? rep)
+                  {:db (:db-after rep) :reps (conj (:reps acc) rep)}
+                  (let [err (or (when (:seon.error/type (ex-data rep)) (ex-data rep)) (refused (step/error-msg rep) (or (ex-data rep) {})))]
+                    (reduced {:refused (contract/error :seon.merge/refused #'seon.writer/applied!
+                                                       (str "main's write check refuses the branch's transaction " (:tx g) ": " (:seon.error/message err))
+                                                       {:tx (:max-tx main) :refused {:tx (:tx g) :error err}})})))))
+            {:db db :reps []} groups)))
+
 (defn- judged-members
   "Each of branches judged as a member of an octopus merge into main, in order, against what it merges into (main with the earlier
-  members taken): refused when it cannot merge now (merge-refused) or its merge leaves a name unbound (dangling-refused), behind
-  when its changes meet an earlier member's (it merges main first). Answers [{:branch :r :head :base :refused}]."
-  {:malli/schema [:=> [:cat :seon.writer/state [:vector :seon.db/branch] :seon.merge/data-attrs] [:vector :map]]}
+  members taken): refused when it cannot merge now (merge-refused) or its plan writes nothing (plan-refused: a conflict of the two
+  sides' net changes, or an entity with no identity), behind when its program changes meet an earlier member's (it merges main
+  first). A member not refused is applied on main's connection, not committed (applied!), so the next is judged against main
+  with it. One refused after its transactions were applied (main's write check refuses one, or its merge leaves a name unbound:
+  dangling-refused) abandons every applied transaction (datahike.writer/abandon-pending!) and is the answer {:retry b :refused
+  why}: the merge is judged again without it. Else answers {:members [{:branch :r :head :base :reps :refused}]}."
+  {:malli/schema [:=> [:cat :seon.writer/state [:vector :seon.db/branch] :seon.merge/data-attrs] [:or [:map [:members [:vector :map]]] [:map [:retry :seon.db/branch] [:refused :map]]]]}
   [st branches data-attrs]
   (let [conn (:conn st)
         main @conn]
-    (:members
-     (reduce (fn [{:keys [taken db] :as acc} b]
-               (let [have? (pdb/branch? conn b)
-                     [head r base] (when have? (branch-merge st b data-attrs))
-                     why-not (if have? (merge-refused main head r) (refused (str "no branch " b) {}))
-                     why-not (or why-not
-                                 (when (some taken (keys (:ours r)))
-                                   (contract/error :seon.merge/behind #'seon.writer/judged-members
-                                                   "another member of the octopus merge changes the same definitions: merge main into the branch first"
-                                                   {:tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))
-                     db' (when-not why-not (pdb/speculate-db db (pm/merge-tx main base head (keys (:ours r)) data-attrs)))
-                     why-not (or why-not (dangling-refused main db' (boolean (seq taken))))]
-                 (-> acc (update :members conj {:branch b :r r :head head :base base :refused why-not})
-                     (cond-> (nil? why-not) (-> (update :taken into (keys (:ours r))) (assoc :db db'))))))
-             {:taken #{} :db main :members []} branches))))
+    (reduce (fn [{:keys [taken db] :as acc} b]
+              (let [have? (pdb/branch? conn b)
+                    [head r base] (when have? (branch-merge st b data-attrs))
+                    why-not (if have? (merge-refused main head r) (refused (str "no branch " b) {}))
+                    why-not (or why-not
+                                (when (some taken (keys (:ours r)))
+                                  (contract/error :seon.merge/behind #'seon.writer/judged-members
+                                                  "another member of the octopus merge changes the same definitions: merge main into the branch first"
+                                                  {:tx (:max-tx main) :behind (count (filter taken (keys (:ours r))))})))
+                    p (when-not why-not (pm/plan base db head))
+                    why-not (or why-not (plan-refused main p))
+                    a (when-not why-not (applied! conn main db (:groups p)))
+                    applied-why (when a (or (:refused a) (dangling-refused main (:db a) (boolean (seq taken)))))]
+                (if applied-why
+                  (do (dw/abandon-pending! conn) (reduced {:retry b :refused applied-why}))
+                  (-> acc (update :members conj {:branch b :r r :head head :base base :reps (:reps a []) :refused why-not})
+                      (cond-> (nil? why-not) (-> (update :taken into (keys (:ours r))) (assoc :db (:db a))))))))
+            {:taken #{} :db main :members []} branches)))
 
 (defn- octopus-merge
   "Merge branches into main in ONE commit (an octopus merge, session R3, as git's, every
   member a parent): each member that holds main's program head and is not refused merges, in
   order; a member whose changes meet an earlier member's is behind (it merges main first).
-  Members are judged against the same main, so the commit is each one's clean merge.
-  Answers [st {:results [answer per branch, in order]}]."
+  What a member writes is its plan (seon.merge/plan): its transactions since its base, each
+  a transaction of main (applied!), then one of main's content mark with the members' heads
+  as its merge parents, all in one commit or none. A member refused after its transactions
+  were applied (judged-members) is answered so, and the others merge without it.
+  Answers [st {:results [answer per branch, in order]}]. See docs/decisions.md, 'A merge
+  replays the source's transactions on the branch that receives it'."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile [:vector :seon.db/branch] :seon.merge/data-attrs] [:tuple :seon.writer/state :map]]}
   [st o branches data-attrs]
   (let [conn (:conn st)
         main @conn
-        judged {:members (judged-members st branches data-attrs)}
-        ok (remove :refused (:members judged))
-        changed (into {} (for [{:keys [r]} ok [k [_ ov]] (:ours r)] [k ov]))]
-    (if (empty? changed)
+        judged (judged-members st branches data-attrs)
+        ok (remove :refused (:members judged))]
+    (cond
+      ;; nothing was committed: the others merge without the refused member, its refusal in its place
+      (:retry judged)
+      (let [i (first (keep-indexed #(when (= (:retry judged) %2) %1) branches))
+            [st r] (octopus-merge st o (into (subvec branches 0 i) (subvec branches (inc i))) data-attrs)]
+        [st (update r :results #(-> (subvec % 0 i) (conj (:refused judged)) (into (subvec % i))))])
+      (not-any? (comp seq :reps) ok)
       [st {:results (mapv #(or (:refused %) {:merged? true :tx (:max-tx main) :datoms 0 :keys 0}) (:members judged))}]
-      ;; git: each member's head becomes a parent, so its merge base moves to it; each
-      ;; member's own datoms for the keys it changed, as they are (seon.merge/merge-tx)
-      ;; each member's parent is the commit its merge was computed from, not its head when this commits
-      (let [rep (d/merge-db conn (set (map (comp d/commit-id :head) ok))
-                            ;; a merge moves main's content: its mark in the same commit (docs/storage.md#mains-content-mark)
-                            (into (vec (mapcat (fn [{:keys [r head base]}] (pm/merge-tx main base head (keys (:ours r)) data-attrs)) ok)) (mark-tx main))
-                            (pdb/tx-meta (pdb/conn-main conn)))
-            t (:max-tx (:db-after rep))
-            ops (pdb/report->tx rep)
+      :else
+      ;; git: each member's head becomes a parent, so its merge base moves to it; each member's parent is the commit its
+      ;; merge was computed from, not its head when this commits. A merge moves main's content: its mark in the last
+      ;; transaction (docs/storage.md#mains-content-mark)
+      (let [mark (dw/apply! conn {:parents (set (map (comp d/commit-id :head) ok)) :tx-data (mark-tx main) :tx-meta (pdb/tx-meta (pdb/conn-main conn))} {:op 'merge!})
+            _ (when-not (map? mark) (dw/abandon-pending! conn) (throw mark))
+            c (try (dw/commit-pending! conn) (finally (when (dw/pending? conn) (dw/abandon-pending! conn))))
+            db (:db c)
+            t (:max-tx db)
+            ops (into (vec (mapcat pdb/report->tx (mapcat :reps ok))) (pdb/report->tx mark))
             _ (stored! st o ops)]
-        [(main-commit st o (:max-tx (:db-before rep)) t ops (:db-after rep))
+        [(main-commit st o (:max-tx main) t ops db)
          {:tx t :datoms (count ops)
           ;; :files, the source files (namespaces' and schema resources') its changes touch: what a write-back rewrites;
           ;; :unfiled, the changed forms of namespaces with no file, which no write-back can write
           :results (mapv #(or (:refused %) (merge {:merged? true :tx t :keys (count (:ours (:r %)))}
-                                                  (written (:db-after rep) (:ours (:r %)))))
+                                                  (written db (:ours (:r %)))))
                          (:members judged))}]))))
 
 (defn- answer

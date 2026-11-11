@@ -9,7 +9,7 @@
   findings, red on the code as it is: each is the smallest reproduction of one assumption that does not hold. See
   docs/storage.md#merges-read-what-changed and docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   (:require [clojure.test :refer [deftest is testing]] [clojure.set :as set]
-            [datahike.api :as d] [seon.db :as pdb] [seon.merge :as pm] [seon.program :as program]
+            [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.program :as program]
             [seon.test-store :as ts] [seon.proofs :as proofs] [seon.config :as config]))
 
 ;; ---- the world's writes --------------------------------------------------------------
@@ -138,6 +138,27 @@
           :else (let [tx (pm/merge-tx main base head (keys (:ours r)) :all)]
                   {:r r :base base :head head :tx tx
                    :rep (d/merge-db conn #{(d/commit-id head)} tx (pdb/tx-meta (:branch (:config main))))}))))
+
+(defn- replay-up!
+  "The branch br merged into main on conn as the writer's merge op now makes it (seon.writer/octopus-merge, task
+  seon.merge/a-merge-replays-the-sources-net-change): planned from the three values (seon.merge/plan), then each group
+  as its own transaction through the connection's checked transact (datahike.writer/apply!), the last with the branch's
+  head as a merge parent, committed once; on a conflict or an entity with no identity nothing is written, and a group
+  the write check refuses abandons them all. Answers the plan, with :refused {:tx :error} when the write was refused."
+  [conn br]
+  (let [main @conn head (pdb/head conn br) base (pdb/branch-base conn (:branch (:config main)) br)
+        p (pm/plan base main head)
+        meta0 (pdb/tx-meta (:branch (:config main)))]
+    (if-not (seq (:groups p))
+      p
+      (let [refused (some (fn [g] (let [r (dw/apply! conn {:tx-data (:ops g) :tx-meta (merge meta0 (select-keys (:meta g) [:seon.tx/branch :seon.tx/eval]))})]
+                                    (when-not (map? r) {:tx (:tx g) :error (or (ex-data r) (ex-message r))})))
+                          (:groups p))
+            refused (or refused (let [r (dw/apply! conn {:parents #{(d/commit-id head)} :tx-data [] :tx-meta meta0} {:op 'merge!})]
+                                  (when-not (map? r) {:tx -1 :error (ex-message r)})))]
+        (if refused
+          (do (dw/abandon-pending! conn) (assoc p :refused refused))
+          (do (dw/commit-pending! conn) p))))))
 
 ;; ---- what a merge must hold ------------------------------------------------------------
 
@@ -510,3 +531,67 @@
   (sides-db (fn [c t _] (d/transact c [[:db/add t :task/plan "main's plan"]]))
             (fn [_ _ _] nil)
             (fn [base main branch] (is (= {:groups []} (pm/plan base main branch))))))
+
+;; ---- the merge up as the writer's op makes it: the plan, then the source's transactions (task seon.merge/a-merge-replays-the-sources-net-change) ----
+
+;; a-data-conflict-holds-the-merge-up-broken, by the plan: both sides changed one task's plan to two ends, so nothing is written
+(deftest a-data-conflict-holds-the-merge-up
+  (branched
+   (fn [conn bc br]
+     (let [t (pdb/eid @conn :task/name :gen/t)]
+       (d/transact conn [[:db/add t :task/plan "main's plan"]])
+       (d/transact bc [[:db/add t :task/plan "the branch's plan"]])
+       (let [t0 (:max-tx @conn) r (replay-up! conn br)]
+         (is (= [[:task/name :gen/t :task/plan]] (mapv :key (:conflicts r))) "the plan names the conflict by the task's identity")
+         (is (= "main's plan" (v-of @conn t :task/plan)) "main keeps its value until the conflict is resolved")
+         (is (= t0 (:max-tx @conn)) "and nothing is written"))))))
+
+;; a-retraction-against-a-change-is-a-conflict-broken, by the plan, on an entity with an identity (a note has none: its change is
+;; named as :unidentified and never carried, an-entity-with-no-identity-is-named-not-carried): main retracted a task whole, the
+;; branch changed its plan
+(deftest a-retraction-against-a-change-is-a-conflict
+  (branched
+   (fn [conn bc br]
+     (let [t (pdb/eid @conn :task/name :gen/t)]
+       (d/transact conn [[:db/retractEntity t]])
+       (d/transact bc [[:db/add t :task/plan "changed on the branch"]])
+       (let [r (replay-up! conn br)]
+         (is (= [{:key [:task/name :gen/t :task/plan] :theirs "changed on the branch" :ours :seon.merge/gone}] (:conflicts r))
+             "the plan names the retraction against the change")
+         (is (empty? (d/datoms @conn :eavt t)) "main keeps the task retracted until the conflict is resolved")))))
+  ;; the same on a note: named, never written
+  (branched
+   (fn [conn bc br]
+     (let [n (first (notes-of @conn :base))]
+       (d/transact conn [[:db/retractEntity n]])
+       (d/transact bc [[:db/add n :note/text "changed on the branch"]])
+       (let [t1 (:max-tx @conn) r (replay-up! conn br)]
+         (is (seq (:unidentified r)) "a note bears no identity: its change is named")
+         (is (and (= t1 (:max-tx @conn)) (empty? (d/datoms @conn :eavt n))) "and main keeps the note retracted, nothing written"))))))
+
+;; two-entities-claiming-one-identity-are-a-conflict-broken, by the plan: each side made one task name with one value, each a
+;; counter id of its own. The net changes meet with one end (no conflict by key), and the branch's transaction, replayed on
+;; main, claims the identity main's entity holds: the write check refuses it, the merge answers that as data, and nothing is written
+(deftest two-entities-claiming-one-identity-are-a-conflict
+  (branched
+   (fn [conn bc br]
+     (doseq [c [conn bc]] (d/transact c [{:task/name :gen/same :task/plan "p" :task/status :held}]))
+     (let [e-main (pdb/eid @conn :task/name :gen/same) t0 (:max-tx @conn)
+           r (error-of #(replay-up! conn br))]
+       (is (nil? r) "the merge answers, never throws")
+       (let [r (replay-up! conn br)]
+         (is (or (seq (:conflicts r)) (:refused r)) "a conflict, or the branch's transaction refused by main's write check")
+         (is (= t0 (:max-tx @conn)) "and nothing is written")
+         (is (= [e-main] (mapv :e (d/datoms @conn :avet :task/name :gen/same))) "main's one entity holds the name"))))))
+
+;; a-branchs-write-to-an-entity-main-retracted-is-kept-or-a-conflict-broken, merged up by the plan: main retracted a task whole,
+;; the branch gave it a ref
+(deftest a-branchs-write-to-an-entity-main-retracted-is-kept-or-a-conflict
+  (branched
+   (fn [conn bc br]
+     (let [t (pdb/eid @conn :task/name :gen/t) v (first (es @conn :var/form)) t0 (do (d/transact conn [[:db/retractEntity t]]) (:max-tx @conn))]
+       (d/transact bc [[:db/add t :task/refs v]])
+       (let [r (replay-up! conn br)]
+         (is (= [[[:task/name :gen/t :task/refs] true :seon.merge/gone]] (mapv (juxt #(subvec (:key %) 0 3) :theirs :ours) (:conflicts r)))
+             "the branch's ref to a task main retracted is the conflict")
+         (is (and (= t0 (:max-tx @conn)) (empty? (d/datoms @conn :eavt t))) "and nothing is written: main keeps the task retracted"))))))
