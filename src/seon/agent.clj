@@ -1589,18 +1589,19 @@
   {step {:digest :binary? :bound}}, the bin/check steps with no green at their digest as bin/prove plans them
   (seon.proofs/plan-of over this branch's reach graph and inputs, every step that reaches a process kept, the generative
   check's keys left to the shards), :bound the step-end factor times the step's median measured ms floored at the stall
-  bound (none unmeasured), :binary? seon.proofs/step-needs-binary?; :missing, the steps with no digest here (one naming a
+  bound (none unmeasured), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
+  steps it names among them (bin/prove --root PORT seon.config-test config), as the plain bin/prove NS runs none; :missing, the steps with no digest here (one naming a
   function the program lacks; health, keyed by a base tree no branch holds); :build {:tree :needed?}, needed when a process
   test or a binary step is among them; :deferred, what it left that is no process item. Or {:unread error}: the cache
   could not be read."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [sel]
+  {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]]] :map]}
+  [sel names]
   (let [plan (:plan sel)
         unread (volatile! nil)
         p (proofs/plan-of {:graph (:graph plan) :inputs (:inputs plan)} "checks" :merge nil nil
                           (fn [cand] (let [r (fx/stored-results cand)] (if (contract/error? r) (do (vreset! unread r) {}) r))))
         process (into {} (for [t (:deferred sel) :let [d (get-in sel [:digests t])] :when (and d (contains? (:process plan) t))] [t d]))
-        run (vec (remove proofs/mg-key? (:run-steps p)))
+        run (vec (cond->> (remove proofs/mg-key? (:run-steps p)) (seq names) (filter #(contains? names (symbol %)))))
         ms (if (seq run) (fx/typical-ms run) {})
         k (cfg/value :seon.config.check/step-end-factor) floor (cfg/value :seon.config.agent/stall-ms)
         steps (into {} (for [s run] [s (cond-> {:digest (get (:steps p) s) :binary? (proofs/step-needs-binary? s) :bound nil}
@@ -1632,7 +1633,7 @@
                    mode (or (:mode m) :judge)
                    sel (run-plan proofs mode (some-> (:names m) set))
                    ;; a run on a checkout (:process?): its process tests, check steps and build are items of the service's too
-                   pp (when (and (:process? m) (not (:unread sel))) (process-plan sel))
+                   pp (when (and (:process? m) (not (:unread sel))) (process-plan sel (some-> (:names m) set)))
                    sel (cond-> sel pp (assoc :deferred (:deferred pp)))
                    ;; the plan's own facts on this branch, once a run: what it reuses and what it defers to the gate, at their
                    ;; digests (each item's run records what it ran); main's run is main's prove's to write

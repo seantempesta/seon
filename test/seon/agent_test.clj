@@ -2147,14 +2147,19 @@
         _ '[seon.agent/handle! seon.agent/process-plan seon.agent/test-plan seon.proofs/plan-of]
         plan (str "(let [r (:result (first (seon.agent/handle! {:op :tests :id :x :plan? true :process? true :mode :judge})))]"
                   " {:process (:process r) :deferred (:deferred r) :ids (get-in r [:steps \"ids\"]) :build (:build r)})")
-        [_ before _ after] (in-agent (fn [_] [(process-proof "a-process-item-of-the-plan" 2) plan
-                                              "(do (in-ns 'seon.check) (clojure.core/defn ids [] :changed) (in-ns 'user) :ok)" plan]))
+        ;; a run naming tests or a step runs the steps it names and no other
+        named (fn [names] (str "(set (keys (:steps (:result (first (seon.agent/handle! {:op :tests :id :x :plan? true :process? true :mode :judge :names '" names "}))))))"))
+        [_ before _ after by-ns by-step] (in-agent (fn [_] [(process-proof "a-process-item-of-the-plan" 2) plan
+                                                             "(do (in-ns 'seon.check) (clojure.core/defn ids [] :changed) (in-ns 'user) :ok)" plan
+                                                             (named "#{seon.repl-test}") (named "#{seon.repl-test ids}")]))
         {:keys [process deferred ids build]} (:value before)]
     (is (string? (get process t)) (str "the process test the branch wrote is an item, at its digest: " (pr-str before)))
     (is (not-any? #{t} deferred) "and is no longer left to the gate")
     (is (and (string? (:digest ids)) (true? (:binary? ids))) (str "a check step with no green at its digest is an item, on the binary: " (pr-str ids)))
     (is (true? (:needed? build)) "so the tree's build is needed")
-    (is (not= (:digest ids) (get-in after [:value :ids :digest])) (str "a change to what the step reaches moves its digest: " (pr-str after)))))
+    (is (not= (:digest ids) (get-in after [:value :ids :digest])) (str "a change to what the step reaches moves its digest: " (pr-str after)))
+    (is (= #{} (:value by-ns)) (str "a run naming only a namespace runs no step: " (pr-str by-ns)))
+    (is (= #{"ids"} (:value by-step)) (str "and one naming a step runs it alone: " (pr-str by-step)))))
 
 ;; "if another agent has already run the same exact test we remove those" (owner, 2026-11-07)
 (deftest a-process-test-green-at-its-digest-asks-no-gate
