@@ -448,7 +448,7 @@
   retracts when they did not: otherwise an earlier end's error or deferred results read as this one's. Beside
   :seon.task/reasons, which a start keeps (the same verdict twice holds, seon.reconcile/judgment) and a person's
   continue retracts (my.root/run!). See docs/reconcile.md#a-task-holds-how-its-work-ended."
-  [:seon.task/reason :seon.task/commit :seon.task/commit-error :seon.task/merged-t :seon.task/error :seon.task/deferred
+  [:seon.task/reason :seon.task/commit :seon.task/merged-t :seon.task/error :seon.task/deferred
    :seon.task/deferred-results :seon.task/gate-unread :seon.task/changed :seon.task/conflicts :seon.task/unmerged
    :seon.task/task-conflicts :seon.task/failures :seon.task/costs :seon.task/waste])
 
