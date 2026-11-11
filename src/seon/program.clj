@@ -966,11 +966,11 @@
   [db s interns]
   (or (get interns (symbol (name s))) (find-var s)))
 
-(def ^:private built
-  "What this process's binary was built from, as bin/build recorded it beside the binary (target/seon.program,
+(defonce ^{:private true :doc "What this process's binary was built from, as bin/build recorded it beside the binary (target/seon.program,
   seon.root/built-program's answer), or nil when it recorded none: read once, by its first reader (root's boot, before it
-  forks the fork server, whose agents inherit it), so a build that moves the record later never changes what a running
-  binary says it holds. See docs/source.md#the-binary-records-its-program."
+  forks the fork server, whose agents inherit it), and kept across a reload of this namespace, so a build that moves the
+  record later never changes what a running binary says it holds. See docs/source.md#the-binary-records-its-program."}
+  built
   (delay (let [f (java.io.File. (str (cfg/checkout) "/target/seon.program"))]
            (when (.isFile f) (sedn/decode (slurp f))))))
 
