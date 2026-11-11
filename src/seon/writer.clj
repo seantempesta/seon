@@ -305,6 +305,11 @@
                                          (let [bc (pdb/connect (assoc (:cfg st) :branch (:branch m)))]
                                            (try (d/transact bc (vec (:tx m))) (finally (d/release bc)))))
                                        {:ok true :exists false})))
+      ;; a tree's branch dropped once no proof of it runs (seon.root/prove-tree!; the owner's ruling, 2026-11-11): only a tree-<id>
+      ;; branch, never another; one already gone answers so
+      :drop-tree-branch (reply st (cond (not (str/starts-with? (name (:branch m)) "tree-")) (refused (str "not a tree's branch: " (:branch m)) {})
+                                        (exists? (:branch m)) (do (d/delete-branch! conn (:branch m)) {:ok true :dropped true})
+                                        :else {:ok true :dropped false}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
                         (reply st {:ok true :t (:max-tx (pdb/head conn (:branch m))) :cfg (:cfg st)}))
       :octopus-merge (let [[st r] (octopus-merge st o (vec (:branches m)) (:data-attrs m #{}))] (reply st r))

@@ -612,4 +612,8 @@
         two (ask)]
     (is (clojure.string/starts-with? (str (:key one)) (str "tree-" tree "@")) (pr-str one))
     (is (= (:key one) (:key two)) "a second ask of one tree is the same run, on the same branch")
-    (is (pos? (+ (or (:pass one) 0) (or (:reused one) 0))) (pr-str one))))
+    (is (pos? (+ (or (:pass one) 0) (or (:reused one) 0))) (pr-str one))
+    ;; the owner, 2026-11-11 ("Yes, drop them"): no run of it in flight, the tree's branch is dropped, its agent ended
+    (is (= [] (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
+                                                   :code (str "(filterv #(clojure.string/ends-with? (name %) " (pr-str (str "tree-" tree)) ") (datahike.api/branches (:conn sys)))")}))))
+        "the tree's branch is gone once its runs answered")))

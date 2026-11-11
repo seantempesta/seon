@@ -1913,8 +1913,42 @@
   [sys req] (call! sys {:op :write :req req}))
 
 (defonce ^:private tree-runs
-  ;; tree branch -> runs of it in flight here (prove-tree!): its agent ends when the last answers
+  ;; tree branch -> {:n runs of it in flight here} or {:dropping promise} while its last run's end drops it (prove-tree!)
   (atom {}))
+
+(defn- tree-enter!
+  "Count one more run of tree branch b in flight; while b is being dropped (its last run ended), wait for the drop first: a run
+  never finds a branch that is going. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :keyword] :nil]}
+  [b]
+  (loop []
+    (let [cur @tree-runs e (get cur b)]
+      (cond (:dropping e) (do @(:dropping e) (recur))
+            (compare-and-set! tree-runs cur (assoc cur b {:n (inc (:n e 0))})) nil
+            :else (recur)))))
+
+(defn- tree-leave!
+  "One run of tree branch b ended: the last one marks b dropping, ends its agent ag (its end awaited on root's events, tapped
+  before the kill) and drops the branch (the writer's :drop-tree-branch: the owner's ruling, the system drops a tree's branch once
+  no proof of it runs), then lets a waiting run in. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :seon.root/sys :keyword [:maybe :seon.agent/id]] :nil]}
+  [sys b ag]
+  (loop []
+    (let [cur @tree-runs e (get cur b)]
+      (if (> (:n e 0) 1)
+        (if (compare-and-set! tree-runs cur (assoc cur b {:n (dec (:n e))})) nil (recur))
+        (let [p (promise)]
+          (if (compare-and-set! tree-runs cur (assoc cur b {:dropping p}))
+            (do (when (and ag (not (gone-statuses (get-in (state sys) [:agents ag :status]))))
+                  (let [ev (events sys)]
+                    (kill! sys ag)
+                    (loop [] (let [x (a/<!! ev)] (when (and x (not (and (#{:ended :dead :killed} (:type x)) (= ag (:agent x))))) (recur))))
+                    (a/untap (:events-mult sys) ev)))
+                @(write! sys {:op :drop-tree-branch :branch b})
+                (swap! tree-runs dissoc b)
+                (deliver p true)
+                nil)
+            (recur)))))))
 
 (defn tree-branch
   "The branch a checkout's files are proved on, by the checkout's tree id (seon.fx/tree-id): every session on one tree shares it,
@@ -1927,7 +1961,8 @@
   their branch (tree-branch), made once from main with the checkout's catch-up written on it (catch-up :fact? false, as the writer's
   one :branch-for-tree op), its live agent or one forked onto it, and prove! of names in mode (default :judge). The run's answer,
   or a typed error: no tree on main to diff from, the catch-up's read failing, or a file it left out (:seon.root/catch-up-skipped,
-  each named: a judgement of part of the files would be wrong). The branch's agent ends once no run of it is in flight here.
+  each named: a judgement of part of the files would be wrong). Once no run of it is in flight here, its agent ends and the branch
+  is dropped (tree-leave!); a run that comes meanwhile waits for the drop and makes the branch again.
   See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :seon.root/sys [:map [:checkout :string] [:tree :string]]] :map]}
   [sys {:keys [checkout tree names mode]}]
@@ -1941,22 +1976,20 @@
                                               (str/join "; " (map #(str (:path %) ": " (:reason %)) (:skipped c))))
                                          {:skipped (:skipped c)})
       :else
-      (let [w @(write! sys {:op :branch-for-tree :branch b :tx (:tx c)})]
-        (if (contract/error? w)
-          w
-          (let [full (pdb/on-main (pdb/conn-main (:conn sys)) b)
-                live (fn [] (some (fn [[aid a]] (when (and (= full (:branch a)) (not (gone-statuses (:status a)))) aid)) (:agents (state sys))))
-                ;; the spawn's answer: the new agent, or, for an asker who came second, the refusal naming the live holder
-                s (when-not (live) @(request! sys 'spawn! nil {:branch b}))
-                ag (or (live) (:id s) (:agent s))]
-            (if-not ag
-              s
-              (do (swap! tree-runs update b (fnil inc 0))
-                  (let [r @(prove! sys ag (set (map symbol names)) (or mode :judge))]
-                    (when (zero? (b (swap! tree-runs update b dec)))
-                      (swap! tree-runs dissoc b)
-                      (kill! sys ag))
-                    r)))))))))
+      (do
+        ;; counted before the branch is made or found: a last run's drop never takes it from under this one
+        (tree-enter! b)
+        (let [w @(write! sys {:op :branch-for-tree :branch b :tx (:tx c)})
+              full (pdb/on-main (pdb/conn-main (:conn sys)) b)
+              live (fn [] (some (fn [[aid a]] (when (and (= full (:branch a)) (not (gone-statuses (:status a)))) aid)) (:agents (state sys))))
+              ;; the spawn's answer: the new agent, or, for an asker who came second, the refusal naming the live holder
+              s (when-not (or (contract/error? w) (live)) @(request! sys 'spawn! nil {:branch b}))
+              ag (when-not (contract/error? w) (or (live) (:id s) (:agent s)))
+              r (cond (contract/error? w) w
+                      (nil? ag) s
+                      :else @(prove! sys ag (set (map symbol names)) (or mode :judge)))]
+          (tree-leave! sys b ag)
+          r)))))
 
 (defn store-clean!
   "A promise of the writer's answer once its store is clean ({:ok :commits :flushes}): every
