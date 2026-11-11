@@ -763,6 +763,8 @@
            settled? (fn [db] (#'seon.server/done-settled? db "demo/g" (constantly nil)))]
        (is (not (settled? (at :running))) "still working: wait")
        (is (not (settled? (at :ready))) "judged green, its merge next: wait (minutes)")
-       (is (settled? (at :gate)) "its gate running: answer now, the verdict comes to the page")
+       (is (not (settled? (at :gate))) "a gate with no process test to run is its merge (minutes): wait, as at :ready")
+       (d/transact conn [{:seon.task/id "demo/g" :seon.task/deferred #{'demo-test/p}}])
+       (is (settled? (at :gate)) "its gate running process tests: answer now, the verdict comes to the page")
        (is (settled? (at :merged)))
        (is (#'seon.server/done-settled? (at :running) "demo/g" (constantly {:seon.error/type :x})) "a defect stopped the judge: answer")))))
