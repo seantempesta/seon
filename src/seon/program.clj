@@ -1351,7 +1351,7 @@
   "Load again, in this process, the live forms of db that expanded a macro the forms ids (form ids, just recorded) define,
   and theirs (dependents): what an eval that redefines a macro owes the code this process already compiled from it, which
   Clojure's eval leaves on the old expansion (a test defined before its macro changed ran stale, and its process's
-  program-differs saw nothing, its form id unchanged: Data model's first task as a Seon agent, 2026-11-11). The same act
+  program-differs saw nothing, its form id unchanged: Data model's first task as a Seon agent). The same act
   load-diff! does at a spawn. Each loaded form is noted as this process's (load-form!). Answers the load errors. See
   docs/source.md#an-agent-changes-code-at-its-repl."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:vector :seon.program/error]]}
