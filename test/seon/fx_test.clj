@@ -285,7 +285,11 @@
     (is (= "the gate's build failed: FileNotFoundException: Could not locate seon/repl_test.jolt, at src/seon/repl.clj:3, where your change wrote: (intern 'seon.repl-test\n  'let 1)"
            (fx/build-failure out files)))
     (is (clojure.string/ends-with? (fx/build-failure out {}) "a place your change's files don't hold"))
-    (is (= "the gate's build failed and named no exception" (fx/build-failure "nothing" files)))))
+    (is (= "the gate's build failed and named no exception; it ended: nothing" (fx/build-failure "nothing" files)))
+    ;; Context's loop D3: the gate's build failed eight times naming no exception, and its log was in the checkout the run
+    ;; removed, so the agent read a path that was gone: how it ended is in the error itself
+    (is (= "the gate's build failed and named no exception; it ended: b | c | d | e | f | killed: out of memory"
+           (fx/build-failure "a\nb\n\nc\nd\ne\nf\nkilled: out of memory\n" files)))))
 
 (deftest a-gates-answer-is-what-the-system-ran
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the gate is proved by the system (seon.root/prove-tree!), which is
@@ -464,7 +468,7 @@
     (is (clojure.string/includes? said "Unable to resolve symbol: h") said)
     (is (clojure.string/includes? said "src/app/a.clj:2") said)
     (is (clojure.string/includes? said "(defn f [] (h))") said))
-  (is (= "the gate's build failed and named no exception" (seon.fx/build-failure "nothing" {}))))
+  (is (= "the gate's build failed and named no exception; it ended: nothing" (seon.fx/build-failure "nothing" {}))))
 
 
 ;; ---- a streaming perform (docs/flow.md#effects-one-owner-and-its-workers-per-kind) ----

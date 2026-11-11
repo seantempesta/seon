@@ -979,10 +979,17 @@
   (let [f (java.io.File. (str runs "/root.port"))]
     (when (.isFile f) (parse-long (str/trim (slurp f))))))
 
+(defn runner-end
+  "The last lines of what a runner said, joined, enough to hold what stopped it: its error, where, and the verdict lines after them. Three lost the error, leaving
+  only where and the two verdicts."
+  {:malli/schema [:=> [:cat :string] :string]}
+  [text] (str/join " | " (take-last 6 (remove str/blank? (str/split-lines text)))))
+
 (defn build-failure
   "What a checkout's failed build says, for whoever asked: the exception it names, where, and when the candidate's files ({path text})
   hold that place, the form written there up to its first blank line, so an agent reads which form of its own stops the build. A build
-  that names no exception says so. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  that names no exception says so, with how it ended (runner-end): its log is in the checkout the run removes, so the error is
+  the only place its words survive. See docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :string [:maybe :map]] :string]}
   [out files]
   (if-let [[_ ex msg path line] (or (re-find #"Unhandled exception \(([^)]*)\): (.*)\n\s*at \./([^:\n]+):(\d+)" out)
@@ -993,13 +1000,7 @@
           form (when text (->> (str/split-lines text) (drop (dec (parse-long line))) (take-while (complement str/blank?)) (str/join "\n")))]
       (str "the gate's build failed: " ex ": " msg ", at " path ":" line
            (if (seq form) (str ", where your change wrote: " form) ", a place your change's files don't hold")))
-    "the gate's build failed and named no exception"))
-
-(defn runner-end
-  "The last lines of what a runner said, joined, enough to hold what stopped it: its error, where, and the verdict lines after them. Three lost the error, leaving
-  only where and the two verdicts."
-  {:malli/schema [:=> [:cat :string] :string]}
-  [text] (str/join " | " (take-last 6 (remove str/blank? (str/split-lines text)))))
+    (str "the gate's build failed and named no exception; it ended: " (runner-end out))))
 
 (defn uncommitted
   "The files git sees changed in the checkout at dir, `git status --porcelain`'s lines, which no merge of the program carries: [] when none, or
