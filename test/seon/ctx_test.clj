@@ -1750,3 +1750,30 @@
     (is (str/includes? (str said) "no member is held at") said)
     (is (str/includes? (str said) (str "at their entity ids: " m)) "and it names the keys the join holds")))
 
+
+(deftest a-windowed-join-asked-its-transaction-patches-as-a-build
+  ;; task seon.ctx/a-windowed-join-asked-its-transaction-patches-as-a-build (docs/ctx.md#the-pattern): a window ({[attr :limit n :reverse true :tx :at] ..})
+  ;; patched by a change holds what a fresh build holds, :at included, and a member nothing changed stays the same object. Fixed by f7eea19ab1
+  ;; (seon.ctx/patch's rebuilt member gains its parent join's :tx key, seon.ctx/linked); this is the task's own proof, beside the property
+  ;; test ctx-is-the-record-after-every-transaction, on small-window-pattern (windows of 10, each asking :tx :at)
+  (let [build (fn [db] (ctx/build (seon.db/index) db (aid db) :b))
+        step (fn [c db tx] (let [rep (d/with db tx) c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)] [c' (:db-after rep)]))
+        db (seeded 30 small-window-pattern) c (build db)]
+    (is (every? :at (vals (:evals (:tree c)))) "every member of the window holds its link's transaction")
+    (testing "a ref asserted back in one transaction: its link is written again, so the member holds that transaction; every other member the same object, as a build"
+      (let [e26 (id db [:seon.eval/id "e26"]) e27 (id db [:seon.eval/id "e27"])
+            [c' db'] (step c db [[:db/retract e26 :seon.eval/agent [:seon.agent/key k]] [:db/add e26 :seon.eval/agent [:seon.agent/key k]]])]
+        (is (= (:max-tx db') (get-in (:tree c') [:evals e26 :at :db/id])) "the member's :at is the transaction that wrote its link again")
+        (is (identical? (get-in (:tree c) [:evals e27]) (get-in (:tree c') [:evals e27])) "a member nothing touched: the same object")
+        (is (= c' (build db')) "as a build holds it")))
+    (testing "a member joining a full window: the newest in with its :at, the oldest out, as a build"
+      (let [[c' db'] (step c db (eval-tx 31))]
+        (is (= 10 (count (:evals (:tree c')))))
+        (is (every? :at (vals (:evals (:tree c')))))
+        (is (= c' (build db')) "as a build holds it")))
+    (testing "a member leaving: the window filled from below, each with its :at, as a build"
+      (let [newest (key (first (:evals (:tree c))))
+            [c' db'] (step c db [[:db/retractEntity newest]])]
+        (is (= 10 (count (:evals (:tree c')))))
+        (is (every? :at (vals (:evals (:tree c')))))
+        (is (= c' (build db')) "as a build holds it")))))
