@@ -1169,7 +1169,7 @@
         side (fn [x] (if (= :seon.merge/gone x) [:em "removed"] [:pre [:code (as-text x)]]))]
     [:div {:key (str key)}
      [:p [:code (str attr)] " of " [:code (str id-attr " " (as-text id-v))] (when (some? v) (list ", the value " [:code (as-text v)]))]
-     (into [:dl {:class "seon-conflict"}]
+     (into [:dl]
            (concat (when (contains? c :base) [[:dt "base"] [:dd (side (:base c))]])
                    [[:dt "yours"] [:dd (side ours)] [:dt "main's"] [:dd (side theirs)]]))
      (when resolve [:p "Settle it: " [:code (as-text resolve)]])]))
