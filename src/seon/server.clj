@@ -409,6 +409,33 @@
                              (recur)))))
          (finally (a/untap (:events-mult sys) ev)))))
 
+(defn ask-streamed
+  "One EDN request m to the server on 127.0.0.1:port, a client of serve-connection!: each line before the answer (an event
+  *emit* wrote, a map carrying :type) handed to on-event as it comes, then the answer, the first line that is no event. The
+  wait ends at the connection's end: refused, closed before the answer or reset is :seon.server/unanswered (:why :refused,
+  :eof or :reset), never a hang and never a timer. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :int :map ifn?] :any]}
+  [port m on-event]
+  (let [unanswered #(contract/error :seon.server/unanswered #'seon.server/ask-streamed
+                                    (str "root on port " port (case % :refused " refused the connection: no root listens there"
+                                                                     :eof " closed the connection before its answer"
+                                                                     :reset " reset the connection before its answer"))
+                                    {:port port :why %})]
+    ;; the edge where a client's socket failures become the one typed error (docs/failure-points.md)
+    (try
+      (with-open [s (java.net.Socket. "127.0.0.1" (int port))]
+        (let [out (.getOutputStream s)
+              r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8"))]
+          (.write out (.getBytes (str (sedn/encode m) "\n") "UTF-8"))
+          (.flush out)
+          (loop []
+            (if-let [line (.readLine r)]
+              (let [v (edn/read-string {:default tagged-literal} line)]
+                (if (and (map? v) (contains? v :type)) (do (on-event v) (recur)) v))
+              (unanswered :eof)))))
+      (catch java.net.ConnectException _ (unanswered :refused))
+      (catch java.io.IOException _ (unanswered :reset)))))
+
 (defmethod op-answer :prove [sys ag req]
   (let [run (fn [] (c/prove-tree! sys (cond-> (select-keys req [:checkout :tree :names]) (:mode req) (assoc :mode (keyword (name (:mode req)))))))
         ;; a checkout's files, on their tree's branch (seon.root/prove-tree!), its verdicts streamed when asked; else an agent's branch, or main

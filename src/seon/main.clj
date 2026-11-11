@@ -5,7 +5,7 @@
   requires every namespace system.edn names a proc in (seon.system resolves them by name at boot)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [seon.root :as c] [seon.lib :as lib] [seon.print :as print]
-            [seon.config] [seon.server] [my.root] [clojure.edn] [jolt.deps]
+            [seon.config] [seon.server] [seon.fx] [clojure.string] [my.root] [clojure.edn] [jolt.deps]
             ;; the e2e loop's subject: the binary built from a merge answers its new value
             [seon.generation] [seon.vector] [seon.problems :as problems]
             ;; the procs system.edn names, resolved by name at boot (seon.system/proc-var)
@@ -94,6 +94,34 @@
       (end! :stdin-eof))
     (lib/c-exit 0)))
 
+(defn- verdict-line
+  "One test's verdict as bin/prove --root prints it as it lands (seon.prove's :prove-verdict): PASS with its ms, RED with each
+  failure, NO-VERDICT with why. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:keys [test status ms failures]}]
+  (case status
+    :pass (str "PASS " test (when ms (str " " ms " ms")))
+    :no-verdict (str "NO-VERDICT " test ": " (clojure.string/join "; " (map :seon.error/message failures)))
+    (clojure.string/join "\n  " (cons (str "RED " test " (" (name status) ")") (map shown failures)))))
+
+(defn prove-client
+  "bin/prove --root PORT's client: asks the root on port to prove checkout's files (the server's :prove with :checkout, its tree
+  id and :stream), prints each test's verdict as it lands (verdict-line), and ends on PROVE OK (0) when the answer names no red,
+  else PROVE FAILED (1) after the reds or the typed error that ended it (seon.server/ask-streamed). Answers the exit status.
+  See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :int :string [:sequential :string]] :int]}
+  [port checkout names]
+  (let [tree (seon.fx/tree-id checkout)
+        _ (out! "prove: asking root on port " port " for tree " tree)
+        r (seon.server/ask-streamed port (cond-> {:op :prove :checkout checkout :tree tree :mode "judge" :stream true}
+                                           (seq names) (assoc :names (vec names)))
+                                    #(when (= :prove-verdict (:type %)) (out! (verdict-line %))))]
+    (cond (seon.contract/error? r) (do (out! "prove: " (:seon.error/message r)) (out! "PROVE FAILED") 1)
+          :else (do (out! "prove: " (shown (select-keys r [:key :ran :reused :pass :fail :error :deferred])))
+                    (if (seq (:red r))
+                      (do (out! "prove: red " (clojure.string/join " " (:red r))) (out! "PROVE FAILED") 1)
+                      (do (out! "PROVE OK") 0))))))
+
 (defn- driver!
   "The check driver's -main (seon.check, in test/), loaded
   now from the checkout's source (checkout-roots!), so the release binary holds only the
@@ -128,4 +156,7 @@
                       (if (seon.contract/error? r) (out! "BUILT-PROGRAM FAILED " (shown r)) (out! (seon.edn/encode r)))
                       (lib/c-exit (if (seon.contract/error? r) 1 0)))
     "embed-worker" (seon.vector/serve!)
+    ;; bin/prove --root PORT [NS ...]: prove PORT CHECKOUT [NS ...]
+    "prove" (let [[_ port checkout & names] (seon.config/without-overrides args)]
+              (lib/c-exit (prove-client (parse-long port) checkout (vec names))))
     (apply (driver! (checkout)) args)))

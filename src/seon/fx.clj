@@ -242,7 +242,8 @@
            (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))))))
 
 (defn env-class
-  "The class of the file at relative path p: :seon.env/system, /web, /deps, /bin (bin/ and the root's other files), /schemas or /src (the .clj
+  "The class of the file at relative path p: :seon.env/system, /web, /deps, /bin (bin/ and the root's other files), /schemas, /docs (the
+  wiki), /tasks (the task files) or /src (the .clj
   files, which env-input? leaves to the program facts: a class only for a reach that reads the program's text), each a part of the checkout one kind of test reads (seon.program/env-class-readers),
   or nil (every test's: native/, the pins, the fixtures, everything else)."
   {:malli/schema [:=> [:cat :string] [:maybe :keyword]]}
@@ -255,6 +256,10 @@
         ;; edit reran 1,600 of 1,891 keys (each pin is its own input, pin-class)
         (or (str/starts-with? p "bin/") (not (str/includes? p "/"))) :seon.env/bin
         (str/starts-with? p "resources/seon/schemas/") :seon.env/schemas
+        ;; the wiki and the task files, each read whole by its own reader (seon.doc/pages, seon.root/task-files): a class, so a
+        ;; wiki edit moves the tests that read the wiki and no other (a 4-line edit to docs/decisions.md ran 117 tests, 2026-11-11)
+        (str/starts-with? p "docs/") :seon.env/docs
+        (str/starts-with? p "resources/seon/tasks/") :seon.env/tasks
         ;; the program's text, which a test reading the whole program (a docstring, a form's source) reads
         (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))) :seon.env/src))
 

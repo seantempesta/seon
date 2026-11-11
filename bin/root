@@ -8,6 +8,10 @@
 # output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT"); the server port it was started
 # bound (what bin/mcp relays to; the root's ROOT LISTENING line names it): runs/root.port, while
 # it runs.
+# A system on another store (a kept copy, another checkout's store): SEON_STORE=DIR names the store, and the files
+# above live in SEON_RUNS (default runs/), not beside the store: a second system in this checkout sets its own
+# SEON_RUNS as well (and SEON_SERVER_PORT, SEON_WEB_PORT), else it reads the first as running and writes over its files.
+# Nothing refuses two systems on one store (task seon.db/two-processes-branch-one-store-at-once).
 # `start`'s root catches its main up with the files this checkout changed since main last indexed them (ROOT CAUGHT UP;
 # docs/source.md#a-boot-catches-up-with-its-checkout); when what changed reaches the binary (ROOT STALE BINARY on main's tree,
 # this checkout's), start runs bin/build seon and starts it again, once.

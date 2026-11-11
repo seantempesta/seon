@@ -48,17 +48,24 @@
     (is (re-find #"durable-write runs target/seon on the seeded store, but this selection's steps-binary" (:out unseeded))
         "a step that needs the seeded store is refused by name, never run on none")))
 
-(deftest a-step-past-its-bound-is-ended-red-with-its-evidence
+;; docs/clocks.md#time-decides-the-owners-exceptions: a step past its bound is ended after its evidence, and the bound is a
+;; signal (the owner, 2026-11-11: "The step bounds are signals not hard constraints"): said with its CPU seconds and the load,
+;; no verdict (no green stored, it runs again), and nothing failed: a red is a step's own exit
+(deftest a-step-past-its-bound-is-ended-with-its-evidence-a-signal-not-a-red
   (let [sel (str (System/getProperty "java.io.tmpdir") "/step-bound-" (random-uuid))
         _ (clojure.java.shell/sh "mkdir" "-p" sel)
         _ (doseq [[f t] {"steps" "laws\n" "steps-binary" "" "step-bounds" "laws 1\n"}] (spit (str sel "/" f) t))
         r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/check") "--steps" sel)
         ev (second (re-find #"evidence in (\S+)" (:out r)))
         out (second (re-find #"(?m)^outputs: (\S+)" (:out r)))
-        ms (slurp (str sel "/step-ms"))]
+        ms (slurp (str sel "/step-ms"))
+        green (let [f (java.io.File. (str sel "/green"))] (if (.isFile f) (slurp f) ""))]
     (clojure.java.shell/sh "rm" "-rf" sel)
-    (is (= 1 (:exit r)) (pr-str r))
-    (is (re-find #"FAILED laws: STEP-OVERRAN, ran past its bound of 1 ms" (:out r)) (:out r))
+    (is (= 0 (:exit r)) (pr-str r))
+    (is (re-find #"SIGNAL laws: STEP-OVERRAN, ran past its bound of 1 ms" (:out r)) (:out r))
+    (is (re-find #"(?m)^STEP SIGNALS .*\n  laws past its bound of 1 ms \(CPU [\d.?]+ s, load [\d.]+\)" (:out r)) "the summary says it, with its CPU seconds and the load")
+    (is (not (re-find #"(?m)^CHECK FAILED" (:out r))) "and nothing failed")
+    (is (not (re-find #"check-laws" green)) "it stored no green: it runs again")
     (is (and ev (.isFile (java.io.File. (str ev "/ps.txt")))) "its process tree was captured before it was ended")
     (is (not (re-find #"(?m)^laws OK" (:out r))) "and it did not run on to its own end")
     (is (re-find #"^laws \d+\n$" ms) "its time is kept for its verdict, as a green step's is")
@@ -538,6 +545,17 @@
     (is (false? (await-feed empty-feed #(pos? (:bytes %)))) "ended before its first bytes")
     (is (false? (await-feed throws :settled)))
     (is (= "read threw: reset" (:ended @throws)))))
+
+;; docs/processes.md#a-stop-reaps-every-child: one rule decides what a stop left running, for drain, lifecycle and orphan
+;; (seon.check/ran-nothing-more?). Batch 46's lifecycle left {:pid 87561 :ppid 1 :stat "?NE" :command "(seon)"}: an orphan
+;; exiting, which a rule counting only zombies read as running
+(deftest a-process-that-can-run-nothing-more-is-not-left-by-a-stop
+  (let [self 4242]
+    (is (seon.check/ran-nothing-more? {:pid 87561 :ppid 1 :stat "?NE" :command "(seon)"} self) "an orphan exiting")
+    (is (seon.check/ran-nothing-more? {:pid 9 :ppid 1 :stat "Z" :command "(seon)"} self) "an orphan zombie")
+    (is (not (seon.check/ran-nothing-more? {:pid 9 :ppid 1 :stat "S" :command "seon"} self)) "an orphan still running stays")
+    (is (not (seon.check/ran-nothing-more? {:pid 9 :ppid self :stat "Z" :command "(seon)"} self)) "a child the stop failed to reap stays")
+    (is (not (seon.check/ran-nothing-more? nil self)) "a pid ps did not find is judged by alive?, not here")))
 
 ;; docs/machine.md#builds-and-checks: a wait on main runs its predicate in main's writer at every commit (seon.root/await-db's
 ;; watch; datahike's writer resets the connection), so a predicate that reads main's whole problems report costs the report

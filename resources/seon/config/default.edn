@@ -227,7 +227,8 @@
  :seon.config.check/ping-ms 10000
  ;; Unit: times. A bin/check step that runs this many times its median measured run (its greens' :ms, seon.fx/typical-ms),
  ;; floored at :seon.config.agent/stall-ms, is ended: bin/evidence captures it first (its process tree, samples, fiber
- ;; dumps, and its root's stall state), and it is red with the typed reason STEP-OVERRAN, never retried (the owner's
+ ;; dumps, and its root's stall state), and it is a signal, STEP-OVERRAN, said with its CPU seconds and the load: no verdict,
+ ;; no green stored, nothing failed (the owner, 2026-11-11: "The step bounds are signals not hard constraints"; the owner's
  ;; fourth clock exception, 2026-11-10: docs/clocks.md#time-decides-the-owners-exceptions). A test bin/test runs past this many
  ;; times its last run (floored at this times :seon.config.agent/stall-ms) is ended the same way by bin/stalls, red as OVERRAN. Provenance: of 6,239 green
  ;; runs in the verdict cache of tests whose median is 2 s or more, 161 ran past 5 times it and 30 (0.5%) past 10, most
