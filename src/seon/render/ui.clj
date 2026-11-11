@@ -716,6 +716,12 @@
      (when why (list ": " (plain why (cell) {:one-line? true})))
      (when-let [ts (seq (:answered-by r))] (str " (answered by " (str/join ", " ts) ")"))]))
 
+(defn- class-words
+  "What problem class c's open rows are, in words, from :seon.problems/class's :seon.status/title (the words are data: docs/health.md); its
+  name when it has none."
+  {:malli/schema [:=> [:cat :keyword] :string]}
+  [c] (or (get (:seon.status/title (contract/properties :seon.problems/class)) c) (kname c)))
+
 (defn problems
   "Main's problems (the declared html render of :seon.problems/report): each class with rows,
   its count, and its rows a line each (`problem-row`), open ones first, rendered only when the
@@ -729,7 +735,7 @@
        [:p "none open"]
        (for [[c n rows] cs :let [id (str "pc-" (name c)) shown? (or (nil? open) (contains? open id))]]
          [:details (cond-> (toggle id) (and open shown?) (assoc :open true))
-          [:summary {:class "cursor-pointer"} (str (kname c) " " n)]
+          [:summary {:class "cursor-pointer" :title (kname c)} (str (class-words c) ": " n)]
           (when shown? (for [r (sort-by #(if (false? (:open? %)) 1 0) rows)] (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.problems/row} (assoc r :class c))))]))]))
 
 (defn problems-model

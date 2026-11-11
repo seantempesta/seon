@@ -1537,7 +1537,7 @@
              :producer 'demo/f :owner-ns 'demo :evidence {:kind :error} :proofs [] :at-ms nil}]
     (is (= "<p class=\"text-xs\">error ×3 demo/f: boom (answered by demo/fix)</p>" (h/html (ui/problem-row {} row))))
     (let [html (h/html (ui/problems {:seon.render/index (seon.db/index)} {:t 1 :classes {:error {:n 1 :rows [(dissoc row :class)]} :red {:n 0 :rows []}}}))]
-      (is (str/includes? html "<summary class=\"cursor-pointer\">error 1</summary>"))
+      (is (str/includes? html "<summary class=\"cursor-pointer\" title=\"error\">errors: 1</summary>"))
       (is (str/includes? html "error ×3 demo/f") "its rows, each by the row's view")
       (is (not (str/includes? html ">red 0<")) "a class with no rows is left out"))
     (is (= ["none open"] (re-seq #"none open" (h/html (ui/problems {:seon.render/index (seon.db/index)} {:t 1 :classes {}})))))
@@ -4450,3 +4450,13 @@
     (is (not (str/includes? r "proof-red")) "no keyword read raw")
     (is (= "root restarted" (:reason (ui/standing {} {:seon.task/outcome :cap :seon.task/reason "root restarted"})))
         "a reason with no data behind it is its string")))
+
+;; docs/health.md: a problem class reads in words, said after its count ("168 tasks that cite no section"), from :seon.problems/class's
+;; :seon.status/title; the keyword stays the data (Point, 2026-11-11: the problems tile listed "uncited-task 168")
+(deftest a-problem-class-reads-in-words
+  (let [classes (drop 2 (get seon.contract/forms :seon.problems/class))
+        words (:seon.status/title (seon.contract/properties :seon.problems/class))
+        html (seon.web.html/html (ui/problems {} {:t 1 :open #{} :classes {:uncited-task {:n 168 :rows [{:producer nil :owner-ns nil :evidence {} :proofs [] :answered-by [] :at-ms nil}]}}}))]
+    (is (= #{} (set (remove words classes))) "every class has its words: a new class is never a bare keyword")
+    (is (str/includes? html "tasks that cite no section: 168") html)
+    (is (not (re-find #">uncited-task" html)) "no bare keyword drawn")))
