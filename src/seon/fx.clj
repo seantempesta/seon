@@ -669,16 +669,6 @@
           (step "bin/worktree --at" [(str from "/bin/worktree") "--at" dir commit repo]))
         (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
-(defn test-command
-  "The runner the :tests effect calls in a checkout, as argv, for tests (qualified names, or a
-  namespace's bare name for all its tests): prove's one entry, each named test with no green at
-  its reach digest run, the rest reused, its run written under out (bin/prove --out: the effect
-  reads the plan there, never from a path the run did not name). A gate names exactly the
-  tests the change reached (:seon.task/deferred), never their namespaces' other tests
-  (docs/merging.md#a-merge-runs-what-the-change-reaches)."
-  {:malli/schema [:=> [:cat [:sequential :symbol] :string] [:vector :string]]}
-  [tests out] (into ["nice" "-n" "15" "bin/prove" "--out" out "--tests"] (map str tests)))
-
 (defn full-run-command
   "The runner of the daily full run, as argv: every test, green or not (bin/test --all: the
   plan ignores the results already recorded, runs the process tests, and measures each cost proof
@@ -1000,20 +990,34 @@
       (vec (remove str/blank? (str/split-lines (:out r))))
       (error #'seon.fx/uncommitted :seon.fx/io-error (str "git status in " dir ": " (:err r)) {:path dir}))))
 
+(defn gate-answer
+  "The system's answer a to the gate's run of tests (seon.root/prove-tree!'s, the run-tests-forked shape: :reports, :red,
+  :digests) as run-on-checkout answers it: {:results {test :pass|:fail} :failures {test [failure ...]} :digests}. A test
+  the run never reached (it is answered at its first red) is in none, so its branch keeps it deferred and asks again: never a
+  red it did not show. See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  {:malli/schema [:=> [:cat :map [:sequential :qualified-symbol]] :map]}
+  [a tests]
+  (let [red (set (:red a))
+        fails (proofs/failures a)
+        passed (into #{} (keep #(when (= :pass (:type %)) (proofs/test-symbol (:var %)))) (:reports a))
+        results (into {} (for [t tests :let [s (cond (red t) :fail (passed t) :pass)] :when s] [t s]))]
+    {:results results
+     :failures (into {} (for [[t s] results :when (= :fail s) :let [fs (get fails t)] :when (seq fs)] [t (vec fs)]))
+     :digests (select-keys (:digests a) (keys results))}))
+
 (defn- run-on-checkout
-  "One run of the :tests effect (run-tests): tests (qualified names) on a checkout of the merge candidate: a
-  detached worktree of repo at branch's head (bin/worktree --at, as a generation's), files
-  ({relative path text}, the candidate's changed files) written over it, then the runner
-  (test-command) over exactly the tests named there, niced, in that tree's own environment;
-  the worktree removed after (its run's logs kept beside its log when it is not all green). The tree's
-  binary is built first (bin/build seon), so its process tests run this candidate. Answers {:value {:results {test status} :ms :log}}, or
-  :seon.fx/io-error naming the step and its log. The answer also holds :digests {test digest} and
-  :failures {test [failure ...]} of its reds (the failures their results recorded, which the run's
-  shard logs, removed with the worktree, also held). With :all? (the daily full run, seon.prove's
-  :full mode) the runner is full-run-command, tests are every test the plan names; repo defaults
-  to this checkout and branch to git's main (:seon.config.source/main)."
-  {:malli/schema [:=> [:cat :string :map] :map]}
-  [sha {:keys [repo files tests all?]}]
+  "One run of the :tests effect (run-tests) on a checkout of the merge candidate: a detached worktree of repo at
+  branch's head (bin/worktree --at, as a generation's), files ({relative path text}, the candidate's changed files)
+  written over it, root's binary and kept stores cloned into it; the worktree removed after. The gate (tests, qualified
+  names) is proved by the system through prove (seon.root/prove-tree!, mode :judge, named by exactly those tests): its
+  process tests run as items on the checkout (docs/merging.md#a-session-proves-through-root), and its answer is read by
+  gate-answer: {:value {:results {test status} :failures {test [failure ...]} :digests {test digest} :ms :log}}, or the
+  run's typed error. With :all? (the daily full run, seon.prove's :full mode) the tree's binary is built first
+  (bin/build seon) and the runner is full-run-command, tests every test its plan names, each read from the verdict
+  cache (test-results), a run not all green keeping its logs beside its log; repo defaults to this checkout and branch
+  to git's main (:seon.config.source/main); its failure is :seon.fx/io-error naming the step and its log."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/fn] :string :map] :map]}
+  [prove sha {:keys [repo files tests all?]}]
   (let [t0 (profile/now-ns)
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
@@ -1073,15 +1077,26 @@
           (if (not (zero? (:exit b)))
             (do (spit log (str (:out b) (:err b)))
                 (error #'seon.fx/run-on-checkout :seon.fx/io-error (str (build-failure (str (:out b) (:err b)) files) "; its log: " log) {:path dir}))
-            ;; the tree's shards cache their verdicts in this checkout's verdict cache, named to them,
+            (if-not all?
+              ;; the gate: the system proves the candidate's checkout (prove, seon.root/prove-tree!, which root binds to this
+              ;; effect's :ctx), named by exactly the deferred tests; its process tests run as items on dir, by the :item owner
+              (let [a (if prove
+                        (prove {:checkout dir :tree (tree-id dir) :names (set tests) :mode :judge})
+                        (error #'seon.fx/run-on-checkout :seon.fx/io-error "the gate has no system to prove its candidate on (the :tests effect's :ctx names no :prove-tree)" {:path dir}))]
+                (if (contract/error? a)
+                  a
+                  (let [v (gate-answer a tests)]
+                    (vreset! green? (= (set tests) (set (keep (fn [[t s]] (when (= :pass s) t)) (:results v)))))
+                    {:value (assoc v :ms (profile/ms-since t0) :log log)})))
+            ;; the full run's shards cache their verdicts in this checkout's verdict cache, named to them,
             ;; so the verdicts read below are the ones its run wrote
             (let [out (str dir "/target/prove/run")
                   r (apply lib/sh (concat clean [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))]
-                                         (if all? (full-run-command out) (test-command (sort-by str (distinct tests)) out))
+                                         (full-run-command out)
                                          [:dir dir]))
                   plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
                   _ (spit log (str (:out r) (:err r)))
-                  tests (if all? (vec (sort-by str (keys (:digests plan)))) tests)
+                  tests (vec (sort-by str (keys (:digests plan))))
                   found (when plan (stored-results (:digests plan)))]
               (cond
                 ;; no plan (out/tests.edn): the runner never got to its tests (its build, its plan or its start failed): that is the
@@ -1103,7 +1118,7 @@
                                                             :let [fs (some->> (get-in plan [:digests t]) found :failures not-empty vec)]
                                                             :when fs]
                                                         [t fs]))}
-                            (not @green?) (assoc :kept kept))})))))
+                            (not @green?) (assoc :kept kept))}))))))
         ;; the worktree's removal is recorded in the run's log: a failed one names what it left
         (finally (let [run (java.io.File. (str dir "/target/prove/run"))
                        mv (when (and (not @green?) (.isDirectory run)) (lib/sh "mv" (.getPath run) kept))
@@ -1146,16 +1161,19 @@
             (if (contract/error? w)
               w
               {:value (assoc v
-                             :results (into {} (for [t tests] [t (or (get results t) (if (proofs/green? (was t)) :pass :fail))]))
+                             ;; a test the run never reached and none held is in no result: its branch keeps it deferred
+                             :results (into {} (for [t tests :let [s (or (get results t) (when (was t) (if (proofs/green? (was t)) :pass :fail)))] :when s] [t s]))
                              :failures (into (or failures {}) (for [t tests :let [fs (:failures (was t))] :when fs] [t (vec fs)]))
                              :digests (into {} (for [t tests] [t (digest-of t)]))
                              :ms (:ms v 0))})))))))
 
 (defn run-tests
-  "The :tests effect: tests on a checkout of the merge candidate (run-on-checkout), its answer {:value {:results :ms :log
-  :digests :failures :kept}} or its declared error; a named run reuses what this candidate already answered (run-held). See docs/merging.md#a-merge-runs-what-the-change-reaches."
+  "The :tests effect: tests on a checkout of the merge candidate (run-on-checkout), proved by the system through its :ctx's
+  :prove-tree (seon.root/prove-tree!, which root binds), its answer {:value {:results :ms :log :digests :failures :kept}} or
+  its declared error; a named run reuses what this candidate already answered (run-held). See
+  docs/merging.md#a-merge-runs-what-the-change-reaches."
   {:malli/schema [:=> [:cat :map] :map]}
-  [{{:keys [repo branch all?] :as req} :req}]
+  [{{:keys [repo branch all?] :as req} :req {:keys [prove-tree]} :ctx}]
   (let [repo (or repo (when all? (str (cfg/checkout))))
         branch (or branch (when all? (cfg/value :seon.config.source/main)))
         req (assoc req :repo repo :branch branch)
@@ -1165,9 +1183,9 @@
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))]
     (cond
       (contract/error? sha) sha
-      all? (run-on-checkout sha req)
+      all? (run-on-checkout nil sha req)
       :else
-      (run-held run-on-checkout sha req))))
+      (run-held (partial run-on-checkout prove-tree) sha req))))
 
 ;; ---- a session's items (Flow step 4) -------------------------------------------------
 

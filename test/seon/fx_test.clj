@@ -275,11 +275,44 @@
     (is (clojure.string/ends-with? (fx/build-failure out {}) "a place your change's files don't hold"))
     (is (= "the gate's build failed and named no exception" (fx/build-failure "nothing" files)))))
 
-(deftest a-merges-deferred-tests-command
-    ;; the gate runs the tests the change reached, not their namespaces' other tests (the restart
-    ;; test's gate ran 48 tests for 1 deferred one)
-    (is (= ["nice" "-n" "15" "bin/prove" "--out" "/o" "--tests" "seon.check-test/a" "seon.root-test/b"]
-           (fx/test-command ['seon.check-test/a 'seon.root-test/b] "/o"))))
+(deftest a-gates-answer-is-what-the-system-ran
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the gate is proved by the system (seon.root/prove-tree!), which is
+  ;; answered at its first red; a deferred test it never reached is in no result, so its branch keeps it deferred and asks
+  ;; again, never a red it did not show (a :fail there would stand until that test's own digest moved)
+  (let [a {:red ['seon.root-test/b]
+           :reports [{:type :pass :var "#'seon.check-test/a"} {:type :pass :var "#'seon.root-test/b"}
+                     {:type :fail :var "#'seon.root-test/b" :message "expected 1"}]
+           :digests {'seon.check-test/a "da" 'seon.root-test/b "db" 'seon.agent-test/c "dc"}}
+        v (fx/gate-answer a ['seon.check-test/a 'seon.root-test/b 'seon.agent-test/c])]
+    (is (= {'seon.check-test/a :pass 'seon.root-test/b :fail} (:results v)))
+    (is (= ["expected 1"] (map :message (get-in v [:failures 'seon.root-test/b]))))
+    (is (= {'seon.check-test/a "da" 'seon.root-test/b "db"} (:digests v)))))
+
+(deftest a-gate-is-proved-by-the-system-on-its-candidates-checkout
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the :tests effect makes the candidate's checkout (the merges head,
+  ;; the candidate's files over it) and asks the system to prove it (its :ctx's :prove-tree, seon.root/prove-tree! as root
+  ;; binds it), named by exactly the deferred tests, in mode :judge, by the checkout's tree; the checkout is removed after.
+  ;; Before, it ran bin/prove --tests in the checkout, a shell runner beside the test service
+  (let [repo (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-gate-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))
+        asked (atom nil)
+        ;; one red and one test the run never reached (it is answered at its first red): nothing green is held
+        prove (fn [on] (reset! asked (assoc on :file (slurp (str (:checkout on) "/src/a.clj")) :tree-now (fx/tree-id (:checkout on))))
+                {:red ['a/t] :reports [{:type :fail :var "#'a/t" :message "red"}] :digests {'a/t "d"}})]
+    (try
+      (git "init" "-q" "-b" "main")
+      ;; target/ ignored, as the repository's is: the checkout's cloned products are no part of its tree
+      (spit (str repo "/.gitignore") "/target/\n/runs/\n") (spit (str repo "/f") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
+      (let [r (fx/run-tests {:req {:repo repo :branch "main" :files {"src/a.clj" (str "(ns a) ; " (random-uuid))} :tests ['a/t 'a/u]}
+                             :ctx {:prove-tree prove}})]
+        (is (= {'a/t :fail} (get-in r [:value :results])) (pr-str r))
+        (is (= ["red"] (map :message (get-in r [:value :failures 'a/t]))))
+        (is (= #{'a/t 'a/u} (:names @asked)) "named by exactly the deferred tests")
+        (is (= :judge (:mode @asked)))
+        (is (clojure.string/starts-with? (str (:file @asked)) "(ns a)") "the candidate's files are on the checkout it asks to prove")
+        (is (= (:tree-now @asked) (:tree @asked)) "named by the checkout's tree")
+        (is (not (.exists (java.io.File. (str (:checkout @asked))))) "and the checkout is removed after"))
+      (finally (seon.lib/remove-tree! repo)))))
 
 (deftest a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
   ;; the restart test's first loop merge was held: "no commit of branch jolt/seon-merges-... in <clone>": the

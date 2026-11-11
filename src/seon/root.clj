@@ -137,7 +137,7 @@
    "main's changes since the session's base"
    "host state: atoms, open files, sockets, fibers"])
 
-(declare answer-spawn insert-evals start-spawn no-room binary-program binary-current kill!)
+(declare answer-spawn insert-evals start-spawn no-room binary-program binary-current kill! prove-tree!)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -1647,6 +1647,9 @@
                      :stale-binary stale}}
         graph-p (promise)
         root-procs-p (promise)
+        ;; this root's handle, for the merge gate's :tests effect, which proves its candidate through prove-tree! (bound as
+        ;; :prove-tree): delivered below, before the graph is resumed, so no effect runs before it
+        sys-p (promise)
         ;; what the declaration (resources/seon/system.edn) names as :bind/<name>
         bindings (merge (select-keys chans [:ext :back :to-writer :fork-server-ev :judge])
                         {:view view :graph graph-p
@@ -1656,6 +1659,7 @@
                          :api-from-writer-buf (+ (cfg/value :seon.config.root/writer-buf) (cfg/value :seon.config.root/writer-batch) (cfg/value :seon.config.root/api-writes))
                          :cron-tick (a/chan 1) :full-run-at (cfg/value :seon.config.proofs/full-run-at)
                          :stall-ms (or stall-ms (cfg/value :seon.config.agent/stall-ms)) :reconciler-buf (cfg/value :seon.config.root/reconciler-buf) :prove-main-buf (a/sliding-buffer 1) :render-main-buf (a/sliding-buffer 1) :web-streams-buf (a/sliding-buffer (cfg/value :seon.config.web/streams-buf))
+                         :prove-tree (fn [on] (prove-tree! @sys-p on))
                          :item-workers (:workers (seon.prove/config-admission)) :model-workers (cfg/value :seon.config.ai/max-in-flight) :model-rate (when (pos? (cfg/value :seon.config.ai/rate)) (cfg/value :seon.config.ai/rate))
                          :web-port (cfg/value :seon.config.web/port)
                          :vectors-main-buf (a/sliding-buffer 1) :embed-batch (cfg/value :seon.config.vector/batch)
@@ -1676,6 +1680,7 @@
                           :store-path path :boot boot
                           :bindings bindings
                           :events-in events-in :events-mult events-mult})
+        _ (deliver sys-p sys)
         ]
     (flow/resume g)
     ;; dataflow start: the boot fact's commit wakes the reconciler on main as it is; a root

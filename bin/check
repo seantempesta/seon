@@ -189,6 +189,16 @@ step() {
   [[ -n $W ]] && { kill $W 2>/dev/null; wait $W 2>/dev/null }
   local r=$(sed -n 's/^real \([0-9.]*\).*/\1/p' "$OUT/$name.time" | head -1)
   [[ -n $SEL && -n $r ]] && printf "%s %.0f\n" "$name" $(( r * 1000 )) >> "$SEL/step-ms"
+  # a red's message first, on its FAILED line and in the run's failed list: the log's first line that says what went wrong
+  # (an unhandled exception, a FAILED or ERROR verdict), else its first line; never its last, which for a throw is a trace
+  # frame (the rename's health red was read from its trace lines and misdiagnosed for 1.5 h, 2026-11-11)
+  local msg=
+  if [[ ! -e $OUT/$name.overran ]] && (( st != expect )); then
+    msg=$(grep -m1 -E 'Unhandled exception|Exception|FAILED|FAIL |ERROR|[Ee]rror:' "$log" 2>/dev/null)
+    [[ -n $msg ]] || msg=$(head -1 "$log" 2>/dev/null)
+    msg=${msg:0:300}
+    echo "FAILED $name: $msg (exit $st, expected $expect, $log)"
+  fi
   if [[ -n $filter ]]; then grep -E "$filter" "$log"; else tail -1 "$log"; fi
   if [[ -e $OUT/$name.overran ]]; then
     # a signal, never a red (the owner, 2026-11-11: "The step bounds are signals not hard constraints"): the step was ended
@@ -200,7 +210,7 @@ step() {
     echo "SIGNAL $name: STEP-OVERRAN, ran past its bound of $(<$OUT/$name.overran) ms (:seon.config.check/step-end-factor times its median; CPU ${cpu:-?} s); ended, no verdict, not failed; evidence in $OUT/$name-overran"
     # bin/prove's store-steps reads the selection's overran names: a signal, never one of its reds
     [[ -n $SEL ]] && print -r -- "${${name%-write}%-read}" >> "$SEL/overran"
-  elif (( st != expect )); then failed "$name (exit $st, expected $expect, $log)"; echo "FAILED $name (exit $st, expected $expect)"
+  elif (( st != expect )); then failed "$name: $msg (exit $st, expected $expect, $log)"
   else green $name; fi
   return 0
 }
