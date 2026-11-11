@@ -155,19 +155,19 @@
  ;; Observations: data on the branch that recorded them, never carried by a merge ----
  ;; an eval: one per eval request (a model's tool call, a form the user or a session typed),
  ;; its id a digest (seon.repl/eval-id: a model's eval, of its call and its place in the reply; any other, of a fresh UUID); who evaluated it (the agent's id, "user", "outside", "context")
- :seon.eval/id [:and {:seon.db/identity true} :string]
- :seon.eval/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]
- :seon.eval/by [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact]} :seon.db/ref]
+ :seon.eval/id [:and {:seon.db/identity true :description "The eval's identity: a digest for a model's eval, a fresh UUID for any other."} :string]
+ :seon.eval/agent [:and {:seon.db/to [:seon.db/agent-fact] :description "The agent whose record holds this eval."} :seon.db/ref]
+ :seon.eval/by [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact] :description "Who evaluated it: an agent or the root."} :seon.db/ref]
  ;; opened by a reader of the agent's page: true once, never retracted; root writes it on main as the
  ;; agent's :seon.agent/opened (an eval's id names it only within its agent), its turn on its branch
- :seon.eval/opened :boolean
+ :seon.eval/opened [:boolean {:description "True once a reader of the agent's page has opened this eval; never retracted."}]
  ;; what is stored of an eval's answer (:seon.repl/answer) beside its result: its handle, cost, namespace and warnings, each as the
  ;; answer has them (seon.repl/record-details, seon.db/with-response); its value, error and output are its result's, and
  ;; seon.db/response-of answers the whole (docs/users.md#what-each-thing-is)
- :seon.eval/response [:and :seon.repl/answer :seon.db/plain]
+ :seon.eval/response [:and {:description "What is stored of the eval's answer beside its result: its handle, cost, namespace and warnings. See docs/users.md#what-each-thing-is."} :seon.repl/answer :seon.db/plain]
  ;; the eval's result, one entity per answer: evaluating one value twice points both evals at it. Evaluating again moves the ref
  ;; and the old result stays. Never pull its reverse: every eval with no value points at the same nil
- :seon.eval/result [:and {:seon.db/to [:seon.result/result-fact]} :seon.db/ref]
+ :seon.eval/result [:and {:seon.db/to [:seon.result/result-fact] :description "The eval's result, one entity per answer; evaluating one value twice points both evals at it."} :seon.db/ref]
  ;; a result: the full hash (hasch's uuid, as text) of what an answer is, [value ex out err forms], is its identity and its content
  ;; id, so two sessions that produce one value produce one entity; the handle result/<8 hex> is its short form and no identity
  ;; (two values sharing eight digits stay two entities). Its value made plain (seon.contract/plainly), its error the one error
@@ -190,51 +190,51 @@
  ;; model draw it from the branch at its t). The response is :seon.eval/response, whole, its value as plain data
  ;; (seon.contract/plainly) up to :seon.config.store/max-value-chars; never a text made for a reader (seon.print
  ;; prints it when it is sent or shown). The intent is kept as written, never parsed as it is recorded
- :seon.eval/code :string
- :seon.eval/intent :string
- :seon.eval/call-id :string
+ :seon.eval/code [:string {:description "The code that was evaluated."}]
+ :seon.eval/intent [:string {:description "The model's intent for this eval, kept as it wrote it."}]
+ :seon.eval/call-id [:string {:description "The provider's call id for the model call this eval came from."}]
  ;; the model call of the turn in force when it was written (seon.task/call-ref; absent on root's, on an agent's own turn loop and on a context read)
- :seon.eval/call [:and {:seon.db/to [:seon.model-call/fact]} :seon.db/ref]
- :seon.eval/fns [:vector :map]
- :seon.eval/schema :qualified-keyword
- :seon.eval/basis [:map [:t :int] [:branch :seon.db/branch]]
+ :seon.eval/call [:and {:seon.db/to [:seon.model-call/fact] :description "The model call of the turn in force when this eval was written; absent on root's evals, on an agent's own turn loop and on a context read."} :seon.db/ref]
+ :seon.eval/fns [:vector {:description "The ten costliest contracted functions of the eval, each with its var, calls and ms."} :map]
+ :seon.eval/schema [:qualified-keyword {:description "The render schema that the eval's value names, kept in place of a copy."}]
+ :seon.eval/basis [:map {:description "The basis (branch and t) that the eval's value is rendered from, when the value names one."} [:t :int] [:branch :seon.db/branch]]
  ;; an agent: one entity per agent, named by its key (seon.lib/unique-id: the digest of a fresh UUID),
  ;; a content id so root's entity on main and the one its branch's records name are one; it refs the root that started it. What root
  ;; observes of it (status, pid, memory, the form running, its task's description) is recorded
  ;; on it when root's view of it changes (seon.task/agent-tx)
- :seon.agent/key [:and {:seon.db/identity true :seon.db/content-id true} :string]
+ :seon.agent/key [:and {:seon.db/identity true :seon.db/content-id true :description "The agent's identity: the digest of a fresh UUID, the same on main and on its branch."} :string]
  ;; an agent's id in root's process and its procs: the keyword whose name is its key; never stored
- :seon.agent/id :keyword
- :seon.agent/root [:and {:seon.db/to [:seon.root/root-fact]} :seon.db/ref]
- :seon.agent/branch :keyword
+ :seon.agent/id [:keyword {:description "The agent's id in root's process and its procs: the keyword whose name is its key; never stored."}]
+ :seon.agent/root [:and {:seon.db/to [:seon.root/root-fact] :description "The root that started this agent."} :seon.db/ref]
+ :seon.agent/branch [:keyword {:description "The branch this agent works on."}]
  ;; the task it works (the agent's record pulls it, docs/ctx.md#the-pattern) and the turns it may take: raised to extend the agent
  ;; (the agent is the unit, seon.agent/the-agent-is-the-unit-not-the-run; max-turns is written from its cut 2, until then work!'s
  ;; :max-turns bounds the loop)
- :seon.agent/task [:and {:seon.db/to [:seon.task/task-fact]} :seon.db/ref]
+ :seon.agent/task [:and {:seon.db/to [:seon.task/task-fact] :description "The task this agent works. See docs/ctx.md#the-pattern."} :seon.db/ref]
  ;; the turns it may take, agent-wide: its :seon.agent/turn against it. Set at spawn from the config its task's environment names
  ;; (seon.reconcile/desired-env); raised, and the task released again (my.root/run!), it goes on (docs/turn.md#the-cap)
  ;; at least one turn: the environment it is read into (:seon.task/env) takes a positive count, one definition of it
- :seon.agent/max-turns pos-int?
+ :seon.agent/max-turns [:and {:description "The turns the agent may take, agent-wide; raised to extend the agent. See docs/turn.md#the-cap."} pos-int?]
  ;; the agent's turn number (docs/turn.md#the-turn-is-a-number): moved by the model turn that starts (seon.turn/act!) in the
  ;; transaction of its model call's first facts, agent-wide and never restarting across wakes; every record takes the number in force
- :seon.agent/turn :int
+ :seon.agent/turn [:int {:description "The agent's turn number, agent-wide and never restarting across wakes. See docs/turn.md#the-turn-is-a-number."}]
  :seon.agent/description [:string]
  ;; the model it works for, when its task names none of root's; the client that attached it, when an outside agent's (seon.server/held)
- :seon.agent/model :string
- :seon.agent/holder :string
+ :seon.agent/model [:string {:description "The model the agent works for, when its task names none of root's."}]
+ :seon.agent/holder [:string {:description "The client that attached this agent, when it is an outside agent's."}]
  ;; root's boot it was started in, and when (ms): the agent is live in a root when the boot is that root's and its task is :running
- :seon.agent/boot [:and {:seon.db/index true} :string]
- :seon.agent/started-ms :int
- :seon.agent/ended-ms :int
+ :seon.agent/boot [:and {:seon.db/index true :description "The root boot the agent was started in; it is live in a root when the boot is that root's and its task is running."} :string]
+ :seon.agent/started-ms [:int {:description "When the agent was started, in ms."}]
+ :seon.agent/ended-ms [:int {:description "When the agent ended, in ms."}]
  ;; a test run that failed as a whole (its fork refused, a namespace did not load): the error as data (its type, message and
  ;; data keys), written on the agent's branch by its turn (seon.turn/observe) and retracted when a run answers;
  ;; present only while it is so (seon.ctx.status/status)
- :seon.agent/test-error :seon.error/base
+ :seon.agent/test-error [:and {:description "The error, as data, of a test run that failed as a whole; present only while it is so."} :seon.error/base]
  ;; how its work ended, as the agent writes it on its branch (seon.agent/write-end!), naming its turn: root reads it at judging
  ;; (seon.reconcile/pull-end), and an end whose turn is not past the wake's is none (:no-end)
- :seon.agent/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error]
- :seon.agent/reason :string
- :seon.agent/ended-turn :int
+ :seon.agent/outcome [:enum {:description "How the agent's work ended, as the agent writes it on its branch."} :green :red :waiting :cap :failed :merge-failed :error]
+ :seon.agent/reason [:string {:description "Why the agent's work ended as its outcome says."}]
+ :seon.agent/ended-turn [:int {:description "The turn that the agent's end names."}]
  ;; an entity's own pattern, stored with it from its first change; before that it reads its schema's (its role's). The
  ;; description is what an agent reads beside its pattern (seon.render.ui/pull-front): what it is, the warning, one form that adds
  ;; a join. What a role's pattern must keep is that role's :seon.ctx/required, {attribute what-it-is}, a join's attribute or a
@@ -245,24 +245,24 @@
  ;; its description is what an agent reads beside the clause in its pull view (seon.render.ui/pull-front): what a render is handed
  :seon.render/hiccup [:and {:description "Your own render: the function your page is drawn by in place of your schema's, by its symbol. A render is (f opts node), node the pulled entity, and answers hiccup. opts always holds :seon.render/index, the entity index; name :seon.db/db or :seon.ctx/ctx in its opts contract, [:and :seon.render/opts [:map [:seon.db/db :any]]], to be handed the db at your page's point or your whole pull (as @ctx gives it). It is not handed the page drawn so far; the page at the previous stored point is to come (an owner's ruling), and what the walk drew is (my.render/tree) after it. Try a render on one node at your REPL: (f {:seon.render/index (seon.agent/branch-index)} node). To watch a render you are changing, draw it on your own page: docs/ctx.md#adding-a-datum-and-its-render."} :symbol]
  ;; the doc sections its system message is, when it names its own (docs/render.md#the-models-context-a-cached-prefix-then-the-turn); with none, docs/prompt.md's
- :seon.agent/system [:set {:seon.db/to [:seon.doc/fact]} :seon.db/ref]
+ :seon.agent/system [:set {:seon.db/to [:seon.doc/fact] :description "The doc sections that make up the agent's system message, when it names its own. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."} :seon.db/ref]
  ;; a person's name, a lookup ref, and its presence is what makes an agent a user: a location /user/<name> reads it (docs/users.md#what-each-thing-is)
  :seon.user/name [:and {:seon.db/identity true} :string]
  ;; the agents this one started, a user or an agent alike (docs/users.md#what-each-thing-is)
- :seon.agent/agents [:set {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]
+ :seon.agent/agents [:set {:seon.db/to [:seon.db/agent-fact] :description "The agents this one started. See docs/users.md#what-each-thing-is."} :seon.db/ref]
  ;; the ids of its evals a reader of its page opened (seon.root/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
- :seon.agent/opened [:set :string]
+ :seon.agent/opened [:set {:description "The ids of its evals that a reader of its page opened, kept on main."} :string]
  ;; main's head and its branch's merge base as it last heard them (seon.agent's state :main, :base), the commits the
  ;; page's branch views read, written by its turn, so a cold build draws what the live page does
- :seon.agent/main-commit :uuid
+ :seon.agent/main-commit [:uuid {:description "Main's head as the agent last heard it, the commit that its page's branch views read."}]
  ;; of those mains, the newest whose content (seon.merge/content-datoms) moved: what seon.ctx.status/status reads, as a commit that moved
  ;; none of it, root's note of an agent's status on each eval, changes no answer it gives (docs/render.md#how-the-work-stands)
- :seon.agent/main-program :uuid
- :seon.agent/base-commit :uuid
+ :seon.agent/main-program [:uuid {:description "The newest of those main commits whose content moved, which the agent's status reads. See docs/render.md#how-the-work-stands."}]
+ :seon.agent/base-commit [:uuid {:description "The agent branch's merge base as it last heard it."}]
  ;; the namespace its REPL is in, as its newest eval left it (seon.repl/record-tx: a datom when it moved), so a cold
  ;; build draws what the live page does; before any, where the REPL starts (seon.ctx/current-ns)
- :seon.agent/ns :symbol
+ :seon.agent/ns [:symbol {:description "The namespace the agent's REPL is in, as its newest eval left it."}]
  ;; a member of an agent's record (an eval, a cite, a search, a process) is linked by a ref seon.ctx retracts to remove it from the
  ;; record while the entity stays, so a swap! can bring it back (docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together:
  ;; a membership ref is never required); each still means something alone: the code that ran, what was cited, the query, the process
@@ -328,17 +328,17 @@
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
  ;; :seon.agent/key) and its target's (seon.ref/target-value: an address, a name, an id, a key or a path)
- :seon.cite/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
+ :seon.cite/id [:and {:seon.db/identity true :seon.db/content-id true :description "The cite's identity: the citing entity's identity value and its target's, joined by a space."} :string]
  ;; the citing entity: a task (its text's, written by seon.task/cites-tx with the text) or an agent
  ;; (my.agent/cite!, and :seon.config.agent/cites written when the agent is made)
- :seon.cite/of [:and {:seon.db/to [:seon.task/task-fact :seon.db/agent-fact]} :seon.db/ref]
+ :seon.cite/of [:and {:seon.db/to [:seon.task/task-fact :seon.db/agent-fact] :description "The citing entity: a task or an agent."} :seon.db/ref]
  ;; what it cites: a section, a var, a task, a schema entry, a namespace or a file, written as the lookup of its
  ;; identity (seon.ref/target), which resolves against what the same write made before it; a lookup to nothing is refused,
  ;; :seon.db/no-target (docs/references.md#an-entity-cites)
- :seon.cite/target [:and {:seon.db/to [:seon.doc/fact :seon.db/var-fact :seon.task/task-fact :seon.db/schema-fact :seon.db/ns-fact :seon.db/file-fact]} :seon.db/ref]
- :seon.cite/depth :seon.ref/depth
+ :seon.cite/target [:and {:seon.db/to [:seon.doc/fact :seon.db/var-fact :seon.task/task-fact :seon.db/schema-fact :seon.db/ns-fact :seon.db/file-fact] :description "What it cites: a section, a var, a task, a schema entry, a namespace or a file. See docs/references.md#an-entity-cites."} :seon.db/ref]
+ :seon.cite/depth [:and {:description "How deep the cited target is pulled."} :seon.ref/depth]
  ;; its first mention's place in the citing text (an agent's: the order its cites were written)
- :seon.cite/order :int
+ :seon.cite/order [:int {:description "The place of the cite's first mention in the citing text."}]
  ;; the cite as ctx holds it: what it names joined (a section with its sections below; a var with its
  ;; form and newest callers, each caller with the vars it defines; a task; a schema key's entry; a
  ;; namespace), drawn by its two renders (docs/render.md#a-component-answers-hiccup)
@@ -372,23 +372,23 @@
                        [:seon.cite/depth :seon.cite/depth] [:seon.cite/order :seon.cite/order]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
- :seon.task/id [:and {:seon.db/identity true} :string]
- :seon.task/ns :symbol
- :seon.task/name :string
+ :seon.task/id [:and {:seon.db/identity true :description "The task's identity."} :string]
+ :seon.task/ns [:symbol {:description "The namespace that owns the task."}]
+ :seon.task/name [:string {:description "The task's name within its namespace."}]
  :seon.task/plan [:string]
  :seon.task/instructions [:string]
  :seon.task/proofs [:set {:description "The tests that say this task is done. A proof is a clojure.test deftest in the test namespace of what it proves, built on a small test world, never the live db: (my.test/world). Register one with (my.task/update! :seon.task/proofs conj (quote ns-test/name)). (prove) runs your proofs and every test your change reaches, and records the verdicts; clojure.test/run-test-var records nothing."} :qualified-symbol]
- :seon.task/needs [:set {:seon.db/to [:seon.task/task-fact]} :seon.db/ref]
+ :seon.task/needs [:set {:seon.db/to [:seon.task/task-fact] :description "The tasks that this task needs."} :seon.db/ref]
  ;; the example sessions its agent reads before its own (seon.ctx.wire/request): agents keyed "example/<id>"
  ;; (seon.ctx.session/session-tx), drawn by the renders that draw its own session
  :seon.task/examples [:set {:seon.db/to [:seon.db/agent-fact] :description "The example sessions its agent reads before its own: refs to agents keyed \"example/<id>\", finished sessions of other tasks, which the model reads as messages (seon.ctx.wire/request) and the page draws with seon.render.ui/examples. See docs/tasks.md#a-task-names-example-sessions."} :seon.db/ref]
- :seon.task/branch :keyword
- :seon.task/model :string
- :seon.task/execution [:and {:seon.db/index true} [:enum :held :running :cancelled]]
- :seon.task/kind [:enum :user :work :design :implement :test :merge :whole]
+ :seon.task/branch [:keyword {:description "The branch the task's work is on."}]
+ :seon.task/model [:string {:description "The model that works the task."}]
+ :seon.task/execution [:and {:seon.db/index true :description "Whether the task is held, running or cancelled."} [:enum :held :running :cancelled]]
+ :seon.task/kind [:enum {:description "What kind of work the task is."} :user :work :design :implement :test :merge :whole]
  ;; measured evidence a task starts from: its last failed run's conflicts, unmerged keys, red
  ;; proofs and problem (seon.reconcile/hold-tx), read by the run root releases next
- :seon.task/evidence [:map
+ :seon.task/evidence [:map {:description "The measured evidence the task starts from: its last failed run's conflicts, unmerged keys, red proofs and problem."}
                       [:from :seon.task/id] [:conflicts [:vector :seon.merge/conflict]]
                       [:unmerged [:vector :string]] [:red [:vector :qualified-symbol]]
                       ;; why the run failed: its reasons or its death, as the reconciler stated it
@@ -401,16 +401,16 @@
  ;; what it waited on, how long, its pid), written with the task; then the cause its worker records
  ;; (my.task/update!): what it was, the evidence captured (sample, lsof, ps), whether it is a bug, and the
  ;; defect task filed for one. Its proofs read it (seon.stall-proofs)
- :seon.task/cause [:map [:stall [:map [:agent :keyword] [:task {:optional true} :seon.task/id] [:quiet-ms :int] [:pid {:optional true} [:maybe :int]]
+ :seon.task/cause [:map {:description "The cause of a stall task: the stall root observed, what it was, the evidence captured, whether it is a bug and the defect task filed for it."} [:stall [:map [:agent :keyword] [:task {:optional true} :seon.task/id] [:quiet-ms :int] [:pid {:optional true} [:maybe :int]]
                                  [:last-op {:optional true} [:maybe :seon.agent/last-op]]
                                  ;; the api's open asks ([rid kind agent]) and the test service's state (seon.prove/state-view) when it stalled
                                  [:api {:optional true} :map]]]
                    [:what {:optional true} :string] [:evidence {:optional true} :map]
                    [:bug? {:optional true} :boolean] [:defect {:optional true} :seon.task/id]]
  :seon.task/gone [:and {:description "What the task's text cites whose cites ended with their targets (each target's identity value), written by the write that ended them and cleared when the text is written again. See docs/references.md#task-references."} [:vector :any] :seon.db/plain]
- :seon.task/failure [:map [:reason :string] [:counterexample {:optional true} :string] [:agent {:optional true} :string] [:turn {:optional true} :int]]
+ :seon.task/failure [:map {:description "The failure the task was held or marked failed with: its reason, counterexample, agent and turn."} [:reason :string] [:counterexample {:optional true} :string] [:agent {:optional true} :string] [:turn {:optional true} :int]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
- :seon.task/declared :string
+ :seon.task/declared [:string {:description "The declaration that a task file last stated for this task, as EDN."}]
  ;; a task may hold config keys as its overrides, by their own names; each key is defined once, by its own schema
  ;; (seon.config.agent.edn, seon.config.merge.edn), never listed here (an attribute is named by one entity schema)
  :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:seon.task/id
@@ -453,7 +453,7 @@
  ;; ---- how a task's work stands and ended: attributes of the task, on main, written when root starts and judges it ----
  ;; (docs/reconcile.md#a-task-holds-how-its-work-ended). A task's history is its attributes' previous values (d/history).
  ;; the agent that works it now (an agent moves between a session's tasks, seon.reconcile/stage-boundary)
- :seon.task/agent [:and {:seon.db/to [:seon.db/agent-fact] :seon.db/index true} :seon.db/ref]
+ :seon.task/agent [:and {:seon.db/to [:seon.db/agent-fact] :seon.db/index true :description "The agent that works the task now."} :seon.db/ref]
  ;; the work's state, which the compare-and-swap guards (seon.reconcile/cas-tx). nil: no agent yet. finished: the task is done
  ;; (seon.task/finished); judged: judged, root has the next step to take (the merge's turn or its gate); failed: its agent died
  ;; or was lost, a death (seon.problems/report). :running, an agent works it; :parked, its agent waits for a message and its
@@ -462,32 +462,32 @@
  ;; merge; :gate, a merge whose process tests are to run first; :merged, in main; :behind, a merge main moved under; :dead, its
  ;; agent died; :lost, its process was gone; :killed, stopped for a cancel, a hold or a changed environment; :refused, root refused
  ;; the spawn; :closed, judged when its task was no longer running, or held for root
- :seon.task/outcome [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ready :gate} :seon.status/failed #{:dead :lost}}
+ :seon.task/outcome [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ready :gate} :seon.status/failed #{:dead :lost} :description "The state of the task's work, which the compare-and-swap guards."}
                      [:enum :running :parked :told :cap :done :ready :gate :merged :behind :dead :lost :killed :refused :closed]]
  ;; why it stands so: the agent's own words, or root's (the death, a refused start)
  ;; the branch of the agent that launched this task (my.task/launch!), told how it ends (seon.reconcile/tell-tx)
  ;; who started it, a user or an agent: its agent, when it starts, is in that one's :seon.agent/agents (seon.task/start-tx; docs/users.md#what-each-thing-is)
- :seon.task/started-by [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]
- :seon.task/reason :string
+ :seon.task/started-by [:and {:seon.db/to [:seon.db/agent-fact] :description "Who started the task, a user or an agent. See docs/users.md#what-each-thing-is."} :seon.db/ref]
+ :seon.task/reason [:string {:description "Why the task stands as its outcome says: the agent's own words, or root's."}]
  ;; what the done rule said was not done when root judged it (seon.reconcile/done-explain); the same again holds the task
  ;; (seon.reconcile/judgment); retracted when a person continues the task
- :seon.task/reasons [:vector [:map [:reason :keyword] [:symbol {:optional true} :symbol] [:key {:optional true} :string] [:behind {:optional true} :int]]]
+ :seon.task/reasons [:vector {:description "What the done rule said was not done when root judged the task."} [:map [:reason :keyword] [:symbol {:optional true} :symbol] [:key {:optional true} :string] [:behind {:optional true} :int]]]
  ;; the merges-branch commit holding the source files a merge rewrote (seon.source, the
  ;; :git effect), or why the commit was refused; recorded by its asker, the reconciler
- :seon.task/commit :string
- :seon.task/merged-t :int
+ :seon.task/commit [:string {:description "The merges-branch commit holding the source files a merge rewrote, or why the commit was refused."}]
+ :seon.task/merged-t [:int {:description "The t at which the task's branch was merged."}]
  ;; the process tests its change reaches, which its merge runs on a checkout (root's ruling, 2026-10-22), never an agent's fork;
  ;; the gate's run of them (each test's status); the changed namespaces the gate could not read from the branch, each with why:
  ;; it tested another tree than the one that merges, so none of its results counts as a pass
- :seon.task/deferred [:set :qualified-symbol]
- :seon.task/deferred-results [:map-of :qualified-symbol :seon.proof/status]
- :seon.task/gate-unread [:vector [:map [:ns :symbol] [:reason :string]]]
+ :seon.task/deferred [:set {:description "The process tests that the task's change reaches, which its merge runs on a checkout."} :qualified-symbol]
+ :seon.task/deferred-results [:map-of {:description "The gate's run of the deferred tests, each test's status."} :qualified-symbol :seon.proof/status]
+ :seon.task/gate-unread [:vector {:description "The changed namespaces that the gate could not read from the branch, each with why."} [:map [:ns :symbol] [:reason :string]]]
  ;; measured at its end from the branch (seon.merge/three-way's :ours): the printed program keys it changed since its merge base
  ;; (each seon.edn/encode of a :seon.merge/program-key, so generated ones are too); the octopus merge admits on them
- :seon.task/changed [:set [:string {:gen/elements ["[:var app/a]" "[:var app.b/c]" "[:form \"app/1-2\"]" "[:ns app]"]}]]
+ :seon.task/changed [:set {:description "The printed program keys that the task changed since its merge base, which the octopus merge admits on."} [:string {:gen/elements ["[:var app/a]" "[:var app.b/c]" "[:form \"app/1-2\"]" "[:ns app]"]}]]
  ;; its merge entries (:seon.merge/conflict) and the keys still unmerged on the branch
- :seon.task/conflicts [:vector :seon.merge/conflict]
- :seon.task/unmerged [:set :string]
+ :seon.task/conflicts [:vector {:description "The task's merge entries that conflict."} :seon.merge/conflict]
+ :seon.task/unmerged [:set {:description "The keys still unmerged on the task's branch."} :string]
  ;; a test's name and status in a proof's results (a gate's, seon.proofs/results); verdicts themselves are cached by
  ;; digest outside the store (docs/merging.md#verdicts-are-a-cache)
  :seon.proof/status [:enum :pass :fail :error :none]
@@ -591,11 +591,11 @@
  ;; and on each recipient's branch whole when its next act delivers it (seon.agent/deliver!). from names a sender: an agent's
  ;; key, "root" or "owner"; to names its recipients by agent entity, a ref each, and a recipient's branch holds its own ref
  ;; only: removing the message from a ctx retracts that ref (the entity stays, so it is not delivered again)
- :seon.message/id [:and {:seon.db/identity true :seon.db/content-id true} :string]
- :seon.message/from [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact] :seon.db/index true} :seon.db/ref]
- :seon.message/to [:set {:seon.db/to [:seon.db/agent-fact] :seon.db/index true} :seon.db/ref]
+ :seon.message/id [:and {:seon.db/identity true :seon.db/content-id true :description "The message's identity."} :string]
+ :seon.message/from [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact] :seon.db/index true :description "Who sent the message: an agent, or root or the owner."} :seon.db/ref]
+ :seon.message/to [:set {:seon.db/to [:seon.db/agent-fact] :seon.db/index true :description "The agents that receive the message, a ref each."} :seon.db/ref]
  ;; when root's writer recorded it (ms): it orders and decides nothing (docs/clocks.md)
- :seon.message/sent-ms :int
+ :seon.message/sent-ms [:int {:description "When root's writer recorded the message, in ms; it orders and decides nothing. See docs/clocks.md."}]
  :seon.message/body [:string]
  :seon.message/fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/message :seon.render/openai-compat seon.ctx.wire/message-msgs} [:seon.message/id :seon.message/id] [:seon.message/from :seon.message/from]
                      [:seon.message/to {:optional true} :seon.message/to] [:seon.message/sent-ms {:optional true} :seon.message/sent-ms]
@@ -641,35 +641,35 @@
  ;; reasoning and how it stopped are the model's words; its tokens, sent-hash and split are bookkeeping, which the agent's
  ;; pull leaves out (docs/ctx.md#the-agents-entity-holds-its-work); the debug page and the turn's header read it ----
  ;; the digest of the agent's key and n, the turn it answers (seon.lib/call-id); an outside read of the context (seon.turn/context-block), of the key and "read-<k>"
- :seon.model-call/id [:and {:seon.db/identity true} :string]
+ :seon.model-call/id [:and {:seon.db/identity true :description "The model call's identity: the digest of the agent's key and n."} :string]
  ;; the agent whose request it is, and the turn it answers (a model's: :seon.agent/turn when it started) or the read's own
  ;; counter k (an outside read moves no turn)
- :seon.model-call/agent [:and {:seon.db/to [:seon.db/agent-fact] :seon.db/index true} :seon.db/ref]
- :seon.model-call/n :int
+ :seon.model-call/agent [:and {:seon.db/to [:seon.db/agent-fact] :seon.db/index true :description "The agent whose request the model call is."} :seon.db/ref]
+ :seon.model-call/n [:int {:description "The turn that the call answers, or the read's own counter for an outside read."}]
  ;; who read the context: the agent's model, or an outside agent through the server (a read is a call)
- :seon.model-call/origin [:enum :model :outside]
+ :seon.model-call/origin [:enum {:description "Who read the context: the agent's model, or an outside agent through the server."} :model :outside]
  ;; the model's reply: its text (a reply that called nothing is a message to the user), its reasoning as returned and the
  ;; provider's finish_reason; truncated, the reply stopped at max-tokens and its text was cut
  :seon.model-call/reply [:string]
  :seon.model-call/reasoning [:string]
- :seon.model-call/truncated :boolean
+ :seon.model-call/truncated [:boolean {:description "True when the reply stopped at max-tokens and its text was cut."}]
  ;; a call that failed: the typed error as data (the agent's end holds it too, :seon.agent/error)
- :seon.model-call/error :seon.error/base
- :seon.model-call/forms :int
- :seon.model-call/ms :int
- :seon.model-call/tokens :int
+ :seon.model-call/error [:and {:description "The typed error, as data, of a call that failed."} :seon.error/base]
+ :seon.model-call/forms [:int {:description "How many forms the reply held."}]
+ :seon.model-call/ms [:int {:description "How long the call took, in ms."}]
+ :seon.model-call/tokens [:int {:description "The tokens of the call, as the provider reported them."}]
  ;; the prompt tokens the provider served from its prefix cache, and those it did not, as its
  ;; usage reported them (absent when it did not: nobody measured them)
- :seon.model-call/cache-hit-tokens :int
- :seon.model-call/cache-miss-tokens :int
+ :seon.model-call/cache-hit-tokens [:int {:description "The prompt tokens that the provider served from its prefix cache; absent when it did not report them."}]
+ :seon.model-call/cache-miss-tokens [:int {:description "The prompt tokens that the provider did not serve from its prefix cache; absent when it did not report them."}]
  ;; the model that answered
- :seon.model-call/model :string
+ :seon.model-call/model [:string {:description "The model that answered."}]
  ;; what the reader's context was built from, never its text (a model call stores its basis,
  ;; not its prompt): the commit it read, its task, run and turn, the observations no db
  ;; holds (the proofs' results, red assertions, reasons, the run's errors), whether the
  ;; branch's unmerged entries show, and the last evaluations' transcript while no earlier turn
  ;; shows them. seon.ctx.wire/render makes the exact user message from it on that commit.
- :seon.model-call/basis [:map [:commit :uuid] [:t {:optional true} :int] [:task :seon.task/id]
+ :seon.model-call/basis [:map {:description "What the reader's context was built from, never its text: the commit it read, its task, turn and observations no db holds."} [:commit :uuid] [:t {:optional true} :int] [:task :seon.task/id]
                    [:turn :int] [:max-turns :int] [:origin :seon.model-call/origin]
                    [:merge? {:optional true} :boolean]
                    ;; the agent whose record the request renders (its key)
@@ -678,7 +678,7 @@
                    [:model {:optional true} :string]]
  ;; a hash of the bytes a request sent (seon.lib/digest of its messages, seon.turn/act!): the debug page draws a turn again from
  ;; its records at its commit with today's renders, and says when its redraw hashes to something else (docs/render.md#the-debug-page-is-the-wire-request)
- :seon.model-call/sent-hash [:string {:min 16 :max 16}]
+ :seon.model-call/sent-hash [:string {:min 16 :max 16 :description "A hash of the bytes that the request sent. See docs/render.md#the-debug-page-is-the-wire-request."}]
  :seon.model-call/fact [:map {:seon.db/attributes true :seon.render/hiccup seon.render.ui/model-call-view :seon.render/openai-compat seon.ctx.wire/model-call-msgs}
                           [:seon.model-call/id :seon.model-call/id] [:seon.model-call/agent {:optional true} :seon.model-call/agent]
                           [:seon.model-call/n {:optional true} :seon.model-call/n] [:seon.model-call/origin {:optional true} :seon.model-call/origin]
