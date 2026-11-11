@@ -320,7 +320,7 @@
                                        {:ok true :exists false})))
       ;; a tree's branch dropped once no proof of it runs (seon.root/prove-tree!; the owner's ruling, 2026-11-11): only a tree-<id>
       ;; branch, never another; one already gone answers so
-      :drop-tree-branch (reply st (cond (not (re-matches #"tree-[0-9a-f]{40}" (name (:branch m)))) (refused (str "not a tree's branch: " (:branch m)) {})
+      :drop-tree-branch (reply st (cond (not (pdb/tree-branch? (:branch m))) (refused (str "not a tree's branch: " (:branch m)) {})
                                         (exists? (:branch m)) (do (d/delete-branch! conn (:branch m)) {:ok true :dropped true})
                                         :else {:ok true :dropped false}))
       :clone-branch (do (d/branch! conn (:from m) (:branch m))
