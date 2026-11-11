@@ -3742,6 +3742,26 @@
       (is (nil? (r/render-of (seon.db/index) v nil)))
       (is (str/includes? (pr-str (r/hiccup {:seon.render/index (seon.db/index)} v)) ":n")))))
 
+(deftest a-value-that-is-hiccup-is-drawn-on-the-page
+  ;; docs/render.md#a-value-draws-itself: an agent's call of a render at its REPL (seon.render.ui/pull-front, whose contract answers
+  ;; :seon.render/hiccup-value) answers hiccup; its eval names that schema from the contract alone, its value is drawn on the page as
+  ;; html with the data folded under it, and the model reads the value as the data it is, as before
+  (let [[_ branch eid] (paged-dbs)
+        k "a3"
+        v (ui/pull-front {:seon.ctx/ctx (d/pull branch '[*] eid) :seon.render/index (seon.db/index)})
+        code "(seon.render.ui/pull-front opts)"
+        rec (seon.repl/record-details code {:value v} {})
+        db (d/db-with branch (seon.repl/record-tx {:seon.agent/key k} "h1" (seon.task/sender "a3")
+                                                  (merge rec {:seon.eval/call (seon.task/call-ref k 1) :seon.eval/response {:handle 'result/h1 :value (get-in rec [:seon.eval/response :value])}})))
+        html (component-html db "evaluation-h1")
+        read (pr-str (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "h1"])))]
+    (is (= :seon.render/hiccup-value (:seon.eval/schema rec)) "the eval names the schema the called render's contract answers")
+    (is (some? html) "the eval, a component of the page")
+    (is (str/includes? html "<h1>a3 as data</h1>") (str "the value drawn as html: " html))
+    (is (re-find #"(?s)<details><summary>show as data</summary>.*:section" html) "and under it, folded, the value as data")
+    (is (str/includes? read "[:section") "the model reads the value as data")
+    (is (not (str/includes? read "<h1>")) "never as html")))
+
 (deftest an-agents-own-draw-replaces-roots-at-the-same-revision
   ;; docs/render.md#a-value-draws-itself: root draws a live agent's page first, from its branch, and root holds no render the agent defined; the agent's answer must reach the page though each process counts revisions of its own
   (let [page (fn [u] (filter #(= "x" (:id %)) (:seon.render/units (ui/page-chrome {:units [u] :view "a1" :tab :chat} :a1))))
