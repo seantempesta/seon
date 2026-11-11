@@ -2220,6 +2220,24 @@
     (is (str/includes? t ":form/src") "a ref followed: what the form entity holds")
     (is (str/includes? (text :var/name) "A real value:") "an attribute that is no ref: a real value")))
 
+(deftest a-cited-schema-that-is-no-attribute-shows-its-form-and-its-renders
+  ;; found reading one task's turn-1 request, 2026-11-11: a plan naming :seon.render/process ("a schema naming its renders") was told
+  ;; "An attribute your plan names. It holds :any." (the last keyword a regex found in the form), and its agent spent five turns finding
+  ;; how a schema declares its render. A key the db stores no attribute for is an entity's schema or a value's: its form, whole, and
+  ;; the renders its properties name
+  ;; the form as a schema file holds it (the stored :schema/form is that text)
+  (let [form "[:map {:seon.render/hiccup seon.render.ui/problems :seon.render/model seon.render.ui/problems-model} [:t :int] [:classes :map]]"
+        db (d/db-with (db-with-program) [{:schema/key :seon.problems/report :schema/form form}
+                                         {:schema/key :seon.db/agent-fact :schema/form "[:map {:seon.db/attributes true} [:seon.agent/key :seon.agent/key]]"}])
+        text (fn [k] (seon.render/part-text ['seon.render.ui/cite {} (seon.render.ui/cite-hiccup db {:seon.cite/depth :doc :seon.cite/target (d/pull db '[*] [:schema/key k])})]))
+        t (text :seon.problems/report)]
+    (is (not (str/includes? t "An attribute your plan names")) t)
+    (is (str/includes? t "A value's schema your plan names") t)
+    (is (str/includes? t "seon.render.ui/problems") "the render it names for a page")
+    (is (str/includes? t "seon.render.ui/problems-model") "and the one that prints it for the model")
+    (is (str/includes? t ":seon.render/hiccup") "its form whole, as the pull holds it")
+    (is (str/includes? (text :seon.db/agent-fact) "An entity's schema your plan names") "an entity schema says it is one")))
+
 (deftest proofs-of-one-namespace-show-its-example-once
   ;; docs/render.md#how-the-work-stands: seen 2026-11-06 on a task with four unwritten proofs: its namespace's example four times,
   ;; and every scaffold naming the first proof
