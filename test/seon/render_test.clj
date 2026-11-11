@@ -4450,3 +4450,11 @@
     (is (not (str/includes? r "proof-red")) "no keyword read raw")
     (is (= "root restarted" (:reason (ui/standing {} {:seon.task/outcome :cap :seon.task/reason "root restarted"})))
         "a reason with no data behind it is its string")))
+
+;; docs/render.md#how-the-work-stands: a proof's verdict is what its last run saw at that run's program, not its state now (Tests' task
+;; seon.render/a-verdict-shown-is-at-the-tests-digest; Data model: outside a status, a verdict reads as at its last run), so the agent's
+;; state never says green now of a test edited since
+(deftest the-agents-proofs-read-as-at-their-last-run
+  (let [html (h/html (ui/agent-state {:seon.ctx/ctx {:db/id 1 :seon.agent/task {:seon.task/id "demo/g" :proved {'demo-test/g-test {:seon.test/status :green}}}}
+                                      :seon.db/db (ts/test-db)}))]
+    (is (str/includes? html "1 of 1 proofs green at their last run") html)))
