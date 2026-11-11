@@ -127,8 +127,4 @@ Proof: an agent whose change stales a section reads, in its status, each section
   :seon.task/plan "Data model's real task, 2026-11-11 (finding 10): a (require ...) at the REPL is warned 'not program ... goes in its namespace's ns form' with no form that does it. The warning names the ns form to edit, as an edit! form ready to evaluate (seon.repl/edit! of the namespace's ns form, the require added), as other findings carry their fix. Proof: a require at the REPL answers a :seon.repl/fix holding an edit! form that, evaluated, makes the namespace's ns form require it."
   :seon.task/kind :work
   :seon.task/proofs #{seon.repl-test/a-require-at-the-repl-answers-the-edit-that-records-it}}
- {:seon.task/name "a-cites-part-shows-forms-not-templates"
-  :seon.task/plan "Data model's real task, 2026-11-11 (finding 12): the cite's part on the page shows 'A real call: (my.agent/doc-of ~x)', a macro's syntax-quote template, and a search hit with no docstring shows '(defn- doc-view' as its description. A cite part shows a call form an agent can evaluate (the template's unquotes read as the var's arglist names) and a hit with no docstring says it has none. Proof: a cited macro's part holds no '~', and a docstring-less hit's description is its arglist."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.render-test/a-cites-part-shows-a-callable-form}}
 ]
