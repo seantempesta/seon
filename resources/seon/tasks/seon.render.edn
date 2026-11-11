@@ -1,4 +1,8 @@
-[ {:seon.task/name "a-merge-conflict-shows-on-the-page"
+[ {:seon.task/name "a-verdict-shown-is-at-the-tests-digest"
+  :seon.task/plan "Owner: Web (seon.render.ui). Found 2026-11-11: a test's verdict is a fact on its var entity (:seon.test/status with :seon.test/digest, seon.proofs), and two readers show the last recorded status by name whatever its digest: a task's proof states (seon.render.ui, the :proved verdicts) and the proof story (story-rows). A verdict recorded at another program (an earlier digest, or tonight's empty-inputs digests: seon.prove/one-digest-whichever-runner-plans-it) is then shown as the test's state now. Plan: each reader compares the fact's :seon.test/digest with the test's digest now (seon.agent's plan of the branch, or the digest the fact's run recorded for the head) and shows \"not run at this program\" when they differ, never the old status. Proof to write: a task whose proof's verdict is at another digest is drawn not-run, not green."
+  :seon.task/kind :work
+  :seon.task/proofs #{}}
+ {:seon.task/name "a-merge-conflict-shows-on-the-page"
   :seon.task/plan "What exists: the agent's status part (`seon.render.ui/status-hiccup`) draws each unmerged entry with its key, yours and main's text and the forms that settle it; a task's merge conflicts (:seon.task/conflicts: key, kind, base, ours, theirs) are drawn nowhere with their base, and the run entry (`seon.render.ui` line showing N conflicts) and the problems banner show only a count. Correct: a declared html render of :seon.merge/conflict with its three sides, shown from the run entry and the task's page as well as the agent's status."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/a-merge-conflict-shows-its-three-sides}}
