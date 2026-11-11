@@ -158,6 +158,17 @@ A script this branch holds (``bin/root``, at that name or its absolute path) cha
 - What arrives: before your first turn your page whole, as the call ``(my.render/page p)`` and its answer, and before each later turn where something on your page moved ``(my.render/diff p0 p1)``, only what moved, as edits by name (docs/render.md#a-change-is-edits-by-name), each a call in your conversation like your own (docs/render.md#the-render-is-an-eval). Your own evals and replies are your conversation, never repeated in a component. An eval runs once, when you send it: nothing is evaluated again for you.
 - Attached from outside, a `seon_context` read shows the page as a turn does: the same calls and their results, in your conversation.
 
+## Looking at what you pulled
+
+A pull is data, and one function gives a pulled entity as its data model: ``(my.db/pulled @ctx)``. It answers `{:schema :source :clauses :unasked :held-unasked :renders}`:
+
+- `:schema` is the entity schema that names it, and `:source` where its pattern came from (`:entity`, its own; `:schema`, its schema's).
+- `:clauses` is the pattern clause by clause. An attribute's clause holds its `:value` (nil when the pull holds nothing for it). A join's holds `:members`, how many it joined (0 when it was asked and is empty), its `:pattern` (a schema's name already read as the pattern it stands for) and `:sub`, each sub-clause with how many members hold it.
+- `:unasked` is what its schema names that the pattern does not ask; `:held-unasked` what the entity holds on your branch that the pattern does not ask.
+- `:renders` names the render that draws it for a person and the one that makes its messages for the model.
+
+A node joined inside another's pull was pulled by the sub-pattern at its path: read a member with the join's `:pattern`, ``(my.db/pulled (:seon.agent/task @ctx) (:pattern j))``. A clause with no value was asked on a db that holds nothing for it: on your own branch that is every fact main keeps about you (your status, your branch), since a pull reads the one db it is made on. The pull view of a page lays this same map out (```seon.render/pulled```, the one producer), so what a person sees there and what you read here are one thing.
+
 ## Finding your way
 
 The program as your branch records it answers where things are, so read before you write.

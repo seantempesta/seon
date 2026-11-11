@@ -2690,6 +2690,43 @@
     (is (str/includes? front ":seon.agent/_agents") "a join it asks, with its members: who started it")
     (is (str/includes? front "does not ask") "what its schema names beside")))
 
+(deftest an-entity-as-its-data-model-has-one-producer
+  ;; docs/render.md#an-entity-may-name-its-own-render: seon.render/pulled is the one reading of a pulled entity as its data model, which the
+  ;; pull view lays out and an agent calls at its REPL (my.db/pulled): each clause with what the pull holds, a join asked and empty as 0
+  ;; members (never a missing clause), a sub-pattern given by a schema's name read as that schema's pattern, what the schema names and
+  ;; the entity holds that the pattern does not ask, and the renders that draw it
+  (let [k "inspect/a1"
+        db (:db-after (d/with (ts/test-db)
+                              [{:seon.agent/key k :seon.agent/task {:seon.task/id "lab/inspect"} :seon.agent/turn 1}
+                               {:seon.task/id "lab/inspect" :seon.task/ns 'app.x :seon.task/name "inspect" :seon.task/plan "A plan."
+                                :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-inspect}
+                               {:seon.model-call/id (str k "/1") :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n 1 :seon.model-call/reply "I will look."}
+                               {:seon.eval/id "e1" :seon.eval/agent [:seon.agent/key k] :seon.eval/by {:seon.agent/key k} :seon.eval/call [:seon.model-call/id (str k "/1")]}]))
+        a (seon.db/eid db :seon.agent/key k)
+        ix (seon.db/index)
+        t (:tree (seon.ctx/build ix db a :b))
+        m (r/pulled db ix t nil)
+        by (into {} (map (juxt :key identity)) (:clauses m))]
+    (is (= :seon.db/agent-fact (:schema m)))
+    (is (= :schema (:source m)) "no pattern of its own: its schema's")
+    (is (= 1 (:value (by :seon.agent/turn))) "an attribute's clause holds what the pull holds")
+    (is (nil? (:value (by :seon.agent/status))) "an attribute asked and not held is a clause with no value")
+    (is (= 0 (:members (by :seon.message/_to))) "a join asked and empty is 0 members, never a missing clause")
+    (is (= 1 (:members (by :seon.eval/_agent))))
+    (is (= {:clause :seon.eval/id :held 1} (first (filter #(= :seon.eval/id (:clause %)) (:sub (by :seon.eval/_agent))))) "a sub-clause says how many members hold it")
+    (is (= {:clause :seon.eval/code :held 0} (first (filter #(= :seon.eval/code (:clause %)) (:sub (by :seon.eval/_agent))))) "and 0 for one none holds")
+    (is (some #(= :seon.task/plan (:clause %)) (:sub (by :seon.agent/task))) "a sub-pattern given by a schema's name is read as the pattern that schema declares")
+    (is (contains? (set (:unasked m)) :seon.agent/holder) "what its schema names and the pattern does not ask")
+    (is (= [] (:held-unasked m)) "everything this entity holds is asked")
+    (is (= {:hiccup 'seon.render.ui/agent :model 'seon.ctx.wire/agent-msgs} (:renders m)))
+    (let [mt (r/pulled db ix (:seon.agent/task t) (:pattern (by :seon.agent/task)))]
+      (is (= :given (:source mt)) "a joined node is read by the sub-pattern it was pulled by")
+      (is (= :seon.task/task-fact (:schema mt)))
+      (is (some #(= :proved (:key %)) (:clauses mt)) "a join held under its :as is found there"))
+    (let [mo (r/pulled db ix {:db/id a :seon.agent/key k :seon.ctx/pattern [:seon.agent/key :seon.ctx/pattern]} nil)]
+      (is (= :entity (:source mo)) "an entity holding its own pattern is read by it")
+      (is (= [:seon.agent/task :seon.agent/turn] (:held-unasked mo)) "what the entity holds on the db that its pattern does not ask"))))
+
 (deftest an-own-renders-part-is-the-models-unless-marked-for-the-page
   ;; docs/render.md#an-entity-may-name-its-own-render: the lists a walk reads as parts (seon.render/page-lists, what the model reads) hold
   ;; the pull view's front, a part like any, and not the stage's, which its render marks for the page alone (red before: the pull view's

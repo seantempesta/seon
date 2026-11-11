@@ -1755,25 +1755,19 @@
             (coll? v) (str (count v) " values") :else (print/text v)))
 
 (defn- pull-clause
-  "Pattern clause x of pulled entity e as the pull view draws it: what it asks (an attribute, or a join and its own pattern) and what the
-  pull holds for it, the transaction its datom was written in when the pull holds that (:seon.ctx/tx), a join's members by count with the
-  sub-pattern's clauses as each member answers them (n of the members hold it). See docs/render.md#an-entity-may-name-its-own-render."
-  {:malli/schema [:=> [:cat :any :any] :any]}
-  [x e]
-  (let [attr (fn [k] (if (vector? k) (first k) k))
-        tx (fn [k] (get-in e [:seon.ctx/tx (attr k)]))
-        leaf (fn [k] (let [v (get e (attr k))]
-                       [:li [:code (print/text k)] " " (pulled-summary v) (when-let [t (tx k)] (str " · tx " t))
-                        (when (coll? v) [:details [:summary "value"] [:pre (print/text v)]])]))]
-    (cond
-      (map? x) (for [[k sub] x :let [v (get e (attr k))
-                                      ms (cond (and (map? v) (:db/id v)) [v] (map? v) (vec (vals v)) (sequential? v) (vec v) :else [])]]
-                 [:li [:code (print/text k)] " " (str (count ms) (if (= 1 (count ms)) " member" " members"))
-                  ;; a join's own pattern, a vector of clauses (a recursion depth or a single clause is one clause)
-                  (into [:ul] (for [y (if (sequential? sub) sub [sub]) :let [ks (if (map? y) (keys y) [y])] k2 ks :let [a2 (attr k2)]]
-                                [:li [:code (print/text (if (map? y) {k2 '...} k2))] " " (str (count (filter #(some? (get % a2)) ms)) " of " (count ms))]))
-                  (when (seq ms) [:details [:summary "members"] [:pre (print/text ms)]])])
-      :else [(leaf x)])))
+  "Clause m of an entity's data model (seon.render/pulled) as the pull view draws it: what it asks and what the pull holds for it, the
+  transaction of its datom when the pull holds that; a join by its members' count, the pattern its sub-pattern stands for (a schema's name
+  read as that schema's pattern) clause by clause with how many members hold each, and the members themselves (held, what the pull holds
+  at the clause's key) folded under it, never cut. It lays the map out and computes nothing. See
+  docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat :map :any] :any]}
+  [{:keys [clause value tx members sub] :as m} held]
+  (if (contains? m :members)
+    [:li [:code (print/text clause)] " " (str members (if (= 1 members) " member" " members"))
+     (into [:ul] (for [{c :clause n :held} sub] [:li [:code (print/text c)] " " (str n " of " members)]))
+     (when (pos? members) [:details [:summary "members"] [:pre (print/text held)]])]
+    [:li [:code (print/text clause)] " " (pulled-summary value) (when tx (str " · tx " tx))
+     (when (coll? value) [:details [:summary "value"] [:pre (print/text value)]])]))
 
 (defn pull-front
   "Entity pull c presented as its data model (docs/render.md#an-entity-may-name-its-own-render): where its pattern comes from (its own
@@ -1789,17 +1783,14 @@
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx ix :seon.render/index}]
   (let [e (ratom/realize c)
-        s (render/entity-schema ix e nil)
-        own? (some? (:seon.ctx/pattern e))
-        p (render/entity-pattern ix e)
-        asked (into #{} (mapcat (fn [x] (if (map? x) (map #(if (vector? %) (first %) %) (keys x)) [(if (vector? x) (first x) x)]))) p)
-        unasked (when s (remove asked (pdb/attributes-of ix s)))]
+        {:keys [schema source clauses unasked renders]} (render/pulled nil ix e nil)]
     [:section
      [:h1 (str (or (:seon.agent/key e) (:seon.user/name e) (:db/id e)) " as data")]
-     [:p "Schema " [:code (str s)] " · its pattern is " (if own? "its own (:seon.ctx/pattern on the entity)" "its schema's")
-      " · " (count p) " clauses"]
+     [:p "Schema " [:code (str schema)] " · its pattern is " (if (= :entity source) "its own (:seon.ctx/pattern on the entity)" "its schema's")
+      " · " (count (render/entity-pattern ix e)) " clauses"]
+     [:p "Drawn for a person by " [:code (str (:hiccup renders))] (when (:model renders) (list " · for the model by " [:code (str (:model renders))]))]
      [:h2 "What the pattern asks, and what the pull holds"]
-     (into [:ul] (mapcat #(pull-clause % e)) p)
+     (into [:ul] (map #(pull-clause % (get e (:key %)))) clauses)
      [:h2 (str "What its schema names that the pattern does not ask (" (count unasked) ")")]
      (into [:ul] (for [a unasked] [:li [:code (print/text a)]]))
      [:details {:data-as "conversation" :data-preserve-attr "open"} [:summary [:span {:data-when "closed"} "Show as the conversation"] [:span {:data-when "open"} "Show as data"]]]]))
