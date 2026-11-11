@@ -1125,7 +1125,7 @@
 (defn- repair-problem
   "Why an eval call's code may not run as the forgiving reader repaired it (seon.reader/forgive's repairs of code), or nil: a repair
   that only adds closers at the end is what the code plainly meant, and runs; one that drops text, comments a line out or inserts
-  inside the form changes what the form does (loop D2-again, 2026-11-11: a swap!'s lines were commented out and the let it was in ran
+  inside the form changes what the form does (in a loop, a swap!'s lines were commented out and the let it was in ran
   as nothing), so the call is not run, and its answer names the repairs. See docs/prompt.md."
   {:malli/schema [:=> [:cat :string [:sequential :map]] [:maybe :seon.error/base]]}
   [code repairs]
