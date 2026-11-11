@@ -1630,10 +1630,10 @@
     (is (= [{:seon.agent/task [:a :b] :seon.agent/key2 [:c]} :seon.agent/key]
            (render/expanded (seon.db/index) [{:seon.agent/task [:a] :seon.agent/key2 [:c]} :seon.agent/key {:seon.agent/task [:b :a]}]))
         "merged at the first clause that asked it, key by key, each clause once")
-    (is (str/includes? (str (try (render/expanded (seon.db/index) [{:seon.agent/agents [:seon.agent/key]} {:seon.agent/agents 2}]) nil
+    (is (str/includes? (str (try (render/expanded (seon.db/index) [{:seon.agent/agents 3} {:seon.agent/agents 2}]) nil
                                  (catch clojure.lang.ExceptionInfo e (ex-data e))))
-                       "asked twice")
-        "a join asked twice where one is a depth is refused, never guessed")))
+                       "asked with 2 depths")
+        "a join asked with two depths is refused, never guessed")))
 
 (deftest the-documented-form-names-the-role-and-stores-two-clauses
   ;; docs/ctx.md#changing-it-swap: the form :seon.ctx/pattern's description tells an agent to run names its role's pattern by the
@@ -1648,6 +1648,35 @@
     (is (= [:seon.db/agent-fact {:my.ns/_of [:my.ns/text]}] stored (:seon.ctx/pattern (d/pull db' [:seon.ctx/pattern] [:seon.agent/key k])))
         "two clauses: the role's name and the join added")
     (is (= "lab/ctx" (:seon.task/id task)) "and its pull still holds its task")))
+
+(deftest a-depth-asks-the-plain-join-beside-it-at-its-last-level
+  ;; docs/ctx.md#the-pattern: a plain join of the same key asked beside a depth is what the join asks at its last level, where the depth
+  ;; has run out (seon.render/expanded): entries to the depth, and below the last of them only what the plain join asks, here their ids,
+  ;; so an entry says how many are below it and nothing is cut silently
+  (let [ks ["depth/a" "depth/b" "depth/c" "depth/d" "depth/e"]
+        db (:db-after (d/with (ts/test-db) (into (mapv (fn [x] {:seon.agent/key x :seon.agent/turn 1}) ks)
+                                                 (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/agents #{{:seon.agent/key y}}}))))
+        ix (seon.db/index)
+        down #(first (vals (:seon.agent/agents %)))
+        tree (fn [p] (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "depth/a") :b p)))
+        refused (fn [p] (str (try (render/pattern ix p) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))))
+        n (seon.config/value :seon.config.render/agent-tree-depth)]
+    (let [t (tree [:seon.agent/key {:seon.agent/agents [:db/id]} {:seon.agent/agents 2}])
+          last-full (down t)]
+      (is (= ["depth/a" "depth/b"] (mapv :seon.agent/key [t last-full])) "entries to the depth: the entity and one level more")
+      (is (= (pdb/eid db :seon.agent/key "depth/c") (:db/id (down last-full))) "the last full level holds the ids below it")
+      (is (nil? (:seon.agent/key (down last-full))) "and nothing else of them"))
+    (is (= (render/pattern ix [:seon.agent/key {:seon.agent/agents [:seon.agent/key {:seon.agent/agents [:db/id]}]}])
+           (render/pattern ix [:seon.agent/key {:seon.agent/agents 2} {:seon.agent/agents [:db/id]}]))
+        "either order: the joins written out")
+    (let [t (tree [:seon.agent/key {:seon.agent/agents [:db/id]} {:seon.agent/agents :seon.config.render/agent-tree-depth}])
+          levels (take-while some? (iterate down t))]
+      (is (= (subvec ks 0 n) (vec (keep :seon.agent/key levels))) "a config key's value, the same way")
+      (is (nil? (:seon.agent/key (last levels))) "below the last, ids alone"))
+    (is (str/includes? (refused [:seon.agent/key {:seon.agent/agents 2} {:seon.agent/agents 3}]) "asked with 2 depths") "two depths: refused")
+    (is (str/includes? (refused [:seon.agent/key {:seon.agent/agents [:db/id]} {:seon.agent/agents 2} {:seon.agent/agents [:seon.agent/key]}])
+                       "a depth and 2 plain joins")
+        "a depth and two plain joins: refused, saying what is allowed")))
 
 (deftest a-join-asks-its-enclosing-pattern-again-to-a-depth
   ;; docs/ctx.md#the-pattern: a join's sub-pattern may be a depth, a positive integer or a config key naming one: the enclosing pattern

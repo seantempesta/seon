@@ -1248,15 +1248,18 @@
   {:malli/schema [:=> [:cat :any] [:maybe :int]]}
   [sub] (cond (int? sub) sub (depth? sub) (config/value sub)))
 
+(declare again)
+
 (defn expanded
   "Raw pattern p with each top-level clause that names an entity schema (in the entity index ix) spliced in its place by the pattern
   that schema declares (`schema-property`), itself expanded; every other clause as it stands, and a clause the splice repeats once.
   So [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}] is the agent schema's pattern and that join. A join asked twice
   by the exact same key (the role's {:seon.agent/task :seon.task/task-fact} and an agent's own {:seon.agent/task [...]}) is one join,
   at the first clause that asked it, whose sub-pattern is both (a schema's name read as its declared pattern), expanded; key by key
-  for a clause holding several. What every reader of a raw pattern reads; the stored :seon.ctx/pattern stays raw. Throws
+  for a clause holding several. A join asked as a depth and beside it one plain join asks the plain one at its last level, written
+  out here (`again`): [:a {:j [:id]} {:j 2}] is [:a {:j [:a {:j [:id]}]}]. What every reader of a raw pattern reads; the stored :seon.ctx/pattern stays raw. Throws
   :seon.ctx/invalid-pattern naming the clause when a schema it names declares no pattern, its pattern reaches itself (seen: the
-  schemas spliced on the way), or a join asked twice is a depth in one of them. See docs/ctx.md#the-pattern."
+  schemas spliced on the way), or a join is asked with two depths, or with a depth and two plain joins. See docs/ctx.md#the-pattern."
   {:malli/schema [:function [:=> [:cat :map [:sequential :any]] [:vector :any]]
                   [:=> [:cat :map [:sequential :any] [:set :qualified-keyword]] [:vector :any]]]}
   ([ix p] (expanded ix p #{}))
@@ -1269,28 +1272,38 @@
                                 (distinct))
                        p)
          as-pattern (fn [sub] (if (keyword? sub) (or (schema-property ix sub :seon.ctx/pattern) (bad (str sub " declares no pattern") sub)) sub))
-         ;; join k's two sub-patterns as one
-         both (fn [k a b] (if (or (depth? a) (depth? b))
-                            (bad (str "the join " k " is asked twice and one of them is a depth: ask it once") {k b})
-                            (expanded ix (vec (concat (as-pattern a) (as-pattern b))) seen)))]
-     ;; out: the clauses so far; at: each join key asked so far, at the index of the clause that asked it first
-     (:out (reduce (fn [{:keys [out at] :as acc} x]
-                     (if-not (map? x)
-                       (update acc :out conj x)
-                       (let [{out :out fresh :fresh} (reduce (fn [r [k sub]] (if-let [i (at k)] (update-in r [:out i k] #(both k % sub)) (assoc-in r [:fresh k] sub)))
-                                                             {:out out :fresh {}} x)]
-                         (if (seq fresh)
-                           {:out (conj out fresh) :at (into at (for [k (keys fresh)] [k (count out)]))}
-                           {:out out :at at}))))
-                   {:out [] :at {}} spliced)))))
+         allowed "a join is asked once, or as plain joins that merge, or as one depth and beside it at most one plain join, its last level"
+         ;; out: the clauses, each join key in the first clause that asked it; subs: every sub-pattern each join key was asked with
+         {:keys [out subs]} (reduce (fn [{:keys [subs] :as acc} x]
+                                      (if-not (map? x)
+                                        (update acc :out conj x)
+                                        (let [fresh (into {} (remove #(contains? subs (key %))) x)]
+                                          (cond-> (assoc acc :subs (reduce (fn [s [k sub]] (update s k (fnil conj []) sub)) subs x))
+                                            (seq fresh) (update :out conj fresh)))))
+                                    {:out [] :subs {}} spliced)
+         ;; each join key as [its sub-pattern, the plain sub-pattern its depth asks at the last level or nil]
+         resolved (into {} (for [[k ss] subs :let [ds (filterv depth? ss) ps (filterv (complement depth?) ss)]]
+                             [k (cond (< 1 (count ds)) (bad (str "the join " k " is asked with " (count ds) " depths: " allowed) {k ss})
+                                      (and (seq ds) (< 1 (count ps))) (bad (str "the join " k " is asked with a depth and " (count ps) " plain joins: " allowed) {k ss})
+                                      (seq ds) [(first ds) (first ps)]
+                                      (= 1 (count ps)) [(first ps) nil]
+                                      ;; plain joins asked more than once: one join holding them all
+                                      :else [(expanded ix (vec (mapcat as-pattern ps)) seen) nil])]))
+         out (mapv (fn [x] (if (map? x) (into {} (for [[k _] x] [k (first (resolved k))])) x)) out)
+         lasts (into {} (keep (fn [[k [_ b]]] (when b [k b]))) resolved)]
+     ;; a depth with its last level is written out here, where both are known
+     (if (seq lasts) (again out lasts) out))))
 
 (defn- again
   "Pattern p with each of its joins whose sub-pattern is a depth n (`depth`) written out as ordinary nested joins: p again under the
-  join, with that join at n-1 in it, and at n = 1 p without that join. So [:a {:j 2}] is [:a {:j [:a {:j [:a]}]}]. One level of p: a
-  depth inside a sub-pattern is written out when that sub-pattern is read. Throws :seon.ctx/invalid-pattern for a depth below 1. The
-  one reading of a depth, for `pattern` and `pulled`. See docs/ctx.md#the-pattern."
-  {:malli/schema [:=> [:cat [:sequential :any]] [:vector :any]]}
-  [p]
+  join, with that join at n-1 in it, and at n = 1 p without that join. So [:a {:j 2}] is [:a {:j [:a {:j [:a]}]}]. With lasts
+  {join-key sub-pattern} (the plain join `expanded` found asked beside a depth), the join asks that sub-pattern at n = 1 instead: [:a
+  {:j [:id]} {:j 2}] is [:a {:j [:a {:j [:id]}]}]. One level of p: a depth inside a sub-pattern is written out when that sub-pattern
+  is read. Throws :seon.ctx/invalid-pattern for a depth below 1. The one reading of a depth, for `pattern`, `pulled` and `expanded`.
+  See docs/ctx.md#the-pattern."
+  {:malli/schema [:function [:=> [:cat [:sequential :any]] [:vector :any]] [:=> [:cat [:sequential :any] :map] [:vector :any]]]}
+  ([p] (again p {}))
+  ([p lasts]
   (let [p (vec p)
         ;; p with clause i's join k at v, or without that join when v is nil (and without the clause when it held no other)
         at (fn [i k v] (into [] (keep-indexed (fn [j y] (if (= i j) (not-empty (if (nil? v) (dissoc y k) (assoc y k v))) y))) p))]
@@ -1300,11 +1313,12 @@
                                      [k (if-let [n (depth sub)]
                                           (cond (< n 1) (throw (ex-info "pattern: a join's depth is 1 or more"
                                                                         (contract/error :seon.ctx/invalid-pattern #'again "a join's depth is 1 or more" {:clause x})))
-                                                (= n 1) (again (at i k nil))
-                                                :else (again (at i k (dec n))))
+                                                ;; the last level: the plain join asked beside the depth, else p without the join
+                                                (= n 1) (if (contains? lasts k) (get lasts k) (again (at i k nil) lasts))
+                                                :else (again (at i k (dec n)) lasts))
                                           sub)]))
                           x))
-                      p))))
+                      p)))))
 
 (defn- join-targets
   "The entity schemas join [k sub] of a pattern reaches, as the entity index ix says: sub itself when the pattern names a schema there,
@@ -1419,7 +1433,8 @@
   every attribute, else the attributes it names; a top-level entity schema's name, its declared pattern
   in that place (`expanded`); {attr sub} a join, attr as [attr & options], sub a pattern, an entity
   schema's name (its declared one) or a depth, a positive integer or a config key naming one (the
-  enclosing pattern again, `again`)), as the walk takes it: {:star? :attrs
+  enclosing pattern again, `again`; a plain join of the same key beside it is what it asks at its
+  last level)), as the walk takes it: {:star? :attrs
   :joins [{:attr :key :rev? :limit :reverse? :by :sub}]}, each join's attribute read forward, its
   key its :as else the attribute, its limit a count or a config key's value; :attrs also the name a
   reverse :by join reads. Throws :seon.ctx/invalid-pattern naming the clause it cannot read: no
