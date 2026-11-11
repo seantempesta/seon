@@ -903,7 +903,9 @@
         (let [[parts page] (try (enter-agent! {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)]
                                 (finally (end-agent!)))
               shown (:units parts)
-              top (remove :parent shown)
+              ;; in the lists' order the model reads them in (render-ctx-hiccup's), each list's members in the page's order; the page's
+              ;; own unit (its layout's output, seon.render/placed-units' first) is no part
+              top (mapcat (fn [sel] (filter #(and (nil? (:parent %)) (= sel (:container %))) shown)) ["#p-task" "#c-rows"])
               by (into {} (map (juxt :id identity)) shown)
               root-of (fn root-of [u] (if-let [p (by (:parent u))] (root-of p) u))]
           (is (= (remove #{"agent-state" "chat-ask" "chat-end" "page-rules"} (map :id top)) (keys page)) "every component placed in a list, the conversation's too, in order: nothing left out but what is the person's alone, which the model is sent none of")
