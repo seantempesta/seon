@@ -1463,7 +1463,9 @@
   that changed (its text on db, main holding tree's program, is not in the file as the binary's tree has it) is in
   root-reach of db's reach graph, or when db holds no namespace of it (added or gone: what it held is unknown); a path
   of none of these that does not run from the checkout or main (tests, the wiki, task files, bin/'s scripts) is not current. Anything else (tests, the wiki, task files, agent-side code) is current: a process
-  loads it from main's db. The one rule a spawn refusal, the stale-binary row and the gate's build all ask.
+  loads it from main's db. The one rule a spawn refusal, the stale-binary row and the gate's build all ask, and one answer for two
+  trees: a caller holding the tree's own graph (g, the plan's) keeps its answer beside the builds (judged-path), which every later
+  caller reads first, so a boot whose store holds another program (a test's system) never answers otherwise than the plan did.
   Cost: one git diff, one reach graph of db (or g, when the caller holds one), O(changed files' forms).
   See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe :map] [:maybe :string]] [:maybe :map]]
