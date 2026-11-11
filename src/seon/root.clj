@@ -809,6 +809,8 @@
     (case (:op m)
       ;; the test service answered a waiter (seon.prove)
       :prove-answer (deliver-rid st o (:rid m) (:r m))
+      ;; a verdict as it lands, for the run keyed :key: on root's events, which a streaming :prove writes as a line
+      :prove-verdict (do (step/out! o :events (step/event (-> m (dissoc :op) (assoc :type :prove-verdict)))) st)
       ;; the render proc's health of main (:health): its value, held at the counts this api's fold put it at
       ;; (the fold it was asked with, and which it keeps), so it is the same count as root's page's
       :health-answer (deliver-rid st o (:rid m) (:r m))
