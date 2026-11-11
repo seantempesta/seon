@@ -30,13 +30,16 @@
 (deftest a-measure-takes-a-count-of-samples-never-a-time
   ;; task seon.cost/ticks-are-exact: measure repeated a call until 20 ms of CPU time or 25 calls,
   ;; so a fast call took 25 samples and a slow or loaded one 3, and the minimum moved with the
-  ;; machine; it takes calls until :seon.config.proofs/cost-settled in a row allocate no fewer bytes than the least,
-  ;; whatever a call costs
+  ;; machine. A measure is one call (owner, 2026-11-11); given a cap (a call over its estimate, seon.cost/run, or an agent's
+  ;; perf problem) it takes calls until :seon.config.proofs/cost-settled in a row allocate no fewer bytes than the least,
+  ;; whatever a call costs, and says how many it took
+  (let [n (atom 0) m (cost/measure (fn [] (swap! n inc) nil) [])]
+    (is (= 1 @n (:calls (meta m))) "by default: one call"))
+  (let [n (atom 0) m (cost/measure (fn [] (swap! n inc) nil) [] (seon.config/value :seon.config.proofs/cost-max-samples))]
+    (is (<= (inc (seon.config/value :seon.config.proofs/cost-settled)) @n (seon.config/value :seon.config.proofs/cost-max-samples)) "a fast call: a count of calls between the settled count and the cap")
+    (is (= @n (:calls (meta m))) "and the measure says how many"))
   (let [n (atom 0)]
-    (cost/measure (fn [] (swap! n inc) nil) [])
-    (is (<= (inc (seon.config/value :seon.config.proofs/cost-settled)) @n (seon.config/value :seon.config.proofs/cost-max-samples)) "a fast call: a count of calls between the settled count and the cap"))
-  (let [n (atom 0)]
-    (cost/measure (fn [] (swap! n inc) (reduce + (range 200000))) [])
+    (cost/measure (fn [] (swap! n inc) (reduce + (range 200000))) [] (seon.config/value :seon.config.proofs/cost-max-samples))
     (is (<= (inc (seon.config/value :seon.config.proofs/cost-settled)) @n (seon.config/value :seon.config.proofs/cost-max-samples)) "a slow call: the same bounds, whatever it costs")))
 
 (deftest exponent-is-the-log-log-slope

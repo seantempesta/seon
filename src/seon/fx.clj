@@ -290,7 +290,7 @@
   renames: a mode 160000 is a pin), or :seon.fx/io-error with git's words when git cannot diff them (a tree it does not
   hold). Two tree ids' diff never changes, so it is kept beside the checkout's builds (target/tree-diffs/FROM-TO.edn, derived
   data, read before git is asked): the plan that judged a binary current computed it, and root's boot reads it as a file,
-  running no git (clojure.java.shell's futures are threads root does not declare). See docs/source.md#the-binary-records-its-program."
+  running no git (git's cost; every shell is on a fiber, docs/machine.md#processes). See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :string :string :string] [:or [:vector [:tuple :string :string :string]] :seon.error/base]]}
   [root from to]
   (let [f (java.io.File. (str root "/target/tree-diffs/" from "-" to ".edn"))]
@@ -465,12 +465,50 @@
   [path text]
   (if (= path cfg/shipped-file) (cfg/text-refusal text) (unread-text path text)))
 
+(declare git-commit)
+
+(defn- checked-out-at
+  "The worktree of the repository at dir that has ref (refs/heads/...) checked out, or nil (git worktree list --porcelain:
+  each tree's path and its branch). See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
+  [dir ref]
+  (some (fn [block] (let [ls (str/split-lines block)
+                          path (some #(when (str/starts-with? % "worktree ") (subs % 9)) ls)]
+                      (when (some #{(str "branch " ref)} ls) path)))
+        (str/split (git! {} dir ["worktree" "list" "--porcelain"] nil) #"\n\n")))
+
+(defn- commit-in-tree!
+  "Commit files on the branch worktree wt has checked out, through that tree: each file written there, added to its own
+  index and committed as git commit does, so its HEAD, index and files move together. Refused, committing nothing, when
+  its index differs from its HEAD (a change staged there) or a file to write differs there from HEAD (an edit of the
+  tree's own): {:value {:sha :files n}} or :seon.fx/io-error. See docs/source.md#commit-the-merges-branch."
+  {:malli/schema [:=> [:cat :string :map :map] :map]}
+  [wt env {:keys [files message allow-empty? modes]}]
+  (let [paths (vec (sort (keys files)))
+        staged? (not (zero? (:exit (git-run {} wt ["diff-index" "--cached" "--quiet" "HEAD" "--"] nil))))
+        edited (when (seq paths)
+                 (not-empty (str/trim (git! {} wt (into ["status" "--porcelain" "--untracked-files=all" "--"] paths) nil))))]
+    (cond
+      staged? (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: " wt " has changes staged that its HEAD does not hold") {:path wt})
+      edited (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: files the write-back writes differ in " wt " from its HEAD: " (str/replace edited "\n" "; ")) {:path wt})
+      :else
+      (do (doseq [[p text] files :let [f (java.io.File. ^String wt ^String p)]]
+            (.mkdirs (.getParentFile f))
+            (spit f text))
+          (when (seq paths) (git! {} wt (into ["add" "--"] paths) nil))
+          (doseq [[p m] modes :when (and (= "100755" m) (contains? files p))]
+            (git! {} wt ["update-index" "--chmod=+x" "--" p] nil))
+          (git! env wt (cond-> ["commit" "-q" "--no-verify" "-m" message] allow-empty? (conj "--allow-empty")) nil)
+          {:value {:sha (git! {} wt ["rev-parse" "HEAD"] nil) :files (count files)}}))))
+
 (defn git-commit
   "Commit files ({relative path text}) on branch of the repository at dir, with message,
   through git's plumbing: blobs, a tree from the branch's own with the files replaced, a
   commit whose parent is the branch head (a branch not there yet starts at :base, else at dir's HEAD, the
-  commit the running generation's tree checks out), and the ref moved only from that head. No
-  working tree or checkout is touched, so main and every worktree's files stay as they are.
+  commit the running generation's tree checks out), and the ref moved only from that head, so no
+  tree's files are touched. A branch a worktree has checked out (the standing root's jolt/merges in .worktrees/merges) is
+  committed through that tree instead (commit-in-tree!): its files, index and HEAD move together, and a change of that
+  tree's own refuses the commit; moved by plumbing, its HEAD left its index behind. See docs/source.md#commit-the-merges-branch.
   With :allow-empty? and no files it commits the branch's own tree again (an empty commit: a review,
   seon.doc/review-message). Each file is first read as its reader reads it (unreadable), and one that doesn't refuses the commit. :modes ({path git mode}) gives a file's mode, 100644 otherwise. Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
   to write), or :seon.fx/io-error."
@@ -482,7 +520,13 @@
       (if-let [bad (seq (for [[p t] (sort files) :let [why (unreadable p t)] :when why] (str p ": " why)))]
        (error #'seon.fx/git-commit :seon.fx/io-error (str "refused, nothing committed: " (str/join "; " bad)) {:path dir})
        (let [ref (str "refs/heads/" branch)
-            have? (some? (git-try dir ["rev-parse" "--verify" "--quiet" ref]))
+            who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)
+            id-env {"GIT_AUTHOR_NAME" who "GIT_AUTHOR_EMAIL" mail "GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail}]
+        ;; a branch a worktree has checked out moves with that tree's index and files, through the tree (commit-in-tree!):
+        ;; moved by plumbing, the tree's HEAD left its index behind, each merged file a staged deletion
+        (if-let [wt (checked-out-at dir ref)]
+          (commit-in-tree! wt id-env {:files files :message message :allow-empty? allow-empty? :modes modes})
+       (let [have? (some? (git-try dir ["rev-parse" "--verify" "--quiet" ref]))
             parent (git! {} dir ["rev-parse" "--verify" (if have? ref (or base "HEAD"))] nil)
             gp (git! {} dir ["rev-parse" "--git-path" (str "seon-index-" (lib/c-getpid))] nil)
             index (if (str/starts-with? gp "/") gp (str dir "/" gp))]
@@ -492,13 +536,11 @@
             (git! {"GIT_INDEX_FILE" index} dir ["update-index" "--add" "--cacheinfo" (str (get modes path "100644") "," (git! {} dir ["hash-object" "-w" "--stdin"] text) "," path)] nil))
           ;; Seon is the committer and author of its merges (the config's identity): a
           ;; root's HOME is its checkout's target/home, which holds no git identity
-          (let [who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)
-                sha (git! {"GIT_AUTHOR_NAME" who "GIT_AUTHOR_EMAIL" mail "GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail}
-                          dir ["commit-tree" (git! {"GIT_INDEX_FILE" index} dir ["write-tree"] nil) "-p" parent "-m" message] nil)]
+          (let [sha (git! id-env dir ["commit-tree" (git! {"GIT_INDEX_FILE" index} dir ["write-tree"] nil) "-p" parent "-m" message] nil)]
             ;; only from the head read above; a new branch only if none appeared meanwhile
             (git! {} dir ["update-ref" ref sha (if have? parent "0000000000000000000000000000000000000000")] nil)
             {:value {:sha sha :files (count files)}})
-          (finally (.delete (java.io.File. ^String index))))))
+          (finally (.delete (java.io.File. ^String index))))))))
       (catch Throwable e (error #'seon.fx/git-commit :seon.fx/io-error (step/error-msg e) {:path dir})))))
 
 ;; ---- the wiki's history: what each section was last written against -----------------------

@@ -19,7 +19,7 @@ setopt pipefail
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 fail() { print -u2 "update: $*"; print "UPDATE FAILED"; exit 1 }
 # main brought into the write-back tree $1. Its index and files must agree with its HEAD before the merge: a change staged
-# there (a ref moved under a checked-out branch leaves its index behind: task seon.fx/a-write-back-moves-the-checked-out-trees-files)
+# there (a ref moved under a checked-out branch left its index behind, until the write-back committed through that tree: docs/source.md#commit-the-merges-branch)
 # is refused by git's merge, and a merge that did not bring main in is no update. After it, HEAD contains main, or it failed:
 # eight updates on 2026-11-11 said UPDATE OK while the write-back tree stayed at batch 24
 merges_catch_up() {

@@ -681,3 +681,21 @@
      :fixed {:calls 2 :bytes 20000}
      :sizes [10 100 1000]}))
 
+
+(defn styled-output
+  "The input of size n: one component's output of n elements, each with a class (a misfit) and a child marker every tenth (never walked)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any]]}
+  [n] [(into [:section {:id "c"}] (for [i (range n)] (if (zero? (mod i 10)) [:seon.render/child ['x i]] [:p {:class "text-sm" :key i} (str "p" i)])))])
+
+;; docs/render.md#the-hiccup-is-checked
+(deftest the-hiccup-check-costs-the-components-own-output
+  ;; seon.render/misfits reads one component's own output, its elements' attributes once each, never a child's output
+  (cost/proof
+    {:of 'seon.render/misfits :input 'seon.render-cost-test/styled-output
+     :n "elements of one component's output"
+     :work "each element's attributes checked once against the schema, a misfit counted by kind; a child's marker skipped"
+     :growth :linear
+     ;; measured 2026-11-11: 41 calls and 26.4 KB at 10, within 4 calls and 3 KB an element at 100 and 1000 (seon.contract/fits? an element)
+     :per-n {:calls 4 :bytes 3000}
+     :fixed {:calls 5 :bytes 5000}
+     :sizes [10 100 1000]}))

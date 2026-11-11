@@ -170,10 +170,10 @@
   ;; collection, so vec's own bytes depend on whether one ran since the last call: task
   ;; jolt.core/vec-builds-by-reduction.)
   (let [f (fn [] (count (into [] (range 100000))))
-        alone (seon.cost/measure f [])
+        alone (seon.cost/measure f [] (seon.config/value :seon.config.proofs/cost-max-samples))
         busy (allocating-thread)
         g0 (:count (seon.lib/gc-stats))
-        beside (try (seon.cost/measure f []) (finally (end-threads! busy)))
+        beside (try (seon.cost/measure f [] (seon.config/value :seon.config.proofs/cost-max-samples)) (finally (end-threads! busy)))
         gcs (- (:count (seon.lib/gc-stats)) g0)]
     (is (pos? gcs) "the measure beside the allocating thread ran collections")
     (is (<= (Math/abs (- (:bytes beside) (:bytes alone))) 4096.0)
@@ -201,19 +201,20 @@
 (deftest a-measure-is-the-same-beside-another-thread
   ;; the measured call's bytes are the same alone and while another thread allocates
   (let [f (fn [] (reduce + (map leaf (range 1000))))
-        alone (seon.cost/measure f [])
+        alone (seon.cost/measure f [] (seon.config/value :seon.config.proofs/cost-max-samples))
         busy (allocating-thread)
-        beside (try (seon.cost/measure f []) (finally (end-threads! busy)))]
+        beside (try (seon.cost/measure f [] (seon.config/value :seon.config.proofs/cost-max-samples)) (finally (end-threads! busy)))]
     (is (<= (:bytes beside) (* 1.25 (max 1.0 (:bytes alone)))) (str "alone " alone ", beside " beside))))
 
 (deftest a-measure-is-the-call-at-its-steady-state
   ;; task seon.cost/a-call-allocates-the-same-bytes-each-time: a call allocates more on its first calls
   ;; (seon.merge/delta-three-way: 3,776 2,752 1,536 3,584 B over its settled bytes, down to 320 by the
-  ;; 14th); the measure is the settled call's, never one the warm-up is still in
+  ;; 14th); the measure given a cap (a call over its estimate, or a perf problem: one call is the default) is the settled call's, never
+  ;; one the warm-up is still in
   (let [calls (atom 0)
         f (fn [calls] (fn [] (swap! calls inc) (count (vec (range (if (< @calls 10) 3000 100))))))
-        warming (seon.cost/measure (f calls) [])
-        steady (seon.cost/measure (f (atom 100)) [])]
+        warming (seon.cost/measure (f calls) [] (seon.config/value :seon.config.proofs/cost-max-samples))
+        steady (seon.cost/measure (f (atom 100)) [] (seon.config/value :seon.config.proofs/cost-max-samples))]
     (is (< 10 @calls) "the measure went on past the warm-up")
     (is (= (:bytes steady) (:bytes warming)) (str "the warm-up is not the cost: " warming " against " steady))))
 
@@ -223,17 +224,20 @@
   ;; least now and then: seon.cost-test/the-unit-table-is-current, once in three runs)
   (let [calls (atom 0)
         cap (seon.config/value :seon.config.proofs/cost-max-samples)
-        m (seon.cost/measure (fn [] (swap! calls inc) (count (vec (range (- 100000 (* 100 @calls)))))) [])]
+        m (seon.cost/measure (fn [] (swap! calls inc) (count (vec (range (- 100000 (* 100 @calls)))))) [] cap)]
     (is (= cap @calls) "it stopped at its cap")
     (is (= {:calls cap :lowered-at cap} (:unsettled (meta m))) "and marks the answer")
     (is (pos? (:bytes m)))
-    (is (nil? (:unsettled (meta (seon.cost/measure (fn [] (count (vec (range 100)))) [])))) "a settled call carries no mark")))
+    (is (nil? (:unsettled (meta (seon.cost/measure (fn [] (count (vec (range 100)))) [] cap)))) "a settled call carries no mark")
+    (let [calls (atom 0)]
+      (seon.cost/measure (fn [] (swap! calls inc)) [])
+      (is (= 1 @calls) "by default a measure is one call"))))
 
 (deftest a-measure-is-one-number-beside-another-thread
   ;; the same call measured ten times while another thread allocates reads one byte count
   (let [f (fn [] (reduce + (map leaf (range 1000))))
         busy (allocating-thread)
-        counts (try (vec (repeatedly 10 #(:bytes (seon.cost/measure f [])))) (finally (end-threads! busy)))]
+        counts (try (vec (repeatedly 10 #(:bytes (seon.cost/measure f [] (seon.config/value :seon.config.proofs/cost-max-samples))))) (finally (end-threads! busy)))]
     (is (= 1 (count (distinct counts))) (str "bytes " (sort counts)))))
 
 (deftest a-call-is-measured-one-way

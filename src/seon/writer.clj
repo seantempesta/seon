@@ -374,7 +374,7 @@
   A closed :in is the end of the flow: everything taken is committed and flushed, then
   {:op :drained} goes out. Continuous group commit (DECISIONS, Durability is continuous group
   commit): answers
-  leave when their batch is committed in memory; a dirty store with no notice out tells the
+  leave when the store has committed their batch (LMDB's commit, unsynced: every process reads it); a dirty store with no notice out tells the
   flusher {:op :dirty :commits n}, and its {:op :flushed :commits n} makes the store clean
   when n is still the commit count, else the flusher is told again. A :flush? request (an
   outside effect follows) is synced before its answer; a :clean request is answered once the

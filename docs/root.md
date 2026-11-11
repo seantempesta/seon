@@ -13,7 +13,7 @@ Root's procs are declared as data in `resources/seon/system.edn` and started all
 | `:flusher` | `seon.writer/flusher-proc` | the store's sync ([storage](storage.md)) |
 | `:fork-server` | `seon.fork-server/fork-server-proc` | the fork server's command pipe, its events, its standby ([processes](processes.md#the-fork-server)) |
 | `:reconciler` | `seon.reconcile/reconciler-proc` | main's commits, turned into actions ([judging](#runs-and-judging)) |
-| `:prove` | `seon.prove/prove-proc` | the test service's admission: one run at a time per checkout, whoever asks, and its state told to root for a stall's evidence ([merging](merging.md#the-test-service)) |
+| `:prove` | `seon.prove/prove-proc` | the test service: every request to run tests, whoever asks, each (test, digest) item run once for every asker by as many workers as `:seon.config.proofs/test-workers`, and its state told to root for a stall's evidence ([merging](merging.md#the-test-service)) |
 | `:vectors` | `seon.vector/vectors-proc` | main's missing text vectors: sends due texts to `:embed`, writes their vectors through the writer ([vectors](vector.md)) |
 | `:render` | `seon.render.proc/render-proc` | the dashboard's views ([dashboard](dashboard.md)) |
 | `:web` | `seon.web/web-proc` | the HTTP listener and the tabs ([dashboard](dashboard.md)) |
@@ -30,7 +30,7 @@ In order: the store is opened and main resumed as it is, reading no file and no 
 
 Tasks of an earlier boot still `:running` are reaped as `:lost` ("root restarted") by the reconciler's first pass.
 
-`seon.root/stop!` drains the graph and first writes `:seon.root/stopped` (`{:boot :cause :at-ms}`), so every clean end says why. Its drain ends the boot fork server's process group at once (```seon.fork-server/release!```), never waiting for the server to read its socket's EOF: a server still warming (its indexes decoded, its tests loaded, ~35 s on a loaded machine) reads nothing until it is done, and every stop of a young root waited for that (26-32 s, 2026-11-10); a stop is now its close and joins (0.13-0.35 s measured). Its answer says how the server ended (`:drained :ended`, `:group-ended`). `bin/root start` runs a root detached on this checkout's ports; `bin/root next` stops it and starts the next generation's binary on the same store and main ([source](source.md#the-next-generation)).
+`seon.root/stop!` drains the graph and first writes `:seon.root/stopped` (`{:boot :cause :at-ms}`), so every clean end says why. Its drain ends the boot fork server's process group at once (```seon.fork-server/release!```), never waiting for the server to read its socket's EOF: a server still warming (its indexes decoded, its tests loaded, ~35 s on a loaded machine) reads nothing until it is done, and every stop of a young root waited for that (26-32 s, 2026-11-10); a stop is now its close and joins (0.13-0.35 s measured). It answers only once every process the server forked has exited: each it has not reaped (`:forked`, kept from its `:forked` and `:exit` events) is killed and its exit awaited, since an agent killed with the group and reaped later by launchd outlived the stop under load (batch 21's lifecycle step, `:left`). Its answer says how the server ended (`:drained :ended`, `:group-ended`). `bin/root start` runs a root detached on this checkout's ports; `bin/root next` stops it and starts the next generation's binary on the same store and main ([source](source.md#the-next-generation)).
 
 ## Runs and judging
 

@@ -171,7 +171,7 @@ step() {
     ( trap 'kill $S 2>/dev/null; exit 0' TERM; sleep $(( bound / 1000.0 )) 7>&- 3>&- & S=$!; wait $S || exit 0
       "$ROOT/bin/evidence" "$OUT/$name-overran" $sp "$(cat "${SEON_STORE:-/nonexistent}/root.port" 2>/dev/null)" > /dev/null 2>&1
       print -r -- "$bound" > "$OUT/$name.overran"
-      end-tree $sp ) 7>&- 3>&- & W=$!
+      "$ROOT/bin/end-tree" $sp ) 7>&- 3>&- & W=$!
   fi
   wait $sp; local st=$?
   [[ -n $W ]] && { kill $W 2>/dev/null; wait $W 2>/dev/null }
@@ -183,16 +183,6 @@ step() {
     echo "FAILED $name: STEP-OVERRAN, ran past its bound of $(<$OUT/$name.overran) ms (:seon.config.check/step-end-factor times its median); evidence in $OUT/$name-overran"
   elif (( st != expect )); then failed "$name (exit $st, expected $expect, $log)"; echo "FAILED $name (exit $st, expected $expect)"
   else green $name; fi
-  return 0
-}
-# end-tree PID: every process under PID (PID itself, the shell that times the step, reports its end), by their process groups (a held command's is its own), ended at once; bin/check's
-# own group is never one of them. Only what this run started: the tree is read from ps by parent, from PID down.
-end-tree() {
-  local me=$(ps -o pgid= -p $$ | tr -d ' ')
-  local t=($(ps -axo pid=,ppid= | awk -v r="$1" '{ p[$1] = $2 } END { for (x in p) { y = p[x]; while (y != "") { if (y == r) { print x; break } y = p[y] } } }'))
-  local g=($(for k in $t; do ps -o pgid= -p $k; done | tr -d ' ' | sort -u))
-  for x in $g; do [[ $x != $me ]] && kill -KILL -$x 2>/dev/null; done
-  kill -KILL $t 2>/dev/null
   return 0
 }
 

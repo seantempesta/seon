@@ -364,6 +364,37 @@
 
 (declare entity-schema)
 
+(defn misfits
+  "What hiccup output out holds that the intermediate refuses, by kind (:seon.render/misfits): each element's attributes against
+  :seon.render/hiccup-attrs, walked through its own elements and never into a child's (a marker is the child's own output). {} when it
+  fits. See docs/render.md#the-hiccup-is-checked."
+  {:malli/schema [:=> [:cat :any] :seon.render/misfits]}
+  [out]
+  (let [n (volatile! {})
+        kind (fn [k v] (cond (= :class k) :class (= :style k) :style
+                             (and (keyword? k) (= "wire" (namespace k))) :wire
+                             (and (keyword? k) (namespace k)) :qualified
+                             (not (or (string? v) (number? v) (boolean? v) (nil? v) (keyword? v) (symbol? v) (uuid? v))) :value))]
+    ((fn walk [x]
+       (cond (and (vector? x) (= ::child (first x))) nil
+             (and (vector? x) (keyword? (first x)))
+             (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))]
+               (when (and attrs (not (contract/fits? :seon.render/hiccup-attrs attrs)))
+                 (doseq [[k v] attrs :let [c (kind k v)] :when c] (vswap! n update c (fnil inc 0))))
+               (doseq [y (if attrs (drop 2 x) (rest x))] (walk y)))
+             (sequential? x) (doseq [y x] (walk y))
+             :else nil))
+     out)
+    @n))
+
+(defn misfits-by-render
+  "Walk w's misfits (`misfits`) by the render that drew them, each component's own output as it last ran, summed: {render-sym
+  misfits}, the renders that fit left out. What a render still writes that the intermediate refuses, read at the REPL and pinned by
+  seon.render-test/every-render-fits-the-hiccup. See docs/render.md#the-hiccup-is-checked."
+  {:malli/schema [:=> [:cat :map] [:map-of :symbol :seon.render/misfits]]}
+  [w]
+  (reduce (fn [m [_ c]] (let [f (misfits (:out c))] (if (seq f) (update m (symbol (:f c)) #(merge-with + % f)) m))) {} @(:cache w)))
+
 (defn- places
   "The components output out places, in order, [[sel k]]: each child's marker with the selector of the nearest element above it in out
   that has an id (nil when none does), never walking into a child's own output: what `placed` reads of each component, kept on its cache

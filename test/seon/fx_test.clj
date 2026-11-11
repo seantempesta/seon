@@ -481,3 +481,38 @@
     (fx/worker-proc st ::flow/stop)
     (is (= :closed @shut) "stopping the worker closes the call's connection, which ends the reader")
     (let [idle (fx/worker-proc {:kind :t :owner :fx/t :perform identity})] (is (= idle (fx/worker-proc idle ::flow/stop)) "a worker with no call stops as before"))))
+
+(deftest a-write-back-onto-a-checked-out-branch-leaves-that-tree-clean
+  ;; docs/source.md#commit-the-merges-branch, 2026-11-11: the standing root's write-back commits onto
+  ;; jolt/merges, the branch .worktrees/merges has checked out. git-commit moved the ref by plumbing, so that tree's HEAD
+  ;; moved and its index and files stayed at the parent: each merged file a staged deletion, and bin/update's merge of main
+  ;; then refused (or, unchecked, did nothing). A commit onto a branch a worktree has checked out goes through that tree:
+  ;; its files written, its index, its HEAD, one commit. Red before: git status showed "D  src/demo/half.clj"
+  (let [dir (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-checked-out-" (random-uuid))) (.mkdirs)))
+        git (fn [& args] (clojure.string/trim (str (:out (apply clojure.java.shell/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@localhost" args)))))
+        commit #(fx/git-commit {:req (merge {:dir dir :branch "jolt/merges" :message "Seon merge"} %)})]
+    (try
+      (git "init" "-q" "-b" "main")
+      (spit (str dir "/a.txt") "a\n") (git "add" "-A") (git "commit" "-q" "-m" "one")
+      (git "checkout" "-q" "-b" "jolt/merges")
+      (let [parent (git "rev-parse" "HEAD")
+            r (commit {:files {"src/demo/half.clj" "(ns demo.half)\n"}})]
+        (is (some? (get-in r [:value :sha])) (pr-str r))
+        (is (= (get-in r [:value :sha]) (git "rev-parse" "HEAD")) "the checked-out branch moved")
+        (is (= parent (git "rev-parse" "HEAD^")) "by one commit on its old head")
+        (is (= "" (git "status" "--short")) "and the tree is clean: index and files at the new HEAD")
+        (is (= "(ns demo.half)\n" (slurp (str dir "/src/demo/half.clj"))) "the merged file is on disk"))
+      (testing "a change of the tree's own is never overwritten: the write-back refuses and commits nothing"
+        (spit (str dir "/src/demo/half.clj") "edited by hand\n")
+        (let [head (git "rev-parse" "HEAD")
+              r (commit {:files {"src/demo/half.clj" "(ns demo.half)\n(def x 1)\n"}})]
+          (is (= :seon.fx/io-error (:seon.error/type r)) (pr-str r))
+          (is (= head (git "rev-parse" "HEAD")) "nothing committed")
+          (is (= "edited by hand\n" (slurp (str dir "/src/demo/half.clj"))) "the hand's edit kept")))
+      (testing "a branch no tree has checked out is committed by plumbing, every tree's files as they are"
+        (git "checkout" "-q" "--" "src/demo/half.clj")
+        (let [r (fx/git-commit {:req {:dir dir :branch "jolt/sync-x" :message "sync" :files {"b.txt" "b\n"}}})]
+          (is (some? (get-in r [:value :sha])) (pr-str r))
+          (is (= "" (git "status" "--short")) "the checked-out tree untouched")
+          (is (not (.exists (java.io.File. (str dir "/b.txt")))) "and no file written into it")))
+      (finally (seon.lib/remove-tree! dir)))))

@@ -1,0 +1,12 @@
+#!/bin/zsh
+# bin/end-tree PID: every process under PID (not PID itself: its starter's to end or to let report), by their process groups (a held
+# command's is its own), ended at once with SIGKILL; the caller's own group is never one of them. Only what the caller started: the
+# tree is read from ps by parent, from PID down. bin/check ends an overran step's tree with it (PID the shell that times the step,
+# which reports its end), bin/stalls an overran test's shard (then the shard itself), each after bin/evidence
+# (docs/clocks.md#time-decides-the-owners-exceptions).
+me=$(ps -o pgid= -p $$ | tr -d ' ')
+t=($(ps -axo pid=,ppid= | awk -v r="$1" '{ p[$1] = $2 } END { for (x in p) { y = p[x]; while (y != "") { if (y == r) { print x; break } y = p[y] } } }'))
+g=($(for k in $t; do ps -o pgid= -p $k; done | tr -d ' ' | sort -u))
+for x in $g; do [[ $x != $me ]] && kill -KILL -$x 2>/dev/null; done
+kill -KILL $t 2>/dev/null
+exit 0

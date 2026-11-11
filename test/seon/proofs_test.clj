@@ -413,8 +413,8 @@
         thrown (try (runner/plan-of d "tests" false nil store) nil (catch Throwable t t))]
    (try
     (is (some? thrown) "a file that does not read: the plan throws")
-    ;; the full run of 2026-10-26 passed the store's own error (MDB_SEM_UNDO_FULL, scratch stores
-    ;; left open) as this throw, and then read a store it had half made
+    ;; a store's own error (one a full run once passed as this throw) is not the file's, and a plan
+    ;; that throws reads no store it half made
     (is (not (#{:lmdb-error :db-does-not-exist} (:type (ex-data thrown)))) "the file's, not the store's")
     (is (= #{:db} (branches)) "and leaves no branch named for its tree")
     (spit (str d "/src/app/fi_calc.clj") good)
@@ -446,11 +446,11 @@
     (finally (d/release conn) (close-stores! store)))))
 
 (deftest a-process-plans-on-more-scratch-stores-than-its-undo-entries
-  ;; the full run of 2026-10-26: this namespace's scratch stores stayed open (program-db keeps its
-  ;; branch's connection), nine of them by its end, and the shard's next opens failed with
-  ;; MDB_SEM_UNDO_FULL (the LMDB fork then held one of kern.sysv.semume's 10 for each open env's
-  ;; life; it holds none since lmdb 7b7de38f). A test's own store ends with the test, so a process
-  ;; plans on any number in turn: eleven, one past the 10 undo entries (each store made costs ~20 M ticks, its seed)
+  ;; docs/failure-points.md#lmdb-crash-safety: a test's own store ends with the test (program-db keeps its
+  ;; branch's connection, so close-stores! closes it), and a process plans on any number of stores in turn.
+  ;; No system-wide limit stands behind the count any more (docs/failure-points.md#lmdb-locks: no semaphore),
+  ;; so eleven passes with or without the close: task seon.proofs/the-scratch-stores-proof-has-a-mutation
+  ;; (each store made costs ~20 M ticks, its seed)
   (let [d (checkout! {"deps.edn" "{}" "src/app/ps_calc.clj" "(ns app.ps-calc)\n(defn add [a b] (+ a b))\n"
                       "test/app/ps_calc_test.clj" "(ns app.ps-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest adds (is true))\n"})
         planned (vec (for [_ (range 11)

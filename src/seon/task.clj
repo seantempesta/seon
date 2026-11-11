@@ -176,7 +176,7 @@
 
 (defn plan-search-tx
   "The search a task holds of its plan's words, of task t (its tempid or a lookup ref) with plan text plan, or nil for a blank
-  plan: the ranked matches over code and wiki its page draws on the branch's db (seon.render.ui/searched), the place to start
+  plan: the ranked matches over code and wiki its page draws, ranked on main as the agent's branch last merged it (seon.render.ui/searched), the place to start
   before any citation. Every task gets it the one way, whether it was declared in a file or asked for (`create-tx`). The query
   is the plan as written, copied once: the agent owns it after. See docs/tasks.md#a-request-is-one-transaction."
   {:malli/schema [:=> [:cat :any [:maybe :string]] [:maybe :map]]}
