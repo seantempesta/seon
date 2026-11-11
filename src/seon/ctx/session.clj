@@ -107,7 +107,7 @@
   "The conversation of agent record c on db, [record kind] in its order (turn by turn: its messages, its reply, its evals). A record keeps the turn it names as :turn. See docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat :map :seon.host/db] [:vector [:tuple :map :qualified-keyword]]]}
   [c db]
-  (let [placed (ctx/placed-messages db c)]
+  (let [placed (ctx/placed-messages c)]
    (vec (for [[n cid] (ctx/turns c)
              :let [messages (get placed n) evals (ctx/turn-evals c cid)
                    call (get-in c [:seon.model-call/_agent cid])]

@@ -222,7 +222,8 @@
         db (:db-after (d/with (ts/test-db)
                               (into [{:seon.agent/key k :seon.agent/task {:seon.task/id "lab/ctx"}}
                                      {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
-                                      :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
+                                      :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx
+                                      :seon.task/reasons [{:reason :proof-red :symbol 'app.x-test/f0-passes} {:reason :behind :behind 3}]}]
                                     (concat (mapcat eval-tx (range 1 6))
                                             (for [t (range 3)] {:seon.model-call/id (str "lab/ctx#1/" t) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n t})
                                             [{:seon.message/id "m1" :seon.message/from {:seon.agent/key "user"} :seon.message/body "How is it going?"
@@ -230,6 +231,9 @@
         t (:tree (ctx/build (seon.db/index) db (aid db) :b))]
     (is (= "lab/ctx" (get-in t [:seon.agent/task :seon.task/id])) "the task, pulled whole by the agent's own ref")
     (is (= "Make app.x/f0 pass." (get-in t [:seon.agent/task :seon.task/plan])))
+    ;; docs/tasks.md#the-done-rule: what the judge said was not done is data the agent's pull holds, each reason a map its schema names
+    (is (= [{:reason :proof-red :symbol 'app.x-test/f0-passes} {:reason :behind :behind 3}] (get-in t [:seon.agent/task :seon.task/reasons]))
+        "the task's judged reasons, as the maps the done rule answers")
     (is (= 4 (count (:seon.model-call/_agent t))) "every model call, those its records name among them")
     (is (= 5 (count (:seon.eval/_agent t))) "every eval")
     (is (= ["m1"] (names (:seon.message/_to t) :seon.message/id)) "the messages it holds")
@@ -274,7 +278,8 @@
 (defn- pattern-faults
   "The faults in pattern p of entity schema s, at any depth, as [schema thing what]: a `*`, an :as on a join whose attribute (or
   forward attribute, for a reverse one) names its target (:seon.db/to), a ref join its schema's implied pattern does not hold
-  (:seon.agent/agents is the one the implied pattern skips, as it targets its own schema). A join's own pattern is read as its
+  (:seon.agent/agents is the one the implied pattern skips, as it targets its own schema), a join to a history schema (seon.render/history?:
+  the conversation's, placed by when each member was linked) that asks no :tx (docs/ctx.md#the-pattern). A join's own pattern is read as its
   target schema's: the owner of a reverse attribute, the one a :by names, else the first its attribute targets."
   {:malli/schema [:=> [:cat [:maybe [:or :qualified-keyword [:vector :qualified-keyword]]] [:vector :any]] [:sequential :any]]}
   [s p]
@@ -290,6 +295,7 @@
                         target (cond (reverse? a) ((:entity-schemas (pdb/index)) fwd) (:by o) ((:entity-schemas (pdb/index)) (:by o)) :else (let [ts ((:targets (pdb/index)) fwd)] (if (next ts) (vec ts) (first ts))))]
                   fault (concat (when (and ((:targets (pdb/index)) fwd) (:as o)) [[s a :as]])
                                 (when (and ((:targets (pdb/index)) fwd) (not (:by o)) implied (not (implied a)) (not= :seon.agent/agents a)) [[s a :not-implied]])
+                                (when (and (not (:tx o)) (some #(render/history? (pdb/index) %) (if (sequential? target) target [target]))) [[s a :no-tx]])
                                 (when (vector? sub) (pattern-faults target sub)))]
               fault))))
 
@@ -299,7 +305,7 @@
     (is (seq ps) "entity schemas with a pattern")
     (is (some #(= :seon.db/agent-fact (first %)) ps) "the agent's is one")
     (doseq [[s p] ps]
-      (is (= [] (vec (pattern-faults s p))) (str s ": every join keyed by its attribute, no *, each ref join one its refs imply")))))
+      (is (= [] (vec (pattern-faults s p))) (str s ": every join keyed by its attribute, no *, each ref join one its refs imply, each history join asking :tx")))))
 
 ;; docs/ctx.md#the-pattern: a pattern's :tx names the key a transaction is held under, the transaction entity whole (:db/id,
 ;; :db/txInstant, :seon.tx/branch), so what an agent does with it is a short clojure.core form (owner, 2026-11-11: "I want this to work
@@ -557,6 +563,28 @@
   (let [db (:db-after (d/with (seeded n) [[:db/add [:seon.agent/key k] :seon.ctx/pattern [(symbol "*") {[:seon.eval/_agent :as :evals :limit n :reverse true] [(symbol "*")]}]]]))
         c (ctx/build (seon.db/index) db (aid db) :b) rep (d/with db (eval-tx (inc n)))]
     [c (:db-after rep) (:tx-data rep) :b]))
+
+;; docs/ctx.md#the-pattern: a window holds the newest n of a join's members and says, as metadata on the join's value
+;; (:seon.ctx/count), how many the join has in the db, so what it left out is data: at its build, after a member joins
+;; (the window moves, the count grows), after one the window never held leaves (the same members, one fewer joined),
+;; and when the window is not full (the count is the members held)
+(deftest a-window-says-how-many-members-its-join-has
+  (let [windowed (fn [n lim] (:db-after (d/with (seeded n) [[:db/add [:seon.agent/key k] :seon.ctx/pattern [(symbol "*") {[:seon.eval/_agent :as :evals :limit lim :reverse true] [(symbol "*")]}]]])))
+        db (windowed 30 5)
+        c (ctx/build (seon.db/index) db (aid db) :b)
+        held #(count (:evals (:tree %))) joined #(:seon.ctx/count (meta (:evals (:tree %))))
+        more (d/with db (eval-tx 31)) c1 (ctx/patch c (:db-after more) (:tx-data more) :b)
+        less (d/with (:db-after more) [[:db/retract (id db [:seon.eval/id "e3"]) :seon.eval/agent [:seon.agent/key k]]])
+        c2 (ctx/patch c1 (:db-after less) (:tx-data less) :b)
+        short (windowed 30 40) cs (ctx/build (seon.db/index) short (aid short) :b)]
+    (is (= [5 30] [(held c) (joined c)]) "built: the newest five held, thirty joined")
+    (is (= [5 31] [(held c1) (joined c1)]) "a member joined: the window moved, one more joined")
+    (is (= [5 30] [(held c2) (joined c2)]) "a member the window never held left: the same five, one fewer joined")
+    (is (= (keys (:evals (:tree c1))) (keys (:evals (:tree c2)))) "and the window's members are the ones they were")
+    (is (= [30 30] [(held cs) (joined cs)]) "a window not full: the count is the members held")
+    (let [all (:db-after (d/with (seeded 30) [[:db/add [:seon.agent/key k] :seon.ctx/pattern [(symbol "*") {[:seon.eval/_agent :as :evals :reverse true] [(symbol "*")]}]]]))
+          ca (ctx/build (seon.db/index) all (aid all) :b)]
+      (is (= [30 nil] [(held ca) (joined ca)]) "a join with no :limit carries none: its count is its count"))))
 
 (deftest an-agents-own-record-holds-every-message-and-turn
   ;; (the owner, 2026-10-30: "deliver all messages and errors"): an
@@ -1134,7 +1162,7 @@
         evals? (fn [x] (and (map? x) (some #(= :seon.eval/_agent (if (vector? %) (first %) %)) (keys x))))
         [[_ c0] _] (step db #(deref ctx/ctx))
         dropped (some #(when (and (keyword? %) (not (#{:seon.agent/key :seon.ctx/pattern} %)) (some? (get c0 %))) %) default)
-        edited (conj (vec (remove #(or (evals? %) (= dropped %)) default)) '{[:seon.eval/_agent :as :evals :limit 3 :reverse true] [*]})]
+        edited (conj (vec (remove #(or (evals? %) (= dropped %)) default)) '{[:seon.eval/_agent :as :evals :limit 3 :reverse true :tx :at] [*]})]
     (is (some? dropped) "the seeded agent holds an attribute its pattern asks")
     (let [[[_ c] db'] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern edited))]
       (is (= edited (:seon.ctx/pattern (d/entity db' [:seon.agent/key k]))) "the pattern, on the agent's entity")
@@ -1565,23 +1593,29 @@
     (is (not (re-find #"…\d" stored)) "no cut")))
 
 (deftest an-own-pattern-written-before-a-join-asked-its-transaction-still-places-its-messages
-  ;; docs/ctx.md#the-pattern: an entity's own :seon.ctx/pattern stored before its schema's pattern asked a join's transaction
-  ;; ({[:seon.message/_to :tx :at] ..}, batch 44) is read with the transaction keys its schema's pattern asks on the same joins, so its
-  ;; messages are placed by time as any agent's (root's session's, written on its branch before that join, showed none: Web, 2026-11-11)
+  ;; docs/ctx.md#the-pattern: an entity's own :seon.ctx/pattern names its role ([:seon.db/agent-fact <its own clauses>]), so the role's
+  ;; clauses, the transaction its conversation joins ask ({[:seon.message/_to :tx :at] ..}) among them, are read from the schema at every
+  ;; pull: a pattern stored before the role asked :at still places its messages by time. Batch 47's msgorder was reverted because a stored
+  ;; whole copy of the role's pattern (root's session's, before batch 45) placed none; copies go with the store's erase (Data model's
+  ;; ruling, jolt/rolesource) and a pattern that drops a required join's :tx is refused (seon.ctx/lost-required)
   (ts/test-branch!
     (fn [_ conn]
       (let [ix (seon.db/index)
-            schema-p (render/schema-property ix :seon.db/agent-fact :seon.ctx/pattern)
-            ;; the pattern as it was: each [attr :tx k] join key its bare attribute
-            before (walk/postwalk #(if (and (vector? %) (keyword? (first %)) (= :tx (second %))) (first %) %) schema-p)]
-        (is (not= before schema-p) "the old pattern lacks the transaction the schema's asks")
+            before [:seon.db/agent-fact :seon.agent/started-ms]]
+        (is (not-any? #(= :tx %) (flatten (seq before))) "the stored pattern says nothing of a transaction")
         (d/transact conn [{:seon.agent/key "old" :seon.agent/turn 1 :seon.ctx/pattern before}])
         (d/transact conn [{:seon.message/id "m1" :seon.message/to [[:seon.agent/key "old"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "Hello."}])
         (d/transact conn [{:seon.model-call/id (seon.lib/call-id "old" 1) :seon.model-call/agent [:seon.agent/key "old"] :seon.model-call/n 1 :seon.model-call/origin :model :seon.model-call/reply "Hi."}])
+        ;; two more after turn 1's call: the turn after takes them, in the order they were delivered
+        (d/transact conn [{:seon.message/id "m3" :seon.message/to [[:seon.agent/key "old"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "Then this."}])
+        (d/transact conn [{:seon.message/id "m2" :seon.message/to [[:seon.agent/key "old"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "And this."}])
         (let [db @conn
-              c (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "old") :b))]
-          (is (= 1 (count (:seon.message/_to c))) "the pull holds the message")
-          (is (= ["m1"] (mapv second (get (ctx/placed-messages db c) 1))) "and it is placed, at the turn that read it"))))))
+              c (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "old") :b))
+              placed (ctx/placed-messages c)]
+          (is (= 3 (count (:seon.message/_to c))) "the pull holds every message")
+          (is (every? (comp :db/txInstant :at) (vals (:seon.message/_to c))) "each with the transaction that delivered it, its role's :tx :at")
+          (is (= ["m1"] (mapv second (get placed 1))) "the first placed at the turn that read it")
+          (is (= ["m3" "m2"] (mapv second (:pending placed))) "the later two for the turn after, in the order delivered (not by id)"))))))
 
 
 (deftest a-pattern-that-drops-a-required-join-is-refused-naming-it
@@ -1597,7 +1631,12 @@
     (let [said (str (tryit (vec (remove #(join? :seon.message/_to %) p))))]
       (is (str/includes? said "must keep :seon.message/_to") said)
       (is (str/includes? said "the messages sent to you") "and says what the join is"))
-    (is (str/includes? (str (tryit [:seon.agent/key])) "must keep") "a replacement is refused")))
+    (is (str/includes? (str (tryit [:seon.agent/key])) "must keep") "a replacement is refused")
+    ;; a required join keeps the transaction its role asks of each member's link ({[:seon.message/_to :tx :at] ..}): the page and
+    ;; the request order the conversation by it, so a pattern that asks the join without it is refused naming the join and the option
+    (let [bare (fn [x] (if (join? :seon.message/_to x) (into {} (for [[k sub] x] [(if (vector? k) (first k) k) sub])) x))
+          said (str (tryit (mapv bare p)))]
+      (is (str/includes? said "must ask :seon.message/_to with :tx :at") said))))
 
 (deftest a-schemas-name-in-a-pattern-keeps-what-its-pattern-asks
   ;; docs/ctx.md#the-pattern: an entity schema's name among a pattern's own clauses is that schema's pattern in its place
@@ -1633,9 +1672,9 @@
     (is (= [{:seon.agent/task [:a :b] :seon.agent/key2 [:c]} :seon.agent/key]
            (render/expanded (seon.db/index) [{:seon.agent/task [:a] :seon.agent/key2 [:c]} :seon.agent/key {:seon.agent/task [:b :a]}]))
         "merged at the first clause that asked it, key by key, each clause once")
-    (is (str/includes? (str (try (render/expanded (seon.db/index) [{:seon.agent/agents [:seon.agent/key]} {:seon.agent/agents 2}]) nil
+    (is (str/includes? (str (try (render/expanded (seon.db/index) [{:seon.agent/agents 3} {:seon.agent/agents 2}]) nil
                                  (catch clojure.lang.ExceptionInfo e (ex-data e))))
-                       "asked twice")
+                       "asked twice and one of them is a depth")
         "a join asked twice where one is a depth is refused, never guessed")))
 
 (deftest the-documented-form-names-the-role-and-stores-two-clauses
@@ -1651,6 +1690,36 @@
     (is (= [:seon.db/agent-fact {:my.ns/_of [:my.ns/text]}] stored (:seon.ctx/pattern (d/pull db' [:seon.ctx/pattern] [:seon.agent/key k])))
         "two clauses: the role's name and the join added")
     (is (= "lab/ctx" (:seon.task/id task)) "and its pull still holds its task")))
+
+(deftest a-depth-join-asks-its-below-option-under-its-last-level
+  ;; docs/ctx.md#the-pattern: a depth join's :below option is what it asks below its last level (seon.render's again): entries to the
+  ;; depth, and below the last of them only what :below asks, here their ids, so an entry says how many are below it and nothing is cut
+  ;; silently. A :below on a join that is no depth is refused, as is a plain join added beside a depth of the same key
+  (let [ks ["depth/a" "depth/b" "depth/c" "depth/d" "depth/e"]
+        db (:db-after (d/with (ts/test-db) (into (mapv (fn [x] {:seon.agent/key x :seon.agent/turn 1}) ks)
+                                                 (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/agents #{{:seon.agent/key y}}}))))
+        ix (seon.db/index)
+        down #(first (vals (:seon.agent/agents %)))
+        tree (fn [p] (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "depth/a") :b p)))
+        refused (fn [p] (str (try (render/pattern ix p) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))))
+        n (seon.config/value :seon.config.render/agent-tree-depth)]
+    (let [t (tree [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2}])
+          last-full (down t)]
+      (is (= ["depth/a" "depth/b"] (mapv :seon.agent/key [t last-full])) "entries to the depth: the entity and one level more")
+      (is (= (pdb/eid db :seon.agent/key "depth/c") (:db/id (down last-full))) "the last full level holds the ids below it")
+      (is (nil? (:seon.agent/key (down last-full))) "and nothing else of them"))
+    (is (= (render/pattern ix [:seon.agent/key {:seon.agent/agents [:seon.agent/key {:seon.agent/agents [:db/id]}]}])
+           (render/pattern ix [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2}]))
+        "the joins written out, each asked by its key without :below")
+    (let [t (tree [:seon.agent/key {[:seon.agent/agents :below [:db/id]] :seon.config.render/agent-tree-depth}])
+          levels (take-while some? (iterate down t))]
+      (is (= (subvec ks 0 n) (vec (keep :seon.agent/key levels))) "a config key's value, the same way")
+      (is (nil? (:seon.agent/key (last levels))) "below the last, ids alone"))
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :below [:db/id]] [:seon.agent/key]}]) "it takes a depth")
+        "a :below on a join that is no depth: refused, never ignored")
+    (is (str/includes? (refused [:seon.agent/key {[:seon.agent/agents :below [:db/id]] 2} {:seon.agent/agents [:seon.agent/status]}])
+                       "asked twice and one of them is a depth")
+        "a plain join added beside a depth of the same key: refused, saying why")))
 
 (deftest a-join-asks-its-enclosing-pattern-again-to-a-depth
   ;; docs/ctx.md#the-pattern: a join's sub-pattern may be a depth, a positive integer or a config key naming one: the enclosing pattern
@@ -1682,3 +1751,31 @@
                                         (catch clojure.lang.ExceptionInfo e (pr-str (ex-data e))))))]
     (is (str/includes? (str said) "no member is held at") said)
     (is (str/includes? (str said) (str "at their entity ids: " m)) "and it names the keys the join holds")))
+
+
+(deftest a-windowed-join-asked-its-transaction-patches-as-a-build
+  ;; task seon.ctx/a-windowed-join-asked-its-transaction-patches-as-a-build (docs/ctx.md#the-pattern): a window ({[attr :limit n :reverse true :tx :at] ..})
+  ;; patched by a change holds what a fresh build holds, :at included, and a member nothing changed stays the same object. Fixed by f7eea19ab1
+  ;; (seon.ctx/patch's rebuilt member gains its parent join's :tx key, seon.ctx/linked); this is the task's own proof, beside the property
+  ;; test ctx-is-the-record-after-every-transaction, on small-window-pattern (windows of 10, each asking :tx :at)
+  (let [build (fn [db] (ctx/build (seon.db/index) db (aid db) :b))
+        step (fn [c db tx] (let [rep (d/with db tx) c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)] [c' (:db-after rep)]))
+        db (seeded 30 small-window-pattern) c (build db)]
+    (is (every? :at (vals (:evals (:tree c)))) "every member of the window holds its link's transaction")
+    (testing "a ref asserted back in one transaction: its link is written again, so the member holds that transaction; every other member the same object, as a build"
+      (let [e26 (id db [:seon.eval/id "e26"]) e27 (id db [:seon.eval/id "e27"])
+            [c' db'] (step c db [[:db/retract e26 :seon.eval/agent [:seon.agent/key k]] [:db/add e26 :seon.eval/agent [:seon.agent/key k]]])]
+        (is (= (:max-tx db') (get-in (:tree c') [:evals e26 :at :db/id])) "the member's :at is the transaction that wrote its link again")
+        (is (identical? (get-in (:tree c) [:evals e27]) (get-in (:tree c') [:evals e27])) "a member nothing touched: the same object")
+        (is (= c' (build db')) "as a build holds it")))
+    (testing "a member joining a full window: the newest in with its :at, the oldest out, as a build"
+      (let [[c' db'] (step c db (eval-tx 31))]
+        (is (= 10 (count (:evals (:tree c')))))
+        (is (every? :at (vals (:evals (:tree c')))))
+        (is (= c' (build db')) "as a build holds it")))
+    (testing "a member leaving: the window filled from below, each with its :at, as a build"
+      (let [newest (key (first (:evals (:tree c))))
+            [c' db'] (step c db [[:db/retractEntity newest]])]
+        (is (= 10 (count (:evals (:tree c')))))
+        (is (every? :at (vals (:evals (:tree c')))))
+        (is (= c' (build db')) "as a build holds it")))))

@@ -262,7 +262,7 @@
 (defn earlier-agents-tx
   "What a new boot changes about the agents an earlier boot started: each keeps its link to root
   (:seon.agent/root, so root's page holds every boot's sessions, grouped by :seon.agent/boot,
-  seon.root/root-session-pattern); one still shown live (:busy, :idle, :spawning: a root that
+  root's session's pull, through the user's); one still shown live (:busy, :idle, :spawning: a root that
   crashed or was stopped wrote no end) is :dead, its running form retracted; and a stall one showed is over, its :seon.process/stall retracted with its process (an
   open :stalled problem never outlives it)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
@@ -314,7 +314,7 @@
   session is id and the tasks on its branch it needs, transitively (a request's stages, a work
   task and its merge: design agent-loop section 1a), and its agent is the newest started among
   the chain's tasks' agents (:seon.task/agent). Work started for the session continues it, so its
-  conversation and messages go on (seon.ctx/turn-members). One process at a time holds it: a session is one
+  conversation and messages go on (seon.ctx/placed-messages). One process at a time holds it: a session is one
   branch, and root refuses a spawn on a branch a live agent holds. Reads the chain's tasks."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe :string]]}
   [db id]
@@ -377,34 +377,14 @@
                 (for [[id m] (:seon.config.ai/models c)]
                   (-> (dissoc m :seon.config.ai/max-in-flight :seon.config.ai/max-tokens) (assoc :seon.ai.model/id id))))))
 
-(def entry-pattern
-  "What an agent's entry reads where another's pull joins it (seon.render.ui/agent's nested form): its identity, its process's status, its
-  branch and turns, when it started, its name when it is a user (root holds the user too), and its task's id, plan, outcome, reason and who started it. One pattern for every join of
-  :seon.agent/agents (an agent's, a user's, root's). See docs/users.md#whats-on-screen."
-  [:seon.agent/key :seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms
-   {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]}])
-
-(defn agents-join
-  "The join of the agents an entity started, depth levels deep (`entry-pattern` at each), the last level holding each one's started
-  agents as ids alone, so its entry says how many there are below and nothing is cut silently. See docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat :seon.config.render/agent-tree-depth] :map]}
-  [depth]
-  {:seon.agent/agents (conj entry-pattern (if (> depth 1) (agents-join (dec depth)) {:seon.agent/agents [:db/id]}))})
-
-(defn user-pattern
-  "What the user's pull reads: its name and the agents it started, each with the ones it started, to :seon.config.render/agent-tree-depth
-  levels (`agents-join`): its page and every page's agents list are this one pull. Written on the user at each boot (`boot-tx`), so a
-  change of the key reaches it at the next. See docs/users.md#whats-on-screen."
-  {:malli/schema [:=> [:cat] [:vector :any]]}
-  [] [:seon.agent/key :seon.user/name :seon.render/hiccup (agents-join (cfg/value :seon.config.render/agent-tree-depth))])
-
 (defn boot-tx
   "Root's boot: its id for this process lifetime (the config in force, max-running among its keys, is written with it,
   config-tx), and the user, name, an agent with no process, one entity across boots (:seon.user/name, its lookup ref): the evals and messages it
-  makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.root/signed-in). See docs/users.md#what-each-thing-is."
+  makes name it (:seon.eval/by its id), and root's page lists it with its agents; until there is a login, it is who is signed in (:seon.root/signed-in). The user
+  stores no pattern: its pull is its schema's (:seon.db/user-fact's :seon.ctx/pattern). See docs/users.md#what-each-thing-is."
   {:malli/schema [:=> [:cat :string :string] [:vector :any]]}
   [boot name]
-  (into [{:db/id "user" :seon.agent/key name :seon.user/name name :seon.ctx/pattern (user-pattern)}
+  (into [{:db/id "user" :seon.agent/key name :seon.user/name name}
          {:seon.root/id :root :seon.root/boot boot :seon.root/signed-in "user"}]
         (agent-tx (keyword name) {})))
 
