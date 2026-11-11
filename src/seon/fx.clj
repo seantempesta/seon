@@ -290,7 +290,7 @@
   renames: a mode 160000 is a pin), or :seon.fx/io-error with git's words when git cannot diff them (a tree it does not
   hold). Two tree ids' diff never changes, so it is kept beside the checkout's builds (target/tree-diffs/FROM-TO.edn, derived
   data, read before git is asked): the plan that judged a binary current computed it, and root's boot reads it as a file,
-  running no git (clojure.java.shell's futures are threads root does not declare). See docs/source.md#the-binary-records-its-program."
+  running no git (git's cost; every shell is on a fiber, docs/machine.md#processes). See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:=> [:cat :string :string :string] [:or [:vector [:tuple :string :string :string]] :seon.error/base]]}
   [root from to]
   (let [f (java.io.File. (str root "/target/tree-diffs/" from "-" to ".edn"))]
