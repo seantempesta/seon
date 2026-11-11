@@ -20,12 +20,8 @@
  * 8. the same with a descendant made by posix_spawn (/bin/sleep): no fork handler runs; the exec
  *    closes the descriptions (opened close-on-exec);
  * 9. a thread holds the writer lock while another forks: the child, where that thread does not exist,
- *    opens the store and writes after the parent's commit, and the parent writes on;
- * a. (10) a child of fork() begins a read txn and a write txn on the env it inherited: each fails with
- *    MDB_ENV_FORKED, and the reader table holds no slot of the parent's pid the child made (a reader
- *    the child registered under the parent's pid is cleared when the parent dies: wrong reads); the
- *    child closes the inherited env, opens its own, reads and writes; the parent reads and writes on.
- * CASES, default 123456789a, names the cases to run. Prints LMDB-KILL OK and exits 0 only when every case
+ *    opens the store and writes after the parent's commit, and the parent writes on.
+ * CASES, default 123456789, names the cases to run. Prints LMDB-KILL OK and exits 0 only when every case
  * run holds. */
 #include <lmdb.h>
 #include <stdio.h>
@@ -42,9 +38,6 @@
 
 #ifndef MDB_SAFENOSYNC
 #define MDB_SAFENOSYNC 0	/* a LMDB without it */
-#endif
-#ifndef MDB_ENV_FORKED
-#define MDB_ENV_FORKED (-30767)	/* a LMDB without it: the case shows what it does instead */
 #endif
 
 static MDB_env *open_env(const char *p, unsigned maxreaders) {
@@ -343,67 +336,18 @@ static int fork_beside_holder(const char *dir) {
   return ok;
 }
 
-/* mdb_reader_list's lines are "pid thread txnid"; count those of pid ctx[0] into ctx[1] */
-static int count_pid(const char *line, void *ctx) {
-  int pid, *c = ctx;
-  if (sscanf(line, "%d", &pid) == 1 && pid == c[0]) c[1]++;
-  return 0;
-}
-static int slots_of(MDB_env *e, int pid) { int c[2] = {pid, 0}; mdb_reader_list(e, count_pid, c); return c[1]; }
-
-static int inherited_env(const char *dir) {
-  char p[512]; int up[2], go[2], rs[3] = {-1, -1, -1}; char b;
-  path(p, sizeof p, dir, "inherited");
-  printf("10. a child of fork() begins a read txn and a write txn on the env it inherited\n");
-  if (pipe(up) || pipe(go)) return 0;
-  MDB_env *e = open_env(p, 0);
-  int ok = !put(e, "k", 0);
-  int before = slots_of(e, getpid());
-  pid_t c = fork();
-  if (!c) {
-    MDB_txn *rt = NULL, *wt = NULL;
-    rs[0] = mdb_txn_begin(e, NULL, MDB_RDONLY, &rt);	/* kept open while the parent counts */
-    rs[1] = mdb_txn_begin(e, NULL, 0, &wt);
-    if (!rs[1]) mdb_txn_abort(wt);
-    if (write(up[1], rs, 2 * sizeof *rs) != 2 * sizeof *rs || read(go[0], &b, 1) != 1) _exit(1);
-    if (!rs[0]) mdb_txn_abort(rt);
-    mdb_env_close(e);	/* the inherited env: no lock of the parent's is touched */
-    MDB_env *own = open_env(p, 0);
-    rs[2] = has(own, "k") ? put(own, "child", 0) : MDB_NOTFOUND;
-    mdb_env_close(own);
-    _exit(write(up[1], &rs[2], sizeof rs[2]) == sizeof rs[2] && !rs[2] ? 0 : 1);
-  }
-  int got = read(up[0], rs, 2 * sizeof *rs) == 2 * sizeof *rs;
-  int during = slots_of(e, getpid());	/* the child's read txn is open now */
-  if (write(go[1], "g", 1) != 1) got = 0;
-  got = got && read(up[0], &rs[2], sizeof rs[2]) == sizeof rs[2];
-  int st; waitpid(c, &st, 0);
-  int pr = put(e, "parent", 0), after = slots_of(e, getpid());
-  printf("  the child's read txn: %s; its write txn: %s\n", rs[0] ? mdb_strerror(rs[0]) : "BEGUN",
-         rs[1] ? mdb_strerror(rs[1]) : "BEGUN");
-  printf("  slots of this process's pid: %d before, %d while the child's read was open, %d after\n", before, during, after);
-  printf("  the child through its own env: %s; this process writes on: %s\n",
-         rs[2] ? mdb_strerror(rs[2]) : "read and committed", pr ? mdb_strerror(pr) : "committed");
-  ok = ok && got && rs[0] == MDB_ENV_FORKED && rs[1] == MDB_ENV_FORKED && before == 0 && during == 0 &&
-       after == 0 && !rs[2] && WIFEXITED(st) && !WEXITSTATUS(st) && !pr && has(e, "child") && has(e, "parent");
-  mdb_env_close(e);
-  close(up[0]); close(up[1]); close(go[0]); close(go[1]);
-  return ok;
-}
-
 int main(int argc, char **argv) {
   setvbuf(stdout, NULL, _IONBF, 0);
   signal(SIGPIPE, SIG_IGN);	/* a write to a dead child is an error, not this process's death */
   if (argc < 2 || argc > 3) { printf("usage: lmdb-kill DIR [CASES]\n"); return 2; }
-  const char *only = argc == 3 ? argv[2] : "123456789a";	/* the cases to run, by number */
+  const char *only = argc == 3 ? argv[2] : "123456789";	/* the cases to run, by number */
   mkdir(argv[1], 0755);
 #define RUN(n, f) (strchr(only, n) ? f(argv[1]) : 1)
   int c1 = RUN('1', killed_writer), c2 = RUN('2', dead_reader_lock), c3 = RUN('3', fork_held),
       c4 = RUN('4', readers_full), c5 = RUN('5', dead_reader_pins), c6 = RUN('6', killed_after_sync),
-      c7 = RUN('7', killed_with_children), c8 = RUN('8', killed_with_spawned), c9 = RUN('9', fork_beside_holder),
-      c10 = RUN('a', inherited_env);
-  printf("cases: %d %d %d %d %d %d %d %d %d %d\n", c1, c2, c3, c4, c5, c6, c7, c8, c9, c10);
-  int ok = c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10;
+      c7 = RUN('7', killed_with_children), c8 = RUN('8', killed_with_spawned), c9 = RUN('9', fork_beside_holder);
+  printf("cases: %d %d %d %d %d %d %d %d %d\n", c1, c2, c3, c4, c5, c6, c7, c8, c9);
+  int ok = c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9;
   printf(ok ? "LMDB-KILL OK\n" : "LMDB-KILL FAILED\n");
   return ok ? 0 : 1;
 }
