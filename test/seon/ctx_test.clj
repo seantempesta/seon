@@ -1122,14 +1122,22 @@
 
 (deftest an-agent-edits-its-pattern
   ;; the owner, 2026-10-26: "the pull pattern ... stored in the context and the agent can update it":
-  ;; a swap! of :seon.ctx/pattern is written on the agent's entity, and the record is pulled by it
+  ;; a swap! of :seon.ctx/pattern is written on the agent's entity, and the record is pulled by it. It edits its role's
+  ;; pattern in place (2026-11-11: added to, never replaced): here its evals become a window of three and one attribute it
+  ;; held is no longer asked, every join its role requires kept
   (let [db (seeded 20)
-        step (fn [db f] (as-agent! db #(let [r (try (f) (catch clojure.lang.ExceptionInfo e (ex-data e)))] [r @ctx/ctx])))]
-    (let [[[_ c] db'] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern '[* {[:seon.eval/_agent :as :evals :limit 3 :reverse true] [*]}]))]
-      (is (= '[* {[:seon.eval/_agent :as :evals :limit 3 :reverse true] [*]}] (:seon.ctx/pattern (d/entity db' [:seon.agent/key k]))) "the pattern, on the agent's entity")
+        step (fn [db f] (as-agent! db #(let [r (try (f) (catch clojure.lang.ExceptionInfo e (ex-data e)))] [r @ctx/ctx])))
+        default (vec (render/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern))
+        evals? (fn [x] (and (map? x) (some #(= :seon.eval/_agent (if (vector? %) (first %) %)) (keys x))))
+        [[_ c0] _] (step db #(deref ctx/ctx))
+        dropped (some #(when (and (keyword? %) (not (#{:seon.agent/key :seon.ctx/pattern} %)) (some? (get c0 %))) %) default)
+        edited (conj (vec (remove #(or (evals? %) (= dropped %)) default)) '{[:seon.eval/_agent :as :evals :limit 3 :reverse true] [*]})]
+    (is (some? dropped) "the seeded agent holds an attribute its pattern asks")
+    (let [[[_ c] db'] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern edited))]
+      (is (= edited (:seon.ctx/pattern (d/entity db' [:seon.agent/key k]))) "the pattern, on the agent's entity")
       (is (= ["e20" "e19" "e18"] (names (:evals c) :seon.eval/id)) "the record pulled by it: its three newest evals")
-      (is (nil? (:task c)) "and nothing the pattern does not name"))
-    (let [[[r _] _] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern '[* {[:seon.eval/_agent :newest 3] [*]}]))]
+      (is (nil? (get c dropped)) "and nothing the pattern does not name"))
+    (let [[[r _] _] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern (conj default '{[:seon.eval/_agent :newest 3] [*]})))]
       (is (= :seon.ctx/invalid-pattern (:seon.error/type r)) "a pattern the walk cannot read: refused, nothing written"))))
 
 (deftest a-swap-writes-the-record
