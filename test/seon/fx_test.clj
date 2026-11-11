@@ -483,7 +483,7 @@
     (let [idle (fx/worker-proc {:kind :t :owner :fx/t :perform identity})] (is (= idle (fx/worker-proc idle ::flow/stop)) "a worker with no call stops as before"))))
 
 (deftest a-write-back-onto-a-checked-out-branch-leaves-that-tree-clean
-  ;; task seon.fx/a-write-back-moves-the-checked-out-trees-files, 2026-11-11: the standing root's write-back commits onto
+  ;; docs/source.md#commit-the-merges-branch, 2026-11-11: the standing root's write-back commits onto
   ;; jolt/merges, the branch .worktrees/merges has checked out. git-commit moved the ref by plumbing, so that tree's HEAD
   ;; moved and its index and files stayed at the parent: each merged file a staged deletion, and bin/update's merge of main
   ;; then refused (or, unchecked, did nothing). A commit onto a branch a worktree has checked out goes through that tree:

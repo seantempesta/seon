@@ -508,7 +508,7 @@
   commit the running generation's tree checks out), and the ref moved only from that head, so no
   tree's files are touched. A branch a worktree has checked out (the standing root's jolt/merges in .worktrees/merges) is
   committed through that tree instead (commit-in-tree!): its files, index and HEAD move together, and a change of that
-  tree's own refuses the commit; moved by plumbing, its HEAD left its index behind (task 2026-11-11).
+  tree's own refuses the commit; moved by plumbing, its HEAD left its index behind. See docs/source.md#commit-the-merges-branch.
   With :allow-empty? and no files it commits the branch's own tree again (an empty commit: a review,
   seon.doc/review-message). Each file is first read as its reader reads it (unreadable), and one that doesn't refuses the commit. :modes ({path git mode}) gives a file's mode, 100644 otherwise. Answers {:value {:sha :files n}} ({:sha nil :files 0} when there is nothing
   to write), or :seon.fx/io-error."
@@ -523,7 +523,7 @@
             who (cfg/value :seon.config.source/committer-name) mail (cfg/value :seon.config.source/committer-email)
             id-env {"GIT_AUTHOR_NAME" who "GIT_AUTHOR_EMAIL" mail "GIT_COMMITTER_NAME" who "GIT_COMMITTER_EMAIL" mail}]
         ;; a branch a worktree has checked out moves with that tree's index and files, through the tree (commit-in-tree!):
-        ;; moved by plumbing, the tree's HEAD left its index behind, each merged file a staged deletion (2026-11-11)
+        ;; moved by plumbing, the tree's HEAD left its index behind, each merged file a staged deletion
         (if-let [wt (checked-out-at dir ref)]
           (commit-in-tree! wt id-env {:files files :message message :allow-empty? allow-empty? :modes modes})
        (let [have? (some? (git-try dir ["rev-parse" "--verify" "--quiet" ref]))
