@@ -207,7 +207,7 @@
 
 (defn own-message-tx
   "Message mid from from (its sender's lookup, seon.task/sender), sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
-  took it is derived from the transaction that wrote it (seon.ctx/placed-messages). Its sender is written by its identity (seon.task/sender),
+  took it is derived from the transaction that wrote it (seon.ctx/turn-members). Its sender is written by its identity (seon.task/sender),
   an upsert, so a sender made after this branch forked resolves here too. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :string :map :any :int] :seon.db/tx-data]}
   [mid from body sent-ms]
@@ -296,20 +296,14 @@
     (:result (await-reply n {:op :focus :k n :key k}))))
 
 (defn note-costs!
-  "fns (seon.profile/touched of an eval) added to what this agent has measured since its last end (write-end! writes it); nothing in a process that is no agent's. See docs/sharing.md#a-functions-cost-is-a-fact."
+  "fns (seon.profile/touched of an eval) added to what this agent's process has measured since it started, (:fn-costs @state):
+  an observation of this process on this machine, never written to the store; nothing in a process that is no agent's. See docs/sharing.md#a-functions-cost-is-a-fact."
   {:malli/schema [:=> [:cat [:vector :seon.profile/fn-cost]] :any]}
   [fns]
   (when (:store-conn @state)
     (swap! state #(assoc % :fn-costs (profile/accrue (:fn-costs % {}) fns (:eval %))))))
 
 (declare transact!)
-
-(defn- costs-tx
-  "held ({var stats}) added to each function's :seon.fn/stats as db holds it: one value a function that moved, written with the agent's end. Costs held."
-  {:malli/schema [:=> [:cat :seon.host/db :map] :seon.db/tx-data]}
-  [db held]
-  (vec (for [[v st] held]
-         {:seon.fn/var v :seon.fn/stats (profile/stats-sum (:seon.fn/stats (d/entity db [:seon.fn/var v])) st)})))
 
 (defn commit!
   "Commit the writes this agent applied (run-ahead) to its branch, once, through its own
@@ -418,7 +412,7 @@
 (defn deliver!
   "Bring what main holds for this agent onto its branch, committed: its messages (undelivered) and the facts of
   its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). A message
-  on the branch is delivered; the turn that read it is derived from its transaction (seon.ctx/placed-messages). Answers the
+  on the branch is delivered; the turn that read it is derived from its transaction (seon.ctx/turn-members). Answers the
   messages delivered. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
@@ -692,12 +686,9 @@
         now (cond-> {:seon.agent/outcome outcome :seon.agent/ended-turn (turn-now)}
               reason (assoc :seon.agent/reason reason)
               error (assoc :seon.agent/error error)
-              (seq waste) (assoc :seon.agent/waste waste))
-        ;; what its functions cost since its last end, once a run: written every commit it was most of what a turn moved on the branch
-        ;; (354 of about 410 datoms, Context's lab, 2026-11-08), which every diff, patch and merge of the branch then read
-        held (when (contains? (:schema (db)) :seon.fn/stats) (not-empty (:fn-costs @state)))
-        _ (when held (swap! state dissoc :fn-costs))]
-    (transact! (into (cond-> [(assoc now :seon.agent/key k)] held (into (costs-tx (db) held)))
+              (seq waste) (assoc :seon.agent/waste waste))]
+    ;; what its functions cost is not written: an observation of this process, kept live in (:fn-costs @state) (docs/sharing.md#a-functions-cost-is-a-fact)
+    (transact! (into [(assoc now :seon.agent/key k)]
                      (for [a [:seon.agent/reason :seon.agent/error :seon.agent/waste] :when (and (not (contains? now a)) (get e a))]
                        [:db.fn/retractAttribute [:seon.agent/key k] a])))
     (commit!)))
@@ -1733,7 +1724,7 @@
 
 (defn begin-run!
   "This agent begins task on its branch: the agent's record names it as its task (:seon.agent/task: the conversation finds the
-  messages it took by the agent, seon.ctx/placed-messages, and @ctx holds the task), the task running as main holds it. Written as
+  messages it took by the agent, seon.ctx/turn-members, and @ctx holds the task), the task running as main holds it. Written as
   the process starts (init!: an outside agent's branch is cut before root writes its start on main), or by the turn that begins a
   later task of the session; once, nothing written when the branch holds it. The task is running, as main holds it
   (its release, written on main after the branch was cut, read :held here: my.task/current and the

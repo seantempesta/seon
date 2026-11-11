@@ -1,7 +1,7 @@
 (ns seon.server-test
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
-  (:require [clojure.test :refer [deftest is]] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
+  (:require [clojure.test :refer [deftest is]] [jolt.fibers] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
             [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d]))
 
 (deftest each-op-has-its-answer
@@ -212,12 +212,13 @@
   ;; answers the request's text, system prompt first, screen last
   (let [[ctx status sent] (at/in-agent (fn [{:keys [agent task]}]
                                          [{:op :context :agent agent} "(my.task/status)"
-                                          {:op :eval :agent "root"
-                                           :code (str "(let [db (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))]"
-                                                      " {:ns (datahike.api/q '[:find [?n ...] :where [?m :seon.model-call/origin :outside] [?m :seon.model-call/sent-hash _] [?m :seon.model-call/n ?n]] db)"
-                                                      "  :ids (datahike.api/q '[:find [?id ...] :where [?m :seon.model-call/origin :outside] [?m :seon.model-call/id ?id]] db)"
-                                                      "  :turns (datahike.api/q '[:find [?t ...] :where [_ :seon.agent/turn ?t]] db)"
-                                                      "  :key (datahike.api/q '[:find ?k . :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db)})")}]))
+                                          ;; read here, from the store (seon.test-store/read-task-branch): no request to root
+                                          (fn [{:keys [root]}]
+                                            (let [db (ts/read-task-branch root task)]
+                                              {:ns (d/q '[:find [?n ...] :where [?m :seon.model-call/origin :outside] [?m :seon.model-call/sent-hash _] [?m :seon.model-call/n ?n]] db)
+                                               :ids (d/q '[:find [?id ...] :where [?m :seon.model-call/origin :outside] [?m :seon.model-call/id ?id]] db)
+                                               :turns (d/q '[:find [?t ...] :where [_ :seon.agent/turn ?t]] db)
+                                               :key (d/q '[:find ?k . :where [?a :seon.agent/key ?k] [?m :seon.model-call/agent ?a]] db)}))]))
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
     (is (clojure.string/includes? text "(my.render/page {:commit") "the page, as the call Seon made and its answer")
@@ -365,9 +366,7 @@
                         ;; from any namespace, the record by its qualified name (a value the printer
                         ;; would show as an earlier eval's handle is compared here instead)
                         (str "(in-ns 'demo) (= " (pr-str plan) " (get-in @seon.ctx/ctx [:seon.agent/task :seon.task/plan]))")
-                        {:op :eval :agent "root"
-                         :code (str "(:seon.task/plan (datahike.api/entity (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))"
-                                    " [:seon.task/id " (pr-str task) "]))")}
+                        (fn [{:keys [root]}] (:seon.task/plan (d/entity (ts/read-task-branch root task) [:seon.task/id task])))
                         {:op :context :agent agent}]))]
     (is (clojure.string/includes? (:context first-turn) "\"Work.\"") "the first turn shows the plan as it was")
     (is (= plan (:value swapped)) "the next @ctx holds what the swap! wrote")
@@ -591,11 +590,29 @@
                                         [(str "(let [db0 (seon.agent/db) _ (seon.turn/context-block " (pr-str task) " false) db1 (seon.agent/db)]"
                                               " {:t [(:max-tx db0) (:max-tx db1)] :commit [(datahike.api/commit-id db0) (datahike.api/commit-id db1)]})")
                                          {:op :context :agent agent}
-                                         {:op :eval :agent "root"
-                                          :code (str "(let [db (:db @(seon.root/branch-db sys (seon.task/default-branch " (pr-str task) ")))]"
-                                                     " (datahike.api/q '[:find [?c ...] :where [?e :seon.eval/code ?c] [(clojure.string/starts-with? ?c \"(print (seon.turn/context-block\")]] db))")}]))
+                                         (fn [{:keys [root]}]
+                                           (d/q '[:find [?c ...] :where [?e :seon.eval/code ?c] [(clojure.string/starts-with? ?c "(print (seon.turn/context-block")]]
+                                                (ts/read-task-branch root task)))]))
         {:keys [t commit]} (:value looked)]
     (is (some? t) (pr-str looked))
     (is (apply = t) "the branch's t is the same after an observer's read")
     (is (apply = commit) "and nothing was committed for it")
     (is (empty? (:value evals)) "no read left an eval of its print form")))
+
+(deftest a-sessions-checkout-is-proved-on-its-trees-branch
+  ;; docs/merging.md#a-session-proves-through-root (Flow step 3, with Tests): :prove with :checkout and :tree proves the checkout's
+  ;; files on a branch keyed by the tree, every asker of one tree sharing its branch, agent and run key. Red before: :checkout was
+  ;; ignored and the op proved main
+  (let [checkout (seon.config/checkout)
+        root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str checkout))])
+        tree (seon.fx/tree-id checkout)
+        ask #(ts/ask root {:op :prove :checkout checkout :tree tree :names ["seon.ref-test"]})
+        one (ask)
+        two (ask)]
+    (is (clojure.string/starts-with? (str (:key one)) (str "tree-" tree "@")) (pr-str one))
+    (is (= (:key one) (:key two)) "a second ask of one tree is the same run, on the same branch")
+    (is (pos? (+ (or (:pass one) 0) (or (:reused one) 0))) (pr-str one))
+    ;; the owner, 2026-11-11 ("Yes, drop them"): no run of it in flight, the tree's branch is dropped, its agent ended
+    (is (= [] (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
+                                                   :code (str "(filterv #(clojure.string/ends-with? (name %) " (pr-str (str "tree-" tree)) ") (datahike.api/branches (:conn sys)))")}))))
+        "the tree's branch is gone once its runs answered")))

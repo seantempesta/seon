@@ -78,6 +78,22 @@ Of the branch that orders an agent's messages by the transaction the pull carrie
 
 Of `bin/root`, `seon.root`, `my.root` and the `:seon.root/*` keys, after the vocabulary ruling: "Later, with the erase" (by the question tool, relayed). The wiki's wording is corrected as pages are touched; the command, the namespaces and the keys are renamed together, at the erase.
 
+### A merge replays the source's transactions on the branch that receives it: a fact is placed by when it arrived (owner, 2026-11-11)
+
+A fact has two times: when it happened, and when a branch learned it. The model's request must keep the second, or a fact that arrives late is placed in the agent's past and every byte after it moves. The Optimization, Deep fixes and Data model sessions first agreed a merge as one new transaction of the receiving branch; the owner corrected it: "I disagree. We should never record two transaction times that are the same" (relayed by the managing session). So, agreed by the three after that:
+
+- a merge writes the source's net change since the base grouped by the source's transactions, each group as its own transaction of the receiving branch, in source order, all in one commit or none;
+- each such transaction takes a new id and a new time, strictly later than the one before (arrival), and keeps the source's own facts about itself (which branch wrote it, which eval made it);
+- what it brings keeps its entity ids;
+- so a conversation orders by the transaction a pull carries (`:at`) alone, on any branch;
+- a conversation's own requests are made again on the branch that lived it, as of each call's basis commit.
+
+Datahike's merge takes the transaction data its caller gives it, so this is the caller's choice and needs no change in the fork. Not built: it is the rule the one-merge trial is held to. Its cost against one collapsed transaction is being measured. Stated in [the plan](plan.md#the-plan), part 1.
+
+### No derived value is stored; a judgment is run on the db state (owner, 2026-11-11)
+
+Asked whether a merge may skip values that are derived: "But we aren't storing derived values so what's the problem? If we are storing derived values stop that. If the branch says it's all good it's because the underlying data that will be synced means it's okay and when it syncs it should still be okay". And of moving them to a cache beside the store: "This shouldn't be a cache fix btw. I'm talking about the 'all good' being run on the db state" (both relayed by the managing session). It restates his ruling of 2026-10-26. So a value derived from the db's data (a test's status, a total, a standing, a score) is computed on the db state where it is read and its write is deleted; the same data after a sync gives the same answer, so nothing is carried and nothing can be stale. An observation the data cannot give back (a measured cost) is a fact, written by one writer under an identity that names who observed it, so two branches' observations never meet in one attribute. The merge therefore needs no rule for derived data. The digest-keyed verdicts ([merging](merging.md#verdicts-are-a-cache)) stay what they are, how a judgment avoids running a test twice. Read that day: a test's status on its branch, a function's summed cost, a task's cost reports and waste, and a first move's score are each stored today. Stated in [data modeling](data-modeling.md#derived-data-is-a-cache-never-relied-on).
+
 ### Work, then refine, then review; a refinement is tried from the store's history (owner, 2026-11-11)
 
 "For us this will be a task following their work step. Us doing a refine your previous session context and curate the task so it would have been done better. And then we can test those refinements without losing the previous one because we have db history." And of the fork that reflects mid-task: "What if we take advantage of our ability to fork sessions and make edits to the context? It's cheap from a tokens perspective since it's mostly cached data and we can inject a mini task at the end ... So lets say after 10 turns we do this reflect and improve step". Stated in [the plan](plan.md#the-plan), part 2; not built.

@@ -1604,10 +1604,10 @@
     (agent/commit!)))
 
 (defn- read-at
-  "The ids of the messages the running agent's turn n reads, as its record holds them (seon.ctx/placed-messages) on its branch's db."
+  "The ids of the messages the running agent's turn n reads, as its record holds them (seon.ctx/turn-members) on its branch's db."
   [n]
   (let [db (agent/db) k (:key @agent/state) c (seon.ctx/agent-ctx (seon.db/index) db (pdb/eid db :seon.agent/key k))]
-    (mapv second (get (seon.ctx/placed-messages c) n []))))
+    (mapv second (:messages (seon.ctx/turn-members db c (seon.ctx/call-of db n k))))))
 
 (deftest a-message-taken-by-one-agent-is-still-owed-to-the-other
   ;; docs/users.md#messages (owner, 2026-11-09: the message on the agent's branch is the proof of delivery): a's taking it writes a's branch alone
@@ -2164,22 +2164,17 @@
     (is (not= (:value after) (:value after-script)) "and so does a script the branch writes")))
 
 ;; docs/sharing.md#what-a-branchs-nodes-are: a process test that is no proof keeps its :deferred fact and takes the gate's green over it,
-;; docs/sharing.md#a-functions-cost-is-a-fact: what a function cost is queryable on the branch, and adds up across commits, written only with a commit going out anyway
-(deftest what-a-function-cost-is-a-fact-on-the-branch
-  (let [stats "(:seon.fn/stats (datahike.api/pull (seon.agent/db) [:seon.fn/stats] [:seon.fn/var 'seon.lib/digest]))"
-        called "(do (seon.lib/digest \"x\") (seon.lib/digest \"y\") (seon.agent/transact! [{:seon.eval/id \"probe\" :seon.eval/by {:seon.agent/key \"probe\"}}]) (seon.agent/commit!) :ok)"
+;; docs/sharing.md#a-functions-cost-is-a-fact (the owner, 2026-11-11: no derived or observed value that collides is stored; :seon.fn/stats
+;; stops being written): what an agent's functions cost is measured live in its process, (:fn-costs @seon.agent/state), and no
+;; commit or end writes a :seon.fn/* datom on the branch. Red before: the end wrote one :seon.fn/stats sum a function
+(deftest what-a-function-cost-is-measured-live-and-never-stored
+  (let [called "(do (seon.lib/digest \"x\") (seon.lib/digest \"y\") (seon.agent/transact! [{:seon.eval/id \"probe\" :seon.eval/by {:seon.agent/key \"probe\"}}]) (seon.agent/commit!) :ok)"
         ended "(do (seon.agent/write-end! {:outcome :waiting}) :ok)"
-        [_ committed _ first-stats _ _ second-stats q]
-        (in-agent [called stats ended stats called ended stats
-                   "(datahike.api/q '[:find ?v :where [?f :seon.fn/var ?v] [?f :seon.fn/stats ?s] [(get ?s :calls) ?c] [(>= ?c 2)]] (seon.agent/db))"])
-        a (:value first-stats) b (:value second-stats)]
-    (is (nil? (:value committed)) "a commit writes no cost: the turn's datoms stay its own work")
-    (is (<= 2 (:calls a)) (str "the end writes them: " (pr-str first-stats)))
-    (is (= 4 (- (:calls b) (- (:calls a) 2))) (pr-str [a b]))
-    (is (pos? (:bytes b)) "bytes are counted")
-    (is (pos? (reduce + (vals (:hist b)))) "calls by size")
-    (is (string? (get-in b [:worst :eval])) "the worst eval, to find it again")
-    (is (contains? (set (map first (:value q))) 'seon.lib/digest) (str "and a plain query reaches it: " (pr-str q)))))
+        stored "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.fn/stats))"
+        live "(get-in @seon.agent/state [:fn-costs 'seon.lib/digest :calls])"
+        [_ _ n-stored calls] (in-agent [called ended stored live])]
+    (is (= 0 (:value n-stored)) (str "the branch holds no function cost: " (pr-str n-stored)))
+    (is (<= 2 (or (:value calls) 0)) (str "the live measure holds the calls: " (pr-str calls)))))
 
 ;; so it never reads as unjudged after it passed and the gate is not asked again; one green in the cache was never deferred, so it needs no fact
 (deftest a-deferred-test-that-is-no-proof-is-judged-once
@@ -2259,20 +2254,29 @@
   ;; the owner's ruling: a turn runs the proofs, the tests the change reaches run once they are green, judged as the
   ;; judge judges them, before it is done. md-scan #24 ended green on its proofs and the judge found 18 reds its change
   ;; made: here a green proof beside a change that breaks main's edit test (seon.fixtures/whole-stray) does not end
-  ;; green, and its next turn's status names the red
+  ;; green, and its next turn's status names a red its change made. The change breaks every test reaching
+  ;; seon.repl/offsets that edits text, and a run is answered at its first red (docs/merging.md#the-test-service), its items
+  ;; running at once, so which one the status names is the order they landed in: the claim is one of them, never a
+  ;; particular one (red in batch 46 as flaky: it awaited the exact-text edit test and the copied-source one landed first)
   (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"ws\" :seon.task/plan \"Make ws.\" :seon.task/config {:seon.config.ai/script 'seon.fixtures/whole-stray}})"
                    " _ (seon.root/await-db sys \"the work ended\" #(" not-running " (:seon.task/outcome (datahike.api/entity % [:seon.task/id \"" % "/ws\"]))))"
                    " db @(:conn sys) t (seon.task/task db \"" % "/ws\")"
                    " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/ws\")}}))"
                    " a (seon.db/eid b :seon.agent/key (:seon.task/agent t))]"
                    " [(:seon.task/outcome t) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/ws\") (mapv (juxt :reason :symbol) (:reasons (seon.ctx.status/status b (:tree (seon.ctx/build (seon.db/index) b a :b)) {})))])")
-        [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
-                        {})
-        [outcome state reasons] (:value r)]
+        [_ r reaching] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))}
+                                          "(my.agent/tests-reaching 'seon.repl/offsets)")
+                                 {})
+        [outcome state reasons] (:value r)
+        broken (set (:value reaching))]
     (is (not (#{:done :merged} outcome)) (pr-str r))
     (is (not= :merged state) "not merged")
-    (is (some #{[:stray-red 'seon.repl-test/an-edit-replaces-exact-text-once-and-evaluates-the-definition]} reasons)
-        (str "its status names the test its change broke: " (pr-str reasons)))))
+    ;; the two orders batch 46 saw: either red, landing first, is one the change broke
+    (is (every? broken '[seon.repl-test/an-edit-replaces-exact-text-once-and-evaluates-the-definition
+                         seon.repl-test/an-edit-copied-from-the-shown-source-applies])
+        (pr-str reaching))
+    (is (some (fn [[why t]] (and (= :stray-red why) (contains? broken t))) reasons)
+        (str "its status names a test its change broke: " (pr-str reasons)))))
 
 (deftest a-red-whole-task-is-not-merged-and-its-next-turn-says-why
   ;; the other way: a whole task whose proof is red is not merged. Its task does not end red: it
@@ -2550,7 +2554,7 @@
                                              "   :turn (:seon.agent/turn (datahike.api/entity db [:seon.agent/key (:key @seon.agent/state)]))"
                                              "   :eval-turns (set (datahike.api/q '[:find ?by ?t :where [?e :seon.eval/by ?be] [?be :seon.agent/key ?by] [?e :seon.eval/call ?c] [?c :seon.model-call/n ?t]] db))"
                                              "   :loop-eval-turns (vec (datahike.api/q '[:find [?t ...] :where (not-join [?e] [?e :seon.eval/by ?s] [?s :seon.root/id :root]) [(missing? $ ?e :seon.eval/call-id)] [?e :seon.eval/turn ?t]] db))"
-                                             "   :message-turns (let [c @seon.ctx/ctx] (vec (for [[n cid] (seon.ctx/turns c) :when (seq (get (seon.ctx/placed-messages c) n))] n)))"
+                                             "   :message-turns (let [c @seon.ctx/ctx] (vec (for [[n cid] (seon.ctx/turns c) :when (seq (:messages (seon.ctx/turn-members db c cid)))] n)))"
                                              "   :call-ids (vec (datahike.api/q '[:find [?id ...] :where [?m :seon.model-call/id ?id]] db))"
                                              "   :committed (msgs (datahike.api/commit-as-db db (get-in m [:seon.model-call/basis :commit])))"
                                              "   :intent (mapv #(datahike.api/q '[:find ?r . :in $ ?i :where [?e :seon.eval/id ?i] [?e :seon.eval/intent ?r]] db %) (map first evals))})")
@@ -2869,7 +2873,7 @@
   ;; queue before anything else, each recorded as any eval is, by whoever asked, at turn 0 and with no call id. One that
   ;; throws is recorded with its error and the rest run, as a reply's calls do (owner, 2026-11-08). A reader of the
   ;; conversation then sees them in order and, in the request, as calls of their own.
-  (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:seon.eval/_agent (first %)]) (seon.ctx/turn-evals c (second (first (seon.ctx/turns c)))))] "
+  (let [read (str "(let [c @seon.ctx/ctx db (seon.agent/db) es (map #(get-in c [:seon.eval/_agent (first %)]) (:evals (seon.ctx/turn-members db c (second (first (seon.ctx/turns c))))))] "
                   "{:turn (seon.agent/turn-now) "
                   " :records (mapv (fn [v] [(seon.task/sender-name (:seon.eval/by v)) (:seon.eval/intent v) (:seon.eval/call-id v) (some? (:ex (seon.db/response-of db v))) (:value (seon.db/response-of db v))]) es) "
                   " :roles (mapv :role (drop 2 (:messages (seon.ctx.wire/render db {:agent (:key @seon.agent/state) :commit (datahike.api/commit-id db) :task \"x\" :turn 1 :max-turns 1 :origin :outside} {:walk (seon.repl/page-walk)}))))})")

@@ -401,8 +401,12 @@
         ;; what is cold in a fresh process (a pull pattern's parse, a call site's first dispatch)
         _ (apply f args)
         _ (when minus (apply (:f (unit-benches minus)) args))
-        m (cost/measure f args)
-        b (when minus (cost/measure (:f (unit-benches minus)) args))]
+        ;; the least of a warm-up's calls, not one call: a unit is a difference of two measures, and one call each carried what
+        ;; the binary had cold, the same on every run of that binary and another on the next (batch 46's :db/pull-attr read
+        ;; -2675.73 B on its binary, green on main's): the unit table is the perf work the cap is for (docs/cost.md#how-we-measure)
+        cap (seon.config/value :seon.config.proofs/cost-max-samples)
+        m (cost/measure f args cap)
+        b (when minus (cost/measure (:f (unit-benches minus)) args cap))]
     {:ticks (/ (- (:ticks m) (:ticks b 0.0)) units) :ns (/ (- (:ns m) (:ns b 0.0)) units) :bytes (/ (- (:bytes m) (:bytes b 0.0)) units)}))
 
 (defn- fresh-rows
