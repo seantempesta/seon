@@ -229,7 +229,7 @@
         ;; as a plain write (it wakes nothing): the agent's page and context show it from the pull they already make
         ;; once per standing set of errors: its id is the agent's and the errors', so a resume or a second hello that meets the same
         ;; errors finds it on main and writes nothing
-        swp ((fn [st] (let [mid (lib/id (lib/digest (pr-str [:started-without-program (name id) (sort-by str (:errors swp))])))]
+        swp ((fn [st] (let [mid (lib/id (lib/digest (sedn/encode [:started-without-program (name id) (vec (sort-by (juxt (comp name :ns) :message) (:errors swp)))])))]
                         (when-not (pdb/eid @(:conn st) :seon.message/id mid)
                           (step/out! o :to-writer {:op :tx :branch :db
                                                 :tx-data (task/message-tx mid {:seon.root/id :root} [(name id)]
