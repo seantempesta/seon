@@ -2028,14 +2028,10 @@
           (if (compare-and-set! tree-runs cur (assoc cur b {:dropping p}))
             ;; whatever the drop meets, a run waiting on it is let in and the tree's entry cleared: a throw here never strands one
             (try
-              (when ag
-                ;; the tap first, then the status: an agent that ends between the two has sent its end where this reads it
-                (let [ev (events sys)]
-                  (try
-                    (when-not (gone-statuses (get-in (state sys) [:agents ag :status]))
-                      (kill! sys ag)
-                      (loop [] (let [x (a/<!! ev)] (when (and x (not (and (#{:ended :dead :killed} (:type x)) (= ag (:agent x))))) (recur)))))
-                    (finally (a/untap (:events-mult sys) ev)))))
+              ;; its agent stopped first: the kill's own answer, given once root's view holds it stopped (the api's :kill), is the
+              ;; wait's end; never an end event read from a tap, which slides and can drop the one event waited for
+              (when (and ag (not (gone-statuses (get-in (state sys) [:agents ag :status]))))
+                @(request! sys 'kill! ag nil))
               @(write! sys {:op :drop-tree-branch :branch b})
               nil
               (finally (swap! tree-runs dissoc b) (deliver p true)))
