@@ -1620,6 +1620,8 @@
                [{:op :tests :id (:id m) :mem-mb (mem-mb)
                  :result (or (:unread sel)
                              (cond-> {:items (select-keys (:digests sel) (:run sel)) :selected (:selected sel) :deferred (:deferred sel)
+                                      ;; each item's measured ms, or its class's estimate (seon.proofs/estimated-ms): what the service orders by
+                                      :ms (proofs/estimated-ms (:run sel) (fx/typical-ms (:run sel)) (:process (:plan sel)))
                                       :at-judge (count (:judge sel)) :reused-reports (:reused-reports sel)
                                       :digests (select-keys (:digests sel) (filter (:reused sel) (:selected sel)))}
                                (seq (:deferred sel)) (assoc :why (into {} (for [t (:deferred sel)] [t (program/process-path (:graph (:plan sel)) t)])))))}])
