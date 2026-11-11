@@ -13,17 +13,20 @@
   (-> (with-meta r nil) (assoc :applied (count (:applied r)))))
 
 (defn merge-main!
-  "git merge main: stage this runtime onto the branch, then merge main's changes since
-  the merge base. What does not conflict is applied and loaded here; each conflict stays
-  on the branch as an unmerged entry (base, ours, theirs). Answers {:ok :applied
-  :conflicts :unmerged} (unmerged: every entry still open, earlier ones included), printed by `merged-summary`: the whole
-  value stays under the eval's handle."
-  {:malli/schema [:=> [:cat] [:map [:ok :boolean]]]}
-  []
-  (stage/stage!)
-  (let [r (agent/merge-main! #{})
-        db (agent/db)]
-    (with-meta (assoc r :unmerged (pm/unmerged db)) {:seon.render/schema :seon.branch/merged})))
+  "git merge main: stage this runtime onto the branch, then merge main's changes since the merge base, as the one merge
+  does (seon.agent/merge-main!): main's transactions replayed onto the branch and loaded here. A conflict (a key this
+  branch and main each changed to their own value since the base: {:key :base :ours :theirs}) writes nothing and is the
+  answer: merge again with resolutions, {key value} (the conflict's :key, the value the branch keeps; :seon.merge/gone
+  retracts it). Answers {:ok :applied :conflicts :unmerged} (unmerged: entries an older merge stored), printed by
+  `merged-summary`: the whole value stays under the eval's handle. See docs/decisions.md, 'A merge replays the source's
+  transactions on the branch that receives it'."
+  {:malli/schema [:function [:=> [:cat] [:map [:ok :boolean]]] [:=> [:cat :map] [:map [:ok :boolean]]]]}
+  ([] (merge-main! {}))
+  ([resolutions]
+   (stage/stage!)
+   (let [r (agent/merge-main! resolutions)
+         db (agent/db)]
+     (with-meta (assoc r :unmerged (pm/unmerged db)) {:seon.render/schema :seon.branch/merged}))))
 
 (defn unmerged
   "The entries of this branch still unmerged: the conflicts no re-defn or resolve! has

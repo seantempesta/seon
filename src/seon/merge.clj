@@ -664,14 +664,19 @@
   identity, which cannot cross (net-change); else {:groups [...]}, src's transactions since base as the
   receiving branch will write them (replay), which is [] when src holds nothing onto lacks. The writer's
   merge runs it inside its one op, so two branches merging at once are each judged against what the other
-  left. Task seon.merge/a-merge-replays-the-sources-net-change."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :map]}
-  [base onto src]
+  left. With resolutions ({key value}, an agent's on a merge down: seon.agent/merge-main!), a conflict of a key they settle is
+  none. A source transaction onto's own branch wrote (its :seon.tx/branch, come back through a merge) is no group.
+  Task seon.merge/a-merge-replays-the-sources-net-change."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :map] [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map] :map]]}
+  ([base onto src] (plan base onto src {}))
+  ([base onto src resolutions]
   (let [theirs (net-change base src)
-        cs (conflicts (net-change base onto) theirs)]
+        cs (vec (remove #(contains? resolutions (:key %)) (conflicts (net-change base onto) theirs)))]
     (cond (seq cs) {:conflicts cs}
           (seq (:unidentified theirs)) {:unidentified (:unidentified theirs)}
-          :else {:groups (replay base src)})))
+          ;; a transaction the receiving branch wrote itself, come back through the other side's replay of it, is not
+          ;; written again: it holds nothing the branch lacks, and a value the branch changed since stays the branch's
+          :else {:groups (let [b (get-in onto [:config :branch])] (filterv #(not= b (:seon.tx/branch (:meta %))) (replay base src)))}))))
 
 (defn apply-groups!
   "Groups (plan's, replay's) applied on conn after what is pending, each its own transaction through the connection's checked

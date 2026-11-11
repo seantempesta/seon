@@ -521,55 +521,67 @@
 
 ;; ---- merging main into this branch (seon.merge; session M1) -------------------------------
 
+(defn- resolution-tx
+  "The branch's own write of resolutions, {key value} of the conflicts a merge of main names (seon.merge/conflicts): a
+  cardinality-one key [identity-attr identity-value attribute] takes value, or is retracted for :seon.merge/gone; a
+  cardinality-many key [identity-attr identity-value attribute value] is asserted for true, retracted for
+  :seon.merge/gone. The entity is named by its identity (a lookup), never an id. See docs/decisions.md, 'A merge replays the
+  source's transactions on the branch that receives it'."
+  {:malli/schema [:=> [:cat :map] [:vector :any]]}
+  [resolutions]
+  (vec (for [[k v] resolutions :let [e [(nth k 0) (nth k 1)] a (nth k 2)]]
+         (cond (= 4 (count k)) [(if (= :seon.merge/gone v) :db/retract :db/add) e a (nth k 3)]
+               (= :seon.merge/gone v) [:db.fn/retractAttribute e a]
+               :else [:db/add e a v]))))
+
 (defn merge-main!
-  "git merge main into this agent's branch, in this process (it owns the branch's writes):
-  main's changes since the merge base that do not conflict apply in one merge commit with
-  main as parent, each conflict stays on the branch as an unmerged entry, and the changed
-  definitions load here. The task content main carried since the base (seon.task/carry-tx,
-  the other way: another session's design, root's edit) comes in the same commit, since the
-  base moves to main's head and a member main changed would otherwise read, at the run's end,
-  as this branch reverting it (live finding F3); one both changed keeps the branch's and is
-  answered in :task-conflicts. data-attrs: the data that merges beside the program. When main's
-  content mark is the base's (seon.merge/same-content?), only records moved main: nothing is
-  diffed and nothing merges. Answers {:ok :applied :conflicts :task-conflicts :t}."
-  {:malli/schema [:=> [:cat :seon.merge/data-attrs] [:map [:ok :boolean]]]}
-  [data-attrs]
+  "git merge main into this agent's branch, in this process (it owns the branch's writes), as the one merge does
+  (seon.merge/plan from their merge base, onto this branch, from main): main's transactions since the base, each replayed
+  whole as its own transaction of the branch naming who wrote it (seon.merge/apply-groups!), then one transaction of the
+  branch's own writing resolutions ({key value}, the conflicts' keys: resolution-tx), then the merge's own transaction
+  (main's commit its merge parent, :seon.tx/merged main, the agent's :seon.agent/base-commit), one commit or none; the
+  changed definitions load here. After it the merge base is that main commit and the branch holds everything it holds.
+  A conflict no resolution settles, an entity of main's with no identity, or a transaction the branch's write check
+  refuses writes nothing and is the answer, as data. Answers {:ok :applied [main's transactions written] :conflicts
+  :resolved :t}, or {:ok false} with :conflicts, :unidentified or :refused {:tx :error}. See docs/decisions.md, 'A
+  merge replays the source's transactions on the branch that receives it'."
+  {:malli/schema [:=> [:cat :map] [:map [:ok :boolean]]]}
+  [resolutions]
   (commit!)
   (let [conn (:store-conn @state)
         main-b (pdb/main-branch (:cfg @state))
         main (heard-main)
-        head @conn
-        ;; main's content mark is the base's: only records moved main, so nothing merges and nothing is diffed; declared data
-        ;; moves no mark, so a merge that declares some reads the diff (docs/storage.md#mains-content-mark)
-        same? (and (= #{} data-attrs) (pm/same-content? (:base @state) main))
-        ;; git's merge base: the main last merged, unless main has since merged a commit of this branch (its own merge up), which
-        ;; is then the base; read from the commit graph only when main moved, over the commits since (docs/sharing.md#a-merge)
-        base (if (or same? (= (d/commit-id main) (d/commit-id (:base @state)))) (:base @state) (pdb/branch-base conn main-b (:branch @state)))
-        r (if same? {:theirs {}} (pm/delta-three-way base head main data-attrs))]
-    (if (empty? (:theirs r))
+        head @conn]
+    (if (= (d/commit-id main) (d/commit-id (:base @state)))
       {:ok true :applied [] :conflicts [] :t (:max-tx head)}
-      (let [carried (task/carry-tx base main head)
-            ;; the parent is the commit merged: a branch name would name main's head when this commits, which can be newer than what was merged
-            rep (d/merge-db conn #{(d/commit-id main)} (-> (pm/merge-tx head base main (:apply r) data-attrs)
-                                               (into (pm/unmerged-tx head (:conflicts r) (:max-tx main)))
-                                               (into (:tx carried)))
-                             (pdb/tx-meta (:branch @state) {:seon.tx/merged main-b}))
-            ops (pdb/report->tx rep)
-            errs (program/load-changes! (:db-after rep) ops)]
-        ;; the merge base is now main's head, the value just merged, so no walk of the commit graph finds it: what main changed is not this branch's change
-        (let [attrs (into #{} (map (fn [op] (nth op 2 nil))) ops)]
-          (doc/carry-index! head @conn (map (fn [op] [(nth op 1) (nth op 2)]) ops))
-          (swap! state #(-> % (assoc :db @conn :base main) (schema-moved attrs)))
-          ;; the same on the branch's fact, or the status, which reads the fact, takes what main changed for this branch's work until a next turn writes it
-          (let [merged-t (:max-tx @conn)]
-            ;; carried like any write: skipped, the next search rebuilt the index after every merge
-            (let [r (d/transact conn [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id (:base @state))}])]
-              (doc/carry-index! (:db-before r) (:db-after r) (map (juxt :e :a) (:tx-data r))))
-            (swap! state assoc :db @conn :merged-t merged-t)))
-        (send! {:op :committed :t (:max-tx @conn) :txs 1})
-        (cond-> {:ok true :applied (:apply r) :conflicts (:conflicts r) :t (:merged-t @state) :datoms (count ops)}
-          (seq (:conflicts carried)) (assoc :task-conflicts (:conflicts carried))
-          (seq errs) (assoc :load-errors errs))))))
+      (let [base (pdb/branch-base conn main-b (:branch @state))
+            p (pm/plan base head main resolutions)]
+        (cond
+          (seq (:conflicts p)) {:ok false :applied [] :conflicts (:conflicts p) :t (:max-tx head)}
+          (:unidentified p) {:ok false :applied [] :conflicts [] :unidentified (:unidentified p) :t (:max-tx head)}
+          :else
+          (let [a (pm/apply-groups! conn head (pdb/tx-meta (:branch @state)) (:groups p))
+                own (fn [tx-data opts] (dw/apply! conn (cond-> {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:op opts) (assoc :seon.tx/merged main-b)))}
+                                                         (:op opts) (assoc :parents #{(d/commit-id main)}))
+                                                  opts))
+                resolved (when (and (not (:refused a)) (seq resolutions)) (own (resolution-tx resolutions) nil))
+                final (when (and (not (:refused a)) (or (nil? resolved) (map? resolved)))
+                        (own [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}] {:op 'merge!}))
+                refused (or (:refused a) (when (and resolved (not (map? resolved))) {:tx nil :exception resolved})
+                            (when (and final (not (map? final))) {:tx nil :exception final}))]
+            (if refused
+              (do (dw/abandon-pending! conn)
+                  {:ok false :applied [] :conflicts [] :t (:max-tx head)
+                   :refused {:tx (:tx refused) :error (or (ex-data (:exception refused)) {:seon.error/message (ex-message (:exception refused))})}})
+              (let [c (try (dw/commit-pending! conn) (finally (when (dw/pending? conn) (dw/abandon-pending! conn))))
+                    ops (vec (mapcat pdb/report->tx (cond-> (:reps a) resolved (conj resolved) true (conj final))))
+                    errs (program/load-changes! (:db c) ops)]
+                (doc/carry-index! head (:db c) (map (fn [op] [(nth op 1) (nth op 2)]) ops))
+                ;; the merge base is now main's head, the value just merged
+                (swap! state #(-> % (assoc :db (:db c) :base main :merged-t (:max-tx (:db c))) (schema-moved (into #{} (map (fn [op] (nth op 2 nil))) ops))))
+                (send! {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c)})
+                (cond-> {:ok true :applied (:applied a) :conflicts [] :resolved (vec (keys resolutions)) :t (:max-tx (:db c)) :datoms (count ops)}
+                  (seq errs) (assoc :load-errors errs))))))))))
 
 ;; ---- evaluation -----------------------------------------------------------------
 
@@ -1692,7 +1704,7 @@
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})
                 nil)
     ;; root asks this agent to merge main into its branch (it owns the branch's writes)
-    :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:data-attrs m #{}))}]
+    :merge-main [{:op :merged-main :id (:id m) :result (merge-main! (:resolutions m {}))}]
     :clone (do (clone! m) nil)
     :stats [{:op :stats :id (:id m) :result {:mem-mb (mem-mb) :t (:max-tx (db)) :pid (lib/c-getpid)
                                               :results (count (:results @state)) :evals (:n @state)

@@ -614,7 +614,7 @@
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :judge {:op :judge}
                     :stats {:op :stats}
-                    :merge-main {:op :merge-main :data-attrs (:data-attrs m)}
+                    :merge-main {:op :merge-main :resolutions (:resolutions m {})}
                     ;; its page's parts drawn by its own renders (the render proc's, seon.render.proc/ask-parts)
                     :render {:op :render})]
           (to-agent st o id {:op :req :rid rid :kind op :msg msg})))
@@ -1813,7 +1813,7 @@
   {:malli/schema [:=> [:cat :symbol [:maybe :seon.agent/id] [:maybe :map] [:maybe :map]] :map]}
   [op id args a]
   (let [live? (boolean (and a (not (gone-statuses (:status a)))))
-        data-attrs (:data-attrs args :all)]
+        resolutions (:resolutions args {})]
     (case op
       spawn! {:op :spawn :opts (or args {})}
       clone! {:op :clone :parent id :opts (or args {})}
@@ -1837,7 +1837,7 @@
       opened! {:op :write :req {:op :tx :branch :db :tx-data [[:db/add [:seon.agent/key (:key args)] :seon.agent/opened (:eval args)]]}}
       focus! {:op :focus :key (:key args)}
       merge-main! (if live?
-                    {:op :merge-main :id id :data-attrs data-attrs}
+                    {:op :merge-main :id id :resolutions resolutions}
                     (absent a id))
       (refused 'seon.root/request (str op " is not one of root's requests") {}))))
 
@@ -2130,10 +2130,9 @@
   ([sys p] (call! sys {:op :apply :decl (system/read-decl p) :bindings (:bindings sys)})))
 
 (defn merge-main!
-  "git merge main, on the agent's branch (seon.merge): main's changes since the merge base
-  come into the branch and the agent's db; each conflict stays on the branch as an unmerged
-  entry. A promise of {:ok true :applied [key] :conflicts [...] :t}, or :seon.root/no-agent. opts {:data-attrs}
-  (default :all)."
+  "git merge main, on the agent's branch (seon.agent/merge-main!, the one merge): main's transactions since the merge base
+  come into the branch and the agent's db; a conflict no resolution settles is the answer, nothing written. A promise of
+  {:ok :applied :conflicts :t}, or :seon.root/no-agent. opts {:resolutions {key value}} (default {})."
   {:malli/schema [:function [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]
                   [:=> [:cat :seon.root/sys :seon.agent/id :map] :seon.host/promise]]}
   ;; the agent owns its branch's writes: it merges main itself
