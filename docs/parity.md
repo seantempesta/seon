@@ -58,7 +58,7 @@ Each v1 capability for tasks, merges and tests, and where it stands here.
 | tasks as data, `:needs`, one reconciler, green at start ends with no model call | `seon.task`, `seon.reconcile` | present |
 | ``chain!`` and ``:seon.task/next`` | `:needs` only | dropped |
 | step templates (design, prove, implement, merge) | `seon.template/request` by default (one task that merges itself), one transaction; for experiments, `seon.template/design-build` (design-build, then merge) and `seon.template/stages` (design → implement → merge on one branch) ([tasks](tasks.md#a-request-is-one-transaction)) | present |
-| three-way program merge, conflicts as entries, merge of main into the branch | `seon.merge`, `my.branch/merge-main!` | present |
+| three-way program merge, conflicts as entries, merge of main into the branch | `seon.merge` (the one merge: each side's net change by identity, a conflict answered and computed, never stored: [merging](merging.md#seons-merge-is-a-three-way-merge-of-the-program)), `my.branch/merge-main!` | present |
 | many agents merging onto shared definitions at once (v1's swarm) | `bin/check swarm` (`seon.e2e`'s swarm entry: 20 tasks over 5 shared vars, 8 agents at once; red unless conflicts arose and every one was resolved, every task done, and a fresh agent on main gets every proof's value) | present |
 | main wins a conflict | ours is kept | missing |
 | a changed function no test reaches refuses the branch (``:seon.test/unreached``, ``:seon.source/unreached``) | none: `seon.reconcile/done-explain` has no coverage reason | missing |

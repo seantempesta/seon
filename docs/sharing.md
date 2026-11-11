@@ -1,6 +1,6 @@
 # Sharing
 
-How branches share data, how a merge works, where each kind of fact lives, and what each operation should cost. A branch is a pointer to a tree of immutable index nodes, so a fork costs one pointer; a merge is git's three-way merge by key; and what a branch writes decides how much of its tree is its own. What is built is said as built; what is planned names its task.
+How branches share data, how a merge works, where each kind of fact lives, and what each operation should cost. A branch is a pointer to a tree of immutable index nodes, so a fork costs one pointer; a merge replays the source's transactions on the branch that receives it, planned from base, ours and theirs by each entity's identity; and what a branch writes decides how much of its tree is its own. What is built is said as built; what is planned names its task.
 
 ## One tree, everything linked
 
@@ -18,9 +18,9 @@ A db value reads only its own branch's datoms: a ref to an entity only another b
 
 ## A merge
 
-Git's three-way merge of base, ours and theirs, by key (```seon.merge/three-way```, read where they differ: ```seon.merge/delta-three-way```):
+One merge for both directions, planned from base, ours and theirs before anything is written ([merging](merging.md#seons-merge-is-a-three-way-merge-of-the-program)):
 
-- **The datoms carried are the source's, as they are,** tx included (```seon.merge/carried-tx```), and only a retraction the source made travels. So a merge that took part of another branch never reads what it lacks as removed: tested, a session's program-only merge from its user, then its whole merge back, leaves another session's data alone. What it can do is report a false `:deleted-by-them` conflict (task ``seon.merge/what-a-side-never-held-is-no-change``).
+- **What it writes is the source's transactions,** each replayed as its own transaction of the receiving branch with a new time, entity ids kept (```seon.merge/replay```); a retraction the source made travels as the source made it, and a key the receiving branch changed too, to another end, is a conflict that writes nothing. What a side never held is no change of its (```seon.merge/net-change``` reads each side against the base).
 - **A parent is the commit merged,** never a branch name, which Datahike would read as that branch's head when the merge commits ([merging](merging.md)).
 - **A pull of main starts from git's merge base** (```seon.agent/merge-main!```): the main last merged, kept as `:base` with no walk while main has not moved; when main has moved, read from the commit graph over the commits since, so after main merged a commit of this branch (its own merge up) that commit is the base. An agent that goes on after its task merged (a chat's next message) and edits what it merged then meets no conflict with itself (``seon.agent-test/a-pull-after-its-own-merge-starts-from-what-it-merged``). A second merge up carries only what changed since, since the writer's base is read from the same graph (```seon.writer/octopus-merge```). An agent stays on its branch and in its process through all of this: a restart is for a new binary or a dead process.
 - **A form's place is a sort key with gaps** (```seon.program/stable-places```): an inserted form takes a place between its neighbours and moves no other.
