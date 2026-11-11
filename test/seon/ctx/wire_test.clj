@@ -454,7 +454,7 @@
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou're at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "user" "assistant" "tool"] (mapv :role r0)) "the first request: the system prompt, what opens the session, then the page whole as a generated eval and its result")
         (is (str/starts-with? (page-code r0) "(my.render/page {:commit #uuid \"") "the page is the call (my.render/page p)")
-        (is (every? #(re-find % (:content (peek r0))) [#":class \"cite\"" #"Doubles\." #":class \"status\""]) "the page whole, each part by the function that drew it: how the work stands too")
+        (is (every? #(re-find % (:content (peek r0))) [#":render seon.render.ui/cite" #"Doubles\." #":render seon.render.ui/status"]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (str/starts-with? (page-code r1) "(my.render/diff {:commit #uuid \"") "what moved is a generated eval of its own at the end, after turn 1's own eval")
         (is (re-find #"\[\"page\" \"p-task\" \"task-view-demo_2Ff\" \"cite-[^\"]*demo_2Ff\" :pre\]" (:content (peek r1)))
             "the cited var's edit at its own part, nested in its task's as the pull nests it: the ids name each render and what it shows, and only what moved inside the cite is sent")
