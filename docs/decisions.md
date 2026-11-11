@@ -118,9 +118,13 @@ Asked with the question tool by the managing session, the Tests session's eviden
 
 "Do not launch any fable agents without my approval. I literally can't afford it." A session says which model a helper or a new session would run on and gets his yes first; a helper takes the cheapest model that fits its piece. Stated in [sessions](sessions.md#no-fan-out).
 
-### The store neither corrupts nor exhausts the machine; the last unsynced writes may be lost (owner, 2026-11-10)
+### LMDB's corruption is fixed in the fork we own (owner, 2026-11-10)
 
-The task he set the dependency work: "our LMDB must not corrupt or exhaust the system; losing the last unsynced data is fine." Landed as batch 35: the store's locks are the kernel's and end with their process, and a crash with sync off loses the last commits and never corrupts. Stated in [storage](storage.md#durability-is-continuous-group-commit).
+"I changed my mind and want to see if we can just fix the corruption issue with LMDB since we already own the dependency" (relayed by the managing session). The task he set it: "our LMDB must not corrupt or exhaust the system; losing the last unsynced data is fine." Landed as batch 35: the store's locks are the kernel's and end with their process, and a crash with sync off loses the last commits and never corrupts. Stated in [storage](storage.md#durability-is-continuous-group-commit).
+
+### A test earns its place or is cut (owner, 2026-11-10)
+
+"If that test isn't god's gift to the world fucking kill it. Cut all bullshit tests." (relayed by the managing session, 2026-11-10 night). Stated in [testing](testing.md#a-proof-is-focused).
 
 ### Load is judged by cores and free memory (owner, 2026-11-10)
 
