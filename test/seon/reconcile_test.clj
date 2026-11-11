@@ -1094,6 +1094,30 @@
       (is (= :closed (:seon.task/outcome tk)))
       (is (= :seon.merge/behind (:seon.error/type (:seon.task/error tk))) "with the writer's evidence"))))
 
+;; docs/reconcile.md#a-task-holds-how-its-work-ended: the one merge's refusals (seon.writer): a replayed transaction main's write
+;; check refused (main moved since the base) runs the merge again, merging main first, as behind does; a conflict and an entity
+;; with no identity hold the task (no rerun resolves them). Red before: every type but :seon.merge/behind held
+(deftest a-replay-refused-merge-runs-again-as-behind
+  (let [answer (fn [r]
+                 (let [db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :running)))
+                       db (d/db-with db [{:seon.task/id "demo/add-merge" :seon.task/outcome :ready}])
+                       act (first (filter #(= :octopus-merge (:op %)) (actions-for db)))
+                       [st _] (#'r/start (st-of db) act)
+                       [_ outs] (#'r/advance st "demo/add-merge" :octopus-merged {:ok true :results [r]})
+                       tx (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) outs)))]
+                   (task/task (d/db-with db tx) "demo/add-merge")))
+        ;; each with the data its schema holds (seon.merge.edn): what the writer answers
+        err (fn [t] (contract/error t 'seon.writer/applied! "refused"
+                                    (case t
+                                      :seon.merge/replay-refused {:tx 9 :refused {:tx 7 :error (contract/error :seon.root/refused 'seon.db/transact-checked "requires :task/plan" {})}}
+                                      :seon.merge/conflicts {:tx 9 :conflicts [{:key [:seon.task/id "demo/x" :seon.task/plan] :ours "a" :theirs "b"}]}
+                                      :seon.merge/unidentified {:tx 9 :unidentified #{#{:seon.zz/x}}})))]
+    (let [tk (answer (err :seon.merge/replay-refused))]
+      (is (= [:running :behind] [(:seon.task/execution tk) (:seon.task/outcome tk)]) "a replay main refused: behind, it runs again"))
+    (doseq [t [:seon.merge/conflicts :seon.merge/unidentified]]
+      (let [tk (answer (err t))]
+        (is (= [:held :closed] [(:seon.task/execution tk) (:seon.task/outcome tk)]) (str t ": held for root"))))))
+
 (deftest a-branch-behind-main-is-told-so-first
   ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 7): a branch behind main was judged
   ;; on a program main had moved from and read "proof-unknown"; the done rule leads with the fix, and the judging
