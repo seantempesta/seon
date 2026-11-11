@@ -1106,11 +1106,11 @@
 
 (def ^:private root-session-plan
   "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-session."
-  "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look first for a session already on it in your list of sessions; if one is, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
+  "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/sessions) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
 (defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through root's entity to every agent with its status and task,
-  which makes its task list draw root's sessions (seon.render.ui/sessions). See docs/users.md#whats-on-screen."
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through root's entity to every agent with its status and task
+  (what root's page lists of its sessions; root's model asks for them at its REPL). See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat] [:vector :any]]}
   [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
            {:seon.agent/root [{:seon.agent/_root [:seon.agent/key :seon.agent/status {:seon.agent/task [:seon.task/id :seon.task/outcome]}]}]}))
