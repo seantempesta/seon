@@ -32,12 +32,25 @@
   {:malli/schema [:=> [:cat :seon.task/ns :seon.task/name] :seon.task/id]}
   [ns-sym nm] (str ns-sym "/" nm))
 
+(declare default-branch)
+
 (defn merges?
-  "Whether a task of kind merges main into its branch at each green and its green branch into
-  main: a merge task, and a whole one (seon.template/request: one agent works the request
-  through and merges it)."
-  {:malli/schema [:=> [:cat [:maybe :keyword]] :boolean]}
-  [kind] (contains? #{:merge :whole} kind))
+  "Whether task t merges main into its branch at each green and its green branch into main, by data, never its kind: when no task
+  on its own branch needs it. needers, the tasks that need t, each {:seon.task/id :seon.task/branch} (a branch its own, else
+  `default-branch` of its id). So a work task a merge task follows on its branch leaves the merge to that task, and a lone one
+  merges itself (a trial, Data model's rule: rung 1's plain task finished green and never merged). See
+  docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:sequential [:map [:seon.task/id :seon.task/id]]]] :boolean]}
+  [t needers]
+  (let [br (fn [x] (or (:seon.task/branch x) (default-branch (:seon.task/id x))))]
+    (not-any? #(= (br %) (br t)) needers)))
+
+(defn merges-on?
+  "`merges?` of task id as db holds it: its branch and the tasks that need it, one pull. See docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
+  [db id]
+  (let [t (d/pull db [:seon.task/id :seon.task/branch {:seon.task/_needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id])]
+    (merges? (assoc t :seon.task/id id) (vec (:seon.task/_needs t)))))
 
 (defn default-branch
   "The branch a task's runs check out when it names none: task-<ns>-<name>."

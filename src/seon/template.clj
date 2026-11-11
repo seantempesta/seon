@@ -115,7 +115,7 @@
   that works it, the default (my.root/request!; owner: \"keep experimenting with having the agent
   do everything in one task\"): the :whole template, which one agent works
   through: it writes the red proof, makes it green, merges main and keeps it green, and its green
-  branch merges into main itself (seon.task/merges?). `design-build` and `stages` are the
+  branch merges into main itself (seon.task/merges?: nothing on its branch needs it). `design-build` and `stages` are the
   experiments' choices."
   {:malli/schema [:=> [:cat :seon.task/declaration] [:vector :seon.task/declaration]]}
   [decl] (from (templates :whole) decl))

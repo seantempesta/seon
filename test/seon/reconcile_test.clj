@@ -253,6 +253,8 @@
     (is (= [{:op :reap :task "demo/x"}] (actions-for db)) "one action a task: its flight is one, and the spawn is the next pass's, once the reap has written :lost")
     (is (= #{} (:live (r/index db))))))
 
+;; A lone work task, which nothing on its branch needs, merges itself (seon.task/merges?): its green end is :ready, the merge's
+;; to make, where a work task its merge task follows is :done (a-green-work-task-judged-behind-is-done-and-its-merge-runs)
 (deftest ended-work-is-judged-by-the-done-rule
   ;; the decision is made once, where an end's facts are in hand (`judgment`, pure), and stored on the task
   (let [db (db-of diamond :extra (work "a" :running))
@@ -260,7 +262,7 @@
         red [{:reason :proof-red :symbol 'demo-test/a-test}]]
     (are [facts expected] (= expected (j facts))
       ;; green: a work task is done on its branch (b's red proof is b's own)
-      {:end {:outcome :green} :results {(t "a") :pass (t "b") :fail}} {:outcome :done :reasons []}
+      {:end {:outcome :green} :results {(t "a") :pass (t "b") :fail}} {:outcome :ready :reasons []}
       ;; its proof red: the agent is told (a verdict, which wakes it)
       {:end {:outcome :red} :results {(t "a") :fail}} {:outcome :told :reasons red :verdict red}
       ;; out of turns with its proof red: it stays, at its cap (the budget is the agent's), never held
@@ -289,7 +291,7 @@
   ;; reached by the change (not main's) holds it, and a main red that the task names as a proof still holds it
   (let [db (db-of diamond :extra (work "a" :running))
         j (fn [facts] (judgment-of db "a" (merge {:end {:outcome :green} :results {(t "a") :pass 'demo-test/other :error}} facts)))]
-    (is (= {:outcome :done :reasons []} (j {:main-red #{'demo-test/other}})) "main's red is not this task's")
+    (is (= {:outcome :ready :reasons []} (j {:main-red #{'demo-test/other}})) "main's red is not this task's")
     (is (= :told (:outcome (j {:main-red #{}}))) "reached by the change: it holds the task")
     (is (= [{:reason :stray-red :symbol 'demo-test/other}] (:reasons (j {:main-red #{'demo-test/x}}))) "another test's main red excuses nothing")
     (is (= [{:reason :proof-red :symbol (t "a")}]
@@ -398,7 +400,7 @@
         none (judge! db "a" nil :results {(t "a") :pass})
         tk (task/task (:db none) "demo/a")]
     (is (= "the agent wrote no end" (:seon.task/reason tk)))
-    (is (= :done (:outcome none)) "the proofs root measured are green: the done rule holds whatever the agent wrote")
+    (is (= :ready (:outcome none)) "the proofs root measured are green: the done rule holds whatever the agent wrote")
     (testing "with no end, red results are held, not told as a green end would be"
       (is (= :closed (:outcome (judge! db "a" nil :results {(t "a") :fail}))))
       (is (= :told (:outcome (judge! db "a" {:outcome :green :reason "all green"} :results {(t "a") :fail})))))))
@@ -504,7 +506,7 @@
         db (db-of [(decl "a")] :extra (work "a" :running :members stale))
         {after :db} (judge! db "a" {:outcome :green} :results {(t "a") :pass})
         tk (task/task after "demo/a")]
-    (is (= :done (:seon.task/outcome tk)))
+    (is (= :ready (:seon.task/outcome tk)))
     (is (= stale (select-keys (task/task db "demo/a") (keys stale))) "the earlier end's facts are on the task before")
     (is (not-any? #(contains? tk %) (keys stale)) "and gone after a judging that set none of them")))
 
@@ -612,7 +614,7 @@
   (let [two [(decl "x") (decl "y")]
         db (db-of two :extra (concat (work "x" :merged :members {:seon.task/merged-t 100}) (work "y" :running)))
         y (fn [basis] (judgment-of db "y" {:end {:outcome :green} :results {(t "x") :fail (t "y") :pass} :basis basis}))]
-    (is (= {:outcome :done :reasons []} (y 50)))
+    (is (= {:outcome :ready :reasons []} (y 50)))
     (is (= :told (:outcome (y 150))) "refused: told the agent")))
 
 (deftest contracts-are-checked
@@ -1106,7 +1108,7 @@
   ;; merges is done, and its merge task (which merges main into the branch and is gated) runs next; told again it
   ;; was held for root once :seon.config.merge/max-behind of its judgings were behind a busy main (bin/check swarm held
   ;; sw/s8 and sw/s9 so, 2026-10-31). A task no merge task follows still merges main itself and is told so
-  (let [merge-decl {:seon.task/ns 'demo :seon.task/name "a-merge" :seon.task/kind :merge :seon.task/plan "Merge a." :seon.task/needs #{"demo/a"}}
+  (let [merge-decl {:seon.task/ns 'demo :seon.task/name "a-merge" :seon.task/kind :merge :seon.task/plan "Merge a." :seon.task/needs #{"demo/a"} :seon.task/branch :task-demo-a}
         judged (fn [decls] (judgment-of (db-of decls :extra (work "a" :running)) "a" {:end {:outcome :green} :results {(t "a") :pass} :behind 4}))]
     (is (= {:outcome :done :reasons []} (judged [(decl "a") merge-decl])) "followed by its merge task: no verdict, the task is done")
     (is (= {:reason :behind :behind 4} (first (:verdict (judged [(decl "a")])))) "no merge task: told it is behind")
@@ -1154,7 +1156,7 @@
   (let [better "Make a true. Design: (defn f [xs] ...) one pass over xs."
         {:keys [db outcome]} (judge! (design-db (work "a" :running)) "a" {:outcome :green} :results {(t "a") :fail}
                                      :on-branch [{:seon.task/id "demo/a" :seon.task/plan better}])]
-    (is (= :done outcome))
+    (is (= :ready outcome))
     (is (= better (:seon.task/plan (task/task db "demo/a"))) "and the plan is on main")))
 
 (deftest a-refused-end-holds-its-task-and-creates-none
@@ -1540,7 +1542,7 @@
     (testing "parked in an earlier boot: its process is gone, so the next start is a spawn (a load of the session)"
       (is (= [(spawn "a")] (actions-for (db-of [(decl "a")] :extra (work "a" :parked :boot "boot-0")) :woken ["a-a"]))))
     (testing "it waited with its proofs green: done, never parked (start stops its kept process)"
-      (is (= {:outcome :done :reasons []} (judgment-of db0 "a" {:end {:outcome :waiting} :results {(t "a") :pass}}))))
+      (is (= {:outcome :ready :reasons []} (judgment-of db0 "a" {:end {:outcome :waiting} :results {(t "a") :pass}}))))
     (testing "its task moved to another branch: the parked process (forked on the old one) is stopped, and the next start is a spawn"
       (let [db (db-of [(decl "a")] :extra (concat (parked :parked) [{:seon.task/id "demo/a" :seon.task/branch :elsewhere}]))]
         (is (= [{:op :kill :task "demo/a" :reason :env-changed}] (actions-for db :woken [(akey "a")])) "a task has one flight, so one action a pass")
