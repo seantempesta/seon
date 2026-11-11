@@ -989,6 +989,31 @@
     (is (empty? (:appends patch)))
     (is (empty? (:prepends patch)))))
 
+(deftest a-reordered-unit-is-moved-not-its-container-sent
+  ;; docs/render.md#a-layout-places-its-lists: a unit that changed place among the held ones of its container is taken out and put back by
+  ;; its new neighbour; the others stay. Red before: a list's reorder moved nothing (the tab kept the old order), and a parent whose children
+  ;; only changed order was sent whole with every child in it
+  (let [li (fn [id] (str "<li id=\"" id "\">" id "</li>"))
+        u (fn [id] {:id id :container "#c-rows" :input id :html (li id)})
+        step (fn [held units] (let [[v patch] (#'p/step-units (seon.db/index) held units)] (#'p/finish-patch v patch units)))
+        [v1 _] (step nil (mapv u ["a" "b" "c" "d"]))
+        [v2 patch] (step v1 (mapv u ["a" "c" "d" "b"]))]
+    (is (= [["b" "#d" "after" (li "b")]] (:moves patch)) "b alone moves, after d")
+    (is (empty? (concat (:frags patch) (:appends patch) (:afters patch) (:prepends patch) (:removes patch))))
+    (is (= {"#c-rows" ["a" "c" "d" "b"]} (:order v2)) "the order held is the new one")
+    (let [[_ patch] (step v2 (mapv u ["b" "a" "c" "d"]))]
+      (is (= [["b" "#c-rows" "prepend" (li "b")]] (:moves patch)) "first in its container: prepended"))
+    (testing "a parent whose children only changed order is not sent; the child that moved is"
+      (let [parent (fn [ids] {:id "p" :container "#p-tiles" :input (vec ids) :html (str "<ul id=\"p\">" (apply str (for [i ids] (str "<!--s:" i "-->"))) "</ul>")})
+            kid (fn [id] {:id id :container "#p" :parent "p" :input id :html (li id)})
+            [v1 _] (step nil [(parent ["x" "y" "z"]) (kid "x") (kid "y") (kid "z")])
+            [_ patch] (step v1 [(parent ["z" "x" "y"]) (kid "z") (kid "x") (kid "y")])]
+        (is (empty? (:frags patch)) (str "the parent stays: " (:frags patch)))
+        (is (= [["z" "#p" "prepend" (li "z")]] (:moves patch)))))
+    (testing "a move is sent as a remove, then a put back by its neighbour"
+      (let [chunk (seon.web/chunk-of (assoc patch :view nil))]
+        (is (re-find #"(?s)selector \[id=\"b\"\].*mode remove.*selector #d.*mode after.*elements <li id=\"b\">" chunk) chunk)))))
+
 (defn- depth "Hiccup x's nesting." [x] (if (vector? x) (inc (reduce max 0 (map depth x))) 0))
 
 (deftest every-view-of-an-agent-shows-one-read-of-its-branch

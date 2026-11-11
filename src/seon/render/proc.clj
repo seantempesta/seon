@@ -162,7 +162,7 @@
                                        (and p (= :prepends (get placed p))) :prepends
                                        :else :prepends)]
                          [[view (update patch how conj (if (= :afters how) [p id] [container id])) (update n :rendered inc)] prev (assoc placed id how)])
-                       :else [[view (update patch :frags conj [id html]) (update n :rendered inc)] prev placed])))))
+                       :else [[view (-> patch (update :frags conj [id html]) (assoc-in [:was id] (:html old))) (update n :rendered inc)] prev placed])))))
              [[(or view {}) {:frags [] :appends [] :prepends [] :afters [] :removes []} {:rendered 0 :same 0}] {} {}]
              units))))
 
@@ -172,27 +172,77 @@
   [html units]
   (str/replace html #"<!--s:([^>]*?)-->" (fn [[_ id]] (compose (get-in units [id :html] "") units))))
 
+(def ^:private slot-re #"<!--s:([^>]*?)-->")
+
+(defn- order-only?
+  "Whether html differs from was only in the order of its slots: the same text around them and the same slots. See
+  docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string]] :boolean]}
+  [was html]
+  (boolean (and was html (not= was html) (= (str/replace was slot-re "") (str/replace html slot-re ""))
+                (= (sort (map second (re-seq slot-re was))) (sort (map second (re-seq slot-re html)))))))
+
+(defn- kept-run
+  "The longest run of xs, numbers, that rises (patience sorting, n log n): the indexes into xs that stay where they are. See
+  docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat [:vector :int]] [:set :int]]}
+  [xs]
+  (let [[tails prev] (reduce (fn [[tails prev] i]
+                               (let [x (nth xs i)
+                                     j (loop [lo 0 hi (count tails)] (if (< lo hi) (let [m (quot (+ lo hi) 2)] (if (< (nth xs (nth tails m)) x) (recur (inc m) hi) (recur lo m))) lo))]
+                                 [(if (= j (count tails)) (conj tails i) (assoc tails j i)) (assoc prev i (when (pos? j) (nth tails (dec j))))]))
+                             [[] {}] (range (count xs)))]
+    (loop [i (peek tails) out #{}] (if (some? i) (recur (get prev i) (conj out i)) out))))
+
+(defn- moves
+  "The units that changed place among those view held in their container, as order (container -> ids, this step's) has them against
+  was (the last step's): in each container the held ones that stay in order are the longest run that keeps it (`kept-run`), each
+  other is taken out and put back after the unit now before it, or first in its container. [[id container]] in order. See
+  docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat [:maybe :map] :map] [:vector [:tuple :string :string]]]}
+  [was order]
+  (vec (for [[c ids] order
+             :let [old (get was c) at (zipmap old (range)) held (filterv at ids)
+                   stay (into #{} (map held) (kept-run (mapv at held)))]
+             id held :when (not (stay id))]
+         [id c])))
+
 (defn- finish-patch
   "A patch's units as HTML, each composed with its children's (a unit's slots), a unit inside an ancestor the patch also sends left
-  to it, its appends and prepends (a container's new rows before what it holds as one prepend, in the layout's order), and the removes
-  of the contained units the layout no longer has. See docs/render.md#a-layout-places-its-lists."
-  {:malli/schema [:=> [:cat :map :map [:set :string]] [:tuple :map :map]]}
-  [view patch live-ids]
-  (let [gone (for [[id u] (:units view) :when (and (:container u) (not (live-ids id)))] id)
-        view (update view :units #(apply dissoc % gone))
+  to it, its appends and prepends (a container's new rows before what it holds as one prepend, in the layout's order), the removes
+  of the contained units the layout no longer has, and the moves of those that changed place: a unit whose html changed only in its
+  children's order is not sent, its children that moved are (`moves`), so a reorder costs what moved. Units, this step's in the
+  layout's order. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :map :map [:sequential :map]] [:tuple :map :map]]}
+  [view patch units]
+  (let [live-ids (set (map :id units))
+        gone (for [[id u] (:units view) :when (and (:container u) (not (live-ids id)))] id)
+        order (reduce (fn [m {:keys [id container]}] (cond-> m container (update container (fnil conj []) id))) {} units)
+        was (:order view)
+        view (-> view (update :units #(apply dissoc % gone)) (assoc :order order))
         html #(compose (get-in view [:units % :html]) (:units view))
+        ;; a unit whose html moved only in its children's order: its children's moves say it
+        reordered (into #{} (keep (fn [[id h]] (when (order-only? (get-in patch [:was id]) h) id))) (:frags patch))
+        patch (update patch :frags #(vec (remove (comp reordered first) %)))
         ;; a unit sent inside an ancestor this patch also sends (a parent re-drawn carries its children, composed) is not sent again
         sent (into #{} (concat (map first (:frags patch)) (map second (:appends patch)) (map second (:prepends patch)) (map second (:afters patch))))
         inside? (fn inside? [id] (when-let [p (get-in view [:units id :parent])] (or (contains? sent p) (inside? p))))
-        own (fn [k xs] (vec (remove #(inside? (nth % k)) xs)))
-        patch (-> patch (update :frags #(own 0 %)) (update :appends #(own 1 %)) (update :prepends #(own 1 %)) (update :afters #(own 1 %)))]
+        ;; what moved, unless an ancestor sent carries it; a moved unit is sent whole by its move, its own frag and its children's with it
+        mv (vec (remove (comp inside? first) (moves was order)))
+        moved (set (map first mv))
+        under? (fn under? [id] (when-let [p (get-in view [:units id :parent])] (or (contains? moved p) (under? p))))
+        own (fn [k xs] (vec (remove #(or (inside? (nth % k)) (moved (nth % k)) (under? (nth % k))) xs)))
+        patch (-> patch (update :frags #(own 0 %)) (update :appends #(own 1 %)) (update :prepends #(own 1 %)) (update :afters #(own 1 %)))
+        before (fn [id c] (let [ids (get order c) i (.indexOf ^java.util.List ids id)] (when (pos? i) (nth ids (dec i)))))]
     [view (-> patch
+              (dissoc :was)
               ;; each sent unit's html with its children's composed into its slots
               (update :frags (fn [fs] (vec (for [[id _] fs] [id (html id)]))))
               (update :appends (fn [as] (vec (for [[c el] as] [c (html el)]))))
               (update :prepends (fn [ps] (vec (for [[c group] (group-by first ps)] [c (apply str (map (comp html second) group))]))))
               ;; a unit placed after its sibling: by the sibling's element id
               (update :afters (fn [as] (vec (for [[sib el] as] [(str "#" sib) (html el)]))))
+              (assoc :moves (vec (for [[id c] mv] (if-let [b (before id c)] [id (str "#" b) "after" (html id)] [id c "prepend" (html id)]))))
               (assoc :removes (vec gone)))]))
 
 ;;; --- a location's page ------------------------------------------------------------------------
@@ -765,7 +815,7 @@
     :else
     (let [units (:seon.render/units out)
           [view patch n] (step-units (units-index st) held units)
-          [view patch] (finish-patch view patch (set (map :id units)))
+          [view patch] (finish-patch view patch units)
           skel (h/html (:seon.render/hiccup out))
           view (assoc view :skeleton skel :layout (:seon.render/hiccup out))]
       [(-> (hold st view) (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))
@@ -773,7 +823,7 @@
          ;; a patch replaces only elements the tab holds: a unit new to it in no container (its slot in the layout,
          ;; not a list's) has no element there to replace, so the tab is sent the page whole
          (and held (some #(not (contains? (:units held) (first %))) (:frags patch))) {:op :keyframe :whole true :view view-id :html (compose skel (:units view))}
-         (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:afters patch)) (seq (:removes patch)))
+         (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:afters patch)) (seq (:moves patch)) (seq (:removes patch)))
          (assoc patch :op :patch :view view-id))]))))
 
 (defn- view-pass
