@@ -197,3 +197,4 @@ aotcachebudget
 providerfirstuse
 fibersecondmutator
 fiberuncaught
+imagelegacyclaim
