@@ -32,6 +32,8 @@ After the three moves (an estimate until each is built): about 20 of the 31 beco
 
 ## The data moves
 
+Each move with the pull form before and after it, and what it deletes.
+
 | move | before | after | deletes |
 |---|---|---|---|
 | the role named in the pattern | a whole pattern stored per entity, written by code at boot for root's session and the user (three copies of the user's that disagree) | `[:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]`: the role's name, then its own clauses; a join "again, to depth n" with n a config key | `seon.task/user-pattern`, `agents-join`, `seon.root/root-session-pattern`, the two boot writes |
@@ -44,6 +46,8 @@ After the three moves (an estimate until each is built): about 20 of the 31 beco
 | a referenced session | a copy keyed `example/<id>` loaded on main | a ref to an agent at a point, with how it is shown as data on the join; built with C | `my.root/load-example!`, the copy |
 
 ## The order it ships in
+
+Each row is one tip, small enough to land alone, with who builds it, its proof and what the next live run should show.
 
 | # | tip | builder | proof, red first | what the next live run should show |
 |---|---|---|---|---|
