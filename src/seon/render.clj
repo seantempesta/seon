@@ -339,8 +339,9 @@
     (vec (keep (fn [f] (let [s (:seon.render/style (meta f))] (when (css? s) [(symbol f) s]))) (sort-by symbol vs)))))
 
 (defn- with-id
-  "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id and
-  its render's name as its first class, then any class the render gave its root (a root's classes were
+  "Hiccup hc with its root element's attributes merged with attrs: a component's key as its id, the render that drew it as data
+  (:render, its full symbol: what the model reads of which function drew a part, and what the page writes as data-render), and
+  its render's name as its first class (the page's CSS scope), then any class the render gave its root (a root's classes were
   once replaced, so a layout written on a root silently did nothing: a page's messages touched; the model
   reads no class, seon.render's strip-attrs). Its var's :seon.render/style is added when its html is
   written (`styled`). A render that drew nothing (nil) stays nothing: no element to hold it, so no part
@@ -498,7 +499,7 @@
                             as (:seon.render/as opts)
                             out (cond (::for env) nil
                                       as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil)
-                                      :else (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))}))]
+                                      :else (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') (cond-> {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))} (var? f) (assoc :render (symbol f)))))]
                         ;; an entity's own render for each other output, where no call answers that output for it
                         ;; each in a run of its own at this edge (docs/failure-points.md, a component's render): a model render that throws
                         ;; is that output's defect, never the page's, which the person still reads; its error is data both see: a problem
@@ -661,7 +662,9 @@
     (if (and (vector? out) (map? (second out)) (:class (second out)))
       (cond-> out
         (and style (not (css? style))) (update-in [1 :class] str " " style)
-        (var? f) (assoc-in [1 :data-render] (str (symbol f))))
+        ;; the render that drew it, which the walk put on the root as data (:render, `with-id`), written as an html attribute
+        (contains? (second out) :render) (update 1 #(-> % (assoc :data-render (str (:render %))) (dissoc :render)))
+        (and (var? f) (not (contains? (second out) :render))) (assoc-in [1 :data-render] (str (symbol f))))
       out)))
 
 (defn resolved
@@ -892,9 +895,9 @@
           pl)))
 
 (defn- strip-attrs
-  "An element's attributes as a reader of its hiccup reads them: its presentation (class, style) is the page's and its marks (:wire/*) the reading's; an id names it, so the model need not guess it."
+  "An element's attributes as a reader of its hiccup reads them: its presentation (class, style) is the page's and its marks (:wire/*) the reading's; an id names it, so the model need not guess it; its :render is said by the part's head (`part-form`), never twice."
   {:malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [attrs] (not-empty (reduce-kv (fn [m k _] (if (and (keyword? k) (= "wire" (namespace k))) (dissoc m k) m)) (dissoc attrs :class :style) attrs)))
+  [attrs] (not-empty (reduce-kv (fn [m k _] (if (and (keyword? k) (= "wire" (namespace k))) (dissoc m k) m)) (dissoc attrs :class :style :render) attrs)))
 
 (defn- size
   "The characters x holds, as the one sizer counts them: its strings and the text of its other leaves, a mark for each collection, no wire mark
