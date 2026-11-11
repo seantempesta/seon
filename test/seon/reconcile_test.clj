@@ -320,6 +320,12 @@
                                              ["and released" (task/execution-tx ["demo/w-merge"] :running)]])]
         (is (= #{"demo/w"} (:merging (r/index db0))) "w, judged, merges itself while nothing follows it")
         (is (= #{} (:merging (first idxs))) "then the step, which merges it, is the merge in flight")))
+    (testing "a need that moves to another branch: its step is a step no longer, in the index observed as in the index listed"
+      (let [db0 (db-of [(decl "w") step] :extra (concat (work "w" :ready) (work "w-merge" :running)))
+            [db _ idxs] (observed-steps db0 [["w moves to another branch" [{:seon.task/id "demo/w" :seon.task/branch :main/elsewhere}]]])]
+        (is (= #{"demo/w-merge"} (:merging (r/index db0))) "before: the step merges w while it works")
+        (is (= (:merging (r/index db)) (:merging (first idxs))) "the mark observed is the mark listed")
+        (is (not (contains? (:merging (first idxs)) "demo/w-merge")) "and the task that needed w on its branch no longer merges it")))
     (testing "behind is the work's own only when no step follows it on its branch"
       (let [db (db-of decls :extra (concat (work "w" :running) (work "l" :running)))
             behind {:end {:outcome :green} :results {(t "w") :pass (t "l") :pass} :behind 2}]

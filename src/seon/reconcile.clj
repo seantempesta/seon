@@ -356,10 +356,13 @@
                      (case (or kind okind)
                        :task (let [id (or (:seon.task/id v) oid)
                                    needs? (not= (get-in idx [:tasks id :seon.task/needs]) (:seon.task/needs v))
-                                   ;; whether a task merges its own work reads the tasks that need it on its branch (merges-in?): the tasks
-                                   ;; a task needed, or needs now, are re-derived where its needs or its branch moved
-                                   moved? (or needs? (not= (get-in idx [:tasks id :seon.task/branch]) (:seon.task/branch v)))
-                                   needed (when moved? (into (get-in idx [:tasks id :seon.task/needs] #{}) (:seon.task/needs v)))]
+                                   ;; whether a task merges its own work reads the tasks that need it on its branch (merges-in?), and whether it
+                                   ;; is a merge step reads the branches of the tasks it needs (merge-step-in?): where a task's needs or its branch
+                                   ;; moved, the tasks it needed or needs now are re-derived, and where its branch moved the tasks that need it too
+                                   branch? (not= (get-in idx [:tasks id :seon.task/branch]) (:seon.task/branch v))
+                                   moved? (or needs? branch?)
+                                   needed (when moved? (cond-> (into (get-in idx [:tasks id :seon.task/needs] #{}) (:seon.task/needs v))
+                                                         branch? (into (get-in idx [:needed-by id]))))]
                                [(-> idx (put-task id v) (update :keys #(if v (assoc % e [:task id]) (dissoc % e))))
                                 (cond-> nc (or needs? (nil? (get-in idx [:acc id])) (not= (get-in idx [:tasks id :seon.task/proofs]) (:seon.task/proofs v))) (conj id))
                                 (into (conj dirty id) needed) all?])
