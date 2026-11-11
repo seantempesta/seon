@@ -471,7 +471,9 @@
                          _ (when gone (agent/transact! (mapv (fn [[_ e f]] [:db/retract e :var/form f]) gone)))
                          m (cond-> m gone (assoc :unmapped (mapv first gone)))]
                    (if acct
-                     (let [[tx redefined] (try
+                     (let [;; the vars this form makes that the branch did not hold before it (read before its transaction)
+                           made (vec (remove #(pdb/eid (agent/db) :var/name %) (map :var (:defs acct))))
+                           [tx redefined] (try
                                             (let [tx (when contract/record? (program/record-tx (agent/db) acct))]
                                               ;; what this form's own transaction changes of an existing var's contract or
                                               ;; docstring, read before it is applied (a form that defines nothing reads nothing)
@@ -483,8 +485,9 @@
                                                                        (map (juxt :multi :dispatch) (:methods acct)) (map (juxt :protocol :type) (:impls acct))))
                                       :repl/defined (mapv :var (:defs acct)))
                          redefined (assoc :redefined redefined)
-                         ;; a plain def in a program namespace is usually a look, not a change: said where it lands (loop 2: eight turns)
-                         (and (seq? (:repl/form m)) (= 'def (first (:repl/form m))) (seq (:defs acct))) (assoc :program-def (mapv :var (:defs acct)))
+                         ;; a var new in a program namespace may be a look, not a change: said where it lands, whatever form made it
+                         ;; (loop 2: a def, eight turns; Data model's tasks: a scratch defn and a macro, unnoticed)
+                         (seq made) (assoc :program-def made)
                          (seq (program/unknown-refs acct)) (assoc :unknown-vars (program/unknown-refs acct))))
                      (cond-> m
                        l (assoc :repl/defined (program/set-vars l))
@@ -619,7 +622,7 @@
                    (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)})
                    (some :program-def fs)
                    (conj {:seon.repl/finding :program-def :vars (vec (mapcat :program-def fs))
-                          :seon.repl/fix "This def made program on your branch; it merges with your task. If you only meant to try something, take it back with (ns-unmap 'the.ns 'the-name) and define such things in your own namespace."})
+                          :seon.repl/fix "New on your branch, so it merges with your task. If you only meant to try something, take it back with (ns-unmap 'the.ns 'the-name) and define such things in your own namespace."})
                    (some :unknown-vars fs)
                    (conj {:seon.repl/finding :unknown-var :unknown (vec (distinct (mapcat :unknown-vars fs)))
                           :seon.repl/fix "No var has this name yet, so the definition fails when that line runs: fix the name, or define it."})

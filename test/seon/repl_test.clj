@@ -447,14 +447,17 @@
 
 (deftest a-plain-def-in-a-program-namespace-says-where-it-landed
   ;; loop 2 (2026-11-11): an agent's (def conn ...) to look at something became program in the task's namespace, and it spent eight
-  ;; turns learning what :recorded meant; a plain def that records says so where it lands, with the form that takes it back
-  (let [[d f] (at/in-agent (fn [{:keys [ns]}]
-                             [(str "(ns " ns ".core) (def look 1)")
-                              (str "(in-ns '" ns ".core) (defn g \"G.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)")]))
+  ;; turns learning what :recorded meant; Data model's real tasks: a scratch defn and a macro became program unnoticed. A var NEW on the
+  ;; branch, whatever form made it, is said where it lands, with the form that takes it back; a var redefined is the change itself
+  (let [[d f g] (at/in-agent (fn [{:keys [ns]}]
+                               [(str "(ns " ns ".core) (def look 1)")
+                                (str "(in-ns '" ns ".core) (defn g \"G.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+                                (str "(in-ns '" ns ".core) (defn g \"G.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")]))
         found (fn [r] (some #(when (= :program-def (:seon.repl/finding %)) %) (:warnings r)))]
     (is (= "look" (some-> (found d) :vars first name)) (str "a def that recorded: said, with its var: " (pr-str d)))
     (is (str/includes? (str (:seon.repl/fix (found d))) "ns-unmap") "and the form that takes it back")
-    (is (nil? (found f)) (str "a defn is the change it means: nothing said: " (pr-str f)))))
+    (is (= "g" (some-> (found f) :vars first name)) (str "a new defn too: " (pr-str f)))
+    (is (nil? (found g)) (str "a var redefined is the change it means: nothing said: " (pr-str g)))))
 
 (deftest a-definition-inside-a-top-level-do-is-program
   ;; owner, 2026-10-28: match Clojure, whose compiler evaluates each form of a top-level do as a
