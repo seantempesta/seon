@@ -674,6 +674,44 @@
     (is (= '{green-test/proof nil green-test/other nil green-test/turned :red} (:value first-facts)) (pr-str first-facts))
     (is (= '{green-test/proof :green green-test/other nil green-test/turned :green} (:value second-facts)) (pr-str second-facts))))
 
+(deftest a-proof-over-the-branchs-data-is-keyed-by-its-data-too
+  ;; Context's trial finding 14: an agent's proof over its branch's data (lab.proofs/the-tasks-i-cite-differ-from-my-base) ran
+  ;; red before the agent's write and green after at one digest, so it was judged flaky and its task refused. Its digest held
+  ;; its code and not the data it reads: a test namespace's own call of a branch reader (my.db, seon.agent/db) takes the
+  ;; branch's point as one more input in an agent (docs/merging.md#verdicts-are-a-cache); the tests that read no branch,
+  ;; and bin/test's digests, which hold no branch, stay as they were
+  (let [in {:env "e" :tree "t" :config {} :data-refs {}}
+        tests (conj @#'seon.program-test/calc-tests 'app.pt-calc-test/data-test 'app.pt-calc-test/api-test)
+        base (d/db-with (#'seon.program-test/calc-db)
+                        [{:seon.root/id :root :seon.root/boot "b1" :seon.root/source {:root "/r" :files 0 :forms 0 :ms 0 :boot "b1" :inputs in}}])
+        ;; seon.agent/db itself: this program holds no my.* forms, whose readers (my.db/q) branch-readers finds by their calls of it
+        ;; and an agent API function calling it (as my.db/q does), which a test calls with no db handed in
+        branch (seon.program-test/record base 'app.pt-calc-test "(deftest data-test (is (seon.agent/db)))"
+                                         'my.lab-api "(defn branch-db [] (seon.agent/db))"
+                                         'app.pt-calc-test "(deftest api-test (is (my.lab-api/branch-db)))")
+        written (d/db-with branch [{:seon.root/id :root :seon.root/boot "b1"}])
+        agent (fn [db] (select-keys (:digests (agent/test-plan db base tests)) tests))
+        checkout (fn [db] (select-keys (ts/reach-digests db in) tests))
+        [a b] [(agent branch) (agent written)]]
+    (is (not= (get a 'app.pt-calc-test/data-test) (get b 'app.pt-calc-test/data-test)) "the branch's data moved: the proof over it is a new digest")
+    (is (not= (get a 'app.pt-calc-test/api-test) (get b 'app.pt-calc-test/api-test)) "and one through the agent's API")
+    (is (= (dissoc a 'app.pt-calc-test/data-test 'app.pt-calc-test/api-test) (dissoc b 'app.pt-calc-test/data-test 'app.pt-calc-test/api-test))
+        "the tests reading no branch keep theirs")
+    (is (= (checkout branch) (checkout written)) "bin/test's digests hold no branch")))
+
+(deftest an-agents-own-deftest-is-no-failure-point
+  ;; docs/health.md#a-laws-unnamed-site: a deftest an agent defines at its REPL, in a namespace of its own (which takes a file under src,
+  ;; seon.source/namespace-path), is a test by its var's :test (the compiler's fact), so its `is`'s catch opens no
+  ;; :unnamed-site the done rule refuses on (seon.problems/caused); a catch in a function it defines there still does
+  (let [[_ caused] (in-agent (fn [{n :ns}]
+                               [(str "(ns " n ".lab (:require [clojure.test :refer [deftest is]]))"
+                                     " (deftest p (is (= 1 1)))"
+                                     " (defn f [] (try 1 (catch Exception _ 2)))")
+                                "(seon.problems/caused (seon.agent/heard-main) (seon.agent/db))"]))
+        site (fn [v] (some #(str/includes? % (str ".lab/" v " has a catch site")) (:value caused)))]
+    (is (not (site "p")) (pr-str caused))
+    (is (site "f") (pr-str caused))))
+
 (deftest an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test green at its digest is not run again, "especially when freshly branched": an agent's greens and a
   ;; checkout's (bin/test's) are one verdict cache, so an agent's plan must key each test by the digest bin/test's plan does.
@@ -2959,3 +2997,12 @@
     (is (= :seon.writer/refused (:cause v)) (pr-str v))
     (is (str/includes? (str (:message v)) "gone") (pr-str v))
     (is (false? (:made v)) "no branch made")))
+
+(deftest my-task-status-shows-a-failing-proofs-source-as-the-page-does
+  ;; the physics audit (2026-11-11, high 3): docs/agent.md says (my.task/status) answers what the page's status shows, and the page draws a
+  ;; red proof's :source and :calls; my.task/status stripped both, so an agent had to (source the-proof) to read the test it failed
+  (let [read #'my.task/proof-as-read
+        red {:test 'app.x-test/t :status :fail :source "(deftest t (is false))" :calls ['app.x/f] :shape {:n 1}}
+        green {:test 'app.x-test/u :status :pass :source "(deftest u (is true))" :calls ['app.x/g] :shape {:n 1}}]
+    (is (= (dissoc red :shape) (read red)) "a failing proof keeps its source and what it calls")
+    (is (= {:test 'app.x-test/u :status :pass} (read green)) "a passing one is its name and status")))

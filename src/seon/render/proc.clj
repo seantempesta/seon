@@ -151,7 +151,8 @@
                  (if (and old (= input (:input old)))
                    [[view patch n] prev placed]
                    (let [[hiccup html kept] (render-unit ix u (:kept old))
-                         view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container) (:parent u) (assoc :parent (:parent u)) (some? kept) (assoc :kept kept)))]
+                         view (assoc-in view [:units id] (cond-> {:input input :html html :hiccup hiccup} container (assoc :container container) (:parent u) (assoc :parent (:parent u))
+                                                           (:regions u) (assoc :regions (:regions u)) (some? kept) (assoc :kept kept)))]
                      (cond
                        (= html (:html old)) [[view patch (update n :same inc)] prev placed]
                        (and container (nil? old))
@@ -167,10 +168,17 @@
              units))))
 
 (defn compose
-  "html with every slot marker replaced by its unit's retained HTML, recursively."
-  {:malli/schema [:=> [:cat :string :map] :string]}
-  [html units]
-  (str/replace html #"<!--s:([^>]*?)-->" (fn [[_ id]] (compose (get-in units [id :html] "") units))))
+  "html with every slot marker replaced by its unit's retained HTML and every region (seon.render/region) by the units order
+  ({container [id ...]}, a view's :order) places in that element that no parent holds, each composed the same way, recursively. With
+  no order a region is empty: a unit read alone. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:function [:=> [:cat :string :map] :string] [:=> [:cat :string :map [:maybe :map]] :string]]}
+  ([html units] (compose html units nil))
+  ([html units order]
+   (str/replace html #"<!--([sc]):([^>]*?)-->"
+                (fn [[_ k id]]
+                  (if (= "s" k)
+                    (compose (get-in units [id :html] "") units order)
+                    (apply str (for [u (get order (str "#" id)) :when (nil? (get-in units [u :parent]))] (compose (get-in units [u :html] "") units order))))))))
 
 (def ^:private slot-re #"<!--s:([^>]*?)-->")
 
@@ -220,17 +228,20 @@
         order (reduce (fn [m {:keys [id container]}] (cond-> m container (update container (fnil conj []) id))) {} units)
         was (:order view)
         view (-> view (update :units #(apply dissoc % gone)) (assoc :order order))
-        html #(compose (get-in view [:units % :html]) (:units view))
+        html #(compose (get-in view [:units % :html]) (:units view) order)
+        ;; who holds a unit: its parent, else the unit whose regions hold its container (the page holds its lists' members)
+        region-of (into {} (for [[id u] (:units view) r (:regions u)] [(str "#" r) id]))
+        holder (fn [id] (let [u (get-in view [:units id])] (or (:parent u) (region-of (:container u)))))
         ;; a unit whose html moved only in its children's order: its children's moves say it
         reordered (into #{} (keep (fn [[id h]] (when (order-only? (get-in patch [:was id]) h) id))) (:frags patch))
         patch (update patch :frags #(vec (remove (comp reordered first) %)))
         ;; a unit sent inside an ancestor this patch also sends (a parent re-drawn carries its children, composed) is not sent again
         sent (into #{} (concat (map first (:frags patch)) (map second (:appends patch)) (map second (:prepends patch)) (map second (:afters patch))))
-        inside? (fn inside? [id] (when-let [p (get-in view [:units id :parent])] (or (contains? sent p) (inside? p))))
+        inside? (fn inside? [id] (when-let [p (holder id)] (or (contains? sent p) (inside? p))))
         ;; what moved, unless an ancestor sent carries it; a moved unit is sent whole by its move, its own frag and its children's with it
         mv (vec (remove (comp inside? first) (moves was order)))
         moved (set (map first mv))
-        under? (fn under? [id] (when-let [p (get-in view [:units id :parent])] (or (contains? moved p) (under? p))))
+        under? (fn under? [id] (when-let [p (holder id)] (or (contains? moved p) (under? p))))
         own (fn [k xs] (vec (remove #(or (inside? (nth % k)) (moved (nth % k)) (under? (nth % k))) xs)))
         patch (-> patch (update :frags #(own 0 %)) (update :appends #(own 1 %)) (update :prepends #(own 1 %)) (update :afters #(own 1 %)))
         ;; its neighbours in the container's new order: by element id, so a unit whose parent element has no id of its own lands in it
@@ -506,6 +517,12 @@
     (list-units (render/placed-units (:w kw)) "#c-side")
     []))
 
+(defn- system-units
+  "Which system a page is: the system walk's unit in #p-system (seon.render.ui/system-source), which the frame places in the top bar of
+  every page; none before the system walk is drawn. See docs/render.md#the-page."
+  {:malli/schema [:=> [:cat :map] [:vector :map]]}
+  [st] (if-let [w (some-> (:root-walk st) :w)] (list-units (render/placed-units w) "#p-system") []))
+
 (defn- agent-view
   "View's page when it names an agent (entity eid on main db): its components as its process drew
   them (ask-parts, seon.repl/render-ctx: the units of its walk) at the branch root read or later, else, with no process
@@ -577,7 +594,7 @@
                 (cond (and bdb (not chat?)) (ctx-units)
                       bdb (branch-units)
                       ;; a branch that could not be read: its error, by the error's render
-                      berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/hiccup {:seon.render/index (seon.db/index)} berr)])}]))
+                      berr [{:id "p-branch-error" :container "#p-head" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/hiccup {:seon.render/index (seon.db/index)} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
         ;; the signed-in user's agents list, the one every page shows (`user-sides`), and the agent's head from its facts on main
         ;; every agent's page draws its own agents list; the frame shows the signed-in user's on every page, one walk's (`user-sides`)
@@ -588,13 +605,15 @@
         ;; system's own view (its head, process and problems: root's runtime values, never written) from the system's walk, placed by
         ;; the frame as the agents list is, the same mechanism
         system? (= "root" (:seon.agent/key e))
-        system (when (and chat? system?) (some-> (:root-walk st) :w render/placed-units))
+        ;; the system walk fills regions of this page, so its own root unit (its page) is not placed
+        ;; and its source line, which every page holds (system-units), is placed once
+        system (when (and chat? system?) (some->> (:root-walk st) :w render/placed-units (remove #(#{render/root-container "#p-system"} (:container %)))))
         head (cond-> (or (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid) {:seon.agent/key (:seon.agent/key e)})
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
                (not (task/this-boots db e)) (dissoc :processes))
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent-head {} head)])}]
-    (ui/page-chrome {:units (vec (concat sides [head-unit] system units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
+    (ui/page-chrome {:units (vec (concat (system-units st) sides [head-unit] system units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
@@ -719,7 +738,7 @@
      (and eid (= :debug (first-of view))) (debug-value st view)
      (and eid (= :chat (first-of view)) (agent-of db (second view))) (agent-view st view db eid)
      (and eid (agent-of db view)) (agent-view st view db eid)
-     (= :home (second-of view)) (ui/page-chrome {:units [{:id "p-sign-in" :container "#p-head" :rev 0 :html (h/html (ui/sign-in {:seon.db/db db}))}] :view (ui/view-param view) :tab :chat} :root)
+     (= :home (second-of view)) (ui/page-chrome {:units (conj (system-units st) {:id "p-sign-in" :container "#p-head" :rev 0 :html (h/html (ui/sign-in {:seon.db/db db}))}) :view (ui/view-param view) :tab :chat} :root)
      db (contract/error :seon.render/no-location #'seon.render.proc/page-value
                         (str "no " (let [v (if (vector? view) (second view) view)] (if (keyword? v) (str "agent " (address-of v)) (ui/kname v)))
                              " on main: an address names an agent by its key (boot/id), its id in this boot, its task or its branch; the home page lists every session")
@@ -840,8 +859,9 @@
       [(-> (hold st view) (update-in [:counts :rendered] (fnil + 0) (:rendered n)) (update-in [:counts :same] (fnil + 0) (:same n)))
        (cond
          ;; a patch replaces only elements the tab holds: a unit new to it in no container (its slot in the layout,
-         ;; not a list's) has no element there to replace, so the tab is sent the page whole
-         (and held (some #(not (contains? (:units held) (first %))) (:frags patch))) {:op :keyframe :whole true :view view-id :html (compose skel (:units view))}
+         ;; not a list's) has no element there to replace, and a frame the tab does not hold (an error page that became the
+         ;; agent's) has none of the regions its units go in, so the tab is sent the page whole
+         (and held (or (not= (:skeleton held) skel) (some #(not (contains? (:units held) (first %))) (:frags patch)))) {:op :keyframe :whole true :view view-id :html (compose skel (:units view) (:order view))}
          (or (seq (:frags patch)) (seq (:appends patch)) (seq (:prepends patch)) (seq (:afters patch)) (seq (:moves patch)) (seq (:removes patch)))
          (assoc patch :op :patch :view view-id))]))))
 
@@ -883,8 +903,8 @@
   "The composed document of view-id from its retained fragments (renders nothing)."
   {:malli/schema [:=> [:cat :map :any] [:maybe :string]]}
   [st view-id]
-  (when-let [{:keys [skeleton units]} (get-in st [:views view-id])]
-    (compose skeleton units)))
+  (when-let [{:keys [skeleton units order]} (get-in st [:views view-id])]
+    (compose skeleton units order)))
 
 (defn- drop-read
   "St without branch b's read (no view shows it): its db let go and its kept walk (branch-walk!) disposed."

@@ -1073,6 +1073,7 @@
                                     :files (if changed? (+ (count (d/datoms db :aevt :ns/file)) (count (d/datoms db :aevt :schema/file))) n)
                                     :forms (count (d/datoms db :aevt :form/id))}
                              (:commit r) (assoc :commit (:commit r))
+                             (:branch r) (assoc :branch (:branch r))
                              ;; the tree it read: the next import reads only what differs from it
                              (:tree r) (assoc :tree (:tree r))
                              (seq (:pins r)) (assoc :pins (:pins r))

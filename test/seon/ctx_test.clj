@@ -903,7 +903,9 @@
         (let [[parts page] (try (enter-agent! {:db db :key k :branch :b}) [(seon.repl/render-ctx) (seon.repl/render-ctx-hiccup)]
                                 (finally (end-agent!)))
               shown (:units parts)
-              top (remove :parent shown)
+              ;; in the lists' order the model reads them in (render-ctx-hiccup's), each list's members in the page's order; the page's
+              ;; own unit (its layout's output, seon.render/placed-units' first) is no part
+              top (mapcat (fn [sel] (filter #(and (nil? (:parent %)) (= sel (:container %))) shown)) ["#p-task" "#c-rows"])
               by (into {} (map (juxt :id identity)) shown)
               root-of (fn root-of [u] (if-let [p (by (:parent u))] (root-of p) u))]
           (is (= (remove #{"agent-state" "chat-ask" "chat-end" "page-rules"} (map :id top)) (keys page)) "every component placed in a list, the conversation's too, in order: nothing left out but what is the person's alone, which the model is sent none of")
@@ -1120,14 +1122,22 @@
 
 (deftest an-agent-edits-its-pattern
   ;; the owner, 2026-10-26: "the pull pattern ... stored in the context and the agent can update it":
-  ;; a swap! of :seon.ctx/pattern is written on the agent's entity, and the record is pulled by it
+  ;; a swap! of :seon.ctx/pattern is written on the agent's entity, and the record is pulled by it. It edits its role's
+  ;; pattern in place (2026-11-11: added to, never replaced): here its evals become a window of three and one attribute it
+  ;; held is no longer asked, every join its role requires kept
   (let [db (seeded 20)
-        step (fn [db f] (as-agent! db #(let [r (try (f) (catch clojure.lang.ExceptionInfo e (ex-data e)))] [r @ctx/ctx])))]
-    (let [[[_ c] db'] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern '[* {[:seon.eval/_agent :as :evals :limit 3 :reverse true] [*]}]))]
-      (is (= '[* {[:seon.eval/_agent :as :evals :limit 3 :reverse true] [*]}] (:seon.ctx/pattern (d/entity db' [:seon.agent/key k]))) "the pattern, on the agent's entity")
+        step (fn [db f] (as-agent! db #(let [r (try (f) (catch clojure.lang.ExceptionInfo e (ex-data e)))] [r @ctx/ctx])))
+        default (vec (render/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern))
+        evals? (fn [x] (and (map? x) (some #(= :seon.eval/_agent (if (vector? %) (first %) %)) (keys x))))
+        [[_ c0] _] (step db #(deref ctx/ctx))
+        dropped (some #(when (and (keyword? %) (not (#{:seon.agent/key :seon.ctx/pattern} %)) (some? (get c0 %))) %) default)
+        edited (conj (vec (remove #(or (evals? %) (= dropped %)) default)) '{[:seon.eval/_agent :as :evals :limit 3 :reverse true] [*]})]
+    (is (some? dropped) "the seeded agent holds an attribute its pattern asks")
+    (let [[[_ c] db'] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern edited))]
+      (is (= edited (:seon.ctx/pattern (d/entity db' [:seon.agent/key k]))) "the pattern, on the agent's entity")
       (is (= ["e20" "e19" "e18"] (names (:evals c) :seon.eval/id)) "the record pulled by it: its three newest evals")
-      (is (nil? (:task c)) "and nothing the pattern does not name"))
-    (let [[[r _] _] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern '[* {[:seon.eval/_agent :newest 3] [*]}]))]
+      (is (nil? (get c dropped)) "and nothing the pattern does not name"))
+    (let [[[r _] _] (step db #(swap! ctx/ctx assoc :seon.ctx/pattern (conj default '{[:seon.eval/_agent :newest 3] [*]})))]
       (is (= :seon.ctx/invalid-pattern (:seon.error/type r)) "a pattern the walk cannot read: refused, nothing written"))))
 
 (deftest a-swap-writes-the-record
@@ -1570,3 +1580,30 @@
           (is (= 1 (count (:seon.message/_to c))) "the pull holds the message")
           (is (= ["m1"] (mapv second (get (ctx/placed-messages db c) 1))) "and it is placed, at the turn that read it"))))))
 
+
+(deftest a-pattern-that-drops-a-required-join-is-refused-naming-it
+  ;; docs/ctx.md#changing-it-swap: a pattern is the agent's own data, added to and never replaced (owner, 2026-11-11: "The agent can
+  ;; break their context"; "a schema for a functioning agent ... the pull pattern has required parts that we can check"). What a
+  ;; role's pattern must keep is data on its schema (:seon.ctx/required); the one write path refuses a swap! that drops one, naming it
+  (let [db (:db-after (d/with (ts/test-db) [{:seon.agent/key k :seon.agent/turn 1}]))
+        p (vec (render/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern))
+        join? (fn [a x] (and (map? x) (some #(= a (if (vector? %) (first %) %)) (keys x))))
+        tryit (fn [p'] (first (as-agent! db #(try (swap! ctx/ctx assoc :seon.ctx/pattern p') :written
+                                                  (catch clojure.lang.ExceptionInfo e (pr-str (ex-data e)))))))]
+    (is (= :written (tryit (conj p :seon.agent/started-ms))) "a clause added: accepted")
+    (let [said (str (tryit (vec (remove #(join? :seon.message/_to %) p))))]
+      (is (str/includes? said "must keep :seon.message/_to") said)
+      (is (str/includes? said "the messages sent to you") "and says what the join is"))
+    (is (str/includes? (str (tryit [:seon.agent/key])) "must keep") "a replacement is refused")))
+
+(deftest a-swap-at-a-key-the-join-does-not-hold-says-so
+  ;; docs/ctx.md#changing-it-swap: a join's members are keyed by their entity ids; a swap! whose path names a key the join holds no member
+  ;; at (a map entry, a string id) is refused saying that, with the keys it does hold, not only that a new member names its identity
+  ;; (Trial 2 run 4: an agent passed (first (filter .. join)), a map entry, and read the refusal as a forbidden write: six evals)
+  (let [db (:db-after (d/with (ts/test-db) [{:seon.agent/key k :seon.agent/turn 1}
+                                            {:seon.message/id "m1" :seon.message/from {:seon.agent/key "user"} :seon.message/body "hi" :seon.message/to [[:seon.agent/key k]]}]))
+        m (seon.db/eid db :seon.message/id "m1")
+        said (first (as-agent! db #(try (swap! ctx/ctx assoc-in [:seon.message/_to [m {:seon.message/body "hi"}] :seon.message/body] "edited") nil
+                                        (catch clojure.lang.ExceptionInfo e (pr-str (ex-data e))))))]
+    (is (str/includes? (str said) "no member is held at") said)
+    (is (str/includes? (str said) (str "at their entity ids: " m)) "and it names the keys the join holds")))

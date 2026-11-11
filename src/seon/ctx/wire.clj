@@ -245,11 +245,12 @@
   [{:role "user" :content (print/text (array-map :render-threw (some-> in str) :message (str message)) (:context print/budgets))}])
 
 (defn- presentation-free
-  "Hiccup h without what is the page's alone: each element's class, style and id, its :data-* and :aria-* attributes (what the page's script
-  and a screen reader read; :href, :title and :alt stay), but for a component's root (an element the walk
-  gave an id), which keeps its render's name, the first word of its class, so the model can look up the function that drew a part
-  (`(source seon.render.ui/task-view)`) and its CSS on that var's metadata, and its id (seon.render/key-id: the render and what it shows), by which
-  a diff names it (seon.render/keyed); each element's children vectors only (`children`). See docs/render.md#style."
+  "Hiccup h without what is the page's alone: every element's class and style, its :data-* and :aria-* attributes (what the page's script
+  and a screen reader read; :href, :title and :alt stay) and its id, but for a component's root (an element the walk gave an id), which
+  keeps its id (seon.render/key-id: the render and what it shows), by which a diff names it (seon.render/keyed), and :render, the
+  render that drew it as data, its full symbol (seon.render's with-id), so the model can look up the function that drew a part
+  (`(source seon.render.ui/task-view)`); nothing presentational reaches the model; each element's children vectors only (`children`).
+  See docs/render.md#style."
   {:malli/schema [:=> [:cat :any] :any]}
   [h]
   ;; an element's children as the tree holds them: a seq a render returned (a `for`) spliced in its place, nils dropped, so the
@@ -257,13 +258,12 @@
   (letfn [(children [xs] (into [] (comp (mapcat #(if (seq? %) (children %) [%])) (remove nil?)) xs))]
   (clojure.walk/postwalk (fn [x] (if (and (vector? x) (keyword? (first x)) (map? (second x)))
                                        (let [m (second x)
-                                             r (when (:id m) (first (str/split (str (:class m)) #"\s+")))
                                              ;; and the page's own marks (:wire/for \"page\"): what the page alone shows says nothing to the model
                                              ;; and what drives the page's script or a screen reader (:data-*, :aria-*): the page's alone too
                                              a (cond-> (into {} (remove (fn [[k _]] (or (#{:class :style :id} k) (= "wire" (namespace k))
                                                                                         (and (nil? (namespace k)) (or (str/starts-with? (name k) "data-") (str/starts-with? (name k) "aria-"))))))
                                                              m)
-                                                 (seq r) (assoc :class r :id (:id m)))]
+                                                 (and (:id m) (:render m)) (assoc :id (:id m)))]
                                          (into (if (seq a) [(first x) a] [(first x)]) (children (nnext x))))
                                        (if (and (vector? x) (keyword? (first x))) (into [(first x)] (children (next x))) x)))
                              h)))
@@ -289,18 +289,23 @@
 
 (defn model-parts
   "The parts of entity c's page the model reads, as one component: the lists its page render places (seon.render/render-var-of: its own
-  render, else its schema's) that hold no messages and are not for the page alone, as seon.render/page-lists keeps them, in the order the
+  render, else its schema's), anywhere in its output (a layout places them in its columns: docs/render.md#a-layout-places-its-lists),
+  that hold no messages and are not for the page alone, as seon.render/page-lists keeps them, in the order the
   render places them; none at a point before the entity was made. The root of the parts walk (`parts-walk`), so a list an entity's own render adds is read by the model as the
   task's parts are. See docs/render.md#an-entity-may-name-its-own-render."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
   [opts c]
   ;; at a point before the entity was made its pull holds nothing, and nothing draws its page: no parts
   (let [out (if (:db/id (ratom/untracked c)) ((render/render-var-of (:seon.render/index opts) c) opts c) [])
-        placed (if (and (vector? out) (keyword? (first out))) (drop-while map? (rest out)) out)
         model? (fn [x] (and (vector? x) (var? (first x))
                             (let [m (meta (first x))]
-                              (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for m)) (not= "page" (:wire/for (second x)))))))]
-    (into [:div {:id "model-parts"}] (filter model?) placed)))
+                              (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for m)) (not= "page" (:wire/for (second x)))))))
+        ;; the lists, through the layout's own elements, never into a component call's arguments
+        lists (fn lists [x] (cond (model? x) [x]
+                                  (and (vector? x) (keyword? (first x))) (mapcat lists (rest x))
+                                  (seq? x) (mapcat lists x)
+                                  :else nil))]
+    (into [:div {:id "model-parts"}] (lists out))))
 
 (defn- parts-walk
   "Agent a's page-parts walk drawn at db d0 (its branch's own, at t), cold: {:id :t :at :c :r :w}, the walk the model reads (:model-only:
@@ -333,8 +338,8 @@
 
 (defn page-parts-through
   "Agent a's page parts at each point of chain, a vector of points ({:commit :t}, in order on one branch; a first of nil: nothing
-  before the second, answered nil), on db's store, as the model reads them: one walk of its page-parts render
-  (seon.render.ui/agent-parts, named here by symbol: seon.render.ui requires this namespace) over the agent pulled by what the
+  before the second, answered nil), on db's store, as the model reads them: one walk rooted on `model-parts` (the lists of the
+  entity's own render, else its schema's, that hold no messages and are not for the page alone) over the agent pulled by what the
   parts read (`parts-walk`), advanced from point to point as a kept walk moves (`advance`: docs/render.md#a-page-is-a-kept-walk),
   each point's hiccup stripped of presentation (`presentation-free`). The walk is kept after the call at the chain's last point
   (`kept-walk`), so a later chain of the same agent on the same branch starting at or after it advances from it: a request at a

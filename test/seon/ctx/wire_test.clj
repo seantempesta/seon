@@ -454,7 +454,7 @@
         (is (str/starts-with? (:content (first r0)) "# You are a Seon agent\n\nYou're at a Clojure REPL") "the page, from its sections")
         (is (= ["system" "user" "assistant" "tool"] (mapv :role r0)) "the first request: the system prompt, what opens the session, then the page whole as a generated eval and its result")
         (is (str/starts-with? (page-code r0) "(my.render/page {:commit #uuid \"") "the page is the call (my.render/page p)")
-        (is (every? #(re-find % (:content (peek r0))) [#":class \"cite\"" #"Doubles\." #":class \"status\""]) "the page whole, each part by the function that drew it: how the work stands too")
+        (is (every? #(re-find % (:content (peek r0))) [#":render seon.render.ui/cite" #"Doubles\." #":render seon.render.ui/status"]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (str/starts-with? (page-code r1) "(my.render/diff {:commit #uuid \"") "what moved is a generated eval of its own at the end, after turn 1's own eval")
         (is (re-find #"\[\"page\" \"p-task\" \"task-view-demo_2Ff\" \"cite-[^\"]*demo_2Ff\" :pre\]" (:content (peek r1)))
             "the cited var's edit at its own part, nested in its task's as the pull nests it: the ids name each render and what it shows, and only what moved inside the cite is sent")
@@ -1645,10 +1645,11 @@
 
 (deftest the-models-page-holds-no-attribute-of-the-pages-alone
   ;; docs/render.md#style: what the page's script and a screen reader read (:data-*, :aria-*) is the page's alone, as class and style
-  ;; are; a link's target, a title and an image's text stay, and a component's root keeps its render's name and its id
-  (is (= [:section {:class "task-view" :id "task-view-x"} [:a {:href "/x" :title "t"} "x"] [:button "close"] [:img {:alt "a"}]]
+  ;; are; a link's target, a title and an image's text stay, and a component's root keeps its id and the render that drew it as data
+  ;; (:render, its full symbol), never a class (Point's 1602 ruling, 2026-11-11: nothing presentational reaches the model)
+  (is (= [:section {:render 'seon.render.ui/task-view :id "task-view-x"} [:a {:href "/x" :title "t"} "x"] [:button "close"] [:img {:alt "a"}]]
          (#'wire/presentation-free
-          [:section {:class "task-view big" :id "task-view-x" :data-render "seon.render.ui/task-view"}
+          [:section {:class "task-view big" :id "task-view-x" :render 'seon.render.ui/task-view :data-render "seon.render.ui/task-view"}
            [:a {:href "/x" :title "t" :aria-current "page" :class "link"} "x"]
            [:button {:data-seon-form "(f)" (keyword "data-on:click") "@post('/open')"} "close"]
            [:img {:alt "a" :style "w"}]]))))
@@ -2218,6 +2219,24 @@
     (is (str/includes? t "An attribute your plan names.") t)
     (is (str/includes? t ":form/src") "a ref followed: what the form entity holds")
     (is (str/includes? (text :var/name) "A real value:") "an attribute that is no ref: a real value")))
+
+(deftest a-cited-schema-that-is-no-attribute-shows-its-form-and-its-renders
+  ;; found reading one task's turn-1 request, 2026-11-11: a plan naming :seon.render/process ("a schema naming its renders") was told
+  ;; "An attribute your plan names. It holds :any." (the last keyword a regex found in the form), and its agent spent five turns finding
+  ;; how a schema declares its render. A key the db stores no attribute for is an entity's schema or a value's: its form, whole, and
+  ;; the renders its properties name
+  ;; the form as a schema file holds it (the stored :schema/form is that text)
+  (let [form "[:map {:seon.render/hiccup seon.render.ui/problems :seon.render/model seon.render.ui/problems-model} [:t :int] [:classes :map]]"
+        db (d/db-with (db-with-program) [{:schema/key :seon.problems/report :schema/form form}
+                                         {:schema/key :seon.db/agent-fact :schema/form "[:map {:seon.db/attributes true} [:seon.agent/key :seon.agent/key]]"}])
+        text (fn [k] (seon.render/part-text ['seon.render.ui/cite {} (seon.render.ui/cite-hiccup db {:seon.cite/depth :doc :seon.cite/target (d/pull db '[*] [:schema/key k])})]))
+        t (text :seon.problems/report)]
+    (is (not (str/includes? t "An attribute your plan names")) t)
+    (is (str/includes? t "A value's schema your plan names") t)
+    (is (str/includes? t "seon.render.ui/problems") "the render it names for a page")
+    (is (str/includes? t "seon.render.ui/problems-model") "and the one that prints it for the model")
+    (is (str/includes? t ":seon.render/hiccup") "its form whole, as the pull holds it")
+    (is (str/includes? (text :seon.db/agent-fact) "An entity's schema your plan names") "an entity schema says it is one")))
 
 (deftest proofs-of-one-namespace-show-its-example-once
   ;; docs/render.md#how-the-work-stands: seen 2026-11-06 on a task with four unwritten proofs: its namespace's example four times,

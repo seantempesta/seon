@@ -134,11 +134,12 @@
   {:malli/schema [:=> [:cat :int] :string]}
   [pid] (str (cfg/value :seon.config.agent/cwd) "/tests/" pid))
 
-(def ^:private child-env-scrub
+(def child-env-scrub
   "The `env -u` argv that gives a child process the tree's own environment (docs/source.md#the-next-generation):
   bin/env and bin/root export names for this root's checkout, runs and home, and a child inheriting
   SEON_SOURCE_ROOT listed its test namespaces from that checkout, not the tree it ran in (a full run's plan
-  named a test of the root's working tree that main does not hold, and its shard died at once). Used by build and run-tests."
+  named a test of the root's working tree that main does not hold, and its shard died at once). Used by build, run-tests
+  and the health step's base (test-runner/base-program)."
   ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
    "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"])
 
@@ -159,7 +160,7 @@
   :tree, the id of the whole tree as it is on disk (tree-id: git's own index makes it the cost of
   what changed), which stands for every file's content.
   With :since (the tree id of the last import, and no :paths; :since-dirs, the dirs that import read), only the files under dirs that differ from it, and every file of a dir it didn't read, are read, so what main merged and the tree never held stays main's. A tree git can no longer find reads whole.
-  Answers {:value {path text} :modes {path git mode, of each file the allow-list names} :commit sha :tree id :paths paths-when-read-by-them :pins {path sha}} or :seon.fx/io-error."
+  Answers {:value {path text} :modes {path git mode, of each file the allow-list names} :commit sha :branch name (nil when detached) :tree id :paths paths-when-read-by-them :pins {path sha}} or :seon.fx/io-error."
   {:malli/schema [:=> [:cat :map] :map]}
   [{{:keys [root dirs paths since since-dirs]} :req}]
   (try
@@ -186,6 +187,8 @@
                                                  :when (source? p)]
                                              [p (slurp f)])))}
                      head (assoc :commit head
+                                 ;; the branch checked out, none when HEAD is detached: which system a page is (seon.render.ui/source-line)
+                                 :branch (git-try base ["symbolic-ref" "--short" "-q" "HEAD"])
                                  :tree now
                                  :pins (into {}
                                              (for [[_ sha p] (re-seq #"(?m)^160000 ([0-9a-f]{40}) \d+\t(\S+)$"
@@ -982,7 +985,7 @@
            (if (seq form) (str ", where your change wrote: " form) ", a place your change's files don't hold")))
     "the gate's build failed and named no exception"))
 
-(defn- runner-end
+(defn runner-end
   "The last lines of what a runner said, joined, enough to hold what stopped it: its error, where, and the verdict lines after them. Three lost the error, leaving
   only where and the two verdicts."
   {:malli/schema [:=> [:cat :string] :string]}
