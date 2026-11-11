@@ -204,7 +204,7 @@ Asked by the question tool whether an agent's fibers take the safe paths at 11 t
 
 ### The standing system and its store are for use; erasing it stays his (owner, 2026-11-11)
 
-Asked whether agents may work on the standing store once the merge gate is right, since it was treated as read-only: "What? the database is read only? Why? No. Just use it!" Agents work and merge on the standing system, sessions attach and evaluate through the MCP tools, and the tree branches of a session live there; the rule of read-only evals is gone. What stays the owner's is erasing the store. Not yet stated in AGENTS.md §0 or the wiki (the managing session is to change them).
+Asked whether agents may work on the standing store once the merge gate is right, since it was treated as read-only: "What? the database is read only? Why? No. Just use it!" Agents work and merge on the standing system, sessions attach and evaluate through the MCP tools, and the tree branches of a session live there; the rule of read-only evals is gone. What stays the owner's is erasing the store. Stated in AGENTS.md §0 and [sessions](sessions.md#sessions-own-their-areas).
 
 ### The test suite is for the online version, in the db, and the workflow is the agents' (owner, 2026-11-11)
 
