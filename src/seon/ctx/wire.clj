@@ -317,7 +317,7 @@
 
 (defn ctx-at
   "Agent a's record at point p of its branch, on db's store, as data: exactly what `@ctx` held there (seon.ctx/agent-ctx, its own pattern
-  whole, its conversation's joins included: the owner, 2026-11-11, the same thing, never a filtered copy). What the model is shown whole at
+  whole, its conversation's joins included: the same thing the agent reads, never a filtered copy). What the model is shown whole at
   its first point, before its page (`page-diff-msgs`), and what my.render/ctx answers. See
   docs/ctx.md#what-the-model-reads-and-what-the-page-renders."
   {:malli/schema [:=> [:cat :seon.host/db :int :map] :map]}
