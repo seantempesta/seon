@@ -170,7 +170,7 @@ A flush (`seon.render/flush!`) answers each component it ran, `:miss` when its o
 (swap! ctx update-in [:seon.agent/task :seon.task/plan] str " See `seon.print/text`.")
 ```
 
-Each part is headed by the name of the render that drew it (``seon.render.ui/cited``, ``seon.render.ui/status``), so a line you see leads to the function you redefine. `seon.render-test/a-redefined-render-redraws`, `seon.ctx-test/the-page-reads-every-write-since-it-was-drawn`.
+Each part is headed by the name of the render that drew it (``seon.render.ui/cite``, ``seon.render.ui/status``), so a line you see leads to the function you redefine. `seon.render-test/a-redefined-render-redraws`, `seon.ctx-test/the-page-reads-every-write-since-it-was-drawn`.
 
 **What a read costs**, measured in that test and in `seon.ratom-test/inferred-paths`: a render runs again when a change reaches what it read.
 - `(get-in c [:seon.agent/task :seon.task/plan])`, `(:k m)`: that value changed, or something above it was replaced.
