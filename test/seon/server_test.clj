@@ -769,3 +769,16 @@
        (is (settled? (at :gate)) "its gate running process tests: answer now, the verdict comes to the page")
        (is (settled? (at :merged)))
        (is (#'seon.server/done-settled? (at :running) "demo/g" (constantly {:seon.error/type :x})) "a defect stopped the judge: answer")))))
+
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: a streamed prove whose run throws answers that throw as a typed defect: a
+;; spawned fiber keeps its throw for a joiner, and nobody joined this one, so its reader waited on done for good (code read,
+;; 2026-11-12). Red before: Jolt's deadlock detector ended the wait ("every fiber and thread of this process waits")
+(deftest a-streamed-prove-whose-run-throws-answers-the-throw
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [src (a/chan 8)
+           sys {:graph nil :ext (a/chan) :conn conn :events-mult (a/mult src)}
+           r (binding [seon.server/*emit* (fn [_])]
+               (#'seon.server/prove-streamed sys :tree-x (fn [] (throw (ex-info "the run broke" {})))))]
+       (is (= :seon.server/defect (:seon.error/type r)) (pr-str r))
+       (is (re-find #"the run broke" (str (:seon.error/message r))))))))

@@ -406,7 +406,11 @@
                (doseq [w (:verdicts answer) :when (not (written (id w)))]
                  (*emit* (line (assoc w :type :prove-verdict :key (:key answer)))))
                answer)]
-    (fibers/spawn #(a/>!! done (run)))
+    ;; a throw in run is the stream's answer, never a reader left waiting on done: a spawned fiber keeps its throw for a
+    ;; joiner, and nobody joins this one (jolt.fibers/monitor!; the callback runs on the fiber's carrier, so it puts, never blocks)
+    (fibers/monitor! (fibers/spawn #(a/>!! done (run)))
+                     (fn [err] (when err (a/put! done (contract/error :seon.server/defect #'seon.server/prove-streamed
+                                                                       (str "the run threw: " (or (ex-message err) (str err))) {:line "prove"})))))
     (try (loop [written #{}]
            (let [[v ch] (a/alts!! [done ev])]
              (cond (= ch done) (owed written v)

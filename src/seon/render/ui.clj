@@ -167,7 +167,7 @@
   ([text {:keys [inline?]}]
    (let [{:seon.ref/keys [blocks spans]} (ref/scan text)
          run (fn [a b] (if inline? (inline text a b spans) [(subs text a b)]))]
-     (into [:div {:class "seon-md font-sans flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
+     (into [:div {:class "seon-md flex flex-col gap-2 leading-relaxed [&_p]:whitespace-pre-wrap [&_li]:whitespace-pre-wrap"}]
            (for [{:seon.ref/keys [kind from to heading heading-level text-from text-to items ordered]} blocks
                  :let [body (subs text from to)]]
              (cond
@@ -463,7 +463,7 @@
       [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
                           (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
                           :placeholder (cond (and talks? live?) "Say something (Enter; Shift+Enter: a new line)\n(+ 1 2) runs in its REPL"
-                                       talks? "Say something and it starts again (Enter; Shift+Enter: a new line)"
+                                       talks? "Say something and it starts (Enter; Shift+Enter: a new line)"
                                        :else "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)")}
                    ;; the chat takes focus (it follows its tail); a browser scrolls a focused field into view, and this one ends the page
                    focus? (assoc :autofocus true))]
@@ -1265,7 +1265,8 @@
 
 (defn agent-state
   "The agent's state for the person (a component over ctx and the db), nothing of it for the model: how its work stands
-  (`standing`, from the task's outcome where it holds one), its task, the form it is running and its proofs green."
+  (`standing`, from the task's outcome where it holds one), its task, the form it is running and its proofs green at their last run (a verdict is what a run saw at its program, not the
+  state now: the status judges that; seon.ctx.status, docs/render.md#how-the-work-stands)."
   {:seon.render/style ".agent-state {border-radius: 0.375rem; background: var(--color-base-900); padding: 0.5rem; min-width: 0; overflow-x: auto; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (let [task (:seon.agent/task c)
@@ -1279,7 +1280,7 @@
      [:p (str "● " (:text stands) (when (:detail stands) (str " · " (:detail stands))) (when (:reason stands) (str " · " (:reason stands))))]
      (when (:seon.task/id t) [:p "task " (task-title t)])
      (when running [:p "running " [:code running]])
-     (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green")])]))
+     (when (seq verdicts) [:p (str (count (filter #{:green} verdicts)) " of " (count verdicts) " proofs green at their last run")])]))
 
 (defn own-problems
   "The open problems of the agent (a component over its branch db, seon.problems/own: its newest run's,
@@ -2244,9 +2245,12 @@
      ;; the tasks by their state, in plain words (owner, 2026-11-08: "Just show the status as parked"): a parked one wakes on a message
      [:h1 {:class "text-base font-semibold text-text-50"}
       (if (pos? (+ running parked))
-        (str (str/join ", " (remove nil? [(when (pos? parked) (str parked " parked")) (when (pos? running) (str running " running"))])) ".")
+        (str (str/join ", " (remove nil? [(when (pos? parked) (str parked (if (= 1 parked) " task" " tasks") " parked"))
+                                          (when (pos? running) (str running (if (= 1 running) " task" " tasks") " running"))])) ".")
         "Nothing running.")]
-     (when (pos? held) [:p {:class "seon-note"} (str held (if (= 1 held) " task" " tasks") " not released yet.")])
+     ;; the task files a seed loads are held until someone releases one: no one's work yet, so folded, never the head's first words
+     (when (pos? held) [:details {:class "seon-note"} [:summary (str held (if (= 1 held) " task" " tasks") " from the task files, not started")]
+                        [:p "Each waits until a person or the system releases it; nothing runs for it before then."]])
      (root-quiet {} (relevant :seon.root/root-fact c))]))
 
 (defn source-line
