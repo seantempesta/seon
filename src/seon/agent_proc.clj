@@ -259,8 +259,9 @@
                                (contract/error :seon.fx/unknown-kind #'seon.agent-proc/agent-frame (str "no effect kind " (:kind m)))))))
       ;; the agent's turn asks the test service to prove its branch at t (seon.prove): one run for
       ;; whoever asked for that key; the answer comes back on this proc's :in
-      :prove (do (step/out! o :to-api {:op :request :req (cond-> {:op :prove :agent id :branch (:branch st) :t (:t m) :digest (:digest m) :mode (:mode m)}
-                                                                (:names m) (assoc :names (:names m)))
+      ;; the agent's message passes on whole (its :names, :proofs, ...), never re-listed key by key here: a key listed here
+      ;; and not there was how an agent's :proofs never reached the service; the proc sets only what is its to say (who, which branch)
+      :prove (do (step/out! o :to-api {:op :request :req (assoc (dissoc m :k) :agent id :branch (:branch st))
                                          :route [id :in] :tag (:k m)})
                  st)
       ;; the agent launches a task of its own (my.task/launch!): root makes it, as a person's sentence

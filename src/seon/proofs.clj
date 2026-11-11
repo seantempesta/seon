@@ -104,6 +104,7 @@
   them all, in the binary, for bin/check mg-check and the full run (docs/checks.md#the-generative-check-is-per-function)."
   '{"laws" :tree "agent-tests" [seon.check/agent-tests seon.agent/run-tests-forked seon.repl/page-walk] "health" :caused "lmdb-kill" :pins "lmdb-lock" :pins "lmdb-crash" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
+    "agent-checks" [seon.check/agent-checks seon.agent/prove! seon.agent-proc/agent-frame seon.prove/prove-proc seon.program/program-differs]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
     "lifecycle" [seon.check/lifecycle] "backpressure" [seon.check/backpressure] "hotreload" [seon.check/hotreload]

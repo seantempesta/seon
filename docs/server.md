@@ -38,7 +38,7 @@ Working a task this way is the turn loop's path with the model outside: [turn](t
 
 A Claude agent works a task as a Seon agent does, on its own root and branch, and plays the model: what it reads and what it evals are what a model reads and evals, and no model is called.
 
-**The session's `seon_*` tools are the relay of the checkout the session started in**, so a helper in a worktree reaches the session's root through them, most often the owner's on 7888, which is read-only for it. It reaches its own root with `bin/mcp call`, the same relay from a shell, on its checkout's `runs/root.port`, with the checkout as its client so the agent it attaches answers its next call. A session started inside a worktree has its own relay and uses the tools. Each `bin/mcp call OP` below is the tool `seon_<OP>` with the same arguments.
+**The session's `seon_*` tools are the relay of the checkout the session started in**, so a helper in a worktree reaches the session's root through them, most often the owner's on 7888, which is read-only for it. It reaches its own root with `bin/mcp call`, the same relay from a shell, on its checkout's `runs/root.port`, with the checkout as its client so the agent it attaches answers its next call; `bin/mcp call --port PORT` reaches the root on PORT instead (a check step's own root: `seon.check/agent-checks`). A session started inside a worktree has its own relay and uses the tools. Each `bin/mcp call OP` below is the tool `seon_<OP>` with the same arguments.
 
 ```
 bin/worktree NAME; cd "$(bin/worktree --path NAME)"   # or, in a worktree made by something else: bin/worktree --setup

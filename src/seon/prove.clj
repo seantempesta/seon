@@ -12,7 +12,8 @@
     second run. Each run is planned by the agent holding its branch (what it would run, at their digests), and its
     items, (test, digest) pairs, join one queue: an item many runs need is queued once and run once, granted to a free
     worker (seon.prove/admission: :seon.config.proofs/max-workers, max-cores and max-load) one at a time, an agent's turn
-    first, then by waiters and measured time. A run is answered at its first red item or its last green one.
+    first, then by waiters and measured time. A run is answered when every proof of its asker has its verdict: an agent's turn its own proofs (its first red when it named
+    none), any other run every item.
   - Every waiter is answered exactly once, with the run's answer.
   A run is a chain of requests to the api (this proc's `:to-api`, answers on `:answers`): the
   agent that holds the branch runs its tests (`:tests`); main, which no agent holds, is run by a
@@ -519,7 +520,10 @@
                              prio (if (= :turn (:mode run)) :turn :batch)
                              items (into (plan-items run r) (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run) :kind :test} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t]))
                                                                                      (:checkout run) (assoc :checkout (:checkout run)))]))
-                             [st outs] (ask-items (assoc-in st [:runs key :stage] :items) key prio items (set (:proofs run)))]
+                             ;; past a red, a turn waits for its own proofs; any other run (a tree's :judge, main's) is a verdict of the
+                             ;; whole and waits for every item, so a session and a landing hear every red, never only the first
+                             proofs (if (= :turn (:mode run)) (set (:proofs run)) (into #{} (map first) (keys items)))
+                             [st outs] (ask-items (assoc-in st [:runs key :stage] :items) key prio items proofs)]
                          (settle st outs))
         :else [(update st :stale (fnil inc 0)) []]))))
 

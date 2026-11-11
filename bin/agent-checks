@@ -1,0 +1,46 @@
+#!/bin/zsh
+# bin/agent-checks [DIR [PORT]] — the runtime invariant's acceptance, as an agent does it: through the MCP tools (bin/mcp call), on the
+# system DIR's bin/mcp reaches (default this checkout; the main tree's is the standing system), or the root on PORT (bin/check's
+# agent-checks step boots its own: seon.check/agent-checks), no file edited
+# (docs/merging.md#a-session-proves-through-root). One task of its own a run (tests.inv/agent-checks-<pid>), one agent:
+#   (i)   an eval redefining a function so its test fails: (prove) red
+#   (ii)  a registration narrowing a schema entry so a contracted function's test fails: red
+#   (iii) each put back: green, the earlier result reused at its digest
+#   (iv)  the agent killed and attached again (a new process, its branch's program loaded): both tests named red again
+#         (one may be its red reused at its digest)
+# Prints one line a check, CHECK name ok|FAILED, then AGENT CHECKS OK or AGENT CHECKS FAILED (exit 1); kills its agent.
+emulate -L zsh
+ROOT=${1:-${0:A:h:h}}
+cd "$ROOT"
+T=tests.inv/agent-checks-$$
+st=0
+P=(); [[ -n ${2:-} ]] && P=(--port $2)
+call() { timeout 300 bin/mcp call $P "$@" 2>&1 }
+ev() { local intent=$1 code=$2; call eval agent=$A intent="$intent" code="$code" }
+check() { local name=$1 want=$2 got=$3
+  if print -r -- "$got" | grep -q -- "$want"; then print "CHECK $name ok"; else print "CHECK $name FAILED: wanted $want"; print -r -- "$got" | grep -E "red: |green: |✗ |:value" | head -6; st=1; fi }
+prove() { ev "prove the checks' tests" "(my.agent/prove '#{tests.inv.lab/twice-doubles tests.inv.lab/amount-passes})" }
+call create ns=tests.inv name=agent-checks-$$ plan="bin/agent-checks: the runtime invariant through the MCP tools" > /dev/null
+A=$(call attach task=$T | sed -n 's/^{:agent :\([a-z0-9]*\),.*/\1/p')
+[[ -n $A ]] || { print "AGENT CHECKS FAILED: no agent attached for $T"; exit 1 }
+ev "a function and its test" "(ns tests.inv.lab (:require [clojure.test :refer [deftest is]])) (defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x)) (deftest twice-doubles (is (= 6 (twice 3))))" > /dev/null
+ev "a registered entry, a contracted function on it and its test" "(my.schema/register! :tests.inv.lab/amount :int) (in-ns 'tests.inv.lab) (defn amount-of {:malli/schema [:=> [:cat :tests.inv.lab/amount] :tests.inv.lab/amount]} [x] x) (deftest amount-passes (is (= 5 (amount-of 5))))" > /dev/null
+check start "green: 2 of 2" "$(prove)"
+ev "redefine twice so its test fails" "(in-ns 'tests.inv.lab) (defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 3 x))" > /dev/null
+check i "tests.inv.lab/twice-doubles" "$(prove)"
+ev "narrow the registered entry so the contracted test fails" "(my.schema/register! :tests.inv.lab/amount [:int {:min 10}])" > /dev/null
+check ii "tests.inv.lab/amount-passes" "$(prove)"
+call eval agent=root intent="end the checks' agent: an attach resumes it in a new process" code="(seon.root/kill! sys :$A)" > /dev/null
+# the kill's end, read from root's view (an event: its status gone from :idle), never a sleep; bounded by the asks it makes
+for i in {1..60}; do
+  call eval agent=root intent="read the checks' agent's status" code="(get-in (seon.root/state sys) [:agents :$A :status])" | grep -q ":value :idle" || break
+done
+call attach task=$T > /dev/null
+R=$(prove)
+check iv-twice "tests.inv.lab/twice-doubles" "$R"
+check iv-amount "tests.inv.lab/amount-passes" "$R"
+ev "put twice back" "(in-ns 'tests.inv.lab) (defn twice {:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))" > /dev/null
+ev "put the registered entry back" "(my.schema/register! :tests.inv.lab/amount :int)" > /dev/null
+check iii "reused 2" "$(prove)"
+call eval agent=root intent="end the checks' agent" code="(seon.root/kill! sys :$A)" > /dev/null
+if (( st )); then print "AGENT CHECKS FAILED"; exit 1; else print "AGENT CHECKS OK"; fi

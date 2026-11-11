@@ -956,8 +956,12 @@
   (let [k (:tx-seq (swap! state update :tx-seq inc))
         answered (volatile! false)]
     (try
-      (let [r (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/run-digest (db)) :mode mode}
-                                        (seq names) (assoc :names names))))]
+      (let [;; its proofs, the task's and those asked for by name: the service answers past a red until each has its verdict
+            ;; (seon.prove/item-ended; Sean, 2026-11-11: "have them fix that"), which an ask that named none never got
+            proofs (into (or (some->> (:task @state) (task/task (db)) :seon.task/accumulated :proofs) #{}) (filter qualified-symbol?) names)
+            r (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/run-digest (db)) :mode mode}
+                                        (seq names) (assoc :names names)
+                                        (seq proofs) (assoc :proofs proofs))))]
         (vreset! answered true)
         ;; its facts on this branch, once an ask, from the answer and this agent's plan of the run
         (if (and (map? r) (not (contract/error? r)))
@@ -1382,6 +1386,12 @@
   ([ticks proofs mode forked names] (run-tests-forked ticks proofs mode forked names nil))
   ([ticks proofs mode forked names items]
   ;; an item the test service granted, at the digest this agent's plan of the run gave it: run as planned, nothing planned again
+  ;; the runtime invariant (docs/merging.md#a-session-proves-through-root): this process runs its branch's program before a
+  ;; test of it is judged; a definition it holds another form of is named, never judged (seon.program/program-differs)
+  (if-let [differs (when-let [base (:base @state)] (not-empty (program/program-differs base (db))))]
+    (contract/error :seon.agent/program-differs #'seon.agent/run-tests-forked
+                    (str "this agent runs another program than its branch: " (str/join ", " (map :var differs)))
+                    {:differs differs})
   (let [{:keys [unread] :as sel} (or (item-selection (:held-plan @state) items) (run-plan proofs mode names))]
   (if unread
     unread
@@ -1463,7 +1473,7 @@
                :selected selected :deferred deferred :at-judge (count judge))
         ;; why each was left out: the process it reaches and the calls to it (seon.program/process-path)
         (cond-> (seq deferred) (assoc :why (into {} (for [t deferred] [t (program/process-path (:graph plan) t)])))))))]
-    (finish (run-all send!)))))))
+    (finish (run-all send!))))))))
 
 ;; ---- a run's whole verdict ---------------------------------------------------------------
 

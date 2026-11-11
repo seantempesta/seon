@@ -1,5 +1,6 @@
 #!/bin/zsh
-# bin/mcp call OP [KEY=VALUE ...]   one tool call from a shell, through this checkout's relay and root,
+# bin/mcp call [--port PORT] OP [KEY=VALUE ...]   one tool call from a shell, through this checkout's relay and root (PORT's
+# root with --port: a check step's own, seon.check/agent-checks),
 # printing the tool's text (seon_<OP>; exit 1 on an error from the relay or the server). VALUE - reads
 # stdin (code=- <<'EOF'), true/false and [...] are JSON; eval's intent= and code= on an agent are a reply of that one eval. Its client is this checkout, so the agent one call
 # attaches answers the next: what a helper in a worktree uses, since the seon MCP tools of a Claude session
@@ -21,8 +22,9 @@
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 if [[ ${1:-} == call ]]; then
   shift
+  PORT=; [[ ${1:-} == --port ]] && { PORT=$2; shift 2 }
   exec perl -MJSON::PP -MEncode -e '
-    my ($mcp, $root, $op, @kv) = @ARGV; @kv = map { decode_utf8($_) } @kv; my %a;
+    my ($mcp, $port, $root, $op, @kv) = @ARGV; @kv = map { decode_utf8($_) } @kv; my %a;
     die "usage: bin/mcp call OP [KEY=VALUE ...]\n" unless defined $op;
     for (@kv) {
       my ($k, $v) = /\A([^=]+)=(.*)\z/s or die "bin/mcp call: $_ is not KEY=VALUE\n";
@@ -34,11 +36,11 @@ if [[ ${1:-} == call ]]; then
     $ENV{SEON_MCP_CLIENT} = "checkout-$root";
     binmode STDOUT, ":utf8"; binmode STDERR, ":utf8";
     my $req = encode_json({jsonrpc => "2.0", id => 1, method => "tools/call", params => {name => "seon_$op", arguments => \%a}});
-    open my $out, "-|", "printf \x27%s\\n\x27 \Q$req\E | \Q$mcp\E" or die "bin/mcp call: $!\n";
+    open my $out, "-|", "printf \x27%s\\n\x27 \Q$req\E | \Q$mcp\E \Q$port\E" or die "bin/mcp call: $!\n";
     my $r = decode_json(join "", <$out>);
     if ($r->{error}) { print STDERR $r->{error}{message}, "\n"; exit 1 }
     print $_->{text}, "\n" for @{$r->{result}{content}};
-  ' "$0" "$ROOT" "$@"
+  ' "$0" "$PORT" "$ROOT" "$@"
 fi
 exec perl -MIO::Socket::INET -MJSON::PP -e '
   $| = 1; my ($port, $portf) = @ARGV; my $client = $ENV{SEON_MCP_CLIENT} // "mcp-$$-" . time();

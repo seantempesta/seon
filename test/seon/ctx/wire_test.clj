@@ -2,7 +2,7 @@
   "The agent's current-state block says each thing once: a passing proof is its status, a
   red one its source and its failures (expected and actual), a reference already shown as a
   proof is not shown again, a merge task's plan stays its own."
-  (:require [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
+  (:require [my.branch] [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.ctx.search :as search] [seon.ctx.session :as session] [seon.ctx.status :as status] [seon.ctx.wire :as wire] [seon.print :as print]
             [seon.doc-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.doc :as doc] [seon.judge] [seon.ctx :as ctx] [seon.fixtures] [seon.render :as render] [seon.render.ui] [seon.web.html] [my.test :as t]
             [seon.print.select :as select] [seon.ratom] [clojure.walk] [clojure.string :as str] [seon.lib] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model] [seon.config] [clojure.data.json] [seon.render-cost-test]))
@@ -2196,7 +2196,7 @@
 (deftest the-recorded-requests-come-out-the-same
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: what the model is sent does not change by a byte unless a change means it to, and then this
   ;; rewrites test/seon/recorded_requests.edn in the same commit
-  (let [recorded (clojure.edn/read-string (slurp (str (seon.config/checkout) "/test/seon/recorded_requests.edn")))
+  (let [recorded (clojure.edn/read-string (my.branch/file "test/seon/recorded_requests.edn"))
         now (recorded-sessions)]
     (is (= (update-vals recorded count) (update-vals now count)) "the same sessions, the same turns of each")
     (doseq [[k turns] recorded [i t] (map-indexed vector turns)]

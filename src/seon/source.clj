@@ -261,6 +261,12 @@
         ls (if (some-> (first ls) (str/starts-with? "#!")) (rest ls) ls)]
     (mapv #(str/trim (subs % 1)) ls)))
 
+(defn- fixture-tx
+  "The facts of the test fixture at path holding text: the file alone, a data file a test reads (my.branch/file). See
+  docs/source.md#a-program-file."
+  {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
+  [path text] [{:file/path path :file/text text}])
+
 (defn- script-tx
   "The facts of the script at path holding text: the file, and what its lead comment says of it, for reading (docs/source.md#a-program-file)."
   {:malli/schema [:=> [:cat :string :string] :seon.db/tx-data]}
@@ -269,7 +275,7 @@
     [{:file/path path :file/text text :seon.script/says (str/join "\n" ls)
       :seon.script/usage (str/join "\n" (filter #(str/starts-with? % path) ls))}]))
 
-(defn- held-text
+(defn held-text
   "The text the file at path holds on db: a file of one entry, as a db holds it (docs/source.md#a-program-file)."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe :string]]}
   [db path] (:file/text (d/entity db [:file/path path])))
@@ -281,7 +287,8 @@
   asks a file's kind. See docs/source.md#a-program-file."
   {:schema {:tx #'schema-tx :text #'schema-resource-text}
    :config {:tx #'config-tx :text #'config-text}
-   :script {:tx #'script-tx :text #'held-text}})
+   :script {:tx #'script-tx :text #'held-text}
+   :fixture {:tx #'fixture-tx :text #'held-text}})
 
 (defn modes-tx
   "The facts of modes ({relative path git mode}, the files as the import read them), only where they differ from db. See docs/source.md#a-program-file."
@@ -822,7 +829,7 @@
   (vec (sort (distinct (for [[[k x] [a b]] changes
                              :let [p (case k
                                        :form (ns-file db (:ns (or b a)))
-                                       (:schema :config :script) (:file (or b a))
+                                       (:schema :config :script :fixture) (:file (or b a))
                                        :section (first (str/split x #"#" 2))
                                        nil)]
                              :when p]

@@ -3,7 +3,7 @@
   unmerged, resolve an entry. The writer does the merge (seon.merge/three-way, the one
   derivation); this branch sees main's changes only through these functions."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.fx :as fx] [seon.config :as cfg] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.stage :as stage] [seon.program :as program]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.fx :as fx] [seon.source :as source] [seon.config :as cfg] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.stage :as stage] [seon.program :as program]))
 
 (defn merged-summary
   "A merge of main as its eval answers it (seon.render/model, the schema :seon.branch/merged): how many keys it applied, and all the rest as it is, since a
@@ -63,3 +63,15 @@
   [] (let [files (fx/uncommitted (str (cfg/checkout)))]
        (cond-> (pm/divergence (agent/branch-changes (:base @agent/state) (agent/db)))
          (seq files) (assoc :checkout (if (contract/error? files) (:seon.error/message files) files)))))
+
+(defn file
+  "The text of the file at path (relative to the checkout) as this agent's branch holds it, or nil when the branch holds no
+  such file: a program file fact (:seon.config.source/things: the schema resources, the shipped config, bin/, the test
+  fixtures), read from the branch's db (seon.source/held-text), never from a checkout, so a test reading a fixture reads the
+  program its digest covers. In a process with no branch (bin/test, which runs its checkout's own tree) the checkout's file.
+  See docs/source.md#files-and-the-db-two-directions."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [path]
+  (if (:db @agent/state)
+    (source/held-text (agent/db) path)
+    (let [f (java.io.File. (str (cfg/checkout) "/" path))] (when (.isFile f) (slurp f)))))

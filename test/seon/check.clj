@@ -1851,6 +1851,21 @@
   (vec (for [[code by] (d/q '[:find ?c ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/code ?c] [?e :seon.eval/by ?by]] db attr id)]
          {:code code :by (not-empty (into {} (remove (comp nil? val)) (d/pull db [:seon.agent/key :seon.root/id] by)))})))
 
+(defn agent-checks
+  "The runtime invariant's acceptance as an agent works (docs/merging.md#a-session-proves-through-root): bin/agent-checks, the
+  checkout's own script, against this step's root through bin/mcp call --port: an agent's eval that breaks a function, and a
+  registration that narrows a schema entry, each prove red with every proof named; killed and attached again, its new
+  process loads its branch's program and both are red again; put back, both green, reused at their digests. One script
+  for a session's hand run (on its tree's root, or the standing system) and this step, so the two cannot drift."
+  []
+  (run-check "AGENT CHECKS" {:datoms 2000}
+   (fn [sys]
+    (let [port (.getLocalPort ^java.net.ServerSocket (:server sys))
+          r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/agent-checks") (seon.config/checkout) (str port))
+          lines (filterv #(re-find #"^CHECK |^AGENT CHECKS" %) (clojure.string/split-lines (str (:out r))))]
+      {:report {:lines lines :exit (:exit r) :err (:err r)}
+       :checks {:every-check-ok (and (zero? (:exit r)) (some #{"AGENT CHECKS OK"} lines) (not-any? #(clojure.string/includes? % "FAILED") lines))}}))))
+
 (defn mcp-proof
   "The MCP phase's proof: an outside client (a separate process: bin/mcp PORT, the stdio
   relay, fed JSON-RPC on stdin) lists agents, evaluates in a running agent and as root, and
@@ -2234,6 +2249,7 @@
      "jobs" (fn [n more] (do (println (seon.config/value :seon.config.proofs/jobs)) (lib/c-exit 0)))
      "steps" (fn [n more] (do (println (clojure.string/join " " (sort (keys seon.proofs/check-steps)))) (lib/c-exit 0)))
      "mcp-proof" (fn [n more] (mcp-proof))
+     "agent-checks" (fn [n more] (agent-checks))
      "hotreload" (fn [n more] (hotreload))
      "idle" (fn [n more] (idle (n-or n "2000")))
      "smoke" (fn [_ _] (smoke)))))
