@@ -238,6 +238,23 @@
       (seon.lib/remove-tree! runs)
       {:ids ids :agents agents :out log :left (if drained left (conj left :not-drained))})))
 
+;; docs/merging.md#verdicts-are-a-cache: one digest for a test whichever runner plans it (task
+;; seon.prove/one-digest-whichever-runner-plans-it). An agent planned by empty inputs and its own profile's config, the shell
+;; by the checkout's and scripted, so neither reused the other's greens (batch 82 through the system ran ~1,600 items). An
+;; agent of a test's root takes the binary's record of the inputs (a test's root is handed no runs/root-inputs.edn), so this
+;; pins the two planners, the inputs' reader aside
+(deftest an-agent-and-the-shell-plan-a-test-at-one-digest
+  (let [ns-name "seon.prove-test"
+        shell (:digests (#'runner/tests-of (cfg/checkout) [ns-name] (ts/program-store)))
+        agent-digests (with-agent {}
+                        (fn [{:keys [names eval-root]}]
+                          (let [a (:agent names)]
+                            (root-value (eval-root (str "(:value @(c/submit! sys :" a " " (pr-str (str "(into {} (filter (fn [[t _]] (= " (pr-str ns-name) " (namespace t)))) (:digests (#'seon.agent/run-plan #{} :judge '#{" ns-name "}))))")) " {:origin :outside}))"))))))
+        ag (if (string? agent-digests) (clojure.edn/read-string agent-digests) agent-digests)]
+    (is (seq shell) "the shell planned the namespace")
+    (is (= (set (keys shell)) (set (keys ag))) (pr-str (take 3 ag)))
+    (is (= shell (select-keys ag (keys shell))) (str "every test one digest; differ: " (pr-str (for [[t d] shell :when (not= d (get ag t))] t))))))
+
 ;; docs/merging.md#the-test-service: the one call proves a reference (Sean, 2026-11-11: "seon.test/prove #commit id or
 ;; whatever we are passing in to signify the branch or point in time and that runs it"). Wrong if a reference at an earlier
 ;; commit answers the head's verdicts: a past point always forks, onto a branch made at that commit, which loads its program
