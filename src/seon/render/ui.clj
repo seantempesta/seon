@@ -767,7 +767,7 @@
   {:malli/schema [:=> [:cat :seon.host/db [:or pos-int? [:= :latest]] [:vector pos-int?] :boolean] [:maybe :map]]}
   [db at calls raw?]
   (let [pull #(d/pull db [:seon.model-call/basis :seon.model-call/sent-hash :seon.model-call/tokens :seon.model-call/cache-hit-tokens
-                          :seon.model-call/cache-miss-tokens :seon.model-call/error] %)
+                          :seon.model-call/cache-miss-tokens :seon.model-call/error :seon.model-call/ms :seon.model-call/model] %)
         last-e (peek calls)
         lb (some-> last-e pull :seon.model-call/basis)
         ;; the turn to come: on latest, while the newest model turn's agent has no end
@@ -793,7 +793,7 @@
         {:at at :to-come? to-come? :turn (:turn b) :agent (:agent b) :origin (:origin b) :raw? raw? :swept? (boolean swept?)
          :body (:body w) :sources (:sources w) :new (:new w)
          :differs? (boolean (and sent-hash (not= sent-hash (lib/digest (sedn/encode (:messages w))))))
-         :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens])
+         :usage (select-keys m [:seon.model-call/tokens :seon.model-call/cache-hit-tokens :seon.model-call/cache-miss-tokens :seon.model-call/ms :seon.model-call/model])
          :error (:seon.model-call/error m)}))))
 
 (defn more
@@ -2215,7 +2215,7 @@
   while opened, the whole body's JSON as sent. input as `debug-input` answers it. See docs/render.md#the-debug-page-is-the-wire-request. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:keys [view to-come? turn agent origin body sources new raw? error differs? opened swept?]
-         {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens]} :usage}]
+         {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens] call-ms :seon.model-call/ms call-model :seon.model-call/model} :usage}]
   (let [unit (:unit opts)
         ms (:messages body)
         sizes (mapv #(select/estimate (json/write-str %)) ms)
@@ -2287,6 +2287,8 @@
       (when (and prompt (pos? prompt))
         [:span {:class "tabular-nums text-text-400"} (str (group3 cache-hit-tokens) " of " (group3 prompt) " prompt tokens from cache (" (long (* 100 (/ cache-hit-tokens prompt))) "%)")])
       [:span {:class "muted"} (str (count ms) " messages · " (count (filter true? new)) " new")]
+      ;; which model answered it and how long the call took, as the turn recorded them (the two facts the model call keeps)
+      (when (or call-model call-ms) [:span {:class "muted"} (str/join " · " (remove nil? [call-model (some-> call-ms (str " ms"))]))])
       (cond (= :outside origin) [:span {:class "muted"} "an outside read: no model call"]
             to-come? [:span {:class "muted"} "redrawn as the branch moves"]
             (not (or tokens error)) [:span {:class "muted"} "the call is in flight"])]

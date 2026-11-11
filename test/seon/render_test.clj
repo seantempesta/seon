@@ -1351,6 +1351,13 @@
     (is (str/includes? (html {:focus? false}) "<textarea") "the field is still there")
     (is (not (str/includes? (html {:live? false :focus? true}) "<textarea")) "no process: no field")))
 
+(deftest the-debug-tabs-turn-shows-its-model-and-time
+  ;; docs/render.md#the-debug-page-is-the-wire-request: a turn on the debug tab says which model answered it and how long the call took,
+  ;; the two facts a model call keeps (the Data model session's D1: they had no reader; red before: neither was drawn)
+  (let [html (h/html (ui/debug-turn {:unit "d-turn"} {:view [:debug :a1] :turn 3 :agent "a1" :origin :model :body {:messages []} :new []
+                                                       :usage {:seon.model-call/tokens 120 :seon.model-call/ms 2345 :seon.model-call/model "deepseek-chat"}}))]
+    (is (str/includes? html "deepseek-chat · 2345 ms") html)))
+
 (deftest roots-context-is-its-debug-page
   ;; root, 2026-10-26: root's page and an agent's both toggle to what their model reads; root has no
   ;; model turn, so its debug page is the context the render proc holds (its :context, the system's
