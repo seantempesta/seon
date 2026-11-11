@@ -1,6 +1,7 @@
 #!/bin/zsh
-# bin/agent-checks [DIR] — the runtime invariant's acceptance, as an agent does it: through the MCP tools (bin/mcp call), on the
-# system DIR's bin/mcp reaches (default this checkout; the main tree's is the standing system), no file edited
+# bin/agent-checks [DIR [PORT]] — the runtime invariant's acceptance, as an agent does it: through the MCP tools (bin/mcp call), on the
+# system DIR's bin/mcp reaches (default this checkout; the main tree's is the standing system), or the root on PORT (bin/check's
+# agent-checks step boots its own: seon.check/agent-checks), no file edited
 # (docs/merging.md#a-session-proves-through-root). One task of its own a run (tests.inv/agent-checks-<pid>), one agent:
 #   (i)   an eval redefining a function so its test fails: (prove) red
 #   (ii)  a registration narrowing a schema entry so a contracted function's test fails: red
@@ -13,7 +14,8 @@ ROOT=${1:-${0:A:h:h}}
 cd "$ROOT"
 T=tests.inv/agent-checks-$$
 st=0
-call() { timeout 300 bin/mcp call "$@" 2>&1 }
+P=(); [[ -n ${2:-} ]] && P=(--port $2)
+call() { timeout 300 bin/mcp call $P "$@" 2>&1 }
 ev() { local intent=$1 code=$2; call eval agent=$A intent="$intent" code="$code" }
 check() { local name=$1 want=$2 got=$3
   if print -r -- "$got" | grep -q -- "$want"; then print "CHECK $name ok"; else print "CHECK $name FAILED: wanted $want"; print -r -- "$got" | grep -E "red: |green: |✗ |:value" | head -6; st=1; fi }
