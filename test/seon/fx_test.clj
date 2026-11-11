@@ -587,8 +587,9 @@
 ;; and what it left in its group is ended as it ends
 (deftest a-bounded-command-is-ended-whole-past-its-bound
   (let [root (str (cfg/checkout)) dir (str (System/getProperty "java.io.tmpdir") "/seon-bounded-" (random-uuid))
-        ;; a sleep of a length no other process has, so the check reads only this test's orphan
-        n (+ 40000 (rand-int 20000))
+        ;; a sleep of a length no other process has, so the check reads only this test's orphan: a fixed value, an input the
+        ;; digest names (a random one was an unnamed input of the test, the check step test-inputs' red)
+        n 47113
         alive? (fn [m] (some #(clojure.string/ends-with? % (str "sleep " m)) (clojure.string/split-lines (:out (seon.lib/sh "ps" "-axo" "command")))))
         over (seon.lib/sh (str root "/bin/bounded") "1000" (str dir "/over") "zsh" "-c" (str "( sleep " n " & ) ; sleep " (inc n)))
         under (seon.lib/sh (str root "/bin/bounded") "60000" (str dir "/under") "zsh" "-c" (str "( sleep " (+ 2 n) " & ) ; echo kept; exit 3"))]
