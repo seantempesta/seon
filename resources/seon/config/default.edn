@@ -400,6 +400,16 @@
  ;; measured 2026-10-23). Read by bin/env from this line, so it stays one line of text. At the
  ;; bound: none; a value that is no EDN map stops every Jolt process at start, naming it.
  :seon.config.build/jolt-compiler-options "{:image-fn-forms false}"
+ ;; Unit: megabytes: the byte budget of Jolt's compiled-code cache (target/cache/aot of the main tree, shared
+ ;; by every checkout), least recently used first (docs/source.md#shared-build-caches). bin/env exports it
+ ;; as JOLT_CACHE_MB, which Jolt's loader reads when a process that published an artifact prunes. 32768
+ ;; while we develop, so nothing is evicted (owner, 2026-11-11: "leave the cache high and we'll lower it
+ ;; later"); measured 2026-11-11: one worktree's builds and tests on a new runtime 354 MB, every session's
+ ;; on one runtime over a day and a half 3.2 GB, so 4096 is the candidate for the 16 GB target (task
+ ;; jolt.loader/the-cache-bound-is-tested-at-the-targets-size-before-release). Read by bin/env from this
+ ;; line, so it stays one line. At the bound: the least recently used artifacts older than a minute are
+ ;; deleted and recompiled when next needed, never an error.
+ :seon.config.build/jolt-cache-mb 32768
 
  ;; ==== Seon's own source ======================================================================
 
