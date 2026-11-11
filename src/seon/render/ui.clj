@@ -1936,8 +1936,7 @@
 (defn steps
   "Turn n's steps, eval views xs (each drawn by its schema's render, `evaluation`), folded under one line that says how many and
   what each was for, its intent (intents, in xs' order; one with none is not named): the chat shows the messages and what was done,
-  a person opens the steps for their code and output (owner, 2026-11-06: \"show the eval intent ... collapse the eval statement and the
-  output\"; 2026-11-10: the evals \"not shown unless they are expanded\"); nothing for none. See docs/render.md#the-page."
+  a person opens the steps for their code and output; nothing for none. See docs/render.md#the-page."
   {:seon.render/style ".seon-steps > summary { cursor: pointer; font-size: 0.75rem; color: var(--color-text-500); list-style: none; } .seon-steps > summary::before { content: '▸ '; } .seon-steps[open] > summary::before { content: '▾ '; }
 .seon-steps > summary .intent { color: var(--color-text-300); }"
    :malli/schema [:=> [:cat :int [:sequential :any] [:sequential :string]] :any]}
