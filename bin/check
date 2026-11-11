@@ -372,7 +372,9 @@ unit() {
   # a unit that cannot take its copy of the seeded store fails here, loudly: it never runs on a store its own root seeded
   (( NEEDS )) && { mkdir -p "$SEON_STORE" && cp -c "$STORE/data.mdb" "$SEON_STORE/data.mdb" || { failed "$1 (no copy of the seeded store $STORE)"; print "FAILED $1: no copy of the seeded store $STORE"; return 1 } }
   { u-$1 } > "$OUT/$1.shown" 2>&1
-  grep -q "^$1[ -]" "$OUT/failed" || "$ROOT/bin/remove-tree" "$SEON_STORE"
+  # a failed step's store stays to be read: failed's lines are "NAME: why", "NAME (why)" or "NAME-i ..." (it wanted "NAME " or
+  # "NAME-" alone, so every red step's store was removed: Deep fixes, 2026-11-12)
+  grep -q "^$1[ :-]" "$OUT/failed" || "$ROOT/bin/remove-tree" "$SEON_STORE"
   cat "$OUT/$1.shown"
 }
 mkfifo "$OUT/pool"; exec 3<>"$OUT/pool"; rm "$OUT/pool"
