@@ -420,7 +420,7 @@
   ;; fact). Main moved since by what its agents merged is main's own: its program differs from the binary's, its tree does
   ;; not, and spawns go on. Red before: the refusal compared main's program with the binary's, and refused e2e-loop's root
   ;; after its agent merged, and a second boot of a store whose agents had worked (2026-11-10, the batch's prove)
-  (let [built (root/binary-program)
+  (let [built (program/binary-program)
         db0 (mt/world)
         on (fn [db tree] (d/db-with db [{:seon.root/id :root :seon.root/source {:root "/c" :files 1 :forms 1 :ms 1 :tree tree}}]))
         merged (mt/with db0 (mt/code 'app.merged "(ns app.merged)\n(defn f [x] x)"))]
