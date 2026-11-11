@@ -11,7 +11,7 @@
   docs/storage.md#merges-read-what-changed and docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   (:require [clojure.test :refer [deftest is testing]] [clojure.set :as set]
             [datahike.api :as d] [datahike.writer :as dw] [seon.db :as pdb] [seon.merge :as pm] [seon.program :as program]
-            [seon.test-store :as ts] [seon.proofs :as proofs] [seon.config :as config]))
+            [seon.contract :as contract] [seon.test-store :as ts] [seon.proofs :as proofs] [seon.config :as config] [my.schema :as schema]))
 
 ;; ---- the world's writes --------------------------------------------------------------
 
@@ -597,3 +597,23 @@
 ;; docs/storage.md#merges-read-what-changed: the same property with every write, the broken ones included, on the one merge
 (deftest any-branch-with-any-write-merges-to-main-safely
   (doseq [seed (seeds)] (property-up seed (into safe-ops broken-ops))))
+
+;; docs/source.md#schemas-at-the-repl: a branch registers an entity of its own (my.schema/registration, as my.schema/register! writes
+;; it: the schema entries and the Datahike declarations of their attributes) and writes one; merged up by the one merge, main holds
+;; the attribute and the value
+(deftest a-branchs-new-attribute-and-its-value-merge-up
+  (branched
+   (fn [conn bc br]
+     (doseq [[k v] [[:app.mg/id [:and {:seon.db/identity true} :string]] [:app.mg/size :int]
+                    [:app.mg/thing [:map {:seon.db/attributes true} [:app.mg/id :app.mg/id] [:app.mg/size :app.mg/size]]]]]
+       (let [r (schema/registration @bc k v false)]
+         (is (not (contract/error? r)) (pr-str r))
+         (d/transact bc {:tx-data (:tx r) :tx-meta (pdb/tx-meta br)})))
+     (let [k (program/schema-changes @bc)]
+       (d/transact bc {:tx-data [{:app.mg/id "one" :app.mg/size 3}] :tx-meta (pdb/tx-meta br) :seon.db/schemas {:forms k :registry (program/schema-registry k)}}))
+     (let [r (replay-up! conn br)]
+       (spit "/tmp/mergeop/new-attr.edn" (pr-str (-> r (update :groups #(mapv (fn [g] (update g :ops (fn [ops] (mapv (fn [o] (vec (take 3 o))) ops)))) %)))))
+       (is (seq (:groups r)) (pr-str (dissoc r :groups)))
+       (is (nil? (:refused r)) (pr-str (:refused r)))
+       (is (contains? (d/schema @conn) :app.mg/size) "main holds the attribute")
+       (is (= 3 (:app.mg/size (d/entity @conn [:app.mg/id "one"]))) "and the value")))))
