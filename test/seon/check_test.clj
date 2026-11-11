@@ -35,12 +35,18 @@
                   (some->> out (clojure.java.shell/sh "rm" "-rf"))
                   r)))
         lines (run "laws\nlmdb-lock\n" "laws 1\nlmdb-lock 1\n")
-        unknown (run "laws no-such-step" "laws 1\n")]
+        unknown (run "laws no-such-step" "laws 1\n")
+        ;; a step that runs the binary on the seeded store, in a selection whose steps-binary says none needs it (2026-11-11: a
+        ;; hand-written one ran durable on an unseeded store, and it failed two phases later)
+        unseeded (run "durable\n" "durable 60000\n")]
     ;; a step's header is printed only when the selection holds it (bin/check's unit)
     (is (re-find #"(?m)^== laws " (:out lines)) (:out lines))
     (is (re-find #"(?m)^== lmdb-lock " (:out lines)) "both names, one a line, ran")
     (is (= 1 (:exit unknown)) (:out unknown))
-    (is (re-find #"FAILED no-such-step: no step of that name" (:out unknown)) "a name no step has is red, named")))
+    (is (re-find #"FAILED no-such-step: no step of that name" (:out unknown)) "a name no step has is red, named")
+    (is (= 1 (:exit unseeded)) (:out unseeded))
+    (is (re-find #"durable-write runs target/seon on the seeded store, but this selection's steps-binary" (:out unseeded))
+        "a step that needs the seeded store is refused by name, never run on none")))
 
 (deftest a-step-past-its-bound-is-ended-red-with-its-evidence
   (let [sel (str (System/getProperty "java.io.tmpdir") "/step-bound-" (random-uuid))
