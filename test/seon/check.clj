@@ -664,6 +664,13 @@
   []
   {:roster (thread-roster) :gc-sweepers (lib/gc-sweepers! -1) :os (lib/nthreads)})
 
+(defn- settled-threads
+  "threads, read again until two readings in a row agree: the roster and the OS count of one moment, so a thread that
+  starts or ends between the two parts of a reading never counts as one over. A reading that never settles ends at the
+  step's own bound, a signal (bin/check), never a red. Read where nothing is starting."
+  {:malli/schema [:=> [:cat] :map]}
+  [] (loop [a (threads)] (let [b (threads)] (if (= a b) b (recur b)))))
+
 (defn thread-diff
   "Where measured threads (threads) differ from declared ones
   (declared-threads): {} when they are exactly what is declared, else each
@@ -726,7 +733,7 @@
         results (fan work ids)
         t-done (profile/ms-since t0)
         _ (doseq [r results :when (not (:ok r))] (out! "NOT OK: " (pr-str r)))
-        th-work (thread-diff (declared-threads sys) (threads))
+        th-work (thread-diff (declared-threads sys) (settled-threads))
         st (c/state sys)
         mem1 (lib/sysmem)
         agent-mb (keep #(get-in st [:agents % :mem-mb]) ids)
@@ -738,7 +745,7 @@
         _ (doseq [id ids] (c/kill! sys id))
         _ (await-agents ev ids #{:killed})
         mem2 (do (Thread/sleep (seon.config/value :seon.config.check/pages-ms)) (lib/sysmem))
-        th-end (thread-diff (declared-threads sys) (threads))
+        th-end (thread-diff (declared-threads sys) (settled-threads))
         ;; the target machine (a 16 GB M1, owner 2026-10-22): root, the fork server and the default
         ;; number of agents at once fit :seon.config.machine/memory-mb, each agent charged what the
         ;; machine's free plus inactive memory dropped per agent from before the agents started to their
@@ -766,9 +773,14 @@
                                :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}}
        ;; root's threads exactly as declared once agents run (at boot Jolt's io poller has not
        ;; started yet: it starts at the first socket wait, an agent's). The model's threads (Metal's
-       ;; GCD workers) are the embedding helper's, not root's, so the OS count is judged at every sample
+       ;; GCD workers) are the embedding helper's, not root's. The named roster is judged at every
+       ;; sample; the OS count only where nothing is starting (after the work and after the kills, each
+       ;; read after a wait on what it waited for, as one settled reading: settled-threads): all-ready is read as the agents finish spawning, and its
+       ;; roster and OS count are two reads at two instants, so a thread a spawn starts and ends between
+       ;; them counted one OS thread over (batch 73, 2026-11-11, :os [55 56] at load 25-30, the roster
+       ;; exact): a count load could turn red. Its :os stays in the report
        :checks {:every-eval-and-test-passed (every? :ok results) :ten-merges-went-in (every? :merged? merged)
-                :root-threads-as-declared (every? empty? [th-ready th-work th-end])
+                :root-threads-as-declared (every? empty? [(dissoc th-ready :os) th-work th-end])
                 :fits-the-machine (<= need budget)}}))))
 
 ;; ---- scale-work: agents that work --------------------------------------------------
