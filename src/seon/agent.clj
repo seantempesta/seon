@@ -1196,6 +1196,9 @@
                ;; the test child's own ceiling, from its own heap at its fork: the agent's absolute ceiling
                ;; left a child of a grown agent less room than any test needs (docs/machine.md#what-a-process-owns-in-memory)
                (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes)) (cfg/value :seon.config.agent/trip-bytes))
+               ;; a run of a session's checkout (seon.root/prove-tree!): its tests read that checkout's files, as their digests
+               ;; (the tree's) say, never root's, which this agent was forked from (seon.config/checkout reads SEON_CHECKOUT)
+               (when-let [co (:checkout plan)] (lib/c-setenv "SEON_CHECKOUT" co 1))
                ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's
                ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
                (intr/forked!)
@@ -1659,6 +1662,8 @@
                                (seq (:deferred sel)) (assoc :why (into {} (for [t (:deferred sel)] [t (program/process-path (:graph (:plan sel)) t)])))
                                pp (merge (select-keys pp [:process :steps :build :missing]))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
+                 ;; items of a run of a session's checkout: their test children read that checkout's files (test-child)
+                 _ (when (and (:checkout m) (:held-plan @state)) (swap! state assoc-in [:held-plan :plan :checkout] (:checkout m)))
                  r (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                      proofs
                                      (or (:mode m) :judge)

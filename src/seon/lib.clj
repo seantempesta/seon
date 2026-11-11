@@ -51,6 +51,7 @@
 (defc c-kill "kill" [:int :int] :int)
 (defc c-setpgid "setpgid" [:int :int] :int)
 (defc c-unsetenv "unsetenv" [:string] :int)
+(defc c-setenv "setenv" [:string :string :int] :int)
 (defc c-creat "creat" [:string :int] :int)
 (defc c-rename "rename" [:string :string] :int {:capture-native-error true})
 (defc c-dup2 "dup2" [:int :int] :int)

@@ -546,6 +546,18 @@
       (is (= 6 ((resolve 'app.pt-src/twice) 3)) "the branch's redefinition runs in the agent")
       (is (identical? add0 @(resolve 'app.pt-src/add)) "the imported forms around it are not evaluated again"))))
 
+(deftest an-agent-runs-its-branchs-change-to-imported-source-imported-too
+  ;; Context's first bin/prove --root (2026-11-11) judged main's code: a tree branch's catch-up imports the checkout's changed
+  ;; file, so its changed form came from a source tree too, and load-diff! read it as the binary's own (every var bound) and
+  ;; kept main's definition. A change the branch imported runs in the agent as one it evaluated does
+  (let [main (main-with-file)
+        changed (clojure.string/replace pt-text "(add x x)" "(* 3 x)")
+        branch (d/db-with main (source/replace-tx main {"src/app/pt_src.clj" changed}))]
+    (hold! 'app.pt-src pt-text)
+    (is (= 6 ((resolve 'app.pt-src/twice) 3)) "main's twice before")
+    (is (= [] (program/load-diff! main branch)))
+    (is (= 9 ((resolve 'app.pt-src/twice) 3)) "the branch's imported redefinition runs in the agent")))
+
 (deftest a-form-that-fails-at-load-is-named
   ;; root's ruling, 2026-10-27: a definition that fails at load fails the load loudly, naming the
   ;; form; it said only "did not load in seon.task-test: nil where a ... Future is required"
