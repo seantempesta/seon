@@ -153,6 +153,9 @@
                                         (take n (distinct (repeatedly #(nth es (.nextInt rnd (count es)))))))})
         r [(pdb/head conn b) (pdb/head conn s) :eavt []]]
     (d/release c)
+    ;; diffed once here, so the nodes that differ are read from the store before the measure: a first call's
+    ;; reads follow what the node cache holds after the commit, not the walk (the cold read is the store's cost)
+    (apply d/datoms-diff r)
     r))
 
 (deftest a-diff-of-two-commits-costs-the-nodes-that-differ
@@ -167,9 +170,11 @@
                 "one hashed lookup each and the differing leaves' datoms merged once; at most one root-to-leaf "
                 "path of differing nodes per value replaced")
      :growth :linear
-     ;; measured 2026-11-11 at 1, 10 and 100: 71.5k, 304k and 1.59M ticks, 289 KB, 1.37 MB and 6.95 MB (sublinear
-     ;; at 100: the changes begin to share branches). Before Datahike ae20699b (a membership lookup of every datom
-     ;; in both whole sets, java.util.HashSet.retainAll, which Jolt answers in n x m) 113k, 768k and 6.91M ticks
+     ;; measured 2026-11-11 at 1, 10 and 100, the nodes read: 61k, 250k and 1.22M ticks, 104 KB, 417 KB and 1.55 MB
+     ;; (Datahike 6def526a; sublinear at 100: the changes begin to share branches). At ae20699b (each leaf copied by
+     ;; .keys, a vector per child) 71.5k, 304k and 1.60M ticks, 289 KB, 1.37 MB and 6.95 MB; before it (a membership
+     ;; lookup of every datom in both whole sets, java.util.HashSet.retainAll, which Jolt answers in n x m) 113k,
+     ;; 768k and 6.91M ticks
      :per-n {:ticks 16000 :bytes 90000}
      :fixed {:ticks 60000 :bytes 300000}
      :sizes [1 10 100]}))
