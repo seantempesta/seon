@@ -600,7 +600,7 @@
   different ends, and every key one side changed on an entity whose identity the other side retracted (a write
   to an entity the other side deleted, a ref to one). Each is {:key k :ours v :theirs v}, a missing end ::gone
   and an untouched one ::same; [] when the two merge. Computed, never stored."
-  {:malli/schema [:=> [:cat :map :map] [:vector :map]]}
+  {:malli/schema [:=> [:cat :map :map] [:vector :seon.merge/data-conflict]]}
   [ours theirs]
   (let [ko (:keys ours) kt (:keys theirs)
         ;; the identities each side retracted: its own identity key ended ::gone
