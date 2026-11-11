@@ -290,7 +290,7 @@
   (sides (fn [c t _] (d/transact c [[:db/add t :task/plan "main's plan"]]))
          (fn [c t _] (d/transact c [[:db/add t :task/plan "the branch's plan"]]))
          (fn [ours theirs]
-           (is (= [{:key [:task/name :gen/t :task/plan] :ours "main's plan" :theirs "the branch's plan"}] (pm/conflicts ours theirs))
+           (is (= [{:key [:task/name :gen/t :task/plan] :base "p" :ours "main's plan" :theirs "the branch's plan"}] (pm/conflicts ours theirs))
                "the key names the task by its identity, never an entity id, and both ends are its values"))))
 
 (deftest one-end-on-both-sides-and-two-keys-of-one-entity-merge
@@ -305,7 +305,7 @@
   (sides (fn [c t _] (d/transact c [[:db/retractEntity t]]))
          (fn [c t _] (d/transact c [[:db/add t :task/status :ready]]))
          (fn [ours theirs]
-           (is (= [{:key [:task/name :gen/t :task/status] :theirs :ready :ours :seon.merge/gone}] (pm/conflicts ours theirs))
+           (is (= [{:key [:task/name :gen/t :task/status] :base :held :theirs :ready :ours :seon.merge/gone}] (pm/conflicts ours theirs))
                "the branch wrote to a task main retracted: its write is the conflict, though main never changed that key"))))
 
 (deftest an-entity-with-no-identity-is-named-not-carried
@@ -341,7 +341,7 @@
   (sides-db (fn [c t _] (d/transact c [[:db/add t :task/plan "main's plan"]]))
             (fn [c t _] (d/transact c [[:db/add t :task/plan "the branch's plan"]]))
             (fn [base main branch]
-              (is (= {:conflicts [{:key [:task/name :gen/t :task/plan] :ours "main's plan" :theirs "the branch's plan"}]}
+              (is (= {:conflicts [{:key [:task/name :gen/t :task/plan] :base "p" :ours "main's plan" :theirs "the branch's plan"}]}
                      (pm/plan base main branch)))))
   ;; the branch changed a note, which bears no identity: named, never carried, and no group
   (sides-db (fn [_ _ _] nil)
@@ -386,7 +386,7 @@
        (d/transact conn [[:db/retractEntity t]])
        (d/transact bc [[:db/add t :task/plan "changed on the branch"]])
        (let [r (replay-up! conn br)]
-         (is (= [{:key [:task/name :gen/t :task/plan] :theirs "changed on the branch" :ours :seon.merge/gone}] (:conflicts r))
+         (is (= [{:key [:task/name :gen/t :task/plan] :base "p" :theirs "changed on the branch" :ours :seon.merge/gone}] (:conflicts r))
              "the plan names the retraction against the change")
          (is (empty? (d/datoms @conn :eavt t)) "main keeps the task retracted until the conflict is resolved")))))
   ;; the same on a note: named, never written

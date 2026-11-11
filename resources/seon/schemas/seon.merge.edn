@@ -50,9 +50,8 @@
  :seon.merge/dangling [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/dangling]] [:dangling [:vector [:map [:ref :qualified-symbol] [:form :string]]]]]]
  ;; one key both sides of a merge changed to different ends since their base (seon.merge/conflicts): its key by the entity's
  ;; identity, [identity-attr identity-value attribute] (and the value, for an attribute of cardinality many), and each side's
- ;; end: a value, true (a member asserted), or :seon.merge/gone (retracted). :base, the base's value at the key, is not given yet
- ;; (seon.merge/conflicts has no base to read it from): it is owed before the agent's page reads this error in place of the stored
- ;; unmerged entries (task seon.merge/a-merge-replays-the-sources-net-change, piece 5)
+ ;; end: a value, true (a member asserted), or :seon.merge/gone (retracted). :base, the base's value at the key, is present for a
+ ;; key of cardinality one that base held a value of (seon.merge/net-change reads it from the value retracted)
  :seon.merge/data-conflict [:map [:key [:or [:tuple :keyword :any :keyword] [:tuple :keyword :any :keyword :any]]] [:base {:optional true} :any] [:ours :any] [:theirs :any]]
  ;; a merge refused because the two sides' net changes conflict (seon.writer/plan-refused): the agent resolves them
  :seon.merge/conflicts [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/conflicts]] [:conflicts [:vector {:min 1} :seon.merge/data-conflict]]]]

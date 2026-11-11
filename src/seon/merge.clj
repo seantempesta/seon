@@ -578,7 +578,7 @@
 
 (defn net-change
   "What db holds that base does not, and what base held that db does not, by identity, never by entity id:
-  {:keys {key now} :unidentified #{schema-less entity's attributes}}. A key of an attribute of cardinality one is
+  {:keys {key now} :base {key base's value} :unidentified #{schema-less entity's attributes}}. A key of an attribute of cardinality one is
   [identity-attr identity-value attribute] and its now is the value on db, or ::gone; of cardinality many it is
   [identity-attr identity-value attribute value] and its now is true (asserted) or ::gone (retracted). A ref's
   value is its target's identity. A transaction's own facts are no change of the branch's data (a merge writes
@@ -601,7 +601,9 @@
                    (cond (tx? e) acc
                          (nil? (id e)) (update acc :unidentified conj (into #{} (map :a) (concat (d/datoms db :eavt e) (d/datoms base :eavt e))))
                          (many? a) (assoc-in acc [:keys (conj (id e) a (value dt))] (if (= ::gone now) ::gone true))
-                         :else (assoc-in acc [:keys (conj (id e) a)] (if (= ::gone now) ::gone (value dt)))))))]
+                         ;; a value retracted is base's: the key's :base (cardinality one)
+                         :else (cond-> (assoc-in acc [:keys (conj (id e) a)] (if (= ::gone now) ::gone (value dt)))
+                                 (= ::gone now) (assoc-in [:base (conj (id e) a)] (value dt)))))))]
     ;; retractions first, so a value replaced (a retraction and an assertion of one key) ends as its new value
     (reduce (step ::now) (reduce (step ::gone) {:keys {} :unidentified #{}} gone) added)))
 
@@ -609,7 +611,8 @@
   "The conflicts of two sides' net changes since their base (net-change of each): every key both changed to
   different ends, and every key one side changed on an entity whose identity the other side retracted (a write
   to an entity the other side deleted, a ref to one). Each is {:key k :ours v :theirs v}, a missing end ::gone
-  and an untouched one ::same; [] when the two merge. Computed, never stored."
+  and an untouched one ::same, and :base the value base held for a key of cardinality one that held one; [] when the two
+  merge. Computed, never stored."
   {:malli/schema [:=> [:cat :map :map] [:vector :seon.merge/data-conflict]]}
   [ours theirs]
   (let [ko (:keys ours) kt (:keys theirs)
@@ -619,11 +622,12 @@
         entity (fn [k] [(first k) (second k)])
         ;; a ref's value is its target's identity pair
         target (fn [k now] (let [v (if (= 4 (count k)) (nth k 3) now)] (when (and (vector? v) (= 2 (count v)) (keyword? (first v))) v)))
-        both (for [[k o] ko :let [t (get kt k ::same)] :when (and (not= ::same t) (not (dd/value= o t)))] {:key k :ours o :theirs t})
+        based (fn [c] (let [b (merge (:base theirs) (:base ours))] (cond-> c (contains? b (:key c)) (assoc :base (get b (:key c))))))
+        both (for [[k o] ko :let [t (get kt k ::same)] :when (and (not= ::same t) (not (dd/value= o t)))] (based {:key k :ours o :theirs t}))
         onto-gone (fn [ks gone side other]
                     (for [[k now] ks :when (and (not= ::gone now) (not (contains? (if (= side :ours) kt ko) k))
                                                 (or (gone (entity k)) (some-> (target k now) gone)))]
-                      {:key k side now other ::gone}))]
+                      (based {:key k side now other ::gone})))]
     (vec (concat both (onto-gone ko gt :ours :theirs) (onto-gone kt go :theirs :ours)))))
 
 (defn replay
