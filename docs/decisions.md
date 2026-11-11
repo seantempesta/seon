@@ -62,6 +62,22 @@ Counted that day by a search for "root" as the subject of a system act: about 15
 
 What the standing store held that day, read at the REPL across main and three agents' branches: no transaction id, no entity id and no eval id names two different things on two branches (the store issues them from one counter); a transaction's time is `:db/txInstant`, a millisecond; along main's 400 transactions and a branch's 158 it never went backwards and no two neighbours shared a millisecond. Not yet answered: what breaks a tie when two do, and that an import must write the original time or an imported conversation orders by when it was loaded. Stated in [the plan](plan.md#the-plan), part 1, as the open step.
 
+### A sync merges everything that does not conflict; no list of attributes decides (owner, 2026-11-11)
+
+Offered a smaller sync shaped from lists of attributes: "I don't want a hand made list of attributes to sync. I want all non conflicting data to merge and conflicts to be fixed before we merge anything else. We can hold off merging anything until the conflicts are resolved too if that's safer." (by the question tool, relayed by the managing session). Everything a branch holds merges unless it conflicts; a conflict is resolved before anything else merges; holding a whole turn's merge until its conflicts are resolved is acceptable. Today's merge is decided by such lists (```seon.merge/carried-platform-attrs```, its platform-record test, an empty set of data attributes), which this rules out as the design. Not built; the unlanded `jolt/sync` is not its base. Stated in [the plan](plan.md#the-plan), part 1.
+
+### An attribute nothing reads gets a purpose and a render, or is removed (owner, 2026-11-11)
+
+Of a model call's time taken, stop reason, error count and model, which are written and read by nothing: "If by reader you mean include them in pulls and render them with well written render functions that are focused on why were we are even storing them (if there's no purpose remove them)" (by the question tool, relayed). So each such attribute has one line of purpose and a render that shows it, in a pattern, to whoever acts on it; or it is deleted. Stated in [data modeling](data-modeling.md#before-you-add-something), whose first question it is.
+
+### Messages are ordered by when they arrived, from the pull (owner, 2026-11-11)
+
+Of the branch that orders an agent's messages by the transaction the pull carries, with the recorded requests unchanged by a byte: "Land it" (by the question tool, relayed). Stated in [ctx](ctx.md#the-pattern) when it lands.
+
+### The command and namespace names that say root change with the erase (owner, 2026-11-11)
+
+Of `bin/root`, `seon.root`, `my.root` and the `:seon.root/*` keys, after the vocabulary ruling: "Later, with the erase" (by the question tool, relayed). The wiki's wording is corrected as pages are touched; the command, the namespaces and the keys are renamed together, at the erase.
+
 ### Work, then refine, then review; a refinement is tried from the store's history (owner, 2026-11-11)
 
 "For us this will be a task following their work step. Us doing a refine your previous session context and curate the task so it would have been done better. And then we can test those refinements without losing the previous one because we have db history." And of the fork that reflects mid-task: "What if we take advantage of our ability to fork sessions and make edits to the context? It's cheap from a tokens perspective since it's mostly cached data and we can inject a mini task at the end ... So lets say after 10 turns we do this reflect and improve step". Stated in [the plan](plan.md#the-plan), part 2; not built.
