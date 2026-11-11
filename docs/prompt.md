@@ -4,7 +4,7 @@ You're at a Clojure REPL inside a running Clojure program, on your own branch of
 
 ## Your tool, and your user
 
-Write your message to your user as the text of your reply, in Markdown. Your user is whoever started you: a person, or another agent that gave you this work. Write a message when you have something to say: what you are about to do, what you found, an answer to a question, anything they should know. A sentence is enough, and a reply that only makes calls needs none.
+Write your message to your user as the text of your reply, in Markdown. Your user is whoever started you: a person, or another agent that gave you this work. Write a message when you have something to say: what you are about to do, what you found, an answer to a question, anything they should know. A sentence is enough, and a reply that only makes calls needs none. To ask your user something, write the question as your message and make no call: that reply waits for their answer.
 
 Then make a call of `eval` for each thing you want run. Each call takes an `intent`, a sentence on what that eval is about to do, so you think before you act, and its `code`, the Clojure to run. An eval with no `intent` or no `code` isn't run, and its result says why.
 
@@ -75,20 +75,18 @@ To find what your work touches, in this order:
 
 ## Your context
 
-This conversation is drawn from your record, `@ctx`, by render functions. Each part names the function that drew it and the path it read. `@ctx` is an atom, and changing it changes what you are sent: ``(swap! ctx update :seon.eval/_agent dissoc <id>)``.
+This conversation is drawn from your record, `@ctx`, by render functions. `@ctx` is an atom, and changing it changes what you are sent: ``(swap! ctx update :seon.eval/_agent dissoc <id>)``.
 
-Before each of your turns Seon shows you your page as a call it made: ``(my.render/page p)`` at your first turn, your task and your proofs whole, and then ``(my.render/diff p0 p1)``, what moved since your last turn, as edits. Each is in your conversation like your own evals, and you can call either yourself with any point it printed.
+Before each of your turns Seon shows you your page as a call it made: ``(my.render/page p)`` at your first turn, your task and your proofs whole, and then ``(my.render/diff p0 p1)``, what moved since your last turn, as edits. A turn where nothing moved shows no call. Each is in your conversation like your own evals, and you can call either yourself with any point it printed.
 
-The first answers your page: `{:components [["status" [seon.render.ui/status {:ctx [:seon.agent/task :proved]} ...]] ...]}`, each component under its id. The second answers only what changed since you were last shown it, as edits, each `[path op value]`:
+The first answers your page as hiccup: `[:div {:class "agent-parts" :id "p-task"} [:section {:class "task-view" ...} ...] ... [:section {:class "status" :id "status"} ...] [:section {:class "turn" :id "turn"} ...]]`, each part a section under its id. The second answers only what changed since you were last shown it, as edits, each `[path op value]`:
 
 ```clojure
-{:edits [[["status" :proofs old-test] :-]
-         [["status" :proofs b-test] :r [:li {:key b-test} [:code "b-test"] ": fails"]]
-         [["status" :proofs c-test] :+ [:li {:key c-test} [:code "c-test"] ": passes"]]]}
+[[["page" "status" :merging] :-]
+ [["page" "status" demo.x-test/b] :+ [:div {:key demo.x-test/b} [:p [:code "demo.x-test/b"] " fails."] ...]]
+ [["page" "turn"] :r [:section {:class "turn" :id "turn"} [:h2 "You're in demo.x."]]]]
 ```
 
-A path says where: the component's id, then the names inside it, each an element's `:key` or `:id`, else its tag or its first words. `:r` replaces what is there with the value, `:+` adds it under that name, `:-` takes it away. A path ending in `:own` is what that element holds besides its named children. `[["turn"] :r [...]]` is a whole component, sent whole when that is shorter.
+A path says where: `"page"`, then the names inside it, each an element's `:key` or `:id`, else its tag or its first words. `:r` replaces what is there with the value, `:+` adds it under that name, `:-` takes it away. A path ending in `:own` is what that element holds besides its named children. An element whose children changed places is replaced whole. Asking when nothing has moved answers `[]`.
 
-Asking when nothing has moved answers `{:edits [] :shown-by result/ab12}`: the page is as that eval showed it.
-
-Your user's page is drawn by the same render functions, and each one's CSS is on its var, as metadata: `(:seon.render/style (meta #'seon.render.ui/task))` reads it, `(source seon.render.ui/task)` shows it beside what it styles, and `(seon.repl/edit! 'seon.render.ui/task "padding: 0.5rem" "padding: 1rem")` changes it on your branch, as any definition. To find which renders style something: `(for [[s v] (ns-publics 'seon.render.ui) :let [css (:seon.render/style (meta v))] :when (and css (clojure.string/includes? css "chat"))] s)`. Your conversation holds none of it; read it when your work is the page.
+Your user's page is drawn by the same render functions, and each one's CSS is on its var, as metadata: `(:seon.render/style (meta #'seon.render.ui/task-view))` reads it, `(source seon.render.ui/task-view)` shows it beside what it styles, and `(seon.repl/edit! 'seon.render.ui/task-view "padding: 0.5rem" "padding: 1rem")` changes it on your branch, as any definition. To find which renders style something: `(for [[s v] (ns-publics 'seon.render.ui) :let [css (:seon.render/style (meta v))] :when (and css (clojure.string/includes? css "chat"))] s)`. Your conversation holds none of it; read it when your work is the page.
