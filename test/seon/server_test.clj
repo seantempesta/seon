@@ -2,7 +2,7 @@
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
   (:require [clojure.test :refer [deftest is]] [jolt.fibers] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
-            [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d]))
+            [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d] [clojure.java.shell]))
 
 (deftest each-op-has-its-answer
   ;; the ops table (each op's doc and args, the MCP tool list) and op-answer's methods are one set of
@@ -617,3 +617,51 @@
     (is (= [] (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
                                                    :code (str "(filterv #(clojure.string/ends-with? (name %) " (pr-str (str "tree-" tree)) ") (datahike.api/branches (:conn sys)))")}))))
         "the tree's branch is gone once its runs answered")))
+
+(deftest bin-prove-asks-a-root-and-prints-each-verdict-as-it-lands
+  ;; docs/merging.md#a-session-proves-through-root (Flow step 3, the client): bin/prove --root PORT asks that root to prove its
+  ;; checkout's tree, prints each test's verdict as root streams it, and ends on the answer. The checkout is a worktree of this
+  ;; tree with two test namespaces added, one green and one red (a run id in each, so no verdict is reused); each is asked
+  ;; alone, since an asker is answered at its first red (seon.prove's item-ended) and a green ending after it would print
+  ;; nothing. Its target/ holds links to this checkout's binary, libraries and home, what bin/prove --root runs
+  (let [here (seon.config/checkout)
+        root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str here))])
+        tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-prove-client-" (random-uuid))) (.mkdirs)))
+        wt (str tmp "/wt")
+        run (str (random-uuid))
+        git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" here "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                           (is (zero? (:exit r)) (str args (:err r))) (clojure.string/trim (:out r))))
+        links (for [f ["seon" "lib" "home"]] (java.io.File. (str wt "/target/" f)))
+        prove (fn [& args] (let [{:keys [exit out]} (apply clojure.java.shell/sh (str wt "/bin/prove") args)]
+                             {:exit exit :out out :lines (clojure.string/split-lines out)}))
+        before? (fn [lines a b] (let [i (.indexOf ^java.util.List lines a) j (.indexOf ^java.util.List lines b)] (and (<= 0 i) (< i j))))]
+    (try
+      ;; this checkout's files as they are, uncommitted ones included, as a commit of their tree
+      (git "worktree" "add" "-q" "--detach" wt (git "commit-tree" (seon.fx/tree-id here) "-p" "HEAD" "-m" "bin/prove --root's fixture"))
+      (doseq [[n body] [["green" "(deftest a-green (is (string? run)))"] ["red" "(deftest a-red (is (= \"another run\" run)))"]]]
+        (spit (str wt "/test/seon/prove_client_" n "_test.clj")
+              (str "(ns seon.prove-client-" n "-test (:require [clojure.test :refer [deftest is]]))\n\n(def run " (pr-str run) ")\n\n" body "\n")))
+      (.mkdirs (java.io.File. (str wt "/target")))
+      (doseq [^java.io.File l links]
+        (java.nio.file.Files/createSymbolicLink (.toPath l) (.toPath (java.io.File. (str here "/target/" (.getName l)))) (make-array java.nio.file.attribute.FileAttribute 0)))
+      (let [port (str (:port root))
+            green (prove "--root" port "seon.prove-client-green-test")
+            red (prove "--root" port "seon.prove-client-red-test")
+            ;; a port no root listens on: bound for its number, then let go
+            free (let [s (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))] (.close s) (.getLocalPort s))
+            none (prove "--root" (str free) "seon.prove-client-green-test")]
+        (is (= 0 (:exit green)) (:out green))
+        (is (= "PROVE OK" (last (:lines green))) (:out green))
+        (is (some #(clojure.string/starts-with? % "PASS seon.prove-client-green-test/a-green") (:lines green))
+            (str "the green's verdict printed as it landed: " (:out green)))
+        (is (= 1 (:exit red)) (:out red))
+        (is (= "PROVE FAILED" (last (:lines red))) (:out red))
+        (is (before? (:lines red) "RED seon.prove-client-red-test/a-red (fail)" "prove: red seon.prove-client-red-test/a-red")
+            (str "the red's verdict (:fail) printed before the answer, which names it: " (:out red)))
+        (is (= 1 (:exit none)) (:out none))
+        (is (= ["PROVE FAILED"] (take-last 1 (:lines none))) (:out none))
+        (is (clojure.string/includes? (:out none) "refused the connection") "no root there: a typed end, never a wait"))
+      (finally
+        (doseq [^java.io.File l links] (.delete l))
+        (clojure.java.shell/sh "git" "-C" here "worktree" "remove" "--force" wt)
+        (seon.lib/remove-tree! tmp)))))

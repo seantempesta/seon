@@ -106,6 +106,8 @@
  ;; a defect answering one outside request at root's server (seon.server/respond): the
  ;; line it took, and the cause's ex-data printed; the server goes on serving
  :seon.server/held [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/held]] [:agent :keyword] [:task :seon.task/id] [:holder :string]]]
+ ;; a client's request that root never answered (seon.server/ask-streamed): no root on port, or the connection's end before the answer
+ :seon.server/unanswered [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/unanswered]] [:port :int] [:why [:enum :refused :eof :reset]]]]
  :seon.server/defect [:and :seon.error/base [:map [:seon.error/type [:= :seon.server/defect]] [:line :string] [:data {:optional true} :seon.db/plain]]]
  ;; a value its attribute's declared schema refuses, at the write (seon.db/invalid-datom)
  :seon.db/invalid-datom [:and :seon.error/base [:map [:seon.error/type [:= :seon.db/invalid-datom]] [:attribute :qualified-keyword]]]
