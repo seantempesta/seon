@@ -558,6 +558,16 @@
     (is (= [] (program/load-diff! main branch)))
     (is (= 9 ((resolve 'app.pt-src/twice) 3)) "the branch's imported redefinition runs in the agent")))
 
+(deftest a-process-that-runs-another-program-than-its-branch-is-told-so
+  ;; Sean, 2026-11-11 (the runtime invariant): a process runs its branch's program, and a run asks before its first item.
+  ;; Tonight's first class: a tree branch's imported change never loaded, so the agent ran main's twice
+  (let [main (main-with-file)
+        branch (d/db-with main (source/replace-tx main {"src/app/pt_src.clj" (clojure.string/replace pt-text "(add x x)" "(* 3 x)")}))]
+    (hold! 'app.pt-src pt-text)
+    (is (= '[app.pt-src/twice] (mapv :var (program/program-differs main branch))) "before the diff loads: twice is main's")
+    (program/load-diff! main branch)
+    (is (= [] (program/program-differs main branch)) "after it: the branch's program")))
+
 (deftest a-form-that-fails-at-load-is-named
   ;; root's ruling, 2026-10-27: a definition that fails at load fails the load loudly, naming the
   ;; form; it said only "did not load in seon.task-test: nil where a ... Future is required"
