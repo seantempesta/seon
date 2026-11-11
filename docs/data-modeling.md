@@ -85,6 +85,29 @@ So derive nothing you can read, and store nothing you can derive: a value comput
 
 A value derived from the db (a score, a selection, a render, a diff, a test's verdict) may be kept as a cache, keyed by its inputs (a digest, a db's t) and never by a clock; anything may evict it at any time, and its reader then regenerates it from the db as of t (owner, 2026-10-28: "Derived data may be cached with the understanding that it may be evicted at any time so the process must always have a way to generate the data from database time T."). A derived value that cannot be regenerated from the db at t is not a cache: it is a fact that belongs in the db, or a defect. Results are reused the same way, by the digest of their inputs: a test's by everything it reaches, a check step's by its build's source, a build's by its sources, so unchanged inputs are never computed again ([merging](merging.md#verdicts-are-a-cache)).
 
+## Where each entity's facts live, and which pull reaches them
+
+One store holds many branches, and a pull reads the one db it is made on. So where a fact is written decides who can pull it. Read this before a fix that touches an attribute, a ref, a pattern clause or a fact a process keeps: say the pull form you want, and find here which db holds what it asks.
+
+| entity | its identity | written on the agent's own branch | written on main | reached by |
+|---|---|---|---|---|
+| an agent | `:seon.agent/key` | by its start: its key and its task; by its turns: `turn`, `ns`, `test-error`, `main-commit`, `main-program`, `base-commit`; by its own `swap!`: `:seon.ctx/pattern`, `:seon.render/hiccup`, keys it registers; by its end: `outcome`, `reason`, `ended-turn` | by the system, what it observes: `status`, `branch`, `boot`, `started-ms`, `max-turns`, who started it (`:seon.agent/agents`), the evals a person opened | its own pull (the top of `@ctx`); on main, the `:seon.agent/agents` join of whoever started it |
+| a task | `:seon.task/id` | what its agent edits: `plan`, `instructions`, `proofs`, carried to main when it merges | by the task files and the reconciler: its execution, `outcome`, `reason`, `reasons`, its commit, its error | `{:seon.agent/task ...}`; a task it needs, `:seon.task/needs`; any other, by citing it |
+| a model call | `:seon.model-call/id` | by the turn that made it | nothing until the branch merges | `{[:seon.model-call/_agent :tx :at] ...}` |
+| an eval and its result | `:seon.eval/id` (made from its code) | by the REPL that ran it | nothing until the branch merges | `{[:seon.eval/_agent :tx :at] ...}`, and a call's `:seon.eval/_call` |
+| a message | `:seon.message/id` | at its delivery to the recipient's branch, a transaction of that branch | where it was sent | `{[:seon.message/_to :tx :at] ...}`: `:at` is when it reached this branch |
+| a cite | `:seon.cite/id` | by whoever cited (`my.agent/cite!`), or by a plan's text naming an address | a task file's plan | `{:seon.cite/_of ...}` of the agent and of its task |
+| a process | `:seon.process/id` | never | by the system: pid, when it forked and ended, a stall | not in an agent's own pull; on main by `:seon.process/_agent` |
+| the system | `:seon.root/id` | never | by the boot and each landing: what main was indexed from, the boot | root's page; not an agent's pull |
+
+What follows from it:
+- **A fact main keeps about an agent is not in that agent's own pull.** Its pattern asks `status`, `branch` and `max-turns`, and on its own branch they hold nothing. A render that needs one reads it where it lives, or the data is moved; it is never patched with a second pull written by hand.
+- **Nothing an agent did is on main until its branch merges.** A page of main cannot sum a running agent's calls or count its evals.
+- **A value computed from other facts is not in either column.** A status, a spend, a waste, the conflicts of a merge are computed where they are read ([derived data](#derived-data-is-a-cache-never-relied-on)), so no pull holds them: a render computes them from what the pull does hold.
+- **What a process keeps in its own state is in no db.** The test service's queue and an effect's counters are shown to a person from the process; a model's request never reads them, since a request is made again from a commit.
+
+The table says where; the living answer for one entity is `(my.db/pulled @ctx)` ([looking at what you pulled](agent.md#looking-at-what-you-pulled)), which lists every clause with what this db holds for it, and `(doc :an/attribute)` for one key's schema.
+
 ## Before you add something
 
 Four questions settle most new data, and each one can end with adding nothing.

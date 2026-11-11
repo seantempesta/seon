@@ -620,6 +620,19 @@
 (def ^:dynamic *writing* "True while a swap!'s transaction is applied: its patch waits for the swap! to end (pending)." false)
 (defonce ^:private pending (volatile! nil))
 
+(defn- lost-required
+  "Why pattern p may not be entity e's (in the entity index ix): each clause its role requires (its schema's :seon.ctx/required,
+  {attribute reason}: a join's attribute, or a plain one) that p no longer asks, as an :invalid entry naming it and what it is; []
+  when it keeps them all. A clause is asked as a keyword, as [attribute & options] or as a join's key. A pattern is added to,
+  never replaced. See docs/ctx.md#changing-it-swap."
+  {:malli/schema [:=> [:cat :map :map [:sequential :any]] [:vector :map]]}
+  [ix e p]
+  (let [required (render/schema-property ix (render/entity-schema ix e nil) :seon.ctx/required)
+        attr (fn [k] (if (vector? k) (first k) k))
+        asked (into #{} (mapcat (fn [x] (if (map? x) (map attr (keys x)) [(attr x)]))) p)]
+    (vec (for [[k what] required :when (not (asked k))]
+           {:path [:seon.ctx/pattern] :why (str "your pattern must keep " k " (" what "): add to the pattern, never replace it")}))))
+
 (defn write!
   "A swap! of the record to nv, written: its change from the record (edits) as one transaction,
   every value checked by its schema, of the record's basis (nv's :t :branch :commit are the
@@ -639,7 +652,11 @@
                       (contract/error :seon.ctx/basis #'write! "the map is not of the record's basis: the db moved while the swap!'s function ran (write with the swap!, not inside its function), or the function wrote :t, :branch or :commit, which are the record's basis; nothing written"
                                       {:held (select-keys cur basis) :swapped (if (map? nv) (select-keys nv basis) {:value nv})}))))
     ;; a pattern the walk cannot read is refused before anything is written (seon.render/pattern throws why)
-    (when (and (map? nv) (not= (:seon.ctx/pattern nv) (:seon.ctx/pattern cur)) (some? (:seon.ctx/pattern nv))) (render/pattern (:index (:ix c)) (:seon.ctx/pattern nv)))
+    (when (and (map? nv) (not= (:seon.ctx/pattern nv) (:seon.ctx/pattern cur)) (some? (:seon.ctx/pattern nv)))
+      (render/pattern (:index (:ix c)) (:seon.ctx/pattern nv))
+      ;; and one that drops a join its role requires, naming the join
+      (when-let [lost (seq (lost-required (:index (:ix c)) cur (:seon.ctx/pattern nv)))]
+        (throw (ex-info "ctx: refused by the schemas, nothing written" (contract/error :seon.ctx/invalid #'write! "refused by the schemas, nothing written: each path and why" {:invalid (vec lost)})))))
     (let [{:keys [tx invalid paths named]} (edits (:index (:ix c)) db (get-in c [:ix :spec []] {:joins []}) cur nv (:db/id cur) [] {:tx [] :invalid [] :paths [] :named {}})]
       (cond
         ;; nothing to write: the record stays the db's (the swap!'s map gives way to it as it ends)
