@@ -1632,6 +1632,9 @@
                           (fn [cand] (let [r (fx/stored-results cand)] (if (contract/error? r) (do (vreset! unread r) {}) r))))
         process (into {} (for [t (:deferred sel) :let [d (get-in sel [:digests t])] :when (and d (contains? (:process plan) t))] [t d]))
         run (vec (cond->> (remove proofs/mg-key? (:run-steps p)) (seq names) (filter #(contains? names (symbol %)))))
+        ;; the generative contract keys with no green at their digest: items of the run too, as the shell's shards run them
+        ;; (a merge's verification proves them; leaving them out, a tree proved through the system proved less than the shell's)
+        mg (into {} (for [k (filter proofs/mg-key? (:run-steps p)) :when (not (seq names))] [k (get (:steps p) k)]))
         ms (if (or (seq run) (seq process)) (fx/typical-ms (into run (keys process))) {})
         k (cfg/value :seon.config.check/step-end-factor) floor (cfg/value :seon.config.agent/stall-ms)
         ;; a process test's bound, as a step's: the factor times its median measured ms, floored; none when never measured
@@ -1641,7 +1644,7 @@
                                          (proofs/machine-steps s) (assoc :alone? true))]))]
     (if-let [u @unread]
       {:unread u}
-      {:process process :bounds bounds :steps steps :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))
+      {:process process :bounds bounds :steps steps :mg mg :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))
        :build {:tree (:tree (:inputs plan)) :needed? (boolean (or (seq process) (some :binary? (vals steps))))}})))
 
 (defn handle!
@@ -1681,7 +1684,7 @@
                                       :at-judge (count (:judge sel)) :reused-reports (:reused-reports sel)
                                       :digests (select-keys (:digests sel) (filter (:reused sel) (:selected sel)))}
                                (seq (:deferred sel)) (assoc :why (into {} (for [t (:deferred sel)] [t (program/process-path (:graph (:plan sel)) t)])))
-                               pp (merge (select-keys pp [:process :bounds :steps :build :missing]))))}])
+                               pp (merge (select-keys pp [:process :bounds :steps :mg :build :missing]))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                  ;; items of a run of a session's checkout: their test children read that checkout's files (test-child)
                  _ (when (and (:checkout m) (:held-plan @state)) (swap! state assoc-in [:held-plan :plan :checkout] (:checkout m)))
