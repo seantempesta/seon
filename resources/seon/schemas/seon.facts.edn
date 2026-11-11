@@ -235,7 +235,12 @@
  :seon.agent/outcome [:enum :green :red :waiting :cap :failed :merge-failed :error]
  :seon.agent/reason :string
  :seon.agent/ended-turn :int
- :seon.ctx/pattern [:and [:vector :any] :seon.db/plain]
+ ;; an entity's own pattern, stored with it from its first change; before that it reads its schema's (its role's). The
+ ;; description is what an agent reads beside its pattern (seon.render.ui/pull-front): what it is, the warning, one form that adds
+ ;; a join. What a role's pattern must keep is that role's :seon.ctx/required, {attribute what-it-is}, a join's attribute or a
+ ;; plain one (docs/ctx.md#changing-it-swap)
+ :seon.ctx/pattern [:and {:description "Your pull pattern: what your pull holds, in Datahike's pull syntax, one clause an attribute or a join ({attribute sub-pattern}). Your page and your next request are made from it, so changing it changes what you read. ADD to it, never replace it: a pattern that drops a join your role requires is refused, and one that drops anything else simply stops showing it to you. To add a join: (swap! ctx update :seon.ctx/pattern (fn [p] (conj (vec (or p (seon.render/entity-pattern (seon.agent/branch-index) @ctx))) {:my.ns/_of [:my.ns/text]})))"}
+                    [:vector :any] :seon.db/plain]
  ;; an entity's own render, as :seon.ctx/pattern is its own pattern: what its page is drawn by in place of its schema's (seon.render/render-var-of; docs/render.md#an-entity-may-name-its-own-render)
  :seon.render/hiccup :symbol
  ;; the doc sections its system message is, when it names its own (docs/render.md#the-models-context-a-cached-prefix-then-the-turn); with none, docs/prompt.md's
@@ -269,7 +274,7 @@
                      [:seon.eval/response :seon.eval/response] [:seon.eval/result {:optional true} :seon.eval/result] [:seon.eval/opened {:optional true} :seon.eval/opened]]
  ;; an entity's record (seon.ctx, :seon.ctx/pattern: Datahike's pull syntax as data, docs/ctx.md#the-pattern;
  ;; its joins are the page walk's units, seon.render/units), each member rendered by its own schema's render
- :seon.db/agent-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [:seon.agent/key
+ :seon.db/agent-fact [:map {:seon.db/attributes true :seon.ctx/required {:seon.agent/task "the task you work" :seon.message/_to "the messages sent to you" :seon.eval/_agent "your evals" :seon.model-call/_agent "your turns"} :seon.render/keys [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/description] :seon.ctx/pattern [:seon.agent/key
                                :seon.user/name
                                :seon.render/hiccup
                                :seon.agent/branch
@@ -318,7 +323,7 @@
  ;; the agent whose page the person last opened: home is this page (docs/users.md#whats-on-screen); absent means root
  ;; or a task: an agent focuses the person on work it just launched (my.task/launch! answers the task), its agent made a moment later
  :seon.user/focus [:and {:seon.db/to [:seon.db/agent-fact :seon.task/task-fact]} :seon.db/ref]
- :seon.db/user-fact [:and {:seon.db/attributes true :seon.render/hiccup seon.render.ui/agent :seon.ctx/pattern [:seon.agent/key :seon.user/name {:seon.agent/agents [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {:seon.agent/agents [:db/id]}]}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
+ :seon.db/user-fact [:and {:seon.db/attributes true :seon.ctx/required {:seon.agent/agents "the sessions you started"} :seon.render/hiccup seon.render.ui/agent :seon.ctx/pattern [:seon.agent/key :seon.user/name {:seon.agent/agents [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {:seon.agent/agents [:db/id]}]}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
  ;; :seon.agent/key) and its target's (seon.ref/target-value: an address, a name, an id, a key or a path)
