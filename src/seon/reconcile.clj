@@ -9,7 +9,7 @@
   by the writer."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.sock :as sock] [seon.step :as step]
-            [seon.task :as task] [seon.lib :as lib] [seon.proofs :as proofs] [seon.merge :as pm] [seon.program :as program] [seon.source :as source] [seon.doc :as doc]
+            [seon.task :as task] [seon.lib :as lib] [seon.proofs :as proofs] [seon.program :as program] [seon.source :as source] [seon.doc :as doc]
             [datahike.api :as d] [seon.db :as pdb] [clojure.string :as str] [clojure.core.async.flow :as flow]
             [seon.config :as cfg] [seon.error :as err]))
 
@@ -897,14 +897,14 @@
 
 (defn- judge-tx
   "Task id's end judged on MEASURED facts and written on main, once: the end its agent wrote on the branch (pull-end),
-  root's own proof results, the branch's merge entries, and diff, the writer's one read of the
+  root's own proof results, and diff, the writer's one read of the
   branch (:branch-diff: its head db, its merge base and main's t there, the keys it changed,
-  its unmerged keys, its contract gaps); `judgment` decides from them what comes next (the outcome, the reasons the done rule gave,
+  its contract gaps); `judgment` decides from them what comes next (the outcome, the reasons the done rule gave,
   a verdict to tell, a hold for root) and the answer is stored on the task (:seon.task/outcome and the rest, retracting
   what this end did not set); the task content the branch changed carried to main, or its conflicts with main's recorded
   for root (seon.task/carry-tx); and a failure the agent marked (my.task/fail!) carried with the task held.
   Answers {:tx :outcome :kept?}: kept? when the agent's process is to stay."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:map [:tx [:vector :any]] [:outcome :seon.task/outcome]]]}
+  {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:map [:tx [:vector :any]] [:outcome :seon.task/outcome]]]}
   [st {:keys [act run-problems worked-error deferred main-red]} results {:keys [db base base-t] :as diff}]
   (let [main (:db st) idx (:idx st)
         id (:task act)
@@ -920,21 +920,17 @@
         ;; marked failed by its agent at the turn its end came on (my.task/fail!): the failure on main and the task held for root
         marked? (and failure end (= k (:agent failure)) (= (:turn failure) (:ended-turn end)))
         kind (:seon.task/kind t)
-        unmerged (mapv sedn/encode (:unmerged diff))
-        j (judgment idx id {:end end :results results :main-red main-red :uncontracted (set (:uncontracted diff)) :unmerged unmerged :caused (set (:caused diff))
+        j (judgment idx id {:end end :results results :main-red main-red :uncontracted (set (:uncontracted diff)) :unmerged [] :caused (set (:caused diff))
                             :behind (when (pos? (:theirs diff 0)) (:theirs diff)) :basis (or base-t (:max-tx main)) :deferred (set deferred)
                             :plan (when (= :design kind) (some-> (task/task db id) :seon.task/accumulated :plan))
                             :plan-before (when (= :design kind) (some-> (task/task base id) :seon.task/accumulated :plan))
                             :behinds (behinds main id) :told (:seon.task/reasons t)})
-        conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
         reason (or (:reason end) (when-not end (if worked-error (str "seon.turn/work! threw: " (:seon.error/message worked-error)) "the agent wrote no end")))
         error (or (:error end) worked-error)
         now (System/currentTimeMillis)
         ;; what this end measured, each only when there is one to say (and what an earlier end set that this did not, retracted)
         want (cond-> {:seon.task/reasons (:reasons j)}
                reason (assoc :seon.task/reason reason)
-               (seq conflicts) (assoc :seon.task/conflicts conflicts)
-               (seq unmerged) (assoc :seon.task/unmerged (set unmerged))
                (seq (:ours diff)) (assoc :seon.task/changed (into #{} (map sedn/encode) (:ours diff)))
                (seq deferred) (assoc :seon.task/deferred (set deferred))
                (seq (:failures run-problems)) (assoc :seon.task/failures (:failures run-problems))
@@ -942,7 +938,7 @@
                error (assoc :seon.task/error error)
                (seq (:waste end)) (assoc :seon.task/waste (:waste end))
                (seq (:conflicts carried)) (assoc :seon.task/task-conflicts (:conflicts carried)))
-        facts {:conflicts conflicts :unmerged unmerged :red (for [[tt s] results :when (not= :pass s)] tt)}
+        facts {:red (for [[tt s] results :when (not= :pass s)] tt)}
         outcome (if marked? :closed (:outcome j))
         move (if (and (:hold j) (not marked?))
                (hold-tx main id (task/outcome-tx main id :running outcome want) (:hold j) facts)
@@ -951,7 +947,7 @@
                (into [{:seon.agent/key k :seon.agent/ended-ms now}])
                (into (when (and (:verdict j) (not marked?))
                        (task/message-tx (str "v-" id "-" turn) task/system-sender [k]
-                                        (verdict-body (:verdict j) {:results results :deferred deferred :unmerged unmerged :caused (:caused diff)
+                                        (verdict-body (:verdict j) {:results results :deferred deferred :caused (:caused diff)
                                                                     :basis (or base-t (:max-tx main))})
                                         now)))
                (into (:tx carried))
@@ -1008,7 +1004,7 @@
                              ;; why they could not run, when the gate itself failed: the effect's error, or a changed
                              ;; namespace with no file on the branch (each test then reads :error)
                              (when (seq why) (str "; the gate could not run them: " (str/join "; " why))))
-                        {:red (mapv first red) :conflicts (:seon.task/conflicts (get-in st [:idx :tasks id])) :unmerged (:seon.task/unmerged (get-in st [:idx :tasks id]))}))]
+                        {:red (mapv first red)}))]
     (if err (err/asked-tx main err :seon.task/deferred-results move) move)))
 
 (defn- advance
@@ -1138,7 +1134,7 @@
                                                        (and (behind-types (:seon.error/type r)) (< n (cfg/value :seon.config.merge/max-behind)))
                                                        (task/move-tx task :ready :behind {:seon.task/reason (:seon.error/message r) :seon.task/error r})
                                                        :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
-                                                                      problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))))
+                                                                      problem {}))))
                                                  (:members act) (:results r)))))))
       ;; each deferred test's status on the task. The candidate is the writer's: the files the octopus merge would write
       ;; (seon.writer's :merge-candidate), forms', tests' and schema resources' alike (a :seon.ref/block change left out would

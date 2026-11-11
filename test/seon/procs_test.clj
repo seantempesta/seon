@@ -6,7 +6,7 @@
             [malli.core :as m] [seon.contract]
             [clojure.core.async :as a] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec]
             [clojure.core.async.flow :as flow]
-            [datahike.api :as d] [datahike.writer :as dw]
+            [datahike.api :as d] [datahike.writer :as dw] [seon.merge :as pm]
             [seon.step :as step] [seon.db :as pdb] [seon.sock :as sock]
             [seon.writer :as writer] [seon.reconcile :as reconcile] [seon.fork-server :as server]
             [seon.agent :as agent] [seon.agent-proc :as ap] [seon.fx] [seon.system :as root] [seon.problems :as problems] [seon.repl :as repl] [seon.render.proc] [seon.web]
@@ -1326,14 +1326,14 @@
           db @conn
           written (sort (filter #(> % t0) (map :e (d/datoms db :aevt :db/txInstant))))]
       (is (= :seon.merge/replay-refused (:seon.error/type ra)) "a's replay is refused by main's write check")
-      (is (= :transact/unique (get-in ra [:refused :error :error])) "naming the check's error")
+      (is (= :transact/unique (get-in ra [:seon.merge/refused :error])) "naming the check's error")
       (is (:merged? rb) "b merges without it")
       (is (= "b2" (:task/plan (d/entity db [:task/name :gen/b]))) "b's net change is on main")
       (is (= 3 (count written)) "b's two transactions and the merge's last, which carries main's content mark")
       (is (= [b b] (map #(:seon.tx/branch (d/entity db %)) (butlast written))) "each of b's names the branch that wrote it")
       (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity db (first written)))) "and main's runtime")
-      (is (= :seon.merge/conflicts (:seon.error/type rc)) "c conflicts with main")
-      (is (= [[:task/name :gen/t :task/plan]] (mapv :key (:conflicts rc))) "named by identity")
+      (is (= :seon.merge/conflict-refused (:seon.error/type rc)) "c conflicts with main")
+      (is (= [[t :task/plan]] (mapv pm/conflict-key (:seon.merge/conflicts rc))) "at the task's plan")
       (is (= "main" (:task/plan (d/entity db t))) "and main keeps its value")
       (is (= 1 (count (d/datoms db :avet :task/name :gen/same))) "main's one entity holds the name a claimed"))))))
 
@@ -1418,24 +1418,9 @@
         ask (fn [st req] (let [[st outs] (step #'writer/writer-proc st :in (assoc req :dest {:rid 2}))] [st (:r (first (filter #(= {:rid 2} (:dest %)) (:to-api outs))))]))
         [st cand] (ask st {:op :merge-candidate :branch c})
         [_ merged] (ask st {:op :octopus-merge :branches [c]})]
-    (is (= :seon.merge/conflicts (:seon.error/type cand)) (str "the candidate is refused as the merge is: " (pr-str cand)))
+    (is (= :seon.merge/conflict-refused (:seon.error/type cand)) (str "the candidate is refused as the merge is: " (pr-str cand)))
     (is (= (:seon.error/type cand) (:seon.error/type (first (:results merged)))) "by the same type")
     (is (not (dw/pending? conn)) "and nothing is left pending")))))
-
-(deftest a-merge-of-an-entity-with-no-identity-is-refused
-  ;; seon.merge/plan's :unidentified, as the writer answers it (seon.writer/plan-refused): a note bears no identity
-  (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
-        st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
-        e (pdb/on-main (:branch cfg) :mo-e)
-        _ (d/branch! conn (:branch cfg) e)
-        ec (pdb/connect (assoc cfg :branch e))
-        _ (try (d/transact ec [{:note/text "a note" :note/agent :e}]) (finally (d/release ec)))
-        t0 (:max-tx @conn)
-        [_ outs] (step #'writer/writer-proc st :in {:op :octopus-merge :branches [e] :dest {:rid 1}})
-        [re] (:results (:r (first (filter #(= {:rid 1} (:dest %)) (:to-api outs)))))]
-    (is (= :seon.merge/unidentified (:seon.error/type re)) (pr-str re))
-    (is (= #{#{:note/text :note/agent}} (:unidentified re)) "named by its attributes")
-    (is (= t0 (:max-tx @conn)) "and nothing is written")))))
 
 (deftest a-merge-leaves-anothers-pending-transactions-as-they-were
   ;; seon.writer/pending-refused: the octopus merge and the gate's candidate apply on main's connection's run-ahead and abandon

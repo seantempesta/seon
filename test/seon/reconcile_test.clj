@@ -75,8 +75,6 @@
   {:op :spawn :task (str "demo/" nm)
    :env {:branch (task/default-branch (str "demo/" nm)) :model model :max-turns (cfg/value :seon.config.agent/max-turns)}})
 (defn- t [nm] (symbol "demo-test" (str nm "-test")))
-(def conflict-f {:key [:var 'app/f] :base {:src "(defn f [x] x)"}
-                 :ours {:src "(defn f [x] (inc x))"} :theirs {:src "(defn f [x] (dec x))"}})
 
 (defn- mdb
   "A main db of decls with their merge tasks (template/with-merge), all released."
@@ -1121,12 +1119,11 @@
         ;; each with the data its schema holds (seon.merge.edn): what the writer answers
         err (fn [t] (contract/error t 'seon.writer/applied! "refused"
                                     (case t
-                                      :seon.merge/replay-refused {:tx 9 :refused {:tx 7 :error (contract/error :seon.system/refused 'seon.db/transact-checked "requires :task/plan" {})}}
-                                      :seon.merge/conflicts {:tx 9 :conflicts [{:key [:seon.task/id "demo/x" :seon.task/plan] :ours "a" :theirs "b"}]}
-                                      :seon.merge/unidentified {:tx 9 :unidentified #{#{:seon.zz/x}}})))]
+                                      :seon.merge/replay-refused {:seon.merge/refused (assoc (contract/error :seon.system/refused 'seon.db/transact-checked "requires :task/plan" {}) :db/id 7)}
+                                      :seon.merge/conflict-refused {:seon.merge/conflicts [{:seon.merge/entity 9 :seon.merge/attribute :seon.task/plan :seon.merge/ours "a" :seon.merge/theirs "b"}]})))]
     (let [tk (answer (err :seon.merge/replay-refused))]
       (is (= [:running :behind] [(:seon.task/execution tk) (:seon.task/outcome tk)]) "a replay main refused: behind, it runs again"))
-    (doseq [t [:seon.merge/conflicts :seon.merge/unidentified]]
+    (doseq [t [:seon.merge/conflict-refused]]
       (let [tk (answer (err t))]
         (is (= [:held :closed] [(:seon.task/execution tk) (:seon.task/outcome tk)]) (str t ": held for root"))))))
 
@@ -1236,12 +1233,7 @@
              ["its proof never run" "demo/add" (:db (judge! (told unknown) "add" {:outcome :red} :results {}))
               "the same verdict again: proof-unknown demo-test/add-test" :closed]
              ["a dead agent" "demo/add" (d/db-with dead-db (#'r/dead-tx (st-of dead-db) "demo/add" died nil))
-              "its agent died: agent a-add died: exit 70" :dead]
-             ["a merge conflict" "demo/add-merge"
-              (let [db (mdb two-tasks :extra (concat (work "add" :done) (work "add-merge" :running)))]
-                (:db (judge! db "add-merge" {:outcome :red} :results {(t "add") :pass}
-                             :on-branch [(assoc (pm/conflict-tx conflict-f) :seon.merge/main-t 5)] :diff {:unmerged [[:var 'app/f]]})))
-              "ended red: unmerged [:var app/f]" :closed]]]
+              "its agent died: agent a-add died: exit 70" :dead]]]
       (testing why
         (let [tk (task/task db' id)
               before (mdb two-tasks)]
@@ -1255,11 +1247,6 @@
           (is (= id (:from (:seon.task/evidence tk))))
           (is (= outcome (:seon.task/outcome tk)) "the task is answered once")
           (is (= :failed (r/task-state (r/index db') id))))))
-    (testing "a merge conflict's evidence is the branch's entries"
-      (let [db (mdb two-tasks :extra (concat (work "add" :done) (work "add-merge" :running)))
-            {db' :db} (judge! db "add-merge" {:outcome :red} :results {(t "add") :pass}
-                              :on-branch [(assoc (pm/conflict-tx conflict-f) :seon.merge/main-t 5)] :diff {:unmerged [[:var 'app/f]]})]
-        (is (= [conflict-f] (mapv #(select-keys % (keys conflict-f)) (:conflicts (:seon.task/evidence (task/task db' "demo/add-merge"))))))))
     (testing "a merge the octopus merge refused: the reconciler proc's answer to the writer"
       (let [db (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :ready)))
             [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))

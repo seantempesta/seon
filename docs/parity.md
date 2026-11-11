@@ -46,7 +46,7 @@ Each v1 function of the agent's REPL and where it stands here.
 | removal that refuses while a referrer remains (`my.program/unmap-subject!`) | plain `ns-unmap`, observed and recorded on the branch (`seon.repl/unmapped`); a referrer is not refused (it fails where it loads and in its tests) | partial |
 | `my.web/fetch`, `search` | none (no `:web` effect) | missing |
 | `my.fs/*` (read, write, list files), `my.edit/*` (exact-span text edits), `my.shell/run!` (a command, its output and exit), and their handlers' policy (fs roots, no symlink following, a digest precondition on write, argv-only shell with an env allowlist) | none; they go through the effect owner (`my.fx/call`), like every outside-world call. Seon does any work its user wants (AGENTS §1); only Seon's own code changes at the REPL | missing |
-| `my.schema/register!`, `my.branch/merge-main!`, `unmerged`, `resolve!` | the same names (`merge-main!` stages the live runtime onto the branch, then merges main's changes since the merge base) | present |
+| `my.schema/register!`, `my.branch/merge-main!`, `unmerged`, `resolve!` | `register!`, `merge-main!` (stages the live runtime onto the branch, then merges main's transactions since the merge base; a conflict settles by merging again with resolutions), `unmerged` (computed, never stored); no `resolve!`, the resolutions are its form | present |
 | an effect's receipt committed before its handler runs, settled once, never sent again (`seon.effect`) | the outcome only, in the answer of the eval that asked; a dead agent's effect in flight leaves no record | missing |
 
 ## Tasks, merges, tests

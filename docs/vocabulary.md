@@ -115,7 +115,7 @@ The words for tasks and their prerequisites, and the namespace that owns each.
 | **flight** | one action carried out as a chain of requests and answers in the reconciler proc | `seon.reconcile/advance` |
 | **turn loop** | inside an agent: observe, then end (green, or stopped with the outcome and reason) or act (context to the model, forms through the REPL path); every work merges main first, and a merge task again at each green until there is nothing new on main to merge | `seon.turn/work!` |
 | **three-way** | git's comparison of program maps (base, ours, theirs) keyed `[:var sym]`, `[:form id]`, `[:schema k]` (a schema entry), read only where the dbs differ ([storage](storage.md#merges-read-what-changed)): what judges a merge up and what a branch's merge carries, never what the merge writes | `seon.merge/three-way`, `seon.merge/delta-three-way` |
-| **unmerged entry** | a conflict an earlier merge stored on the branch (base, ours, theirs), read until re-defn or `resolve!`; the one merge stores none, and a branch's conflicts with main are computed (```seon.agent/main-conflicts```) | `seon.merge/unmerged` |
+| **unmerged** | a branch's conflicts with main now, computed (```seon.agent/main-conflicts```); settled by merging again with resolutions | `my.branch/unmerged` |
 | **stage** (was harvest) | staging the live runtime onto the branch (unmaps, plain defs as values, aliases) | `seon.stage/stage!` |
 | **failure point** (was dragon) | a place where the outside world can fail us, met by one named edge function | `docs/failure-points.md` |
 | **problem** | an open fact that something needs fixing: a failed or blocked task, a task conflict, a recorded error; health is their absence ([errors](errors.md#problems)) | `seon.problems/report`, `my.root/problems` |
@@ -134,5 +134,5 @@ The functions an agent has in its own namespaces, by namespace.
 | `my.turn` | `evals`, `wait` |
 | `my.schema` | `registration`, `forms`, `register!` (on the agent's own branch) |
 | `my.fx` | `call`, `send` (effects through their owner) |
-| `my.branch` | `merge-main!`, `unmerged`, `resolve!` |
+| `my.branch` | `merge-main!`, `unmerged` |
 | `my.root` (root's functions) | `create!`, `request!`, `run!`, `hold!`, `cancel!`, `load-tasks!`, `load-docs!`, `problems`, `generation`, `resume-args`, `build!`, `next-generation` |

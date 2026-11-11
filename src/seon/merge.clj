@@ -23,11 +23,10 @@
     is neither program, observation nor merge bookkeeping). Entity ids are store-wide
     unique, so a data entity keeps its id across branches.
 
-  `three-way` compares base, ours and theirs: the one derivation behind merging main into
-  a branch, merging a branch into main, the done rule's unmerged entries and the
-  dashboard. A conflict is kept as an unmerged entry on the branch (`unmerged-tx`), base,
-  ours and theirs as data, until the branch's content for its key changes or it is
-  resolved (`resolve-tx`). Every function here is pure over db values."
+  `three-way` compares base, ours and theirs by program key: what a branch's work changed, whether
+  main moved under it (the writer's behind), and the dashboard. What a merge writes is the one merge
+  at the end of this namespace (`plan`): the source's transactions replayed whole when the two
+  sides' changes do not conflict. Every function here but `apply-groups!` is pure over db values."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.datom :as dd] [datahike.writer :as dw] [clojure.string :as str] [clojure.set] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg]))
 
@@ -381,89 +380,6 @@
   {:malli/schema [:=> [:cat :seon.merge/changes] [:set :qualified-symbol]]}
   [ch] (into #{} (keep (fn [[kind x]] (when (= :var kind) x))) (keys ch)))
 
-;; ---- verbatim merges: a merged datom is the same datom ------------------------------
-
-(defn- key-entity
-  "The entity bearing program key k on db, or nil."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] [:maybe :int]]}
-  [db [kind a :as k]]
-  (if-let [stated (stated-keys kind)]
-    (pdb/eid db (:id stated) a)
-    (case kind
-      :form (pdb/eid db :form/id a)
-      (:var :method :impl :ns) (program/def-eid db k)
-      :datum a)))
-
-(defn carried-tx
-  "The datoms src's changes since base carry for program keys ks, as they are (e, a, v and
-  tx): the retractions src made of the keys' entities' datoms base holds, then the datoms
-  src added to them, then the facts of the transactions that made them. Ids are the
-  store's, issued once (docs/storage.md#ids), so on any other branch they name the same
-  entities and transactions: a merge adds what the branch wrote, never a copy. Platform
-  records ride on no key, so they stay where they were written. Datahike keeps a carried
-  datom's own tx (datahike.db.transaction, transact-add and transact-retract-datom). A carried form's
-  namespace entity is carried with it."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.db/tx-data]}
-  [base src ks data-attrs]
-  (let [es (into #{} (for [k ks db [base src] :let [e (key-entity db k)] :when e] e))
-        ;; a carried form names its namespace by ref: the namespace entity rides with it (a namespace made
-        ;; without an (ns) form is no key of its own), or the form reads :ns nil where it lands
-        es (into es (for [e es :let [n (:db/id (:form/ns (d/entity src e)))] :when n] n))
-        das (data-attr? src data-attrs)
-        carry? (fn [d] (and (es (:e d)) (let [a (:a d)] (or (das a) (program/attr-namespaces (namespace a)) (carried-namespace? (namespace a))))))
-        [gone added] (d/datoms-diff base src :eavt [])
-        added (filterv carry? added)
-        retracted (vec (for [d gone :when (carry? d)
-                             :let [r (last (filter #(and (not (:added %)) (> (:tx %) (:tx d)))
-                                                   (d/datoms (d/history src) :eavt (:e d) (:a d) (:v d))))]
-                             :when r]
-                         r))
-        txs (into (sorted-set) (map :tx) (concat retracted added))]
-    (-> []
-        (into retracted)
-        (into added)
-        (into (for [t txs d (d/datoms src :eavt t)] d)))))
-
-(defn attribute-declarations
-  "The Datahike declarations, from the built registry, of the attributes the datoms of tx use
-  that onto's schema lacks: what a branch cut before an attribute needs before main's datoms of it
-  can land (Datahike refuses an attribute its schema does not define). Empty when onto holds
-  them all. One pass over tx's attributes, then the registry's declarations only when one is
-  lacking."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:vector :seon.schema/declaration]]}
-  [onto tx]
-  (let [have (d/schema onto)
-        lacking (into #{} (comp (map :a) (filter #(and (keyword? %) (not (contains? have %))))) tx)]
-    (if (empty? lacking)
-      []
-      (filterv #(contains? lacking (:db/ident %)) (program/schema-declarations onto contract/registry)))))
-
-(defn merge-tx
-  "The tx-data merging src's changes since base for program keys ks onto db onto: the
-  Datahike declarations of the attributes its datoms use that onto lacks (attribute-declarations),
-  then the datoms src wrote, as they are (carried-tx), and the declarations a merged schema
-  entry's population needs on onto (as a registration installs them). An entity whose identity
-  src retracted is retracted whole on onto, so no fact onto wrote of it (a test's results) stays
-  on a nameless entity (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.host/db [:maybe [:sequential :seon.merge/program-key]] :seon.merge/data-attrs] :seon.db/tx-data]}
-  [onto base src ks data-attrs]
-  ;; a branch with nothing of its own has no keys: (keys {}) is nil
-  (let [ks (vec ks)
-        carried (carried-tx base src ks data-attrs)
-        schema (:schema src)
-        unique? #(= :db.unique/identity (get-in schema [% :db/unique]))
-        named (into #{} (keep #(when (and (:added %) (unique? (:a %))) (:e %))) carried)
-        gone (into [] (comp (keep #(when (and (not (:added %)) (unique? (:a %)) (not (named (:e %)))) (:e %))) (distinct)
-                            (map #(vector :db/retractEntity %)))
-                   carried)
-        tx (-> (attribute-declarations onto carried) (into carried) (into gone))]
-    (if-let [own (seq (keep #(when (= :schema (first %)) (second %)) ks))]
-      (let [merged (pdb/speculate-db onto tx)
-            reg (program/schema-registry (program/schema-changes merged))]
-        (-> tx (into (program/schema-declarations onto reg))
-            (into (mapcat #(program/own-declaration onto % reg)) own)))
-      tx)))
-
 ;; ---- what program code does not do ----------------------------------------------------
 
 (defn mutations
@@ -482,72 +398,6 @@
                              (for [v (sort-by str (:inline-defs f))] {:inline-def v}))]
          (merge {:form id :ns (:ns f) :defines (vec (sort-by sedn/encode (:defines f)))} finding))))
 
-;; ---- unmerged entries (git's index stages 1, 2, 3), on the branch ------------------------
-
-(defn- entry-eids
-  "The branch's merge entries: entities with a key and the main t they were merged at
-  (a run's conflict evidence on main shares the :seon.merge/* members, not :main-t)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :int]]}
-  [db] (vec (d/q '[:find [?e ...] :where [?e :seon.merge/key] [?e :seon.merge/main-t]] db)))
-
-(defn conflict-value
-  "The conflict the :seon.merge/* members of m state, m a pulled entry (the inverse of
-  `conflict-tx`): one decoder for a branch's entries and a run's evidence."
-  {:malli/schema [:=> [:cat :seon.merge/entry-members] :seon.merge/conflict]}
-  [m]
-  (cond-> {:key (:seon.merge/key m)}
-    (:seon.merge/base m) (assoc :base (:seon.merge/base m))
-    (:seon.merge/ours m) (assoc :ours (:seon.merge/ours m))
-    (:seon.merge/theirs m) (assoc :theirs (:seon.merge/theirs m))))
-
-(defn entries
-  "Every merge entry on db, as conflict values with :main-t and :resolved?."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.merge/entry-value]]}
-  [db]
-  (vec (sort-by (comp sedn/encode :key)
-                (for [e (entry-eids db)
-                      :let [m (d/pull db '[*] e)]]
-                  (assoc (conflict-value m) :main-t (:seon.merge/main-t m) :resolved? (boolean (:seon.merge/resolved? m)))))))
-
-(defn conflict-tx
-  "A conflict as the members of one merge entity (no :db/id): for the branch's entries
-  and a run's evidence alike."
-  {:malli/schema [:=> [:cat :seon.merge/conflict] :map]}
-  [{:keys [key base ours theirs]}]
-  (cond-> {:seon.merge/key key}
-    base (assoc :seon.merge/base base)
-    ours (assoc :seon.merge/ours ours)
-    theirs (assoc :seon.merge/theirs theirs)))
-
-(defn unmerged-tx
-  "The branch's unmerged entries for conflicts, against main at t main-t: an earlier entry
-  for the same key is replaced."
-  {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.merge/conflict] :int] :seon.db/tx-data]}
-  [db conflicts main-t]
-  (let [ks (set (map :key conflicts))]
-    (into (vec (for [e (entry-eids db)
-                     :when (ks (:seon.merge/key (d/entity db e)))]
-                 [:db/retractEntity e]))
-          (for [c conflicts] (assoc (conflict-tx c) :seon.merge/main-t main-t :seon.merge/resolved? false)))))
-
-(defn unmerged
-  "The entries of db still unmerged: not resolved, and the branch's content for the key
-  still equal to ours (a re-defn resolves by itself). Reads the program at the entries'
-  keys only (program-of)."
-  {:malli/schema [:=> [:cat :seon.host/db] [:vector :seon.merge/entry-value]]}
-  [db]
-  (let [es (entries db)
-        prog (program-of db (mapv :key es) #{})]
-    (filterv #(and (not (:resolved? %)) (same? (:key %) (:ours %) (get prog (:key %)))) es)))
-
-(defn resolve-tx
-  "Mark the entry for key resolved (git add): the branch keeps what it holds now."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] :seon.db/tx-data]}
-  [db k]
-  (vec (for [e (entry-eids db)
-             :when (= k (:seon.merge/key (d/entity db e)))]
-         [:db/add e :seon.merge/resolved? true])))
-
 (defn dangling
   "The references db-to's program leaves naming nothing: each live form of db-to whose recorded references (:form/refs, the
   compiler's) name a var db-from defines and db-to does not, as {:ref :form}, sorted. What a merge that removes a definition
@@ -560,206 +410,119 @@
                       dt (d/datoms db-to :avet :form/refs v) :when (program/live? db-to (:e dt))]
                   {:ref v :form (:form/id (d/entity db-to (:e dt)))}))))
 
-;; ---- the one merge: each side's net change, and what of it conflicts (task seon.merge/a-merge-replays-the-sources-net-change) ----
-
-(defn- identity-of
-  "Entity e's identity on db: [attribute value] of its upsert key, an attribute that is :db.unique/identity in db's own
-  schema (its :schema map, which a schema entry's {:seon.db/identity true} installs: seon.schema.datahike), or :db/ident (an
-  attribute's declaration, by Datahike's own identity); nil when it bears none. Read from the db's data, never a process's
-  registry, so a branch's own identities count. An entity holding several (a user is an agent: :seon.agent/key and
-  :seon.user/name) is named by the one whose attribute's ident sorts first, which both sides of a merge share, never by
-  attribute ids (an attribute a branch installed has another id on main). See
-  docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
-  {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe [:tuple :keyword :any]]]}
-  [db e]
-  ;; the db's schema map as it holds it (:schema), never (d/schema db), which builds the whole map again on every call
-  (let [schema (:schema db)
-        ids (filter (fn [dt] (or (= :db/ident (:a dt)) (= :db.unique/identity (get-in schema [(:a dt) :db/unique])))) (d/datoms db :eavt e))]
-    (some (fn [dt] [(:a dt) (:v dt)]) (sort-by :a ids))))
+;; ---- the one merge (task seon.merge/a-merge-replays-the-sources-net-change; docs/decisions.md, 'A merge replays the source's
+;; transactions on the branch that receives it') ----
 
 (defn net-change
-  "What db holds that base does not, and what base held that db does not, by identity, never by entity id:
-  {:keys {key now} :base {key base's value} :unidentified #{schema-less entity's attributes}}. A key of an attribute of cardinality one is
-  [identity-attr identity-value attribute] and its now is the value on db, or ::gone; of cardinality many it is
-  [identity-attr identity-value attribute value] and its now is true (asserted) or ::gone (retracted). A ref's
-  value is its target's identity. A transaction's own facts are no change of the branch's data (a merge writes
-  new transactions), and neither is a fact both hold under two transactions (a merge's copy). An entity that bears no identity is named in :unidentified by its attributes: it cannot
-  cross (docs/decisions.md, 'A merge replays the source's transactions')."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:keys :map] [:unidentified [:set [:set :keyword]]]]]}
+  "What db holds that base does not, and what base held that db does not, by entity id: {:keys {key now} :base {key base's
+  value}}. A key is [e a] for an attribute of cardinality one, its now db's value or ::gone, and [e a v] for one of
+  cardinality many, its now true or ::gone; :base holds the value base held at a key of cardinality one db retracted. A
+  transaction's own facts are no change, and neither is a fact both hold under two transactions (a merge's copy). See
+  docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:keys :map] [:base :map]]]}
   [base db]
-  (let [schema (:schema db)
-        many? (fn [a] (= :db.cardinality/many (:db/cardinality (get schema a))))
-        ref? (fn [a] (= :db.type/ref (:db/valueType (get schema a))))
-        id (memoize (fn [e] (or (identity-of db e) (identity-of base e))))
-        tx? (memoize (fn [e] (boolean (or (seq (d/datoms db :eavt e :db/txInstant)) (seq (d/datoms base :eavt e :db/txInstant))))))
-        value (fn [dt] (if (ref? (:a dt)) (or (id (:v dt)) [:db/id (:v dt)]) (:v dt)))
-        ;; a fact both hold under two transactions (a merge's copy, written again under a new one) is no change
-        ;; (in both halves of the diff by e, a and v: a set of the two, no index read; a value compared by content, as the index does)
-        [gone added] (let [[g a] (d/datoms-diff base db :eavt [])
-                           eav (fn [dt] [(:e dt) (:a dt) (let [v (:v dt)] (if (bytes? v) (vec v) v))])
-                           both (clojure.set/intersection (into #{} (map eav) g) (into #{} (map eav) a))]
-                       (if (empty? both) [g a] [(remove #(both (eav %)) g) (remove #(both (eav %)) a)]))
+  (let [many? (fn [a] (= :db.cardinality/many (get-in (:schema db) [a :db/cardinality])))
+        [gone added] (d/datoms-diff base db :eavt [])
+        eav (fn [dt] [(:e dt) (:a dt) (let [v (:v dt)] (if (bytes? v) (vec v) v))])
+        copy (clojure.set/intersection (into #{} (map eav) gone) (into #{} (map eav) added))
         step (fn [now]
-               (fn [acc dt]
-                 (let [e (:e dt) a (:a dt)]
-                   (cond (tx? e) acc
-                         (nil? (id e)) (update acc :unidentified conj (into #{} (map :a) (concat (d/datoms db :eavt e) (d/datoms base :eavt e))))
-                         (many? a) (assoc-in acc [:keys (conj (id e) a (value dt))] (if (= ::gone now) ::gone true))
-                         ;; a value retracted is base's: the key's :base (cardinality one)
-                         :else (cond-> (assoc-in acc [:keys (conj (id e) a)] (if (= ::gone now) ::gone (value dt)))
-                                 (= ::gone now) (assoc-in [:base (conj (id e) a)] (value dt)))))))]
+               (fn [acc {:keys [e a v tx] :as dt}]
+                 (cond (or (= e tx) (copy (eav dt))) acc
+                       (many? a) (assoc-in acc [:keys [e a v]] (if (= ::gone now) ::gone true))
+                       (= ::gone now) (-> acc (assoc-in [:keys [e a]] ::gone) (assoc-in [:base [e a]] v))
+                       :else (assoc-in acc [:keys [e a]] v))))]
     ;; retractions first, so a value replaced (a retraction and an assertion of one key) ends as its new value
-    (reduce (step ::now) (reduce (step ::gone) {:keys {} :unidentified #{}} gone) added)))
+    (reduce (step ::now) (reduce (step ::gone) {:keys {} :base {}} gone) added)))
+
+(defn conflict-key
+  "Conflict c's key, as net-change keys and a resolution names it: [entity attribute], or [entity attribute value] for an
+  attribute of cardinality many. See docs/agent.md#merging."
+  {:malli/schema [:=> [:cat :seon.merge/data-conflict] [:vector :any]]}
+  [{:seon.merge/keys [entity attribute] :as c}]
+  (if (contains? c :seon.merge/value) [entity attribute (:seon.merge/value c)] [entity attribute]))
 
 (defn conflicts
-  "The conflicts of two sides' net changes since their base (net-change of each): every key both changed to
-  different ends, and every key one side changed on an entity whose identity the other side retracted (a write
-  to an entity the other side deleted, a ref to one). Each is {:key k :ours v :theirs v}, a missing end ::gone
-  and an untouched one ::same, and :base the value base held for a key of cardinality one that held one; [] when the two
-  merge. Computed, never stored."
+  "The conflicts of two sides' net changes since their base (net-change of each, ours the receiving branch's): every key
+  both changed to different ends (compared by content, datahike.datom/value=), each a :seon.merge/data-conflict with base's value
+  when it held one. [] when the two merge. Computed, never stored. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat :map :map] [:vector :seon.merge/data-conflict]]}
   [ours theirs]
-  (let [ko (:keys ours) kt (:keys theirs)
-        ;; the identities each side retracted: its own identity key ended ::gone
-        gone-ids (fn [ks] (into #{} (for [[k now] ks :when (and (= ::gone now) (= 3 (count k)) (= (first k) (nth k 2)))] [(first k) (second k)])))
-        go (gone-ids ko) gt (gone-ids kt)
-        entity (fn [k] [(first k) (second k)])
-        ;; a ref's value is its target's identity pair
-        target (fn [k now] (let [v (if (= 4 (count k)) (nth k 3) now)] (when (and (vector? v) (= 2 (count v)) (keyword? (first v))) v)))
-        based (fn [c] (let [b (merge (:base theirs) (:base ours))] (cond-> c (contains? b (:key c)) (assoc :base (get b (:key c))))))
-        both (for [[k o] ko :let [t (get kt k ::same)] :when (and (not= ::same t) (not (dd/value= o t)))] (based {:key k :ours o :theirs t}))
-        onto-gone (fn [ks gone side other]
-                    (for [[k now] ks :when (and (not= ::gone now) (not (contains? (if (= side :ours) kt ko) k))
-                                                (or (gone (entity k)) (some-> (target k now) gone)))]
-                      (based {:key k side now other ::gone})))]
-    (vec (concat both (onto-gone ko gt :ours :theirs) (onto-gone kt go :theirs :ours)))))
-
-(defn- unsaid
-  "The retractions of what base holds and src does not, that src's history does not say (said: [e a v] it retracted; an
-  attribute that keeps no history), never of a transaction's own facts (tx?) nor of a fact src holds under another
-  transaction (a merge's copy). See docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:set :any] :seon.host/fn] [:vector [:vector :any]]]}
-  [base src said tx?]
-  (vec (for [dt (first (d/datoms-diff base src :eavt [])) :when (and (not (tx? (:e dt))) (not (said [(:e dt) (:a dt) (:v dt)]))
-                                                                     (empty? (d/datoms src :eavt (:e dt) (:a dt) (:v dt))))]
-         [:db/retract (:e dt) (:a dt) (:v dt)])))
+  (vec (for [[k o] (:keys ours) :let [t (get (:keys theirs) k ::same)] :when (and (not= ::same t) (not (dd/value= o t)))]
+         (cond-> {:seon.merge/entity (k 0) :seon.merge/attribute (k 1) :seon.merge/ours o :seon.merge/theirs t}
+           (= 3 (count k)) (assoc :seon.merge/value (k 2))
+           (contains? (:base ours) k) (assoc :seon.merge/base (get (:base ours) k))))))
 
 (defn replay
-  "The source's transactions since base as the transactions a merge writes on the branch that receives it:
-  one group for each, in the source's order, each {:tx the source transaction :meta that transaction's own
-  facts (which branch wrote it, which eval; never its time) :ops [[:db/retract e a v] ... [:db/add e a v] ...]}:
-  ALL it wrote, the values a later transaction replaced included, so each state the receiving branch passes
-  through is one the source held (and passed the write check with), as the net change cut by transaction is not;
-  `plan` leaves out a transaction the receiving branch wrote itself. No reader the system makes stands between two
-  replayed transactions (a reference to a branch is a commit, and the merge commits once at its end); only a raw as-of at a t
-  inside the merge does, and it reads, for those keys, a state the source really held. Ops, never datoms, so each group is a new transaction of the receiving branch with a new time;
-  entity ids are kept (the store's, issued once: docs/storage.md#ids). A retraction the source's history does
-  not hold (an attribute that keeps no history) rides the last group. See docs/decisions.md, 'A merge replays
-  the source's transactions on the branch that receives it'."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:vector [:map [:tx :int] [:meta :map] [:ops [:vector :any]]]]]
-                  [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword]] [:vector [:map [:tx :int] [:meta :map] [:ops [:vector :any]]]]]]}
-  ([base src] (replay base src nil))
-  ([base src skip]
-  (let [tx? (memoize (fn [e] (boolean (or (seq (d/datoms src :eavt e :db/txInstant)) (seq (d/datoms base :eavt e :db/txInstant))))))
-        ;; every datom the source's history holds that base's does not: what its transactions since base wrote
-        wrote (remove #(tx? (:e %)) (second (d/datoms-diff (d/history base) (d/history src) :eavt [])))
-        op (fn [dt] [(if (:added dt) :db/add :db/retract) (:e dt) (:a dt) (:v dt)])
-        by-tx (reduce (fn [m dt] (update m (:tx dt) (fnil conj []) (op dt))) (sorted-map) wrote)
-        unsaid (unsaid base src (into #{} (comp (filter #(= :db/retract (first %))) (map rest)) (mapcat val by-tx)) tx?)
-        meta (fn [t] (into {} (for [dt (d/datoms src :eavt t) :when (not= :db/txInstant (:a dt))] [(:a dt) (:v dt)])))
-        ;; a transaction branch skip wrote itself is left out first, so the unsaid retractions ride a group that stays
-        by-tx (into (sorted-map) (remove (fn [[t _]] (and skip (= skip (:seon.tx/branch (meta t)))))) by-tx)
-        ;; the unsaid ride the last group, or one of their own when none is left
-        groups (vec (for [[t ops] by-tx] {:tx t :ops ops :meta (meta t)}))
-        groups (cond (empty? unsaid) groups
-                     (seq groups) (update-in groups [(dec (count groups)) :ops] into unsaid)
-                     :else [{:tx (:max-tx src) :ops (vec unsaid) :meta {}}])]
-    ;; retractions first: a value replaced in one transaction is retracted, then asserted
-    (mapv (fn [g] (update g :ops #(vec (sort-by (fn [op] (if (= :db/retract (first op)) 0 1)) %)))) groups))))
+  "The source's transactions since base as the transactions a merge writes on the branch that receives it, each whole, in
+  the source's order: {:tx the source transaction :meta its own facts (who wrote it, which eval; never its time) :ops
+  [[:db/retract e a v] ... [:db/add e a v] ...]}, so each state the receiving branch passes through is one the source held.
+  One the branch skip wrote itself (its :seon.tx/branch, come back through the other side) is left out. No reader the system
+  makes stands between two replayed transactions (a reference to a branch is a commit, and the merge commits once at its
+  end). See docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword]] [:vector [:map [:tx :int] [:meta :map] [:ops [:vector :any]]]]]}
+  [base src skip]
+  (let [wrote (second (d/datoms-diff (d/history base) (d/history src) :eavt []))
+        by-tx (reduce (fn [m {:keys [e a v tx added]}] (if (= e tx) m (update m tx (fnil conj []) [(if added :db/add :db/retract) e a v])))
+                      (sorted-map) wrote)
+        meta (fn [t] (into {} (for [dt (d/datoms src :eavt t) :when (not= :db/txInstant (:a dt))] [(:a dt) (:v dt)])))]
+    (vec (for [[t ops] by-tx :let [m (meta t)] :when (not= skip (:seon.tx/branch m))]
+           ;; retractions first: a value replaced in one transaction is retracted, then asserted
+           {:tx t :meta m :ops (vec (sort-by #(if (= :db/retract (first %)) 0 1) ops))}))))
+
+(defn- written
+  "Every key the replayed groups write, with src's end at it (net-change's keys and ends): what the merge would set onto, a key the
+  source wrote and wrote back included. See docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  {:malli/schema [:=> [:cat :seon.host/db [:vector :map]] :map]}
+  [src groups]
+  (let [many? (fn [a] (= :db.cardinality/many (get-in (:schema src) [a :db/cardinality])))]
+    (into {} (for [g groups [_ e a v] (:ops g)]
+               (if (many? a) [[e a v] (if (seq (d/datoms src :eavt e a v)) true ::gone)] [[e a] (or (:v (first (d/datoms src :eavt e a))) ::gone)])))))
 
 (defn plan
-  "What merging src into onto does, decided before anything is written, from the three values alone: their
-  base, the branch that receives (onto) and the branch merged in (src). {:conflicts [...]} when the two sides'
-  net changes conflict (conflicts); {:unidentified #{attrs ...}} when src changed an entity that bears no
-  identity, which cannot cross (net-change); else {:groups [...]}, src's transactions since base as the
-  receiving branch will write them (replay), which is [] when src holds nothing onto lacks. The writer's
-  merge runs it inside its one op, so two branches merging at once are each judged against what the other
-  left. With resolutions ({key value}, an agent's on a merge down: seon.agent/merge-main!), a conflict of a key they settle is
-  none. A source transaction onto's own branch wrote (its :seon.tx/branch, come back through a merge) is no group.
-  Task seon.merge/a-merge-replays-the-sources-net-change."
+  "What merging src into onto does, decided before anything is written, from the three values alone: their base, the branch
+  that receives (onto) and the branch merged in (src). {:conflicts [...]} when a key onto changed since base (net-change) is one
+  src's replayed transactions write (written) to another end, unless resolutions ({key value}, an agent's on a merge down) settle
+  it; else {:groups [...]}, src's transactions since base as onto will write them (replay). See docs/decisions.md, 'A merge
+  replays the source's transactions on the branch that receives it'."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :map] [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map] :map]]}
   ([base onto src] (plan base onto src {}))
   ([base onto src resolutions]
-  (let [theirs (net-change base src)
-        cs (vec (remove #(contains? resolutions (:key %)) (conflicts (net-change base onto) theirs)))]
-    (cond (seq cs) {:conflicts cs}
-          (seq (:unidentified theirs)) {:unidentified (:unidentified theirs)}
-          ;; a transaction the receiving branch wrote itself, come back through the other side's replay of it, is not
-          ;; written again: it holds nothing the branch lacks, and a value the branch changed since stays the branch's
-          :else {:groups (replay base src (pdb/main-branch (:config onto)))}))))
-
-(defn held-op?
-  "Does op write nothing on db: an assertion of a datom db holds, a retraction (or :db.fn/retractAttribute) of what db does
-  not hold? An entity or a ref value named by its identity (a lookup) is read as db names it; one db cannot resolve is no
-  held assertion (the write answers for it) and a held retraction (nothing there to retract). What a merge leaves out of a transaction, so it writes no empty one (apply-groups!,
-  seon.agent/merge-main!'s resolutions). See docs/decisions.md, 'A merge replays the source's transactions on the branch
-  that receives it'."
-  {:malli/schema [:=> [:cat :seon.host/db [:vector :any]] :boolean]}
-  [db [op e a v]]
-  (let [id (fn [x] (if (vector? x) (:db/id (d/entity db x)) x))
-        eid (id e)
-        v (if (and (vector? v) (= :db.type/ref (get-in (:schema db) [a :db/valueType]))) (id v) v)]
-    (boolean (case op
-               ;; a retraction from an entity db does not hold (its identity retracted) has nothing to retract
-               :db.fn/retractAttribute (or (nil? eid) (empty? (d/datoms db :eavt eid a)))
-               :db/retract (or (nil? eid) (empty? (d/datoms db :eavt eid a v)))
-               :db/add (and eid (some? v) (seq (d/datoms db :eavt eid a v)))
-               false))))
+   (let [groups (replay base src (pdb/main-branch (:config onto)))
+         cs (vec (remove #(contains? resolutions (conflict-key %)) (conflicts (net-change base onto) {:keys (written src groups)})))]
+     (if (seq cs) {:conflicts cs} {:groups groups}))))
 
 (defn refusal
-  "The refusal of a merge whose plan (plan) writes nothing, or nil when it is groups to write; and, given a source
-  transaction and the exception the receiving branch's write check threw at it, that refusal: :seon.merge/conflicts (the two
-  sides' net changes conflict: the agent resolves), :seon.merge/unidentified (the source changed an entity that bears no
-  identity: a defect of its schema), :seon.merge/replay-refused (the receiving branch moved since the base: merge the other
-  way and try again). t is the receiving branch's. One shape for the writer's merge up and an agent's merge down. See
+  "A merge refused, as data, one shape for the writer's merge up and an agent's merge down: its plan's conflicts
+  (:seon.merge/conflict-refused, nil when the plan has none), or, given a source transaction and what the receiving branch's
+  write check threw at it, :seon.merge/replay-refused (it moved since the base: merge the other way, and again). See
   docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
-  {:malli/schema [:function [:=> [:cat :int :map] [:maybe [:or :seon.merge/conflicts :seon.merge/unidentified]]]
-                  [:=> [:cat :int :int :any] :seon.merge/replay-refused]]}
-  ([t p]
-   (cond (seq (:conflicts p))
-         (contract/error :seon.merge/conflicts #'seon.merge/refusal
-                         (str "the two sides changed " (count (:conflicts p)) " key(s) to different ends since their base: "
-                              (str/join "; " (map (comp sedn/encode :key) (:conflicts p))))
-                         {:tx t :conflicts (:conflicts p)})
-         (seq (:unidentified p))
-         (contract/error :seon.merge/unidentified #'seon.merge/refusal
-                         (str "the source changed " (count (:unidentified p)) " entit(ies) that bear no identity, which cannot cross: attributes "
-                              (str/join "; " (map (comp sedn/encode sort) (:unidentified p))))
-                         {:tx t :unidentified (:unidentified p)})))
-  ([t source-tx exception]
+  {:malli/schema [:function [:=> [:cat :map] [:maybe :seon.merge/conflict-refused]] [:=> [:cat :int :any] :seon.merge/replay-refused]]}
+  ([p]
+   (when (seq (:conflicts p))
+     (contract/error :seon.merge/conflict-refused #'seon.merge/refusal
+                     (str "the two sides changed " (count (:conflicts p)) " key(s) to different ends since their base: "
+                          (str/join "; " (map (comp sedn/encode conflict-key) (:conflicts p))))
+                     {:seon.merge/conflicts (:conflicts p)})))
+  ([source-tx exception]
    (let [err (or (when (:seon.error/type (ex-data exception)) (ex-data exception))
                  (contract/error :seon.writer/refused #'seon.merge/refusal (or (ex-message exception) (str exception)) (or (ex-data exception) {})))]
      (contract/error :seon.merge/replay-refused #'seon.merge/refusal
                      (str "the receiving branch's write check refuses the source's transaction " source-tx ": " (:seon.error/message err)
-                          ": it moved since the base; merge the other way and try again")
-                     {:tx t :refused {:tx source-tx :error err}}))))
+                          ": it moved since the base; merge the other way and again")
+                     {:seon.merge/refused (assoc err :db/id source-tx)}))))
 
 (defn apply-groups!
-  "Groups (plan's, replay's) applied on conn after what is pending, each its own transaction through the connection's checked
-  'transact! (datahike.writer/apply!), not committed: its tx-meta meta0 with the source transaction's own :seon.tx/branch,
-  :seon.tx/eval and :seon.tx/merged (who made it; never its runtime or its time). A group that writes nothing on db as it
-  stands (each assertion's datom held already, each retraction's held by nothing: a branch's own transaction come back to it
-  through main) is not applied, so it leaves no empty transaction. The one write of a merge: the writer's merge up and an
-  agent's merge down both make it. Answers {:db the value after them (db when none) :reps their reports :applied [source tx]},
-  with :refused {:tx source-tx :exception e} at the first the write check refuses. See docs/decisions.md, 'A merge replays the
-  source's transactions on the branch that receives it'."
+  "Groups (plan's) applied on conn after what is pending, each its own transaction through the connection's checked 'transact!
+  (datahike.writer/apply!), not committed: its tx-meta meta0 with the source transaction's own :seon.tx/branch, :seon.tx/eval and
+  :seon.tx/merged (who made it; never its runtime or its time). The one write of a merge: the writer's merge up and an agent's
+  merge down both make it. Answers {:db the value after them :reps their reports :applied [source tx]}, with :refused {:tx
+  source-tx :exception e} at the first the write check refuses. See docs/decisions.md, 'A merge replays the source's
+  transactions on the branch that receives it'."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :map [:sequential :map]] [:map [:reps [:vector :map]] [:applied [:vector :int]]]]}
   [conn db meta0 groups]
   (reduce (fn [acc g]
-            (if (every? #(held-op? (:db acc) %) (:ops g))
-              acc
-              (let [rep (dw/apply! conn {:tx-data (:ops g) :tx-meta (merge meta0 (select-keys (:meta g) [:seon.tx/branch :seon.tx/eval :seon.tx/merged]))})]
-                (if (map? rep)
-                  (-> acc (assoc :db (:db-after rep)) (update :reps conj rep) (update :applied conj (:tx g)))
-                  (reduced (assoc acc :refused {:tx (:tx g) :exception rep}))))))
+            (let [rep (dw/apply! conn {:tx-data (:ops g) :tx-meta (merge meta0 (select-keys (:meta g) [:seon.tx/branch :seon.tx/eval :seon.tx/merged]))})]
+              (if (map? rep)
+                (-> acc (assoc :db (:db-after rep)) (update :reps conj rep) (update :applied conj (:tx g)))
+                (reduced (assoc acc :refused {:tx (:tx g) :exception rep})))))
           {:db db :reps [] :applied []} groups))

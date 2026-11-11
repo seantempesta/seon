@@ -130,16 +130,15 @@
                   after))))
 
 (defn resolving-form
-  "The form that settles conflict key k on a merge of main into this branch: my.branch/merge-main! with the resolution
-  {k value}, value the agent's to write (the branch's end, main's, or :seon.merge/gone). The one place it is built. See
-  docs/agent.md#merging."
+  "The form that settles a conflict at key k ([entity attribute], [entity attribute value]: seon.merge/conflict-key) on a merge
+  of main into this branch: my.branch/merge-main! with the resolution {k value}, value the agent's to write (the branch's end,
+  main's, or :seon.merge/gone). The one place it is built. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat [:vector :any]] :any]}
   [k] (list 'my.branch/merge-main! {k 'value}))
 
 (defn main-conflicts
   "The conflicts of branch db with main since their merge base base, as a merge of main would answer them (seon.merge/conflicts
-  of the two net changes, {:key :base :ours :theirs}, ours the branch's), each with the form that settles it (:resolve,
-  resolving-form): a judgment run on the db state, never stored. Held keyed by the three points it is a function of, as
+  of the two net changes, ours the branch's), each with the form that settles it (:seon.merge/resolve, resolving-form): a judgment run on the db state, never stored. Held keyed by the three points it is a function of, as
   main-changes is, the newest on the state (:main-conflicts), so a reader that finds them current reads it with no diff; a db
   with no commit (a run-ahead value) is never held. [] when main is at base. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db [:maybe :seon.host/db]] [:vector :seon.merge/data-conflict]]}
@@ -150,7 +149,7 @@
           {held :key cs :conflicts} (:main-conflicts @state)]
       (if (= k held)
         cs
-        (let [cs (mapv #(assoc % :resolve (resolving-form (:key %))) (pm/conflicts (pm/net-change base db) (pm/net-change base main)))]
+        (let [cs (mapv #(assoc % :seon.merge/resolve (resolving-form (pm/conflict-key %))) (pm/conflicts (pm/net-change base db) (pm/net-change base main)))]
           (when (every? (comp some? first) k) (swap! state assoc :main-conflicts {:key k :conflicts cs}))
           cs)))))
 
@@ -547,15 +546,13 @@
 ;; ---- merging main into this branch (seon.merge; session M1) -------------------------------
 
 (defn- resolution-tx
-  "The branch's own write of resolutions, {key value} of the conflicts a merge of main names (seon.merge/conflicts): a
-  cardinality-one key [identity-attr identity-value attribute] takes value, or is retracted for :seon.merge/gone; a
-  cardinality-many key [identity-attr identity-value attribute value] is asserted for true, retracted for
-  :seon.merge/gone. The entity is named by its identity (a lookup), never an id. See docs/decisions.md, 'A merge replays the
-  source's transactions on the branch that receives it'."
+  "The branch's own write of resolutions, {key value} of the conflicts a merge of main names (seon.merge/conflict-key): a key
+  [e a] takes value, or is retracted for :seon.merge/gone; a key [e a v] (cardinality many) is asserted for true, retracted
+  for :seon.merge/gone. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat :map] [:vector :any]]}
   [resolutions]
-  (vec (for [[k v] resolutions :let [e [(nth k 0) (nth k 1)] a (nth k 2)]]
-         (cond (= 4 (count k)) [(if (= :seon.merge/gone v) :db/retract :db/add) e a (nth k 3)]
+  (vec (for [[[e a :as k] v] resolutions]
+         (cond (= 3 (count k)) [(if (= :seon.merge/gone v) :db/retract :db/add) e a (nth k 2)]
                (= :seon.merge/gone v) [:db.fn/retractAttribute e a]
                :else [:db/add e a v]))))
 
@@ -566,10 +563,10 @@
   branch's own writing resolutions ({key value}, the conflicts' keys: resolution-tx), then the merge's own transaction
   (main's commit its merge parent, :seon.tx/merged main, the agent's :seon.agent/base-commit), one commit or none; the
   changed definitions load here. After it the merge base is that main commit and the branch holds everything it holds.
-  A conflict no resolution settles, an entity of main's with no identity, or a transaction the branch's write check
-  refuses writes nothing and is the answer: the typed refusal the writer's merge gives (seon.merge/refusal:
-  :seon.merge/conflicts, :seon.merge/unidentified, :seon.merge/replay-refused), or the write check's own error for the
-  branch's own write, with :ok false. Answers {:ok :applied [main's transactions written] :conflicts :resolved :t}. See docs/decisions.md, 'A
+  A conflict no resolution settles, or a transaction the branch's write check refuses, writes nothing and is the answer: the
+  typed refusal the writer's merge gives (seon.merge/refusal: :seon.merge/conflict-refused, :seon.merge/replay-refused), or
+  the write check's own error for the branch's own write, with :ok false. A resolution's entity is its id or a lookup ref.
+  Answers {:ok :applied [main's transactions written] :resolved :t}. See docs/decisions.md, 'A
   merge replays the source's transactions on the branch that receives it'."
   {:malli/schema [:=> [:cat :map] [:map [:ok :boolean]]]}
   [resolutions]
@@ -579,24 +576,23 @@
         main (heard-main)
         head @conn]
     (if (= (d/commit-id main) (d/commit-id (:base @state)))
-      {:ok true :applied [] :conflicts [] :t (:max-tx head)}
+      {:ok true :applied [] :t (:max-tx head)}
       (let [base (pdb/branch-base conn main-b (:branch @state))
+            resolutions (into {} (for [[[e & more] v] resolutions] [(into [(if (vector? e) (:db/id (d/entity head e)) e)] more) v]))
             p (pm/plan base head main resolutions)]
-        (if-let [why (pm/refusal (:max-tx head) p)]
+        (if-let [why (pm/refusal p)]
           (assoc why :ok false :applied [] :t (:max-tx head))
           (let [a (pm/apply-groups! conn head (pdb/tx-meta (:branch @state)) (:groups p))
                 own (fn [tx-data opts] (dw/apply! conn (cond-> {:tx-data tx-data :tx-meta (pdb/tx-meta (:branch @state) (cond-> {} (:op opts) (assoc :seon.tx/merged main-b)))}
                                                          (:op opts) (assoc :parents #{(d/commit-id main)}))
                                                   opts))
-                ;; a resolution that keeps what the branch holds after the replay writes nothing (seon.merge/held-op?)
-                settle (when-not (:refused a) (vec (remove #(pm/held-op? (:db a) %) (resolution-tx resolutions))))
-                resolved (when (seq settle) (own settle nil))
+                resolved (when (and (not (:refused a)) (seq resolutions)) (own (resolution-tx resolutions) nil))
                 final (when (and (not (:refused a)) (or (nil? resolved) (map? resolved)))
                         (own [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}] {:op 'merge!}))
                 ;; the branch's own write refused (a resolution, the merge's transaction): the write check's own error
                 own-refused (fn [e] (or (when (:seon.error/type (ex-data e)) (ex-data e))
                                         (contract/error :seon.writer/refused #'seon.agent/merge-main! (or (ex-message e) (str e)) (or (ex-data e) {}))))
-                why (cond (:refused a) (pm/refusal (:max-tx head) (:tx (:refused a)) (:exception (:refused a)))
+                why (cond (:refused a) (pm/refusal (:tx (:refused a)) (:exception (:refused a)))
                           (and resolved (not (map? resolved))) (own-refused resolved)
                           (and final (not (map? final))) (own-refused final))]
             (if why
@@ -608,7 +604,7 @@
                 ;; the merge base is now main's head, the value just merged
                 (swap! state #(-> % (assoc :db (:db c) :base main :merged-t (:max-tx (:db c))) (schema-moved (into #{} (map (fn [op] (nth op 2 nil))) ops))))
                 (send! {:op :committed :t (:max-tx (:db c)) :txs (:tx-count c)})
-                (cond-> {:ok true :applied (:applied a) :conflicts [] :resolved (vec (keys resolutions)) :t (:max-tx (:db c)) :datoms (count ops)}
+                (cond-> {:ok true :applied (:applied a) :resolved (vec (keys resolutions)) :t (:max-tx (:db c)) :datoms (count ops)}
                   (seq errs) (assoc :load-errors errs))))))))))
 
 ;; ---- evaluation -----------------------------------------------------------------

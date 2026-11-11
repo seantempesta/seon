@@ -478,28 +478,6 @@
      :fixed {:ticks 100000.0 :bytes 100000.0}
      :sizes [10 30 100]}))
 
-(defn carried-of
-  "merge-tx's arguments: a base, a branch adding n forms to it, and the keys of those forms."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db :seon.host/db [:sequential :any] :seon.merge/data-attrs]]}
-  [n]
-  (let [base (first (branch-of 1))
-        src (reduce (fn [db i] (let [nsym (symbol (str "app.c" i))] (d/db-with db ((mt/code nsym (str "(ns " nsym ")\n(defn f [] " i ")\n")) db)))) base (range n))
-        ks (keys (:ours (seon.merge/delta-three-way base src base #{})))]
-    [base base src (vec ks) #{}]))
-
-;; docs/sharing.md#where-a-fact-lives: a merge reads the schema once. It read (d/schema src) per carried datom, which rebuilds the whole schema map:
-;; 418 M ticks a real merge of about 60 keys, 24 M since
-(deftest a-merge-costs-what-it-carries
-  (cost/proof
-    {:of 'seon.merge/merge-tx :input 'seon.program-cost-test/carried-of
-     :n "forms the branch added"
-     :work "one diff of the branch against its base, one seek per carried datom's entity, the schema read once"
-     :growth :linear
-     ;; measured: 14.0 / 21.3 / 49.2 / 134.7 MB and 5.2 / 8.7 / 22.2 / 63.7 M ticks at 10 / 30 / 100 / 300; with the schema read per datom, 285.8 MB at 10
-     :per-n {:bytes 400000.0}
-     :fixed {:bytes 10000000.0}
-     :sizes [3 10 30]}))
-
 (defn digested-of
   "program-digest's argument: a branch db holding n forms (branch-of's)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}

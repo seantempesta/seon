@@ -3,7 +3,7 @@
   conflicts with main, settle them by merging again with resolutions. The merge is the one merge
   (seon.agent/merge-main!, docs/agent.md#merging); this branch sees main's changes only through these functions."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [seon.fx :as fx] [seon.source :as source] [seon.config :as cfg] [seon.agent :as agent] [seon.repl :as repl] [seon.merge :as pm] [seon.stage :as stage] [seon.program :as program]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [seon.fx :as fx] [seon.source :as source] [seon.config :as cfg] [seon.agent :as agent] [seon.merge :as pm] [seon.stage :as stage] [seon.program :as program]))
 
 (defn merged-summary
   "A merge of main as its eval answers it (seon.render/model, the schema :seon.branch/merged): how many keys it applied, and all the rest as it is, since a
@@ -14,10 +14,11 @@
 
 (defn merge-main!
   "git merge main: stage this runtime onto the branch, then merge main's changes since the merge base, as the one merge
-  does (seon.agent/merge-main!): main's transactions replayed onto the branch and loaded here. A conflict (a key this
-  branch and main each changed to their own value since the base: {:key :base :ours :theirs}) writes nothing and is the
-  answer: merge again with resolutions, {key value} (the conflict's :key, the value the branch keeps; :seon.merge/gone
-  retracts it). Answers {:ok :applied :conflicts}, printed by
+  does (seon.agent/merge-main!): main's transactions replayed onto the branch and loaded here. A conflict (an entity's
+  attribute this branch and main each changed to their own value since the base, :seon.merge/data-conflict) writes nothing:
+  the answer is the refusal naming them (:seon.merge/conflicts). Merge again with resolutions, {key value}, key [entity
+  attribute] (its :seon.merge/resolve shows it), value the one the branch keeps (:seon.merge/gone retracts it). Answers
+  {:ok :applied}, printed by
   `merged-summary`: the whole value stays under the eval's handle. See docs/decisions.md, 'A merge replays the source's
   transactions on the branch that receives it'."
   {:malli/schema [:function [:=> [:cat] [:map [:ok :boolean]]] [:=> [:cat :map] [:map [:ok :boolean]]]]}
@@ -27,32 +28,11 @@
    (with-meta (agent/merge-main! resolutions) {:seon.render/schema :seon.branch/merged})))
 
 (defn unmerged
-  "This branch's conflicts with main now, as a merge of main would answer them (seon.agent/main-conflicts), each
-  {:key :base :ours :theirs :resolve}, :resolve the merge-main! form that settles it. See docs/agent.md#merging."
+  "This branch's conflicts with main now, as a merge of main would answer them (seon.agent/main-conflicts), each a
+  :seon.merge/data-conflict whose :seon.merge/resolve is the merge-main! form that settles it. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat] [:vector :seon.merge/data-conflict]]}
   []
   (agent/main-conflicts (:base @agent/state) (agent/db) (agent/heard-main)))
-
-(defn resolve!
-  "Settle the unmerged entry of var sym (git add). With no side the branch keeps what it
-  holds now; :theirs or :base loads that side's definition (or unmaps the var when that
-  side deleted it) and records it. Answers the entries still unmerged."
-  {:malli/schema [:function [:=> [:cat :qualified-symbol] [:vector :seon.merge/data-conflict]]
-                  [:=> [:cat :qualified-symbol [:enum :ours :theirs :base]] [:vector :seon.merge/data-conflict]]]}
-  ([sym] (resolve! sym :ours))
-  ([sym side]
-   (let [k [:var sym]
-         entry (first (filter #(= k (:key %)) (pm/entries (agent/db))))
-         content (get entry side)
-         nsym (symbol (namespace sym))]
-     (when (and entry (not= :ours side))
-       (if-let [src (:src content)]
-         (let [cur (ns-name *ns*)]
-           (repl/eval-string (str "(in-ns '" nsym ")\n" src "\n(in-ns '" cur ")")))
-         (do (ns-unmap (find-ns nsym) (symbol (name sym)))
-             (stage/stage!))))
-     (agent/transact! (pm/resolve-tx (agent/db) k))
-     (unmerged))))
 
 (defn changes
   "git diff main...: what this branch's merge will carry to main, the vars it added, changed

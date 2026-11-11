@@ -112,25 +112,19 @@
 (defn- merge-refused
   "Why branch head (its three-way r against main) cannot merge into main now (session M1), or
   nil: main's program (and declared data) changed since the branch's merge base
-  (:seon.merge/behind: a merge task merges main first); the branch has unmerged entries
-  (:seon.merge/unmerged); its program calls intern, alter-var-root, eval or load-string,
+  (:seon.merge/behind: a merge task merges main first); its program calls intern, alter-var-root, eval or load-string,
   or defines inside a function body (:seon.merge/mutation, seon.merge/mutations); it
   carries an uncontracted function (:seon.merge/uncontracted: contracts decide what is
   admitted). A changed doc merges as code does: its page is written back with the merge (seon.doc/files)."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
-  (let [unmerged (pm/unmerged head)
-        uncontracted (pm/uncontracted (:ours r))]
+  (let [uncontracted (pm/uncontracted (:ours r))]
     (cond
       (seq (:theirs r))
       (contract/error :seon.merge/behind #'seon.writer/merge-refused
                       (str "main changed " (count (:theirs r)) " key(s) since the branch's merge base: merge main into the branch first")
                       {:tx (:max-tx main) :behind (count (:theirs r))
                        :seon.error/fix "A merge task merges main into the branch (my.branch/merge-main!), resolves any conflict, and its proofs run on the combined program."})
-      (seq unmerged)
-      (contract/error :seon.merge/unmerged #'seon.writer/merge-refused
-                      (str "the branch has " (count unmerged) " unmerged entr(ies)")
-                      {:tx (:max-tx main) :unmerged (mapv :key unmerged)})
       (seq (pm/mutations main (:ours r)))
       (let [ms (pm/mutations main (:ours r))]
         (contract/error :seon.merge/mutation #'seon.writer/merge-refused
@@ -166,7 +160,7 @@
   [conn main db groups]
   (let [a (pm/apply-groups! conn db (pdb/tx-meta (pdb/conn-main conn)) groups)]
     (if-let [{:keys [tx exception]} (:refused a)]
-      (assoc a :refused (pm/refusal (:max-tx main) tx exception))
+      (assoc a :refused (pm/refusal tx exception))
       a)))
 
 (defn- member-applied!
@@ -178,7 +172,7 @@
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :seon.host/db :seon.host/db :seon.host/db :boolean] [:map [:reps [:vector :map]]]]}
   [conn main db base head behind?]
   (let [p (pm/plan base db head)]
-    (if-let [why (pm/refusal (:max-tx main) p)]
+    (if-let [why (pm/refusal p)]
       {:refused why :reps []}
       (let [a (applied! conn main db (:groups p))]
         (if (:refused a) a (if-let [why (dangling-refused main (:db a) behind?)] (assoc a :refused why) a))))))
@@ -419,7 +413,7 @@
                                  {:ok true :db head :base base :base-t (:max-tx base)
                                   :ours (vec (sort-by str (keys (:ours r)))) :theirs (count (:theirs r))
                                   :conflicts (count (:conflicts r))
-                                  :unmerged (mapv :key (pm/unmerged head)) :uncontracted (pm/uncontracted (:ours r))
+                                  :uncontracted (pm/uncontracted (:ours r))
                                   :caused (vec (problems/caused base head (:ours r)))
                                   :vars (into (sorted-set) (keep (fn [[k s]] (when (= :var k) s))) (keys (:ours r)))})
                                (refused (str "no branch " (:branch m)) {})))

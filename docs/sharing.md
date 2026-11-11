@@ -47,7 +47,7 @@ A number far off its line is a defect to find. n is what the operation is about,
 | Fork a branch | O(1) | 0.28 M ticks |
 | Read an entity | O(log N), the same on any branch | 300 pulls 6.6 M on main, a user and an agent |
 | A commit of k datoms | O(k) | about 5 k ticks a datom without history, 14 k with |
-| Merge of k carried datoms | O(k) | 7.3 k ticks a datom in `merge-tx` |
+| A merge's plan of k changed datoms | O(k), never the store | about 6 k ticks a changed datom (`seon.merge-cost-test/a-plan-costs-what-the-two-sides-changed`) |
 | An insert in a file | O(1) places | 1 place |
 | Analyzing a merged tree, one file | O(that file) | under 0.1 s a file |
 | `bin/prove` deciding which deftests to run, after a body edit | O(changed forms) | 165 M ticks, 1.5 s |

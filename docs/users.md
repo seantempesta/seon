@@ -109,7 +109,7 @@ Each fact lives where the readers who need it find it, and that placement is wha
 - **Main:** that an agent or user exists, its branch and upstream, who points at what, and messages addressed to a branch. Delivery is the fact.
 - **A branch:** evals and a person's data and functions.
 - **Every branch alike:** content-id entities, forms, results and messages, so forks share them and they can't conflict.
-- **Merge bases:** one, from the commit graph. A partial merge recorded as a parent loses no data, tested through ```seon.merge/carried-tx```, which carries only retractions its source wrote; docs/sharing.md#where-a-fact-lives says what it does get wrong.
+- **Merge bases:** one, from the commit graph. A merge replays the source's transactions whole, so a merge recorded as a parent loses no data.
 - **Live process state:** main only, root's observation.
 - **Laziness comes from placement:** reading 300 evals' code cold with 60 KB values took 100-125 ms inline and 3 ms with a content-id result, the same as no large values; following the ref took about 1 ms (lab, one run). A node load realizes every large value in it, so a value next to what you read gets read. Identical values share one result, because the value is no longer mixed with ``:ms`` and ``:ticks``. The result is not joined into the agent's ``@ctx`` pattern: joining would load every value with the walk; a reader that needs the value reads it from the db by the ref (``seon.db/response-of``), as the model's request and the page do when they draw an eval.
 

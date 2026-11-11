@@ -418,7 +418,7 @@
       (is (= "The file's words." (doc healed 'app.pt-ni)) "a store made before this gains it, on an unchanged file"))
     (let [base (empty-db)
           r (pm/three-way (pm/program base #{}) (pm/program db1 #{}) (pm/program base #{}))
-          main (d/db-with base (pm/merge-tx base base db1 (keys (:ours r)) #{}))]
+          main db1]
       (is (= "First words." (doc main 'app.pt-nd)) "merged, with its form"))))
 
 (deftest defmethod-extend-and-defrecord-merge-and-load-on-main
@@ -432,13 +432,12 @@
                        'app.pt-mm "(defrecord Circle [r] Named (label [_] (str \"circle \" r)))"
                        'app.pt-mm "(defmethod area :circle [{:keys [r]}] (* 3 r r))")
         r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))
-        main (d/db-with base (pm/merge-tx base base branch (keys (:ours r)) #{}))]
+        main branch]
     (is (= '#{[:ns app.pt-mm] [:var app.pt-mm/area] [:method app.pt-mm/area ":square"] [:method app.pt-mm/area ":circle"]
               [:var app.pt-mm/Named] [:var app.pt-mm/label] [:impl app.pt-mm/Named "String"]
               [:var app.pt-mm/Circle] [:var app.pt-mm/->Circle] [:var app.pt-mm/map->Circle]}
            (set (remove #(= :form (first %)) (keys (:ours r)))))
         "each definition is its own merge key: methods [multi dispatch], extensions [protocol type]")
-    (is (= [] (pm/unmerged main)))
     (remove-ns 'app.pt-mm)
     (is (= [] (:errors (program/load-all! main))) "main loads the merged forms from nothing")
     (is (= [16 27] [((resolve 'app.pt-mm/area) {:shape :square :s 4}) ((resolve 'app.pt-mm/area) {:shape :circle :r 3})]))

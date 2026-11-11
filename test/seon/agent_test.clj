@@ -1548,7 +1548,7 @@
          (redefine "app.m0/f1-second" "(+ x 2)")
          (agent/heard-main)
          (let [r (agent/merge-main! {})]
-           (is (= [] (:conflicts r)) "its own merged edit is no change of main's")
+           (is (:ok r) (str "its own merged edit is no change of main's: " (pr-str r)))
            (is (= "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2))" (src (agent/db))) "and its second edit stands"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
@@ -1797,7 +1797,7 @@
          (let [base (pdb/branch-base conn (:branch cfg) (pdb/on-main (:branch cfg) :msg-a)) head (heads ka) main @conn
                r (pm/delta-three-way base head main #{})]
            (is (empty? (:ours r)) "merged up, the branch has no change of its own from the message")
-           (d/merge-db conn #{(pdb/on-main (:branch cfg) :msg-a)} (pm/merge-tx main base head (keys (:ours r)) #{}) (pdb/tx-meta (:branch cfg))))
+           (d/merge-db conn #{(pdb/on-main (:branch cfg) :msg-a)} [] (pdb/tx-meta (:branch cfg))))
          (as ka #(do (is (= [] (agent/undelivered)) "after the merge, held anew: not delivered again")
                      (is (= [] (agent/deliver!)))
                      (is (= [] (messages-held)))))
@@ -3139,27 +3139,13 @@
      (agent/commit!)
      (let [c0 (d/commit-id @store-conn) r (agent/merge-main! {})]
        (is (not (:ok r)))
-       (is (= :seon.merge/conflicts (:seon.error/type r)) "the typed refusal the writer's merge gives (seon.merge/refusal)")
-       (is (= [[:task/name :gen/down :task/plan]] (mapv :key (:conflicts r))) (pr-str r))
+       (is (= :seon.merge/conflict-refused (:seon.error/type r)) "the typed refusal the writer's merge gives (seon.merge/refusal)")
+       (is (= [[t :task/plan]] (mapv pm/conflict-key (:seon.merge/conflicts r))) (pr-str r))
        (is (= c0 (d/commit-id @store-conn)) "nothing written")
-       (let [r (agent/merge-main! {[:task/name :gen/down :task/plan] "settled"})]
+       (let [r (agent/merge-main! {[[:task/name :gen/down] :task/plan] "settled"})]
          (is (:ok r) (pr-str r))
          (is (= "settled" (:task/plan (d/entity @store-conn t))) "the resolution is the branch's value")
          (is (= (d/commit-id @conn) (d/commit-id (pdb/branch-base conn main-b ab))) "and the base moved"))))))
-
-(deftest a-resolution-that-keeps-mains-value-writes-nothing-of-its-own
-  ;; seon.merge/held-op?: a resolution taking main's value finds it on the branch already (the replay wrote it), so the merge
-  ;; writes main's transaction and its own merge transaction, no empty one between
-  (down-agent
-   (fn [{:keys [conn store-conn t]}]
-     (d/transact conn [[:db/add t :task/plan "main's"]])
-     (agent/transact! [[:db/add t :task/plan "the branch's"]])
-     (agent/commit!)
-     (let [txs #(count (d/datoms @store-conn :aevt :db/txInstant)) n0 (txs)
-           r (agent/merge-main! {[:task/name :gen/down :task/plan] "main's"})]
-       (is (:ok r) (pr-str r))
-       (is (= "main's" (:task/plan (d/entity @store-conn t))))
-       (is (= (+ n0 (count (:applied r)) 1) (txs)) "main's transactions and the merge's own: no resolution transaction")))))
 
 (deftest a-resolution-on-an-entity-main-retracted-is-refused
   ;; main retracted the task whole, the branch changed its plan: a conflict whose main end is :seon.merge/gone. A resolution
@@ -3171,13 +3157,13 @@
      (d/transact conn [[:db/retractEntity t]])
      (agent/transact! [[:db/add t :task/plan "the branch's"]])
      (agent/commit!)
-     (let [k [:task/name :gen/down :task/plan] c0 (d/commit-id @store-conn)
+     (let [k [t :task/plan] c0 (d/commit-id @store-conn)
            r (agent/merge-main! {})]
-       (is (= [[k "the branch's" :seon.merge/gone]] (mapv (juxt :key :ours :theirs) (:conflicts r))) (pr-str r))
+       (is (= [[k "the branch's" :seon.merge/gone]] (mapv (juxt pm/conflict-key :seon.merge/ours :seon.merge/theirs) (:seon.merge/conflicts r))) (pr-str r))
        (doseq [v ["the branch's" :seon.merge/gone]]
          (let [r (agent/merge-main! {k v})]
            (is (= :seon.merge/replay-refused (:seon.error/type r)) (pr-str r))
-           (is (= :seon.db/invalid-entity (get-in r [:refused :error :seon.error/type])) "the write check's own error inside")
+           (is (= :seon.db/invalid-entity (get-in r [:seon.merge/refused :seon.error/type])) "the write check's own error inside")
            (is (= c0 (d/commit-id @store-conn)) "nothing written")))
        (agent/transact! [[:db/retractEntity t]])
        (agent/commit!)
@@ -3198,12 +3184,12 @@
            base (:base @agent/state)
            [cs n1] (calls #(agent/main-conflicts base @store-conn @conn))
            [cs2 n2] (calls #(agent/main-conflicts base @store-conn @conn))
-           k [:task/name :gen/down :task/plan]]
-       (is (= [[k "p" "the branch's" "main's"]] (mapv (juxt :key :base :ours :theirs) cs)) (pr-str cs))
-       (is (= (list 'my.branch/merge-main! {k 'value}) (:resolve (first cs))) "with the form that settles it")
+           k [t :task/plan]]
+       (is (= [[k "p" "the branch's" "main's"]] (mapv (juxt pm/conflict-key :seon.merge/base :seon.merge/ours :seon.merge/theirs) cs)) (pr-str cs))
+       (is (= (list 'my.branch/merge-main! {k 'value}) (:seon.merge/resolve (first cs))) "with the form that settles it")
        (is (= 2 n1) "the first read diffs each side once")
        (is (= [cs 0] [cs2 n2]) "a second read with the same three commits diffs nothing")
        (d/transact conn [[:db/add t :task/status :ready]])
        (let [[cs3 n3] (calls #(agent/main-conflicts base @store-conn @conn))]
          (is (= 2 n3) "main moved: read again")
-         (is (= (mapv :key cs) (mapv :key cs3))))))))
+         (is (= (mapv pm/conflict-key cs) (mapv pm/conflict-key cs3))))))))

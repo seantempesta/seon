@@ -1160,17 +1160,16 @@
     (if (str/includes? t "\n") [:pre [:code t]] [:code t])))
 
 (defn data-conflict
-  "One merge conflict (the declared html render of :seon.merge/data-conflict) as the agent and a person read it: which value of which
-  entity, by its identity; what the base held (when it held one), your end and main's (a side that removed it says so); and the form
-  that settles it, its value the agent's to write. See docs/agent.md#merging."
+  "One merge conflict (the declared html render of :seon.merge/data-conflict) as the agent and a person read it: which attribute of
+  which entity (and member); what the base held (when it held one), your end and main's (a side that removed it says so); and the
+  form that settles it, its value the agent's to write. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.merge/data-conflict] :any]}
-  [_ {:keys [key ours theirs resolve] :as c}]
-  (let [[id-attr id-v attr v] key
-        side (fn [x] (if (= :seon.merge/gone x) [:em "removed"] [:pre [:code (as-text x)]]))]
-    [:div {:key (str key)}
-     [:p [:code (str attr)] " of " [:code (str id-attr " " (as-text id-v))] (when (some? v) (list ", the value " [:code (as-text v)]))]
-     (into [:dl {:class "seon-conflict"}]
-           (concat (when (contains? c :base) [[:dt "base"] [:dd (side (:base c))]])
+  [_ {:seon.merge/keys [entity attribute ours theirs resolve] :as c}]
+  (let [side (fn [x] (if (= :seon.merge/gone x) [:em "removed"] [:pre [:code (as-text x)]]))]
+    [:div {:key (str [entity attribute (:seon.merge/value c)])}
+     [:p [:code (str attribute)] " of entity " [:code (str entity)] (when (contains? c :seon.merge/value) (list ", the value " [:code (as-text (:seon.merge/value c))]))]
+     (into [:dl]
+           (concat (when (contains? c :seon.merge/base) [[:dt "base"] [:dd (side (:seon.merge/base c))]])
                    [[:dt "yours"] [:dd (side ours)] [:dt "main's"] [:dd (side theirs)]]))
      (when resolve [:p "Settle it: " [:code (as-text resolve)]])]))
 

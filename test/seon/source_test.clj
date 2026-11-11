@@ -540,7 +540,7 @@
   [main & forms]
   (let [branch (apply pt/record main forms)
         r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))]
-    [(d/db-with main (pm/merge-tx main main branch (keys (:ours r)) #{})) (:ours r)]))
+    [branch (:ours r)]))
 
 (deftest a-change-to-a-namespace-with-no-file-is-named-never-dropped
   ;; changed-files leaves a form out when its namespace has no :ns/file; unfiled-forms names it,
@@ -679,7 +679,7 @@
         edited "#!/bin/sh\n# bin/x says hello\necho 2\n"
         ours (d/db-with main (source/file-tx "bin/x" edited))
         ch (:ours (seon.merge/delta-three-way main ours main #{}))
-        merged (d/db-with main (seon.merge/merge-tx main main ours (keys ch) #{}))
+        merged ours
         paths (source/changed-files merged ch)
         c (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files (source/files merged paths) :modes (source/modes merged paths) :message "m"}})]
     (is (some? (get-in c [:value :sha])) (pr-str c))
@@ -855,7 +855,7 @@
   (let [branch (apply pt/record main forms)
         _ (hold! nsym text)
         r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))
-        rep (d/with main (pm/merge-tx main main branch (keys (:ours r)) #{}))]
+        rep (d/with main (let [[gone added] (d/datoms-diff main branch :eavt [])] (into (mapv (fn [x] [:db/retract (:e x) (:a x) (:v x)]) gone) (map (fn [x] [:db/add (:e x) (:a x) (:v x)])) added)))]
     [(:db-after rep) (program/load-changes! (:db-after rep) (pdb/report->tx rep))]))
 
 (deftest a-merge-to-imported-source-loads-in-place

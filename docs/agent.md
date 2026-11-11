@@ -206,10 +206,10 @@ The judge's test selection follows reach: a change to a namespace many others re
 
 ## Merging
 
-How merging with main works, and what to do when a merge of main answers conflicts. Main's work is merged into your branch as main moves (a work agent's too), and a merge task's branch has main merged in: main's transactions since your merge base are replayed onto your branch whole. A key both you and main changed to your own values since the base is a conflict, `{:key :base :ours :theirs}`: the merge writes nothing and answers the conflicts.
+How merging with main works, and what to do when a merge of main answers conflicts. Main's work is merged into your branch as main moves (a work agent's too), and a merge task's branch has main merged in: main's transactions since your merge base are replayed onto your branch whole. An entity's attribute both you and main changed to your own values since the base is a conflict (`:seon.merge/data-conflict`: its `:seon.merge/entity`, `:seon.merge/attribute`, `:seon.merge/base`, `:seon.merge/ours`, `:seon.merge/theirs`): the merge writes nothing and answers the conflicts (`:seon.merge/conflicts`).
 
-- `(my.branch/merge-main!)` merges main in, or answers its `:conflicts`. Settle them by merging again with resolutions, a map from each conflict's `:key` to the value your branch keeps: ``(my.branch/merge-main! {[:seon.task/id "app/x" :seon.task/plan] "the plan both need"})``; a conflict's ``:ours`` value keeps yours, its ``:theirs`` value takes main's, and ``:seon.merge/gone`` retracts it.
-- Your status's `:unmerged` (and `(my.branch/unmerged)`) names your conflicts with main as you last heard it, each with its `:resolve`, the `my.branch/merge-main!` form that settles it, its value yours to write.
+- `(my.branch/merge-main!)` merges main in, or answers its conflicts. Settle them by merging again with resolutions, a map from each conflict's key, `[entity attribute]` (the entity by its id or a lookup ref), to the value your branch keeps: ``(my.branch/merge-main! {[[:seon.task/id "app/x"] :seon.task/plan] "the plan both need"})``; a conflict's `:seon.merge/ours` keeps yours, its `:seon.merge/theirs` takes main's, and `:seon.merge/gone` retracts it.
+- Your status's `:unmerged` (and `(my.branch/unmerged)`) names your conflicts with main as you last heard it, each with its `:seon.merge/resolve`, the `my.branch/merge-main!` form that settles it, its value yours to write.
 - Your branch sees only its own changes until then.
 
 ## Ending
