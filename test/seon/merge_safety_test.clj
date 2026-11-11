@@ -497,7 +497,6 @@
              ;; through the write check, one transaction a group, as the writer's op will
              refused (vec (keep (fn [g] (error-of #(apply! conn :main (:ops g)))) groups))
              landed @conn]
-         (spit "/tmp/fsafe/replay-groups.out" (pr-str {:groups (mapv :ops groups) :refused refused}))
          (is (= 5 (count groups)) "one group for each of the source's transactions since the base, the entity made and retracted included")
          (is (apply < (map :tx groups)) "in the source's order")
          (is (every? #(= br (:seon.tx/branch (:meta %))) groups) "each carries its source transaction's own facts: the branch that wrote it")
