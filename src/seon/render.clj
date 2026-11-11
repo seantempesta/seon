@@ -1313,7 +1313,8 @@
   ref's owner (:entity-schemas of the attribute it reverses)."
   {:malli/schema [:=> [:cat :map :any :any] [:sequential :any]]}
   [ix k sub]
-  (if (and (keyword? sub) (nil? (depth sub)))
+  ;; a schema the index names is asked first: most keyword subs are one, and it costs no call
+  (if (and (keyword? sub) (or (contains? (:required-keys ix) sub) (nil? (depth sub))))
     [sub]
     (let [a (if (vector? k) (first k) k)]
       (if (dbu/reverse-ref? a)
