@@ -164,7 +164,11 @@
 
 (deftest a-private-contract-is-checked-in-tests-and-not-in-production
   (is (contract/private-checked?) "a test process checks private contracts")
-  (is (= :armed (contract/arm! #'armed-private-str)))
+  ;; armed now, or already: a process that loads its program from the store (an agent, forked from the fork server's)
+  ;; armed every contracted var it loaded (seon.program's load), this namespace's among them; a bin/test shard requires it
+  ;; plainly. Red in agent-tests (batch 42) as (not (= :armed :unchanged)): the claim is the arming's effect, below
+  (is (#{:armed :unchanged} (contract/arm! #'armed-private-str)))
+  (is (contract/armed? #'armed-private-str))
   (is (refused? #(private-str :k)) "in a test, a private helper's wrong call is refused")
   (is (refused? #(armed-private-str :k)) "and one armed afterwards")
   (is (= "1" (private-str 1)) "a right call answers")
