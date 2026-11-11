@@ -1501,7 +1501,7 @@
 
 (declare agent-parts conversation-list tiles)
 
-(declare standing task-name session-address tone-class members markdown agents-list)
+(declare standing task-name session-address tone-class members agents-list)
 
 (defn- last-exchange
   "The newest message a person sent agent e (a seek of :seon.message/to, the newest by eid, from a :seon.user/name) and its task
