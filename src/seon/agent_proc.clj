@@ -302,7 +302,9 @@
        :workload :io
        :ping-map-fn (fn [st] {:id (:id st) :pid (:pid st) :dead? (boolean (:dead? st)) :noise (:noise st)
                               ;; what root asked of it and holds unanswered, rid and kind: what a stuck agent is owed
-                              :inflight (into (sorted-map) (update-vals (:inflight st) :kind)) :fx-out (:fx-out st)})})
+                              :inflight (into (sorted-map) (update-vals (:inflight st) :kind)) :fx-out (:fx-out st)
+                              ;; what its stall check reads (:stall?): whether it reported one, and when its last frame came (nil: none yet)
+                              :stall-seen (boolean (:stall-seen st)) :last-frame-ms (:last-frame-ms st)})})
   ([args] (assoc (select-keys args [:id :end :branch :pid])
                  :inflight {} :noise 0 :fx-out 0 :fx-kinds (:fx-kinds args)
                  ::flow/in-ports {:from (:in (:end args))}
