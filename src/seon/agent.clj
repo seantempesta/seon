@@ -1535,7 +1535,18 @@
     ;; the :repl proc runs what it runs; the answer is the run as the done rule reads it, bounded by its
     ;; reds (seon.proofs/answer): the whole run is cached by digest before it, so nothing is lost, and
     ;; the frame stays small
-    :tests (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
+    :tests (if (:plan? m)
+             ;; the test service's plan of a run (seon.prove): what it would run, each at its digest, and what it reuses and defers;
+             ;; nothing forked. The service then asks for each item by name, as its workers free
+             (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
+                   sel (run-plan proofs (or (:mode m) :judge) (some-> (:names m) set))]
+               [{:op :tests :id (:id m) :mem-mb (mem-mb)
+                 :result (or (:unread sel)
+                             (cond-> {:items (select-keys (:digests sel) (:run sel)) :selected (:selected sel) :deferred (:deferred sel)
+                                      :at-judge (count (:judge sel)) :reused-reports (:reused-reports sel)
+                                      :digests (select-keys (:digests sel) (filter (:reused sel) (:selected sel)))}
+                               (seq (:deferred sel)) (assoc :why (into {} (for [t (:deferred sel)] [t (program/process-path (:graph (:plan sel)) t)])))))}])
+           (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                  r (run-tests-forked (or (:ticks m) (cfg/value :seon.config.agent/test-ticks))
                                      proofs
                                      (or (:mode m) :judge)
@@ -1544,7 +1555,7 @@
                  ;; a test its asker named is one it reads, as a proof is: seon.proofs/answer keeps its pass
                  names (set (:names m))
                  named (filter #(or (names %) (names (symbol (namespace %)))) (:selected r))]
-             [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (into proofs named)) r) :mem-mb (mem-mb)}])
+             [{:op :tests :id (:id m) :result (if (and (map? r) (not (contract/error? r))) (proofs/answer r (into proofs named)) r) :mem-mb (mem-mb)}]))
     ;; an async effect's outcome (fx-send!): a message to this agent, recorded
     :fx-reply (let [r (dissoc m :op :k)]
                 (swap! state update :inbox (fnil conj []) {:from :fx :k (:k m) :kind (fx-done! (:k m)) :body r})
