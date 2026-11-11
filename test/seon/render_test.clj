@@ -2876,8 +2876,8 @@
     (is (re-find #"data-standing=\"parked\"[^>]*id=\"agent-b2_2Fa1\"" html) "the parked one in the group that comes first")
     (is (re-find #"data-standing=\"finished\"[^>]*id=\"agent-b2_2Fa3\"" html) "the merged one in the last")
     (let [head (pr-str (ui/root-head {:seon.render/index (seon.db/index) :seon.ctx/ctx (or c {}) :seon.db/db db}))]
-      (is (str/includes? head "1 parked") "the head says so, in the state's plain word")
-      (is (str/includes? head "1 running") "a finished task is not running, whatever its execution still says"))))
+      (is (str/includes? head "1 task parked") "the head says so, in the state's plain word, with what it counts")
+      (is (str/includes? head "1 task running") "a finished task is not running, whatever its execution still says"))))
 
 (deftest how-an-agents-work-stands-is-said-from-its-data
   ;; owner, 2026-11-05: an agent whose task hit its turn cap read "waiting" and "idle", though a capped task is not woken
@@ -4548,3 +4548,16 @@
   (let [html (h/html (ui/agent-state {:seon.ctx/ctx {:db/id 1 :seon.agent/task {:seon.task/id "demo/g" :proved {'demo-test/g-test {:seon.test/status :green}}}}
                                       :seon.db/db (ts/test-db)}))]
     (is (str/includes? html "1 of 1 proofs green at their last run") html)))
+
+;; docs/render.md#the-page: a fresh system tells a first-time person nothing it has not done (task seon.render/a-fresh-system-says-nothing-
+;; it-has-not-done; seen 2026-11-11 on a fresh store: "1 parked.", "373 tasks not released yet.", "it starts again"): the head's counts say
+;; what they count, the task files' held tasks are folded, and the input says what typing does now
+(deftest a-fresh-system-says-nothing-it-has-not-done
+  (let [db (d/db-with (ts/test-db) (for [i (range 3)] {:seon.task/id (str "demo/held-" i) :seon.task/ns 'demo :seon.task/name (str "held-" i)
+                                                        :seon.task/plan "What exists: nothing." :seon.task/execution :held}))
+        head (h/html (ui/root-head {:seon.render/index (seon.db/index) :seon.ctx/ctx {} :seon.db/db db}))
+        input (h/html (ui/agent-input {:unit "u"} {:id :root :live? false :talks? true}))]
+    (is (str/includes? head "<details") (str "the held tasks are folded: " head))
+    (is (str/includes? head "3 tasks from the task files, not started") head)
+    (is (str/includes? input "Say something and it starts") input)
+    (is (not (str/includes? input "again")) "nothing ran yet: never again")))

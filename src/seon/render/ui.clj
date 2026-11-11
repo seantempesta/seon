@@ -463,7 +463,7 @@
       [:textarea (cond-> {:name "forms" :class "flex-1 min-w-0" :rows 3 :autocomplete "off" :spellcheck "false"
                           (keyword "data-on:keydown") "if (evt.key==='Enter' && !evt.shiftKey) { evt.preventDefault(); el.form.requestSubmit() }"
                           :placeholder (cond (and talks? live?) "Say something (Enter; Shift+Enter: a new line)\n(+ 1 2) runs in its REPL"
-                                       talks? "Say something and it starts again (Enter; Shift+Enter: a new line)"
+                                       talks? "Say something and it starts (Enter; Shift+Enter: a new line)"
                                        :else "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)")}
                    ;; the chat takes focus (it follows its tail); a browser scrolls a focused field into view, and this one ends the page
                    focus? (assoc :autofocus true))]
@@ -2245,9 +2245,12 @@
      ;; the tasks by their state, in plain words (owner, 2026-11-08: "Just show the status as parked"): a parked one wakes on a message
      [:h1 {:class "text-base font-semibold text-text-50"}
       (if (pos? (+ running parked))
-        (str (str/join ", " (remove nil? [(when (pos? parked) (str parked " parked")) (when (pos? running) (str running " running"))])) ".")
+        (str (str/join ", " (remove nil? [(when (pos? parked) (str parked (if (= 1 parked) " task" " tasks") " parked"))
+                                          (when (pos? running) (str running (if (= 1 running) " task" " tasks") " running"))])) ".")
         "Nothing running.")]
-     (when (pos? held) [:p {:class "seon-note"} (str held (if (= 1 held) " task" " tasks") " not released yet.")])
+     ;; the task files a seed loads are held until someone releases one: no one's work yet, so folded, never the head's first words
+     (when (pos? held) [:details {:class "seon-note"} [:summary (str held (if (= 1 held) " task" " tasks") " from the task files, not started")]
+                        [:p "Each waits until a person or the system releases it; nothing runs for it before then."]])
      (root-quiet {} (relevant :seon.root/root-fact c))]))
 
 (defn source-line
