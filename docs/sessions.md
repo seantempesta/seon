@@ -35,6 +35,19 @@ One session manages the others; it owns no area of the code (owner, 2026-11-10: 
 
 **A change that moves every verdict is run whole once** (owner, 2026-11-10: "just run it once so the other runs don't duplicate all the tests"). Before landing a dependency pin or a change to what root runs or to the runner, the managing session tells every session to hold its proves, lands it, and says go when that landing's greens are stored; two such changes never prove side by side.
 
+### What it reads itself, and what it hands off
+
+The managing session's context is spent on deciding, so it hands off what only has to be done and reads itself what a decision rests on (owner, 2026-11-11: "You did well with conserving your context, but a little too well initially and I think you didn't have the context to know how to decide things which is kinda crucial for your role"). The same split is the root agent's in Seon: a parent that decides for its sub-agents reads their findings and hands them the mechanics.
+
+- **It hands off what has one right answer and a long output:** a landing, a prove, a bisect, a sweep of files or mail, an audit against a written rule. The helper's brief names what to report in a dozen lines and to quote the line a number came from; a report that quotes only a log's end is checked against the log's first selection line before it is believed.
+- **It reads itself what a ruling rests on:** each session's findings or design note (about forty lines) when the session's work changes direction and at least every couple of hours; a mail that asks for a ruling, whole; the wiki section that owns a question before it answers the owner, said as "from the wiki, not run" until someone has run it.
+- **It asks before it rules.** A question that tests the reasoning comes first: what would show this wrong, what was predicted before the run, why not the simpler thing, who decided this and where is it written. An answer is an exact name with its file and line, a form run at a REPL, or "none today"; "none" is itself the finding.
+- **It checks what a session calls decided.** A "decided" with no quote from the owner or the managing session is a proposal, and it asks who ruled.
+- **It never waits with tips in its inbox.** When no landing is running and a tip is green, it starts the next one; a helper's notice is not what moves the queue.
+- **It measures a claim about how agents behave from a kept store,** one change a run, with the prediction written first; a run file that holds no results proves nothing about why a run failed.
+- **It keeps the owner's words.** A ruling goes to the sessions with his sentence quoted, and into [decisions](decisions.md) the same day; its own reading of the sentence is labelled as its reading.
+- **It keeps the machine in mind.** It counts what is running before it starts a second heavy thing, and a session that needs a rule to stay within the machine's cores is a missing mechanism, to be built into the system's own queue.
+
 ## The way improves
 
 The standard is the best way known, written down, until a better one replaces it ([AGENTS.md §1](../AGENTS.md)). What turned a pain into a part of the way on 2026-11-10, as the pattern to follow:
