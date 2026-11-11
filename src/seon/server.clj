@@ -392,21 +392,29 @@
 (defn- prove-streamed
   "run's answer (a function answering a run's answer), and before it each :prove-verdict event of root's whose run key is
   of branch's runs (seon.prove/run-key: \"<branch>@<digest>...\"), written through *emit* as it comes: the events tapped
-  before run starts (on a fiber of its own), let go after. See docs/server.md#ops."
+  before run starts (on a fiber of its own), let go after. The answer's :verdicts (seon.prove's answer-asker: every
+  verdict the run was told) are what the client is owed: one the events did not bring before the answer (another path
+  than the answer's, and a sliding tap) is written then, so none is lost and none written twice. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.root/sys :keyword ifn?] :any]}
   [sys branch run]
   (let [ev (c/events sys)
         done (a/chan 1)
-        prefix (str (name branch) "@")]
+        prefix (str (name branch) "@")
+        line #(select-keys % [:type :key :test :digest :status :ms :failures :held :load :max-load :queued])
+        id (juxt :test :digest :kind)
+        owed (fn [written answer]
+               (doseq [w (:verdicts answer) :when (not (written (id w)))]
+                 (*emit* (line (assoc w :type :prove-verdict :key (:key answer)))))
+               answer)]
     (fibers/spawn #(a/>!! done (run)))
-    (try (loop []
+    (try (loop [written #{}]
            (let [[v ch] (a/alts!! [done ev])]
-             (cond (= ch done) v
+             (cond (= ch done) (owed written v)
                    ;; root's events ended (it stopped): only the answer is left to wait on
-                   (nil? v) (a/<!! done)
-                   :else (do (when (and (#{:prove-verdict :prove-held} (:type v)) (str/starts-with? (str (:key v)) prefix))
-                               (*emit* (select-keys v [:type :key :test :digest :status :ms :failures :held :load :max-load :queued])))
-                             (recur)))))
+                   (nil? v) (owed written (a/<!! done))
+                   :else (if (and (#{:prove-verdict :prove-held} (:type v)) (str/starts-with? (str (:key v)) prefix))
+                           (do (*emit* (line v)) (recur (cond-> written (= :prove-verdict (:type v)) (conj (id v)))))
+                           (recur written)))))
          (finally (a/untap (:events-mult sys) ev)))))
 
 (defn ask-streamed
