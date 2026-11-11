@@ -62,6 +62,24 @@ Each row is one tip, small enough to land alone, with who builds it, its proof a
 | 9 | move C, with the named sub-patterns | Context; Data model for the patterns | recorded requests byte for byte; the planted-world proof, the entity half | a new kind of member reaches the page and the request |
 | 10 | move B | Web, Optimization; Data model for the view's schema | a REPL trial on root's page with its cost, then the planted proof | root's page with no hand-read state |
 
+## Where each tip stands
+
+Kept current by the Data model session; the newest landed state runs on the standing system, http://127.0.0.1:7777/. "Running to see" is that system showing a live agent's session with hiccup drawn as html, Markdown drawn, structured evals, proofs and diffs, `@ctx` and the page at the first point, and the short system message.
+
+| # | tip | state (2026-11-11 16:35) |
+|---|---|---|
+| 1 | a cited schema drawn as what it is; the pattern's description and required parts | landed, main 61a2d46eb0 |
+| 2 | the role named in a pattern; a join to a depth | built, named tests green, in review with Context: `jolt/rolenames` 6939f6c397 |
+| 3 | the boot writes and pattern functions deleted, with the check | not started; follows 2 |
+| 4 | descriptions on the answer's keys, a file's path, a task's proofs | named tests green, mailed for a batch: `jolt/descs` 78ca6dc004; the join-shape sentence not started |
+| 5 | the short system message | in build (Context) |
+| 6 | `@ctx` and the hiccup at the first point; the cite's pull shortened | not started (Context; the cite's pull is Data model's) |
+| 7 | a proof's four states; every failure and its source | in build (Context has the status half on a branch; Web the page half) |
+| 8 | move A, and with it text fields as Markdown by a `:seon.db/text` schema | not started; waits on Web confirming a render is called with an attribute's value by the schema lookup |
+| 9 | move C, with the named sub-patterns | not started; waits on 2 and 3 |
+| 10 | move B | not started; a REPL trial with its cost comes first |
+| also | a component's root carries `:render`, the full symbol, in place of a class; a render's output named by a `:seon.render/hiccup-value` schema | in build (Web, Context) |
+
 ## Not decided
 
 What "near" means for a stuck agent's repeats (the functions its evals called is the proposal; Context checks it on kept runs). Whether a view (move B) costs more at each draw than the components it replaces: not measured. A model call's previous call, which C needs for a call's page pair: a ref, or read through the agent. A compaction's point: one attribute on the agent, written with the compaction, is proposed and not built. Whether embeddings stay in the store.
