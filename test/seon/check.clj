@@ -766,9 +766,14 @@
                                :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}}
        ;; root's threads exactly as declared once agents run (at boot Jolt's io poller has not
        ;; started yet: it starts at the first socket wait, an agent's). The model's threads (Metal's
-       ;; GCD workers) are the embedding helper's, not root's, so the OS count is judged at every sample
+       ;; GCD workers) are the embedding helper's, not root's. The named roster is judged at every
+       ;; sample; the OS count only where nothing is starting (after the work and after the kills, each
+       ;; read after a wait on what it waited for): all-ready is read as the agents finish spawning, and its
+       ;; roster and OS count are two reads at two instants, so a thread a spawn starts and ends between
+       ;; them counted one OS thread over (batch 73, 2026-11-11, :os [55 56] at load 25-30, the roster
+       ;; exact): a count load could turn red. Its :os stays in the report
        :checks {:every-eval-and-test-passed (every? :ok results) :ten-merges-went-in (every? :merged? merged)
-                :root-threads-as-declared (every? empty? [th-ready th-work th-end])
+                :root-threads-as-declared (every? empty? [(dissoc th-ready :os) th-work th-end])
                 :fits-the-machine (<= need budget)}}))))
 
 ;; ---- scale-work: agents that work --------------------------------------------------
