@@ -338,8 +338,8 @@
 
 (defn page-parts-through
   "Agent a's page parts at each point of chain, a vector of points ({:commit :t}, in order on one branch; a first of nil: nothing
-  before the second, answered nil), on db's store, as the model reads them: one walk of its page-parts render
-  (seon.render.ui/agent-parts, named here by symbol: seon.render.ui requires this namespace) over the agent pulled by what the
+  before the second, answered nil), on db's store, as the model reads them: one walk rooted on `model-parts` (the lists of the
+  entity's own render, else its schema's, that hold no messages and are not for the page alone) over the agent pulled by what the
   parts read (`parts-walk`), advanced from point to point as a kept walk moves (`advance`: docs/render.md#a-page-is-a-kept-walk),
   each point's hiccup stripped of presentation (`presentation-free`). The walk is kept after the call at the chain's last point
   (`kept-walk`), so a later chain of the same agent on the same branch starting at or after it advances from it: a request at a
