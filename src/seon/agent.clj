@@ -207,7 +207,7 @@
 
 (defn own-message-tx
   "Message mid from from (its sender's lookup, seon.task/sender), sent at sent-ms: the one message entity (seon.task/message-tx) as this agent's branch holds it, `to` its own ref only. Its being on the branch is its delivery, and the turn that
-  took it is derived from the transaction that wrote it (seon.ctx/turn-members). Its sender is written by its identity (seon.task/sender),
+  took it is derived from the transaction that wrote it (seon.ctx/placed-messages). Its sender is written by its identity (seon.task/sender),
   an upsert, so a sender made after this branch forked resolves here too. See docs/users.md#messages."
   {:malli/schema [:=> [:cat :string :map :any :int] :seon.db/tx-data]}
   [mid from body sent-ms]
@@ -418,7 +418,7 @@
 (defn deliver!
   "Bring what main holds for this agent onto its branch, committed: its messages (undelivered) and the facts of
   its own entities (untaken-facts). The one delivery, a turn's (seon.turn/deliver!) and its code's (messages). A message
-  on the branch is delivered; the turn that read it is derived from its transaction (seon.ctx/turn-members). Answers the
+  on the branch is delivered; the turn that read it is derived from its transaction (seon.ctx/placed-messages). Answers the
   messages delivered. See docs/users.md#messages."
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
@@ -1731,7 +1731,7 @@
 
 (defn begin-run!
   "This agent begins task on its branch: the agent's record names it as its task (:seon.agent/task: the conversation finds the
-  messages it took by the agent, seon.ctx/turn-members, and @ctx holds the task), the task running as main holds it. Written as
+  messages it took by the agent, seon.ctx/placed-messages, and @ctx holds the task), the task running as main holds it. Written as
   the process starts (init!: an outside agent's branch is cut before root writes its start on main), or by the turn that begins a
   later task of the session; once, nothing written when the branch holds it. The task is running, as main holds it
   (its release, written on main after the branch was cut, read :held here: my.task/current and the

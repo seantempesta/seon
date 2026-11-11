@@ -1484,7 +1484,7 @@
   (let [t (session/example-t db0 k)
         db (d/as-of db0 t)
         c (ctx/agent-ctx ix db (seon.db/eid db :seon.agent/key k))
-        placed (ctx/placed-messages db c)]
+        placed (ctx/placed-messages c)]
     (into [:details {}
            [:summary {:class "muted" :wire/for "page"} (str "example session " k)]
            [:p {} (session/example-open k (:seon.agent/description c))]]
@@ -1723,7 +1723,7 @@
   (let [k (ratom/realize (:seon.agent/key c))
         turn (or (ratom/realize (:seon.agent/turn c)) 0)
         ;; where each message was read, once for every turn (a turn is given its own, so a message delivered runs this list and the turn it reached)
-        placed (when k (ctx/placed-messages db c))]
+        placed (when k (ctx/placed-messages c))]
     [:ol {:id "c-rows"}
      [#'system-message {}]
      [#'session-examples {}]
