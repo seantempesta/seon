@@ -282,14 +282,14 @@
     (is (clojure.string/includes? (str (shown "docs/flow.md#stop")) "Then the graph is gone.") "code depth: the section whole")))
 
 ;; docs/references.md#an-entity-cites: a cite of a schema key joins its entry, of a namespace its entity, of a file its
-;; entity, each drawn from what the cite holds
+;; entity, each drawn by the cite's render from the db by what the cite names
 (deftest a-cited-schema-key-and-namespace-show-what-they-are
   (let [db (d/db-with (db-with-program) [{:ns/name 'demo.calc :ns/doc "Adds. More."} {:schema/key :x.s/block :schema/form "[:map [:x.s/from :int]]"}
                                          {:file/path "bin/env" :file/text "#!/bin/sh"}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
                                                :seon.task/plan "Read `demo.calc`, `:x.s/block` and `bin/env`."}]))
         t (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.task/id "demo/n") :b))
-        m (into {} (for [c (vals (:seon.cite/_of t))] [(task/cited-name c) (seon.render/part-text [(quote seon.render.ui/cite) {} (seon.render.ui/cite-hiccup db c)])]))]
+        m (into {} (for [c (vals (:seon.cite/_of t))] [(task/cited-name c) (seon.render/part-text [(quote seon.render.ui/cite) {} (seon.render.ui/cite {:seon.db/db db :seon.render/index (seon.db/index)} c)])]))]
     (is (str/includes? (m 'demo.calc) "Adds.") "a namespace: the first sentence of its doc")
     (is (str/includes? (m 'demo.calc) "(doc 'demo.calc)") "and the form that reads it")
     (is (str/includes? (m :x.s/block) ":int") "a schema key: what it holds")
@@ -677,7 +677,7 @@
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))
         ;; the page's part: the cite's target is the task, drawn by its plan
         cite (some #(when (= "demo.other/g" (get-in % [:seon.cite/target :seon.task/id])) %) (vals (:seon.cite/_of (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.task/id "demo/f") :b)))))
-        part (seon.render/part-text [(quote seon.render.ui/cite) {} (seon.render.ui/cite-hiccup db cite)])]
+        part (seon.render/part-text [(quote seon.render.ui/cite) {} (seon.render.ui/cite {:seon.db/db db :seon.render/index (seon.db/index)} cite)])]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")
     (is (= "demo.other/g" (get-in cite [:seon.cite/target :seon.task/id])) "the cite's target is the task")
