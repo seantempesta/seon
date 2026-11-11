@@ -1586,8 +1586,8 @@
 (defn process-plan
   "Of sel (run-plan's), what a run on a checkout runs beside its in-process items, each at the digest this branch gives it
   (docs/merging.md#the-test-service): :process {test digest}, the process tests it left (:deferred) that have one; :steps
-  {step {:digest :binary? :bound}}, the bin/check steps with no green at their digest as bin/prove plans them
-  (seon.proofs/plan-of over this branch's reach graph and inputs, every step that reaches a process kept, the generative
+  {step {:digest :binary? :bound :alone?}}, the bin/check steps with no green at their digest as bin/prove plans them
+  (:alone?, a step of seon.proofs/machine-steps, runs with nothing beside it; seon.proofs/plan-of over this branch's reach graph and inputs, every step that reaches a process kept, the generative
   check's keys left to the shards), :bound the step-end factor times the step's median measured ms floored at the stall
   bound (a step never measured has none, as under bin/prove: it ends by its own waits' bounds, and that run measures it), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
   steps it names among them (bin/prove --root PORT seon.config-test config), as the plain bin/prove NS runs none; :missing, the steps with no digest here (one naming a
@@ -1605,7 +1605,8 @@
         ms (if (seq run) (fx/typical-ms run) {})
         k (cfg/value :seon.config.check/step-end-factor) floor (cfg/value :seon.config.agent/stall-ms)
         steps (into {} (for [s run] [s (cond-> {:digest (get (:steps p) s) :binary? (proofs/step-needs-binary? s) :bound nil}
-                                         (ms s) (assoc :bound (max floor (* k (ms s)))))]))]
+                                         (ms s) (assoc :bound (max floor (* k (ms s))))
+                                         (proofs/machine-steps s) (assoc :alone? true))]))]
     (if-let [u @unread]
       {:unread u}
       {:process process :steps steps :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))

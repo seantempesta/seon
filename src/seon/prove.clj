@@ -142,7 +142,7 @@
   holding it as {:op :tests :id agent :mode m :names #{test} :items {test digest}} (a named test runs alone, at the digest
   the agent's plan gave it: seon.agent/item-selection), or, an item of another :kind (a build, a process test, a check
   step, a tree's build or seed), of root's effect owner as {:op :fx :kind :item :req {:kind :tree :checkout :name :digest
-  :binary? :bound}}; an item is not granted while an item it :needs (a set: its tree's build, seed) is queued or running;
+  :binary? :bound}}; an :alone? item (a step about the machine) only with nothing running, and nothing beside it; an item is not granted while an item it :needs (a set: its tree's build, seed) is queued or running;
   tagged
   [:batch bid]; each queued item passed over ages a skip.
   Answers [st outputs]."
@@ -155,10 +155,13 @@
           ;; the askers of a turn, once a grant: most grants have none, and then no item's waiters are read for them
           turns (into #{} (keep (fn [[r a]] (when (= :turn (:prio a)) r))) (:askers st))
           running (count (:batches st))
-          [k it] (when (pos? (free-workers st))
+          ;; a step about the machine itself (:alone?, seon.proofs/machine-steps) runs with nothing beside it: none is granted
+          ;; while one runs, and one is granted only with nothing running
+          alone (some (fn [[_ b]] (some #(:alone? (get-in st [:items %])) b)) (:batches st))
+          [k it] (when (and (pos? (free-workers st)) (not alone))
                    (reduce-kv (fn [best k it]
                                 ;; an item that needs its tree's build or seed waits while that is queued or running (a red one ends it)
-                                (if (and (= :queued (:status it)) (not-any? (:items st) (:needs it)))
+                                (if (and (= :queued (:status it)) (not-any? (:items st) (:needs it)) (or (not (:alone? it)) (zero? running)))
                                   (let [v (+ (if (and (seq turns) (some turns (:waiters it))) 1e12 0) (item-value it bid0))]
                                     (if (or (nil? best) (> v (nth best 2))) [k it v] best))
                                   best))
@@ -246,7 +249,7 @@
     (let [st (reduce (fn [st [k m]]
                        (if (get-in st [:items k])
                          (update-in st [:items k :waiters] conj rid)
-                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :binary? :bound]) :status :queued :waiters #{rid} :at (:bid st 0)))))
+                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :binary? :bound :alone?]) :status :queued :waiters #{rid} :at (:bid st 0)))))
                      (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}}) items)]
       (grant st)))))
 
@@ -452,8 +455,9 @@
         seed? (and build? (or (seq (:process r)) (some :binary? (vals (:steps r)))))]
     (cond-> (into {}
                   (concat (for [[t d] (:process r)] [[t d] (cond-> (assoc on :kind :process :binary? true) build? (assoc :needs #{sk}))])
-                          (for [[s {:keys [digest binary? bound]}] (:steps r)]
-                            [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?)) bound (assoc :bound bound) (and seed? binary?) (assoc :needs #{sk}))])))
+                          (for [[s {:keys [digest binary? bound alone?]}] (:steps r)]
+                            [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?)) bound (assoc :bound bound) alone? (assoc :alone? true)
+                                          (and seed? binary?) (assoc :needs #{sk}))])))
       build? (assoc bk (assoc on :kind :build))
       seed? (assoc sk (assoc on :kind :seed :needs #{bk})))))
 
