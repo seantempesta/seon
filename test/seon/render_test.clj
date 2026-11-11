@@ -2377,6 +2377,21 @@
     ;; being "root" too (seen live on a demo root, 2026-11-08)
     (is (map? (seon.ctx.status/status db (seon.ctx/agent-ctx (seon.db/index) db (:db/id (d/entity db [:seon.agent/key "root"]))) {})) "and how its work stands")))
 
+(deftest roots-session-asks-for-its-sessions
+  ;; docs/users.md#roots-session: root's session's page lists no sessions (its model reads none in each request); it asks at its REPL,
+  ;; (my.user/sessions), which reads them from its record's join through root: every session linked to root, how each stands, by key; an
+  ;; agent whose pattern holds no such join has none
+  (let [db (d/db-with (booted) [{:seon.task/id "request/greet" :seon.task/ns 'request :seon.task/name "greet" :seon.task/plan "Say hi." :seon.task/kind :user
+                                 :seon.task/branch :task-request-greet :seon.task/outcome :parked}
+                                {:seon.agent/key "b1/a2" :seon.agent/root [:seon.root/id :root] :seon.agent/task [:seon.task/id "request/greet"] :seon.agent/status :waiting}])
+        as (fn [k] (let [c (seon.ctx/agent-ctx (seon.db/index) db (:db/id (d/entity db [:seon.agent/key k])))]
+                     (try (binding [seon.ctx/*installing* true] (reset! seon.ctx/ctx c)) (my.user/sessions)
+                          (finally (binding [seon.ctx/*installing* true] (reset! seon.ctx/ctx nil))))))
+        listed (as "root")]
+    (is (some #(= {:key "b1/a2" :status :waiting :task "request/greet" :outcome :parked} %) listed) (pr-str listed))
+    (is (= (sort (map :key listed)) (map :key listed)) "by key")
+    (is (= [] (as "b1/a2")) "an agent whose pattern holds no join through root: none")))
+
 (deftest roots-session-holds-every-agent-with-its-status-and-task
   ;; docs/users.md#roots-session: root's session's own pattern reaches every agent through root's entity, each with its status and task
   (let [db0 (booted)
