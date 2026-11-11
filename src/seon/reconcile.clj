@@ -153,6 +153,20 @@
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.reconcile/agent]]}
   [idx id] (get-in idx [:agents (get-in idx [:tasks id :seon.task/agent])]))
 
+(declare idle)
+
+(defn- session-idle
+  "The idle process of task id's session when id has no agent of its own: an agent parked or at its cap in this boot on id's
+  branch, working another task (a refine continues the agent of the task it cites on that branch). A session is one branch and
+  one process holds it, so its next task is a wake on that process, never a second fork the branch would refuse. nil otherwise.
+  Cost: the tasks on the index, read once a start. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id] [:maybe :seon.reconcile/agent]]}
+  [idx id]
+  (when-not (get-in idx [:tasks id :seon.task/agent])
+    (let [br #(or (get-in idx [:tasks % :seon.task/branch]) (task/default-branch %))
+          b (br id)]
+      (some (fn [tid] (when (and (not= tid id) (= b (br tid))) (idle idx tid))) (keys (:tasks idx))))))
+
 (defn- idle
   "Task id's agent when its work is parked on its live process: parked or at its cap in this boot, by an agent (the
   judge parks only a task whose process is kept, keeps?). A wake reuses it; a cancel, a hold or a new branch for its
@@ -490,7 +504,7 @@
                                        (recur more (inc n) (inc m) (when ks (into taken ks)) (conj acc id))
                                        (recur more n m taken acc)))
                        :else (recur more (inc n) m taken (conj acc id))))
-        spawns (for [id starts :let [t (get-in idx [:tasks id]) p (idle idx id) prior (task-agent idx id)
+        spawns (for [id starts :let [t (get-in idx [:tasks id]) p (or (idle idx id) (session-idle idx id)) prior (task-agent idx id)
                                      ;; work a root restart lost was ended by nobody: a model's goes on
                                      lost? (= :lost (:seon.task/outcome t))
                                      env (desired-env t (when lost? (:seon.agent/env prior)))]

@@ -1718,3 +1718,13 @@
     (testing "a refine that changed nothing"
       (let [{db3 :db} (judge! db2 "a-refine" {:outcome :green})]
         (is (= :held (:seon.task/execution (task/task db3 "demo/a"))) "starts no run")))))
+
+(deftest a-refine-wakes-the-agent-it-continues
+  ;; docs/tasks.md#a-refine-curates-its-own-task: a refine continues the agent of the task it cites, on that task's branch. That agent's
+  ;; process stays at its cap, idle, and holds the branch, so the refine's start is a wake on it; a spawn would be refused ("branch ...
+  ;; is held by live agent", loop D0, 2026-11-11)
+  (let [db (with-refine-section (mdb [(decl "a")] :extra (work "a" :cap)))
+        db1 (d/db-with db (task/refine-tx db "demo/a" false))
+        acts (filter #(= "demo/a-refine" (:task %)) (actions-for db1))]
+    (is (= [:wake] (map :op acts)) (str "woken, not spawned: " (pr-str acts)))
+    (is (= [:a-a] (map :agent acts)) "on the agent it continues")))
