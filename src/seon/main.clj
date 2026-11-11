@@ -119,7 +119,13 @@
         _ (out! "prove: asking root on port " port " for tree " tree)
         r (seon.server/ask-streamed port (cond-> {:op :prove :checkout checkout :tree tree :mode "judge" :stream true}
                                            (seq names) (assoc :names (vec names)))
-                                    #(when (= :prove-verdict (:type %)) (out! (verdict-line %))))]
+                                    #(case (:type %)
+                                       :prove-verdict (out! (verdict-line %))
+                                       ;; the service holding this run for the machine's load, and resuming it: never a silent wait
+                                       :prove-held (out! (if (:held %)
+                                                           (str "HELD: load " (:load %) " >= max-load " (:max-load %) ", " (:queued %) " items waiting")
+                                                           "RESUMED"))
+                                       nil))]
     (cond (seon.contract/error? r) (do (out! "prove: " (:seon.error/message r)) (out! "PROVE FAILED") 1)
           :else (do (out! "prove: " (shown (select-keys r [:key :ran :reused :pass :fail :error :deferred])))
                     (if (seq (:red r))

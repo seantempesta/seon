@@ -329,9 +329,10 @@
   [{:keys [messages]}]
   (if (some #(and (= "assistant" (:role %)) (= "Nothing to run; I wait for you." (:content %))) messages)
     (calls "Saw my own reply." "(my.turn/wait)")
-    ;; (an assistant message of the model's: the page Seon ran as an eval has text too, on a call of its own)
+    ;; (an assistant message of the model's: the page Seon ran as an eval has text too, on a call of its own, and so does each call
+    ;; Seon writes for the model, (my.render/ctx p), (my.render/page p) and (my.render/diff p0 p1), a whole reply of its own)
     (if (some #(and (= "assistant" (:role %)) (seq (:content %))
-                    (not (some (fn [c] (clojure.string/starts-with? (str (:id c)) "eval-")) (:tool-calls %)))) messages)
+                    (not (some (fn [c] (or (clojure.string/starts-with? (str (:id c)) "eval-") (clojure.string/starts-with? (str (:code c)) "(my.render/"))) (:tool-calls %)))) messages)
       (calls "Lost my own reply." "(my.turn/wait)")
       {:text "Nothing to run; I wait for you."})))
 
