@@ -1139,14 +1139,16 @@
 ;; listing was 239,943 characters with every section's references and citers
 (deftest doc-reads-a-local-and-a-page-lists-its-sections-without-their-edges
   (let [db (my.test/with (my.test/world) (my.test/page "docs/small.md" "# Small\n\nThe lead of small, citing app.calc/add.\n\n## Below\n\nThe text below, citing app.calc/total.\n"))]
-    (with-redefs [seon.agent/db (fn [] db)]
+    (try
+      (enter-agent! {:db db})
       (let [printed (with-out-str (let [a "docs/small.md#small"] (my.agent/doc a)))
             listing (my.agent/doc-of "docs/small.md")]
         (is (clojure.string/includes? printed "The lead of small") "a let-bound address is read as a literal is")
         (is (clojure.string/includes? printed "docs/small.md#below") "and names the section below")
         (is (not (clojure.string/includes? printed "The text below")) "without its text")
         (is (= ["docs/small.md#small" "docs/small.md#below"] (mapv :seon.ref/address listing)) "a page lists its sections")
-        (is (not-any? #(or (:seon.ref/references %) (:seon.ref/cited-by %)) listing) "each without its edges")))))
+        (is (not-any? #(or (:seon.ref/references %) (:seon.ref/cited-by %)) listing) "each without its edges"))
+      (finally (end-agent!)))))
 
 ;; docs/references.md#an-entity-cites: a cite holds its target by identity, and of a cited task also what an agent may edit there
 ;; (its plan, instructions, proofs and cause: the task content a run's end carries to main), so a task that curates another
