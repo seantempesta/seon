@@ -261,6 +261,9 @@ An agent's `:base`, against which it chooses the tests that judge its branch, is
 
 Related: [source](source.md) (merges read a branch's history by commit), [failure points](failure-points.md).
 
+
+A session is restored at any commit C of its branch the same way, never by a binary of that commit (the owner, 2026-11-11: "Eval it on the current main fork and if it crashes return an error"): a spawn with `{:branch b :commit C}` has the writer make `b` from C (`datahike.api/branch!` takes a commit id) and fork it as resumed, so the agent, forked holding main's program, loads the session's own change since its base up to C (```seon.program/load-diff!```) and a definition that does not load is named in the spawn's answer (`:started-without-program`). The answer says what is not restored (```seon.root/not-restored```): the system's own code, main's changes since the session's base, and host state. A commit the store no longer holds is refused before anything is written (`:seon.writer/refused`, [failure points](failure-points.md)). Proofs: ```seon.agent-test/a-session-restored-at-an-older-commit-runs-that-commits-definitions```, ```seon.agent-test/a-restore-at-a-commit-the-store-no-longer-holds-is-refused```.
+
 ## A renamed attribute
 
 A stored keyword is renamed by erasing the store, never by a migration ([decisions](decisions.md)), so a store made before a rename is refused when it opens: ```seon.db/retired-names``` holds each old name and its new one, and ```seon.db/install-missing!``` throws `:seon.db/name-retired` naming them and changes nothing in the store. Opened instead, it would gain the new attribute with nothing under it, and its next write-back would rewrite each resource from nothing. Proof: `seon.db-test/a-kept-store-on-a-retired-name-is-refused`.

@@ -284,18 +284,31 @@
       ;; the agent's branch (new: a pointer to main's head), then its fork: the agent opens
       ;; the branch itself and owns its writes (run-ahead, committed by the agent), and holds
       ;; the task and run it works from its first form
-      :spawn (let [{:keys [agent branch]} m
-                   resumed? (exists? branch)]
-               ;; a fork is an outside effect: what it reads from the store (its session's entries,
-               ;; seon.agent/undelivered) is synced first (docs/storage.md#durability-is-continuous-group-commit), the
-               ;; batch this op just committed included (:dirty is settled only after the drain)
-               (when (:durable? st) (pdb/sync! (:cfg st)))
-               (when-not resumed? (d/branch! conn main branch))
-               ;; main's commit and t, which this branch starts at and the image it forks from holds
-               (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :ns (:ns m) :fd (:fd m) :key (:key m)
-                                              :cfg (:cfg st) :resumed resumed?
-                                              :commit (d/commit-id @conn) :t (:max-tx @conn)})
-               (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))
+      ;; with :commit C (a session restored at that point of its branch, docs/storage.md#compiled-code), the branch is made
+      ;; from commit C and not from main's head, and is resumed from its first form: the agent loads its program at C over main's image
+      :spawn (let [{:keys [agent branch commit]} m
+                   resumed? (exists? branch)
+                   ;; a fork is an outside effect: what it reads from the store (its session's entries,
+                   ;; seon.agent/undelivered) is synced first (docs/storage.md#durability-is-continuous-group-commit), the
+                   ;; batch this op just committed included (:dirty is settled only after the drain)
+                   _ (when (:durable? st) (pdb/sync! (:cfg st)))
+                   gone (when (and commit (not resumed?))
+                          ;; the named edge (docs/failure-points.md): datahike's branch! throws :commit-not-found before it writes anything
+                          (try (d/branch! conn commit branch) nil
+                               (catch clojure.lang.ExceptionInfo e
+                                 (if (= :commit-not-found (:type (ex-data e))) e (throw e)))))]
+               (if (or gone (and commit resumed?))
+                 (reply st (refused (if gone
+                                      (str "commit " commit " is gone from the store (collected): no session can be restored at it")
+                                      (str "branch " branch " exists: a restore at commit " commit " makes a new branch"))
+                                    {:branch branch :commit commit}))
+                 (let [resumed? (boolean (or resumed? commit))]
+                   (when-not resumed? (d/branch! conn main branch))
+                   ;; main's commit and t, which this branch starts at and the image it forks from holds
+                   (step/out! o :to-fork-server {:op :fork :agent agent :branch branch :task (:task m) :ns (:ns m) :fd (:fd m) :key (:key m)
+                                                  :cfg (:cfg st) :resumed resumed?
+                                                  :commit (d/commit-id @conn) :t (:max-tx @conn)})
+                   (reply st {:ok true :t (:max-tx @conn) :resumed resumed?}))))
       ;; a session's files as a branch of main, keyed by their tree (seon.root/prove-tree!): made once, from main's head, with
       ;; the catch-up of the checkout written on it; a second asker of one tree finds it made (:exists), never makes it again
       :branch-for-tree (reply st (if (exists? (:branch m))

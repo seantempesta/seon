@@ -10,7 +10,7 @@
                         writer answers; answers {:t :datoms}. Inside a test (a fork of the
                         agent) it applies to the fork's db only: a test's writes vanish."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.agent :as agent] [seon.db :as pdb]))
+  (:require [seon.contract :refer [defn defn-]] [datahike.api :as d] [seon.agent :as agent] [seon.db :as pdb] [seon.render :as render]))
 
 (defn db "The branch's current db value." {:malli/schema [:=> [:cat] :seon.host/db]}
   [] (agent/db))
@@ -23,6 +23,23 @@
   [pattern eid] (d/pull (agent/db) pattern eid))
 (defn transact! "Write tx-data to this agent's branch; answers {:t :datoms}." {:malli/schema [:=> [:cat :seon.db/tx-data] :seon.agent/tx-result]}
   [tx-data] (agent/transact! tx-data))
+(defn pulled
+  "Pulled entity node as its data model (seon.render/pulled, the one producer; the pull view lays the same map out): its schema,
+  where its pattern came from, each clause with what the pull holds for it, a join's members and how many hold each sub-clause,
+  what its schema names that the pattern does not ask, what the entity holds that it does not ask, and the renders that draw
+  it. With one argument, the entity a pull starts from, by its own pattern; a node joined inside another's pull was pulled
+  by the sub-pattern at its path, the second argument (a join's :pattern). See docs/agent.md#looking-at-what-you-pulled.
+
+  ## Examples
+
+  ```clojure
+  (my.db/pulled @ctx)
+  (let [j (first (filter :members (:clauses (my.db/pulled @ctx))))] (:pattern j))
+  ```"
+  {:malli/schema [:function [:=> [:cat :any] [:maybe :map]] [:=> [:cat :any [:maybe [:sequential :any]]] [:maybe :map]]]}
+  ([node] (pulled node nil))
+  ([node pattern] (render/pulled (agent/db) (agent/branch-index) node pattern)))
+
 (defn at
   "The db at a named point, for d/q, d/pull, d/entity and my.agent/history ({:db it}): no opts is (db);
   {:t t} this branch as of t (a t it never had is refused, a t from history is read as it was);
