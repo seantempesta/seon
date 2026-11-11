@@ -2153,6 +2153,13 @@
     (is (= :seon.ctx/unworded (try (wire/page-message id 'clojure.core/inc ["1"] 2) nil (catch clojure.lang.ExceptionInfo e (:seon.error/type (ex-data e)))))
         "a function with no words is refused, never an empty message")))
 
+(deftest a-diffs-reply-names-what-moved
+  ;; loop 2 (2026-11-11): a model copied the diff's fixed reply word for word (call 16); the reply is a function of the edits, the parts
+  ;; that moved by their names in the edits' paths, so it differs with what moved and says something true when copied
+  (is (= "My page changed: status." (wire/diff-reply [[["page" "p-task" "status" :own] :r [:p "x"]] [["page" "p-task" "status"] :r [:p "y"]]])))
+  (is (= "My page changed: status, cite-x." (wire/diff-reply [[["page" "p-task" "status"] :-] [["page" "p-task" "cite-x" :pre] :r "s"]])))
+  (is (= "My page changed: page." (wire/diff-reply [[["page"] :r [:div]]])) "the page whole, by its own name"))
+
 (deftest every-call-seon-writes-is-a-whole-reply
   ;; the law (owner, 2026-11-11: "Set a good example for the agent"): each function a Seon-made call names holds its reply and its
   ;; intent, and every assistant message of a request that holds no record of the model's own has text and each call an intent

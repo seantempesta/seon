@@ -483,6 +483,8 @@
                                                                        (map (juxt :multi :dispatch) (:methods acct)) (map (juxt :protocol :type) (:impls acct))))
                                       :repl/defined (mapv :var (:defs acct)))
                          redefined (assoc :redefined redefined)
+                         ;; a plain def in a program namespace is usually a look, not a change: said where it lands (loop 2: eight turns)
+                         (and (seq? (:repl/form m)) (= 'def (first (:repl/form m))) (seq (:defs acct))) (assoc :program-def (mapv :var (:defs acct)))
                          (seq (program/unknown-refs acct)) (assoc :unknown-vars (program/unknown-refs acct))))
                      (cond-> m
                        l (assoc :repl/defined (program/set-vars l))
@@ -615,6 +617,9 @@
                    ;; a def beside calls (wrap-record): it stays this eval, not program
                    (some :not-program fs)
                    (conj {:seon.repl/finding :not-program :seon.repl/fix (some :not-program fs)})
+                   (some :program-def fs)
+                   (conj {:seon.repl/finding :program-def :vars (vec (mapcat :program-def fs))
+                          :seon.repl/fix "This def made program on your branch; it merges with your task. If you only meant to try something, take it back with (ns-unmap 'the.ns 'the-name) and define such things in your own namespace."})
                    (some :unknown-vars fs)
                    (conj {:seon.repl/finding :unknown-var :unknown (vec (distinct (mapcat :unknown-vars fs)))
                           :seon.repl/fix "No var has this name yet, so the definition fails when that line runs: fix the name, or define it."})
