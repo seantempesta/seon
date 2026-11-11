@@ -43,11 +43,11 @@ An example is an ended agent holding the records of the session it was made from
 
 ## A refine curates its own task
 
-A refine is a task that needs the task you just finished, on the same branch, so it is worked by you, continued: your conversation goes on, and the task you need is shown inside your new task. It asks one thing: make the task you finished better for whoever works it next. It does not ask for more work on what you built.
+A refine is a task on the same branch that cites the task you just finished, so it is worked by you, continued: your conversation goes on, and the task it cites is shown inside your new task, with what may be edited there. It needs nothing, since it is wanted whatever that task's outcome (a need waits for a finish). Every end that holds or finishes a task gets one (```seon.task/refine-tx```), except a task that continues another's branch (a merge task, which needs its work there); after a finish it runs at once, after a failure it is held for root to release, as whatever follows a failure is. It asks one thing: make the task you finished better for whoever works it next. It does not ask for more work on what you built.
 
 Read back through your own turns and find where one went that the task could have saved: something you had to look for, a form that failed before the one that worked, a section you read and did not need. Then change only these:
 
-- **Its plan:** what to do, in the order that worked, with the forms that mattered. The task you need is in your pull, so it is one `swap!`: ``(let [[e t] (first (:seon.task/needs (:seon.agent/task @ctx)))] (swap! ctx assoc-in [:seon.agent/task :seon.task/needs e :seon.task/plan] (str (:seon.task/plan t) "\n\n" "what would have saved a turn")))``.
+- **Its plan:** what to do, in the order that worked, with the forms that mattered. The task you cite is in your pull, so it is one `swap!`: ``(let [[e c] (first (filter #(:seon.task/id (:seon.cite/target (val %))) (:seon.cite/_of (:seon.agent/task @ctx))))] (swap! ctx assoc-in [:seon.agent/task :seon.cite/_of e :seon.cite/target :seon.task/plan] (str (:seon.task/plan (:seon.cite/target c)) "\n\n" "what would have saved a turn")))``, the cite whose target is a task (a refine's plan cites a section too).
 - **What it cites:** a plan cites by naming: name the section or the function you had to find, and take out a name you never used.
 - **The wiki sections you pulled,** where one was wrong or lacked the line you needed: edit the section, as any doc is changed ([changing a doc](agent.md#changing-a-doc)).
 
