@@ -180,14 +180,27 @@
           ;; the load is read only when it decides: an item to grant, one running, and a max-load set
           ld (if (and k (nil? ld) (:max-load st) (pos? running)) (machine-load) ld)
           st (cond-> st ld (assoc :load ld))]
-      (if (or (nil? k) (and ld (pos? running) (>= ld (:max-load st))))
-        [st outs]
-        (let [batch #{k}
+      (cond
+        (nil? k) [st outs]
+        ;; held for the load: each asker with an item queued is told once as the hold begins (:prove-held, which its
+        ;; client prints, so a hold never reads as a hang), and once as it ends, at the next grant (:resumed)
+        (and ld (pos? running) (>= ld (:max-load st)))
+        (if (:held st)
+          [st outs]
+          (let [askers (into (sorted-set) (comp (filter #(= :queued (:status %))) (mapcat :waiters)) (vals (:items st)))
+                queued (count (filter #(= :queued (:status %)) (vals (:items st))))]
+            [(assoc st :held askers)
+             (into outs (for [a askers] {:op :prove-held :key a :held true :load ld :max-load (:max-load st) :queued queued}))]))
+        :else
+        (let [outs (into outs (for [a (:held st)] {:op :prove-held :key a :held false}))
+              st (dissoc st :held)
+              batch #{k}
               bid (inc (:bid st 0))
               st (-> st (assoc :bid bid) (assoc-in [:batches bid] batch) (assoc-in [:items k :status] :running))
               [st m] (step/ask st [:prove :answers] [:batch (str bid)]
                                (if (= :test (:kind it :test))
-                                 {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)}
+                                 (cond-> {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)}
+                                   (:checkout it) (assoc :checkout (:checkout it)))
                                  ;; a build, a process test or a check step: root's effect owner runs it on the run's checkout
                                  {:op :fx :kind :item :req {:kind (:kind it) :tree (:tree it) :checkout (:checkout it)
                                                             :name (if (#{:build :seed} (:kind it)) (:kind it) (first k)) :digest (second k)
@@ -504,7 +517,8 @@
         (= :spawn step) (plan! (update-in st [:runs key] assoc :runner (:id r) :agent (:id r)) key)
         (= :plan step) (let [st (assoc-in st [:runs key :base] (dissoc r :items :ms :process :steps :build))
                              prio (if (= :turn (:mode run)) :turn :batch)
-                             items (into (plan-items run r) (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run) :kind :test} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t])))]))
+                             items (into (plan-items run r) (for [[t d] (:items r)] [[t d] (cond-> {:agent (:agent run) :mode (:mode run) :kind :test} (get-in r [:ms t]) (assoc :ms (get-in r [:ms t]))
+                                                                                     (:checkout run) (assoc :checkout (:checkout run)))]))
                              [st outs] (ask-items (assoc-in st [:runs key :stage] :items) key prio items (set (:proofs run)))]
                          (settle st outs))
         :else [(update st :stale (fnil inc 0)) []]))))
