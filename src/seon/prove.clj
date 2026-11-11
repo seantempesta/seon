@@ -448,13 +448,16 @@
   [run r]
   (let [tree (or (:tree run) (get-in r [:build :tree]))
         on {:tree tree :checkout (or (:checkout run) (cfg/checkout))}
-        bk [[:build tree] tree] sk [[:seed tree] tree]
+        bk [[:build tree] tree]
         build? (get-in r [:build :needed?])
         ;; the seed brings the checkout's plan program store to the tree first, which every process and step item clones
         ;; (seon.fx/run-item), so each of them needs it; when a process test or a binary step runs, it also seeds the check
         ;; store and makes the process tests' store (its :binary?)
         seed? (boolean (or (seq (:process r)) (seq (:steps r))))
-        stores? (boolean (or (seq (:process r)) (some :binary? (vals (:steps r)))))]
+        stores? (boolean (or (seq (:process r)) (some :binary? (vals (:steps r)))))
+        ;; a seed that seeds the stores is another item than one that only keeps the tree: a checkout's green one of the
+        ;; second (:made) never stands for the first
+        sk [[:seed tree (if stores? :stores :tree)] tree]]
     (cond-> (into {}
                   (concat (for [[t d] (:process r)] [[t d] (cond-> (assoc on :kind :process :binary? true) seed? (assoc :needs #{sk}))])
                           (for [[s {:keys [digest binary? bound alone?]}] (:steps r)]

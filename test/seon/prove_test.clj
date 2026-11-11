@@ -446,6 +446,15 @@
         [st o2] (feed st [(answer-of ask plan)])]
     [st o2 ask]))
 (defn- fx-asks [outs] (filterv #(= :fx (get-in % [:req :op])) outs))
+(defn- seeded-run
+  "tree-run, its tree's seed answered green: every step and process item needs the seed (it brings the checkout's program
+  store to the tree), so what a test of the steps reads is granted after it. [st outputs past the seed, the plan ask]."
+  [slots plan]
+  (let [[st o ask] (tree-run slots plan)
+        sd (first (filter #(= :seed (get-in % [:req :req :kind])) (fx-asks o)))]
+    (if sd
+      (let [[st o2] (feed st [(answer-of sd {:value {:pass 1 :fail 0 :error 0 :ms 1}})])] [st (into (vec (remove #{sd} o)) o2) ask])
+      [st o ask])))
 (defn- run-answers [outs] (mapv :r (filter #(= :prove-answer (:op %)) outs)))
 
 ;; docs/merging.md#the-test-service: a process test runs on its checkout's binary, so it waits for its tree's build
@@ -477,17 +486,27 @@
         [_ o4] (feed st [(answer-of (first (asks o3 :tests)) {:items {} :process {'a.p-test/u "du"} :build {:tree "T" :needed? true}})])]
     (is (= [:process] (mapv #(get-in % [:req :req :kind]) (fx-asks o4))) "the second run's process item is granted at once: no build, no seed")))
 
+(deftest a-seed-that-kept-the-tree-only-is-not-a-seed-of-the-stores
+  ;; a run of a laws step seeds the tree only (no check store, no process tests' store); a later run of that tree with a
+  ;; process test needs both stores, so the checkout's green seed of the first kind is no seed of the second (:made)
+  (let [[st o] (seeded-run 4 {:items {} :steps {"laws" {:digest "dl" :binary? false}} :build {:tree "T" :needed? false}})
+        [st _] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 1}})])
+        [st o2] (feed st [[:req {:rid 2 :branch :tree-T :digest "dT" :agent :a1 :checkout "/ck" :tree "T" :names '#{a.p-test}}]])
+        [_ o3] (feed st [(answer-of (first (asks o2 :tests)) {:items {} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? false}})])]
+    (is (= [[:seed true]] (mapv #(vector (get-in % [:req :req :kind]) (get-in % [:req :req :binary?])) (fx-asks o3)))
+        "the process test's run seeds the stores first")))
+
 (deftest a-step-about-the-machine-runs-with-nothing-beside-it
   ;; Optimization's e2e of step 4: scale (it measures what root's agents cost the machine's memory) was granted beside 29 other
   ;; steps and 7 of its agents answered no verdict; bin/check runs it alone (seon.proofs/machine-steps)
-  (let [[st o] (tree-run 4 {:items {} :steps {"scale" {:digest "ds" :binary? false :alone? true} "laws" {:digest "dl" :binary? false}
+  (let [[st o] (seeded-run 4 {:items {} :steps {"scale" {:digest "ds" :binary? false :alone? true} "laws" {:digest "dl" :binary? false}
                                               "fx" {:digest "df" :binary? false}}
                             :build {:tree "T" :needed? false}})
         names (fn [outs] (mapv #(get-in % [:req :req :name]) (fx-asks outs)))]
     (is (= ["scale"] (names o)) "nothing running: scale, the most valuable, is granted, and nothing beside it though three workers are free")
     (let [[st o1] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 10}})])]
       (is (= #{"laws" "fx"} (set (names o1))) "it ended: the others at once")))
-  (let [[st o] (tree-run 4 {:items {} :steps {"laws" {:digest "dl" :binary? false :ms 1} "scale" {:digest "ds" :binary? false :alone? true}}
+  (let [[st o] (seeded-run 4 {:items {} :steps {"laws" {:digest "dl" :binary? false :ms 1} "scale" {:digest "ds" :binary? false :alone? true}}
                             :build {:tree "T" :needed? false}})
         names (fn [outs] (mapv #(get-in % [:req :req :name]) (fx-asks outs)))
         ran (names o)]
@@ -518,7 +537,7 @@
 ;; a step past its bound is a signal (docs/clocks.md#time-decides-the-owners-exceptions), never a verdict: its asker is answered
 ;; on the rest, and the answer names it
 (deftest a-step-that-overran-is-a-signal-not-a-red
-  (let [[st o] (tree-run 4 {:items {'a.b-test/t "dt"} :steps {"laws" {:digest "dl" :binary? false :bound 100}} :build {:tree "T" :needed? false}})
+  (let [[st o] (seeded-run 4 {:items {'a.b-test/t "dt"} :steps {"laws" {:digest "dl" :binary? false :bound 100}} :build {:tree "T" :needed? false}})
         [s] (fx-asks o)
         [t] (remove #(get-in % [:req :plan?]) (asks o :tests))
         [st o2] (feed st [(answer-of s {:value {:signal :overran :ms 150}})])
@@ -548,7 +567,7 @@
 ;; docs/merging.md#the-test-service: a red step is the run's red by its name (a step's is no test var, so its failing report named
 ;; nothing), and a red run is not remembered: the same key asked again runs again. Red before: :red [] and the run remembered green
 (deftest a-red-step-is-named-red-and-never-remembered
-  (let [[st o] (tree-run 4 {:items {} :steps {"laws" {:digest "dl" :binary? false :bound 100}} :build {:tree "T" :needed? false}})
+  (let [[st o] (seeded-run 4 {:items {} :steps {"laws" {:digest "dl" :binary? false :bound 100}} :build {:tree "T" :needed? false}})
         [s] (fx-asks o)
         [st o2] (feed st [(answer-of s {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message "measures FAILED"}]}})])
         [r] (run-answers o2)
