@@ -287,12 +287,26 @@
                               (or (empty? todo) (>= i steps)) false
                               :else (recur (into #{} (mapcat #(:datahike/parents (d/commit-graph-record store %))) todo) (inc i))))))))
 
+(defn model-parts
+  "The parts of entity c's page the model reads, as one component: the lists its page render places (seon.render/render-var-of: its own
+  render, else its schema's) that hold no messages and are not for the page alone, as seon.render/page-lists keeps them, in the order the
+  render places them. The root of the parts walk (`parts-walk`), so a list an entity's own render adds is read by the model as the
+  task's parts are. See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
+  [opts c]
+  (let [out ((render/render-var-of (:seon.render/index opts) c) opts c)
+        placed (if (and (vector? out) (keyword? (first out))) (drop-while map? (rest out)) out)
+        model? (fn [x] (and (vector? x) (var? (first x))
+                            (let [m (meta (first x))]
+                              (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for (second x)))))))]
+    (into [:div {:id "model-parts"}] (filter model?) placed)))
+
 (defn- parts-walk
   "Agent a's page-parts walk drawn at db d0 (its branch's own, at t), cold: {:id :t :at :c :r :w}, the walk the model reads (:model-only:
   what is the page's alone is not drawn) over the agent pulled by what the parts read (seon.render/page-pattern of its own pattern)."
   {:malli/schema [:=> [:cat :seon.host/db :int :int [:tuple :any :any :int]] :map]}
   [d0 t a id]
-  (let [parts (requiring-resolve 'seon.render.ui/agent-parts)
+  (let [parts #'model-parts
         branch (nth id 1)
         ix0 (program/index-of-db d0)
         c0 (assoc-in (ctx/build ix0 d0 a branch (render/page-pattern ix0 (or (render/entity-pattern ix0 (d/pull d0 '[*] a)) []))) [:ix :own-index?] true)
