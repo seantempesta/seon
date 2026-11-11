@@ -58,7 +58,9 @@
 ;; :last-frame-ms), and which procs answered the ping, so a proc mid-step is seen missing, never read as nil
 (deftest a-hangs-evidence-holds-roots-stall-state
   (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
-        r (ts/value-of (:response (ts/ask root {:op :eval :agent "root" :code "(seon.root/stall-state sys)"})))]
+        ;; with an agent of its own running, so an agent proc's state is read, then ended
+        r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
+                                                :code "(let [ag (seon.root/spawn! sys {}) s (seon.root/stall-state sys)] (seon.root/kill! sys ag) s)"})))]
     (is (map? (:root r)) (pr-str r))
     (is (every? #{:seon.root/stall-armed :seon.root/busy :seon.root/lost} (keys (:root r))) "root's stall check, nothing else of its state")
     ;; red before (batch 32's problems overrun): the api's ping answered only :agents :closing :pending, so :root was {} on every
