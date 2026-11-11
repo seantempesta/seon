@@ -1207,8 +1207,8 @@
 
 (defn run-item
   "The :item effect: one item of a session's prove that the test service (seon.prove) granted, run on the session's
-  checkout at tree, niced: :build is bin/build seon there; :seed seeds the checkout's check store fresh, once a tree (each binary
-  step takes a clone of it, as bin/check's steps do); :process is one test as a shard of one (bin/test --shard,
+  checkout at tree, niced: :build is bin/build seon there; :seed brings the checkout's program store to the tree and, :binary?,
+  seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :process is one test as a shard of one (bin/test --shard,
   whose runner stores its verdict); :step is one check step (bin/check --steps, then bin/test --store-steps, which
   stores it green at its digest). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the
   cache by its digest, so an item asked again is reused there; a step bin/check ended past its bound (its DIR/overran) is
@@ -1251,10 +1251,15 @@
                 ;; seeded once, fresh, as bin/check's seed step seeds it: so steps at once never race to make it
                 ;; and the process tests' store, made by this checkout's own runtime (its path is its schema's digest), as
                 ;; bin/test's plan makes it before any shard: a process item on a fresh checkout found none
-                :seed (do (lib/remove-tree! store)
-                          (sh "zsh" "-c" (str "ROOT=$PWD; . bin/env; (cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-)"
-                                              " && HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test"
-                                              " -e \"(require 'seon.test-store) (seon.test-store/make-process-store! \\\"$PWD\\\")\"")))
+                ;; first of all the checkout's plan program store, brought to the tree by the plan's own path (program-db with its
+                ;; max-bytes, the one caller that may remove it), so the items that clone it import nothing
+                :seed (let [prog (str "(require 'seon.test-store 'test-runner) (test-runner/program-db \\\"$PWD\\\" (seon.test-store/kept-program-store)"
+                                      " (seon.fx/tree-id \\\"$PWD\\\") (seon.config/value :seon.config.proofs/program-store-max-bytes))"
+                                      (when (:binary? req) " (seon.test-store/make-process-store! \\\"$PWD\\\")"))]
+                        (when (:binary? req) (lib/remove-tree! store))
+                        (sh "zsh" "-c" (str "ROOT=$PWD; . bin/env; "
+                                            (when (:binary? req) "(cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-) && ")
+                                            "HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test -e \"" prog "\"")))
                 :process (sh "bin/test" "--shard" (str dir "/shard-0.edn") "--set" (str ":seon.config.proofs/program-store=" (sedn/encode pstore)))
                 :step (let [c (sh "bin/check" "--steps" dir)] (sh "bin/test" "--store-steps" dir) c))
             ms (profile/ms-since t0)
@@ -1272,7 +1277,7 @@
           (= :build kind) (if (zero? (:exit r))
                             {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
                             (error #'seon.fx/run-item :seon.fx/io-error (str (build-failure (str (:out r) (:err r)) nil) "; its log: " log) {:path checkout}))
-          (= :seed kind) (if (and (zero? (:exit r)) (.isFile (java.io.File. (str store "/data.mdb"))))
+          (= :seed kind) (if (and (zero? (:exit r)) (or (not (:binary? req)) (.isFile (java.io.File. (str store "/data.mdb")))))
                            {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
                            (error #'seon.fx/run-item :seon.fx/io-error (str "the seed of " store " failed (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log) {:path checkout}))
           ;; a step that ended red with no verdict stored, over its bound: the overrun is a signal, its verdict none
