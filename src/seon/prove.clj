@@ -85,7 +85,8 @@
 (defn- grant
   "While a worker is free (a slot) and an item is queued: the most valuable queued item (a :turn asker's first, then
   item-value), alone (no shards: a worker pulls one item, so none idles while another holds a list), asked of the agent
-  holding it as {:op :tests :id agent :mode m :names #{test}} (a named test runs alone: seon.agent/named-tests) tagged
+  holding it as {:op :tests :id agent :mode m :names #{test} :items {test digest}} (a named test runs alone, at the digest
+  the agent's plan gave it: seon.agent/item-selection) tagged
   [:batch bid]; each queued item passed over ages a skip.
   Answers [st outputs]."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:vector :map]]]}
@@ -100,7 +101,7 @@
               st (reduce (fn [st k2] (if (batch k2) (assoc-in st [:items k2 :status] :running) (update-in st [:items k2 :skips] (fnil inc 0))))
                          (-> st (assoc :bid bid) (update :slots dec) (assoc-in [:batches bid] batch))
                          (map key queued))
-              [st m] (step/ask st [:prove :answers] [:batch (str bid)] {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch)})]
+              [st m] (step/ask st [:prove :answers] [:batch (str bid)] {:op :tests :id (:agent it) :mode (:mode it :judge) :names (into #{} (map first) batch) :items (into {} batch)})]
           (recur st (conj outs m)))))))
 
 (defn- item-ended
@@ -204,8 +205,9 @@
 (defn- run-answer
   "The answer run (its plan :base) is given, its items' results (per test: the item's counts, :failures and the :answer of
   the grant that ran it; or the error its batch answered): the run-tests-forked shape the done rule and an agent's prove
-  read: the plan's reused reports, each item's own reports, every digest and function cost, the counts, and what was
-  selected, deferred and why."
+  read: the plan's reused reports, each item's own reports, every digest, function cost and measure (:measured, which the
+  asker's agent writes as its facts: seon.agent/record-answer!), the counts, what was selected, deferred and why, and
+  any verdict the cache would not take (:unstored)."
   {:malli/schema [:=> [:cat :map :map] :map]}
   [base results]
   (let [own (fn [t r] (if (contract/error? r)
@@ -216,9 +218,12 @@
     (cond-> {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :reports reports
              :digests (into (or (:digests base) {}) (for [[_ r] results :when (map? (:answer r)) [t d] (:digests (:answer r))] [t d]))
              :fns (into {} (for [[_ r] results :when (map? (:answer r)) [t f] (:fns (:answer r))] [t f]))
+             :measured (into {} (for [[_ r] results :when (map? (:answer r)) [t m] (:measured (:answer r))] [t m]))
              :selected (vec (:selected base)) :deferred (vec (:deferred base)) :at-judge (:at-judge base 0)
              :reused (count (filter :reused (:reused-reports base))) :ran (count results)}
-      (seq (:why base)) (assoc :why (:why base)))))
+      (seq (:why base)) (assoc :why (:why base))
+      ;; a verdict the cache would not take, named as its run named it
+      (some (comp :unstored :answer) (vals results)) (assoc :unstored (vec (mapcat (comp :unstored :answer) (vals results)))))))
 
 (defn- runner-done
   "outputs with the request that ends run's prove agent (main's run), once no item of the queue is that agent's."
@@ -242,7 +247,10 @@
         died? (and (not err?) (some :exit (:reports r)))
         r (if err? r (assoc r :key k :red (vec (sort-by str (keys (proofs/failures r))))))
         st (cond-> (-> st (update :runs dissoc k) (assoc :last (:branch run)))
-             (not (or err? died? (seq (:red r)))) (assoc-in [:done (slot run)] {:key k :r r}))
+             ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
+             (not (or err? died? (seq (:red r)))) (assoc-in [:done (slot run)] {:key k :r (-> r (dissoc :measured) (assoc :ran 0)
+                                                                                         (update :reports (partial mapv #(assoc % :reused true)))
+                                                                                         (as-> x (assoc x :reused (count (distinct (keep :var (:reports x)))))))}))
         [st kill] (runner-done st run)]
     [st (cond-> (into (reply [] waiters r) kill) (and err? (not ended?)) (conj {:op :problem :class :platform :error r}))]))
 

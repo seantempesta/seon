@@ -933,6 +933,8 @@
 
 (declare handle!)
 
+(declare record-answer!)
+
 (defn prove!
   "Ask the test service (seon.prove) to prove this branch at its head, and wait for its answer:
   the run's (run-tests-forked's answer, with :key). The service runs one run per key whoever
@@ -957,7 +959,10 @@
       (let [r (:result (await-reply k (cond-> {:op :prove :k k :t (:max-tx (db)) :digest (program/run-digest (db)) :mode mode}
                                         (seq names) (assoc :names names))))]
         (vreset! answered true)
-        r)
+        ;; its facts on this branch, once an ask, from the answer and this agent's plan of the run
+        (if (and (map? r) (not (contract/error? r)))
+          (record-answer! r (:held-plan @state) (or (some->> (:task @state) (task/task (db)) :seon.task/accumulated :proofs) #{}))
+          r))
       ;; an interrupt ended this wait, the only way one ends before its answer: the test child it was for goes too, so its run answers as a death (no verdict) and nothing is left running
       (finally (when-not @answered (some-> (:test-child @state) (lib/kill! (jolt.host/signal-number "KILL")))))))))
 
@@ -1243,6 +1248,26 @@
            (catch Throwable e (contract/error :seon.agent/unrecorded #'record-results! (str "the branch refused the run's results: " (ex-message e)) {})))
       0)))))
 
+(defn- record-answer!
+  "Record the test service's answer r to this agent's ask (seon.prove's run-answer: each item's reports, digests and
+  :measured, and the plan's reused reports and :deferred) on this branch, once an ask: record-results! of what it ran,
+  reused and deferred, at the digests of held (held-plan, this agent's plan of the run, every judging test's, so a fact
+  whose digest moved is retracted). The answer as it was, with :unrecorded when the branch refused the write. See
+  docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat :map [:maybe :map] [:set :symbol]] :map]}
+  [r held proofs]
+  (let [digests (merge (:digests held) (:digests r))
+        {:keys [ran failures]} (proofs/answer-ran (assoc r :digests digests))
+        ran (into {} (for [[t x] ran] [t (merge x (get-in r [:measured t]))]))
+        reps (filterv :reused (:reports r))
+        st (proofs/results {:reports reps})
+        fs (proofs/failures {:reports reps})
+        reused (into {} (for [[t s] st :let [d (digests t)] :when d]
+                          [t {:digest d :pass (if (= :pass s) 1 0) :fail (if (= :fail s) 1 0) :error (if (= :error s) 1 0) :failures (get fs t [])}]))
+        rec (record-results! ran failures reused digests (set (:deferred r))
+                             (select-keys (proofs/results r) (keys (get-in held [:plan :removed]))) proofs)]
+    (cond-> (dissoc r :measured) (contract/error? rec) (update :unrecorded (fnil conj []) (:seon.error/message rec)))))
+
 (defn- run-plan
   "What a run of this branch selects and runs (run-tests-forked's, and the test service's :plan of it, seon.prove): the
   plan (test-plan, with the tests of the namespaces named as proofs), the tests it selects for mode (:turn: the proofs and
@@ -1277,6 +1302,24 @@
                                 (and (:cost r) (identical? f (first (:failures r)))) (assoc :cost (:cost r)))))]
     {:plan plan :judge judge :deferred deferred :selected selected :run run :reused reused :digests digests :reused-reports reused-reports}))))
 
+(defn- held-plan
+  "What this agent keeps of its plan of a run (run-plan's sel) for the items the test service grants it: every digest, and
+  of the plan only what running a test reads (:removed, :process, :base-digests), not its graph. See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [sel]
+  {:digests (:digests sel) :plan (select-keys (:plan sel) [:removed :process :base-digests])})
+
+(defn- item-selection
+  "The selection that runs items ({test digest}, the test service's grant) as held (held-plan, this agent's last plan of a
+  run) planned them: each test alone, selected and run, reused and deferred nothing; nil when held gave any of them another
+  digest (or there is none), which is a plan of another program than the one the item was queued at. See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat [:maybe :map] [:maybe [:map-of :qualified-symbol :string]]] [:maybe :map]]}
+  [held items]
+  (when (and held (seq items) (every? (fn [[t d]] (= d (get-in held [:digests t]))) items))
+    (let [ts (vec (sort-by str (keys items)))]
+      (assoc held :judge ts :selected ts :run ts :deferred [] :reused {} :reused-reports []))))
+
 (defn run-tests-forked
   "Fork this agent; the child runs what test-plan runs for proofs (the selected tests with no
   green held at their digest), each test within ticks engine ticks of work of its own, writing
@@ -1306,11 +1349,14 @@
   runs (:at-judge)."
   {:malli/schema [:function [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
                   [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
-                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]]}
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]
+                  [:=> [:cat pos-int? [:set :qualified-symbol] [:enum :turn :judge :main] :seon.host/fn [:maybe [:set :symbol]] [:maybe [:map-of :qualified-symbol :string]]] [:or :seon.test/result :seon.test/fork-refused :seon.error/base]]]}
   ([ticks proofs mode] (run-tests-forked ticks proofs mode (fn [_] nil)))
   ([ticks proofs mode forked] (run-tests-forked ticks proofs mode forked nil))
-  ([ticks proofs mode forked names]
-  (let [{:keys [unread] :as sel} (run-plan proofs mode names)]
+  ([ticks proofs mode forked names] (run-tests-forked ticks proofs mode forked names nil))
+  ([ticks proofs mode forked names items]
+  ;; an item the test service granted, at the digest this agent's plan of the run gave it: run as planned, nothing planned again
+  (let [{:keys [unread] :as sel} (or (item-selection (:held-plan @state) items) (run-plan proofs mode names))]
   (if unread
     unread
   (let [{:keys [plan judge deferred selected run reused digests reused-reports]} sel
@@ -1371,13 +1417,15 @@
         (as-> r (let [{:keys [ran failures]} (proofs/answer-ran (assoc r :digests digests))
                       ran (into {} (for [[t x] ran] [t (merge x (get-in r [:measured t]))]))
                       w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state) :key (:key @state)} ran failures)]
-                  ;; beside the cache, the same run's results as facts on this branch (the record shows them)
+                  ;; beside the cache, the same run's results as facts on this branch (the record shows them); an item the test service
+                  ;; granted writes the cache only: its asker's answer writes the facts once (record-answer!)
                   ;; not main's run: it judges main's tree (no :base), whose facts are main's prove's to write
-                  (let [rec (when-not (= :main mode) (record-results! ran failures (select-keys reused selected) digests (set deferred)
+                  (let [rec (when-not (or (= :main mode) items) (record-results! ran failures (select-keys reused selected) digests (set deferred)
                                                                      (select-keys (proofs/results r) (keys (:removed plan))) proofs))]
                   (-> (cond-> r (contract/error? w) (assoc :unstored [(:seon.error/message w)])
                         (contract/error? rec) (assoc :unrecorded [(:seon.error/message rec)]))
-                      (dissoc :measured)))))
+                      ;; an item's measure goes with its answer: its asker's answer writes the test's sums (record-answer!)
+                      (cond-> (not items) (dissoc :measured))))))
         (update :reports into reused-reports)
         (as-> r (merge-with + r (select-keys (frequencies (map :type reused-reports)) [:pass :fail :error])))
         (assoc :digests (select-keys digests (concat (keep (comp proofs/test-symbol :var) (:reports res)) (filter reused selected))))
@@ -1400,7 +1448,7 @@
   [r]
   (let [dbv (db)
         verdict (fn [t] (d/entity dbv [:var/name t]))
-        by (group-by (fn [t] (if (#{nil :deferred} (:seon.test/status (verdict t))) :deferred :judged)) (:deferred r))
+        by (group-by (fn [t] (if (contains? #{nil :deferred} (:seon.test/status (verdict t))) :deferred :judged)) (:deferred r))
         reports (vec (for [t (:judged by) :let [v (verdict t)]
                            f (if (= :green (:seon.test/status v)) [{:type :pass}] (:seon.test/failures v))]
                        (assoc f :var (str "#'" t) :reused true)))]
@@ -1448,7 +1496,7 @@
             closed (task/unjudged dbv tk (:deferred r))
             named? (fn [t] (or (task/proof? tk t) (contains? names t) (contains? names (symbol (namespace t)))))
             pull-of (fn [t] (d/pull (db) [:seon.test/digest :seon.test/status :seon.test/failures :seon.test/ticks :seon.test/bytes] [:var/name t]))
-            open (filterv #(#{nil :deferred} (:seon.test/status (pull-of %))) (remove (set (:tests closed)) (:deferred r)))
+            open (filterv #(contains? #{nil :deferred} (:seon.test/status (pull-of %))) (remove (set (:tests closed)) (:deferred r)))
             ;; one stage's tests through the gate, written where the status reads them; its error or nil
             gate! (fn [tests prio]
                     (when (seq tests)
@@ -1539,7 +1587,13 @@
              ;; the test service's plan of a run (seon.prove): what it would run, each at its digest, and what it reuses and defers;
              ;; nothing forked. The service then asks for each item by name, as its workers free
              (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
-                   sel (run-plan proofs (or (:mode m) :judge) (some-> (:names m) set))]
+                   mode (or (:mode m) :judge)
+                   sel (run-plan proofs mode (some-> (:names m) set))
+                   ;; the plan's own facts on this branch, once a run: what it reuses and what it defers to the gate, at their
+                   ;; digests (each item's run records what it ran); main's run is main's prove's to write
+                   ;; held for the items it grants this agent (item-selection), each run at the digest planned here, and for
+                   ;; the facts its answer writes on this branch (record-answer!)
+                   _ (when-not (:unread sel) (swap! state assoc :held-plan (held-plan sel)))]
                [{:op :tests :id (:id m) :mem-mb (mem-mb)
                  :result (or (:unread sel)
                              (cond-> {:items (select-keys (:digests sel) (:run sel)) :selected (:selected sel) :deferred (:deferred sel)
@@ -1551,7 +1605,8 @@
                                      proofs
                                      (or (:mode m) :judge)
                                      #(send! {:op :tests-started :id (:id m) :pid %})
-                                     (some-> (:names m) set))
+                                     (some-> (:names m) set)
+                                     (:items m))
                  ;; a test its asker named is one it reads, as a proof is: seon.proofs/answer keeps its pass
                  names (set (:names m))
                  named (filter #(or (names %) (names (symbol (namespace %)))) (:selected r))]
