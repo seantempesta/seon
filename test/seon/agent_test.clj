@@ -2259,20 +2259,29 @@
   ;; the owner's ruling: a turn runs the proofs, the tests the change reaches run once they are green, judged as the
   ;; judge judges them, before it is done. md-scan #24 ended green on its proofs and the judge found 18 reds its change
   ;; made: here a green proof beside a change that breaks main's edit test (seon.fixtures/whole-stray) does not end
-  ;; green, and its next turn's status names the red
+  ;; green, and its next turn's status names a red its change made. The change breaks every test reaching
+  ;; seon.repl/offsets that edits text, and a run is answered at its first red (docs/merging.md#the-test-service), its items
+  ;; running at once, so which one the status names is the order they landed in: the claim is one of them, never a
+  ;; particular one (red in batch 46 as flaky: it awaited the exact-text edit test and the copied-source one landed first)
   (let [code #(str "(let [_ (my.root/request! sys {:seon.task/ns '" % " :seon.task/name \"ws\" :seon.task/plan \"Make ws.\" :seon.task/config {:seon.config.ai/script 'seon.fixtures/whole-stray}})"
                    " _ (seon.root/await-db sys \"the work ended\" #(" not-running " (:seon.task/outcome (datahike.api/entity % [:seon.task/id \"" % "/ws\"]))))"
                    " db @(:conn sys) t (seon.task/task db \"" % "/ws\")"
                    " b (:db @(seon.root/call! sys {:op :write :req {:op :branch-db :branch (seon.task/default-branch \"" % "/ws\")}}))"
                    " a (seon.db/eid b :seon.agent/key (:seon.task/agent t))]"
                    " [(:seon.task/outcome t) (seon.reconcile/task-state (seon.reconcile/index db) \"" % "/ws\") (mapv (juxt :reason :symbol) (:reasons (seon.ctx.status/status b (:tree (seon.ctx/build (seon.db/index) b a :b)) {})))])")
-        [_ r] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))})
-                        {})
-        [outcome state reasons] (:value r)]
+        [_ r reaching] (in-agent #(vector {:op :eval :agent "root" :code (str "(load-file " (pr-str await-file) ")")} {:op :eval :agent "root" :code (code (:ns %))}
+                                          "(my.agent/tests-reaching 'seon.repl/offsets)")
+                                 {})
+        [outcome state reasons] (:value r)
+        broken (set (:value reaching))]
     (is (not (#{:done :merged} outcome)) (pr-str r))
     (is (not= :merged state) "not merged")
-    (is (some #{[:stray-red 'seon.repl-test/an-edit-replaces-exact-text-once-and-evaluates-the-definition]} reasons)
-        (str "its status names the test its change broke: " (pr-str reasons)))))
+    ;; the two orders batch 46 saw: either red, landing first, is one the change broke
+    (is (every? broken '[seon.repl-test/an-edit-replaces-exact-text-once-and-evaluates-the-definition
+                         seon.repl-test/an-edit-copied-from-the-shown-source-applies])
+        (pr-str reaching))
+    (is (some (fn [[why t]] (and (= :stray-red why) (contains? broken t))) reasons)
+        (str "its status names a test its change broke: " (pr-str reasons)))))
 
 (deftest a-red-whole-task-is-not-merged-and-its-next-turn-says-why
   ;; the other way: a whole task whose proof is red is not merged. Its task does not end red: it
