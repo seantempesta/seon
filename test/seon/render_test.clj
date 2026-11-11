@@ -2426,7 +2426,9 @@
   :seon.agent/entry's pattern and one level of the agents it started): its hiccup, the started agents in it as the pulled maps a walk
   places as their own entries."
   [db key]
-  (let [e (vec (remove #(and (map? %) (contains? % :seon.agent/agents)) (r/schema-property (seon.db/index) :seon.agent/entry :seon.ctx/pattern)))]
+  (let [;; the entry's own clauses: its join of the agents it started (asked to a depth, its key a vector with :below) is asked here one level
+        started? (fn [c] (and (map? c) (some #(= :seon.agent/agents (if (vector? %) (first %) %)) (keys c))))
+        e (vec (remove started? (r/schema-property (seon.db/index) :seon.agent/entry :seon.ctx/pattern)))]
     (#'ui/agent-entry db (d/pull db (into [:db/id] (conj e {:seon.agent/agents (into [:db/id] e)})) [:seon.agent/key key]))))
 
 (deftest an-agents-entry-says-what-it-works-on
@@ -2635,13 +2637,16 @@
 
 (deftest a-clause-the-role-gains-reaches-roots-session-with-no-write
   ;; docs/ctx.md#the-pattern: root's session names its role's pattern, so a clause the agent schema's pattern gains reaches its pull at once,
-  ;; with no boot and no write (a registry bound in which :seon.db/agent-fact's pattern asks one clause more, as a branch's schemas are)
+  ;; with no boot and no write (an entity index in which :seon.db/agent-fact's pattern asks one clause more, as a branch's own index is: seon.db/index-of)
   (let [ix (seon.db/index)
         db (d/db-with (booted) [{:seon.agent/key "root" :seon.agent/holder "a clause the role gained"}])
         a (seon.db/eid db :seon.agent/key "root")
         props (update (seon.contract/properties :seon.db/agent-fact) :seon.ctx/pattern #(conj (vec %) :seon.agent/holder))
+        ;; the schema's own form with its pattern one clause longer: its entries are what make it an entity schema in the index
+        forms {:seon.db/agent-fact (assoc (get seon.contract/forms :seon.db/agent-fact) 1 props)}
         before (seon.ctx/agent-ctx ix db a)
-        after (binding [malli.registry/*registry* (seon.contract/registry-of {:seon.db/agent-fact [:map props]})] (seon.ctx/agent-ctx ix db a))]
+        ;; a branch's changed schema is read by the index derived from it (seon.db/index-of), as an agent's is
+        after (seon.ctx/agent-ctx (seon.db/index-of {:forms forms}) db a)]
     (is (nil? (:seon.agent/holder before)) "the role's pattern does not ask it")
     (is (= "a clause the role gained" (:seon.agent/holder after)) "once the role's pattern asks it, root's session's pull holds it")
     (is (= [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}] (:seon.ctx/pattern (d/pull db [:seon.ctx/pattern] a))) "with nothing written")))
