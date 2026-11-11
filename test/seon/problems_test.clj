@@ -402,13 +402,13 @@
     (testing "the reconciler's commit: a failed :git, then the next merge's sha"
       (let [git (assoc (contract/error :seon.fx/io-error 'seon.fx/git-commit "git commit: index.lock exists" {}) :seon.fx/at-ms 2000)
             db0 (world)
-            db (d/db-with db0 (err/asked-tx db0 git :seon.task/commit [{:seon.task/id "t/r1" :seon.task/commit-error (:seon.error/message git)}]))
+            db (d/db-with db0 (err/asked-tx db0 git :seon.task/commit [{:seon.task/id "t/r1" :seon.task/error (contract/error :seon.git/commit-failed 'seon.reconcile/commit-tx (:seon.error/message git) {:seon.git/files ["src/a.clj"]})}]))
             fixed (d/db-with db (err/asked-tx db {:value {:sha "abc"}} :seon.task/commit [{:seon.task/id "t/r2" :seon.task/commit "abc"}]))]
         (is (= 1 (count (rows db))))
         (is (open? db) "a failed commit writes no sha: open")
         (is (false? (:open? (first (rows fixed)))) "the next merge's commit writes one: closed")))
     (testing "an error the asker made itself (no owner's stamp) writes its fact alone"
-      (is (= [{:a 1}] (err/asked-tx (world) (contract/error :seon.fx/io-error 'my.root/gate! "no gate checkout" {}) :seon.task/deferred-results [{:a 1}]))))
+      (is (= [{:a 1}] (err/asked-tx (world) (contract/error :seon.fx/io-error 'seon.reconcile/gated "no gate checkout" {}) :seon.task/deferred-results [{:a 1}]))))
     (.setReadable (java.io.File. co "a.clj") true)
     (run! #(.delete ^java.io.File %) (reverse (file-seq (.getParentFile co))))))
 
@@ -698,7 +698,7 @@
 (deftest a-merge-with-its-process-tests-unrun-is-an-open-problem
   ;; owner's ruling, 2026-10-23: a change that reaches process tests merges with them unrun
   ;; unless root asked; unknown stays visible, an open :unrun row, until each is recorded
-  ;; passing (my.root/gate! runs them): one passing of two, or a red, keeps it open
+  ;; passing (the reconciler's :gate records them): one passing of two, or a red, keeps it open
   (let [att (fn [extra] (:db-after (d/with (seeded 1 5)
                                            [(ended "t/u" (merge {:seon.task/branch :u :seon.task/kind :merge :seon.task/outcome :merged
                                                                  :seon.task/agent {:seon.agent/key "b/a9" :seon.agent/ended-ms 9}
