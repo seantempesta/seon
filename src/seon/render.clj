@@ -1174,7 +1174,7 @@
   :joins [{:attr :key :rev? :limit :reverse? :by :sub}]}, each join's attribute read forward, its
   key its :as else the attribute, its limit a count or a config key's value; :attrs also the name a
   reverse :by join reads. Throws :seon.ctx/invalid-pattern naming the clause it cannot read: no
-  vector, a clause that is no '*, attribute or join, a reverse attribute outside a join, an option
+  vector, a clause that is no '*, attribute, [attribute :t true] (its value and the transaction it was written in, :ts) or join, a reverse attribute outside a join, an option
   neither pull's nor :by, a :limit with no :reverse (a window is newest first), a join with no
   pattern, an entity schema with none or whose pattern reaches itself. An entity schema's name is read in the entity index ix (seon.db/index-of)."
   {:malli/schema [:function [:=> [:cat :map :any] :seon.ctx/spec] [:=> [:cat :map :any [:set :qualified-keyword]] :seon.ctx/spec]]}
@@ -1186,6 +1186,10 @@
      (doseq [x p] (cond (= '* x) nil
                         (keyword? x) (when (reverse? x) (bad "a reverse attribute is read by a join: {:ns/_name pattern}" x))
                         (map? x) nil
+                        ;; an attribute with options, as pull's [attr :as x]: :t true, the transaction each of its datoms was written in, beside its value
+                        (vector? x) (let [[a & opts] x]
+                                      (when-not (and (qualified-keyword? a) (not (reverse? a))) (bad "an attribute clause names an attribute: [:ns/name :t true]" x))
+                                      (when-not (= [:t true] (vec opts)) (bad "an attribute's one option is :t true" x)))
                         :else (bad "a clause is '*, an attribute or a join" x)))
      (let [joins (vec (for [clause p :when (map? clause) [k sub] clause]
                         (let [[a & opts] (if (vector? k) k [k])
@@ -1204,5 +1208,6 @@
                                                            (conj seen sub)))
                                       :else (bad "a join's pattern is a vector, or an entity schema's name" clause))})))]
        {:star? (boolean (some #{'*} p))
-        :attrs (into (into #{} (filter keyword?) p) (keep #(when (:rev? %) (:by %))) joins)
+        :attrs (-> #{} (into (filter keyword?) p) (into (keep #(when (vector? %) (first %))) p) (into (keep #(when (:rev? %) (:by %))) joins))
+        :ts (into #{} (keep #(when (vector? %) (first %))) p)
         :joins joins}))))

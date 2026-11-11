@@ -32,7 +32,9 @@
 (defn- own
   "Entity e on db, the attributes the pattern spec s names (nil, or a `*`: every one), and the ones its joins read (a forward
   join's attribute, a reverse lookup's name): a cardinality-many one as a set (pull answers a vector), a ref as {:db/id};
-  {:db/id e} alone when db holds none of it. One seek of e's datoms, a quarter of what the pull engine costs for the same answer."
+  {:db/id e} alone when db holds none of it. An attribute the pattern asks with its t ([attr :t true], s's :ts) holds beside its value the
+  transaction its datom was written in, under :seon.ctx/t ({attr t}; a cardinality-many one {attr {v t}}, v a ref's entity id): read off the
+  same datoms, so a pattern that asks none costs what it did (docs/ctx.md#the-pattern). One seek of e's datoms, a quarter of what the pull engine costs for the same answer."
   {:malli/schema [:function [:=> [:cat :seon.host/db pos-int?] :map] [:=> [:cat :seon.host/db pos-int? [:maybe :map]] :map]]}
   ([db e] (own db e nil))
   ([db e s]
@@ -42,12 +44,23 @@
          named? (if (or (nil? s) (:star? s))
                   any?
                   (into (set (:attrs s)) (for [j (:joins s) :when (not (:rev? j))] (:attr j))))]
-     (reduce (fn [m {:keys [a v]}]
-               (if (named? a)
-                 (let [x (if (contains? ref a) {:db/id v} v)]
-                   (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x)))
-                 m))
-             {:db/id e} (d/datoms db :eavt e)))))
+     (if-let [ts (not-empty (:ts s))]
+       ;; the pattern asks the t of some attributes ([attr :t true]): each datom's :tx, beside its value, under :seon.ctx/t
+       (reduce (fn [m {:keys [a v tx]}]
+                 (if (named? a)
+                   (let [x (if (contains? ref a) {:db/id v} v)
+                         m (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x))]
+                     (cond (not (contains? ts a)) m
+                           (contains? many a) (assoc-in m [:seon.ctx/t a v] tx)
+                           :else (assoc-in m [:seon.ctx/t a] tx)))
+                   m))
+               {:db/id e} (d/datoms db :eavt e))
+       (reduce (fn [m {:keys [a v]}]
+                 (if (named? a)
+                   (let [x (if (contains? ref a) {:db/id v} v)]
+                     (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x)))
+                   m))
+               {:db/id e} (d/datoms db :eavt e))))))
 
 (defn- many?
   "Does join j hold a collection (a reverse ref, or a cardinality-many attribute)?"
@@ -477,9 +490,12 @@
     acc
     (let [many (get (dbi/-rschema db) :db.cardinality/many #{})
           js (:joins s)
-          skip (cond-> (into #{:db/id} (map :key) js) (empty? p) (into environment-keys))
+          skip (cond-> (into #{:db/id :seon.ctx/t} (map :key) js) (empty? p) (into environment-keys))
           bad (fn [acc path a v] (if-let [w (why a v)] (update acc :invalid conj {:path path :why w}) acc))
           refuse (fn [acc path w] (update acc :invalid conj {:path path :why w}))
+          ;; the transaction a pulled attribute was written in ([attr :t true]) is the db's, as the record's basis is: never written
+          acc (if (= (get old :seon.ctx/t) (get new :seon.ctx/t)) acc
+                (refuse acc (conj p :seon.ctx/t) "the transaction an attribute was written in is the db's (the pattern's [attr :t true]): it is read, never written"))
           own-ks (remove skip (distinct (concat (keys old) (keys new))))
           ;; this entity's change here: each attribute that differs, each join whose members differ (by id, or the swap!'s key)
           change (as-> {} c
