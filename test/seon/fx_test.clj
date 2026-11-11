@@ -591,12 +591,14 @@
       (is (not (alive? (+ 2 n))) "what it left in its group is ended as it ends")
       (finally (seon.lib/remove-tree! dir)))))
 
-;; a test that hangs only when its fixture asks it to: it reads the fifo target/prove/hang.fifo of its checkout when one is there,
-;; which with no writer never ends (a-process-item-past-its-bound-is-a-signal-and-nothing-of-it-runs-on makes it); with none it
-;; passes at once, so a prove pays nothing for it
+;; a test that hangs only when its fixture asks it to: run as a test-service item (its program store is an item's clone,
+;; seon.fx/run-item's target/prove/items/...), it reads the fifo target/prove/hang.fifo of its checkout when one is there, which with
+;; no writer never ends (a-process-item-past-its-bound-is-a-signal-and-nothing-of-it-runs-on makes it); run any other way, a shard of
+;; a prove beside that test included, it passes at once (a shard beside it read the fifo and hung 300 s, 2026-11-11)
 (deftest a-test-that-hangs-while-its-fifo-is-there
-  (let [f (java.io.File. (str (cfg/checkout) "/target/prove/hang.fifo"))]
-    (is (or (not (.exists f)) (string? (slurp f))))))
+  (let [f (java.io.File. (str (cfg/checkout) "/target/prove/hang.fifo"))
+        item? (clojure.string/includes? (str (cfg/value :seon.config.proofs/program-store)) "/target/prove/items/")]
+    (is (or (not item?) (not (.exists f)) (string? (slurp f))))))
 
 ;; docs/merging.md#a-session-proves-through-root: a process item past its bound is ended whole and answers the signal a step past
 ;; its bound does, :overran with no verdict, never a red and never a worker held (f1 sets :bound, f2 honors it). The item is a test
