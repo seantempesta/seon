@@ -179,7 +179,7 @@ The machine Seon is built on and for, and the rules that keep it from being floo
 - **Never flood it:** anything that makes threads or processes starts at n ≤ 100; kill your own process past 200 threads; one experiment at a time; never make load to reproduce something ([machine](docs/machine.md#processes)).
 - **Kill only verified PIDs:** read the full command and its cwd (`lsof -a -p PID -d cwd`) first; never `pkill`, `killall` or a `pgrep -f` pattern.
 - **A system's processes end with it:** kill it, or its fork server's process group, never a fork server by pid.
-- **Leave nothing running when you finish,** and say so.
+- **Leave nothing running and no finished worktree when you finish** (`bin/worktree --prune`), and say so.
 - **Clean up garbage when you see it, whoever left it** (owner, 2026-10-23: "why not kill the leftover processes? why wouldn't you"), after checking that nothing live uses it. Keep what is evidence or someone's work: the standing store, what git or the store holds, a live session's worktree ([machine](docs/machine.md#disk-stays-bounded)).
 - **Git:** commit explicit paths; never bare `git stash`; never `checkout`, `restore` or `reset` on paths you didn't change; never `git submodule` in a worktree (`bin/worktree --sync NAME`); never push this repository's branches. A cause in a dependency is fixed there, on a ``jolt/<topic>`` branch of its fork (``seantempesta/<lib>``), pushed with no ask: no force, never a fork's main, verified with `gh api` after.
 - **Secrets are never printed.** Paid model calls spend from the owner's standing $50 budget, on productive work only, with the context checked first; past it, the owner's go ([model](docs/model.md#paid-runs)). Install nothing system-wide. Never write in `~/src/seon`.
