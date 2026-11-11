@@ -465,21 +465,22 @@
 ;; ---- the model provider, as the config states it --------------------------------------------
 
 (defn provider
-  "The model provider config c names (:seon.config.ai/*, resolved for its model): none, the
+  "The model provider config c names (:seon.config.ai/*, resolved for its model: temperature, thinking and reasoning effort too, each through the resolver, so a model's or a task's value wins over the file's; docs/model.md#thinking-is-off-by-default): none, the
   scripted provider (a test fixture), or the OpenAI-compatible endpoint with the NAME of its key's
   environment variable (never the key)."
   {:malli/schema [:=> [:cat :seon.config/config] :seon.model/provider]}
   [c]
-  (let [v #(:value (resolve-in c {} % {}))]
+  (let [v #(:value (resolve-in c {} % {}))
+        opt #(:value (resolve-in (merge {% nil} c) {} % {}))] ; a key the file may leave out: nil when set nowhere
     (case (:seon.config.ai/provider c)
       :none {:kind :none}
       :scripted {:kind :scripted :script (:seon.config.ai/script c)}
       :openai-compat (cond-> {:kind :openai-compat :base-url (v :seon.config.ai/base-url) :model (:seon.config.ai/model c)
                               :api-key-env (v :seon.config.ai/api-key-variable) :max-tokens (v :seon.config.ai/max-tokens)
                               :replay-reasoning (v :seon.config.ai/replay-reasoning)}
-                       (:seon.config.ai/temperature c) (assoc :temperature (:seon.config.ai/temperature c))
-                       (:seon.config.ai/thinking c) (assoc :thinking (:seon.config.ai/thinking c))
-                       (:seon.config.ai/reasoning-effort c) (assoc :reasoning-effort (:seon.config.ai/reasoning-effort c))))))
+                       (opt :seon.config.ai/temperature) (assoc :temperature (opt :seon.config.ai/temperature))
+                       (opt :seon.config.ai/thinking) (assoc :thinking (opt :seon.config.ai/thinking))
+                       (opt :seon.config.ai/reasoning-effort) (assoc :reasoning-effort (opt :seon.config.ai/reasoning-effort))))))
 
 (defn with-provider
   "Config c stating provider p (a provider handed to root's start! in place of the file's):
