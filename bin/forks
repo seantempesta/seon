@@ -67,7 +67,8 @@ got-of() { grep -F -- "FORK $1 " $2 | tail -1 | sed 's/^FORK [^ ]* //' }
 # it is kept as a death's log is, and its path printed
 part() { local unit=$1 j=$2 d=$ROOT/target/forks-died; mkdir -p "$d"; local f="$d/${TMP:t}-$unit.log"
   awk -v u="$unit" '{ buf = buf $0 "\n" } /^FORK-MS / { if ($2 == u) { printf "%s", buf; exit } buf = "" }' "$TMP/g$j.log" > "$f"
-  echo "forks: $unit beside others, its part of process $j's log: $f"; }
+  if [[ -s $f ]]; then echo "forks: $unit beside others, its part of process $j's log: $f"
+  else cp "$TMP/g$j.log" "$f"; echo "forks: $unit beside others, no part found in process $j's log (its FORK-MS line is missing): the whole log is $f"; fi; }
 bad=0
 for (( i = 1; i <= n; i++ )); do
   unit=${units[$i]} j=${where[$unit]}
