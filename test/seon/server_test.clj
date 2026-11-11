@@ -222,7 +222,7 @@
         text (:context ctx)]
     (is (clojure.string/starts-with? text "# You are a Seon agent") "the system prompt, first")
     (is (clojure.string/includes? text "(my.render/page {:commit") "the page, as the call Seon made and its answer")
-    (is (re-find #":class \"task-view\"" text) "each part headed by the render that drew it (its class's first word: seon.ctx.wire/presentation-free); the task's, seon.render.ui/task-view")
+    (is (re-find #":render seon.render.ui/task-view" text) "each part headed by the render that drew it, its full symbol (seon.ctx.wire/presentation-free); the task's, seon.render.ui/task-view")
     (is (not (contract/error? (:value status))) (pr-str (:value status)))
     (is (contains? (:value status) :proofs) "status answers as the turn measured it")
     (is (seq (:ns (:value sent))) "and the read records the hash of what it sent, as a model turn does (the debug page compares its redraw with it)")
@@ -374,7 +374,8 @@
     (is (true? (last (:value elsewhere))) "read from another namespace as @seon.ctx/ctx (the in-ns, then the read: each form's value)")
     (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
     (is (clojure.string/includes? (:context next-turn) (pr-str plan)) "the next read tells the plan as it is now")
-    (is (not (clojure.string/includes? (:context next-turn) ":seon.model-call/basis")) "and the read before it by its id, never its record")))
+    (is (= 1 (count (re-seq #":seon.model-call/basis" (:context next-turn))))
+        "and the read before it by its id, never its record: the one basis shown is inside the first point's @ctx, whole (owner, 2026-11-11), which holds that turn's model call")))
 
 (deftest a-task-is-declared-held-and-a-missing-argument-is-named
   ;; repl-audit B F3, F1: no op made a task, and an attach with no task printed root's whole system map. A plain op answers the id and starts nothing;

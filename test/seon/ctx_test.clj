@@ -19,8 +19,11 @@
     {[:seon.message/_to :as :messages :reverse true] [*]}])
 
 (def ^:private small-window-pattern
-  "session-pattern with a window of 10, not :seon.config.ctx/window's 100, so a short session moves its windows."
-  (walk/postwalk-replace {:seon.config.ctx/window 10} session-pattern))
+  "session-pattern with a window of 10, not :seon.config.ctx/window's 100, so a short session moves its windows, and each window
+  asking its link's transaction (:tx :at), as the agent's own pattern does, so a patch is proved to keep it."
+  (walk/postwalk-replace {[:seon.model-call/_agent :as :calls :limit :seon.config.ctx/window :reverse true] [:seon.model-call/_agent :as :calls :limit 10 :reverse true :tx :at]
+                          [:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [:seon.eval/_agent :as :evals :limit 10 :reverse true :tx :at]}
+                         session-pattern))
 
 (def ^:private found
   "The agent state this process held when a test first took it (enter-agent!), ::unset while none has."
