@@ -7,6 +7,7 @@
                                       into OUT/steps (WHAT: tests, checks or both)
     --shard FILE                      one shard's tests run here, each result stored
     --store-steps OUT                 the steps bin/check ran green stored at their digests
+    --overran FILE                    a shard bin/stalls ended: its overran test stored red, the rest to FILE's -rest.edn
   bin/test runs each shard in a process of its own, at once. The program the plan reads is kept
   per git tree in a store of its own (program-db)."
   (:require [konserve.jolt.lmdb :as klmdb] [seon.profile :as profile] [konserve.jolt.fasl-store :as fasl] [clojure.java.io :as io] [clojure.java.shell :as sh] [clojure.string :as str] [clojure.edn :as edn]
@@ -318,18 +319,20 @@
   ({key digest}) dealt among them (deal-mg), each written as out/shard-<i>.edn ({:tests [...] :mg {key digest}
   :digests {test digest} :tree t :rerun #{test}}, t the planned tree's id, rerun the tests that run whatever the cache
   holds: every one of a full run, and the reuse audit's) for bin/test to run, one process each (bin/test
-  removes the last run's first), and each measured test's stall bound as out/stall-bounds (\"<test> <ms>\"
-  lines, for bin/stalls). Answers the shard count."
+  removes the last run's first), and each measured test's stall bound and end bound as out/stall-bounds (\"<test> <stall ms>
+  <end ms>\" lines, for bin/stalls). Answers the shard count."
   [out tests digests tree mg jobs ms rerun]
   (let [sh (proofs/shards tests jobs ms)
         mg-ms (measured-ms (keys mg))
         floor (config/value :seon.config.agent/stall-ms) k (config/value :seon.config.proofs/stall-factor)
+        e (config/value :seon.config.check/step-end-factor)
         dealt (deal-mg sh mg ms mg-ms)]
     (doseq [[i [ts m]] (map-indexed vector dealt)]
       (write! (str out "/shard-" i ".edn") (sedn/encode {:tests ts :mg m :digests (select-keys digests ts) :tree tree :rerun (into (sorted-set) (filter (set ts)) rerun)})))
-    ;; each measured test's stall bound, k times its own last run, for bin/stalls (a test with no
-    ;; record takes the floor, out/stall-ms)
-    (write! (str out "/stall-bounds") (apply str (for [[t m] (sort-by key ms)] (str t " " (max floor (* k m)) "\n"))))
+    ;; each measured test's stall bound, k times its own last run, and its end bound, the step-end factor times the
+    ;; same run floored at stall-ms, past which bin/stalls captures its evidence and ends its shard (OVERRAN:
+    ;; docs/clocks.md#time-decides-the-owners-exceptions); a test with no record takes the floors, out/stall-ms
+    (write! (str out "/stall-bounds") (apply str (for [[t m] (sort-by key ms)] (str t " " (max floor (* k m)) " " (* e (max floor m)) "\n"))))
     (count dealt)))
 
 (defn- shard!
@@ -415,6 +418,32 @@
                     (quot (- (profile/now-ns) t0) 1000000) " ms"))
       (if (and (zero? red) (empty? unstored) (empty? unstored-mg)) 0 1))))
 
+(defn- overran!
+  "A shard bin/stalls ended (its log, file's .log, holds \"OVERRAN <test> <bound> ms ...\": the test ran past its end bound,
+  docs/clocks.md#time-decides-the-owners-exceptions): each overran test cached red at its digest, the line its failure
+  (unless the tree is not the plan's, as shard! keeps), and printed RED; the shard's tests that never ended (no ended,
+  reused or OVERRAN line) and its generative keys (which a shard runs last) written to file's -rest.edn, for bin/test to
+  run in a shard of their own (nothing left, no file). The reds of tests that ended before are not stored, as a stopped
+  shard's are not (shard!). Answers 1: the shard ran a red."
+  [file]
+  (let [{:keys [tests digests tree rerun mg] :as sh} (edn/read-string (slurp file))
+        lines (str/split-lines (slurp (str/replace file #"\.edn$" ".log")))
+        over (into (sorted-map) (keep #(when-let [[_ t] (re-matches #"OVERRAN (\S+) .*" %)] [(symbol t) %])) lines)
+        done (into (set (keys over)) (keep #(when-let [[_ t] (re-matches #"(?:ended|reused) (\S+)(?: .*)?" %)] (symbol t))) lines)
+        left (vec (remove done tests))
+        same? (= tree (fx/tree-id (config/checkout)))
+        unstored (when same?
+                   (record-run! {:id (str "bin/test overran " tree " " (random-uuid)) :tree tree}
+                                (into {} (for [t (keys over)] [t {:test t :digest (digests t) :pass 0 :fail 0 :error 1}]))
+                                (into {} (for [[t l] over] [t [{:type :error :message l}]]))))]
+    (doseq [[t l] over] (println "RED" t (pr-str {:pass 0 :fail 0 :error 1 :message l})))
+    (when-not same? (println "the tree changed since the plan: no result stored"))
+    (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))
+    (when (or (seq left) (seq mg))
+      (write! (str/replace file #"\.edn$" "-rest.edn")
+              (sedn/encode (assoc sh :tests left :digests (select-keys digests left) :rerun (into (sorted-set) (filter (set left)) rerun)))))
+    1))
+
 (defn plan-of
   "What bin/prove and bin/test run on the checkout at root (what: tests, checks or both): the
   program's reach read from the kept store at store (program-db), selected by seon.proofs/plan-of
@@ -445,7 +474,7 @@
   (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run;
   out/tests.edn ({:tree :digests {test digest}}) names each candidate test's digest;
   out/binary names the selected keys that reach target/seon, out/steps-binary the steps among
-  them (both empty: nothing to build, nothing to seed), out/stall-ms the stall bound bin/test reads. Answers the exit
+  them (both empty: nothing to build, nothing to seed), out/stall-ms the stall bound and the end bound of a test with no record, which bin/test reads. Answers the exit
   status: 1 when a check step names a function the program does not define."
   [what all? out names]
   (if-let [bad (refused-names names)]
@@ -516,8 +545,10 @@
         _ (write! (str (config/checkout) "/target/seon.inputs") (sedn/encode inputs))
         _ (when (and (seq bin-keys) (not binary-current))
             (println "prove: target/seon is current for this tree by reach (seon.root/binary-current): no build"))
-        ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms)
-        _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) "\n"))
+        ;; the stall bound bin/test names a quiet test by (:seon.config.agent/stall-ms), and the end bound of a test with no
+        ;; record (the step-end factor times it): "<stall ms> <end ms>"
+        _ (write! (str out "/stall-ms") (str (config/value :seon.config.agent/stall-ms) " "
+                                             (* (config/value :seon.config.check/step-end-factor) (config/value :seon.config.agent/stall-ms)) "\n"))
         ;; the process tests' store, made here before any shard starts (shards' roots that each made
         ;; it raced: seon.test-store/process-store), for this schema (seon.db/kept-store!)
         _ (when (seq (filter binary run-tests)) (write! (str out "/process-store") (str (ts/make-process-store! (.getCanonicalPath (io/file (config/checkout)))) "\n")))
@@ -685,5 +716,6 @@
                    (prove! what all? out (if all? (rest names) names)))
         "--shard" (shard! (first more))
         "--store-steps" (store-steps! (first more))
+        "--overran" (overran! (first more))
         ;; --health [CLASS ...]: bin/check's health step
         "--health" (health! (map keyword more))))))

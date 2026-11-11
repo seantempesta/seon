@@ -227,7 +227,8 @@
  ;; Unit: times. A bin/check step that runs this many times its median measured run (its greens' :ms, seon.fx/typical-ms),
  ;; floored at :seon.config.agent/stall-ms, is ended: bin/evidence captures it first (its process tree, samples, fiber
  ;; dumps, and its root's stall state), and it is red with the typed reason STEP-OVERRAN, never retried (the owner's
- ;; fourth clock exception, 2026-11-10: docs/clocks.md#time-decides-the-owners-exceptions). Provenance: of 6,239 green
+ ;; fourth clock exception, 2026-11-10: docs/clocks.md#time-decides-the-owners-exceptions). A test bin/test runs past this many
+ ;; times its last run (floored at this times :seon.config.agent/stall-ms) is ended the same way by bin/stalls, red as OVERRAN. Provenance: of 6,239 green
  ;; runs in the verdict cache of tests whose median is 2 s or more, 161 ran past 5 times it and 30 (0.5%) past 10, most
  ;; at load 30-40 before proves took slots; past 10 is a hang more often than a slow machine.
  :seon.config.check/step-end-factor 10
@@ -659,7 +660,7 @@
  ;; STALLED (bin/stalls): a test with no record, or a bound under :seon.config.agent/stall-ms, takes
  ;; that key. Provenance: at a flat 30 s, 21 healthy process tests were named STALLED in one run (each
  ;; quiet 31-32 s while a root booted or an agent ran, then green); 3x its own time names a hang and
- ;; leaves a slow test. Past it the test is named, never ended.
+ ;; leaves a slow test. Past it the test is named; only past :seon.config.check/step-end-factor is it ended.
  :seon.config.proofs/stall-factor 3
  ;; Unit: ms. A test measured at this or over is left out of bin/prove and a merge until it is fast
  ;; (seon.fx/slow-tests, docs/merging.md#a-slow-test-runs-last); naming it or the full run still runs it.
