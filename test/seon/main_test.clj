@@ -78,7 +78,7 @@
     (is (= ['seon.profile/measure!] (vec callers)))))
 
 (deftest a-task-is-never-written-gate-true
-  ;; docs/merging.md#the-merge-gate: a merge's gate runs the process tests its change reaches before
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a merge's gate runs the process tests its change reaches before
   ;; it merges, nobody asking (seon.reconcile's :gate), so :seon.task/gate? asks for nothing and no
   ;; src form names it but the one that holds the schemas' own text
   ;; (seon.config/schema-forms; the attribute leaves the store at a later erase). Read from the compiler's facts (:form/keywords), never a text search
