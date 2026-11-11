@@ -1735,3 +1735,18 @@
         acts (filter #(= "demo/a-refine" (:task %)) (actions-for db1))]
     (is (= [:wake] (map :op acts)) (str "woken, not spawned: " (pr-str acts)))
     (is (= [:a-a] (map :agent acts)) "on the agent it continues")))
+
+(deftest a-refined-plan-runs-a-capped-task-again
+  ;; docs/tasks.md#a-refine-curates-its-own-task (Point's ruling: work, refine, rerun for every end that is not done): a task at its cap is
+  ;; not held (its execution stays :running), and a refine that changed its plan still starts it again on a new branch (loop D0, 2026-11-11)
+  (let [db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running)))
+        {db1 :db} (judge! db0 "a" {:outcome :cap})
+        old (:seon.task/branch (task/task db1 "demo/a-refine"))
+        db2 (d/db-with db1 (work "a-refine" :running))
+        better "Make a true. The example to copy: demo-test/a-test."
+        {db3 :db} (judge! db2 "a-refine" {:outcome :green} :on-branch [{:seon.task/id "demo/a" :seon.task/plan better}])
+        a (task/task db3 "demo/a")]
+    (is (= :cap (:seon.task/outcome (d/entity db1 [:seon.task/id "demo/a"]))) "capped, not held")
+    (is (= better (:seon.task/plan a)))
+    (is (and (:seon.task/branch a) (not= old (:seon.task/branch a))) "run again on a new branch")
+    (is (= :running (:seon.task/execution a)))))

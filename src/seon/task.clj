@@ -956,11 +956,12 @@
                                     (if finished? (cfg/value :seon.config.agent/refine-finished {:task t}) :running))))))))
 
 (defn again-tx
-  "Refine id's end on main, as its carried facts (seon.task/carry-tx's :tx) leave it: each task it cites on its own branch that
-  root holds (its work ended and was not merged) and whose plan the refine changed runs again, fresh from main: a new branch,
-  released (a compare-and-swap from :held) with root's last reasons retracted, so a fresh agent works the refined plan. A refine
-  that changed no plan, a task not held, and a task that is no refine's start no run. The new branch is named by main's t, as a
-  go back names one (seon.root/back-point). See docs/tasks.md#a-refine-curates-its-own-task."
+  "Refine id's end on main, as its carried facts (seon.task/carry-tx's :tx) leave it: each task it cites on its own branch whose
+  work ended NOT done (its outcome neither finished nor judged, nor running or waiting: capped, red, closed, dead; held for root or
+  not) and whose plan the refine changed runs again, fresh from main: a new branch, released (a compare-and-swap from the execution
+  it has) with root's last reasons retracted, so a fresh agent works the refined plan. A refine that changed no plan, a task that
+  finished or still runs, a cancelled one, and a task that is no refine's start no run. The new branch is named by main's t, as a go
+  back names one (seon.root/back-point). See docs/tasks.md#a-refine-curates-its-own-task."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id [:sequential :any]] [:vector :any]]}
   [main id carried]
   (if-not (refine? main id)
@@ -968,9 +969,11 @@
     (let [br (:seon.task/branch (task main id))
           planned (set (for [x carried :when (and (vector? x) (= :db/add (first x)) (= :seon.task/plan (nth x 2 nil)))] (second (second x))))]
       (vec (for [w (cited-tasks main (pdb/eid main :seon.task/id id))
-                 :let [t (task main w) wb (or (:seon.task/branch t) (default-branch w))]
-                 :when (and (planned w) (= br wb) (= :held (:seon.task/execution t)))
+                 :let [t (task main w) wb (or (:seon.task/branch t) (default-branch w))
+                       ex (:seon.task/execution t) oc (:seon.task/outcome (d/entity main [:seon.task/id w]))]
+                 :when (and (planned w) (= br wb) (#{:held :running} ex)
+                            (not (or (finished oc) (judged oc) (#{:running :parked :told} oc) (nil? oc))))
                  x (concat (env-tx w {:branch (keyword (namespace wb) (str (name wb) "-again-" (:max-tx main)))})
-                           [[:db/cas [:seon.task/id w] :seon.task/execution :held :running]
+                           [[:db/cas [:seon.task/id w] :seon.task/execution ex :running]
                             [:db.fn/retractAttribute [:seon.task/id w] :seon.task/reasons]])]
              x)))))
