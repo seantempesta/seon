@@ -14,7 +14,7 @@
   printf '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\\n' | nc -w 5 127.0.0.1 PORT"
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.step :as step] [seon.profile :as profile] [seon.contract :as contract :refer [defn defn-]] [seon.root :as c] [my.root :as root] [seon.fx :as fx] [seon.config :as cfg] [seon.task :as task] [seon.proofs :as proofs] [seon.error :as err] [seon.reconcile :as r] [datahike.api :as d]
-            [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [seon.ctx.wire :as wire] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk]))
+            [seon.lib :as lib] [seon.edn :as sedn] [seon.db :as pdb] [seon.repl :as repl] [seon.print :as print] [seon.ctx.wire :as wire] [clojure.edn :as edn] [clojure.data.json :as json] [clojure.string :as str] [clojure.walk] [clojure.core.async :as a] [jolt.fibers :as fibers]))
 
 (defn- refused
   "The server refusing a request, as root's API does: the one error map."
@@ -276,7 +276,11 @@
                    :from {:type "string" :description "fork: an agent id (a3) whose program, live values and branch the new agent goes on from, on a sibling of its task"}}}
    :prove {:doc "Run the tests a branch's change reaches, once per branch and tx however many ask (a session, an agent's turn): the one test service (seon.prove). Names an agent (its branch at its head), else main. Answers the run: its key, the counts, the red tests; a result already held for a test's digest is not run again."
            :args {:agent {:type "string" :description "an agent id whose branch to prove; omit for main"}
-                  :names {:type "array" :items {:type "string"} :description "test namespaces to run; omit for every test whose digest holds no green"}}}
+                  :names {:type "array" :items {:type "string"} :description "test namespaces to run; omit for every test whose digest holds no green"}
+                  :checkout {:type "string" :description "a worktree of this root's repository whose files to prove (with tree), in place of an agent"}
+                  :tree {:type "string" :description "the checkout's tree id (seon.fx/tree-id, as bin/build records it): its branch's key"}
+                  :mode {:type "string" :description "judge (default for a checkout) or turn"}
+                  :stream {:type "boolean" :description "EDN only: each test's verdict as a line as it ends, then the answer"}}}
    :done {:doc "Hand the task the agent works back to root: the agent writes its end (its proofs run, seon.turn/hand-back!), then root judges it, and merges it when the done rule has no reason. Answers the verdict when main holds it, as one line and a handle (seon.server/verdict-line): the task's outcome (done, merged, or closed with its task held) and reason, each red test with its first failure, and how main differs from the branch; the handle is the form that reads it whole at root. A defect of the reconciler that stops the judge, as that defect. It waits as long as the judge does (the run's proofs, a gate, a merge), so a caller's read timeout must allow minutes."
           :args {:agent {:type "string"} :task {:type "string" :description "the agent's task (ns/name): needed only for an agent another session attached"}} :required ["agent"]}))
 
@@ -379,8 +383,38 @@
       (and (:agent a) (not (contract/error? a))) (assoc :next (str "seon_context with agent " (name (:agent a)) " reads what its model reads (wire true: the request body). "
                                    "seon_eval with it, message-md and evals (each an intent and code), is one reply, a model's turn; (my.agent/prove) there runs its proofs. seon_done hands it back.")))))
 
+(def ^:dynamic *emit*
+  "A line out before the answer, on the connection answering this request (serve-connection!): an EDN request's
+  :prove with :stream writes each test's verdict through it as it ends. nil for MCP's JSON-RPC, which answers once.
+  See docs/server.md#ops."
+  nil)
+
+(defn- prove-streamed
+  "run's answer (a function answering a run's answer), and before it each :prove-verdict event of root's whose run key is
+  of branch's runs (seon.prove/run-key: \"<branch>@<digest>...\"), written through *emit* as it comes: the events tapped
+  before run starts (on a fiber of its own), let go after. See docs/server.md#ops."
+  {:malli/schema [:=> [:cat :seon.root/sys :keyword ifn?] :any]}
+  [sys branch run]
+  (let [ev (c/events sys)
+        done (a/chan 1)
+        prefix (str (name branch) "@")]
+    (fibers/spawn #(a/>!! done (run)))
+    (try (loop []
+           (let [[v ch] (a/alts!! [done ev])]
+             (cond (= ch done) v
+                   ;; root's events ended (it stopped): only the answer is left to wait on
+                   (nil? v) (a/<!! done)
+                   :else (do (when (and (= :prove-verdict (:type v)) (str/starts-with? (str (:key v)) prefix))
+                               (*emit* (select-keys v [:type :key :test :digest :status :ms :failures])))
+                             (recur)))))
+         (finally (a/untap (:events-mult sys) ev)))))
+
 (defmethod op-answer :prove [sys ag req]
-  (let [r @(c/prove! sys ag (set (map symbol (:names req))))]
+  (let [run (fn [] (c/prove-tree! sys (cond-> (select-keys req [:checkout :tree :names]) (:mode req) (assoc :mode (keyword (name (:mode req)))))))
+        ;; a checkout's files, on their tree's branch (seon.root/prove-tree!), its verdicts streamed when asked; else an agent's branch, or main
+        r (cond (and (:checkout req) (:stream req) *emit*) (prove-streamed sys (c/tree-branch (:tree req)) run)
+                (:checkout req) (run)
+                :else @(c/prove! sys ag (set (map symbol (:names req)))))]
     ;; each red named with its first failing assertion (message, expected, actual), and the
     ;; process tests left to the judge with why (seon.agent/run-tests-forked's :deferred :why)
     (if (contract/error? r)
@@ -516,7 +550,9 @@
         out (.getOutputStream sock)]
     (loop []
       (when-let [line (.readLine r)]
-        (when-let [a (respond sys line)]
+        (when-let [a (binding [*emit* (when-not (str/starts-with? (str/triml line) "{\"")
+                                        (fn [m] (.write out (.getBytes (str (sedn/encode m) "\n") "UTF-8")) (.flush out)))]
+                       (respond sys line))]
           (.write out (.getBytes (str a "\n") "UTF-8"))
           (.flush out))
         (recur)))
