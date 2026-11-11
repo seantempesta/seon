@@ -294,7 +294,7 @@
                       (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:agent-facts [id]}})
                       ;; a hang is evidence: captured now, before a restart takes the process
                       (when (and pid (contains? (system/fx-owners (get-in st [:system :procs])) :fx/evidence))
-                        (step/out! o [:fx/evidence :in]
+                        (step/out! o [:fx/evidence :ask]
                                    {:req {:pid pid :dir (str (cfg/value :seon.config.root/runs-dir) "/stalls/" (:seon.task/name decl))
                                           :stderr (agent/stderr-path (get-in st [:view :store :agents-dir]) id)}
                                     :prio 0 :dest {:stall-evidence tid :agent id}}))
@@ -666,7 +666,7 @@
       :fx (let [owner (keyword "fx" (name (:kind m)))]
             (if (contains? (system/fx-owners (get-in st [:system :procs])) owner)
               (let [[st rid] (pend st p :fx nil)]
-                (step/out! o [owner :in] {:req (:req m) :prio 0 :dest {:rid rid}})
+                (step/out! o [owner :ask] {:req (:req m) :prio 0 :dest {:rid rid}})
                 st)
               (reply! st o p (contract/error :seon.fx/unknown-kind #'seon.root/ext-op (str "no effect kind " (:kind m))))))
       :fs (let [[st rid] (pend st p :fs nil)]
@@ -734,7 +734,7 @@
                              (seq unread) (deliver-rid st o rid {:unread unread})
                              ;; no process test reached: the writer's analysis of the candidate was the check
                              (empty? (:tests dest)) (deliver-rid st o rid {:value {:results {}}})
-                             :else (do (step/out! o [:fx/tests :in] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
+                             :else (do (step/out! o [:fx/tests :ask] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
                                                                      :prio (:prio dest 0) :dest {:rid rid}})
                                        st)))
         (:asked dest) (deliver-rid st o (:rid dest) (if (contract/error? r) r {:task (:asked dest)}))

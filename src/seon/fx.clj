@@ -1428,14 +1428,16 @@
       st)))
 
 (defn- bound
-  "The owner's queue holds at most :seon.config.fx/buf requests; at the bound it reads only :done
-  (Flow's input filter), so agent procs park on :in: back-pressure to the asking agent."
+  "The owner's queue holds at most :seon.config.fx/buf requests of the agents; at the bound it stops reading :in (Flow's
+  input filter), so agent procs park on :in: back-pressure to the asking agent. :ask (root's) and :done are always read."
   {:malli/schema [:=> [:cat :map] :map]}
   [st] (assoc st ::flow/input-filter (if (>= (count (:queue st)) (cfg/value :seon.config.fx/buf)) #(not= :in %) identity)))
 
 (defn owner-proc
   "The owner of one effect kind. In :in (the agent procs' requests {:req :dest :prio
-  :budget :budget-key :agent}, addressed by id; :seon.config.fx/buf), :done (the workers'
+  :budget :budget-key :agent}, addressed by id; :seon.config.fx/buf), :ask (root's own asks, the api's: the same requests,
+  never held back by the bound, since the api that puts them answers every asker and must never wait on one owner; they are
+  bounded where they start: the test service's workers, the reconciler's flights), :done (the workers'
   outcomes). Out :to-workers (its performers' shared channel), :out (the api's :back:
   {:dest :r})."
   {:malli/schema :seon.step/step-fn}
@@ -1444,7 +1446,7 @@
                 :batch "the most requests one worker step takes from the queue (nil: one, as itself)"
                 :close? "the kind has a :close: when the queue is empty and nothing is in flight, its worker is told {:idle true}"
                 :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"}
-       :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :done "its workers' outcomes"} :outs {}
+       :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :ask "root's own requests, never held back by the bound" :done "its workers' outcomes"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
@@ -1461,7 +1463,7 @@
      (if (nil? m)
        [st nil]
        (case in
-         :in (let [n (inc (:seq st))]
+         (:in :ask) (let [n (inc (:seq st))]
                [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (profile/now-ns)))) o)) @o])
          :done (let [st (bound (dispatch (reduce #(outcome %1 o %2) (update st :busy dec) (or (:batch m) [m])) o))]
                  ;; the kind's one worker holds a host object that ends when the work does (:close): the queue
@@ -1639,7 +1641,7 @@
       (let [work (a/chan workers) owner (keyword "fx" (name kind))]
         (-> acc
             (assoc owner {:proc (flow/process #'owner-proc)
-                          :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 workers)}}
+                          :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :ask {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 workers)}}
                           :args (cond-> {:kind kind :workers workers :work work :back back}
                                   rate (assoc :rate rate :tick (a/chan 1))
                                   batch (assoc :batch batch)
