@@ -209,6 +209,8 @@ A test root's processes end with the runner. `bin/held`'s watcher blocked in a `
 
 ## Processes
 
+Every shell Seon runs goes through ```seon.lib/sh```, which runs `clojure.java.shell/sh` on a fiber (a thread's call on a fiber of its own, joined): there Jolt's `sh` copies the child's pipes on fibers parked on their readiness and waits for its exit as an event, starting no thread. Called from a thread (root's boot, a proc's step) it copied on futures, threads of Clojure's send-off pool no proc declares, which outlived root's stop (task seon.root/a-boot-runs-no-shell-of-its-own; ```seon.root-test/root-threads-are-what-root-declares``` after a doc-only change).
+
 Anything that can make threads or processes starts at n ≤ 100 under `nice -n 15`. Watch `ps -M -p PID | wc -l`, and kill your own process past 200 threads. One experiment at a time.
 
 A process that must outlive your tool call is double-forked, which `bin/root` does. The tool host kills a background task's whole process tree when the task stops or its agent exits.
