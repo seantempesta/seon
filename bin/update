@@ -66,7 +66,9 @@ git -c protocol.file.allow=always submodule update --init -q || fail "main's sub
 # tree as data (bin/land's bridge) and its binary is current for it, it keeps running, its agents with it: the inputs of the
 # files now are written (bin/root inputs, the running binary's) and root writes its source fact again (my.root/landed!).
 # Anything else (no bridge, a build input or a form root runs changed, a binary stale at its boot) is a restart, its reason said
-port=${$(bin/ports)%% *}
+# quoted: unquoted in an assignment, zsh applies no %% to a nested $(...) and port held both ports ("7888 7777"), so every
+# ask of landed! was a refused connection and every landing from batch 89 on restarted the system
+port="${$(bin/ports)%% *}"
 if bin/root status >/dev/null 2>&1; then
   if tree=$(bin/tree "$MAIN" HEAD) && bin/root inputs "$@"; then
     kept=$(printf '{:op :eval :agent "root" :code "(my.root/landed! sys \"%s\")"}\n' "$tree" | bin/ask "$port")
@@ -74,7 +76,8 @@ if bin/root status >/dev/null 2>&1; then
       printf '{:op :eval :agent "root" :code "(my.root/file-slow-tests! sys)"}\n' | bin/ask "$port" >/dev/null || print "filing the slow tests' tasks failed: run (my.root/file-slow-tests! sys) at root"
       print "UPDATE OK: kept running on tree $tree (no build, no restart: its agents go on)"; exit 0
     fi
-    print "restart: ${${kept#*:restart }%%\}*}"
+    # the reason restart-for gave (the {:restart "..."} answer's text), else the whole answer: a refused connection or an error
+    if [[ $kept == *':restart "'* ]]; then print -r -- "restart: ${${kept#*:restart \"}%%\"*}"; else print -r -- "restart: ${kept}"; fi
   else
     print "restart: the tree or the inputs of main's files could not be read"
   fi

@@ -271,7 +271,8 @@
 (defn config-input
   "The config in force as a test reads it, cfg (seon.config/config: the shipped file, the
   --config layers its command line names, the #env values, the profile), as {key text}: each
-  value with the checkout's own path written as <checkout>, and the keys that say where a
+  value naming a file by its path written as <file>/ and its name (what the file is, never where the machine keeps it: the
+  embed model's name is its id), any other value with the checkout's own path written as <checkout>, and the keys that say where a
   process runs left out (their schemas' :seon.config/place: its ports, main, store, runs,
   source tree and results directory, and the profile it runs under and what that picks, its provider, script and whether it is its store's sole writer: each checkout's and each root's own by design, as a test reads nothing of its runner, while
   :tree covers the source's content). What a result depends on that git does not see: a
@@ -281,8 +282,15 @@
   {:malli/schema [:=> [:cat :map :string] [:map-of :qualified-keyword :string]]}
   [cfg checkout]
   ;; a plain map: the store encodes no sorted one, and the digest sorts its keys (seon.program/graph-index)
-  (into {} (for [[k v] cfg :when (not (get-in cfg/schema-forms [k 1 :seon.config/place]))]
-                       [k (str/replace (sedn/encode v) checkout "<checkout>")])))
+  ;; a value that names a file enters as what the file is, its name, never where this machine keeps it (what the file holds
+  ;; reaches a digest by the tree, the pins or its own name): the embed model, in the main tree's shared cache, read
+  ;; "<checkout>/..." from the main tree and its absolute path from any other checkout, and 103 of 181 process digests
+  ;; differed between the standing system and a worktree
+  (let [outside? #(and (string? %) (str/starts-with? % "/"))]
+    (into {} (for [[k v] cfg :when (not (get-in cfg/schema-forms [k 1 :seon.config/place]))]
+               [k (if (outside? v)
+                    (str "<file>/" (last (str/split v #"/")))
+                    (str/replace (sedn/encode v) checkout "<checkout>"))]))))
 
 (defn declared-refs
   "{seon.system/read-decl #{symbol}}: every qualified symbol the system declaration's text names
@@ -1298,11 +1306,15 @@
                 ;; max-bytes, the one caller that may remove it), so the items that clone it import nothing
                 :seed (let [prog (str "(require 'seon.test-store 'test-runner) (test-runner/program-db \\\"$PWD\\\" (seon.test-store/kept-program-store)"
                                       " (seon.fx/tree-id \\\"$PWD\\\") (seon.config/value :seon.config.proofs/program-store-max-bytes))"
-                                      (when (:binary? req) " (seon.test-store/make-process-store! \\\"$PWD\\\")"))]
+                                      (when (:binary? req) " (spit \\\"target/process-store.path\\\" (seon.test-store/make-process-store! \\\"$PWD\\\"))"))]
                         (when (:binary? req) (lib/remove-tree! store))
                         (sh "zsh" "-c" (str "ROOT=$PWD; . bin/env; "
                                             (when (:binary? req) "(cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-) && ")
-                                            "HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test -e \"" prog "\"")))
+                                            "HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test -e \"" prog "\""
+                                            ;; and the process tests' store gets this tree's program on :db, as bin/test seeds it before its
+                                            ;; shards (bin/root seed): a process item's root clones it, and one seeded at an earlier tree was a
+                                            ;; binary built from this tree over a store of that one, every spawn refused (Tests' trial, step 2b)
+                                            (when (:binary? req) " && bin/root seed \"$(<target/process-store.path)\""))))
                 ;; with a :bound (seon.prove's plan-items, from its measured ms) it runs through bin/bounded: past the bound its
                 ;; evidence is kept and its whole process group ended, never left to hold a worker
                 :process (apply sh (concat (when bound ["bin/bounded" (str bound) (str dir "/evidence")])
