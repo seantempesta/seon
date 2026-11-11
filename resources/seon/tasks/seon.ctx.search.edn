@@ -9,14 +9,4 @@ The change left: tokens names every hit above the z cut (351 in the measured sea
 Proofs: seon.doc-cost-test/a-search-costs-nothing-for-sections-it-does-not-answer-from and a-search-costs-flat-in-its-texts-length (green); to write, red first: seon.doc-cost-test/a-search-costs-flat-in-the-text-hits-its-fusion-cannot-reach."
   :seon.task/kind :work
   :seon.task/proofs #{seon.doc-cost-test/a-search-costs-flat-in-its-texts-length seon.doc-test/a-move-counts-again-only-the-texts-it-wrote seon.doc-cost-test/a-search-costs-flat-in-the-text-hits-its-fusion-cannot-reach}}
- {:seon.task/name "a-tasks-search-holds-still-while-its-agent-works"
-  :seon.task/plan "Found reading the standing root's demo request (request/add-a-function-demo-math-half-that-halves-a-number-with-a-test-2, 2026-11-11, merged in about 9 turns where its floor is about 3): the page's search of the task's request (seon.render.ui/searched, 10 hits, about 6.5k characters) reached the model three times, whole: in the first page and in two later turns' diffs, about 19.5k of the about 26k characters its page messages carried (counted from seon_context's text of that session). Cause: the search runs on the branch's db at each point (seon.render.ui/searched over seon.ctx.search/search), so the agent's own new definition (demo.math/half) entered the hits and moved the others; the hits' :li carry no :key, and seon.render/settled replaces an element whose named children changed places whole (map keys say nothing of order), so the whole :ol was resent each time it re-ranked. The agent never read a hit after its first turn.
-
-The change, the cause first: the task's search answers what existed when the work began, so the agent's own writes cannot move it: searched reads its hits at the run's first page point (the point (my.render/page p) printed, which the kept page walk already holds), not at each later point; a search the agent asks for itself (my.agent/search, a swap! of the query) still reads its branch now. Keyed :li alone would not do: a reorder still replaces the element whole. Gate: no new key or cache; which db the render reads.
-
-Also seen, not this task: a hit's line is the paragraph holding a query word, so a wiki hit whose paragraph is one long line (docs/machine.md#ten-agents-that-work, about 1.3k characters) is sent whole; and for a request naming a namespace that does not exist yet, most hits were test helpers (seon.ctx.wire-cost-test/hub-of, seon.proofs-test/prog) the work never needed.
-
-Proof, red first: seon.ctx.wire-test/a-definition-matching-the-request-moves-no-search-hit: an agent whose request's words match a var it then defines is sent no edit of its search part at the next turn."
-  :seon.task/kind :work
-  :seon.task/proofs #{seon.ctx.wire-test/a-definition-matching-the-request-moves-no-search-hit}}
 ]

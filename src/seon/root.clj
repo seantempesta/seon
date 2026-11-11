@@ -245,7 +245,7 @@
 
 (defn stall-state
   "What root's stall check and each agent proc hold now, a hang's evidence (bin/evidence asks it through root's server
-  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-due, ::busy and ::lost, and
+  before a run past its bound is ended; it reads, never writes): the api proc's ::stall-armed, ::busy and ::lost (its ping's), and
   each agent proc's :inflight (each request's kind), :fx-out, :stall-seen and :last-frame-ms, read by one Flow ping of
   the graph, with :answered, every proc that answered it. The ping's bound is :seon.config.check/ping-ms: a proc
   mid-step that long answers nothing and is missing from :answered (an agent in ::busy and not there is mid-step), never
@@ -254,10 +254,8 @@
   [sys]
   (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
         state #(::flow/state (get states %))]
-    {:root (let [api (state :api)]
-             ;; the stall check's armed flag: ::stall-due, or once seon.step/timer holds it, ::stall-timer's value (a volatile)
-             (cond-> (select-keys api [::stall-due ::busy ::lost])
-               (contains? api ::stall-timer) (assoc ::stall-armed (some-> (::stall-timer api) deref))))
+    ;; as the api's ping answers it (its :ping-map-fn): the armed flag (seon.step/timer), the busy set, what a throw lost
+    {:root (select-keys (state :api) [::stall-armed ::busy ::lost])
      :agents (into (sorted-map)
                    (for [[pid m] states :let [s (::flow/state m)] :when (contains? s :inflight)]
                      [pid (assoc (select-keys s [:fx-out :stall-seen :last-frame-ms]) :inflight (update-vals (:inflight s) :kind))]))
@@ -929,7 +927,9 @@
        :workload :io
        :ping-map-fn (fn [st] {:agents (count (:agents st)) :closing (boolean (:closing st))
                               ;; every ask it holds unanswered, rid -> [kind agent]: what a waiter waits on
-                              :pending (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))})})
+                              :pending (into (sorted-map) (for [[r {:keys [kind agent]}] (:pending st)] [r [kind agent]]))
+                              ;; the stall check, a hang's evidence (stall-state): its armed flag, the agents it holds busy, what a throw lost
+                              ::stall-armed (boolean (some-> (::stall-timer st) deref)) ::busy (or (::busy st) #{}) ::lost (::lost st)})})
   ;; :system is the root graph's declared procs and conns as built (seon.system), changed by
   ;; seon.root/apply!; agents' procs join them at each update!
   ([args] (assoc (dissoc args :system) :agents {} :agent-procs {} :pending {} :rid 0
@@ -1120,11 +1120,13 @@
   "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/sessions) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
 (defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through root's entity to every agent with its status and task
-  (what root's page lists of its sessions; root's model asks for them at its REPL). See docs/users.md#whats-on-screen."
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through the system entity to the sessions root
+  holds, newest first to :seon.config.ctx/window, each with what its entry reads, its boot and the agents it started as the user's pull joins them (seon.task/entry-pattern,
+  seon.task/agents-join: root's page draws each under its starter, not again at the top), which root's page
+  draws (seon.render.ui/root nested) and root's model asks for at its REPL (my.user/sessions). See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat] [:vector :any]]}
   [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
-           {:seon.agent/root [{:seon.agent/_root [:seon.agent/key :seon.agent/status {:seon.agent/task [:seon.task/id :seon.task/outcome]}]}]}))
+           {:seon.agent/root [:seon.root/id {[:seon.agent/_root :limit :seon.config.ctx/window :reverse true] (conj task/entry-pattern :seon.agent/boot (task/agents-join (cfg/value :seon.config.render/agent-tree-depth)))}]}))
 
 (defn root-session-tx
   "Root's session, made at the boot of a main that has none (`root-session-boot-tx`), an ordinary agent made the ordinary way: an agent

@@ -6,7 +6,19 @@
   (:refer-clojure :exclude [defn defn-])
   (:require [jolt.ffi :as ffi] [jolt.scheme :as scm]
             [seon.contract :refer [defn defn- defchecked] :as contract] [seon.config :as config]
-            [seon.edn :as sedn] [clojure.java.shell :as sh] [konserve.jolt.lmdb :as klmdb]))
+            [seon.edn :as sedn] [clojure.java.shell :as sh] [konserve.jolt.lmdb :as klmdb] [jolt.fibers :as fibers]))
+
+(defn sh
+  "Run a command as clojure.java.shell/sh does (args, its options among them; answers {:exit :out :err}), always on a fiber: there
+  Jolt's sh copies the child's pipes on fibers parked on their readiness and waits for its exit as an event, starting no thread.
+  Called from a thread (a server connection's, seon.server/serve!) it ran its copies on futures, threads of Clojure's
+  send-off pool that no proc declares and that outlive the call. A thread's call runs on a fiber of its own here, joined. Every shell of Seon's runs
+  through it. See docs/machine.md#processes."
+  {:malli/schema [:=> [:cat [:* :any]] :map]}
+  [& args]
+  (if (fibers/in-fiber?)
+    (apply sh/sh args)
+    (fibers/join (fibers/spawn #(apply sh/sh args)))))
 
 (def ^:private c-schemas
   "Malli schemas of C types, for contracts derived from an FFI declaration (G1's proto.lib)."
@@ -349,14 +361,12 @@
   [k n] (id (digest (str k "/" n))))
 
 (defn remove-tree!
-  "Remove each directory and all it holds (`rm -rf`: a symbolic link is removed, never entered), and the
-  semaphore sets of the LMDB stores in it: this process closes the stores it has open there
-  (konserve.jolt.lmdb/close-envs-under!), whose last close removes the set, then target/remove-tree
-  (native/remove_tree.c) releases the locks of every store there that no process holds (a set its last
-  user left when it exited without closing) and removes the tree. The one way a directory is deleted,
-  since a store's set outlives its files otherwise (docs/failure-points.md#lmdb-robust-locks).
-  Answers nil; a directory that is not there is already removed."
+  "Remove each directory and all it holds (`rm -rf`: a symbolic link is removed, never entered), after
+  this process closes the LMDB stores it has open there (konserve.jolt.lmdb/close-envs-under!), so it
+  keeps no mapping of deleted files and a store made again at the path opens its own. The one way a
+  directory that may hold a store is deleted (docs/failure-points.md#lmdb-locks). Answers nil; a
+  directory that is not there is already removed."
   {:malli/schema [:=> [:cat :string [:* :string]] :nil]}
   [dir & dirs]
   (run! klmdb/close-envs-under! (cons dir dirs))
-  (apply sh/sh (str (config/checkout) "/target/remove-tree") dir dirs) nil)
+  (apply sh "rm" "-rf" "--" dir dirs) nil)
