@@ -66,7 +66,7 @@
   (when (and (map? v) (<= 1 (count v) 2) (every? #(or (= :db/id %) (contains? (:identity-schemas ix) %)) (keys v)))
     (some (fn [[k x]] (when (not= :db/id k) x)) v)))
 
-(declare more-of answer)
+(declare more-of answer schema-property)
 
 (defn model
   "What the printer shows in place of value v (seon.print/print-value's :render): {:value m} when v's schema (its metadata
@@ -1496,14 +1496,16 @@
   (let [
          ids? (fn [x] (and (map? x) (seq x) (every? integer? (keys x))))
          entity? (fn [x] (and (map? x) (contains? x :db/id) (not (ids? x))))
-         holds (fn [x] (cond (string? x) (if (< (count x) 60) x {:chars (count x)})
-                             (ids? x) (cond-> {:members (count x) :ids (vec (take 10 (keys x)))} (< 10 (count x)) (assoc :more (- (count x) 10)))
+         ;; what is there, never the value shown and never cut here (the printer cuts, with the forms that read the rest): a name as
+         ;; itself, text (a string holding a space) as its size, a join as its members' ids in order, a collection as its count
+         holds (fn [x] (cond (string? x) (if (re-find #"\s" x) {:chars (count x)} x)
+                             (ids? x) {:members (count x) :ids (vec (sort (keys x)))}
                              (entity? x) :entity
-                             (map? x) (cond-> {:map (count x)} (<= (count x) 12) (assoc :keys (vec (sort-by str (keys x)))))
+                             (map? x) {:map (count x) :keys (vec (sort-by str (keys x)))}
                              (vector? x) {:vector (count x)}
                              (set? x) {:set (count x)}
                              (coll? x) {:items (count x)}
-                             :else (let [s (pr-str x)] (if (< (count s) 60) x {:chars (count s)}))))
+                             :else x))
          first-sentence (fn [d] (when (string? d) (first (str/split d #"(?<=\.)\s" 2))))
          about (fn [k x] (let [s (cond (ids? x) (entity-schema ix (val (first x)) k)
                                        (entity? x) (entity-schema ix x k)

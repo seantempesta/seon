@@ -4325,17 +4325,18 @@
 (deftest describe-says-what-a-value-holds-by-path
   ;; docs/agent.md#looking-at-what-you-pulled (owner, 2026-11-11: "Instead of dumping the whole @ctx value we are now doing this more
   ;; metadata approach"): a value's paths and what each holds, never the value shown; keys, never positions; a plain value has no schema
-  (let [v {:a 1 :s (apply str (repeat 100 "x")) :m {:b [1 2 3]} :ms (sorted-map 5 {:db/id 5 :x 1} 3 {:db/id 3 :x 2})}
-        es (render/describe (seon.db/index) v [] 2)
+  (let [v {:a 1 :n "demo/f" :s (apply str (repeat 20 "a word ")) :m {:b [1 2 3]} :ms (sorted-map 5 {:db/id 5 :x 1} 3 {:db/id 3 :x 2})}
+        es (r/describe (seon.db/index) v [] 2)
         by (into {} (map (juxt :path :holds)) es)]
-    (is (= 1 (by [:a])) "a short scalar as itself")
-    (is (= {:chars 100} (by [:s])) "text as its size")
+    (is (= 1 (by [:a])) "a scalar as itself")
+    (is (= "demo/f" (by [:n])) "a name as itself")
+    (is (= {:chars 140} (by [:s])) "text as its size, however short: what it says is read by its path")
     (is (= {:map 1 :keys [:b]} (by [:m])) "a map as its count and keys")
     (is (= {:vector 3} (by [:m :b])) "one level in, at depth 2")
-    (is (= {:members 2 :ids [5 3]} (by [:ms])) "a map keyed by ids as its members")
+    (is (= {:members 2 :ids [3 5]} (by [:ms])) "a map keyed by ids as its members")
     (is (every? #(not= ::none (get-in v (:path %) ::none)) es) "every entry's path reads back by get-in")
     (is (not-any? :schema es) "a plain value has no schema")
-    (is (= [{:path [:a] :holds 1}] (render/describe (seon.db/index) v [:a] 2)) "a path to a scalar describes it alone")))
+    (is (= [{:path [:a] :holds 1}] (r/describe (seon.db/index) v [:a] 2)) "a path to a scalar describes it alone")))
 
 (deftest an-answer-says-what-it-is-and-what-reads-more
   ;; docs/render.md#a-render-is-a-value-printed-once (Point's ruling 2026-11-11, one way for every tool's answer): a value whose schema
