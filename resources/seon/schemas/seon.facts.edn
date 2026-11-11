@@ -424,6 +424,7 @@
                                 :seon.task/cause
                                 :seon.task/outcome
                                 :seon.task/reason
+                                :seon.task/reasons
                                 :seon.task/started-by
                                 {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact}
                                 {:seon.task/needs [:seon.task/id :seon.task/ns :seon.task/plan :seon.task/execution :seon.task/kind :seon.task/instructions :seon.task/evidence :seon.task/failure :seon.task/cause :seon.task/outcome :seon.task/reason :seon.task/started-by {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {:seon.cite/_of :seon.cite/cite-fact}]}
@@ -469,9 +470,8 @@
  ;; who started it, a user or an agent: its agent, when it starts, is in that one's :seon.agent/agents (seon.task/start-tx; docs/users.md#what-each-thing-is)
  :seon.task/started-by [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]
  :seon.task/reason :string
- ;; what the done rule said was not done when root judged it (seon.reconcile/done-explain); the same again holds the task
- ;; (seon.reconcile/judgment); retracted when a person continues the task
- :seon.task/reasons [:vector [:map [:reason :keyword] [:symbol {:optional true} :symbol] [:key {:optional true} :string] [:behind {:optional true} :int]]]
+ :seon.task/reasons [:vector {:description "What the done rule said was not done when the task was last judged, each reason a map with what it is about (a proof's name, a problem's key, how far behind main). The same reasons twice in a row hold the task; they are retracted when a person continues it. See docs/tasks.md#the-done-rule."}
+                     :seon.reconcile/not-done]
  ;; the merges-branch commit holding the source files a merge rewrote (seon.source, the
  ;; :git effect), or why the commit was refused; recorded by its asker, the reconciler
  :seon.task/commit :string
