@@ -652,12 +652,12 @@
       (is (= (map :html (in root "#c-side")) (map :html (in agent "#c-side"))))
       (is (str/includes? (:html (first (in root "#c-side"))) "href=\"/root\"") "root's line links to its page")
       (is (str/includes? (:html (second (in root "#c-side"))) "href=\"/agent/a3\"") "a link to its page, by its key"))
-    (testing "root's system view: its process, main's open problems and the evals sent to root, by their own renders; its input spawns"
+    (testing "root's system view: its process, main's open problems and the evals sent to root, by their own renders; its input talks to root's session"
       (is (= 3 (count (in root "#p-tiles"))))
       (is (str/includes? (:html (first (in root "#p-tiles"))) "process"))
       (is (str/includes? (:html (second (in root "#p-tiles"))) "problems"))
       (is (str/includes? (:html (last (in root "#p-tiles"))) "sent to root"))
-      (is (= :seon.render/root-input (:schema (input root)))))
+      (is (= [:seon.render/agent-input :root] [(:schema (input root)) (:id (:input (input root)))]) "a message to root's session, which starts the work"))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
       (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :talks? true :address :a3}] [(:schema (input agent)) (:input (input agent))]))
       (let [ctx-page (#'p/page-value st :a3)]
@@ -1013,7 +1013,9 @@
                  seon.render.ui/evaluation {:class 5} seon.render.ui/page-rules {:class 2} seon.render.ui/problems-tile {:class 1}
                  seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 1} seon.render.ui/root-evals {:class 3}
                  seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 2}
-                 seon.render.ui/system-message {:class 4 :wire 2}}]
+                 seon.render.ui/system-message {:class 4 :wire 2}
+                 ;; root's session drawn by its stage (2026-11-11): the walk's own class on each of its three components' roots
+                 seon.render.ui/stage {:class 1} seon.render.ui/stage-list {:class 1} seon.render.ui/stage-front {:class 1}}]
     (try (is (= pinned seen) (str "a count moved: write the new one here when it went down, never when it went up\n"
                                   (with-out-str (clojure.pprint/pprint (into (sorted-map) seen)))))
          (finally (doseq [w ws] (r/dispose-walk! w))))))
@@ -2207,6 +2209,19 @@
       (is (= :seon.test/proved (r/schema-of (seon.db/index) picked nil)))
       (is (str/includes? (h/html (r/hiccup {:seon.render/index (seon.db/index)} picked)) "app.okt/bad-test") "a picked prove draws what it holds"))))
 
+(deftest a-markdown-table-is-a-table-for-a-person
+  ;; docs/render.md#text-and-the-one-string-cutter: a table is drawn as one for a person (:inline?), its cells' marks drawn, and kept as its
+  ;; lines for the model (red before: a person read the pipes and the rule row)
+  (let [md "Counts:\n\n| class | n |\n|---|---|\n| `:stale-section` | 369 |\n| `:eval` | 1 |\n"
+        person (h/html (ui/markdown md {:inline? true}))
+        model (h/html (ui/markdown md))]
+    (is (str/includes? person "<table>") person)
+    (is (str/includes? person "<th>class</th>") person)
+    (is (= 2 (count (re-seq #"<tr><td>" person))) "two rows, the rule row left out")
+    (is (str/includes? person "<code") "a cell's code span drawn")
+    (is (not (str/includes? person "|---|")))
+    (is (str/includes? model "|---|---|") "the model reads its lines")))
+
 (deftest markdown-draws-each-block
   ;; docs/render.md#text-and-the-one-string-cutter: a plan or a reply drawn by its blocks, none dropped,
   ;; each block's text as written (its backticks pick what a citation pulls, and the model reads it)
@@ -2430,7 +2445,7 @@
     (is (= :parked (:seon.task/outcome t)) "its task waits for a message")
     (is (= "root" (seon.task/session-key db "request/root")) "and the ordinary spawn continues it by its key")
     (is (= :seon.db/agent-fact (r/entity-schema (seon.db/index) (d/pull db '[*] (:db/id s)) nil)) "an agent like any other")
-    (is (= #'ui/agent (r/render-var-of (seon.db/index) (d/pull db '[*] (:db/id s)))) "drawn by the agent's layout")
+    (is (= #'ui/stage (r/render-var-of (seon.db/index) (d/pull db '[*] (:db/id s)))) "drawn by its own render, the stage (its :seon.render/hiccup), over the agent's pull")
     (is (= ["Hi root."] (mapv #(:seon.message/body (d/entity db (:e %))) (d/datoms db :avet :seon.message/to (:db/id s)))) "a message to root is its session's")
     (let [db2 (d/db-with db (seon.root/root-session-boot-tx db))
           same (fn [d] [(dissoc (d/pull d '[*] [:seon.agent/key "root"]) :db/id) (dissoc (d/pull d '[*] [:seon.task/id "request/root"]) :db/id)])]
@@ -2547,12 +2562,13 @@
       (is (= "(+ 1 2)" (str/trim (:forms (second mixed))))))))
 
 (deftest home-is-whoever-is-signed-in
-  ;; docs/users.md#whats-on-screen: / is the signed-in user's page, whoever root's :seon.root/signed-in names; with no one, a sign-in page; root's own page is /root
+  ;; docs/users.md#whats-on-screen: / is for whoever root's :seon.root/signed-in names (their focus, else root's page); with no one, a sign-in page
   (let [db0 (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a]])
         db (d/db-with db0 [{:db/id "u" :seon.agent/key "sean" :seon.user/name "sean" :seon.agent/agents [(:db/id (d/entity db0 [:seon.agent/key "b2/a1"]))]}
                            {:seon.root/id :root :seon.root/signed-in "u"}])
         sean (:db/id (d/entity db [:seon.user/name "sean"]))]
-    (is (= sean (#'p/location db [:chat :home])) "home is the user signed in")
+    (is (some? sean) "a user signed in")
+    (is (= (#'p/location db :root) (#'p/location db [:chat :home])) "home, with no focus, is root's page")
     (is (= [:chat :home] (#'seon.web/view-of (ui/view-param [:chat :home]))) "and its feed names it again")
     (is (nil? (#'p/location db0 [:chat :home])) "no one signed in: no home")
     (is (str/includes? (apply str (map :html (:seon.render/units (#'p/page-value {:main-db db0} [:chat :home])))) "sign in") "but a page saying so")
@@ -2657,6 +2673,31 @@
 
 
 (defn- session-eid [db k] (seon.db/eid db :seon.agent/key k))
+
+(deftest a-render-name-that-resolves-to-nothing-is-said
+  ;; docs/render.md#an-entity-may-name-its-own-render: an entity naming a render of its own that this process has no var for is drawn by
+  ;; its schema's render with the typed error naming the symbol where its own would be (red before: the default, and nothing said why)
+  (let [db (booted)
+        a (seon.db/eid db :seon.agent/key "root")
+        db (d/db-with db [{:db/id a :seon.render/hiccup 'no.such/stage}])
+        ix (seon.db/index)
+        t (:tree (seon.ctx/build ix db a :db))
+        w (r/draw t seon.ctx/changes db (r/render-var-of ix t) {:index ix})
+        units (try (seon.fixtures/page-units w) (finally (r/dispose-walk! w)))
+        html (apply str (map :html units))]
+    (is (= 'no.such/stage (:seon.render/hiccup t)) (str "its pull holds the name: " (pr-str (take 6 (:seon.ctx/pattern (d/pull db '[:seon.ctx/pattern] a))))))
+    (is (= #'ui/agent (r/render-var-of ix t)) "drawn by its schema's render")
+    (is (some #(= #'ui/unresolved-list %) (flatten (ui/agent {:seon.render/index ix :seon.ctx/ctx t} t))) (pr-str (ui/agent {:seon.render/index ix :seon.ctx/ctx t} t)))
+    (is (str/includes? html "no.such/stage names no render this process has") (pr-str (map :id units)))))
+
+(deftest an-agents-input-keeps-its-place-as-it-goes-busy-and-idle
+  ;; docs/render.md#an-entity-may-name-its-own-render: the interrupt button is there while the process lives, disabled when nothing runs,
+  ;; so the field keeps its width (red before: it came and went with the agent's status, and the field jumped three times in one turn)
+  (let [in (fn [busy?] (h/html (ui/agent-input {:unit "p-input"} {:id :a1 :address :a1 :live? true :focus? false :busy? busy? :talks? true})))]
+    (is (str/includes? (in true) "data-interrupt"))
+    (is (str/includes? (in false) "data-interrupt") "idle: still there")
+    (is (str/includes? (in false) "disabled") "idle: disabled")
+    (is (not (str/includes? (in true) "disabled")) "busy: it interrupts")))
 
 (deftest roots-sessions-list-an-agent-once-under-its-starter
   ;; docs/users.md#roots-session: root holds every agent, and an entry draws the agents it started under it, so the top level is what
@@ -3763,16 +3804,17 @@
         (is (= [[:db.fn/retractAttribute [:seon.user/name "sean"] :seon.user/focus]] (txs o3)) "opening home retracts it")))
     (is (some? st1))))
 
-(deftest home-is-the-users-focus-else-the-user
+(deftest home-is-the-users-focus-else-roots-page
+  ;; docs/users.md#whats-on-screen: home is the signed-in person's focus, else root's page, which presents the system to them
+  ;; (owner, 2026-11-11: "the goal is mostly root running the presentation"; before, the person's own page)
   (let [[main _ _] (paged-dbs)
-        user-of (fn [db] (:db/id (d/entity db [:seon.user/name "sean"])))
         a3 (fn [db] (:db/id (d/entity db [:seon.agent/key "a3"])))]
-    (is (= (user-of (signed-in-main main nil)) (#'p/location (signed-in-main main nil) :home)) "no focus: the user")
+    (is (= (#'p/location (signed-in-main main nil) :root) (#'p/location (signed-in-main main nil) :home)) "no focus: root's page")
     (is (= (a3 (signed-in-main main "a3")) (#'p/location (signed-in-main main "a3") :home)) "a focus: its agent")
-    ;; a focused task (an agent launched it; its agent is made a moment later): the user's page until its agent exists, then that agent's
+    ;; a focused task (an agent launched it; its agent is made a moment later): root's page until its agent exists, then that agent's
     (let [db (d/db-with (signed-in-main main nil) (seon.task/create-tx (signed-in-main main nil) [{:seon.task/ns 'request :seon.task/name "w" :seon.task/plan "Make w."}]))
           db (d/db-with db [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.task/id "request/w"]]])]
-      (is (= (user-of db) (#'p/location db :home)) "a focused task with no agent yet: the user's own page")
+      (is (= (#'p/location db :root) (#'p/location db :home)) "a focused task with no agent yet: root's page")
       (let [db (d/db-with db [[:db/add [:seon.task/id "request/w"] :seon.task/agent [:seon.agent/key "a3"]]])]
         (is (= (a3 db) (#'p/location db :home)) "its agent made: that agent's page")))))
 
