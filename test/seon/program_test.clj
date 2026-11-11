@@ -1238,28 +1238,38 @@
   ;; docs, of the task files) or runs the binary was digested by the whole tree, so any edit reran its
   ;; 286; it is digested by what it reaches, like any other test, and a file or a binary outside its
   ;; reach is the full run's to catch (bin/test --all, docs/merging.md). A check step still takes
-  ;; the tree when what it reaches reads it, and a test reading the checkout's files from its own
-  ;; namespace (seon.program/file-readers) does.
+  ;; the tree when what it reaches reads it, and a test reading the checkout's files raw from its own
+  ;; namespace (seon.program/file-readers, checkout-read?) does; one reading the wiki or the task files through their
+  ;; readers takes that class alone (:seon.env/docs, :seon.env/tasks: a 4-line wiki edit ran 117 tests, 2026-11-11).
   (let [g (kept-graph (seon.config/checkout)) ;; the graph once: each digest set is an index over it
-        in #(hash-map :env "e" :tree % :config {})
+        in (fn ([t] {:env "e" :tree t :config {}}) ([t c] {:env "e" :tree t :config c}))
         digests (fn [inputs roots] (update-vals (program/graph-index g inputs roots) :digest))
         a (digests (in "t1") nil)
         b (digests (in "t2") nil)
-        step #(digests (in %) {"step" ['seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal]})]
+        step #(digests (in %) {"step" ['seon.render-test/one-printer-and-no-cut-before-it]})]
     (is (< 20 (count a)) "a sample of the suite, not an empty tree")
     ;; the one exception: a test whose test namespace reads the checkout's files itself judges the files
     ;; themselves, so it takes the tree
     (let [moved (set (for [[t d] a :when (not= d (b t))] t))]
       ;; a test calling a file reader from its own namespace (slurp, seon.doc/load-dir-tx): each was reused over an edit to the files it judges (web-ui, 2026-10-28)
       (is (contains? moved 'seon.render-test/one-printer-and-no-cut-before-it) "a test slurping a doc takes the tree")
-      (is (contains? moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead) "a test loading the wiki takes the tree")
+      (is (not (contains? moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead)) "a test loading the wiki through its reader takes no tree")
       (is (contains? moved 'seon.repl-test/the-template-instructions-and-the-help-page-run) "a test reading the wiki through seon.doc/pages takes the tree (it was reused over edits to the help page)")
-      (is (contains? moved 'seon.task-files-test/no-shipped-task-is-merged-work) "and one reading the task files through seon.root/task-files")
+      (is (not (contains? moved 'seon.task-files-test/no-shipped-task-is-merged-work)) "nor one reading the task files through seon.root/task-files")
       ;; 2026-11-08: a process test reading its root's log by slurp took the tree, so a wiki edit reran all of them
       (is (not (contains? moved 'seon.agent-test/an-agent-ends-when-its-root-is-gone)) "a test reading only its own outputs (seon.test-store/output, its root's log) takes no tree")
       (is (< (* 4 (count moved)) (count a)) (str (count moved) " of " (count a) " tests read the checkout's files from their own namespace: a few, not the 286 whose reach reads one"))
       (is (not-any? #(= "seon.root-test" (namespace %)) moved) "a test running the binary takes no tree"))
-    (is (not= (step "t1") (step "t2")) "a step reaching a tree reader still takes the tree")))
+    (is (not= (step "t1") (step "t2")) "a step reaching a raw read of the checkout still takes the tree")
+    ;; the wiki's and the task files' classes move what reads them, and only that
+    ;; each against a (no class held): two indexes, the test's budget being a few full indexes of the suite
+    (let [moved-by (fn [c] (let [x (digests (in "t1" c) nil)] (set (for [[t d] a :when (not= d (x t))] t))))
+          docs-moved (moved-by {:seon.env/docs "d2"})
+          tasks-moved (moved-by {:seon.env/tasks "k2"})]
+      (is (contains? docs-moved 'seon.doc-test/every-section-of-the-wiki-has-a-lead) "a wiki edit moves the test loading the wiki")
+      (is (contains? tasks-moved 'seon.task-files-test/no-shipped-task-is-merged-work) "a task-file edit moves the test reading the task files")
+      (is (not (contains? docs-moved 'seon.task-files-test/no-shipped-task-is-merged-work)) "and a wiki edit does not move it")
+      (is (< (* 10 (count docs-moved)) (count a)) (str (count docs-moved) " of " (count a) " tests read the wiki: a few")))))
 
 (deftest a-test-naming-another-test-does-not-reach-it
   ;; seon.agent-test's tests quote the proofs they ask for: data, never a call, so a change the
