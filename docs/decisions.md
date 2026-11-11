@@ -2,6 +2,62 @@
 
 This file holds the owner's standing rulings, one entry each: the rule, the owner's words and date, and where the rule is stated now; current truth and mechanism live in `AGENTS.md` and the wiki (`docs/`), and superseded or done rulings are kept verbatim in git history.
 
+## 2026-11-11 rulings
+
+The owner's rulings of 2026-11-11, on the system goal and its first loop, on one agent mechanism for every role, on how the data is designed, on sessions, examples and their review, and on how a session leaves the system up to date.
+
+### The system goal: the codebase improves itself, by refinement (owner, 2026-11-11)
+
+"Your medium term (you work fast so maybe short term?) is to get the system ready for a recursive self improvment of the entire codebase. Correctness, perf, complexity (how many functions are interwoven? we have the graph...), number of steps for agents to solve their tasks ... I want to set this as a system goal so have context and web and whatever other agents implement this once we agree on the strategy." "The goal isn't radical change, but refinement over time. Think lots of base hits rather than swinging for homeruns." His four picks that morning, by the question tool: the first loop to close is the end of a task, where the agent hands up what would have saved it turns; a change to the system itself is approved by a review task, then merged, with a digest he can revert; a review judges and files tasks and never edits what it reviews; root starts with fixed focus areas. Stated in [the plan](plan.md#the-plan).
+
+### One agent mechanism for every role, root included (owner, 2026-11-11)
+
+"the goal is mostly root running the presentation and handing direction. I can even see "root" being just a set of different agents with different tasks maybe as subagents? So there is the same system everywhere don't start building different systems for different agents. Whatever capabilities we build into the humble agent allows it to take on any role in the system." A role is an agent's tasks and data, never a second kind of agent. Stated in [the plan](plan.md#the-plan), parts 1 and 3.
+
+### A layout is a render over the same pulled data (owner, 2026-11-11)
+
+"if we say the current design with the focused center chat and the tile of context on the right is a default but we can come up with any design because it's just hiccup and we can render anything we want and we think about it as a presentation stage are we setup to do so from a layout perspective? I don't want to lose our data driven UI rendering and don't want any hand rolled systems. This a design goal." And of the same page shown another way: "Under the hood it's the same system so we can have a button where the user can just render it as the default view." Stated in [the plan](plan.md#the-plan), part 3; not built.
+
+### An agent reads what it can read; a question goes to its parent (owner, 2026-11-11)
+
+"we need to stop contacting root for things the agent can access on their own. Every agent can access every branch since it's just metadata connecting to the database so why are we asking root anything? Secondly make sure we aren't hard coding in any root connections and we start thinking of a graph where every agent can have subagents that have subagents and we direct questions to the parent in the hierarchy. How do we represent this all in the graph? just with agents ref'ed to other agents?" The hierarchy is the agents an agent started, at any depth ([users](users.md#what-each-thing-is), "who started what"). Stated in [the plan](plan.md#the-plan), parts 1 and 4.
+
+### Design the data for the pull (owner, 2026-11-11)
+
+"Remember we control the data model and the design and we should be designing it for the pull -- how do we want to get data so our fixed system of walking and rendering works for us not against us." When a design is hard to render, the data is what changes: the entities and refs are shaped so one pull from the entity that owns a page or a request brings what it needs, in the order it is shown. Stated in [data modeling](data-modeling.md#before-you-add-something) and [the plan](plan.md#the-plan), part 1.
+
+### An agent may hold a set of tasks; a filed task runs now or when the system is free (owner, 2026-11-11)
+
+"We also need to practice with an agent having multiple active tasks assigned. These fork and improve sessions should reuse the same task system. ... start a new session with the assigned task(s) (a set I think all must pass if we put in multiple) ... Again no hard coding. We need system based rules." Of the tasks a review files: "I'd love it if they can just run directly, and maybe we start with that but maybe we need to differentiate between start now and start when the system is free. If we design the chains right we can schedule work based on load right?" Stated in [the plan](plan.md#the-plan), parts 1 and 2; not built.
+
+### Tasks chain by needs; a session pulled in never hard-codes what it is (owner, 2026-11-11)
+
+"I want to go back to our idea of chaining tasks together with the :needs dependencies so we can automatically pass things along and reset the context and focus the agents. Pulling in the previous session in a safe way where agents don't get confused about what they are reviewing is going to be important so make sure we aren't hard coding in "example" or whatever when they get turned into openai-compat formats." And of examples: "In some contexts we want to say "this is a potentially relevant example" let's say we match the curated example sessions via the embedding and we dynamically include them if we think it's relevant." The words over a conversation shown to an agent come from data. Stated in [the plan](plan.md#the-plan), part 2; today's hard-coded framing is in [tasks](tasks.md#a-task-names-example-sessions).
+
+### Is a session just an agent? The data model is worked through live, a step at a time (owner, 2026-11-11)
+
+Asked whether sessions are a thing of their own or the agent's id would do: "I'm okay with just picking one if they represent the same thing"; then, of the whole design written that day: "Still want to defer until we work this all through with the data model agent. We need a pull focused data model that works with our render system. Is a session just an agent if so then we don't need session-open/example-open. I want general systems that we can reliably understand how by putting this data in this place we get this sort of context and UI". And of its scope: "I want to focus on a system we can iterate on and refine and build up. Maybe even start smaller. What's the next step that will strain our data model and let's focus on refining the data model and keep building up from there." So no design is agreed on paper: each step is built small and seen in Seon. Stated in [the plan](plan.md#the-plan), part 1.
+
+### A message's turn is not asked; the pull may carry when an attribute was written (owner, 2026-11-11)
+
+"In general I think the message shouldn't matter what turn it arrived on and what we are missing is either a timestamp or the ability to pull in tx-data from any attribute in addition to the attibute?" He asked to see it in the system before ruling further ("I want to see this visualized ideally in the system itself so we can keep improving our own capabilities for rendering"). It is the step being built; "no model call names a message" ([users](users.md#messages)) stands. Stated in [the plan](plan.md#the-plan), part 1.
+
+### Work, then refine, then review; a refinement is tried from the store's history (owner, 2026-11-11)
+
+"For us this will be a task following their work step. Us doing a refine your previous session context and curate the task so it would have been done better. And then we can test those refinements without losing the previous one because we have db history." And of the fork that reflects mid-task: "What if we take advantage of our ability to fork sessions and make edits to the context? It's cheap from a tokens perspective since it's mostly cached data and we can inject a mini task at the end ... So lets say after 10 turns we do this reflect and improve step". Stated in [the plan](plan.md#the-plan), part 2; not built.
+
+### Reviewed sessions are kept in the repository, in an import area like the tasks' (owner, 2026-11-11)
+
+"Once we have a refined and reviewed session we need to persist those to disk so we don't lose them if we wipe our store." Asked where: "Make it a general import area like tasks and it's in the repo". Stated in [the plan](plan.md#the-plan), part 2; not built, and no curated session exists in a form the import reads.
+
+### Measures accumulate from use; a measurement is one call (owner, 2026-11-11)
+
+Of `seon.cost/measure` calling a function 17 to 60 times at each size: "oh god just remove this. I wanted results to accumulate and become more precise over time naturally as they are exercised in the system. Tests, normal evals, normal system usage." And: "if we know that it needs to be called twice ... do not render a clear number until that is ready". Stated in [cost](cost.md#how-we-measure) once its tip lands (jolt/tests-measure) and [the plan](plan.md#the-plan), part 6.
+
+### Before a compaction a session reflects and reports up, and brings the system up to date (owner, 2026-11-11)
+
+"all agents before they compact should reflect on the work they did ... and report to their parent". And on what it leaves behind: "instruct agents to update docs and tasks in particular and to grep around and find the parts that might be out of date and not just edit an append log.md. I want to move away from just putting all the information in one place and into distributing the updates to bring the system up to date before each session is concluded. Over time I want to stop drift." Stated in AGENTS.md §2 and [sessions](sessions.md#the-way-improves).
+
 ## 2026-11-10 rulings
 
 The owner's rulings of 2026-11-10, on how the work improves and lands, on what reaches main, on how pages are built, on how the machine's load is judged, on what an agent reads and on where a private helper's contract is checked.
@@ -53,6 +109,26 @@ Asked with the question tool by the managing session, the Tests session's eviden
 ### The test system runs inside Seon; the outside is thin wrappers (owner, 2026-11-10)
 
 "I want the test system focused on seon agents running it from the inside. I want a better system than our confusing worktrees and agents churning the codebase and re-running everything all the time. I want maximum test reuse across all branches. If it's the same code and the seed is the same don't re-run shit. How can we take our fragmented system and fix it in seon and then have thin wrappers calling into it from the outside? ... minimal duplication in infrastructure just what we need for our agents to run the system efficiently." Two rules with it (owner, 2026-11-10, asked with the Tests session's picks): a worktree session's changed files are written as a branch of the standing store (deleted when it lands or is dropped), and root proves that branch as it proves an agent's, so `bin/prove` and `bin/land` are thin wrappers over the one service; and a test's digest takes the code of the forms it reaches without their docstrings and comments, the tests that read docs or the whole program taking them explicitly, so the same code is the same digest on every branch. Now stated in: [what a test takes of a form's text](source.md#what-a-test-takes-of-a-forms-text) (digests of code); [merging](merging.md#a-merge-runs-what-the-change-reaches) (the rest, as each step lands).
+
+### The test service runs what the cores hold, one test at a time, and waits on channels (owner, 2026-11-10)
+
+"I don't want 'shards' anymore. I want the flow system that is always only letting the tests run that we have cores for and is updating the db as they run so we can immediately return the results to agents and short circuit the extra queueing and waiting and re-running." "Never do timers if we can setup blocking channels." And against a lock in the shell runner: "Why are they all independent if the db is shared and is holding the test results?" Stated in [merging](merging.md#the-test-service) and [the plan](plan.md#the-plan), part 5.
+
+### A change that moves every verdict is run whole once (owner, 2026-11-10)
+
+"The next time a change invalidates all the tests please just run it once so the other runs don't duplicate all the tests." Before a landing that moves all or most digests (a dependency pin, what root runs, the runner), the managing session tells every session to hold its proves; the landing's own prove is the one whole run; the others merge main and reuse its greens. Stated in [sessions](sessions.md#the-managing-session).
+
+### No agent on the costliest model without the owner's yes (owner, 2026-11-10)
+
+"Do not launch any fable agents without my approval. I literally can't afford it." A session says which model a helper or a new session would run on and gets his yes first; a helper takes the cheapest model that fits its piece. Stated in [sessions](sessions.md#no-fan-out).
+
+### LMDB's corruption is fixed in the fork we own (owner, 2026-11-10)
+
+"I changed my mind and want to see if we can just fix the corruption issue with LMDB since we already own the dependency" (relayed by the managing session). The task he set it: "our LMDB must not corrupt or exhaust the system; losing the last unsynced data is fine." Landed as batch 35: the store's locks are the kernel's and end with their process, and a crash with sync off loses the last commits and never corrupts. Stated in [storage](storage.md#durability-is-continuous-group-commit).
+
+### A test earns its place or is cut (owner, 2026-11-10)
+
+"If that test isn't god's gift to the world fucking kill it. Cut all bullshit tests." (relayed by the managing session, 2026-11-10 night). Stated in [testing](testing.md#a-proof-is-focused).
 
 ### Load is judged by cores and free memory (owner, 2026-11-10)
 
