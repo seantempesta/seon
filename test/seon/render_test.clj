@@ -1805,15 +1805,19 @@
     (is (not-any? nil? (tree-seq vector? seq with)) "and no empty child")))
 
 (defn- outside-code
-  "The text html shows outside its <code> and <pre> elements (where a backtick or a string's quote is the code's own)."
-  [html] (-> html (str/replace #"(?s)<pre[^>]*>.*?</pre>" " ") (str/replace #"(?s)<code[^>]*>.*?</code>" " ") (str/replace #"<[^>]+>" " ")))
+  "The text html shows outside its <code> and <pre> elements and the printer's string values (where a backtick or a quote is the
+  code's or the data's own)."
+  [html] (-> html (str/replace #"(?s)<pre[^>]*>.*?</pre>" " ") (str/replace #"(?s)<code[^>]*>.*?</code>" " ")
+             (str/replace #"(?s)<span[^>]*seon-print-string[^>]*>.*?</span>" " ") (str/replace #"<[^>]+>" " ")))
 
 (deftest a-person-reads-no-markup
   ;; docs/render.md#the-page: what a person reads is drawn, never the marks that describe it: no Markdown delimiter, no escaped quote of
   ;; a printed form, no printer's tree heading, outside code (the owner, on the session pages: "we still aren't rendering html")
   (let [db (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (seon.template/request {:seon.task/ns 'demo :seon.task/name "w"
                                                                                               :seon.task/plan "Make w true:\n\n1. read the field `x`\n2. write **one** test"})))
-        task (h/html (ui/task-view {} (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.task/id "demo/w") nil))))
+        ;; drawn by the walk, as a page draws it: its joins (the task's search) drawn by their own renders
+        task (let [w (draw (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.task/id "demo/w") nil)) seon.ctx/changes db #'ui/task-view {})]
+               (try (apply str (map :html (seon.fixtures/page-units w))) (finally (r/dispose-walk! w))))
         red (h/html (ui/status-hiccup {} {:proofs [{:test 'demo-test/w :status :fail
                                                      :failures [{:assert {:seon.print/code "(str/includes? h \"[:code \\\"x\\\"]\")"} :got false}]}]}))
         value (h/html (r/print-hiccup {:seon.render/index (seon.db/index)} {:a {:b [1 {:c 2}]}}))]
