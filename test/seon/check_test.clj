@@ -34,11 +34,11 @@
                   (clojure.java.shell/sh "rm" "-rf" sel)
                   (some->> out (clojure.java.shell/sh "rm" "-rf"))
                   r)))
-        lines (run "laws\nlmdb-sem\n" "laws 1\nlmdb-sem 1\n")
+        lines (run "laws\nlmdb-lock\n" "laws 1\nlmdb-lock 1\n")
         unknown (run "laws no-such-step" "laws 1\n")]
     ;; a step's header is printed only when the selection holds it (bin/check's unit)
     (is (re-find #"(?m)^== laws " (:out lines)) (:out lines))
-    (is (re-find #"(?m)^== lmdb-sem " (:out lines)) "both names, one a line, ran")
+    (is (re-find #"(?m)^== lmdb-lock " (:out lines)) "both names, one a line, ran")
     (is (= 1 (:exit unknown)) (:out unknown))
     (is (re-find #"FAILED no-such-step: no step of that name" (:out unknown)) "a name no step has is red, named")))
 

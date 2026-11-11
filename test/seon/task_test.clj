@@ -296,17 +296,18 @@
         "the form returned: no longer running")
     (is (= :spawning (:seon.agent/status (pull db3))) "a later fact of the same agent")))
 
-(deftest a-new-boot-leaves-the-earlier-boots-agents
-  ;; root's agents are this boot's: a boot retracts the earlier boots' agents' link to root
+(deftest a-new-boot-keeps-the-earlier-boots-agents
+  ;; docs/users.md#roots-session: a boot keeps each earlier boot's agent linked to root (root's page holds every boot's
+  ;; sessions), marking one still shown live :dead; red before: a boot retracted every link but the user's and root's session's
   (let [db (d/db-with (ts/test-db) (into [{:seon.root/id :root :seon.root/boot "b1"}] (task/agent-tx :a1 {:status :idle})))
         db2 (d/db-with db (into (task/boot-tx "b2" "sean") (task/earlier-agents-tx db)))
-        db3 (d/db-with db2 (task/agent-tx :a1 {:status :spawning}))
+        db3 (d/db-with db2 (task/agent-tx :a2 {:status :spawning}))
         agents (fn [db] (set (map :seon.agent/key (:seon.agent/_root (d/pull db '[{:seon.agent/_root [:seon.agent/key]}] [:seon.root/id :root]))))) ]
     (is (= #{"a1"} (agents db)))
-    (is (= #{"sean"} (agents db2)) "the new boot holds none of the earlier boot's: only its user, an agent with no process")
-    (is (= #{"sean" "a1"} (agents db3)) "and its own as they start")
-    (is (= #{"sean"} (agents (d/db-with db3 (into (task/boot-tx "b3" "sean") (task/earlier-agents-tx db3))))) "a later boot keeps the one user, and unlinks the rest")
-    (is (some? (d/entity db3 [:seon.agent/key "a1"])) "the earlier agent is kept, not deleted")))
+    (is (= #{"sean" "a1"} (agents db2)) "the new boot keeps the earlier boot's agent, beside its user")
+    (is (= :dead (:seon.agent/status (d/entity db2 [:seon.agent/key "a1"]))) "though its process ended with that boot")
+    (is (= #{"sean" "a1" "a2"} (agents db3)) "and holds its own as they start")
+    (is (= #{"sean" "a1" "a2"} (agents (d/db-with db3 (into (task/boot-tx "b3" "sean") (task/earlier-agents-tx db3))))) "a later boot keeps them all")))
 
 (deftest a-design-adds-a-proof-with-update
   ;; owner, 2026-10-25 (Dogfood rulings): my.task/update! takes :seon.task/proofs, so a design

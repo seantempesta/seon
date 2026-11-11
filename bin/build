@@ -1,7 +1,7 @@
 #!/bin/sh
 # bin/build — the runtime from the pinned sources: Chez (our fork) -> Jolt (our fork)
 # -> target/hello (a binary that requires Datahike and opens an in-memory db), then
-# target/lib/libprobe.dylib (native/probe.c, native/ids.c), target/lib/liblmdb.dylib (LMDB, robust locks),
+# target/lib/libprobe.dylib (native/probe.c, native/ids.c), target/lib/liblmdb.dylib (LMDB, record locks, MDB_SAFENOSYNC),
 # target/lib/liblz4.dylib and target/lib/libzstd.dylib (the store's compressors), target/lib/libseon-embed.dylib
 # (llama.cpp and native/embed.c, with the embedding model fetched once by its sha256), target/css/app.css (the page's
 # stylesheet, Tailwind over resources/public/css/input.css) and target/seon (the platform, -main seon.main; a check mode loads the driver, test/seon/check.clj, at run time),
@@ -145,16 +145,15 @@ build_native() {
 }
 
 # LMDB from reference-code/lmdb (the official repository as a submodule on mdb.master3, the branch konserve.jolt.lmdb-ffi binds), built
-# with MDB_USE_ROBUST: on macOS LMDB otherwise locks with POSIX semaphores, and a process
-# SIGKILLed inside a write txn leaves the writer lock held for every process that has the env
-# open (measured 2026-10-21; docs/failure-points.md#lmdb-robust-locks). Robust, it uses SysV
-# semaphores with SEM_UNDO: the kernel releases a dead holder's lock. target/lmdb-kill
-# (native/lmdb_kill.c) is its proof, a bin/check step; target/lmdb-sem (native/lmdb_sem.c), that
-# each env has a semaphore set of its own (our fork's jolt/sysv-sem-identity), another. target/remove-tree
-# (native/remove_tree.c: rm -rf after releasing each env's locks, so a deleted store leaves no set;
-# bin/remove-tree, seon.lib/remove-tree!) and target/semsets (native/semsets.c, the hand tool bin/semsets) link it too.
+# with MDB_USE_ROBUST: on macOS LMDB otherwise locks with POSIX semaphores, and a process SIGKILLed inside a write txn leaves the
+# writer lock held for every process that has the env open (measured 2026-10-21). Robust, our fork locks with fcntl record locks
+# on the lock file (MDB_USE_FCNTL), which the kernel gives back when their holder dies and which leave nothing once the file is
+# gone; Seon opens its stores MDB_SAFENOSYNC, so an OS crash rolls a store back to its last sync (docs/failure-points.md#lmdb-locks,
+# docs/failure-points.md#lmdb-crash-safety). Their proofs, bin/check steps: target/lmdb-kill (native/lmdb_kill.c),
+# target/lmdb-lock (native/lmdb_lock.c), and target/lmdb-crash (native/lmdb_crash.c, LMDB compiled into it with its writes
+# and flushes renamed to its recorder's).
 LMDB_SRC=$RC/lmdb/libraries/liblmdb
-LMDB_NATIVE="native/lmdb_kill.c native/lmdb_sem.c native/remove_tree.c native/semsets.c"
+LMDB_NATIVE="native/lmdb_kill.c native/lmdb_lock.c native/lmdb_crash.c"
 build_lmdb() {
   [ -f "$LMDB_SRC/mdb.c" ] || die "missing LMDB source at $LMDB_SRC (the reference-code/lmdb submodule)"
   pin="$(pin "$LMDB_SRC") robust $(cd "$ROOT" && git hash-object $LMDB_NATIVE | tr '\n' ' ')"
@@ -163,13 +162,17 @@ build_lmdb() {
   say "lmdb: $LMDB_SRC at $pin -> target/lib/liblmdb.dylib (MDB_USE_ROBUST)"
   cc -shared -O2 -g -pthread -DMDB_USE_ROBUST -install_name @rpath/liblmdb.dylib -o "$T/lib/liblmdb.dylib" \
     "$LMDB_SRC/mdb.c" "$LMDB_SRC/midl.c" "$LMDB_SRC/module.c" > "$T/lmdb-build.log" 2>&1 || die "lmdb build failed; see target/lmdb-build.log"
-  cc -O2 -I"$LMDB_SRC" -o "$T/lmdb-kill" "$ROOT/native/lmdb_kill.c" "$T/lib/liblmdb.dylib" -Wl,-rpath,"$T/lib" ||
-    die "lmdb-kill (native/lmdb_kill.c) build failed"
-  cc -O2 -I"$LMDB_SRC" -o "$T/lmdb-sem" "$ROOT/native/lmdb_sem.c" "$T/lib/liblmdb.dylib" -Wl,-rpath,"$T/lib" ||
-    die "lmdb-sem (native/lmdb_sem.c) build failed"
-  cc -O2 -I"$LMDB_SRC" -o "$T/remove-tree" "$ROOT/native/remove_tree.c" "$T/lib/liblmdb.dylib" -Wl,-rpath,"$T/lib" ||
-    die "remove-tree (native/remove_tree.c) build failed"
-  cc -O2 -o "$T/semsets" "$ROOT/native/semsets.c" || die "semsets (native/semsets.c) build failed"
+  for t in kill lock; do
+    cc -O2 -pthread -I"$LMDB_SRC" -o "$T/lmdb-$t" "$ROOT/native/lmdb_$t.c" "$T/lib/liblmdb.dylib" -Wl,-rpath,"$T/lib" ||
+      die "lmdb-$t (native/lmdb_$t.c) build failed"
+  done
+  # lmdb-crash: LMDB's own objects with its writes and flushes renamed, the program without
+  cc -c -O2 -g -pthread -DMDB_USE_ROBUST -Dpwrite=crash_pwrite -Dwritev=crash_writev -Dpwritev=crash_pwritev -Dfcntl=crash_fcntl \
+    -DMDB_BOOT_ID=crash_boot_id -o "$T/lmdb-crash-mdb.o" "$LMDB_SRC/mdb.c" >> "$T/lmdb-build.log" 2>&1 &&
+    cc -c -O2 -g -pthread -o "$T/lmdb-crash-midl.o" "$LMDB_SRC/midl.c" >> "$T/lmdb-build.log" 2>&1 &&
+    cc -O2 -g -pthread -I"$LMDB_SRC" -o "$T/lmdb-crash" "$ROOT/native/lmdb_crash.c" "$T/lmdb-crash-mdb.o" "$T/lmdb-crash-midl.o" \
+    >> "$T/lmdb-build.log" 2>&1 || die "lmdb-crash (native/lmdb_crash.c) build failed; see target/lmdb-build.log"
+  rm -f "$T/lmdb-crash-mdb.o" "$T/lmdb-crash-midl.o"
   echo "$pin" > "$T/lmdb.stamp"
 }
 

@@ -233,7 +233,8 @@
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe pos-int?]]}
   [db view]
   (cond (vector? view) (location db (second view))
-        (= :root view) (:db/id (d/entity db [:seon.root/id :root]))
+        ;; root's page is root's agent's (its session, the agent keyed "root", made at boot), drawn as any agent's is
+        (= :root view) (or (:db/id (d/entity db [:seon.agent/key "root"])) (:db/id (d/entity db [:seon.root/id :root])))
         ;; home: whoever is signed in (docs/users.md#whats-on-screen)
         (= :home view) (let [u (:seon.root/signed-in (d/entity db [:seon.root/id :root])) f (:seon.user/focus u)]
                          ;; a focused task is its agent's page once its agent exists, else the person's own
@@ -400,8 +401,8 @@
   "The kept walk of user e's page on main db, by its declared layout, made at its first draw and held in the proc's cell (:user-walks, one a user), or nil when e is no user. `user-walks` advances it as main moves. See docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat :map :seon.host/db :any] [:maybe :map]]}
   [st db e]
-  (when-let [cell (when (:seon.user/name e) (:user-walks st))]
-    (let [n (:seon.user/name e)]
+  (when-let [cell (when (and (:seon.agent/key e) (nil? (:seon.agent/branch e))) (:user-walks st))]
+    (let [n (:seon.agent/key e)]
       (or (get @cell n)
           (let [kw (kept-walk db (:db/id e) :main {} identity)]
             (vswap! cell assoc n kw)
@@ -428,12 +429,13 @@
     (cond-> st
       (not= before (side)) (update :dirty (fnil into #{}) (keys (:views st)))
       (seq @cell) (update :dirty (fnil into #{})
+                          ;; the views of the agents these walks draw (each branchless: a user, root's session): their pages moved with main
                           (filter (fn [v] (let [x (if (vector? v) (second v) v)]
-                                            (when (keyword? x) (when (not= :root x) (some->> (location db x) (d/entity db) :seon.user/name))))) (keys (:views st)))))))
+                                            (when (keyword? x) (some->> (location db x) (d/entity db) :seon.agent/key (contains? @cell))))) (keys (:views st)))))))
 
 (defn- user-sides
-  "The agents list every page shows: the signed-in user's (root's :seon.root/signed-in), as that user's kept walk drew it (seon.render.ui/user's
-  c-side): root, then what the user started, each with what it started under it. Nothing before main is read or with no one signed in.
+  "The agents list every page shows: the signed-in user's (root's :seon.root/signed-in), as that user's kept walk drew it (seon.render.ui/agents-list,
+  its page's c-side): root, then what the user started, each with what it started under it. Nothing before main is read or with no one signed in.
   See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat :map [:maybe :seon.host/db]] [:vector :map]]}
   [st db]
@@ -451,8 +453,8 @@
   {:malli/schema [:=> [:cat :map :any :seon.host/db pos-int?] :map]}
   [st view db eid]
   (let [;; [:chat v]: the agent's page, the render of its ctx; else (its debug view) its ctx printed
-        chat? (vector? view)
-        [e id] (agent-of db (if chat? (second view) view))
+        chat? (or (vector? view) (= :root view))
+        [e id] (agent-of db (if (vector? view) (second view) view))
         held (get-in st [:parts id])
         berr (get-in st [:branches view :error])
         ;; its process's drawing, when it drew at the branch root read or later: a process works its whole run as one
@@ -473,8 +475,10 @@
         walked #(when (and cell (not branchless?)) (branch-walk! cell bdb e))
         bix (delay (program/index-of-db bdb))
         cold-tree #(quiet (fn [] (:tree (ctx/build @bix bdb (seon.db/eid bdb :seon.agent/key (:seon.agent/key e)) (or (:seon.agent/branch e) :db)))))
-        branch-units (fn [] (if-let [kw (or (walked) (user-walk st db e))]
-                              (quiet #(render/placed-units (:w kw)))
+        ;; a branchless agent's kept walk (`user-walk`: a user's, root's session's) tracks its own reads and `user-walks` marks its views
+        ;; dirty when main moves it: its first draw here is no read of this page's
+        branch-units (fn [] (if-let [kw (or (walked) (binding [datahike.index.interface/*reads* nil] (user-walk st db e)))]
+                              (binding [datahike.index.interface/*reads* nil] (render/placed-units (:w kw)))
                               (let [t (cond-> (cold-tree) (seq opened) (update :seon.eval/_agent #(reduce-kv (fn [m k ev] (if (opened (:seon.eval/id ev)) (assoc m k (assoc ev :seon.eval/opened true)) m)) % %)))
                                     w (quiet #(render/draw t ctx/changes bdb (render/render-var-of @bix (merge {:seon.agent/key (:seon.agent/key e)} t)) {:index @bix}))]
                                 (try (render/placed-units w) (finally (render/dispose-walk! w))))))
@@ -513,18 +517,26 @@
                       berr [{:id "p-branch-error" :container "#p-task" :rev 0 :html (h/html [:section {:id "p-branch-error"} (render/hiccup {:seon.render/index (seon.db/index)} berr)])}]))
         ;; root's agents list, as root's walk drew it, and the agent's head from its facts on main
         ;; the signed-in user's agents list, the one every page shows (`user-sides`), and the agent's head from its facts on main
-        sides (when-not (some #(= "#c-side" (:container %)) units) (user-sides st db))
-        head (cond-> (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid)
+        ;; every agent's page draws its own agents list; the frame shows the signed-in user's on every page, one walk's (`user-sides`)
+        own-side (set (map :id (list-units (or units []) "#c-side")))
+        units (vec (remove (comp own-side :id) units))
+        sides (user-sides st db)
+        ;; an agent whose own pattern joins the system entity (root's session's, seon.root/root-session-pattern): beside its page, the
+        ;; system's own view (its head, process and problems: root's runtime values, never written) from the system's walk, placed by
+        ;; the frame as the agents list is, the same mechanism
+        system? (some #(and (map? %) (contains? % :seon.agent/root)) (:seon.ctx/pattern e))
+        system (when (and chat? system?) (some-> (:root-walk st) :w render/placed-units))
+        head (cond-> (or (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid) {:seon.agent/key (:seon.agent/key e)})
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
                (not (task/this-boots db e)) (dissoc :processes))
         head-unit {:id "p-agent-head" :container "#p-head" :rev (hash head)
                    :html (h/html [:section {:id "p-agent-head" :class "rounded-md bg-base-900 p-3 text-sm text-text-100"} (ui/agent-head {} head)])}]
-    (ui/page-chrome {:units (vec (concat sides [head-unit] units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
+    (ui/page-chrome {:units (vec (concat sides [head-unit] system units)) :view (ui/view-param view) :tab (if chat? :chat :debug)
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
                       ;; its REPL and its messages while its process runs; its held task's release
-                      :input (if (:seon.user/name e) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
+                      :input (if (or (:seon.user/name e) system?) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
                               :value {:id (keyword (:seon.agent/key e)) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat?
                               ;; what its process can answer: a form running is interrupted (busy)
                               :busy? (= :busy (:seon.agent/status e)) :talks? (some? (:seon.agent/task e))
@@ -624,21 +636,13 @@
           (assoc st :context {:text ctx :tokens (select/estimate ctx)} :context-key [v t]))))
     st))
 
-(defn- root-page
-  "Root's page: its walk's units (root-walk) in root's chrome, its input at the top; nil until main
-  is read."
-  {:malli/schema [:=> [:cat :map] [:maybe :map]]}
-  [st]
-  (when-let [{:keys [w]} (:root-walk st)]
-    (ui/page-chrome {:units (into (user-sides st (:main-db st)) (render/placed-units w)) :view (ui/view-param :root) :tab :chat :input {:schema :seon.render/root-input :value {}}} :root)))
-
 (defn- second-of
   "The name inside a view, [:chat v]'s v, else nil."
   {:malli/schema [:=> [:cat :any] :any]}
   [view] (when (vector? view) (second view)))
 
 (defn- page-value
-  "View's page: root's (root-page), an agent's debug page (debug-value) or an agent's
+  "View's page: root's (its agent's, agent-view), an agent's debug page (debug-value) or an agent's
   (agent-view); nil when main is not read yet, :seon.render/no-location when main names no agent
   for it (an agent's id of no agent in this boot)."
   {:malli/schema [:=> [:cat :map :any] [:maybe :map]]}
@@ -646,7 +650,8 @@
   (let [db (:main-db st)
         eid (when db (location db view))]
     (cond
-     (= :root view) (root-page st)
+     ;; root's page is its session's, made at boot: none yet, nothing to draw
+     (= :root view) (when (and eid (:seon.agent/key (d/entity db eid))) (agent-view st view db eid))
      (and eid (= :debug (first-of view))) (debug-value st view)
      (and eid (= :chat (first-of view)) (agent-of db (second view))) (agent-view st view db eid)
      (and eid (agent-of db view)) (agent-view st view db eid)

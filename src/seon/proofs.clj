@@ -102,7 +102,7 @@
   its own: its keys are one per pure contracted function (mg-roots) and the schema registry (mg-registry),
   each digested by what it reaches and run in bin/test's shards beside the tests (mg-run); the step runs
   them all, in the binary, for bin/check mg-check and the full run (docs/checks.md#the-generative-check-is-per-function)."
-  '{"laws" :tree "agent-tests" [seon.check/agent-tests seon.agent/run-tests-forked seon.repl/page-walk] "health" :caused "lmdb-kill" :pins "lmdb-sem" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
+  '{"laws" :tree "agent-tests" [seon.check/agent-tests seon.agent/run-tests-forked seon.repl/page-walk] "health" :caused "lmdb-kill" :pins "lmdb-lock" :pins "lmdb-crash" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
     "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
@@ -222,10 +222,10 @@
                                                               sym {:registry 'seon.contract/registry :malli.generator/=>seed (:malli.generator/seed ch)})}))))))))))) 
 
 (def binary-free
-  "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files), lmdb-kill
-  and lmdb-sem (each a binary of its own), forks (bin/forks, a Jolt process a unit), health
+  "The steps that run no seon.check mode on target/seon: laws (bin/laws over the files), lmdb-kill,
+  lmdb-lock and lmdb-crash (each a binary of its own), forks (bin/forks, a Jolt process a unit), health
   (bin/test --health, over the program store's kept trees)."
-  #{"laws" "lmdb-kill" "lmdb-sem" "forks" "health"})
+  #{"laws" "lmdb-kill" "lmdb-lock" "lmdb-crash" "forks" "health"})
 
 (defn step-needs-binary?
   "Does bin/check's step run a seon.check mode on target/seon (and a store branch)? Every step

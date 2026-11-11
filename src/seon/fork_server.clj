@@ -118,13 +118,40 @@
   [st]
   (boolean (or (:static-due st) (> (lib/non-static-live!) (cfg/value :seon.config.agent/inherited-bytes)))))
 
+(defn- stood
+  "Server state st with its program's standing load errors (:standing, by namespace) brought to a load: the namespaces it
+  loaded again (touched, or every one for a whole load: :all) lose what they held, then errs (seon.program/error maps) are
+  held by their :ns, until a later load of that namespace succeeds. Every agent forked from here is given them
+  (repl/run!'s :program-errors), so one forked from a program that did not load says so at its start, never silently: they
+  were reported once, as an event, and forgotten. See docs/processes.md#an-agent-that-starts-without-its-program."
+  {:malli/schema [:=> [:cat :map [:maybe [:sequential :seon.program/error]] [:or [:= :all] [:set :symbol]]] :map]}
+  [st errs touched]
+  (let [held (if (= :all touched) {} (apply dissoc (:standing st {}) touched))]
+    (assoc st :standing (merge-with into held (group-by :ns errs)))))
+
+(defn fork-args
+  "What an agent forked from server state st for request m is given (repl/run!): m with the server's reach graph, index and
+  schema registry, the spawn's marks, and the standing load errors of the program it is forked with (`stood`), so it starts
+  saying so. See docs/processes.md#an-agent-that-starts-without-its-program."
+  {:malli/schema [:=> [:cat :map :map [:sequential :any]] :map]}
+  [st m marks]
+  (assoc m :graph (:graph st) :index (index-for-agent st) :schema-registry (:schema-registry st) :marks marks
+           :program-errors (vec (mapcat val (:standing st)))))
+
+(defn- asserted-nss
+  "The namespaces of the forms tx-data (resolved ops) asserts on db: what a :tx's load loaded again."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :any]] [:set :symbol]]}
+  [db ops]
+  (into #{} (keep (fn [[op _ a v]] (when (and (= op :db/add) (= a :form/ns)) (:ns/name (d/entity db v))))) ops))
+
 (defn- preload
   "Server state st with what a first fork would otherwise wait for done now, while no one waits: main's tests loaded, the reach graph and index brought to
   :db, what every agent's start reads warmed, and the heap made static when due. Answers [st' load errors]. A fork after it costs a fork. See docs/machine.md#an-agents-first-write."
   {:malli/schema [:=> [:cat :map] [:tuple :map [:maybe [:sequential :any]]]]}
   [st]
-  (let [errs (seq (concat (:load-errors st) (when (:tests-due st) (:errors (program/load-all! (:db st))))))
-        st (-> st (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
+  (let [tests-errs (when (:tests-due st) (:errors (program/load-all! (:db st))))
+        errs (seq (concat (:load-errors st) tests-errs))
+        st (-> st (stood tests-errs #{}) (dissoc :tests-due :preload-t :load-errors) graph-at-fork index-at-fork (warm-start {}))]
     (when (static-due? st) (lib/static!))
     [(dissoc st :static-due) errs]))
 
@@ -165,6 +192,7 @@
                  ;; main's program changed: load it here, so agents forked from now on inherit it compiled; while
                  ;; the tests' load is still due it loads them all at the first fork, as main has them then
                  errs (seq (program/load-changes! db' (:tx-data m) {:tests? (not (:tests-due st))}))
+                 st (stood st errs (asserted-nss db' (:tx-data m)))
                  ;; the commit a :preload was waiting to see
                  [st load-errs] (if (and (:preload-t st) (>= (:max-tx db') (:preload-t st))) (preload st) [st nil])
                  errs (seq (concat errs load-errs))]
@@ -176,8 +204,9 @@
                  ;; main's tests, loaded once, before the first fork, so every agent and test child forked from here
                  ;; inherits them compiled, as read-only pages (docs/source.md#a-process-holds-the-tests-only-when-it-runs-them);
                  ;; their errors go to root as a tx's load errors do
-                 load-errs (seq (concat (:load-errors st) (when (:tests-due st) (:errors (program/load-all! (:db st))))))
-                 st (dissoc st :tests-due :load-errors)
+                 tests-errs (when (:tests-due st) (:errors (program/load-all! (:db st))))
+                 load-errs (seq (concat (:load-errors st) tests-errs))
+                 st (-> st (stood tests-errs #{}) (dissoc :tests-due :load-errors))
                  st (graph-at-fork st)
                  tg (profile/now-ns)
                  st (-> st index-at-fork (warm-start m))
@@ -193,7 +222,7 @@
                  static-ms (profile/ms-since t1)
                  ;; the spawn's phases here, on the one clock (seon.agent/spawn-phases)
                  marks [[:fork-server-in t0 nil] [:reach-graph tg nil] [:index t1 nil] [:static (profile/now-ns) nil]]]
-             (fork-carrying! st fd open #(repl/run! % (assoc m :graph (:graph st) :index (index-for-agent st) :schema-registry (:schema-registry st) :marks marks) (:db st) (:ns m))
+             (fork-carrying! st fd open #(repl/run! % (fork-args st m marks) (:db st) (:ns m))
                              (fn [n] [st {:ev (cond-> [{:ev :fork-failed :agent (:agent m) :active-threads n}]
                                             load-errs (conj {:ev :load-errors :t (:max-tx (:db st)) :errors (vec load-errs)}))}])
                              (fn [pid] (let [[st evs] (adopt st pid)]
@@ -336,7 +365,8 @@
     ;; root evaluates no test namespace (program/load-all! {:tests? false}); the boot server does, once, at its start (above), and its socket is read
     ;; from boot: a stop that came while 2,020 forms were evaluated one by one waited 12-21 s for them
     (step/run-loop #'server-step {:db db0 :cfg cfg :store store :conn conn :exits exits :graph graph :index index
-                                  :tests-due (and (not boot?) tests-due) :load-errors (seq (:errors loaded))}
+                                  :tests-due (and (not boot?) tests-due) :load-errors (seq (:errors loaded))
+                                  :standing (group-by :ns (:errors loaded))}
                    recv! (fn [_ m] (sock/send! fd m)))
     (lib/kill! 0 9)
     (lib/c-exit 0))))

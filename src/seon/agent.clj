@@ -1137,6 +1137,24 @@
     (-> p (assoc :skipped (vec (sort-by str (filter skip? (:selected p)))))
         (update :selected #(filterv (complement skip?) %)) (update :run #(filterv (complement skip?) %)))))
 
+(defn- own-store!
+  "Make this freshly forked process (a clone, a test child) read the store through its own env: the env and connections it inherited
+  forgotten (seon.db/after-fork!: LMDB forbids using them across fork(), whose reader slot is the parent's), a connection of its own on
+  branch, and every db value the state holds of its parent's made again through it (main's, the base, the branch's, the index's), so no
+  node of one not yet realised is read through the parent's env. What the parent decoded is reused through the node cache
+  after-fork! keeps. Answers the connection. See docs/storage.md#an-agents-reads-and-writes."
+  {:malli/schema [:=> [:cat :seon.db/cfg :keyword] :any]}
+  [cfg branch]
+  (pdb/after-fork! cfg)
+  (let [conn (pdb/connect (assoc cfg :branch branch))
+        own #(some->> % d/commit-id (pdb/at-commit conn))]
+    (swap! state (fn [st] (cond-> (assoc (dissoc st :embedded-from) :store-conn conn)
+                            (:db st) (update :db own)
+                            (:base st) (update :base own)
+                            (:main st) (update :main own)
+                            (get-in st [:index :db]) (update-in [:index :db] own))))
+    conn))
+
 (defn- test-child
   "Fork this agent to run tests in a child (run-tests-here; fds the run's atom of the pipe ends open here) and read it to its end: {:answer
   (test-run-answer: the child's final line, or the one :error report of the test it died in),
@@ -1150,7 +1168,9 @@
         lines (atom {:streamed [] :ended #{} :fns {} :heap {}})
         ;; fds: the pipe ends open in this agent for the run's children (an atom, a set), each child closes every
         ;; one but its own write end: a sibling's end held here would keep the agent's death from ending that sibling
-        _ (swap! fds conj r w)]
+        _ (swap! fds conj r w)
+        ;; what ran ahead is committed first, so the child's db is a commit it can make again through its own env (own-store!)
+        _ (when (:dirty? @state) (commit!))]
     (lib/fork!
      {:refused (fn [n] (lib/c-close r) (lib/c-close w) (swap! fds disj r w)
                  (contract/error :seon.test/fork-refused #'seon.agent/test-child
@@ -1174,6 +1194,8 @@
                ;; its tests run as bin/test's runner runs them: no interrupt or eval of the agent's
                ;; (task seon.agent/a-test-child-starts-as-a-test-runner-does)
                (intr/forked!)
+               ;; its reads through its own env, never the agent's (own-store!); its writes stay its own value's (:test mode)
+               (own-store! (:cfg @state) (:branch @state))
                ;; and as a test process: a private function's contract is checked on each call here, whatever its agent's
                ;; setting (the owner, 2026-11-10: "Private helpers: tests only"; docs/checks.md#contracts-armed-at-definition)
                (contract/check-private! true)
@@ -1602,10 +1624,9 @@
                     (let [parent (:id @state)]
                       ;; the parent's socket closed on fork (FD_CLOFORK); this clone's came with the request
                       (sock/clofork! fd)
-                      ;; the clone opens the store itself, on its own branch
-                      (pdb/after-fork! (:cfg r))
+                      ;; the clone opens the store itself, on its own branch, and reads through it alone (own-store!)
                       (stderr-to-file! (stderr-path (pdb/agents-dir (:cfg r)) (:agent m)))
-                      (let [store-conn (pdb/connect (assoc (:cfg r) :branch (:branch m)))]
+                      (let [store-conn (own-store! (:cfg r) (:branch m))]
                         ;; the task it was cloned for (a fork's sibling task, seon.server's), else its parent's
                         (reset! link {:fd fd :conn (sock/conn fd)})
                         (swap! state assoc :task (or (:task m) (:task @state)) :id (:agent m) :key (name (:agent m)) :branch (:branch m) :mode :agent :tx-seq 0
@@ -1676,7 +1697,7 @@
   interrupt handlers. serve is the loop a clone runs (seon.repl/serve!)."
   {:malli/schema [:=> [:cat :seon.lib/fd :map :seon.host/db :seon.host/fn] :any]}
   [fd {id :agent branch :branch task :task cfg :cfg resumed :resumed commit :commit t :t graph :graph index :index schema-registry :schema-registry session :key
-       marks0 :marks} db0 serve]
+       marks0 :marks program-errors :program-errors} db0 serve]
   ;; the spawn's phases on the one clock, each with what this thread allocated in it: the fork
   ;; server's marks (marks0), then this process's, sent with its hello (spawn-phases)
   (let [inherited (lib/generation-bytes)
@@ -1685,10 +1706,6 @@
   ;; a test child or clone forked from here does not hold root's socket, so EOF on root's
   ;; end means this process is gone
   (sock/clofork! fd)
-  ;; the config this process was forked holding (root read it; an agent reads no environment), the heap bound as its task
-  ;; states it (docs/config.md#the-resolver): a task's own :seon.config.agent/heap-extra-bytes bounds its agent
-  (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes {:task (when task (d/pull db0 (cfg/keys-declared) [:seon.task/id task]))}))
-                 (cfg/value :seon.config.agent/trip-bytes))
   (stderr-to-file! (stderr-path (pdb/agents-dir cfg) id))
   (mark! :setup)
   ;; this agent owns its branch's writes: it opens the store itself (seon.db/after-fork!)
@@ -1702,7 +1719,17 @@
         _ (mark! :interrupt-test)
         c (sock/conn fd)
         store-conn (pdb/connect (assoc cfg :branch branch))
+        ;; main as it forked, made again through this process's own env: db0 is the fork server's value, and a node of it not yet
+        ;; realised would be read through the env it inherited, which LMDB forbids across fork() (lmdb.h's caveats: its reader slot
+        ;; is the parent's, reclaimed when the parent dies). Nothing after this reads the parent's value; what the parent decoded is
+        ;; reused through the node cache after-fork! kept (docs/storage.md#an-agents-reads-and-writes)
+        db0 (pdb/at-commit store-conn (d/commit-id db0))
+        index (some-> index (assoc :db db0))
         _ (mark! :connected)]
+    ;; the config this process was forked holding (root read it; an agent reads no environment), the heap bound as its task
+    ;; states it (docs/config.md#the-resolver): a task's own :seon.config.agent/heap-extra-bytes bounds its agent
+    (lib/heap-cap! (+ (lib/bytes-in-heap) (cfg/value :seon.config.agent/heap-extra-bytes {:task (when task (d/pull db0 (cfg/keys-declared) [:seon.task/id task]))}))
+                   (cfg/value :seon.config.agent/trip-bytes))
     (intr/install!)
     ;; root gone, this process ends, busy or not (the fork server's group kill may be gone too)
     (intr/exit-at-eof! #(sock/peer-gone? (:fd @link)))
@@ -1720,7 +1747,9 @@
           _ (when resumed
               (let [_ (pdb/install-missing! store-conn) tx (program/gained-tx @store-conn)]
                 (when (seq tx) (d/transact store-conn {:tx-data tx :tx-meta (pdb/tx-meta branch)}))))
-          load-errors (when resumed (program/load-diff! base @store-conn))
+          ;; what did not load in the program it was forked with (seon.fork-server/stood: main's, held by the server), then what of its
+          ;; resumed branch's does not load here: both go to root with its hello, each a recorded problem of this agent, never a silent start
+          load-errors (concat program-errors (when resumed (program/load-diff! base @store-conn)))
           _ (mark! :base)
           misaligned (when-not resumed (misaligned commit t @store-conn db0))
           _ (mark! :misaligned)]

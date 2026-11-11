@@ -77,7 +77,7 @@
      ;; 30,495 at 180 (168 a message and 255 once).
      ;; 2026-11-10, step 2 (senders as refs): bound 170 -> 171 calls a message, the +1 the one call of seon.render/reference-value per
      ;; sender (a printed reference is its identity value); measured 3,657 at 20 and 10,497 at 60 (170.6 a message, 168 before). Ruled
-     ;; by Point for the owner on 2026-11-10, awaiting his word; what should take it back down: task seon.print/a-one-key-map-costs-what-its-key-prints
+     ;; by Point for the owner on 2026-11-10, awaiting his word. The +1 is the reference rule's own call, which no other fix removes: the ~200 calls a message of a one-key sender map were seon.render's hook path before that rule, and the printer alone shows no namespace cost (seon.print-cost-test/a-nested-maps-key-namespace-costs-nothing-more)
      :per-n {:calls 171}
      :fixed {:calls 260}
      :sizes [20 60 180]}))
@@ -108,24 +108,6 @@
      ;; and its bytes, which a walk over every datom would grow with the records
      :per-n {:calls 33 :bytes 4000000}
      :sizes [10 40 100]}))
-
-(defn boots-of
-  "The input of size n: the agents list's opts over a db holding n sessions of another boot and one of boot \"b\", and that boot."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :string]]}
-  [n]
-  [{:seon.db/db (d/db-with (ts/test-db) (into [{:seon.agent/key "b/a1"}]
-                                              (for [i (range n)] {:seon.agent/key (str "other/a" i)})))}
-   "b"])
-
-(deftest a-boots-sessions-cost-no-other-boots
-  ;; docs/render.md#a-sessions-address-and-the-agents-list: every session on main is listed, and a store's sessions only grow
-  (cost/proof
-    {:of 'seon.render.ui/boot-side :input 'seon.render-cost-test/boots-of
-     :n "sessions of another boot on main"
-     :work "one index range over this boot's keys, never a step per session of another"
-     :growth :constant
-     :per-n {:calls 3 :bytes 16000}
-     :sizes [10 40 160]}))
 
 (defn moved-of
   "The input of size n: the render state holding main with n tasks (main-info's first read), and

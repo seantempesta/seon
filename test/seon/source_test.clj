@@ -210,7 +210,9 @@
         git (fn [env & args] (:out (apply sh/sh (concat ["env"] (for [[k v] env] (str k "=" v)) ["git" "-C" here] args))))
         built-with (fn [path f]
                      ;; tree with path's text replaced by (f text), or its gitlink moved when f is :pin
-                     (let [idx (str here "/target/tmp/binary-current-" (random-uuid) ".index") env {"GIT_INDEX_FILE" idx}]
+                     ;; its index under target/tmp, made here: a fresh worktree has none, and git could not make the index (red in any new worktree)
+                     (let [idx (str here "/target/tmp/binary-current-" (random-uuid) ".index") env {"GIT_INDEX_FILE" idx}
+                           _ (.mkdirs (java.io.File. (str here "/target/tmp")))]
                        (git env "read-tree" tree)
                        (if (= :pin f)
                          (git env "update-index" "--cacheinfo" (str "160000," (apply str (repeat 40 "1")) "," path))
@@ -231,6 +233,12 @@
             "an agent-only change builds nothing")
         (is (= "" (test-runner/build-text [] r)) "and no process test selected builds nothing")))
     (is (= ["reference-code/lmdb"] (:reaches (current (built-with "reference-code/lmdb" :pin)))) "a pin: not current")
+    ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a candidate whose build input differs from the running binary's only in its runtime
+    ;; (the Jolt pin) is not current, so its gate builds before it runs; and so is one that adds a schema attribute (the binary bakes the schemas)
+    (is (= ["reference-code/jolt"] (:reaches (current (built-with "reference-code/jolt" :pin)))) "the runtime's pin: not current")
+    (is (= ["resources/seon/schemas/seon.facts.edn"]
+           (:reaches (current (built-with "resources/seon/schemas/seon.facts.edn" #(str/replace-first % "{" "{\n :seon.zz/added :int\n")))))
+        "a schema attribute added: not current")
     (let [r (current (built-with "src/seon/render/ui.clj" (tweak "(defn script")))]
       (is (some #{'seon.render.ui/script} (:reaches r)) (str "a render a schema names, which no call of root's reaches, is root's: not current " (pr-str r))))
     (is (= ["zz-unplaced.txt"] (:reaches (current (built-with "zz-unplaced.txt" (constantly "x"))))) "a path no rule places: not current")
@@ -1129,6 +1137,25 @@
                :per-n {:ticks 64000.0 :bytes 176000.0 :calls 4.0}
                :fixed {:ticks 200000 :bytes 500000 :calls 15}
                :sizes [5 15 50]}))
+
+(deftest a-gates-checkout-takes-its-roots-built-products
+  ;; docs/merging.md#a-merge-runs-what-the-change-reaches: bin/worktree --at given FROM clones FROM's built products into the checkout's
+  ;; target/ (the runtime and native libraries a gate's runner runs on), not the main tree's: a gate's checkout is made from the
+  ;; checkout of the root that runs it (seon.fx/run-on-checkout). Red before: --at took no FROM and cloned the main tree's
+  (let [tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-at-" (random-uuid))) (.mkdirs)))
+        here (seon.config/checkout)
+        repo (str tmp "/repo") from (str tmp "/from") wt (str tmp "/wt")
+        git (fn [dir & args] (let [r (apply sh/sh "git" "-C" dir "-c" "user.name=t" "-c" "user.email=t@t" args)]
+                               (is (zero? (:exit r)) (str args (:err r))) (str/trim (:out r))))]
+    (try
+      (.mkdirs (java.io.File. repo)) (.mkdirs (java.io.File. (str from "/target")))
+      (git repo "init" "-q" "-b" "main") (spit (str repo "/f") "a") (git repo "add" ".") (git repo "commit" "-q" "-m" "a")
+      (spit (str from "/target/zz") "the root's product") (spit (str from "/target/zz.stamp") "the root's pin")
+      (let [r (sh/sh (str here "/bin/worktree") "--at" wt (git repo "rev-parse" "HEAD") repo from)]
+        (is (zero? (:exit r)) (str (:out r) (:err r)))
+        (is (= "the root's pin" (slurp (str wt "/target/zz.stamp"))) "its product's stamp is FROM's")
+        (is (= "the root's product" (slurp (str wt "/target/zz"))) "and so is the product"))
+      (finally (sh/sh "git" "-C" repo "worktree" "remove" "--force" wt) (seon.lib/remove-tree! tmp)))))
 
 (deftest a-checkout-whose-submodule-moved-is-synced-to-its-pin
   ;; root, 2026-10-27: a worktree that merged main kept its old Jolt checked out (no one ran

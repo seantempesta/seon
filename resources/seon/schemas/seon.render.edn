@@ -49,7 +49,10 @@
                     [:opened {:optional true} [:set :string]]
                     ;; the entity index (seon.db/index-of) a render that recognizes a value itself reads schemas in: the walk's, filled by
                     ;; emit and render!, passed on by hiccup. The interim docs/users.md#the-stages-agreed-2026-11-09 removes (a render running another render)
-                    [:seon.render/index {:optional true} :map]]
+                    [:seon.render/index {:optional true} :map]
+                    ;; drawn where a parent placed it (seon.render/entity-render: a joined entity), not as the page's top: a render that
+                    ;; draws a whole page answers it with the entity's entry (owner, 2026-11-10: one render that knows top from nested)
+                    [:seon.render/nested {:optional true} :boolean]]
  ;; what a citation reached (seon.doc/reached: a var, a namespace, a task, a section, a file, or nothing)
  :seon.render/kind [:enum :entity :value :var :schema :namespace :task :section :file :unresolved]
  ;; the schema a value is drawn by: its entity schema, or a value's attribute

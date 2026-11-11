@@ -1,1 +1,6 @@
-[]
+[
+ {:seon.task/name "the-memory-gauges-proof-measures-the-block-alone"
+  :seon.task/plan "Found 2026-11-11 in the daily full run at 84a88d2c83 (runs/merge-tests/84a88d2c83...-5e9b1851.../.run): seon.lib-test/the-memory-gauge-reads-what-macos-charges-across-a-fork read held minus before = 59.4 MB for a 64 MB random block against its window of 60-80 (lib_test.clj:107; the case is test/seon/check.clj's memory-gauge). The block is incompressible (random bytes); allocating it can start a collection that frees a few MB elsewhere in the process, and the test reads both as one difference, so a bound the process's own state can cross. Correct: read before after the allocation's collection settles, or bound on the block's own pages; red first under the case as it is at a forced collection. Owner: Tests."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.lib-test/the-memory-gauge-reads-what-macos-charges-across-a-fork}}
+]
