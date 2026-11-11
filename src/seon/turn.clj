@@ -451,13 +451,13 @@
         _ (when-not (= max-turns (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key (:key @agent/state)])))
             (agent/transact! [{:seon.agent/key (:key @agent/state) :seon.agent/max-turns max-turns}]))
         t0-task (task/task (agent/db) task)
-        merge? (task/merges? (:seon.task/kind t0-task))
+        merge? (task/merges-on? (agent/db) task)
         merge-cfg (r/merge-limits t0-task)]
     ;; every run starts on main: a kept branch made before main moved merges it first, so
     ;; the branch's db, its base and this process hold one program (its tests' digests are the
     ;; program it runs); a branch at main's head brings nothing
     (branch/merge-main!)
-    (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :whole? (= :whole (:seon.task/kind t0-task))
+    (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :whole? (not= :merge (:seon.task/kind t0-task))
                :max-turns max-turns :merge? merge?}]
       ;; each turn under the branch's schemas as they are now (repl/with-branch-schemas): work! is one eval,
       ;; bound when it began, and a schema the agent registers since must be the one Seon's code checks its
