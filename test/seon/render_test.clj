@@ -4321,3 +4321,15 @@
     (is (str/includes? tiles "href=\"/agent/a5\"") "the started agent's entry, a link to its page, among the tiles")
     (is (some #(= "agent-a5" (:id %)) units) "a unit of its own, keyed by the agent's key")
     (is (not (str/includes? (pr-str model) "a5")) "the model's page holds no entry")))
+
+;; docs/render.md#how-the-work-stands: the done rule's reasons are data the task holds (:seon.task/reasons), read in their schema's words
+;; (:seon.reconcile/reason's :seon.status/title), what each is about as code; never the flattened keyword string (Point, 2026-11-11: the
+;; header read "proof-red seon.render-test/x; open-problem ..." raw)
+(deftest an-agents-end-reasons-read-in-their-schemas-words
+  (let [t {:seon.task/outcome :cap :seon.task/reason "proof-red seon.render-test/x; open-problem k"
+           :seon.task/reasons [{:reason :proof-red :symbol 'seon.render-test/x} {:reason :open-problem :key "k"}]}
+        r (:reason (ui/standing {:seon.agent/outcome :cap} t))]
+    (is (= "proof red `seon.render-test/x`; problems to clear `k`" r) "each reason in its words, what it is about as code")
+    (is (not (str/includes? r "proof-red")) "no keyword read raw")
+    (is (= "root restarted" (:reason (ui/standing {} {:seon.task/outcome :cap :seon.task/reason "root restarted"})))
+        "a reason with no data behind it is its string")))
