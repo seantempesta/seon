@@ -906,6 +906,9 @@
                                                                     :basis (or base-t (:max-tx main))})
                                         now)))
                (into (:tx carried))
+               ;; every end gets its refine, the same agent continued on the same branch (docs/tasks.md#a-refine-curates-its-own-task):
+               ;; none for a refine, none twice (seon.task/refine-tx)
+               (into (task/refine-tx main id))
                ;; marked failed (my.task/fail!): the failure on main and the task held for root (a compare-and-swap from :running),
                ;; so the judge closes it (no retry); one root already cancelled or held keeps root's
                (into (when marked?

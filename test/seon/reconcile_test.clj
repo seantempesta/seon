@@ -1666,3 +1666,20 @@
   (is (= :tested (r/after-work {:value {:outcome :green}} nil)) "a claim of done is judged")
   (is (= :tested (r/after-work {:value {:outcome :failed}} nil)))
   (is (= :tested (r/after-work {:ex {:seon.error/message "threw"}} nil)) "and so is a loop that threw"))
+
+(deftest every-end-gets-one-refine-and-a-refine-gets-none
+  ;; docs/tasks.md#a-refine-curates-its-own-task (the owner, 2026-11-11: "every state should be convertable to a completed task"): an
+  ;; ended task's refine is written with its end, a :design task on its branch that needs it and cites the refine section; a refine
+  ;; gets none, and none is written twice
+  (let [db (db-of [(decl "a")])
+        tx (task/refine-tx db "demo/a")
+        db1 (d/db-with db tx)
+        r (task/task db1 "demo/a-refine")]
+    (is (seq tx) "an ended task gets its refine")
+    (is (= :design (:seon.task/kind r)) "judged by what it changed of the plan")
+    (is (= #{"demo/a"} (set (map :seon.task/id (:seon.task/needs (d/pull db1 [{:seon.task/needs [:seon.task/id]}] [:seon.task/id "demo/a-refine"]))))) "it needs the task it refines")
+    (is (= (:seon.task/branch (task/task db1 "demo/a")) (:seon.task/branch r)) "on its branch: the same agent continues")
+    (is (= :running (:seon.task/execution r)) "released")
+    (is (task/refine? db1 "demo/a-refine") (str "a refine by its cite of the section: " (pr-str (task/cites-of db1 (seon.db/eid db1 :seon.task/id "demo/a-refine")))))
+    (is (nil? (task/refine-tx db1 "demo/a")) "none twice")
+    (is (nil? (task/refine-tx db1 "demo/a-refine")) "a refine gets none")))

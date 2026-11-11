@@ -893,3 +893,38 @@
                (mapcat (fn [id] [[:db/add [:seon.task/id id] :seon.task/execution :cancelled]
                                  [:db/retract [:seon.task/id id] :seon.task/declared (stored id)]])
                        removed))))))))
+
+(def refine-section
+  "The wiki section a refine is: a task that cites it curates the task it needs (docs/tasks.md#a-refine-curates-its-own-task)."
+  "docs/tasks.md#a-refine-curates-its-own-task")
+
+(defn refine?
+  "Whether task id on db is a refine: it cites `refine-section`, which is what makes one (read from its cites, never its name or
+  a kind). See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
+  [db id]
+  (boolean (some #(= refine-section (get-in % [:seon.cite/target :seon.doc/address])) (cites-of db (pdb/eid db :seon.task/id id)))))
+
+(defn refine-decl
+  "The refine of task t (a task map as db holds it, its id, ns, name and branch): a :design task on t's branch that needs t, so
+  the agent that worked t continues on it (its conversation is on that branch) and is judged by what it changed of t's plan, its
+  plan citing `refine-section` (what makes it a refine) and naming t. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id] [:seon.task/ns :symbol] [:seon.task/name :string]]] :seon.task/declaration]}
+  [t]
+  {:seon.task/ns (:seon.task/ns t) :seon.task/name (str (:seon.task/name t) "-refine") :seon.task/kind :design
+   :seon.task/needs #{(:seon.task/id t)} :seon.task/branch (or (:seon.task/branch t) (default-branch (:seon.task/id t)))
+   :seon.task/plan (str "Refine the task `" (:seon.task/id t) "` you just worked, as " refine-section " says: make its plan, what it "
+                        "cites and the wiki sections you pulled better for whoever works it next, from your own turns. Change no code.")})
+
+(defn refine-tx
+  "Task id's refine written on db, held to run, when id just ended and it is no refine itself and no refine of it exists (a task
+  that needs it and cites `refine-section`); else nil. Every end gets one: \"every state should be convertable to a completed
+  task\" (the owner). See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe [:vector :any]]]}
+  [db id]
+  (let [t (task db id)
+        refined? (some #(refine? db (:seon.task/id %)) (:seon.task/_needs (d/pull db [{:seon.task/_needs [:seon.task/id]}] [:seon.task/id id])))]
+    (when (and t (:seon.task/ns t) (not (refine? db id)) (not refined?))
+      (let [tx (create-tx db [(refine-decl t)])]
+        (when (vector? tx)
+          (into tx (execution-tx [(task-id (:seon.task/ns t) (str (:seon.task/name t) "-refine"))] :running)))))))
