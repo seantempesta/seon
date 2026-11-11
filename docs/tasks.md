@@ -55,6 +55,17 @@ Do not change the work, its tests or its proofs. End with a reply that says each
 
 How it is judged: the task you refined is worked again from where you began, by a fresh agent, and the turns it takes are set beside yours. Until that runs by itself, a refine names the proofs of the task it needs.
 
+## An agent edits a task its pull holds
+
+A task is edited where the pull holds it, whoever's task it is: an edit at a path writes the entity ([the pattern](ctx.md#the-pattern)). Your own task is at `[:seon.agent/task]`, a task it needs at `[:seon.agent/task :seon.task/needs e]`, and any other task once you cite it:
+
+- **Put it in your pull:** `(my.agent/cite! "its.ns/its-name")`. It is then at `[:seon.cite/_of e :seon.cite/target]`, with its id, kind and plan.
+- **Edit its plan there:** ``(let [[e c] (first (filter #(= "its.ns/its-name" (:seon.task/id (:seon.cite/target (val %)))) (:seon.cite/_of @ctx)))] (swap! ctx assoc-in [:seon.cite/_of e :seon.cite/target :seon.task/plan] (str (:seon.task/plan (:seon.cite/target c)) "\n\n" "where to start")))``.
+- **Add a cite to it:** name the section or function in its plan. A plan cites by naming, so the write carries the cite.
+- **Add an example:** ``(my.db/transact! [{:seon.task/id "its.ns/its-name" :seon.task/examples [[:seon.agent/key k]]}])``. What the cite's pattern does not hold (its examples, its instructions) is written this way.
+
+The edit is on your branch and reaches main when your task merges. So a task that prepares another is one the other needs: the reconciler starts the work after the preparing task has merged, from main, with the edited plan. A task whose own agent is working it may change its plan too; two edits of one plan are a conflict at the merge.
+
 ## The agent knows its task
 
 An agent holds the task root started it for from its first form: `my.task/current` reads the task through `seon.turn/current-task`. Both ride `seon.root/spawn!`'s opts (`:branch`, `:task`) into the writer's `:spawn` request and the fork server's `:fork` message, and `seon.agent/init!` keeps them in the agent's state (nil for an agent forked with none). A turn loop, a context read and an attached outside agent read it the same way.
