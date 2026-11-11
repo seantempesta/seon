@@ -798,10 +798,21 @@
     (is (not (str/includes? red "(deftest r")) "the test's own source is not repeated (owner, 2026-11-05)")
     (is (str/includes? red "`demo/f`") "what it calls")
     (is (str/includes? red "(defn helper [] 3)") "a helper of its own namespace, with its source")
-    (is (re-find #"test run failed[^<]*`demo-test/d`" st) "a proof the dead run left: the run is what to fix")
-    (is (re-find #"merges[^<]*`demo-test/p`[^<]*Nothing to do" st) "a deferred proof: it runs at the merge, nothing to do now")
-    (is (re-find #"Not judged yet[^<]*`demo-test/u`" st) "a proof not judged yet: (prove) runs it")
-    (is (= 1 (count (re-seq #"\(prove\)" st))) "(prove) is offered for that one alone")))
+    (let [explain (:seon.status/explain (seon.contract/properties :seon.ctx.status/proof-state))]
+      (doseq [[k t] [[:not-run 'demo-test/d] [:deferred 'demo-test/p] [:unknown 'demo-test/u]]]
+        (is (str/includes? st (str "`" t "`: " (get explain k))) (str t ": its name, then what its state means and what helps it, the schema's words"))))
+    (is (str/includes? red (:fail (:seon.status/explain (seon.contract/properties :seon.ctx.status/proof-state)))) "a red proof says what red means and what to do")
+    (is (= 1 (count (re-seq #"\(prove\)" st))) "(prove) is offered for the proof not judged yet alone")))
+
+(deftest every-proof-state-has-its-words
+  ;; docs/render.md#how-the-work-stands: each state a proof is shown in carries its title and its explanation as data on its schema, so a
+  ;; state added without words is red here, never a blank on the page
+  (let [props (seon.contract/properties :seon.ctx.status/proof-state)
+        members (seon.contract/enum-values :seon.ctx.status/proof-state)]
+    (is (seq members) "the enum's members")
+    (doseq [m members]
+      (is (not (str/blank? (get (:seon.status/title props) m))) (str m ": a title"))
+      (is (not (str/blank? (get (:seon.status/explain props) m))) (str m ": an explanation")))))
 
 (deftest a-location-names-root-an-agent-or-an-entity
   (is (= [:root :root [:chat :a3] :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "a3/ctx" "474"])) "an agent's path is its chat; /debug every render of its ctx"))
@@ -3730,7 +3741,7 @@
     (is (= :h2 (first (second h))) "headed")
     (is (str/includes? t "Your proofs") "headed to the agent")
     (is (str/includes? t "<ul><li><code>seon.program-test/a-vars-history</code>") "several proofs: a list of their states")
-    (is (str/includes? t "not written yet") "each proof's state")
+    (is (str/includes? t (:undefined (:seon.status/title (seon.contract/properties :seon.ctx.status/proof-state)))) "each proof's state, its schema's title")
     (is (str/includes? t "Unknown class program") "a failure in a line")
     (is (not (str/includes? t "(deftest a-vars-history")) "the failing proof's source is the agent's own: not repeated")
     (is (str/includes? t "seon.program/history is public") "what blocks merging")
