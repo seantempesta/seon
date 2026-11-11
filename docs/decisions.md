@@ -182,7 +182,7 @@ Asked by the question tool what a render may read of the page, his pick: "The pr
 
 "If we break the \"physics\" of what the agent is expecting like the agent can't see it's context and we keep telling it to look at the rendered function it breaks agents. We need to keep auditing and finding our failures and fixing them". To be stated in [agent](agent.md) by the Context session.
 
-### Reasoning is the development microscope; the model runs without it (owner, 2026-11-11)
+### Reasoning is the development microscope; the system is built to work without it (owner, 2026-11-11)
 
 "I want to keep tuning the model for deepseek flash without reasoning, but let's doing some tests with reasoning turned on ... The goal is to maybe understand via the reasoning what the model is finding confusing and then we fix it and demo it on no reasoning"; "it's gold for understanding how clear we are about the system. They can easily mine this and iterate with the prompt". To be stated in [model](model.md) by the Context session.
 
