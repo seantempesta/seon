@@ -111,7 +111,7 @@
   example does not hold is `session-tx`'s refusal naming it, never a message. See docs/tasks.md#a-task-names-example-sessions."
   {:malli/schema [:=> [:cat :map :map :seon.host/db] [:vector [:tuple :map [:maybe :qualified-keyword]]]]}
   [ix c db]
-  (let [placed (ctx/placed-messages c)]
+  (let [placed (ctx/placed-messages ix c)]
    (vec (for [[n cid] (ctx/turns c)
              :let [members (get placed n) evals (ctx/turn-evals c cid)
                    call (get-in c [:seon.model-call/_agent cid])]

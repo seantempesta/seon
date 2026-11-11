@@ -1546,7 +1546,7 @@
   (let [t (session/example-t db0 k)
         db (d/as-of db0 t)
         c (ctx/agent-ctx ix db (seon.db/eid db :seon.agent/key k))
-        placed (ctx/placed-messages c)]
+        placed (ctx/placed-messages ix c)]
     (into [:details {}
            [:summary {:class "muted" :wire/for "page"} (str "example session " k)]
            [:p {} (session/example-open k (:seon.agent/description c))]]
@@ -1707,9 +1707,9 @@
   that read what a person said with the last thing said before the next ask (the turns between work it out), and what a person said that
   no turn has read yet. Read as the conversation reads them (seon.ctx/placed-messages, seon.ctx/call-of). See
   docs/render.md#an-entity-may-name-its-own-render."
-  {:malli/schema [:=> [:cat :seon.host/db :any :string :int] [:map [:exchanges [:vector :map]] [:waiting [:sequential :string]]]]}
-  [db c k turn]
-  (let [placed (ctx/placed-messages c)
+  {:malli/schema [:=> [:cat :seon.host/db :map :any :string :int] [:map [:exchanges [:vector :map]] [:waiting [:sequential :string]]]]}
+  [db ix c k turn]
+  (let [placed (ctx/placed-messages ix c)
         bodies (fn [ms] (keep (fn [p] (let [x (ratom/realize (get-in c p))]
                                              (when (some? (get-in x [:seon.message/from :seon.user/name])) (:seon.message/body x)))) ms))
         said-in (fn [n] (when-let [cid (ctx/call-of db n k)]
@@ -1789,7 +1789,7 @@
         turn (or (ratom/realize (:seon.agent/turn c)) 0)
         working? (> turn (or (ratom/realize (:seon.agent/ended-turn c)) 0))
         _ (let [v (get c :seon.message/_to)] (when (map? (ratom/untracked v)) (doall (keys v))))
-        {:keys [exchanges waiting]} (if k (stage-exchanges db c k turn) {:exchanges [] :waiting []})
+        {:keys [exchanges waiting]} (if k (stage-exchanges db ix c k turn) {:exchanges [] :waiting []})
         now (peek exchanges)
         ;; the sessions the person's tree holds (root's session pulls who started it, the user, and what they started), itself aside
         held (count (for [u (members (get c :seon.agent/_agents)) a (started-agents (get u :seon.agent/agents))] a))]
@@ -2001,11 +2001,11 @@
 (defn conversation-list
   "The conversation of an agent's page (c-rows), what the model reads as messages (:seon.render/messages) and the person as the chat: its system message, the example sessions it reads, what was asked (the person's: the model reads the plan in the task's part), a component for each of its turns (`conversation-turn`), then how it stands (the person's). It reads the agent's turn number, the turns' bases and where each member of its history was read (`seon.ctx/placed-messages`: each message, or a member of any join its schema calls history, by its path, derived from when it was linked, handed to each turn as its :messages; no join named) and nothing else of its records: a new eval runs its turn alone, and a new turn or member this list and a lookup of each earlier turn's marker; a turn runs again for its own messages alone.
   See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:seon.render/list "c-rows" :seon.render/messages true :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
-  [{c :seon.ctx/ctx db :seon.db/db}]
+  {:seon.render/list "c-rows" :seon.render/messages true :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db] [:seon.render/index :map]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db ix :seon.render/index}]
   (let [k (ratom/realize (:seon.agent/key c))
         ;; where each message was read, once for every turn (a turn is given its own, so a message delivered runs this list and the turn it reached)
-        placed (when k (ctx/placed-messages c))
+        placed (when k (ctx/placed-messages ix c))
         ;; the turn number and whether a task is held are read untracked: placed-messages reads c's key set tracked, which a turn moved
         ;; or a task set or unset reaches (seon.ratom: a node's key set is reached by a direct value replaced), so a read of each here
         ;; was a second read of one change; with no key there is nothing placed and nothing to draw for either

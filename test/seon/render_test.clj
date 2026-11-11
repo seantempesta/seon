@@ -4443,6 +4443,16 @@
                   "the note reaches the request's messages, as history or in the page")
       (println "the request's messages:" msgs))))
 
+(deftest a-join-whose-target-is-no-history-is-no-conversation
+  ;; docs/turn.md#the-turn-is-a-number: the conversation is the joins whose target is history (seon.render/history?, Data model's
+  ;; ruling): an agent's own pattern asking a join with :tx :at whose schema has no model render (a cite, a started agent, here a
+  ;; planted note drawn for html alone) puts none of its members in the conversation
+  (let [{:keys [c ix msgs]} (planted-world {:history? false})]
+    (is (= ["the planted note"] (map :lab.planted.note/text (vals (:lab.planted.note/_agent c)))) "the pull holds the note, with its link's :at")
+    (is (some :at (vals (:lab.planted.note/_agent c))))
+    (is (not-any? #(= :lab.planted.note/_agent (first %)) (mapcat val (seon.ctx/placed-messages ix c))) "no member of it is placed")
+    (is (not (str/includes? msgs "the planted note")) "nor read by the model")))
+
 (deftest an-eval-by-another-hand-reaches-the-request-only-as-the-systems-with-an-intent
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an eval no call holds is placed (seon.ctx/placed-messages) and the
   ;; page shows it; the model reads one by another than the agent only when it is the system's and holds an intent (seon.ctx.wire's

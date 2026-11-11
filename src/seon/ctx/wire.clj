@@ -122,7 +122,7 @@
   [w]
   (let [db ((:db w))
         c @(:ref (:src w))
-        turn-of (into {} (for [[n ps] (when (:db/id c) (ctx/placed-messages c)) :when (int? n) p ps] [(peek p) n]))
+        turn-of (into {} (for [[n ps] (when (:db/id c) (ctx/placed-messages @(:index w) c)) :when (int? n) p ps] [(peek p) n]))
         ps (reduce (fn [acc [m src]]
                      (let [[ref n] (part-ref db turn-of src m) [r0 ms n0] (peek acc)]
                        (if (and (seq acc) (= ref r0)) (conj (pop acc) [r0 (conj ms m) n0]) (conj acc [ref [m] n]))))
@@ -527,10 +527,10 @@
   the call, then its evals in the one order a turn's are read in (seon.ctx/turn-evals: the model's, then other hands'); a member c no longer holds (unlinked by a swap!) is
   none. The model reads of an eval no call holds by another hand than the agent's only one by the system with an intent (`model-reads?`).
   See docs/turn.md#the-turn-is-a-number."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
-  [db c]
+  {:malli/schema [:=> [:cat :seon.host/db :map :map] [:vector :any]]}
+  [db ix c]
   (let [evals (:seon.eval/_agent c)
-        placed (ctx/placed-messages c)
+        placed (ctx/placed-messages ix c)
         ;; what the model reads of the placed members (the page shows them all): an eval by another than the agent itself only when it is the
         ;; system's (its :seon.eval/by the system entity, :seon.root/id) and holds an intent; a person's or another agent's eval, and the
         ;; system's own work (seon.turn/work!, no intent), stay out (Context and Data model, 2026-11-11)
@@ -585,10 +585,10 @@
   that opens it (seon.ctx.session/example-open), its turns' entities placed (`turn-entities`), each rendered by its own
   :seon.render/openai-compat in the walk, and the message that closes it. A call's answer stands for the agent's own model render, so an
   example writes no session opening of its own. See docs/tasks.md#a-task-names-example-sessions."
-  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
-  [{db :seon.db/db} a]
+  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :map] [:vector :any]]}
+  [{db :seon.db/db ix :seon.render/index} a]
   (-> [{:role "user" :content (session/example-open (ratom/realize (:seon.agent/key a)) (ratom/realize (:seon.agent/description a)))}]
-      (into (turn-entities db a))
+      (into (turn-entities db ix a))
       (conj {:role "user" :content "</session>"})))
 
 (defn example-msgs
@@ -608,11 +608,11 @@
   "An agent (:seon.db/agent-fact) as the model reads it: its system message (`agent-system-text`: the doc sections
   :seon.agent/system names, else the system prompt; a placed example is answered by its own call, so it has none), each example session its task names as a placed call of `example-msgs`, what opens its own session, then its turns'
   entities (`turn-entities`). The task is read in the page parts alone, never here. See docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup."
-  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :map] [:vector :any]]}
-  [{db :seon.db/db} a]
+  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db] [:seon.render/index :map]] :map] [:vector :any]]}
+  [{db :seon.db/db ix :seon.render/index} a]
   (let [k (:seon.agent/key a)]
     ;; no prompt on db: no system message, so the request is refused by its own check (a typed error), not thrown inside the render
     (-> (if-let [t (agent-system-text db a)] [{:role "system" :content t}] [])
         (into (map (fn [ek] [#'example-msgs {} ek])) (session/session-examples db a))
         (into (when k [{:role "user" :content (session/session-open k)}]))
-        (into (turn-entities db a)))))
+        (into (turn-entities db ix a)))))

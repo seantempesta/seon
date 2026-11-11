@@ -955,22 +955,25 @@
   "Where the members of agent record c's history were read: {n [[k e] ...]} for each turn n that read some, each member by its path in c
   (k the join that holds it, e its entity id), in the order they were linked, and :pending for those linked after the last turn's edge, which
   the turn now opening takes. Read from the pull alone, no join named: a join is a key of c whose value is a map of member maps holding
-  :at, the transaction that linked each, which the pattern asks ({[:ns/_attr :tx :at] ..}: docs/ctx.md#the-pattern). The joins whose
+  :at, the transaction that linked each, which the pattern asks ({[:ns/_attr :tx :at] ..}: docs/ctx.md#the-pattern), whose target is
+  history (seon.render/history?, its schema read from a member in the entity index ix: a join of cites or started agents asked with :at
+  is no conversation). The joins whose
   members carry a turn number (:seon.model-call/n) make the turns; a turn's edge is the :t of its basis (seon.turn/basis!, the commit its
   request is made from), else, for a turn with no basis (an example session's), the transaction that linked its call; so one linked after a
   turn's basis, mid-turn, reads at the next turn. Every other join's members are placed against those edges by their link (a message by
   its delivery: docs/users.md#messages), but a member that refs a turn-maker's member (an eval's :seon.eval/call), which is read under it
   (`turn-evals`). Turn 0, the record's opening, takes what was linked before turn 1. One sort of the placed members and one pass with the
   turns. See docs/turn.md#the-turn-is-a-number."
-  {:malli/schema [:=> [:cat :map] [:map-of [:or :int [:= :pending]] [:vector [:tuple :keyword :int]]]]}
-  [c]
+  {:malli/schema [:=> [:cat :map :map] [:map-of [:or :int [:= :pending]] [:vector [:tuple :keyword :int]]]]}
+  [ix c]
   (let [plain (ratom/untracked c)
         ;; the joins the pattern asks with their link's transaction: a map of member maps, each holding :at
         joins (for [[k v] plain :when (and (map? v) (seq v) (every? map? (vals v)) (some :at (vals v)))] [k v])
-        ;; those whose members carry a turn number make the turns; each other join's members are placed against them
+        ;; those whose members carry a turn number make the turns; each other join whose target is history (its schema read once a
+        ;; join, from a member) is placed against them
         maker? (fn [[_ v]] (some :seon.model-call/n (vals v)))
         makers (filter maker? joins)
-        placed-joins (remove maker? joins)
+        placed-joins (filter (fn [[_ v]] (render/history? ix (render/entity-schema ix (first (vals v)) nil))) (remove maker? joins))
         ;; the turns' calls: one join's map as the record holds it (newest first, sorted, its order read below), else all of them merged
         calls (when (seq makers) (reduce into (map second makers)))
         cids (set (keys calls))

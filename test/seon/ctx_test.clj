@@ -1611,7 +1611,7 @@
         (d/transact conn [{:seon.message/id "m2" :seon.message/to [[:seon.agent/key "old"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "And this."}])
         (let [db @conn
               c (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "old") :b))
-              placed (ctx/placed-messages c)]
+              placed (ctx/placed-messages ix c)]
           (is (= 3 (count (:seon.message/_to c))) "the pull holds every message")
           (is (every? (comp :db/txInstant :at) (vals (:seon.message/_to c))) "each with the transaction that delivered it, its role's :tx :at")
           (is (= ["m1"] (mapv #(get-in c (conj % :seon.message/id)) (get placed 1))) "the first placed at the turn that read it")
