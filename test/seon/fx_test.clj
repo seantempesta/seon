@@ -33,6 +33,18 @@
         [_ o] (fx/owner-proc st :in (req 2 :budget 10 :budget-key :task-a))]
     (is (= :seon.fx/budget-spent (get-in (first (:out o)) [:r :seon.error/type])))))
 
+;; docs/flow.md#effects-one-owner-and-its-workers-per-kind: at its bound an owner stops reading the agents' :in, but root's own asks
+;; (:ask, the api's {:op :fx}) are read and queued still, so the api that put one never waits on a full owner and every other
+;; asker's op is answered. Red before: no :ask port (root put on :in, behind the agents' back-pressure, and waited with every op)
+(deftest the-api-answers-while-an-effects-queue-is-full
+  (let [b (cfg/value :seon.config.fx/buf)
+        st (reduce (fn [st k] (first (fx/owner-proc st :in (req k)))) (owner 0) (range b))
+        [st2 _] (fx/owner-proc st :ask {:req {:k :root} :prio 0 :dest {:rid 1}})]
+    (is (false? ((::flow/input-filter st) :in)) "the agents' requests wait at the bound")
+    (is (true? ((::flow/input-filter st) :ask)) "root's are read")
+    (is (= (inc b) (count (:queue st2))) "and queued past the bound")
+    (is (contains? (:ins (fx/owner-proc)) :ask) "a port of its own, so root's put never waits behind the agents'")))
+
 (deftest owner-stops-reading-at-its-bound
   (let [st (reduce (fn [st k] (first (fx/owner-proc st :in (req k)))) (owner 0) (range (cfg/value :seon.config.fx/buf)))]
     (is (false? ((::flow/input-filter st) :in)))
