@@ -209,6 +209,8 @@ A test root's processes end with the runner. `bin/held`'s watcher blocked in a `
 
 ## Processes
 
+Every shell Seon runs goes through ```seon.lib/sh```, which runs `clojure.java.shell/sh` on a fiber (a thread's call on a fiber of its own, joined): there Jolt's `sh` copies the child's pipes on fibers parked on their readiness and waits for its exit as an event, starting no thread. Called from a thread (a server connection's, ```seon.server/serve!```) it copied on futures, two threads of Clojure's send-off pool no proc declares, which outlived the call (```seon.server-test/a-done-shells-on-no-thread-of-roots```: a `seon_done`'s `git status`). No other `src` form names `clojure.java.shell/sh` (```seon.main-test/every-shell-runs-through-lib-sh```).
+
 Anything that can make threads or processes starts at n ≤ 100 under `nice -n 15`. Watch `ps -M -p PID | wc -l`, and kill your own process past 200 threads. One experiment at a time.
 
 A child process costs what starting it costs, and on this machine that is most of a git-heavy test's wall time. Measured 2026-11-10: `/usr/bin/git` is the Xcode shim, which finds the developer directory on every call (11.3 ms a `rev-parse HEAD`, against 5.1 ms for the binary it finds), so `bin/env` puts `target/git-bin`, a directory holding only a link to the real git, first on `PATH` for everything it starts; and a child spawned from Jolt costs 20-35 ms against ~10 ms from a shell. A path that spawns children per call is a cost to count: ```seon.fx/tree-id``` is ~7 git children, ```seon.fx/inputs``` ~23 (one per submodule pin).
