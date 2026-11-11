@@ -3,7 +3,7 @@
   red one its source and its failures (expected and actual), a reference already shown as a
   proof is not shown again, a merge task's plan stays its own."
   (:require [my.branch] [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.ctx.search :as search] [seon.ctx.session :as session] [seon.ctx.status :as status] [seon.ctx.wire :as wire] [seon.print :as print]
+            [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.ctx.search :as search] [seon.ctx.session :as session] [my.schema] [seon.ctx.status :as status] [seon.ctx.wire :as wire] [seon.print :as print]
             [seon.doc-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.doc :as doc] [seon.judge] [seon.ctx :as ctx] [seon.fixtures] [seon.render :as render] [seon.render.ui] [seon.web.html] [my.test :as t]
             [seon.print.select :as select] [seon.ratom] [clojure.walk] [clojure.string :as str] [seon.lib] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model] [seon.config] [clojure.data.json] [seon.render-cost-test]))
 
@@ -1920,6 +1920,26 @@
         (is (= [:seon.ctx/session-refused "b/bare"] ((juxt :seon.error/type :key) bare)) "an agent with no plan and no description has no request to show: not an empty one")
         (is (str/includes? (:seon.error/message bare) "no request to show"))
         (is (vector? (session/session-tx @conn "b/src" "x")) "an agent that has a request is shown")))))
+
+(deftest an-example-refuses-a-history-record-of-a-kind-it-does-not-hold-naming-its-schema
+  ;; docs/tasks.md#a-task-names-example-sessions: a member the conversation places (seon.ctx/placed-messages) is recorded as the entity it is,
+  ;; by its schema, never as a message; one of a kind an example does not hold (a planted note) is refused, naming its schema, never dropped
+  (ts/test-branch!
+    (fn [_ conn]
+      (source-session! conn)
+      (doseq [[k form] [[:lab.planted.note/id [:and {:seon.db/identity true} :string]] [:lab.planted.note/text :string]
+                        [:lab.planted.note/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]]
+                        [:lab.planted/note-fact [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/planted-note :seon.render/openai-compat 'seon.render-test/planted-note-msgs}
+                                                 [:lab.planted.note/id :lab.planted.note/id] [:lab.planted.note/text :lab.planted.note/text] [:lab.planted.note/agent :lab.planted.note/agent]]]]]
+        (d/transact conn (:tx (my.schema/registration @conn k form false))))
+      (d/transact conn [{:seon.agent/key "b/src" :seon.ctx/pattern (conj (render/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern)
+                                                                         {[:lab.planted.note/_agent :tx :at] [:db/id :lab.planted.note/id :lab.planted.note/text]})}])
+      (d/transact conn [{:lab.planted.note/id "n1" :lab.planted.note/text "the planted note" :lab.planted.note/agent [:seon.agent/key "b/src"]}])
+      ;; a turn after it, so the note is placed in a turn the example records
+      (d/transact conn [{:seon.model-call/id (seon.lib/call-id "b/src" 3) :seon.model-call/agent [:seon.agent/key "b/src"] :seon.model-call/n 3 :seon.model-call/origin :model :seon.model-call/reply "Noted."}])
+      (let [r (session/session-tx @conn "b/src" "x")]
+        (is (= :seon.ctx/session-refused (:seon.error/type r)) "a record of a kind an example does not hold is refused")
+        (is (str/includes? (str (:seon.error/message r)) ":lab.planted/note-fact") "naming its schema")))))
 
 (deftest an-example-keeps-an-eval-of-ctx-as-its-marker
   ;; the owner, 2026-11-04: "if an agent needs to swap or modify ctx then that needs to be present": no eval is left out of an
