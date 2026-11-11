@@ -717,6 +717,22 @@
     (doseq [b bs] (d/delete-branch! conn b))
     bs))
 
+(defn tree-branch?
+  "Whether b names a checkout's proving branch, tree-<its 40-hex tree id> (seon.root/tree-branch): the only branch the system
+  drops by itself. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :seon.db/branch] :boolean]}
+  [b] (boolean (re-matches #"tree-[0-9a-f]{40}" (name b))))
+
+(defn drop-trees!
+  "Delete every tree branch (tree-branch?) held under main from the store of conn, answering them by the names root gives them
+  (of-main). Root's boot calls it before any agent exists: each found then is one whose last run an end of root cut short, its
+  agent gone with root, which that run would have dropped. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] [:vector :seon.db/branch]]}
+  [conn main]
+  (let [bs (filterv tree-branch? (of-main main (d/branches conn)))]
+    (doseq [b bs] (d/delete-branch! conn (on-main main b)))
+    bs))
+
 (defn preload!
   "Read every node of db's indexes into this process's node cache, so the children it forks
   (the fork server's agents) inherit them decoded and read the store less at a spawn. The fork
