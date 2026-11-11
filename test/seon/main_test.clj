@@ -77,6 +77,17 @@
                      db ['jolt.host/ticks-of 'jolt.host/ticks])]
     (is (= ['seon.profile/measure!] (vec callers)))))
 
+(deftest a-task-is-never-written-gate-true
+  ;; docs/merging.md#the-merge-gate: a merge's gate runs the process tests its change reaches before
+  ;; it merges, nobody asking (seon.reconcile's :gate), so :seon.task/gate? asks for nothing and no
+  ;; src form names it but the one that holds the schemas' own text
+  ;; (seon.config/schema-forms; the attribute leaves the store at a later erase). Read from the compiler's facts (:form/keywords), never a text search
+  (let [db (runner/program)
+        named (d/q '[:find [?n ...] :in $ ?k :where [?f :form/keywords ?k] [?f :form/defines ?v] [?v :var/name ?n]
+                     [?f :form/ns ?ns] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]]
+                   db :seon.task/gate?)]
+    (is (= '[seon.config/schema-forms] (vec (sort named))))))
+
 (deftest a-tasks-outcomes-are-read-once
   ;; task seon.task/a-runs-lifecycle-is-read-once: a task's outcome sets are declared once, on
   ;; :seon.task/outcome's schema, and read once, by seon.task (finished, judged, failed), which every

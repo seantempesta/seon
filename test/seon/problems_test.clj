@@ -408,7 +408,7 @@
         (is (open? db) "a failed commit writes no sha: open")
         (is (false? (:open? (first (rows fixed)))) "the next merge's commit writes one: closed")))
     (testing "an error the asker made itself (no owner's stamp) writes its fact alone"
-      (is (= [{:a 1}] (err/asked-tx (world) (contract/error :seon.fx/io-error 'my.root/gate! "no gate checkout" {}) :seon.task/deferred-results [{:a 1}]))))
+      (is (= [{:a 1}] (err/asked-tx (world) (contract/error :seon.fx/io-error 'seon.reconcile/gated "no gate checkout" {}) :seon.task/deferred-results [{:a 1}]))))
     (.setReadable (java.io.File. co "a.clj") true)
     (run! #(.delete ^java.io.File %) (reverse (file-seq (.getParentFile co))))))
 
@@ -698,7 +698,7 @@
 (deftest a-merge-with-its-process-tests-unrun-is-an-open-problem
   ;; owner's ruling, 2026-10-23: a change that reaches process tests merges with them unrun
   ;; unless root asked; unknown stays visible, an open :unrun row, until each is recorded
-  ;; passing (my.root/gate! runs them): one passing of two, or a red, keeps it open
+  ;; passing (the reconciler's :gate records them): one passing of two, or a red, keeps it open
   (let [att (fn [extra] (:db-after (d/with (seeded 1 5)
                                            [(ended "t/u" (merge {:seon.task/branch :u :seon.task/kind :merge :seon.task/outcome :merged
                                                                  :seon.task/agent {:seon.agent/key "b/a9" :seon.agent/ended-ms 9}
