@@ -442,7 +442,8 @@
                                             (swap! (:drawn w) assoc f new))))
             order (or (:order prev) (vswap! (:mounts w) inc))
             kids (volatile! [])
-            id (key-id k)
+            ;; a walk whose units another page composes names its elements apart (:id-prefix, seon.render.proc/user-walk)
+            id (str (:id-prefix w) (key-id k))
             reads (volatile! nil)
             kept (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and

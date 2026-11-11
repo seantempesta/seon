@@ -380,14 +380,16 @@
   atom, drawn once by its entity's render (seon.render/render-var-of: its tree, with ident, the identity the caller
   holds of it, for a branch that holds no entity yet) over the db it holds: {:w :a :c :at}, :at a volatile of that db.
   Root's own page (root-walk), each user's (`user-walk`) and each watched agent's branch (`branch-walk!`) keep one; `advance-walk!`
-  moves it. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn] :map]}
-  [db e branch ident mark]
+  moves it. Walk-opts go on the walk (:id-prefix, `user-walk`'s). See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:function [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn] :map]
+                  [:=> [:cat :seon.host/db [:maybe pos-int?] :any :map :seon.host/fn [:map [:id-prefix {:optional true} :string]]] :map]]}
+  ([db e branch ident mark] (kept-walk db e branch ident mark {}))
+  ([db e branch ident mark walk-opts]
   (let [ix (program/index-of-db db)
         c (assoc-in (ctx/build ix db e branch) [:ix :own-index?] true) at (volatile! db) a (ratom/atom (mark (:tree c)))
-        w (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/render-var-of ix (merge ident (:tree c))) {} (ratom/ref-view a ctx/changes)] ix)]
+        w (merge (render/walker {:ref a :changes ctx/changes} (fn [] @at) [(render/render-var-of ix (merge ident (:tree c))) {} (ratom/ref-view a ctx/changes)] ix) walk-opts)]
     (render/flush! w nil)
-    {:w w :a a :c c :at at}))
+    {:w w :a a :c c :at at})))
 
 (defn- advance-walk!
   "Kept walk kw (`kept-walk`) as of db, a later value of its branch: its ctx patched by what moved
@@ -455,7 +457,9 @@
   (when-let [cell (when (and (:seon.agent/key e) (nil? (:seon.agent/branch e))) (:user-walks st))]
     (let [n (:seon.agent/key e)]
       (or (get @cell n)
-          (let [kw (kept-walk db (:db/id e) :main {} identity)]
+          ;; a user's walk draws the agents list the frame puts on every page, beside another walk's units: its elements are named apart
+          ;; (a page's units are keyed by element id, and an agent's entry is on root's page twice: the list and root's sessions)
+          (let [kw (kept-walk db (:db/id e) :main {} identity (if (:seon.user/name e) {:id-prefix "u-"} {}))]
             (vswap! cell assoc n kw)
             kw)))))
 

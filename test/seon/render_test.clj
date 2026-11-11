@@ -975,9 +975,23 @@
             [st3 patch] (pass-view st2 [:chat :a3])
             added (concat (:appends patch) (:afters patch) (:prepends patch))]
         (is (= 3 (count (side st3))) "root's line, a3's entry, a4's entry")
-        (is (= ["agent-a4"] (mapv (fn [[_ html]] (second (re-find #"id=\"([^\"]+)\"" html))) added)) "a4's entry, placed in the list")
+        (is (= ["u-agent-a4"] (mapv (fn [[_ html]] (second (re-find #"id=\"([^\"]+)\"" html))) added)) "a4's entry, placed in the list, named apart as the user's walk names its elements")
         (is (str/includes? (second (first added)) "href=\"/agent/a4\"") "a link to its page")
         (is (empty? (:frags patch)) (str "nothing else of the list sent again: " (map first (:frags patch))))))
+    (r/dispose-walk! (get-in st [:root-walk :w]))))
+
+(deftest a-page-names-each-element-once
+  ;; docs/render.md#a-layout-places-its-lists: a page's units are keyed by element id, and the frame puts the user's agents list beside the
+  ;; page's own units: an agent the user started is on root's page twice (the list, root's sessions), so the user's walk names its elements
+  ;; apart. Red before: agent-a3 twice, one unit overwriting the other in the view, a patch for one landing on the other
+  (let [[main branch eid] (paged-dbs)
+        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "a3" :seon.agent/root [:seon.root/id :root]}])
+        st (root-state (branch-state main branch) main)
+        [st1 _] (pass-view st :root)
+        html (p/view-html st1 :root)
+        ids (map second (re-seq #" id=\"([^\"]+)\"" html))]
+    (is (= 2 (count (re-seq #"href=\"/agent/a3\"" html))) "a3's entry is drawn twice: the list and root's sessions")
+    (is (empty? (for [[id n] (frequencies ids) :when (> n 1)] id)) (str "no element id twice: " (pr-str (for [[id n] (frequencies ids) :when (> n 1)] id))))
     (r/dispose-walk! (get-in st [:root-walk :w]))))
 
 (deftest a-part-that-sorts-into-the-middle-goes-there
