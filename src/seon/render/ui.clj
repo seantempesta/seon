@@ -1677,7 +1677,7 @@
         ;; working: a turn begun that has not ended (its branch holds both numbers)
         working? (> turn (or (ratom/realize (:seon.agent/ended-turn c)) 0))
         _ (let [v (get c :seon.message/_to)] (when (map? (ratom/untracked v)) (doall (keys v))))
-        placed (when k (ctx/placed-messages c))
+        placed (when k (ctx/placed-messages db c))
         person? (fn [m] (some? (get-in m [:seon.message/from :seon.user/name])))
         said-in (fn [n] (when-let [cid (ctx/call-of db n k)] (let [r (some-> (get-in c [:seon.model-call/_agent cid :seon.model-call/reply]) ratom/realize)] (when-not (str/blank? r) [cid r]))))
         asks (vec (for [n (sort (filter int? (keys placed)))
