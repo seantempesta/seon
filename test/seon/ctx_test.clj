@@ -278,7 +278,8 @@
 (defn- pattern-faults
   "The faults in pattern p of entity schema s, at any depth, as [schema thing what]: a `*`, an :as on a join whose attribute (or
   forward attribute, for a reverse one) names its target (:seon.db/to), a ref join its schema's implied pattern does not hold
-  (:seon.agent/agents is the one the implied pattern skips, as it targets its own schema). A join's own pattern is read as its
+  (:seon.agent/agents is the one the implied pattern skips, as it targets its own schema), a join to a history schema (seon.render/history?:
+  the conversation's, placed by when each member was linked) that asks no :tx (docs/ctx.md#the-pattern). A join's own pattern is read as its
   target schema's: the owner of a reverse attribute, the one a :by names, else the first its attribute targets."
   {:malli/schema [:=> [:cat [:maybe [:or :qualified-keyword [:vector :qualified-keyword]]] [:vector :any]] [:sequential :any]]}
   [s p]
@@ -294,6 +295,7 @@
                         target (cond (reverse? a) ((:entity-schemas (pdb/index)) fwd) (:by o) ((:entity-schemas (pdb/index)) (:by o)) :else (let [ts ((:targets (pdb/index)) fwd)] (if (next ts) (vec ts) (first ts))))]
                   fault (concat (when (and ((:targets (pdb/index)) fwd) (:as o)) [[s a :as]])
                                 (when (and ((:targets (pdb/index)) fwd) (not (:by o)) implied (not (implied a)) (not= :seon.agent/agents a)) [[s a :not-implied]])
+                                (when (and (not (:tx o)) (some #(render/history? (pdb/index) %) (if (sequential? target) target [target]))) [[s a :no-tx]])
                                 (when (vector? sub) (pattern-faults target sub)))]
               fault))))
 
@@ -303,7 +305,7 @@
     (is (seq ps) "entity schemas with a pattern")
     (is (some #(= :seon.db/agent-fact (first %)) ps) "the agent's is one")
     (doseq [[s p] ps]
-      (is (= [] (vec (pattern-faults s p))) (str s ": every join keyed by its attribute, no *, each ref join one its refs imply")))))
+      (is (= [] (vec (pattern-faults s p))) (str s ": every join keyed by its attribute, no *, each ref join one its refs imply, each history join asking :tx")))))
 
 ;; docs/ctx.md#the-pattern: a pattern's :tx names the key a transaction is held under, the transaction entity whole (:db/id,
 ;; :db/txInstant, :seon.tx/branch), so what an agent does with it is a short clojure.core form (owner, 2026-11-11: "I want this to work
