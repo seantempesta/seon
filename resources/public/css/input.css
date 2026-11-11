@@ -169,19 +169,32 @@
 .seon-print-symbol, .seon-print-tag { color: var(--color-text-100); }
 .seon-print-elision, .seon-print-whole-text, .seon-print-prune { color: var(--color-warning); }
 /* a map as key and value rows; a vector of same-keyed maps as a table (seon.print.emit/close-frame) */
-.seon-print-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 0.75rem; row-gap: 0.125rem; }
+.seon-print-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 0.75rem; row-gap: 0.125rem; margin: 0; }
+.seon-print-grid > .seon-print-entry > dt, .seon-print-grid > .seon-print-entry > dd { margin: 0; }
 .seon-print-entry { display: contents; }
 .seon-print-caption { grid-column: 1 / -1; color: var(--color-text-500); }
 .seon-print-key { text-align: right; opacity: .75; }
 .seon-print-val { min-width: 0; }
 .seon-print-node > .seon-print-grid { margin-left: 1rem; }
+/* a vector, list or set as a list of its members, one per line; of scalars (or the value printed),
+   inline, its delimiters drawn here (seon.print.emit/close-frame-inline) */
+.seon-print-members { list-style: none; margin: 0; padding: 0; color: var(--color-text-200); font-family: var(--font-mono); }
+.seon-print-members > li { margin: 0; padding: 0; }
+.seon-print-members:not(.seon-print-inline) > li + li { border-top: 1px solid var(--color-base-800); }
+.seon-print-node > .seon-print-members { margin-left: 1rem; }
+.seon-print-members.seon-print-inline, .seon-print-members.seon-print-inline > li { display: inline; }
+.seon-print-members.seon-print-inline > li + li { margin-left: 1ch; }
+.seon-print-members.seon-print-inline::before, .seon-print-members.seon-print-inline::after { color: var(--color-text-500); }
+.seon-print-members.seon-print-inline.seon-print-vector::before { content: '['; } .seon-print-members.seon-print-inline.seon-print-vector::after { content: ']'; }
+.seon-print-members.seon-print-inline.seon-print-list::before { content: '('; } .seon-print-members.seon-print-inline.seon-print-list::after { content: ')'; }
+.seon-print-members.seon-print-inline.seon-print-set::before { content: '#{'; } .seon-print-members.seon-print-inline.seon-print-set::after { content: '}'; }
 .seon-print-table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
 .seon-print-table { font-size: 0.72rem; line-height: 1.35; }
 .seon-print-table th, .seon-print-table td { border: 1px solid var(--color-base-800); padding: 0.05rem 0.35rem; text-align: left; vertical-align: top; }
 /* a cell one line, cut by its column's width only; hovered, whole */
 .seon-print-table td { max-width: 22rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seon-print-table td:hover { white-space: normal; overflow: visible; }
-.seon-print-table td .seon-print-grid { display: inline; }
+.seon-print-table td .seon-print-grid, .seon-print-table td .seon-print-grid dt, .seon-print-table td .seon-print-grid dd, .seon-print-table td .seon-print-members, .seon-print-table td .seon-print-members > li { display: inline; }
 .seon-print-table th { font-weight: normal; }
 .seon-print-plain { white-space: pre-wrap; font-family: var(--font-text); color: var(--color-text-200); margin: 0; }
 /* highlight.js's Clojure tokens in the page's palette */
