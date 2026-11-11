@@ -1993,7 +1993,7 @@
   "The sessions the system entity view r holds as root's session's pull joins it (:seon.agent/_root, newest first to
   :seon.config.ctx/window: seon.root/root-session-pattern), root's session itself left out: each by the agent's own render nested (its
   entry, under it the agents it started), so an agent is listed once, under the agent that started it: the top level is what the pull
-  holds that no held agent started (:seon.agent/agents); this boot's first, each earlier boot's under one fold, newest boot first; and how many root holds beyond the window (a count of
+  holds that no agent it lists started (:seon.agent/agents; the user is the person, so what a person asked for is at the top); this boot's first, each earlier boot's under one fold, newest boot first; and how many root holds beyond the window (a count of
   :seon.agent/root's datoms, never a silent cut). Reads the pull, the boot fact and that count. See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db :any] :any]}
   [db r]
@@ -2001,7 +2001,8 @@
         ;; who it holds, read tracked by its key set: a session added or gone draws this again
         _ (doall (keys as))
         held (remove #(contains? #{nil "root"} (:seon.agent/key (ratom/untracked %))) (members as))
-        started (set (for [m held s (members (get m :seon.agent/agents))] (:db/id (ratom/untracked s))))
+        ;; started by an agent listed as an entry: the user is drawn as the person, so what it started stays at the top
+        started (set (for [m held :when (nil? (get m :seon.user/name)) s (members (get m :seon.agent/agents))] (:db/id (ratom/untracked s))))
         ms (remove #(started (:db/id (ratom/untracked %))) held)
         boot-of #(:seon.agent/boot (ratom/untracked %))
         now (task/boot-of db)

@@ -2592,13 +2592,14 @@
   ;; docs/users.md#roots-session: root holds the user as it holds every agent, and nothing started it; its entry says what the data says
   ;; it is (it holds :seon.user/name), the person Seon works for, never a session with a standing (Point's ruling, 2026-11-11)
   (let [db (sessions-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1]])
-        db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/root [:seon.root/id :root]}])
+        db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/root [:seon.root/id :root] :seon.agent/agents [[:seon.agent/key "b2/a1"]]}])
         html (root-page-html db)
         person (re-find #"(?s)<section[^>]*data-standing=\"person\".*?</section>" html)]
     (is (some? person) html)
     (is (str/includes? person "the person Seon works for") person)
     (is (str/includes? person "href=\"/agent/sean\"") "its page")
-    (is (not (re-find #"data-standing=\"finished\"[^>]*id=\"agent-sean\"" html)) "not a finished session")))
+    (is (not (re-find #"data-standing=\"finished\"[^>]*id=\"agent-sean\"" html)) "not a finished session")
+    (is (str/includes? html "href=\"/agent/b2/a1\"") "what the person asked for stays in root's list (red before: the user's join hid it)")))
 
 (deftest a-stopped-agent-does-not-read-as-waiting-in-its-head-or-its-lists
   (let [a {:seon.agent/id :a6 :seon.agent/status :idle :seon.agent/max-turns 40 :seon.agent/key "b2/a6"}
