@@ -99,16 +99,19 @@
   "The ref and turn of message m the agent's model output holds, from src, the component whose own answer held it
   (seon.render/answer-sources: {:f :args}): an eval [:eval id] in its reply's turn, a message [:message id] in its call's, a
   reply [:reply id] in its own, a turn's page message [:page n] in turn n, an example session [:example key], and the agent's
-  own: its system message [:section addresses], what opens its session [:session key]; turn-of, each placed member's entity id to the
-  turn that read it (seon.ctx/placed-messages). What the debug page labels each message by. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:malli/schema [:=> [:cat :seon.host/db :map :map :map] [:tuple [:vector :any] [:maybe :int]]]}
-  [db turn-of {:keys [f args]} m]
+  own: its system message [:section addresses], what opens its session [:session key]; any other member the conversation placed
+  [schema id] by its entity schema in the entity index ix (seon.render/entity-schema: a planted entity is labelled as what it is, never as
+  the session); turn-of, each placed member's entity id to the turn that read it (seon.ctx/placed-messages). What the debug page labels each message by. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  {:malli/schema [:=> [:cat :map :seon.host/db :map :map :map] [:tuple [:vector :any] [:maybe :int]]]}
+  [ix db turn-of {:keys [f args]} m]
   (let [x (some-> (first args) ratom/realize)]
     (cond (= f #'page-diff-msgs) [[:page (nth args 3)] (nth args 3)]
           (= f #'example-msgs) [[:example (first args)] nil]
           (:seon.eval/id x) [[:eval (:seon.eval/id x)] (reply-of db x)]
           (:seon.message/id x) [[:message (:seon.message/id x)] (turn-of (:db/id x))]
           (:seon.model-call/id x) [[:reply (:seon.model-call/id x)] (:seon.model-call/n x)]
+          ;; any other entity the output placed, not the agent itself (whose opening is :session): by what it is, its turn when one read it
+          (and (:db/id x) (nil? (:seon.agent/key x))) [[(render/entity-schema ix x nil) (:db/id x)] (turn-of (:db/id x))]
           (= "system" (:role m)) [[:section (vec (sort (keys (:seon.agent/system x))))] nil]
           :else [[:session (:seon.agent/key x)] nil])))
 
@@ -124,7 +127,7 @@
         c @(:ref (:src w))
         turn-of (into {} (for [[n ps] (when (:db/id c) (ctx/placed-messages @(:index w) c)) :when (int? n) p ps] [(peek p) n]))
         ps (reduce (fn [acc [m src]]
-                     (let [[ref n] (part-ref db turn-of src m) [r0 ms n0] (peek acc)]
+                     (let [[ref n] (part-ref @(:index w) db turn-of src m) [r0 ms n0] (peek acc)]
                        (if (and (seq acc) (= ref r0)) (conj (pop acc) [r0 (conj ms m) n0]) (conj acc [ref [m] n]))))
                    [] (render/answer-sources w :seon.render/openai-compat))
         ms (into [] (mapcat second) ps)]

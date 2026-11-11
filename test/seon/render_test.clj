@@ -4475,7 +4475,7 @@
         ix (seon.program/index-of-db db)
         c (:tree (seon.ctx/build ix db (seon.db/eid db :seon.agent/key "lab/a1") :b))
         w (draw c seon.ctx/changes db #'ui/agent {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
-    (try {:c c :ix ix :page (apply str (map :html (seon.fixtures/page-units w))) :msgs (pr-str (:messages (seon.ctx.wire/request w)))
+    (try {:c c :ix ix :page (apply str (map :html (seon.fixtures/page-units w))) :msgs (pr-str (:messages (seon.ctx.wire/request w))) :parts (:parts (seon.ctx.wire/request w))
           ;; the conversation as the page shows it: the units its list holds (container #c-rows, seon.render.ui/conversation-list)
           :rows (apply str (keep #(when (= "#c-rows" (:container %)) (:html %)) (seon.fixtures/page-units w)))}
          (finally (r/dispose-walk! w))))))
@@ -4496,6 +4496,16 @@
     (when-not (is (or (str/includes? msgs "PLANTED-MODEL the planted note") (str/includes? msgs "PLANTED-HTML the planted note"))
                   "the note reaches the request's messages, as history or in the page")
       (println "the request's messages:" msgs))))
+
+
+(deftest a-placed-history-member-is-labelled-by-its-schema
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: the debug page labels each message the model was sent by what answered
+  ;; it (seon.ctx.wire/part-ref); a member the conversation placed that is no message, eval or reply (the planted note) is labelled by its
+  ;; entity schema and id, never as the session's opening
+  (let [{:keys [parts]} (planted-world)
+        refs (map first parts)]
+    (is (some #(= :lab.planted/note-fact (first %)) refs) (str "the note's part is labelled by its schema: " (pr-str refs)))
+    (is (not-any? #(and (= :session (first %)) (nil? (second %))) refs) "no part labelled as a session with no key")))
 
 (deftest a-join-whose-target-is-no-history-is-no-conversation
   ;; docs/turn.md#the-turn-is-a-number: the conversation is the joins whose target is history (seon.render/history?, Data model's
