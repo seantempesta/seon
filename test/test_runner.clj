@@ -474,7 +474,7 @@
   (names, one line) and out/steps.edn ({:tree :digests {step digest}}) for bin/prove to run;
   out/tests.edn ({:tree :digests {test digest}}) names each candidate test's digest;
   out/binary names the selected keys that reach target/seon, out/steps-binary the steps among
-  them (both empty: nothing to build, nothing to seed), out/stall-ms the stall bound bin/test reads. Answers the exit
+  them (both empty: nothing to build, nothing to seed), out/stall-ms the stall bound and the end bound of a test with no record, which bin/test reads. Answers the exit
   status: 1 when a check step names a function the program does not define."
   [what all? out names]
   (if-let [bad (refused-names names)]
