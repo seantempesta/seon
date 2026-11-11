@@ -1103,11 +1103,12 @@
   "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look first for a session already on it in your list of sessions; if one is, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
 (defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through root's entity to every agent with its status and task,
-  which makes its task list draw root's sessions (seon.render.ui/sessions). See docs/users.md#whats-on-screen."
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through the system entity to the sessions root
+  holds, newest first to :seon.config.ctx/window, each with what its entry reads and its boot (seon.task/entry-pattern), which root's page
+  draws (seon.render.ui/root nested) and root's model reads (seon.render.ui/sessions). See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat] [:vector :any]]}
   [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
-           {:seon.agent/root [{:seon.agent/_root [:seon.agent/key :seon.agent/status {:seon.agent/task [:seon.task/id :seon.task/outcome]}]}]}))
+           {:seon.agent/root [:seon.root/id {[:seon.agent/_root :limit :seon.config.ctx/window :reverse true] (conj task/entry-pattern :seon.agent/boot)}]}))
 
 (defn root-session-tx
   "Root's session, made at the boot of a main that has none (`root-session-boot-tx`), an ordinary agent made the ordinary way: an agent

@@ -474,10 +474,11 @@
   (assoc-in (proc-state main branch) [:branches :a3 :read] [:task-demo-f]))
 
 (defn- root-state
-  "St with root's walk current as of main (seon.render.proc/advance-main: root's ctx built at main's
-  first read, its page the walk's units, root's agents list among them)."
+  "St with root's walk current as of main (seon.render.proc/advance-main: root's ctx built at main's first read), main holding root's
+  session as the boot makes it (seon.root/root-session-boot-tx): root's page is that agent's."
   [st main]
-  (#'p/advance-main (dissoc st :main-db) (d/db-with main (seon.test-store/root-tx {:seon.config.agent/max-running 4}))))
+  (let [main (d/db-with main (seon.test-store/root-tx {:seon.config.agent/max-running 4}))]
+    (#'p/advance-main (dissoc st :main-db) (d/db-with main (seon.root/root-session-boot-tx main)))))
 
 (deftest a-dropped-page-lets-go-of-its-branchs-db
   ;; docs/machine.md#roots-heap: a branch's db read for a page is kept while a page shows it. The
@@ -559,7 +560,7 @@
   ;; commit: from the point it was read at, made again by seon.db/at-commit), and the tile draws what it holds
   (ts/test-branch! (fn [_ conn]
   (let [[_ branch _] (paged-dbs conn)
-        main0 (:db-after (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}))
+        main0 (do (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}) (:db-after (d/transact conn {:tx-data (seon.root/root-session-boot-tx @conn)})))
         st (assoc (#'p/advance-main (dissoc (proc-state main0 branch) :main-db) main0) :conn conn)
         tile (fn [st] (:html (second (filter #(= "#p-tiles" (:container %)) (:seon.render/units (#'p/page-value st :root))))))
         main2 (:db-after (d/transact conn {:tx-data [{:seon.task/id "zz/dead" :seon.task/ns 'zz :seon.task/name "dead" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work
@@ -637,7 +638,8 @@
         top (fn [l] (remove :parent (:seon.render/units l)))
         input (fn [l] (first (filter #(= "p-input" (:id %)) (:seon.render/units l))))]
     (testing "root is an agent: its page and an agent's are each its lists in one chrome (seon.render.ui/page-chrome)"
-      (is (= #{nil "#c-side" "#p-head" "#c-rows" "#p-rules" "#p-tiles"} (set (map :container (top root)))) "root's lists: its agents' cards")
+      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules" "#p-tiles"} (set (map :container (top root))))
+          "root's: its agent's page (its tiles, its conversation) and, beside it, the system's own view (p-tiles)")
       (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (top agent))))
           "an agent's: its task's list above its conversation; no eval of the fixture has a render of its own, so no tiles")
       (doseq [l [root agent] :let [by (into {} (map (juxt :id identity)) (:seon.render/units l))]
@@ -645,17 +647,17 @@
         (is (some? p) (str (:id u) ": a nested unit's parent is a unit of the page"))
         (is (str/includes? (:html p) (str "id=\"" (subs (:container u) 1) "\"")) (str (:id u) ": its container is an element of its parent"))
         (is (str/includes? (:html p) (str "<!--s:" (:id u) "-->")) (str (:id u) ": its parent holds its slot")))
-      (is (= 3 (count (in root "#c-rows"))) "root's list: its work, every session of this boot, then its evals, folded")
-      (is (str/includes? (:html (last (in root "#c-rows"))) "sent to root")))
+      (is (str/includes? (apply str (map :html (in root "#p-task"))) "Sessions") "root's sessions among its agent's tiles (the system entity its pull joins, nested)"))
     (testing "the agents list is the signed-in user's, the same on every page: root first, then what the user started"
       (is (= 2 (count (in root "#c-side")) (count (in agent "#c-side"))))
       (is (= (map :html (in root "#c-side")) (map :html (in agent "#c-side"))))
       (is (str/includes? (:html (first (in root "#c-side"))) "href=\"/root\"") "root's line links to its page")
       (is (str/includes? (:html (second (in root "#c-side"))) "href=\"/agent/a3\"") "a link to its page, by its key"))
-    (testing "root's focus: its process and main's open problems by their own renders, its input spawns"
-      (is (= 2 (count (in root "#p-tiles"))))
+    (testing "root's system view: its process, main's open problems and the evals sent to root, by their own renders; its input spawns"
+      (is (= 3 (count (in root "#p-tiles"))))
       (is (str/includes? (:html (first (in root "#p-tiles"))) "process"))
       (is (str/includes? (:html (second (in root "#p-tiles"))) "problems"))
+      (is (str/includes? (:html (last (in root "#p-tiles"))) "sent to root"))
       (is (= :seon.render/root-input (:schema (input root)))))
     (testing "an agent's focus: its REPL and messages at the top, live while root's view holds it in this boot"
       (is (= [:seon.render/agent-input {:id :a3 :live? true :held nil :focus? true :busy? true :talks? true :address :a3}] [(:schema (input agent)) (:input (input agent))]))
@@ -713,7 +715,7 @@
   ;; root's, which its walk marks (root-walk) when main moved
   (ts/test-branch! (fn [_ conn]
   (let [[main0 branch eid] (paged-dbs conn)
-        main0 (:db-after (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}))
+        main0 (do (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}) (:db-after (d/transact conn {:tx-data (seon.root/root-session-boot-tx @conn)})))
         o (volatile! {})
         st (#'p/pass (assoc (#'p/advance-main (dissoc (proc-state main0 branch) :main-db) main0) :conn conn) o)
         main (:main-db st)
@@ -2184,10 +2186,18 @@
 
 (declare sessions-db)
 
-(deftest a-session-card-says-what-it-works-on
-  ;; docs/render.md#the-page: root's card of a session: its task in words, how it stands, a link to its page
+(defn- entry-of
+  "Agent key's entry as a page draws it where its starter's pull joins it (seon.render.ui/agent nested, its pull by
+  seon.task/entry-pattern and one level of the agents it started): its hiccup, the started agents in it as the pulled maps a walk
+  places as their own entries."
+  [db key]
+  (#'ui/agent-entry db (d/pull db (into [:db/id] (conj seon.task/entry-pattern {:seon.agent/agents (into [:db/id] seon.task/entry-pattern)})) [:seon.agent/key key])))
+
+(deftest an-agents-entry-says-what-it-works-on
+  ;; docs/users.md#whats-on-screen: an agent's entry (seon.render.ui/agent nested, wherever a page joins it): its task in words, how it
+  ;; stands, a link to its page
   (let [db (sessions-db "b2" [["b2/a3" :a3 :running "seon.print/a-long-string" :running :task-a]])
-        card (h/html (ui/session-card {:seon.db/db db} "b2/a3"))]
+        card (h/html (entry-of db "b2/a3"))]
     (is (str/includes? card "A long string") "its task, in words")
     (is (str/includes? card "working") "how its work stands")
     (is (str/includes? card "href=\"/agent/b2/a3\"") "its page")))
@@ -2196,7 +2206,7 @@
 ;; started (its :seon.agent/agents, read forward in the tile's pull). Cost: n = the agents under one tile (what that agent started); the
 ;; join is the tile's own entity's datoms of that attribute and a pull of each child, so a tile costs its own children, never the store's
 ;; agents, and each child tile is its own component, reused by its key
-(deftest a-tile-holds-the-agents-its-agent-started
+(deftest an-entry-holds-the-agents-its-agent-started
   (let [db (sessions-db "b2" [["b2/a2" :a2 :running "seon.print/a-long-string" :parked :task-a]
                               ["b2/a3" :a3 :running "seon.print/b-short-string" :running :task-b]])
         work-task (:db/id (:seon.agent/task (d/entity db [:seon.agent/key "b2/a3"])))
@@ -2204,9 +2214,11 @@
         ;; agent-tx writes it from the task's started-by)
         db (d/db-with db [[:db/add work-task :seon.task/started-by [:seon.agent/key "b2/a2"]] [:db/add work-task :seon.task/agent [:seon.agent/key "b2/a3"]]
                           [:db/add [:seon.agent/key "b2/a2"] :seon.agent/agents [:seon.agent/key "b2/a3"]]])
-        kids (fn [hc] (keep #(when (and (vector? %) (= #'ui/session-card (first %))) (nth % 2)) (tree-seq coll? seq hc)))]
-    (is (= ["b2/a3"] (kids (ui/session-card {:seon.db/db db} "b2/a2"))) "the request's tile holds its work agent's")
-    (is (empty? (kids (ui/session-card {:seon.db/db db} "b2/a3"))) "the work agent's holds none")))
+        ;; the started agents an entry places: the pulled maps under its "started" element, each drawn by its own entry in a walk
+        kids (fn [hc] (keep #(when (and (map? %) (string? (:seon.agent/key %))) (:seon.agent/key %))
+                             (mapcat #(when (and (vector? %) (= :div (first %)) (= "started" (:class (second %)))) (drop 2 %)) (tree-seq coll? seq hc))))]
+    (is (= ["b2/a3"] (kids (entry-of db "b2/a2"))) "the request's entry holds its work agent's")
+    (is (empty? (kids (entry-of db "b2/a3"))) "the work agent's holds none")))
 
 (defn- user-units
   "The units of user name's page on main db, as its kept walk draws them (seon.render.proc/kept-walk: the agent's render over its pull),
@@ -2242,8 +2254,8 @@
         (is (str/includes? side "1 more it started, below") (str "a1's started agent, beyond the pull's depth, counted: " side))
         (is (not (str/includes? (in units "#c-side") "more it started")) "and nothing below an agent that started none")))))
 
-(deftest a-tile-shows-the-last-exchange
-  ;; docs/users.md#whats-on-screen: a tile is titled by what the person typed and shows their newest message and its answer, never
+(deftest an-entry-shows-the-last-exchange
+  ;; docs/users.md#whats-on-screen: an agent's entry is titled by what the person typed and shows their newest message and its answer, never
   ;; an answer to an earlier one under a later question (owner, 2026-11-08: an atom tile showed a paragraph on agents)
   (let [db0 (sessions-db "b2" [["b2/a2" :a2 :idle "x/asks" :parked :task-b]])
         a (:db/id (d/entity db0 [:seon.agent/key "b2/a2"]))
@@ -2251,7 +2263,7 @@
                             {:seon.task/id "x/asks" :seon.task/plan "What is (+ 2 3)?\nOne line." :seon.task/started-by "u" :seon.task/reason "It is five."}])
         db2 (d/db-with db1 [{:seon.message/from {:seon.agent/key "sean"} :seon.message/to [a] :seon.message/body "And times three?" :seon.message/sent-ms 1}])
         db3 (d/db-with db2 [{:seon.task/id "x/asks" :seon.task/reason "It is six."}])
-        tile (fn [db] (h/html (ui/session-card {:seon.db/db db} "b2/a2")))]
+        tile (fn [db] (h/html (entry-of db "b2/a2")))]
     (is (str/includes? (tile db1) "What is (+ 2 3)?") "titled by the first line the person typed")
     (is (not (str/includes? (tile db1) "x/asks</span>")) "not the task's id")
     (is (str/includes? (tile db1) "It is five.") "its answer, with nothing asked since")
@@ -2488,17 +2500,23 @@
     (is (str/includes? (h/html (r/hiccup {:seon.render/index (seon.db/index) :schema :seon.problems/report} old)) "a-class-since-removed") "the page draws it as data")
     (is (not (str/includes? (h/html (r/hiccup {:seon.render/index (seon.db/index) :schema :seon.problems/report} old)) "threw")))))
 
+(defn- root-page-html
+  "Root's page on main db as the render proc draws it (seon.render.proc/page-value :root: root's agent's page, made at boot, with the
+  system's own view beside it), its units composed, as one html string."
+  [db]
+  (let [st (root-state (proc-state db db) db)]
+    (try (apply str (map :html (remove :parent (seon.fixtures/composed (:seon.render/units (#'p/page-value st :root))))))
+         (finally (some-> (get-in st [:root-walk :w]) r/dispose-walk!)))))
+
 (deftest root-reads-what-is-going-on
-  ;; docs/render.md#the-page: root's head and its work say what is going on, in words
+  ;; docs/render.md#the-page: root's head says what is going on, in words; its page lists every session root holds, each by its entry,
+  ;; those that need the person first (the entry's group, a datum the page orders by)
   (let [db (sessions-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1] ["b2/a2" :a2 :running "x/works" :running :t2] ["b2/a3" :a3 :ended "x/done" :merged :t3]])
         c (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.root/id :root) :db))
-        keys-in (fn [hc] (keep #(when (and (vector? %) (= #'ui/session-card (first %))) (nth % 2)) (tree-seq coll? seq hc)))
-        work (ui/work-list {:seon.db/db db})
-        text (pr-str work)]
-    (is (= #{"b2/a1" "b2/a2" "b2/a3"} (set (keys-in work))) "every session with a task")
-    (is (< (.indexOf text "Parked") (.indexOf text "Working") (.indexOf text "Finished")))
-    (is (< (.indexOf text "b2/a1") (.indexOf text "Working")) "what waits on a person comes first")
-    (is (str/includes? text "Finished · 1"))
+        html (root-page-html db)]
+    (is (every? #(str/includes? html (str "href=\"/agent/" % "\"")) ["b2/a1" "b2/a2" "b2/a3"]) "every session with a task")
+    (is (re-find #"data-standing=\"parked\"[^>]*id=\"agent-b2_2Fa1\"" html) "the parked one in the group that comes first")
+    (is (re-find #"data-standing=\"finished\"[^>]*id=\"agent-b2_2Fa3\"" html) "the merged one in the last")
     (let [head (pr-str (ui/root-head {:seon.render/index (seon.db/index) :seon.ctx/ctx (or c {}) :seon.db/db db}))]
       (is (str/includes? head "1 parked") "the head says so, in the state's plain word")
       (is (str/includes? head "1 running") "a finished task is not running, whatever its execution still says"))))
@@ -2545,7 +2563,8 @@
 
 (defn- sessions-db
   "A main db whose root is at boot, holding sessions, each [key id status task-id outcome branch] (a part left nil is not written):
-  the agents of any boot, as a store holds them after a root restarts (only this boot's keep their link to root)."
+  the agents of any boot, as a store holds them after a root restarts, each agent linked to root (:seon.agent/root: the boot keeps every
+  link, so root's session's pull reaches them all), the person's session (id :user) not."
   [boot sessions]
   (reduce d/db-with (ts/test-db)
           (concat
@@ -2558,7 +2577,8 @@
            ]
           ;; one transaction each, the last listed first: the list reads newest first, as the store's transaction ids order it
           (for [[k id status tid _ b] (reverse sessions)]
-            [(cond-> (if (= :user id) {:seon.agent/key k} {:seon.agent/key k :seon.agent/boot (first (str/split k #"/")) :seon.agent/max-turns 40 :seon.agent/branch (or b :task-b)})
+            [(cond-> (if (= :user id) {:seon.agent/key k} {:seon.agent/key k :seon.agent/boot (first (str/split k #"/")) :seon.agent/max-turns 40 :seon.agent/branch (or b :task-b)
+                                                            :seon.agent/root [:seon.root/id :root]})
                status (assoc :seon.agent/status status) b (assoc :seon.agent/branch b)
                tid (assoc :seon.agent/task [:seon.task/id tid]))]))))
 
@@ -2569,74 +2589,56 @@
         t {:seon.task/id "seon.ref/an-alias" :seon.task/outcome :cap :seon.task/reason "proof-red seon.ref-test/an-alias"}
         head (h/html (ui/agent-head {} (assoc a :seon.agent/task t)))
         db (sessions-db "b2" [["b2/a6" :a6 :idle "seon.ref/an-alias" :cap :task-b] ["b2/a7" :a7 :idle "x/y" :parked :task-y]])
-        side (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/a6")))
-        card (h/html (ui/session-card {:seon.db/db db} "b2/a6"))]
+        entry (h/html (entry-of db "b2/a6"))]
     (is (str/includes? head "● stopped at its cap · 40 turns") head)
     (is (str/includes? head "proof-red seon.ref-test/an-alias") "its reason, in the header line")
     (is (not (str/includes? head "waiting")))
-    (is (str/includes? side "stopped at its cap") side)
-    (is (str/includes? side ">An alias</span>") "the pill names the agent by its task")
-    (is (not (str/includes? side ">b2/a6<")) "its key only in the title")
-    (is (not-any? #(str/includes? side %) ["idle" "waiting"]))
-    (is (str/includes? card "stopped at its cap") card)
-    (is (not (str/includes? card "idle")))
-    (is (str/includes? (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/a7"))) "parked") "a parked task can be answered")
+    (is (str/includes? entry "stopped at its cap") entry)
+    (is (str/includes? entry ">An alias</span>") "the entry names the agent by its task")
+    (is (not (str/includes? entry ">b2/a6<")) "its key only in the title")
+    (is (not-any? #(str/includes? entry %) ["idle" "waiting"]))
+    (is (str/includes? (h/html (entry-of db "b2/a7")) "parked") "a parked task can be answered")
     (is (str/includes? (h/html (ui/agent-head {} {:seon.agent/id :a7 :seon.agent/status :idle :seon.agent/task {:seon.task/outcome :parked}})) "● parked"))))
 
 (deftest an-agents-pill-is-one-link-that-names-its-task
   ;; owner, 2026-11-05: the agents list read "a6 idle" and only the name was a link, though the pill looks like a button.
-  ;; The whole pill is the link and says what the agent works on, cut to fit, the whole name in its title
+  ;; The whole entry is the link and says what the agent works on, cut to fit, the whole name in its title (the entry, wherever placed)
   (let [long-id "seon.print/a-long-string-that-does-not-starve-its-siblings-however-long-it-runs"
         db (sessions-db "b2" [["b2/a6" :a6 :idle "seon.ref/an-alias" :cap :task-seon-ref-an-alias]
                               ["b2/a7" :a7 :busy long-id :running :task-long]
                               ["b2/a8" :a8 :idle nil nil :task-demo-f]])
         c {:agents {1 {:seon.agent/id :a6 :seon.agent/key "b2/a6" :seon.agent/status :idle :task {:seon.task/id "seon.ref/an-alias" :seon.task/outcome :cap}}}}
-        side (fn [k] (h/html (ui/agent-side {:seon.db/db db} (session-eid db k))))
+        side (fn [k] (h/html (entry-of db k)))
         a6 (side "b2/a6") a7 (side "b2/a7") a8 (side "b2/a8")]
     (is (= 1 (count (re-seq #"<a " a6))) "one link")
-    (is (str/starts-with? a6 "<li") a6)
     (is (str/includes? a6 "href=\"/agent/b2/a6\"") "by its key")
     (let [[_ inside] (re-find #"<a [^>]*>(.*)</a>" a6)]
-      (is (and (str/includes? inside "○") (str/includes? inside "An alias") (str/includes? inside "stopped at its cap")) "its dot, name (its task in words) and status are inside the link")
-      (is (str/includes? inside "An alias") "and its task in words"))
+      (is (and (str/includes? inside "○") (str/includes? inside "An alias") (str/includes? inside "stopped at its cap")) "its dot, name (its task in words) and status are inside the link"))
     (is (str/includes? a6 "title=\"") "the whole name in a title")
     (is (str/includes? a6 "seon.ref/an-alias") "the title names the task whole")
-    (is (re-find #"truncate[^>]*>A long string that does not starve" a7) "a long name is cut to the pill's width by the page (truncate), never by dropping text")
-    (is (re-find #"title=\"[^\"]*however long it runs" a7) "and the whole name is in its title")
+    (is (re-find #"truncate[^>]*>A long string that does not starve" a7) "a long name is cut to the entry's width by the page (truncate), never by dropping text")
     (is (str/includes? (second (re-find #"<a [^>]*>(.*)</a>" a8)) "task-demo-f") "no task: its branch")
-    (testing "root's entry and the board's card are one link too"
-      (let [root (h/html (ui/root-side {:seon.ctx/ctx c}))
-            card (h/html (ui/session-card {:seon.db/db db} "b2/a6"))]
-        (is (str/includes? (second (re-find #"<a [^>]*href=\"/root\"[^>]*>(.*)</a>" root)) "main"))
-        (is (str/includes? (second (re-find #"<a [^>]*href=\"/agent/b2/a6\"[^>]*>(.*)</a>" card)) "stopped at its cap"))))))
+    (testing "root's line is one link too"
+      (let [root (h/html (ui/root-side {:seon.ctx/ctx c}))]
+        (is (str/includes? (second (re-find #"<a [^>]*href=\"/root\"[^>]*>(.*)</a>" root)) "main"))))))
 
 (deftest every-session-on-main-is-listed-across-boots
-  ;; coordinator, 2026-11-05: after a root restarts its agents list drew "agent-side threw: nil where a Named is required" and
-  ;; no agent. Root's ctx holds this boot's agents alone (a new boot unlinks the earlier ones: seon.task/earlier-agents-tx),
-  ;; and the person (user), with no status and no task, made standing throw. The list is every agent on main, by boot
+  ;; coordinator, 2026-11-05: after a root restarts its agents list drew "agent-side threw" and no agent; the person (user), with no status
+  ;; and no task, made standing throw. Step 3: root's page lists every session root holds (its session's pull through the system entity,
+  ;; seon.root/root-session-pattern), this boot's first, earlier boots' under one fold, each by its entry
   (let [db (sessions-db "b2" [["b2/user" :user nil nil nil nil]
                               ["b2/a1" :a1 :busy "seon.x/now" :running :task-now]
                               ["b1/a1" :a1 :dead "seon.x/old" :cap :task-old]
                               ["b1/a2" :a2 :ended "seon.x/older" :merged :task-older]
                               ["b0/a1" :a1 :dead "seon.x/oldest" :cap :task-oldest]])
-        groups (#'ui/sessions-by-boot db)
-        keys-of (fn [eids] (set (map #(:seon.agent/key (d/pull db [:seon.agent/key] %)) eids)))
-        ;; root's page as its walk draws it: its list of every session, its units each composed with its components
-        st (root-state (proc-state db db) db)
-        side (fn [st] (apply str (map :html (filter #(and (nil? (:parent %)) (re-find #"^(boot-side|earlier-sessions)" (str (:id %))))
-                                                     (seon.fixtures/composed (:seon.render/units (#'p/page-value st :root)))))))
-        html (side st)]
-    (is (= ["b2" "b1" "b0"] (mapv first groups)) "this boot's first, then the others, newest first")
-    (is (= [#{"b2/a1"} #{"b1/a1" "b1/a2"} #{"b0/a1"}] (mapv (comp keys-of second) groups)) "a boot with anything to open, every agent of it")
-    (is (every? #(= (vec (sort %)) %) (map second groups)) "oldest first in its boot")
+        html (root-page-html db)]
     (testing "an agent with no status and no task reads nothing, and draws"
       (is (= :status/none (:state (ui/standing {:seon.agent/id :user} nil))))
-      (is (str/includes? (h/html (ui/agent-side {:seon.db/db db} (session-eid db "b2/user"))) "href=\"/agent/b2/user\"")))
-    (testing "this boot's sessions are in the list; earlier boots' under one fold, each linked by its key; a session with no task and no process is none"
+      (is (str/includes? (h/html (entry-of db "b2/user")) "href=\"/agent/b2/user\"")))
+    (testing "this boot's sessions are on root's page; earlier boots' under one fold, each linked by its key"
       (is (not (str/includes? html "defect")) html)
       (is (str/includes? html "href=\"/agent/b2/a1\""))
-      (is (= 1 (count (re-seq #"<details" html))) "the earlier boots are one fold")
-      (is (not (str/includes? html "href=\"/agent/b2/user\"")) "a person's session with nothing in it is not listed")
+      (is (str/includes? html "<summary class=\"seon-note\">Earlier</summary>") "the earlier boots are one fold")
       (is (and (str/includes? html "href=\"/agent/b1/a1\"") (str/includes? html "href=\"/agent/b1/a2\"") (str/includes? html "href=\"/agent/b0/a1\"")))
       (is (str/includes? html "stopped at its cap") "each with its standing, no process needed")
       (is (str/includes? html "merged"))
@@ -3447,7 +3449,7 @@
   ;; my.root/problems does, and the problems banner is what root's walk then draws: it names the count the api names.
   (ts/test-branch! (fn [_ conn]
     (let [[_ branch _] (paged-dbs conn)
-          main0 (:db-after (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}))
+          main0 (do (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}) (:db-after (d/transact conn {:tx-data (seon.root/root-session-boot-tx @conn)})))
           e (seon.contract/error :seon.instrument/contract-error 'app/f "app/f invalid-input: its arguments do not satisfy its contract"
                                  {:seon.error/member :malli.core/invalid-input :seon.error/problems [{:path [0] :in [0] :expected :int :value {:seon.print/code "nil"}}]})
           occ (fn [i] (seon.error/occurrence e :eval {:agent :a1 :task "t/a" :form "(f 1)"} (+ 1000 i)))
@@ -3567,7 +3569,7 @@
   "What the render proc sends root's tab when main moves by tx-data, from root's view walked and quiet on conn's main."
   [conn tx-data]
   (let [[_ branch _] (paged-dbs conn)
-        main0 (:db-after (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}))
+        main0 (do (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.agent/max-running 4})}) (:db-after (d/transact conn {:tx-data (seon.root/root-session-boot-tx @conn)})))
         st0 (#'p/pass (assoc (#'p/advance-main (assoc (proc-state main0 branch) :watch #{:root} :main-db nil) main0) :conn conn) (volatile! {}))
         st0 (#'p/pass st0 (volatile! {}))
         o (volatile! {})
@@ -3591,6 +3593,8 @@
 (deftest a-spawn-reaches-a-quiet-root-tab
   (let [[main branch _] (paged-dbs)
         main (d/db-with main [{:seon.root/id :root :seon.config.agent/max-running 4}])
+        ;; root's session, made at boot: root's page is its
+        main (d/db-with main (seon.root/root-session-boot-tx main))
         o (volatile! {})
         st0 (#'p/pass (#'p/advance-main (assoc (proc-state main branch) :watch #{:root} :main-db nil) main) (volatile! {}))
         _ (#'p/pass st0 (volatile! {}))
