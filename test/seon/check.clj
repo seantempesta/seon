@@ -1183,14 +1183,23 @@
     (when-let [[_ p pp st cmd] (re-matches #"(\d+)\s+(\d+)\s+(\S+)\s+(.*)" line)]
       {:pid (parse-long p) :ppid (parse-long pp) :stat st :command cmd})))
 
+(defn ran-nothing-more?
+  "Can the process of ps row row run nothing more, for a stop (pid self) to count it ended: a zombie (stat Z: it exited and
+  its parent has not waited for it) or one exiting (stat E: macOS's \"trying to exit\", its command already shown in
+  parentheses), whose parent is not self: an orphan launchd reaps, later under load. One whose parent is self is a child
+  the stop failed to reap, and stays. The one rule every check asking \"is this pid still running\" after a stop uses
+  (still-there). See docs/processes.md#a-stop-reaps-every-child."
+  {:malli/schema [:=> [:cat [:maybe [:map [:stat :string] [:ppid :int]]] :int] :boolean]}
+  [row self]
+  (boolean (and row (re-find #"[ZE]" (:stat row)) (not= (:ppid row) self))))
+
 (defn- still-there
-  "Of pids, the ones still there after a stop, each with its ps row (docs/processes.md#a-stop-reaps-every-child). A zombie (it
-  exited; its parent has not waited for it) counts as ended only when its parent is not this process, the root under test: an
-  orphan the OS reaps. One whose parent is this process is a child root failed to reap, and stays."
+  "Of pids, the ones still there after a stop, each with its ps row (docs/processes.md#a-stop-reaps-every-child): every one
+  alive that can still run (ran-nothing-more? is false)."
   [pids]
   (vec (for [p pids :when (alive? p)
              :let [row (ps-row p)]
-             :when (not (and row (clojure.string/starts-with? (:stat row) "Z") (not= (:ppid row) (lib/c-getpid))))]
+             :when (not (ran-nothing-more? row (lib/c-getpid)))]
          (or row {:pid p}))))
 
 (defn- cycle-row
