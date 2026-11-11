@@ -112,12 +112,21 @@
 (defn- item-ended
   "Item k ended with result r ({:pass :fail :error} counts, its :failures; an error: its batch died): each asker waiting on
   it loses it; one that met a red or an error is answered so at once; one with nothing left is answered green. The item
-  leaves the state: its verdict is the cache's now (its runner wrote it as it ended). Answers [st outputs]."
+  leaves the state: its verdict is the cache's now (its runner wrote it as it ended). Each asker is first told the
+  verdict as it lands, {:op :prove-verdict :key asker :test :digest :status (:pass :fail :error, or :no-verdict for an
+  error) :ms :failures}, which root puts on its events for a streaming :prove to write (docs/merging.md#the-test-service).
+  Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :any :any] [:tuple :map [:vector :map]]]}
   [st k r]
   (let [waiters (get-in st [:items k :waiters])
         st (update st :items dissoc k)
-        red? (or (contract/error? r) (not (proofs/green? r)))]
+        red? (or (contract/error? r) (not (proofs/green? r)))
+        [t d] k
+        verdict (if (contract/error? r)
+                  {:test t :digest d :status :no-verdict :failures [(select-keys r [:seon.error/type :seon.error/message])]}
+                  (cond-> {:test t :digest d :status (proofs/status-of r)}
+                    (get-in r [:answer :measured t :ms]) (assoc :ms (get-in r [:answer :measured t :ms]))
+                    (seq (:failures r)) (assoc :failures (:failures r))))]
     (reduce (fn [[st outs] rid]
               (let [st (-> st (update-in [:askers rid :left] disj k) (assoc-in [:askers rid :results (first k)] r))
                     {:keys [left results]} (get-in st [:askers rid])]
@@ -126,7 +135,7 @@
                              [st (into outs o)])
                       (empty? left) (let [[st o] (answer-asker st rid {:green true :results results})] [st (into outs o)])
                       :else [st outs])))
-            [st []] waiters)))
+            [st (mapv #(assoc verdict :op :prove-verdict :key %) (sort-by str waiters))] waiters)))
 
 (defn ask-items
   "Asker rid (prio :turn or :batch) waits on items ({[test digest] {:agent :ms :mode}}, what its plan holds no verdict

@@ -379,6 +379,25 @@
     (is (seon.contract/error? (get-in r [:results 'app.x-test/t])) "the asker holds the typed error for the item")
     (is (= 1 (:slots st)))))
 
+;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
+;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out
+(deftest each-asker-is-told-a-verdict-as-it-lands
+  (let [it {:agent :a1 :ms 5}
+        [st o1] (prove/ask-items (items-st 2) "k1" :batch {['app.x-test/t "d1"] it ['app.x-test/u "d2"] it})
+        [st _] (prove/ask-items st "k2" :batch {['app.x-test/t "d1"] it})
+        [bt bu] (sort-by #(str (get-in % [:req :names])) (batches o1))
+        [st vt] (step/answered st (:tag bt))
+        [st o2] (prove/batch-ended st (parse-long (second vt)) (green-of 'app.x-test/t))
+        [st vu] (step/answered st (:tag bu))
+        died {:seon.error/type :seon.test/fork-refused :seon.error/message "the test child could not be forked"}
+        [_ o3] (prove/batch-ended st (parse-long (second vu)) died)
+        told (fn [outs] (mapv #(select-keys % [:key :test :digest :status]) (filter #(= :prove-verdict (:op %)) outs)))]
+    (is (= [{:key "k1" :test 'app.x-test/t :digest "d1" :status :pass} {:key "k2" :test 'app.x-test/t :digest "d1" :status :pass}] (told o2))
+        "both askers of the one item are told its verdict")
+    (is (= ["k2"] (keys (answers o2))) "k2, whose only item it was, is answered; k1 still waits on u")
+    (is (< (.indexOf ^java.util.List (mapv :op o2) :prove-verdict) (.indexOf ^java.util.List (mapv :op o2) :asker-answered)) "told before it is answered")
+    (is (= [{:key "k1" :test 'app.x-test/u :digest "d2" :status :no-verdict}] (told o3)) "an item with no verdict is told so")))
+
 (defn queue-of
   "Grant's argument at n: the service's state with n items queued for one batch asker and one free worker. See
   docs/merging.md#the-test-service."
