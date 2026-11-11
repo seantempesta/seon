@@ -445,6 +445,17 @@
     (is (clojure.string/includes? (str (:text nested)) "not program") "its record says why it stays an eval")
     (is (= [true false] (:value branch)) "the branch's program holds a, not b")))
 
+(deftest a-plain-def-in-a-program-namespace-says-where-it-landed
+  ;; loop 2 (2026-11-11): an agent's (def conn ...) to look at something became program in the task's namespace, and it spent eight
+  ;; turns learning what :recorded meant; a plain def that records says so where it lands, with the form that takes it back
+  (let [[d f] (at/in-agent (fn [{:keys [ns]}]
+                             [(str "(ns " ns ".core) (def look 1)")
+                              (str "(in-ns '" ns ".core) (defn g \"G.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)")]))
+        found (fn [r] (some #(when (= :program-def (:seon.repl/finding %)) %) (:warnings r)))]
+    (is (= "look" (some-> (found d) :vars first name)) (str "a def that recorded: said, with its var: " (pr-str d)))
+    (is (str/includes? (str (:seon.repl/fix (found d))) "ns-unmap") "and the form that takes it back")
+    (is (nil? (found f)) (str "a defn is the change it means: nothing said: " (pr-str f)))))
+
 (deftest a-definition-inside-a-top-level-do-is-program
   ;; owner, 2026-10-28: match Clojure, whose compiler evaluates each form of a top-level do as a
   ;; top-level form; an agent's (do (in-ns ..) (defn f ..)) never reached its branch, and its run
