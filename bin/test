@@ -10,7 +10,12 @@
 # each result is stored at its digest, after target/seon is built from this tree when anything
 # runs. Ends on TEST OK / TEST FAILED and its exit status.
 # With bin/prove (both or checks), the check steps to run go beside the shards (bin/check --steps).
-# bin/test --plan|--shard|--store-steps|--health ... are test/test_runner.clj's parts (bin/prove's; --health is bin/check's health step).
+# bin/test --plan|--shard|--store-steps|--overran|--health ... are test/test_runner.clj's parts (bin/prove's; --health is bin/check's
+# health step; --overran is this script's, for a shard bin/stalls ended).
+# A test running far past its measured time (its end bound: :seon.config.check/step-end-factor times its last run, floored at the
+# factor times :seon.config.agent/stall-ms) is ended by bin/stalls after its evidence (the owner's fourth clock exception,
+# docs/clocks.md#time-decides-the-owners-exceptions): it is RED with its OVERRAN line and evidence directory, stored red at its
+# digest, and its shard's tests that never ended run in a new shard, so the run ends.
 # On the runtime bin/build made (target/jolt/jolt), with dependencies cached in target/home.
 # background jobs (shards, the check steps) keep the run's own nice: zsh's BG_NICE renices each, which a niced run
 # may not do ("nice(5) failed: operation not permitted" on every job)
@@ -26,7 +31,7 @@ JOLT=$ROOT/target/jolt/jolt
 # symbol killed the plan with a trace (seon_ids_trusted, 2026-11-10). A stamp compare each when nothing moved. Not for
 # a run's own children (--shard, --store-steps): their run asked already, and two of them would build at once.
 case ${1:-} in
-  --shard|--store-steps) ;;
+  --shard|--store-steps|--overran) ;;
   *) "$ROOT/bin/build" libs > "$ROOT/target/libs-build.log" 2>&1 || { tail -5 "$ROOT/target/libs-build.log" >&2; echo "TEST FAILED (bin/build libs: target/libs-build.log)"; exit 1 } ;;
 esac
 cd "$ROOT"
@@ -46,7 +51,7 @@ runner() { HOME=$ROOT/target/home JOLT_PWD=$ROOT "$JOLT" -A:test run -m test-run
 [[ " $* " == *" --all "* ]] && export SEON_SEEDS=5
 OWN=0
 case ${1:-} in
-  --plan|--shard|--store-steps|--health) runner "$@"; exit $? ;;
+  --plan|--shard|--store-steps|--overran|--health) runner "$@"; exit $? ;;
   --prove) WHAT=$2 OUT=$3; shift 3 ;;
   *) WHAT=tests OWN=1 OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; echo "test: run ${OUT:t}, logs in $OUT" ;;
 esac
@@ -108,23 +113,35 @@ print -r -- "$P" > "$OUT/shards.pid"; [[ -e $OUT/stopped && -n $P ]] && kill $P 
 C=
 if [[ ${WHAT:-} != tests && -s $OUT/steps ]]; then SEON_PROOF_JOBS=$jobs "$ROOT/bin/check" --steps "$OUT" > "$OUT/check.log" 2>&1 & C=$!; fi
 print -r -- "$C" > "$OUT/check.pid"; [[ -n $C && -e $OUT/stopped ]] && kill $C 2>/dev/null
-# a stalled test is named, never ended: a running shard quiet since its last "started" line past
-# that test's bound (k times its own last run, the plan's out/stall-bounds; the floor and a test
-# with no record: :seon.config.agent/stall-ms, out/stall-ms, 0: none) is printed and recorded as
-# STALLED (bin/stalls; an observation: docs/clocks.md)
-STALL_MS=$(<$OUT/stall-ms) W=
+# a stalled test is named: a running shard quiet since its last "started" line past that test's stall bound (k times its own
+# last run, the plan's out/stall-bounds; the floor and a test with no record: :seon.config.agent/stall-ms, out/stall-ms, 0: none)
+# is printed and recorded as STALLED. A test running past its end bound (the step-end factor times the same run, floored at the
+# factor times stall-ms) is ended: its evidence is captured, OVERRAN recorded and its shard ended (bin/stalls; the owner's fourth
+# clock exception, docs/clocks.md#time-decides-the-owners-exceptions). Its shard's runner then stores that test red at its digest
+# (bin/test --overran) and writes the shard's tests that never ended to a -rest.edn, run here in a shard of its own, waited and
+# watched as the others are, so the run goes on and ends
+read -r STALL_MS END_MS < $OUT/stall-ms; W=()
 S=(); for (( i = 1; i <= ${#F}; i++ )); do S+=("${F[$i]%.edn}.log:$P[$i]"); done
-(( STALL_MS > 0 )) && { "$ROOT/bin/stalls" $STALL_MS "$OUT/stall-bounds" $S & W=$! }
+(( STALL_MS > 0 && ${#S} )) && { "$ROOT/bin/stalls" $STALL_MS $END_MS "$OUT/stall-bounds" $S & W+=($!) }
 for (( i = 1; i <= ${#F}; i++ )); do
   f=$F[$i] log=${F[$i]%.edn}.log
   wait $P[$i]; s=$?
-  grep -E "^RED|^SHARD" "$log"
-  if (( s != 0 )); then
+  grep -E "^RED|^SHARD|^OVERRAN" "$log"
+  if grep -q "^OVERRAN " "$log"; then
+    st=1
+    runner --overran "$f" 2>&1 | tee -a "$log" | grep -E "^RED|^UNRECORDED|^the tree"
+    r=${f%.edn}-rest.edn
+    if [[ -s $r && ! -e $OUT/stopped ]]; then
+      ( HOME=$ROOT/target/home JOLT_PWD=$ROOT exec "$JOLT" -A:test run -m test-runner --shard "$r" --profile scripted ) > "${r%.edn}.log" 2>&1 & P+=($!); F+=($r)
+      print -r -- "$P" > "$OUT/shards.pid"
+      (( STALL_MS > 0 )) && { "$ROOT/bin/stalls" $STALL_MS $END_MS "$OUT/stall-bounds" "${r%.edn}.log:$P[-1]" & W+=($!) }
+    fi
+  elif (( s != 0 )); then
     st=1
     [[ -e $OUT/stopped ]] || grep -q "^SHARD" "$log" || echo "FAILED shard $f: exit $s, $(grep '^started' "$log" | tail -1) ($log)"
   fi
 done
-[[ -n $W ]] && kill $W 2>/dev/null
+(( ${#W} )) && kill $W 2>/dev/null
 if [[ -n $C ]]; then wait $C || st=1; [[ -e $OUT/stopped ]] || cat "$OUT/check.log"; fi
 if (( ${#FAST} )); then
   wait $A; cat "$OUT/fast.log"; [[ -e $OUT/stopped ]] && { st=1; echo "stopped: a red in ${FAST} ended the run's other tests and steps" }
