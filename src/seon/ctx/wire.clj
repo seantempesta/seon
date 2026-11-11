@@ -100,7 +100,7 @@
   (seon.render/answer-sources: {:f :args}): an eval [:eval id] in its reply's turn, a message [:message id] in its call's, a
   reply [:reply id] in its own, a turn's page message [:page n] in turn n, an example session [:example key], and the agent's
   own: its system message [:section addresses], what opens its session [:session key]; any other member the conversation placed
-  [schema id] by its entity schema in the entity index ix (seon.render/entity-schema: a planted entity is labelled as what it is, never as
+  [schema id] by its entity schema in the entity index ix (seon.render/entity-schema: an entity of a schema the agent registered is labelled as what it is, never as
   the session); turn-of, each placed member's entity id to the turn that read it (seon.ctx/placed-messages). What the debug page labels each message by. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat :map :seon.host/db :map :map :map] [:tuple [:vector :any] [:maybe :int]]]}
   [ix db turn-of {:keys [f args]} m]

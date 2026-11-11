@@ -1923,23 +1923,23 @@
 
 (deftest an-example-refuses-a-history-record-of-a-kind-it-does-not-hold-naming-its-schema
   ;; docs/tasks.md#a-task-names-example-sessions: a member the conversation places (seon.ctx/placed-messages) is recorded as the entity it is,
-  ;; by its schema, never as a message; one of a kind an example does not hold (a planted note) is refused, naming its schema, never dropped
+  ;; by its schema, never as a message; one of a kind an example does not hold (the note of seon.render-test's registered-schema world) is refused, naming its schema, never dropped
   (ts/test-branch!
     (fn [_ conn]
       (source-session! conn)
-      (doseq [[k form] [[:lab.planted.note/id [:and {:seon.db/identity true} :string]] [:lab.planted.note/text :string]
-                        [:lab.planted.note/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]]
-                        [:lab.planted/note-fact [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/planted-note :seon.render/openai-compat 'seon.render-test/planted-note-msgs}
-                                                 [:lab.planted.note/id :lab.planted.note/id] [:lab.planted.note/text :lab.planted.note/text] [:lab.planted.note/agent :lab.planted.note/agent]]]]]
+      (doseq [[k form] [[:lab.note/id [:and {:seon.db/identity true} :string]] [:lab.note/text :string]
+                        [:lab.note/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]]
+                        [:lab.note/note-fact [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/note-html :seon.render/openai-compat 'seon.render-test/note-msgs}
+                                                 [:lab.note/id :lab.note/id] [:lab.note/text :lab.note/text] [:lab.note/agent :lab.note/agent]]]]]
         (d/transact conn (:tx (my.schema/registration @conn k form false))))
       (d/transact conn [{:seon.agent/key "b/src" :seon.ctx/pattern (conj (render/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern)
-                                                                         {[:lab.planted.note/_agent :tx :at] [:db/id :lab.planted.note/id :lab.planted.note/text]})}])
-      (d/transact conn [{:lab.planted.note/id "n1" :lab.planted.note/text "the planted note" :lab.planted.note/agent [:seon.agent/key "b/src"]}])
+                                                                         {[:lab.note/_agent :tx :at] [:db/id :lab.note/id :lab.note/text]})}])
+      (d/transact conn [{:lab.note/id "n1" :lab.note/text "the note" :lab.note/agent [:seon.agent/key "b/src"]}])
       ;; a turn after it, so the note is placed in a turn the example records
       (d/transact conn [{:seon.model-call/id (seon.lib/call-id "b/src" 3) :seon.model-call/agent [:seon.agent/key "b/src"] :seon.model-call/n 3 :seon.model-call/origin :model :seon.model-call/reply "Noted."}])
       (let [r (session/session-tx @conn "b/src" "x")]
         (is (= :seon.ctx/session-refused (:seon.error/type r)) "a record of a kind an example does not hold is refused")
-        (is (str/includes? (str (:seon.error/message r)) ":lab.planted/note-fact") "naming its schema")))))
+        (is (str/includes? (str (:seon.error/message r)) ":lab.note/note-fact") "naming its schema")))))
 
 (deftest an-example-keeps-an-eval-of-ctx-as-its-marker
   ;; the owner, 2026-11-04: "if an agent needs to swap or modify ctx then that needs to be present": no eval is left out of an
