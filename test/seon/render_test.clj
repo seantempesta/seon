@@ -3006,6 +3006,26 @@
   ;; its list inside its root element, as render-ctx's #p-task is (the walk gives a component's root its own id)
   [:div [:div {:id "parts"} [#'throwing-view {}] [#'fine-view {}]]])
 
+(defn boom "A helper a render calls, which throws." {:malli/schema [:=> [:cat] :any]} [] (throw (ex-info "no such key" {})))
+(defn helper-throwing-view "A component whose helper throws."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [_opts] [:p (boom)])
+(defn helper-layout "A list of one component whose helper throws."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [_opts] [:div [:div {:id "parts"} [#'helper-throwing-view {}]]])
+
+(deftest a-components-defect-says-what-threw-and-where-in-a-line
+  ;; docs/errors.md#nothing-crashes-and-nothing-hangs: a defect's first line, as text, names the render, what was thrown and the fn it
+  ;; was thrown in (seon.error/thrown-in), so a reader takes it without walking the error's data (red before: the error was only a
+  ;; map nested in the part; a model spent 18 turns finding what threw, Context's trial 2026-11-11)
+  (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'helper-layout {}])]
+    (try (r/flush! w nil)
+         (seon.fixtures/no-error-render @(:defects w) {:expects #{"seon.render-test/helper-throwing-view"}})
+         (let [[[_ part]] (seq (r/placed-hiccup w ["#parts"]))
+               line (some #(when (and (vector? %) (= :p (first %))) (second %)) (tree-seq coll? seq part))]
+           (is (= "seon.render-test/helper-throwing-view threw: no such key (in seon.render-test/boom)" line) (pr-str part)))
+         (finally (r/dispose-walk! w)))))
+
 (defn interrupted-view
   "A component whose run is interrupted."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
@@ -3025,7 +3045,9 @@
          (seon.fixtures/no-error-render @(:defects w) {:expects #{"seon.render-test/throwing-view"}})
          (is (= 1 (count @(:defects w))) "the one error is on purpose")
          (let [placed (r/placed-hiccup w ["#parts"])
-               [[_ [_ _ [_ _ broken]]] [_ [_ _ fine]]] (seq placed)]
+               [[_ broken-part] [_ [_ _ fine]]] (seq placed)
+               ;; the part: its line, then the error's render called on the error as data (its last argument)
+               broken (last (last broken-part))]
            (is (= :seon.render/component-defect (:seon.error/type broken)) (str "the model reads the error as data: " (pr-str placed)))
            (is (str/includes? (:seon.error/message broken) "seon.ref/scan invalid-output") "what threw")
            (is (= [{:in [:seon.ref/blocks 3]}] (get-in broken [:seon.render/threw :problems])) "and the thrown error's own data")
