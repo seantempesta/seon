@@ -213,6 +213,8 @@ Every shell Seon runs goes through ```seon.lib/sh```, which runs `clojure.java.s
 
 Anything that can make threads or processes starts at n ≤ 100 under `nice -n 15`. Watch `ps -M -p PID | wc -l`, and kill your own process past 200 threads. One experiment at a time.
 
+A child process costs what starting it costs, and on this machine that is most of a git-heavy test's wall time. Measured 2026-11-10: `/usr/bin/git` is the Xcode shim, which finds the developer directory on every call (11.3 ms a `rev-parse HEAD`, against 5.1 ms for the binary it finds), so `bin/env` puts `target/git-bin`, a directory holding only a link to the real git, first on `PATH` for everything it starts; and a child spawned from Jolt costs 20-35 ms against ~10 ms from a shell. A path that spawns children per call is a cost to count: ```seon.fx/tree-id``` is ~7 git children, ```seon.fx/inputs``` ~23 (one per submodule pin).
+
 A process that must outlive your tool call is double-forked, which `bin/root` does. The tool host kills a background task's whole process tree when the task stops or its agent exits.
 
 Leave nothing running when you finish, and say so in your report. Kill only verified PIDs: read the full command and the working directory (`lsof -a -p PID -d cwd`) first, never a pattern (`pkill`, `killall`, `pgrep -f`); `./seon` runs from `target/` with a relative command line, so its command alone does not say whose it is. A leftover process whose session is gone is garbage like any other ([below](#disk-stays-bounded)).
