@@ -122,7 +122,7 @@
   [w]
   (let [db ((:db w))
         c @(:ref (:src w))
-        turn-of (into {} (for [[n ms] (when (:db/id c) (ctx/placed-messages c)) :when (int? n) [_ id] ms] [id n]))
+        turn-of (into {} (for [[n ms] (when (:db/id c) (ctx/placed-messages db c)) :when (int? n) [_ id] ms] [id n]))
         ps (reduce (fn [acc [m src]]
                      (let [[ref n] (part-ref db turn-of src m) [r0 ms n0] (peek acc)]
                        (if (and (seq acc) (= ref r0)) (conj (pop acc) [r0 (conj ms m) n0]) (conj acc [ref [m] n]))))
@@ -485,7 +485,7 @@
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
   [db c]
   (let [evals (:seon.eval/_agent c) msgs (:seon.message/_to c)
-        placed (ctx/placed-messages c)
+        placed (ctx/placed-messages db c)
         ;; the newest call's basis is written after the commit it names (seon.turn/open-turn!), so read at that commit it holds none:
         ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message; a pull
         ;; that leaves bases out (a smaller pattern) shows no page

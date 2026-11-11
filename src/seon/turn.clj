@@ -131,13 +131,13 @@
     cache-miss-tokens (assoc :seon.model-call/cache-miss-tokens cache-miss-tokens)))
 
 (defn- deliver!
-  "Deliver what was sent since the last turn onto this branch (the turn that reads it is derived, seon.ctx/placed-messages,
+  "Deliver what was sent since the last turn onto this branch (the turn that reads it is derived, seon.ctx/turn-members,
   docs/turn.md#the-turn-is-a-number), before the turn's request is made, so
   each sits in the conversation before the page that shows what came after it: the messages main holds
   to this agent (a person's, root's at a stage boundary or a refused verdict, another agent's:
   seon.agent/deliver!, the entity root's writer wrote on main, with what root wrote of the agent's own
   entities). Its entity on the branch is its delivery, and the record's
-  messages read it (seon.ctx/placed-messages); nothing is held for the turn's basis. An effect's outcome
+  messages read it (seon.ctx/turn-members); nothing is held for the turn's basis. An effect's outcome
   (:from :fx, in the inbox) is no message: the eval that asked holds its answer. A read that is not the
   run's turn (take? false: an observer's read of an agent its model drives) delivers nothing."
   {:malli/schema [:=> [:cat :boolean] :nil]}

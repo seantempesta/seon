@@ -190,6 +190,12 @@
 (defn- p1 "The response of forms evaluated in agent id, as [printed recorded]." [sys id forms]
   ((juxt printed :recorded) @(c/submit! sys id forms)))
 
+(defn- p1-ex
+  "The response of forms evaluated in agent id, as [printed recorded ex]: ex its error, nil when the eval answered, so a
+  check fails where its eval did (durable-write said OK with its evals failed: task seon.check/a-selection-derives-what-it-needs-from-its-steps)."
+  [sys id forms]
+  ((juxt printed :recorded :ex) @(c/submit! sys id forms)))
+
 ;; ---- the modes --------------------------------------------------------------------------
 
 (defn smoke []
@@ -413,12 +419,30 @@
     :proof (str "(deftest p2-test (seon.cost/proof {:of 'app.par/p2 :input 'app.par/p2-input :n \"x\" :work \"one call\""
                 " :growth :constant :fixed {:calls 0.5} :sizes [1 10 100]}))")}])
 
+(defn- stalled-rows
+  "The open :stalled rows on main db: their one class's reader (seon.problems/stalled-agents, one AEVT range), never
+  the whole report, since a wait on main runs it in main's writer at every commit (seon.root/await-db's watch).
+  See docs/machine.md#builds-and-checks."
+  [db] (seon.problems/stalled-agents db (seon.problems/answers db)))
+
+(defn- await-provoked
+  "Main at the reconciler's first quiet after main's t (p1 and p2 released at t, so judged by then: their red proof and
+  cost verdict; the platform defect and the death came before): its quiescence report at or after t, or the quiet
+  itself (:seon.root/quiet-before-true, when no later report was written). The problems are read once, after, from
+  the render proc's kept health (my.root/problems), and the step's :checks name a missing class: a predicate that read
+  main's whole problems report ran it in main's writer at every commit while p1 and p2's proofs committed (batches 32
+  and 38 overran on it). See docs/machine.md#builds-and-checks."
+  [sys t]
+  (seon.root/await-db sys (str "the reconciler's quiet at or after t " t ", p1 and p2 judged")
+                      #(some-> (seon.reconcile/quiescent %) :t (>= t))))
+
 (defn problems-check
   "Provoke every class of problem through the paths agents and root use (:stall-ms 1000
   for the stall, the eval held on a fifo until main holds it, so it comes at any load), then read my.root/problems: an eval error and a contract's error, an
   effect's io error, a platform defect in the api, a stall, an agent's death with its exit
   status and stderr, a red proof's assertions and a cost proof's verdict. It reads them
-  once main holds each (seon.root/await-db over seon.problems/report)."
+  once root is quiet after their runs (await-provoked), from the render proc's kept health; it prints each wait as it
+  enters it. Its waits read one class each, never the whole report (docs/machine.md#builds-and-checks)."
   []
   (run-check "PROBLEMS" {:datoms 300 :max-running 2 :stall-ms 1000}
    (fn [sys]
@@ -431,13 +455,13 @@
         ;; fifo the step writes only once main holds the stall: a sleep let root's stall timer come after the eval
         ;; answered under load (or its assert and retract share one commit), and the wait for a stall that never was
         ;; ran 77 minutes (batch 9, load 26-32; task seon.check/the-problems-step-holds-its-stall-until-it-sees-it)
-        stalled-rows #(get-in (seon.problems/health %) [:classes :stalled :rows])
         hold (str (System/getProperty "java.io.tmpdir") "/problems-stall-" (random-uuid) ".fifo")
         made (clojure.java.shell/sh "mkfifo" hold)
         _ (when-not (zero? (:exit made)) (throw (ex-info (str "mkfifo " hold ": " (:err made)) made)))
         held (str "(slurp " (pr-str hold) ") :awake")
         r2p (c/submit! sys a held)
         ;; it ends, too, if the eval answers first (no stall came): the step then fails on :stalled, never waits on
+        _ (out! "PROBLEMS WAIT the stall on main (or the held eval's answer)")
         during (seon.root/await-db sys #(or (seq (stalled-rows %)) (realized? r2p)))
         stall (first (some-> during stalled-rows))
         ;; the release, written here to the fifo itself (spit writes a file beside it and renames it over the fifo, which
@@ -446,6 +470,7 @@
         _ (when-not (realized? r2p) (with-open [w (java.io.FileOutputStream. ^String hold)] (.write w (.getBytes "go"))))
         r2 @r2p
         _ (clojure.java.shell/sh "rm" "-f" hold)
+        _ (out! "PROBLEMS WAIT the stall closed on main")
         after (seon.root/await-db sys #(empty? (stalled-rows %)))
         _ (a/>!! (:back sys) {:op :writer :tx-count 1 :batch-ms 1 :n-tx "not a number" :commits 1})
         r3 @(c/submit! sys b "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)")
@@ -457,11 +482,8 @@
         ;; named: the report is made of what the reconciler writes (the judge's red and cost
         ;; rows), so the wait ends when root goes quiet with a class missing (:seon.root/quiet-before-true)
         ;; and the :checks below name which one, never a wait for a row that cannot come
-        _ (seon.root/await-db sys "the provoked problems (a red proof, a cost verdict, a platform defect, a death) are on main"
-                              #(let [p (seon.problems/report %)]
-                                    (and (some (fn [r] (= 'app.proofs/p1-test (:test r))) (get-in p [:classes :red :rows]))
-                                         (pos? (get-in p [:classes :cost :n])) (pos? (get-in p [:classes :platform :n]))
-                                         (some (fn [r] (= :seon.agent/died (:type r))) (get-in p [:classes :agent :rows])))))
+        _ (out! "PROBLEMS WAIT the reconciler's quiet after p1 and p2's release")
+        _ (await-provoked sys (:max-tx @(:conn sys)))
         p (my.root/problems sys)
         rows (fn [k] (get-in p [:classes k :rows]))
         types (fn [k] (set (map :type (rows k))))
@@ -1059,13 +1081,13 @@
    (fn [sys]
     (let [path (str (seon.db/agents-dir (:cfg sys)) "/durable")
         [a b k] (spawn-ready! sys {:task "make f1 multiply" :branch :dur-a} {:task "unmerged work" :branch :dur-b} {:task "parent" :branch :dur-c})
-        ra (p1 sys a "(in-ns 'app.m0) (defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (* x 10)) (deftest f1-test (is (= 20 (f1 2)))) (f1 2)")
+        ra (p1-ex sys a "(in-ns 'app.m0) (defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (* x 10)) (deftest f1-test (is (= 20 (f1 2)))) (f1 2)")
         m (merge-in! sys a)
-        rb (p1 sys b "(in-ns 'app.m1) (defn f2 {:malli/schema [:=> [:cat :int] :string]} [x] (str \"b:\" x)) (deftest f2-test (is (= \"b:1\" (f2 1))))
+        rb (p1-ex sys b "(in-ns 'app.m1) (defn f2 {:malli/schema [:=> [:cat :int] :string]} [x] (str \"b:\" x)) (deftest f2-test (is (= \"b:1\" (f2 1))))
                              (in-ns 'agent.a2) (transact! [{:note/text \"b's unmerged note\" :note/agent :b}]) (app.m1/f2 1)")
         cl (ready! sys #(deref (c/clone! sys k {:branch :dur-clone})))
         ev (c/events sys)
-        rc (p1 sys (:id cl) "(transact! [{:note/text \"the clone's note\" :note/agent :clone}]) (count (q '[:find ?n :where [?n :note/text]]))")
+        rc (p1-ex sys (:id cl) "(transact! [{:note/text \"the clone's note\" :note/agent :clone}]) (count (q '[:find ?n :where [?n :note/text]]))")
         ;; an agent's write is answered when applied, committed when the agent is idle (its
         ;; run-ahead writer) and durable at root's next flush: the kill waits for the
         ;; clone's commit event, then for a flush after it (a :flush? write's answer comes after
@@ -1079,7 +1101,9 @@
                 :linked (vec (for [dt (d/datoms @(:conn sys) :aevt :seon.agent/root)] (:seon.agent/key (d/entity @(:conn sys) (:e dt)))))}]
       (spit (str path ".expect.edn") (sedn/encode expect))
       {:report {:store (:store st) :a ra :merge (dissoc m :ops) :b rb :clone [(:id cl) rc] :expect expect :store-bytes (dir-bytes (:store-path sys))}
-       :checks {:merged (:merged? m)} :then :kill}))))
+       :checks {:merged (:merged? m)
+                 ;; every write it makes durable was made: an eval that failed is red here, at its cause, not two phases later
+                 :evals-answered (every? #(nil? (nth % 2)) [ra rb rc])} :then :kill}))))
 
 (defn durable-read
   "Phase 2 (a new process): reopen the same store on the same main and check main, the
