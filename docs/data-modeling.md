@@ -91,20 +91,22 @@ One store holds many branches, and a pull reads the one db it is made on. So whe
 
 | entity | its identity | written on the agent's own branch | written on main | reached by |
 |---|---|---|---|---|
-| an agent | `:seon.agent/key` | by its start: its key and its task; by its turns: `turn`, `ns`, `test-error`, `main-commit`, `main-program`, `base-commit`; by its own `swap!`: `:seon.ctx/pattern`, `:seon.render/hiccup`, keys it registers; by its end: `outcome`, `reason`, `ended-turn` | by the system, what it observes: `status`, `branch`, `boot`, `started-ms`, `max-turns`, who started it (`:seon.agent/agents`), the evals a person opened | its own pull (the top of `@ctx`); on main, the `:seon.agent/agents` join of whoever started it |
+| an agent | `:seon.agent/key` | by its start: its key, its task and, for an agent the system spawned, its turn budget (`max-turns`); by its turns: `turn`, `ns`, `test-error`, `main-commit`, `main-program`, `base-commit`; by its own `swap!`: `:seon.ctx/pattern`, `:seon.render/hiccup`, keys it registers; by its end: `outcome`, `reason`, `ended-turn` | by the system, what it observes: `status`, `branch`, `boot`, `started-ms`, who started it (`:seon.agent/agents`), the evals a person opened | its own pull (the top of `@ctx`); on main, the `:seon.agent/agents` join of whoever started it |
 | a task | `:seon.task/id` | what its agent edits: `plan`, `instructions`, `proofs`, carried to main when it merges | by the task files and the reconciler: its execution, `outcome`, `reason`, `reasons`, its commit, its error | `{:seon.agent/task ...}`; a task it needs, `:seon.task/needs`; any other, by citing it |
 | a model call | `:seon.model-call/id` | by the turn that made it | nothing until the branch merges | `{[:seon.model-call/_agent :tx :at] ...}` |
-| an eval and its result | `:seon.eval/id` (made from its code) | by the REPL that ran it | nothing until the branch merges | `{[:seon.eval/_agent :tx :at] ...}`, and a call's `:seon.eval/_call` |
+| an eval and its result | `:seon.eval/id` (made from its model call and its place in the reply, ```seon.repl/eval-id```; the same code in a later turn is another eval) | by the REPL that ran it | nothing until the branch merges | `{[:seon.eval/_agent :tx :at] ...}`, and a call's `:seon.eval/_call` |
 | a message | `:seon.message/id` | at its delivery to the recipient's branch, a transaction of that branch | where it was sent | `{[:seon.message/_to :tx :at] ...}`: `:at` is when it reached this branch |
 | a cite | `:seon.cite/id` | by whoever cited (`my.agent/cite!`), or by a plan's text naming an address | a task file's plan | `{:seon.cite/_of ...}` of the agent and of its task |
 | a process | `:seon.process/id` | never | by the system: pid, when it forked and ended, a stall | not in an agent's own pull; on main by `:seon.process/_agent` |
 | the system | `:seon.root/id` | never | by the boot and each landing: what main was indexed from, the boot | root's page; not an agent's pull |
 
 What follows from it:
-- **A fact main keeps about an agent is not in that agent's own pull.** Its pattern asks `status`, `branch` and `max-turns`, and on its own branch they hold nothing. A render that needs one reads it where it lives, or the data is moved; it is never patched with a second pull written by hand.
+- **A fact main keeps about an agent is not in that agent's own pull.** Its pattern asks `status` and `branch`, and on its own branch they hold nothing. (An agent attached from outside, `seon_attach`, also lacks its `max-turns`, which a spawned one holds: the two starts do not write the same facts.) A render that needs one reads it where it lives, or the data is moved; it is never patched with a second pull written by hand.
 - **Nothing an agent did is on main until its branch merges.** A page of main cannot sum a running agent's calls or count its evals.
 - **A value computed from other facts is not in either column.** A status, a spend, a waste, the conflicts of a merge are computed where they are read ([derived data](#derived-data-is-a-cache-never-relied-on)), so no pull holds them: a render computes them from what the pull does hold.
 - **What a process keeps in its own state is in no db.** The test service's queue and an effect's counters are shown to a person from the process; a model's request never reads them, since a request is made again from a commit.
+
+**What one attribute is** has two homes, and neither is the schema's properties. `(doc :the/attribute)` prints its schema form: `[:set ...]` is many values, a ref names what it points at (`:seon.db/to`). The db's own schema holds how it is stored: `(get (d/schema (my.db/db)) :the/attribute)` answers its `:db/cardinality` and `:db/valueType`. ```seon.contract/properties``` holds what a schema declares beside its shape (a render, a description), which is why a cardinality is not found there.
 
 The table says where; the living answer for one entity is `(my.db/pulled @ctx)` ([looking at what you pulled](agent.md#looking-at-what-you-pulled)), which lists every clause with what this db holds for it, and `(doc :an/attribute)` for one key's schema.
 

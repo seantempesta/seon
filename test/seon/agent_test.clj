@@ -674,6 +674,31 @@
     (is (= '{green-test/proof nil green-test/other nil green-test/turned :red} (:value first-facts)) (pr-str first-facts))
     (is (= '{green-test/proof :green green-test/other nil green-test/turned :green} (:value second-facts)) (pr-str second-facts))))
 
+(deftest a-proof-over-the-branchs-data-is-keyed-by-its-data-too
+  ;; Context's trial finding 14: an agent's proof over its branch's data (lab.proofs/the-tasks-i-cite-differ-from-my-base) ran
+  ;; red before the agent's write and green after at one digest, so it was judged flaky and its task refused. Its digest held
+  ;; its code and not the data it reads: a test namespace's own call of a branch reader (my.db, seon.agent/db) takes the
+  ;; branch's point as one more input in an agent (docs/merging.md#verdicts-are-a-cache); the tests that read no branch,
+  ;; and bin/test's digests, which hold no branch, stay as they were
+  (let [in {:env "e" :tree "t" :config {} :data-refs {}}
+        tests (conj @#'seon.program-test/calc-tests 'app.pt-calc-test/data-test 'app.pt-calc-test/api-test)
+        base (d/db-with (#'seon.program-test/calc-db)
+                        [{:seon.root/id :root :seon.root/boot "b1" :seon.root/source {:root "/r" :files 0 :forms 0 :ms 0 :boot "b1" :inputs in}}])
+        ;; seon.agent/db itself: this program holds no my.* forms, whose readers (my.db/q) branch-readers finds by their calls of it
+        ;; and an agent API function calling it (as my.db/q does), which a test calls with no db handed in
+        branch (seon.program-test/record base 'app.pt-calc-test "(deftest data-test (is (seon.agent/db)))"
+                                         'my.lab-api "(defn branch-db [] (seon.agent/db))"
+                                         'app.pt-calc-test "(deftest api-test (is (my.lab-api/branch-db)))")
+        written (d/db-with branch [{:seon.root/id :root :seon.root/boot "b1"}])
+        agent (fn [db] (select-keys (:digests (agent/test-plan db base tests)) tests))
+        checkout (fn [db] (select-keys (ts/reach-digests db in) tests))
+        [a b] [(agent branch) (agent written)]]
+    (is (not= (get a 'app.pt-calc-test/data-test) (get b 'app.pt-calc-test/data-test)) "the branch's data moved: the proof over it is a new digest")
+    (is (not= (get a 'app.pt-calc-test/api-test) (get b 'app.pt-calc-test/api-test)) "and one through the agent's API")
+    (is (= (dissoc a 'app.pt-calc-test/data-test 'app.pt-calc-test/api-test) (dissoc b 'app.pt-calc-test/data-test 'app.pt-calc-test/api-test))
+        "the tests reading no branch keep theirs")
+    (is (= (checkout branch) (checkout written)) "bin/test's digests hold no branch")))
+
 (deftest an-agents-own-deftest-is-no-failure-point
   ;; docs/health.md#a-laws-unnamed-site: a deftest an agent defines at its REPL, in a namespace of its own (which takes a file under src,
   ;; seon.source/namespace-path), is a test by its var's :test (the compiler's fact), so its `is`'s catch opens no

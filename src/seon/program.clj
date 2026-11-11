@@ -1435,6 +1435,21 @@
     seon.root/task-files :seon.env/tasks
     seon.fx/read-source :seon.env/src})
 
+(defn- test-class-of
+  "The class of the checkout's inputs a test namespace's call of var s reads whole (test-class-readers), or nil; or, when s is
+  a reader of the agent's own branch with no db handed in (graph-index's readers over branch-reads), :seon.env/data, whose test is :data?: an agent
+  mixes its branch's point into its digest (seon.agent/test-plan); a run with no branch (bin/test, main's suite) mixes none.
+  See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:=> [:cat [:or [:set :symbol] :seon.host/fn] :symbol] [:maybe :qualified-keyword]]}
+  [readers s] (or (test-class-readers s) (when (readers s) :seon.env/data)))
+
+(def ^:private branch-reads
+  "The vars that read an agent's own branch with no db handed in: seon.agent/db (the agent's state's branch) and seon.ctx/ctx
+  (the agent's record, made from it). A var of the agent's API (a my.* namespace) whose own form calls one reads it too
+  (graph-index's readers): (my.db/q ...), (my.agent/prove). A function handed its db reads what the test built, so it is none.
+  See docs/merging.md#verdicts-are-a-cache."
+  '#{seon.agent/db seon.ctx/ctx})
+
 (def registry-walkers
   "The vars that hold every schema entry: a form of a test's namespace naming one reads every entry, a
   key's unit or description included, which no digest holds for it (less-config-fields; a key's entry moves only
@@ -1755,7 +1770,9 @@
         ;; was reused over edits to what it read, and read as flaky)
         scans (flag :scans #(and (test-nss (:ns %)) (some file-readers (:refs %)) (checkout-read? %) (not (env-reader-form? %))))
         ;; a test namespace's form reading one part of the checkout whole (test-class-readers) takes that part's class
-        classed (flag :classed #(and (test-nss (:ns %)) (some test-class-readers (:refs %))))
+        ;; one lookup a reference: a direct reader, or an agent API var whose own form calls one (its row, by var-form)
+        readers (fn [s] (or (branch-reads s) (and (some-> (namespace s) (str/starts-with? "my.")) (some branch-reads (:refs (rows (var-form s)))))))
+        classed (flag :classed #(and (test-nss (:ns %)) (some (partial test-class-of readers) (:refs %))))
         ;; a test namespace's form reading a docstring (clojure.repl/doc, a var's or namespace's doc fact) judges docs,
         ;; which a form's code leaves out (form-ids): it reads the src class, the program's text, as kept-program-store's readers do
         docs (flag :docs #(and (test-nss (:ns %)) (or (some doc-readers (:refs %)) (:doc-attr? %))))
@@ -1799,7 +1816,7 @@
                                                     ;; the config keys it and what it reaches read, its largest
                                                     ;; kid's set grown by the rest
                                                     :config (let [own (map #(let [cf (cond-> (:config (rows %)) (walks %) (-> (or #{}) (conj :seon.env/schemas)) (docs %) (-> (or #{}) (conj :seon.env/src))
-                                                                                (classed %) (-> (or #{}) (into (keep test-class-readers) (:refs (rows %)))))]
+                                                                                (classed %) (-> (or #{}) (into (keep (partial test-class-of readers)) (:refs (rows %)))))]
                                                                          (if (computed %) (into (or cf #{}) (:schema-config g)) cf))
                                                                      c)
                                                                   ks (keep #(get-in fl [% :config]) kids)]
@@ -2026,7 +2043,10 @@
                                       (when (and (not roots?) (some #(:bin (flags %)) cs)) (str "\nbinary " @binary))
                                       (when (and roots? (or src? (some #(:reads (flags %)) cs))) code)
                                       (concat (sort (map cd cs)) (map line (sort ks)))))
-         :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))}))))
+         :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))
+         ;; a test namespace's own call of a branch reader (test-class-of): an agent mixes its branch's point into this
+         ;; digest (seon.agent/test-plan), as the inputs hold no branch
+         :data? (boolean (some #(contains? (:config (flags %)) :seon.env/data) cs))}))))
 
 (defn graph-index
   "{test {:digest :process? :binary?}} of graph g's tests under inputs (or of each key of
