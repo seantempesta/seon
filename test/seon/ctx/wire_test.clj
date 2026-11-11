@@ -1645,10 +1645,11 @@
 
 (deftest the-models-page-holds-no-attribute-of-the-pages-alone
   ;; docs/render.md#style: what the page's script and a screen reader read (:data-*, :aria-*) is the page's alone, as class and style
-  ;; are; a link's target, a title and an image's text stay, and a component's root keeps its render's name and its id
-  (is (= [:section {:class "task-view" :id "task-view-x"} [:a {:href "/x" :title "t"} "x"] [:button "close"] [:img {:alt "a"}]]
+  ;; are; a link's target, a title and an image's text stay, and a component's root keeps its id and the render that drew it as data
+  ;; (:render, its full symbol), never a class (Point's 1602 ruling, 2026-11-11: nothing presentational reaches the model)
+  (is (= [:section {:render 'seon.render.ui/task-view :id "task-view-x"} [:a {:href "/x" :title "t"} "x"] [:button "close"] [:img {:alt "a"}]]
          (#'wire/presentation-free
-          [:section {:class "task-view big" :id "task-view-x" :data-render "seon.render.ui/task-view"}
+          [:section {:class "task-view big" :id "task-view-x" :render 'seon.render.ui/task-view :data-render "seon.render.ui/task-view"}
            [:a {:href "/x" :title "t" :aria-current "page" :class "link"} "x"]
            [:button {:data-seon-form "(f)" (keyword "data-on:click") "@post('/open')"} "close"]
            [:img {:alt "a" :style "w"}]]))))
