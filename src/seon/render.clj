@@ -1524,7 +1524,8 @@
 (defn describe
   "What value v holds at path, depth levels in, as entries {:path :holds [:schema :doc :render]} read in entity index ix: the body of
   my.agent/describe (its docstring says the shape), here so root can describe a record at a point without an agent (the first
-  point's (describe @ctx), seon.ctx.wire/page-diff-msgs). Paths are keys, never positions. See docs/ctx.md#the-pattern."
+  point's (describe @ctx) and a task switch's, seon.ctx.wire/describe-msgs). Paths are keys, never positions. An entry whose schema says
+  what acts on it (:seon.render/more) carries those forms for its own path (:to-use). See docs/ctx.md#the-pattern."
   {:malli/schema [:=> [:cat :map :any [:sequential :any] pos-int?] [:vector :map]]}
   [ix v path depth]
   (let [
@@ -1541,17 +1542,34 @@
                              (coll? x) {:items (count x)}
                              :else x))
          first-sentence (fn [d] (when (string? d) (first (str/split d #"(?<=\.)\s" 2))))
-         about (fn [k x] (let [s (cond (ids? x) (entity-schema ix (val (first x)) k)
-                                       (entity? x) (entity-schema ix x k)
-                                       (qualified-keyword? k) k)
-                               d (when s (first-sentence (schema-property ix s :description)))
-                               r (when s (render-for ix s :seon.render/hiccup))]
-                           (cond-> {} (and s (not= s k)) (assoc :schema s) (and s (= s k) (or d r)) (assoc :schema s) d (assoc :doc d) r (assoc :render r))))
+         schema-at (fn [k x] (cond (ids? x) (entity-schema ix (val (first x)) k)
+                                   (entity? x) (entity-schema ix x k)
+                                   (qualified-keyword? k) k))
+         ;; what acts on the part at path q: its schema's :seon.render/more with `path` read as q; a pair naming a placeholder this reader
+         ;; cannot fill (`v`, the answer; `id`, an entity) is not shown (docs/render.md#a-render-is-a-value-printed-once)
+         forms (fn [s q] (seq (for [[w f] (when s (more-of ix s))
+                                    :let [syms (set (filter symbol? (tree-seq coll? seq f)))]
+                                    :when (not (or (syms 'v) (syms 'id)))]
+                                [w (clojure.walk/postwalk-replace {'path q} f)])))
+         ;; k: the key the part is held at (a member's: its join's, which names its schema)
+         about (fn [k x q] (let [s (schema-at k x)
+                                 d (when s (first-sentence (schema-property ix s :description)))
+                                 r (when s (render-for ix s :seon.render/hiccup))
+                                 f (forms s q)]
+                             (cond-> {} (and s (not= s k)) (assoc :schema s) (and s (= s k) (or d r f)) (assoc :schema s) d (assoc :doc d)
+                                     r (assoc :render r) f (assoc :to-use (vec f)))))
+         ;; a join keyed by ids is walked into, member by its id, when a path was asked (a first look is the overview; a path asks for the
+         ;; detail): its members cost the join no level, so (describe @ctx [:seon.agent/task]) reaches a cited task's own entry
          walk (fn walk [p node left]
                 (mapcat (fn [[k x]]
                           (let [q (conj p k)]
-                            (cons (merge {:path q :holds (holds x)} (about k x))
-                                  (when (and (> left 1) (map? x) (not (ids? x))) (walk q x (dec left))))))
+                            (cons (merge {:path q :holds (holds x)} (about k x q))
+                                  (cond (and (> left 1) (map? x) (not (ids? x))) (walk q x (dec left))
+                                        (and (> left 1) (ids? x) (seq path))
+                                        (mapcat (fn [[id m]] (let [qm (conj q id)]
+                                                               (cons (merge {:path qm :holds (holds m)} (about k m qm))
+                                                                     (when (map? m) (walk qm m (dec left))))))
+                                                (sort-by key x))))))
                         (sort-by (comp str key) (dissoc node :db/id))))
          node (get-in v path)]
      (if (and (map? node) (not (ids? node)))
@@ -1560,7 +1578,9 @@
 
 (defn more-of
   "What schema k (or its nearest parent, in the entity index ix) says acts on its value: its :seon.render/more, [words form] pairs, the
-  forms written once as data and read by every reader that shows such a value (the model's print and the person's page). See
-  docs/render.md#a-render-is-a-value-printed-once."
+  forms written once as data and read by every reader that shows such a value (the model's print and the person's page). A form may
+  name three placeholders, each filled by the reader that can: `v`, the answer (its handle: seon.print/at-handle); `path`, the part's
+  path in the record (seon.render/describe); `id`, an entity's id. A reader that cannot fill one shows no pair naming it; `x` is left
+  for the agent. See docs/render.md#a-render-is-a-value-printed-once."
   {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] [:maybe [:vector [:tuple :string :any]]]]}
   [ix k] (schema-property ix k :seon.render/more))

@@ -4482,3 +4482,22 @@
     (is (not (str/includes? r "proof-red")) "no keyword read raw")
     (is (= "root restarted" (:reason (ui/standing {} {:seon.task/outcome :cap :seon.task/reason "root restarted"})))
         "a reason with no data behind it is its string")))
+
+(deftest describe-shows-what-acts-on-a-part-at-its-path
+  ;; docs/render.md#a-render-is-a-value-printed-once (Point and Data model, 2026-11-11, after loop D2: nine reads to find where a cited
+  ;; task's plan is): an entry whose schema says what acts on it carries those forms for its own path, and asked at a path, describe walks
+  ;; into a join keyed by ids member by member, so a cited task shows the one form that changes its plan
+  (let [ix (seon.db/index)
+        v {:seon.agent/task {:db/id 1 :seon.task/id "x/a" :seon.task/plan "Do a."
+                             :seon.cite/_of {5 {:db/id 5 :seon.cite/id "c" :seon.cite/target {:db/id 7 :seon.task/id "x/b" :seon.task/plan "Do b."}}}}}
+        at (r/describe ix v [:seon.agent/task] 2)
+        by (into {} (map (juxt :path identity)) at)
+        target (by [:seon.agent/task :seon.cite/_of 5 :seon.cite/target])
+        top (r/describe ix v [] 2)]
+    (is (some? target) (str "the cited task has its own entry, member by its id: " (pr-str (map :path at))))
+    (is (= :seon.task/task-fact (:schema target)))
+    (is (= '[(swap! ctx assoc-in (conj [:seon.agent/task :seon.cite/_of 5 :seon.cite/target] :seon.task/plan) x)] (map second (:to-use target)))
+        "its form, for its own path")
+    (is (not-any? #(= 5 (get (:path %) 2)) top) "a first look at the whole is the overview: no member walked")
+    (is (not-any? (fn [e] (some #(some #{'v 'id 'path} (filter symbol? (tree-seq coll? seq (second %)))) (:to-use e))) (concat at top))
+        "no form shown holds a placeholder it could not fill")))

@@ -2406,6 +2406,8 @@
         (is (empty? (begins r2)) "one task: no boundary")
         (is (= 1 (count (begins r3))) "the new task's first call: one boundary")
         (is (str/includes? (:content (nth (:messages r3) (first (begins r3)))) "demo/g") "it names the task that ended")
+        (is (some #(= "(my.agent/describe @ctx [:seon.agent/task])" (get-in % [:tool-calls 0 :code])) (:messages r3))
+            "and the new task is described where the record holds it, its cites' paths and the forms that act on them (docs/agent.md#looking-at-what-you-pulled)")
         (is (= (subvec (:messages r3) 0 (count (:messages r3))) (subvec (:messages r4) 0 (count (:messages r3)))) "the next request starts with this one, boundary included")))))
 
 (defn lab-list
