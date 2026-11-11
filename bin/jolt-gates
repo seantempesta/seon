@@ -1,0 +1,35 @@
+#!/bin/zsh
+# bin/jolt-gates [GATE ...] — Jolt's own gates on this checkout's Jolt pin and this checkout's Chez: what a Jolt
+# pin owes before it is handed over (docs/merging.md#conflicts-and-pins), every gate of test/forks/jolt-gates.txt
+# (or the ones named), ONE at a time, niced, each under a timeout, its output kept in target/jolt-gates/logs/GATE.out.
+# The gates run in a clone of the fork kept at target/jolt-gates/work, moved to the pinned commit, never in
+# reference-code/jolt: Jolt's Makefile runs `git submodule update` for its vendored libraries, which a
+# worktree's checkout must never do (bin/worktree). Verdicts go to target/jolt-gates/verdicts.tsv as they
+# land (GATE, PASS|FAIL|TIMEOUT, seconds). It ends on JOLT GATES OK when the gates that are not PASS are
+# exactly the ones test/forks/jolt-gates-red.txt names (each with its reason there), else JOLT GATES FAILED
+# naming every gate that is red and not known, and every known-red gate that passed (remove its line).
+# One heavy run: start it under the gate of docs/machine.md#builds-and-checks, as a prove.
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+J=$ROOT/reference-code/jolt; T=$ROOT/target/jolt-gates; C=$ROOT/target/chez/bin/scheme
+[[ -x $C ]] || { echo "JOLT GATES FAILED (no $C; run bin/build chez first)"; exit 1 }
+PIN=$(git -C "$J" rev-parse HEAD) || exit 1
+mkdir -p "$T/logs" "$T/tmp" "$T/home"
+[[ -d $T/work/.git ]] || git clone -q "$J" "$T/work" || { echo "JOLT GATES FAILED (cannot clone $J)"; exit 1 }
+git -C "$T/work" fetch -q "$J" "$PIN" && git -C "$T/work" checkout -q --detach "$PIN" || { echo "JOLT GATES FAILED (cannot check out $PIN)"; exit 1 }
+if (( $# )); then gates=("$@"); else gates=(${(f)"$(grep -v '^#' "$ROOT/test/forks/jolt-gates.txt")"}); fi
+known=(${(f)"$(grep -v '^#' "$ROOT/test/forks/jolt-gates-red.txt" | cut -d' ' -f1)"})
+: > "$T/verdicts.tsv"; red=()
+for g in $gates; do
+  t0=$SECONDS
+  ( cd "$T/work" && HOME=$T/home JOLT_CHEZ=$C nice -n 15 timeout -k 30 1100 make CHEZ=$C TMPDIR=$T/tmp/ $g ) > "$T/logs/$g.out" 2>&1 < /dev/null
+  case $? in 0) st=PASS;; 124|137) st=TIMEOUT;; *) st=FAIL;; esac
+  print "$g\t$st\t$((SECONDS - t0))" >> "$T/verdicts.tsv"
+  [[ $st == PASS ]] || red+=($g)
+  print "$st $g"
+done
+new=(${red:|known}); if (( $# )); then fixed=(); else fixed=(${known:|red}); fi
+print "jolt-gates: $PIN, ${#gates} gates, $(( ${#gates} - ${#red} )) PASS, ${#red} not"
+(( ${#new} )) && print "red and not known: $new"
+(( ${#fixed} )) && print "known red and now PASS (remove from test/forks/jolt-gates-red.txt): $fixed"
+if (( ${#new} + ${#fixed} )); then echo "JOLT GATES FAILED"; exit 1; fi
+echo "JOLT GATES OK"

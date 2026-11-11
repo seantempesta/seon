@@ -547,11 +547,12 @@
    :sort/compare {:ticks 6.21 :ns 9.75 :bytes 9.66 :what "sort of shuffled integers, per n log2 n"}
    :str/append {:ticks 4.1 :ns 9.9 :bytes 36.0 :what "StringBuilder append of one char"}
    ;; :str/seq-char and :str/escape re-measured on Jolt 546c3d1f (jolt/lazy-cas: a pure lazy
-   ;; producer is claim-free when threaded, and the claim path drops a box): 272 -> 80 B, 684 -> 436 B
+   ;; producer is claim-free when threaded, and the claim path drops a box): 272 -> 80 B, 684 -> 436 B;
+   ;; :str/escape again on Jolt 6a8df52a (a forced lazy node allocates nothing for its claim): 436 -> 292 B, 60.6 -> 55.8 ticks
    :str/seq-char {:ticks 11.0 :ns 18.2 :bytes 80.01 :what "one step of a seq over a String's chars (doseq, reduce)"}
    ;; source mode, at 10k: the string literal's escape
    ;; (seon.print.emit/string-literal), 2.5x a char seq's bytes
-   :str/escape {:ticks 60.64 :ns 107.8 :bytes 436.1 :what "clojure.string/escape of a text by char-escape-string, newlines kept, per char"}
+   :str/escape {:ticks 55.81 :ns 167.8 :bytes 292.4 :what "clojure.string/escape of a text by char-escape-string, newlines kept, per char"}
    :map/literal {:ticks 3.16 :ns 5.2 :bytes 144.0 :what "a small map literal of 5 keys built per element"}
    :map/seq-step {:ticks 15.79 :ns 28.3 :bytes 127.1 :what "one step of reduce over a hash map's entries (each a map entry)"}
    :map/reduce-kv {:ticks 1.24 :ns 4.7 :bytes 0.0 :what "one step of reduce-kv over a hash map"}
