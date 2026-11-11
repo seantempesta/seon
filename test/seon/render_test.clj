@@ -4402,7 +4402,7 @@
   "The planted world (docs/render.md#the-page): on a test db, as an agent would make it, a schema with both renders
   (:lab.planted/note-fact, drawn by planted-note and planted-note-msgs; with history? false the html render alone, so no history),
   joined by the agent's own :seon.ctx/pattern, one note for agent lab/a1, and tx-data more written after it. Answers {:c the agent's
-  pull :ix :page html :msgs the request's messages, printed}."
+  pull :ix :page html :rows the conversation's html (c-rows) :msgs the request's messages, printed}."
   ([] (planted-world {}))
   ([{:keys [history? more] :or {history? true}}]
   (let [reg (fn [db k form] (let [r (my.schema/registration db k form false)]
@@ -4423,7 +4423,9 @@
         ix (seon.program/index-of-db db)
         c (:tree (seon.ctx/build ix db (seon.db/eid db :seon.agent/key "lab/a1") :b))
         w (draw c seon.ctx/changes db #'ui/agent {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
-    (try {:c c :ix ix :page (apply str (map :html (seon.fixtures/page-units w))) :msgs (pr-str (:messages (seon.ctx.wire/request w)))}
+    (try {:c c :ix ix :page (apply str (map :html (seon.fixtures/page-units w))) :msgs (pr-str (:messages (seon.ctx.wire/request w)))
+          ;; the conversation as the page shows it: the units its list holds (container #c-rows, seon.render.ui/conversation-list)
+          :rows (apply str (keep #(when (= "#c-rows" (:container %)) (:html %)) (seon.fixtures/page-units w)))}
          (finally (r/dispose-walk! w))))))
 
 (deftest a-planted-entity-reaches-the-page
@@ -4447,10 +4449,12 @@
   ;; docs/turn.md#the-turn-is-a-number: the conversation is the joins whose target is history (seon.render/history?, Data model's
   ;; ruling): an agent's own pattern asking a join with :tx :at whose schema has no model render (a cite, a started agent, here a
   ;; planted note drawn for html alone) puts none of its members in the conversation
-  (let [{:keys [c ix msgs]} (planted-world {:history? false})]
+  (let [{:keys [c rows page msgs]} (planted-world {:history? false})]
     (is (= ["the planted note"] (map :lab.planted.note/text (vals (:lab.planted.note/_agent c)))) "the pull holds the note, with its link's :at")
     (is (some :at (vals (:lab.planted.note/_agent c))))
-    (is (not-any? #(= :lab.planted.note/_agent (first %)) (mapcat val (seon.ctx/placed-messages ix c))) "no member of it is placed")
+    (is (str/includes? rows "system message") "the conversation is drawn")
+    (is (not (str/includes? rows "PLANTED-HTML")) "no member of it is placed in the conversation")
+    (is (str/includes? page "PLANTED-HTML the planted note") "the page draws it as a part")
     (is (not (str/includes? msgs "the planted note")) "nor read by the model")))
 
 (deftest an-eval-by-another-hand-reaches-the-request-only-as-the-systems-with-an-intent

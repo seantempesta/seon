@@ -16,7 +16,7 @@
   transaction, or refused with why (write!)."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :as contract :refer [defn defn-]] [seon.render :as render] [seon.agent :as agent] [seon.program :as program]
-            [seon.config :as cfg] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]
+            [seon.config :as cfg] [seon.db :as pdb] [datahike.api :as d] [datahike.db.interface :as dbi] [datahike.db.utils :as dbu] [clojure.string :as str] [malli.core :as m] [malli.error :as me] [malli.registry :as mr]
             [seon.lib :as lib] [seon.print :as print] [seon.ref :as ref] [seon.doc :as doc] [seon.ratom :as ratom]))
 
 ;; ---- the pattern: what ctx holds (docs/ctx.md#the-pattern) ---------------------------------
@@ -956,8 +956,9 @@
   (k the join that holds it, e its entity id), in the order they were linked, and :pending for those linked after the last turn's edge, which
   the turn now opening takes. Read from the pull alone, no join named: a join is a key of c whose value is a map of member maps holding
   :at, the transaction that linked each, which the pattern asks ({[:ns/_attr :tx :at] ..}: docs/ctx.md#the-pattern), whose target is
-  history (seon.render/history?, its schema read from a member in the entity index ix: a join of cites or started agents asked with :at
-  is no conversation). The joins whose
+  history (seon.render/history?, the entity index ix's :history-schemas), read from its attribute: a reverse join's members are of the
+  schema that owns the attribute, a forward join's of its targets (a join of cites or started agents asked with :at is no conversation).
+  The joins whose
   members carry a turn number (:seon.model-call/n) make the turns; a turn's edge is the :t of its basis (seon.turn/basis!, the commit its
   request is made from), else, for a turn with no basis (an example session's), the transaction that linked its call; so one linked after a
   turn's basis, mid-turn, reads at the next turn. Every other join's members are placed against those edges by their link (a message by
@@ -967,13 +968,14 @@
   {:malli/schema [:=> [:cat :map :map] [:map-of [:or :int [:= :pending]] [:vector [:tuple :keyword :int]]]]}
   [ix c]
   (let [plain (ratom/untracked c)
-        ;; the joins the pattern asks with their link's transaction: a map of member maps, each holding :at
-        joins (for [[k v] plain :when (and (map? v) (seq v) (every? map? (vals v)) (some :at (vals v)))] [k v])
-        ;; those whose members carry a turn number make the turns; each other join whose target is history (its schema read once a
-        ;; join, from a member) is placed against them
+        ;; the joins whose target is history, read from the attribute (two map reads a join, no member looked at): a reverse join's
+        ;; members are of the schema owning the attribute, a forward join's of its targets
+        history? (fn [k] (some #(contains? (:history-schemas ix) %) (if (dbu/reverse-ref? k) [(get (:entity-schemas ix) (dbu/reverse-ref k))] (get (:targets ix) k))))
+        joins (for [[k v] plain :when (and (keyword? k) (map? v) (seq v) (history? k))] [k v])
+        ;; those whose members carry a turn number make the turns; each other is placed against them
         maker? (fn [[_ v]] (some :seon.model-call/n (vals v)))
         makers (filter maker? joins)
-        placed-joins (filter (fn [[_ v]] (render/history? ix (render/entity-schema ix (first (vals v)) nil))) (remove maker? joins))
+        placed-joins (remove maker? joins)
         ;; the turns' calls: one join's map as the record holds it (newest first, sorted, its order read below), else all of them merged
         calls (when (seq makers) (reduce into (map second makers)))
         cids (set (keys calls))
