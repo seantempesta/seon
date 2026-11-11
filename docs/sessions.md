@@ -45,6 +45,15 @@ A compaction is where a session's own lessons are most easily lost, so it is whe
 
 **A session leaves the system up to date where each fact lives** (owner, 2026-11-11: "grep around and find the parts that might be out of date and not just edit an append log.md ... Over time I want to stop drift"). Before it concludes or compacts, a session greps the wiki, the task files, the docstrings and the schema descriptions for every place that states what its work changed, makes each true where it is, removes the task entries it completed and rewrites the plans it changed. One new page that restates the rest is drift.
 
+## Live agent runs find the system's problems
+
+A session that runs Seon agents on real tasks with a real model runs them to find what in the system cost the agents turns, and to bring their good work to disk; never to make a number on one task go green (owner, 2026-11-11: "farming for problems while they are testing ... Not teach to the test, recognize systemic failure and adapt over time"; "This isn't a metric I want to actually solve the tasks and improve the system").
+
+- **A run is a harvest.** For each stretch where the agent lost turns, the session names what in the system allowed it (a render the model cannot see, a wiki form that does not evaluate, a refused write that read as success) and mails it at once, with the run's evidence, to the session that owns the cause ([sessions own their areas](#sessions-own-their-areas)). The owner fixes it at the cause, for every task, and files it as a task in its own tasks file until then; a fixed finding is its commit. A model's own error with nothing in the system behind it is no finding.
+- **A fix is never for the run's task:** no hint, plan line or wiki sentence that helps only that task. A fix counts when a later run on a different task shows it held, so the task changes at every run.
+- **What the agent refined reaches disk by review.** The session reads what the agent wrote to its task and to the wiki in its refine step, fixes what is nearly right, and brings the good to files as a docs-and-tasks tip ([source](source.md#a-merged-task-reaches-mains-files)); a task the agent solved lands by the same review, its entry removed; what is not good has its plan rewritten with what the attempt showed.
+- **A run reports what it changed:** the findings sent and fixed, and what reached disk (files and commit) or was rejected and why; turns and spend come second, since one run of one task is too few to compare.
+
 ## The mailbox
 
 Sessions reach each other through files, so what is said is data that can be watched (owner, 2026-11-11: "a communication system based on data that you guys can monitor for a mailbox like system ... keep it simple and reliable"). The mailbox is a folder in the managing session's notes folder, with one inbox a session (`mail/to-<session>/`).
