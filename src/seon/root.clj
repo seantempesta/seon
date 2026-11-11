@@ -137,7 +137,7 @@
    "main's changes since the session's base"
    "host state: atoms, open files, sockets, fibers"])
 
-(declare answer-spawn insert-evals start-spawn no-room binary-program binary-current kill! prove-tree! stop!)
+(declare answer-spawn insert-evals start-spawn no-room binary-current kill! prove-tree! stop!)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -473,7 +473,7 @@
   {:malli/schema [:=> [:cat :seon.host/db] [:maybe :map]]}
   [db]
   (let [held (:tree (:seon.root/source (d/pull db [:seon.root/source] [:seon.root/id :root])))
-        built (binary-program)
+        built (program/binary-program)
         r (binary-current db built held)]
     ;; a diff git cannot make is no answer of current: held as what the row says
     (if (contract/error? r) {:binary (get-in built [:inputs :tree]) :tree held :error (:seon.error/message r)} r)))
@@ -1356,27 +1356,23 @@
 
 (defn built-program
   "The program of the tree at root as a seed indexes it, and the inputs bin/test keys verdicts by: {:program
-  (seon.program/program-digest of the tree's index) :inputs (seon.fx/inputs, whose :tree is the tree's git id: what binary-current and the source fact compare)}, or the error of a read or an analysis.
+  (seon.program/program-digest of the tree's index) :forms (the ids of its live forms, what seon.program/held? asks) :inputs
+  (seon.fx/inputs, whose :tree is the tree's git id: what binary-current and the source fact compare)}, or the error of a read or an analysis.
   The index is the build's cache, a store other than the one store because it is regenerable from the tree at any time
   and root never reads it: kept between builds under base (bin/build's target/seon.index, keyed by the schema and layout:
   seon.db/kept-store!, so one of another layout is dropped, never opened), brought to the tree as a seed brings a store
   (import-tree!: only the files the tree changed) and keyed by the code that made it (kept-index!, roots index-roots by
   default), so a build pays for what changed. What bin/build records beside the binary it built (target/seon.program,
-  `binary-program`). See docs/source.md#the-binary-records-its-program."
+  seon.program/binary-program). See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:vector :qualified-symbol]] :map]]}
   ([root base] (built-program root base program/index-roots))
   ([root base roots]
    (let [inputs (fx/inputs root)
-         r (kept-index! (str (pdb/kept-store! base) "/index") #(import-tree! % {:root root :dirs (cfg/value :seon.config.source/dirs)} (profile/now-ns)) inputs roots)]
-     (if (:error r) (:error r) {:program (:program r) :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}))))
-
-(defn binary-program
-  "What the running binary was built from, as bin/build recorded it beside the binary (target/seon.program,
-  `built-program`'s answer), or nil when it recorded none. Read once, at boot. See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat] [:maybe :map]]}
-  []
-  (let [f (java.io.File. (str (cfg/checkout) "/target/seon.program"))]
-    (when (.isFile f) (sedn/decode (slurp f)))))
+         ;; the ids of the tree's live forms: what the binary holds compiled (seon.program/held?)
+         index (fn [conn] (let [a (import-tree! conn {:root root :dirs (cfg/value :seon.config.source/dirs)} (profile/now-ns))]
+                            (if (:error a) a (assoc a :forms (into (sorted-set) (map :v) (d/datoms @conn :aevt :form/id))))))
+         r (kept-index! (str (pdb/kept-store! base) "/index") index inputs roots)]
+     (if (:error r) (:error r) {:program (:program r) :forms (:forms r) :inputs (assoc-in inputs [:config :seon.env/index] (or (:indexed-by r) "none"))}))))
 
 (defn held-inputs
   "The inputs of the files this system's checkout holds, as bin/root start (or bin/update's no-restart landing) last computed
@@ -1392,7 +1388,7 @@
 
 (defn booted-source
   "Root's :seon.root/source fact held, as this boot (id boot) states it: the git tree the binary was built from (built,
-  `binary-program`'s :tree, as :binary-tree) and its program (:binary), absent when bin/build recorded none. When that tree is
+  seon.program/binary-program's :tree, as :binary-tree) and its program (:binary), absent when bin/build recorded none. When that tree is
   held's :tree, the one main was last brought to from outside (an import, a landing; what agents merged since is main's own and
   never a mismatch), the binary's inputs with the config in force (config-input, seon.fx/config-input), which agents key their
   test results by (seon.agent/test-inputs), and :program the binary's, the program those inputs describe; otherwise :program is
@@ -1455,7 +1451,7 @@
   [from to] (str (cfg/checkout) "/target/binary-current/" from "-" to ".edn"))
 
 (defn binary-current
-  "Whether a binary built from built's tree (binary-program's record, its :inputs :tree) runs tree's program as tree
+  "Whether a binary built from built's tree (seon.program/binary-program's record, its :inputs :tree) runs tree's program as tree
   would have it built: nil when it does, else {:binary its tree :tree tree :reaches [what differs that it bakes]}. Equal
   trees are nil, and so is no tree (main holds no source fact: nothing known differs); a binary that recorded no tree
   against a main that holds one is unknown, never current ({:missing :binary-tree}). What differs is git's changed paths between the two trees: a build
@@ -1762,7 +1758,7 @@
                                                                                   (into (root-session-boot-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
-                                                                         held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (binary-program) digest (fx/config-input cfg/config (cfg/checkout)) stale
+                                                                         held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (program/binary-program) digest (fx/config-input cfg/config (cfg/checkout)) stale
                                                                                                     ;; the inputs of what this boot read, whatever tree id a build recorded
                                                                                                     (when-not stale main-inputs))})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)

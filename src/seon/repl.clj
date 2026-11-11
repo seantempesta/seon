@@ -1034,6 +1034,31 @@
   ([at] (held-file at))
   ([p new] (held-file-write p new :config)))
 
+(defn- ns-not-found
+  "What an edit of namespace nsym adds when old is not in its ns form, its place: :held-by, the vars whose recorded source holds
+  old once, and :said, the sentence the refusal ends with: the edit on the one that holds it (the name left to pick when several do), or, held by no definition, that a new definition is evaluated in its namespace, there being no place in a file
+  to insert one (an agent that found neither spent its turns on line windows and a shell write). See docs/agent.md#changing-a-definition."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol :string] [:map [:held-by [:vector :qualified-symbol]] [:said :string]]]}
+  [db nsym old]
+  (let [ne (pdb/eid db :ns/name nsym)
+        holders (when ne
+                  (sort (for [dt (d/datoms db :avet :form/ns ne)
+                              :let [e (:e dt) src (:form/src (d/entity db e))]
+                              :when (and src (program/live? db e) (= 1 (count (offsets src old))))
+                              v (keep (fn [dv] (:var/name (d/entity db (:v dv)))) (d/datoms db :eavt e :form/defines))]
+                          v)))]
+    {:held-by (vec holders)
+     :said (cond
+             (= 1 (count holders))
+             (str ": its place is its ns form, and the text is in " (first holders)
+                  ", so edit it there, with the same old and new: (seon.repl/edit! '" (first holders) " old new)")
+             (seq holders)
+             (str ": its place is its ns form, and the text is in " (count holders) " definitions, " (clojure.string/join ", " holders)
+                  ": edit the one you mean, with the same old and new, (seon.repl/edit! 'its-name old new)")
+             :else
+             (str ": its place is its ns form, and no definition of " nsym " holds it either. A new definition has no place in a file"
+                  " to insert it: evaluate it in its namespace, (in-ns '" nsym ") then (defn- f ...), and it is recorded as program"))}))
+
 (defn edit!
   "Change the text at a place by replacing old, exact text that occurs once in it, with new: a
   definition var sym names (`(source sym)`), a doc's address (its own block) or any other path (the file on disk), place being the one edge
@@ -1068,17 +1093,21 @@
                      (let [at (when (seq old) (offsets src old))]
                        (cond
                          (empty? old) {:refused (refuse :empty (str (which k) "the old text is empty: give the exact text to replace") nil)}
-                         (empty? at) (let [first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))
+                         (empty? at) (let [in-ns (when (= :ns (place-kind sym)) (ns-not-found (:db @agent/state) sym old))
+                                           first-line (clojure.string/trim (first (clojure.string/split-lines (str old " "))))
                                            cands (vec (for [[i l] (numbered src 1 Long/MAX_VALUE) :when (and (seq first-line) (clojure.string/includes? (clojure.string/trim l) first-line))] [i l]))
                                            ;; at each line that holds its first line, the one line where old stops matching, and how
                                            diffs (vec (keep (fn [[i _]] (differs (clojure.string/split-lines src) i (clojure.string/split-lines old))) cands))
                                            d (first diffs)]
                                        {:refused (cond-> (refuse :not-found (str (which k) "the old text is not in its source exactly (whitespace counts)"
-                                                                                 (if d (str ": at line " (:line d) " old has " (pr-str (:old d)) " and the source " (pr-str (:source d))
-                                                                                            (when-let [[a b] (:indent d)] (str " (" a " leading spaces, the source " b ")")))
-                                                                                     "; read it as it stands"))
+                                                                                 (cond d (str ": at line " (:line d) " old has " (pr-str (:old d)) " and the source " (pr-str (:source d))
+                                                                                              (when-let [[a b] (:indent d)] (str " (" a " leading spaces, the source " b ")")))
+                                                                                       ;; a namespace's place is its ns form: say where the text is, or how a new definition is made
+                                                                                       in-ns (:said in-ns)
+                                                                                       :else "; read it as it stands"))
                                                                  cands)
-                                                   (seq diffs) (assoc :seon.repl/differs diffs))})
+                                                   (seq diffs) (assoc :seon.repl/differs diffs)
+                                                   (seq (:held-by in-ns)) (assoc :seon.repl/held-by (:held-by in-ns)))})
                          (next at) {:refused (refuse :ambiguous (str (which k) "the old text occurs " (count at) " times: give more of it, so it is one") (lines-at at))}
                          :else {:at (first at) :old old :new new})))
              cs (map-indexed check changes)

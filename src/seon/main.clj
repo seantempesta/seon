@@ -4,7 +4,7 @@
   in test/) from the checkout's source. The binary holds what this namespace requires, so it
   requires every namespace system.edn names a proc in (seon.system resolves them by name at boot)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.root :as c] [seon.lib :as lib] [seon.print :as print]
+  (:require [seon.contract :refer [defn defn-]] [seon.root :as c] [seon.program] [seon.lib :as lib] [seon.print :as print]
             [seon.config] [seon.server] [seon.fx] [clojure.string] [my.root] [clojure.edn] [jolt.deps]
             ;; the e2e loop's subject: the binary built from a merge answers its new value
             [seon.generation] [seon.vector] [seon.problems :as problems]
@@ -89,6 +89,11 @@
           (out! "ROOT STALE BINARY binary " (or binary "unrecorded") ", main's tree " tree
                 (cond missing (str ", " (name missing) " missing") error (str ", " error) :else (str ", what differs reaches " (clojure.string/join " " reaches)))
                 ": root forks no agent. " problems/stale-binary-acts))
+        ;; a binary with no record of its forms holds none of main's: the fork server loads every live form (seon.program/held?),
+        ;; a cost never paid silently
+        (when-not (:forms (seon.program/binary-program))
+          (out! "ROOT NO BINARY FORMS target/seon.program records no forms of the tree target/seon was built from: the fork server"
+                " loads every form of main's program over the binary (bin/build records them)"))
         (out! "ROOT LISTENING " bound))
       (loop [] (when (read-line) (recur)))
       (end! :stdin-eof))
