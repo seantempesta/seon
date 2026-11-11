@@ -70,7 +70,7 @@ Kept current by the Data model session; the newest landed state runs on the stan
 |---|---|---|
 | 1 | a cited schema drawn as what it is; the pattern's description and required parts | landed |
 | 2 | the role named in a pattern; a join to a depth | in batch 63, proving: `jolt/rolenames` da7b4f6004 (reviewed by Data model and Context) |
-| 3 | the boot writes and pattern functions deleted, with the check | in build (`jolt/rolesource`, Data model's helper). Found on the way: a join to a depth could not say what the last level asks (today the ids below, so a count is never a silent cut); the depth form gained that first (a depth join and one plain join of the same key: the plain one is what the last level asks), reviewed; the deletions are under test |
+| 3 | the boot writes and pattern functions deleted, with the check | built and reviewed by Data model, Context's review asked, for the batch after 63: `jolt/rolesource` 2ab92afc41. Root's session stores `[:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]` (63 characters where the standing store holds 2,621) and the user stores none. A depth join gained its last level on the way: a plain join of the same key beside it. The standing store needs an erase for it to take effect there |
 | 4 | descriptions on the answer's keys, a file's path, a task's proofs | landed, main f56a85c416; the join-shape sentence not started |
 | 5 | the short system message | in batch 63, proving, last in it (`jolt/prompt` b989058353) |
 | 6 | `@ctx` and the hiccup at the first point; the cite's pull shortened | built, for the batch after 63: the real `@ctx`, byte for byte (`jolt/ctxfirst`, Context); the cite's pull not started (Data model) |
