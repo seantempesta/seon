@@ -122,6 +122,58 @@
     (d/release c) (d/release bc)
     r))
 
+(def ^:private diff-base
+  ;; a branch of the store holding 20,000 entities of two attributes (40,000 :eavt datoms), built once
+  (delay (let [conn @store
+               cfg (pdb/store-cfg :lmdb (get-in @conn [:config :store :path]))
+               b (keyword (str "diff-" (random-uuid)))
+               _ (d/branch! conn :db b)
+               bc (pdb/connect (assoc cfg :branch b))]
+           (d/transact bc {:tx-data [{:db/ident :app.diff/n :db/valueType :db.type/long :db/cardinality :db.cardinality/one}
+                                     {:db/ident :app.diff/m :db/valueType :db.type/long :db/cardinality :db.cardinality/one}]})
+           (doseq [part (partition-all 2000 (range 20000))]
+             (d/transact bc {:tx-data (mapv (fn [i] {:app.diff/n i :app.diff/m i}) part)}))
+           (let [es (vec (d/q '[:find [?e ...] :where [?e :app.diff/n _]] @bc))]
+             (d/release bc)
+             [cfg b es]))))
+
+(defn diff-of
+  "datoms-diff's arguments for two consecutive commits of one branch n values apart: the base
+  branch's head (diff-base) and the head of a branch of it whose one commit replaced :app.diff/m on
+  n entities spread over the store (2n + 1 datoms differ, the transaction's own included)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:= :eavt] [:= []]]]}
+  [n]
+  (let [[cfg b es] @diff-base
+        conn @store
+        s (keyword (str (name b) "-" n "-" (random-uuid)))
+        _ (d/branch! conn b s)
+        c (pdb/connect (assoc cfg :branch s))
+        rnd (java.util.Random. n)
+        _ (d/transact c {:tx-data (mapv (fn [e] [:db/add e :app.diff/m (- (inc (.nextInt rnd 1000000)))])
+                                        (take n (distinct (repeatedly #(nth es (.nextInt rnd (count es)))))))})
+        r [(pdb/head conn b) (pdb/head conn s) :eavt []]]
+    (d/release c)
+    r))
+
+(deftest a-diff-of-two-commits-costs-the-nodes-that-differ
+  ;; See docs/storage.md#merges-read-what-changed (seon.ctx/moved's call: two values of one branch, :eavt, the whole range)
+  (let [[a b] (diff-of 10) [gone added] (d/datoms-diff a b :eavt [])]
+    (is (= [10 11] [(count gone) (count added)]) "ten values replaced, and the transaction's own datom"))
+  (cost/proof
+    {:of 'datahike.api/datoms-diff :input 'seon.merge-cost-test/diff-of
+     :n "values replaced on entities spread over a 40,000-datom store, in one commit"
+     :work (str "the nodes that differ between the two values and nothing else: every child stored at an "
+                "address both hold is skipped unread, the children of each differing branch are compared by "
+                "one hashed lookup each and the differing leaves' datoms merged once; at most one root-to-leaf "
+                "path of differing nodes per value replaced")
+     :growth :linear
+     ;; measured 2026-11-11 at 1, 10 and 100: 71.5k, 304k and 1.59M ticks, 289 KB, 1.37 MB and 6.95 MB (sublinear
+     ;; at 100: the changes begin to share branches). Before Datahike ae20699b (a membership lookup of every datom
+     ;; in both whole sets, java.util.HashSet.retainAll, which Jolt answers in n x m) 113k, 768k and 6.91M ticks
+     :per-n {:ticks 16000 :bytes 90000}
+     :fixed {:ticks 60000 :bytes 300000}
+     :sizes [1 10 100]}))
+
 (use-fixtures :once
   (fn [run]
     (try (run)
