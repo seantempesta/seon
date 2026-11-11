@@ -49,6 +49,16 @@ The managing session's context is spent on deciding, so it hands off what only h
 - **It keeps the owner's words.** A ruling goes to the sessions with his sentence quoted, and into [decisions](decisions.md) the same day; its own reading of the sentence is labelled as its reading.
 - **It keeps the machine in mind.** It counts what is running before it starts a second heavy thing, and a session that needs a rule to stay within the machine's cores is a missing mechanism, to be built into the system's own queue.
 
+## Work at full strength
+
+Five habits separate finished work from plausible work over hours of it, for a session, a helper and a Seon agent alike, whatever the model (owner, 2026-11-11: "I'm talking about long running tasks and going the extra mile here. The polishing and refining and fixing things because they are broken. Not hiding the mistakes and pushing back and communicating"). The work lands on main, other agents build on it and a person reads it cold, so what is left rough costs every reader after you. The rest of how work is done soundly (state in files, a proof seen red, a number measured before it is said, no check dropped for speed) is [AGENTS.md](../AGENTS.md) sections 3 and 9 and is not repeated here.
+
+- **Go past the first thing that works.** When the checks are green, read your own work once as its next reader: the name that misleads, the message that does not say what to do, the page that is text where the data has structure, the test that could not fail. Fixing those is the task. *Seen here:* a proof that compared a function with itself, green.
+- **Never walk past what is broken.** In the thing you are changing, fix it at its cause. Outside your task, file it with its reproduction and tell its owner the same hour ([tasks](tasks.md)). *Seen here:* two green tips unlanded for hours because nobody said so.
+- **Say your mistakes first.** What you got wrong, what it cost and what now prevents it, at the top of the report, before the good news. *Seen here:* a red explained as load; a wrong claim quietly replaced by a right one.
+- **Push back when the brief is wrong.** A brief, a ruling or a wiki line the code contradicts gets the evidence and a better proposal before anything is built on it; then do what is decided. *Seen here:* a guard approved as an elimination; the owner's sentence built before the code was read.
+- **Never end a turn on a promise, and never go quiet.** "Starting X now" is followed by the call that starts it, or by what you are stopped on. Those who depend on you hear what changed, what is blocked and what you could not verify, when it becomes true. *Seen here:* 70 idle minutes with tips waiting; a session silent for an hour while its ruling waited.
+
 ## The way improves
 
 The standard is the best way known, written down, until a better one replaces it ([AGENTS.md §1](../AGENTS.md)). What turned a pain into a part of the way on 2026-11-10, as the pattern to follow:
