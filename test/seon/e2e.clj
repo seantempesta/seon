@@ -209,14 +209,36 @@
   (let [e (get fx/scenarios k)]
     (select-keys (if model? (merge e (:model e)) e) [:check :expect])))
 
+(defn- refine-or-review?
+  "Whether task id on d is a refine (seon.task/refine?) or a refine's review (the merge step that needs one): the next work every end
+  writes on main, not the work a scenario released (docs/tasks.md#a-refine-curates-its-own-task)."
+  [d id] (or (task/refine? d id) (some #(task/refine? d %) (:seon.task/needs (task/task d id)))))
+
 (defn- work-summaries
   "server/task-summaries of d less root's own session's task (its session is the agent keyed \"root\", seon.system/root-session-boot-tx: made at
-  every boot, parked until a message, never done): the work a scenario released."
-  [d] (into {} (remove (fn [[id _]] (= "root" (task/session-key d id)))) (server/task-summaries d)))
+  every boot, parked until a message, never done) and less the refines and reviews its ends wrote: the work a scenario released."
+  [d] (into {} (remove (fn [[id _]] (or (= "root" (task/session-key d id)) (refine-or-review? d id)))) (server/task-summaries d)))
+
+(defn- refines
+  "Each ended task of the scenario's work, with the refines after it and each one's review: every end has exactly one refine, its review
+  held for a session (docs/tasks.md#a-refine-curates-its-own-task). {:ok bool :missing [ids]}."
+  [d]
+  (let [ts (task/tasks d)
+        after (fn [id] (filter #(contains? (set (:seon.task/after (val %))) id) ts))
+        bad (for [[id s] (work-summaries d)
+                  :when (task/ended (:seon.task/outcome (d/entity d [:seon.task/id id])))
+                  :let [rs (after id)
+                        review (some (fn [[rid _]] (some #(when (contains? (set (:seon.task/needs (val %))) rid) (val %)) ts)) rs)]
+                  :when (and (not (task/continues-branch? d id))
+                             (not (and (= 1 (count rs)) (= :held (:seon.task/execution review)))))]
+              id)]
+    {:ok (empty? bad) :missing (vec bad)}))
 
 (defn- all-done
-  "Every task done on d; what is not, by id."
-  [d] (let [not-done (into {} (remove (comp :done val)) (work-summaries d))] {:ok (empty? not-done) :not-done not-done}))
+  "Every task of the scenario's work done on d, what is not by id; and every end's refine written (`refines`)."
+  [d] (let [not-done (into {} (remove (comp :done val)) (work-summaries d))
+            r (refines d)]
+        {:ok (and (empty? not-done) (:ok r)) :not-done not-done :refines-missing (:missing r)}))
 
 (defn- run-scenario
   "Work one row: boot root on (merge {:datoms 300} :boot), release :specs (release!), run
