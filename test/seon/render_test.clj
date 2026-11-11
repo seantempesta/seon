@@ -1667,9 +1667,9 @@
         h (draw #{})]
     (is (= ["system" "assistant" "tool"] (mapv second (re-seq #"data-role=\"(\w+)\"" h))) "a row a message, in the wire's order, by its role")
     (is (not-any? #(str/includes? h %) ["tool_calls[0]" "arguments.code"]) "a closed row is its line: its fields are drawn when opened")
-    (is (str/includes? h "eval {") "an assistant's line is its calls as sent")
+    (is (str/includes? h "repl {") "an assistant's line is its calls as sent")
     (let [o (draw #{"d-turn-o1"})]
-      (is (str/includes? o "tool_calls[0] · eval · a") "opened, the call's fields as sent")
+      (is (str/includes? o "tool_calls[0] · repl · a") "opened, the call's fields as sent")
       (is (str/includes? o "arguments.code") "its arguments by their wire names")
       (is (str/includes? o "(first-call)"))
       (is (str/includes? o "group-open:hidden") "the line gives way to the fields, so nothing is shown twice"))

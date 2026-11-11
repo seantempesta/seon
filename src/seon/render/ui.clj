@@ -1200,8 +1200,9 @@
   (let [in-ns (ctx/current-ns c)
         n (or (ratom/realize (:seon.agent/turn c)) 0)
         m (ratom/realize (:seon.agent/max-turns c))]
-    [:section (when in-ns [:h2 (str "You're in " in-ns ".")])
-     (when m [:p (str "Turn " n " of " m ": " (max 0 (- m n)) " left.")])]))
+    (when (or in-ns m)
+      [:section (when in-ns [:h2 (str "You're in " in-ns ".")])
+       (when m [:p (str "Turn " n " of " m ": " (max 0 (- m n)) " left.")])])))
 
 (defn agent-state
   "The agent's state for the person (a component over ctx and the db), nothing of it for the model: how its work stands

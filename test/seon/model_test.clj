@@ -85,7 +85,7 @@
       (is (= [7 3] [(:prompt-tokens c) (:completion-tokens c)])))))
 
 (deftest a-reply-calls-the-one-tool-repl
-  ;; owner, 2026-10-22: a turn is native tool calls, one tool, eval, so the model sees each
+  ;; owner, 2026-10-22: a turn is native tool calls, one tool, repl, so the model sees each
   ;; evaluation's answer before its next call (DeepSeek's OpenAI-compatible tool_calls)
   (testing "the request declares the one tool, and the conversation's calls and answers go as the API reads them"
     (let [b (model/request-body {:kind :openai-compat :base-url "x" :model "m" :api-key-env "HOME" :max-tokens 64}
@@ -109,7 +109,7 @@
       (is (= [{:id "c1" :code "(def x 41)" :intent "i" :seon.model/at [0 0]} {:id "c2" :code "(inc x)" :intent "j" :seon.model/at [1 0]}] (:tool-calls c)))
       (is (= ["Two steps." "tool_calls"] [(:text c) (:finish-reason c)]))))
   (testing "a call with no content beside it, and a call cut mid-arguments: its arguments as they came"
-    (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"eval\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
+    (let [c (model/parse-reply "{\"choices\":[{\"message\":{\"content\":null,\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"repl\",\"arguments\":\"{\\\"code\\\":\\\"(+ 1\"}}]},\"finish_reason\":\"length\"}]}" 1.0 64)]
       (is (= "" (:text c)))
       (is (= ["c" "{\"code\":\"(+ 1"] ((juxt :id :code) (first (:tool-calls c)))) "its arguments as they came")
       (is (re-find #"not run: the arguments are cut off" (:problem (first (:tool-calls c)))) "and nothing runs: the agent is told why"))))
@@ -147,7 +147,7 @@
     (testing "a call that is not this shape is a typed answer to that reply, nothing run"
       (is (re-find #"code is missing" (:problem (first (:tool-calls (reply "" [(call "c" {:message-md "Hi" :evals [{:intent "f" :code "(f)"}]})]))))) "the old shape's call runs nothing")
       (is (re-find #"code is missing" (:problem (second (:tool-calls (reply "Hi" [(call "ca" {:intent "f" :code "(f)"}) (call "cb" {:intent "g"})]))))) "an eval with no code, beside one that reads")
-      (is (re-find #"there is one tool, eval; message is not a tool" (:problem (first (:tool-calls (reply "" [{:id "c" :function {:name "message" :arguments "{\"message-md\":\"Hi\"}"}}])))))))))
+      (is (re-find #"there is one tool, repl; message is not a tool" (:problem (first (:tool-calls (reply "" [{:id "c" :function {:name "message" :arguments "{\"message-md\":\"Hi\"}"}}])))))))))
 
 (deftest a-request-lets-the-model-reply-with-no-call
   ;; docs/render.md (step 0 measured it live: four DeepSeek turns,
