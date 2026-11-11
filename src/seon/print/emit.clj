@@ -217,6 +217,10 @@
 
 (defn- css-class {:malli/schema [:=> [:cat :keyword] :string]} [kind] (str "seon-print-" (name kind)))
 
+;; a separator span's class, read once at load: a member split asks it of every child, and a contracted call there
+;; would be a call a child (the printer's cost proof)
+(def ^:private separator-class (css-class :seon.print/separator))
+
 (defn- text-op
   {:malli/schema [:function [:=> [:cat :keyword :string] :seon.print/op] [:=> [:cat :keyword :string :any] :seon.print/op]]}
   ([css text] {:op :text :text text :seon.print/class css})
@@ -551,17 +555,6 @@
                            [[:tr [:td {:colspan n} h]]])))
                members)]))))
 
-(defn- members
-  "A vector's, list's or set's frame children as its members: its delimiters dropped and the rest
-  split at each line's separator, so a member is its one element (a scalar's span, a nested
-  collection's, a cut's marker) or a tag and the value it tags."
-  {:malli/schema [:=> [:cat [:sequential :any]] [:sequential [:sequential :any]]]}
-  [children]
-  (let [separator? #(and (vector? %) (= :span (nth % 0 nil)) (= (css-class :seon.print/separator) (:class (nth % 1 nil))))]
-    (->> (subvec (vec children) 1 (dec (count children)))
-         (partition-by separator?)
-         (remove (comp separator? first)))))
-
 (defn- close-frame-inline
   "A collection other than a map as hiccup: a vector or list an `<ol>`, a set a `<ul>`, an `<li>`
   per member (members), a cut a member of its own; its root, or one of scalars, unfolded (laid
@@ -575,7 +568,14 @@
         shown (cond
                 listed? (into [(if (= :seon.print/set face) :ul :ol)
                                {:class (str "seon-print-members " (when unfolded? "seon-print-inline ") (css-class face))}]
-                              (map #(into [:li] %)) (members children))
+                              (map #(into [:li] %))
+                              ;; its members: its delimiters dropped and the rest split at each line's separator, so a member is its one
+                              ;; element (a scalar's span, a nested collection's, a cut's marker) or a tag and the value it tags. Inline: a
+                              ;; contracted call here would be one more call for every collection printed (the printer's cost proof)
+                              (let [separator? #(and (vector? %) (= :span (nth % 0 nil)) (= separator-class (:class (nth % 1 nil))))]
+                                (->> (subvec (vec children) 1 (dec (count children)))
+                                     (partition-by separator?)
+                                     (remove (comp separator? first)))))
                 unfolded? (into [:span {:class (str "seon-print-node seon-print-inline " (css-class face))}] children)
                 :else (into [:span {:class "seon-print-content"}] children))]
     (if unfolded?
