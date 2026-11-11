@@ -680,18 +680,23 @@
   ;; its code and not the data it reads: a test namespace's own call of a branch reader (my.db, seon.agent/db) takes the
   ;; branch's point as one more input in an agent (docs/merging.md#verdicts-are-a-cache); the tests that read no branch,
   ;; and bin/test's digests, which hold no branch, stay as they were
-  (require 'my.db)
   (let [in {:env "e" :tree "t" :config {} :data-refs {}}
-        tests (conj @#'seon.program-test/calc-tests 'app.pt-calc-test/data-test)
+        tests (conj @#'seon.program-test/calc-tests 'app.pt-calc-test/data-test 'app.pt-calc-test/api-test)
         base (d/db-with (#'seon.program-test/calc-db)
                         [{:seon.root/id :root :seon.root/boot "b1" :seon.root/source {:root "/r" :files 0 :forms 0 :ms 0 :boot "b1" :inputs in}}])
-        branch (seon.program-test/record base 'app.pt-calc-test "(deftest data-test (is (my.db/q '[:find ?b . :where [_ :seon.root/boot ?b]])))")
+        ;; seon.agent/db itself: this program holds no my.* forms, whose readers (my.db/q) branch-readers finds by their calls of it
+        ;; and an agent API function calling it (as my.db/q does), which a test calls with no db handed in
+        branch (seon.program-test/record base 'app.pt-calc-test "(deftest data-test (is (seon.agent/db)))"
+                                         'my.lab-api "(defn branch-db [] (seon.agent/db))"
+                                         'app.pt-calc-test "(deftest api-test (is (my.lab-api/branch-db)))")
         written (d/db-with branch [{:seon.root/id :root :seon.root/boot "b1"}])
         agent (fn [db] (select-keys (:digests (agent/test-plan db base tests)) tests))
         checkout (fn [db] (select-keys (ts/reach-digests db in) tests))
         [a b] [(agent branch) (agent written)]]
     (is (not= (get a 'app.pt-calc-test/data-test) (get b 'app.pt-calc-test/data-test)) "the branch's data moved: the proof over it is a new digest")
-    (is (= (dissoc a 'app.pt-calc-test/data-test) (dissoc b 'app.pt-calc-test/data-test)) "the tests reading no branch keep theirs")
+    (is (not= (get a 'app.pt-calc-test/api-test) (get b 'app.pt-calc-test/api-test)) "and one through the agent's API")
+    (is (= (dissoc a 'app.pt-calc-test/data-test 'app.pt-calc-test/api-test) (dissoc b 'app.pt-calc-test/data-test 'app.pt-calc-test/api-test))
+        "the tests reading no branch keep theirs")
     (is (= (checkout branch) (checkout written)) "bin/test's digests hold no branch")))
 
 (deftest an-agents-own-deftest-is-no-failure-point

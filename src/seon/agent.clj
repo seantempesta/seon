@@ -745,10 +745,11 @@
   [base inputs]
   (let [{w-at :point g0 :graph :as w} (:base-graph @state)
         at (pdb/point base)]
-    (if (and w (= at w-at) (= inputs (:inputs w)))
+    ;; a point names a value only with its commit (seon.db/point)
+    (if (and w (first at) (= at w-at) (= inputs (:inputs w)))
       (:value w)
       (let [g (cond (not (and g0 (= (:data-refs inputs) (:data-refs g0)))) (program/reach-graph base (:data-refs inputs))
-                    (= at w-at) g0
+                    (and (first at) (= at w-at)) g0
                     :else (program/reach-update g0 base))
             g (program/reach-indexed g inputs)
             v {:graph g :index (program/index-of g)}]
@@ -784,7 +785,7 @@
   [db base in]
   (let [{w-at :point g :graph w-in :inputs} (:branch-graph @state)
         at (pdb/point db)]
-    (if (and g (= at w-at) (= in w-in))
+    (if (and g (first at) (= at w-at) (= in w-in))
       g
       (let [b (when base (base-graph base in))
             g (if b (program/reach-update (:graph b) db) (program/reach-graph db (:data-refs in)))]
@@ -816,7 +817,7 @@
   ;; the two points are seon.db/point inlined: the lookup is declared one call (seon.program-cost-test/a-turns-held-diff-is-a-lookup)
   (let [{w-base :base w-at :point ch :changes} (:branch-changes @state)]
     (cond (nil? base) {}
-          (and ch (= [(d/commit-id base) (:max-tx base)] w-base) (= [(d/commit-id db) (:max-tx db)] w-at)) ch
+          (and ch (d/commit-id db) (d/commit-id base) (= [(d/commit-id base) (:max-tx base)] w-base) (= [(d/commit-id db) (:max-tx db)] w-at)) ch
           :else (let [ch (pm/delta-changes base db #{})]
                   (swap! state assoc :branch-changes {:base (pdb/point base) :point (pdb/point db) :changes ch})
                   ch))))
@@ -886,7 +887,11 @@
         ;; a proof over the branch's data (:data?: its own call of a branch reader, seon.program/test-class-of) reads db's
         ;; point, which no reach holds: it is one more input of its digest (docs/merging.md#verdicts-are-a-cache)
         point (let [[c t] (pdb/point db)] (str c " " t))
-        cd (update-vals idx #(cond-> (:digest %) (:data? %) (-> (str "\ndata " point) lib/digest)))
+        mix #(-> (str % "\ndata " point) lib/digest)
+        cd (update-vals idx #(cond-> (:digest %) (:data? %) mix))
+        ;; base's digests take the same point for those tests, so selection still asks what the code changed: a proof over the
+        ;; data is selected by its reach, and its verdict is kept and found at the data it read
+        bd (some-> b :index (as-> ix (into {} (for [[t {:keys [digest]}] ix] [t (cond-> digest (:data? (idx t)) mix)]))))
         ;; main's tests the branch removed: each judges from base's definition, loaded in the test
         ;; child, its namespace's ns form first when the branch removed the namespace too; one
         ;; that reaches a process of its own (base's index says) stays a process test
@@ -906,10 +911,10 @@
           ;; a green is anyone's. A red is this agent's own, so its judge need not run what its turn just recorded, never another's: a digest does not
           ;; see the machine, so another's red, under load, would be told to this agent as its work
           found (when-not unread (into {} (remove (fn [[_ r]] (and (proofs/red? r) (not (:flaky r)) (not= (:key @state) (get-in r [:writer :key]))))) stored))]
-      (cond-> (-> (proofs/plan (some-> b :index (update-vals :digest)) cd (if unread {} found) proofs)
+      (cond-> (-> (proofs/plan bd cd (if unread {} found) proofs)
                   (update :selected into (keys removed))
                   (update :run into (keys removed))
-                  (assoc :digests cd :base-digests (some-> b :index (update-vals :digest)) :graph g :removed removed
+                  (assoc :digests cd :base-digests bd :graph g :removed removed
                          :process (into (program/process-tests idx) removed-process)))
         unread (assoc :unread unread))))))
 
