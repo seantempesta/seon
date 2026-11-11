@@ -206,7 +206,12 @@
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :map] :seon.root/api-state]}
   [st o id m]
   (if-let [a (get-in st [:view :agents id])]
-    (let [a' (cond-> (merge a (dissoc m :ready :evals-add))
+    (let [;; its hello names what of the program it was forked with did not load: the agent runs, and that is its first fact and its spawn's answer
+          swp (when (and (:ready m) (seq (:load-errors m)))
+                (contract/error :seon.agent/started-without-program #'seon.root/set-agent
+                                (str "this agent started without part of its program: " (str/join ", " (distinct (map :ns (:load-errors m)))) " did not load")
+                                {:errors (vec (:load-errors m))}))
+          a' (cond-> (merge a (dissoc m :ready :evals-add))
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
                ;; a stall ends with the process
                (and (:stalled a) (gone-statuses (:status m))) (assoc :stalled nil)
@@ -219,7 +224,19 @@
         e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))
         ;; its hello: the spawn is answered now, the agent ready
         ;; its hello answers the spawn, whatever a request sent before it made its status
-        (:ready m) (answer-spawn o id {:id id})
+        (:ready m) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)))
+        ;; and it is the agent's first fact: a message from Seon (the system entity) to it, in its conversation as any message is, written
+        ;; as a plain write (it wakes nothing): the agent's page and context show it from the pull they already make
+        ;; once per standing set of errors: its id is the agent's and the errors', so a resume or a second hello that meets the same
+        ;; errors finds it on main and writes nothing
+        swp ((fn [st] (let [mid (lib/id (lib/digest (sedn/encode [:started-without-program (name id) (vec (sort-by (juxt (comp name :ns) :message) (:errors swp)))])))]
+                        (when-not (pdb/eid @(:conn st) :seon.message/id mid)
+                          (step/out! o :to-writer {:op :tx :branch :db
+                                                :tx-data (task/message-tx mid {:seon.root/id :root} [(name id)]
+                                                                          (str (:seon.error/message swp) "; each error: "
+                                                                               (str/join "; " (map (fn [{:keys [ns message]}] (str ns ": " message)) (:errors swp))))
+                                                                          (System/currentTimeMillis))})))
+                       st))
         ;; and the evals given at its spawn are the first things its REPL queue holds, before any request the answer makes
         (:ready m) (insert-evals o id)
         ;; the agents with an eval in flight: the stall check's set (a gone one never)
@@ -1100,11 +1117,11 @@
 
 (def ^:private root-session-plan
   "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-session."
-  "You are root's session: the person talks to Seon through you. Your page lists every session on main and how each stands. Answer the person yourself when you can. When they want work done, look first for a session already on it in your list of sessions; if one is, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
+  "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/sessions) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
 (defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through root's entity to every agent with its status and task,
-  which makes its task list draw root's sessions (seon.render.ui/sessions). See docs/users.md#whats-on-screen."
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through root's entity to every agent with its status and task
+  (what root's page lists of its sessions; root's model asks for them at its REPL). See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat] [:vector :any]]}
   [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
            {:seon.agent/root [{:seon.agent/_root [:seon.agent/key :seon.agent/status {:seon.agent/task [:seon.task/id :seon.task/outcome]}]}]}))
@@ -1376,16 +1393,20 @@
   never a mismatch), the binary's inputs with the config in force (config-input, seon.fx/config-input), which agents key their
   test results by (seon.agent/test-inputs), and :program the binary's, the program those inputs describe; otherwise :program is
   main's at boot (main-digest, seon.program/program-digest) and no inputs. Another tree is seon.problems/stale-binary's row
-  and refuses spawns: stale, stale-binary's answer at this boot, is held as :stale-binary for the row. Never imported. See docs/source.md#a-boot-resumes-from-the-db."
-  {:malli/schema [:=> [:cat :map :string [:maybe :map] :string :map [:maybe :map]] :map]}
-  [held boot built main-digest config-input stale]
-  (let [one? (and (get-in built [:inputs :tree]) (= (get-in built [:inputs :tree]) (:tree held)))]
+  and refuses spawns: stale, stale-binary's answer at this boot, is held as :stale-binary for the row. A binary built from
+  another tree and current for held's by reach (stale nil: what differs reaches nothing root runs, seon.root/binary-current)
+  hands agents current-inputs, the inputs of held's tree (seon.fx/inputs of it), never its own: a binary current for
+  another tree must not key verdicts by its own tree. Never imported. See docs/source.md#a-boot-resumes-from-the-db."
+  {:malli/schema [:=> [:cat :map :string [:maybe :map] :string :map [:maybe :map] [:maybe :map]] :map]}
+  [held boot built main-digest config-input stale current-inputs]
+  (let [one? (and (get-in built [:inputs :tree]) (= (get-in built [:inputs :tree]) (:tree held)))
+        inputs (if one? (:inputs built) (when-not stale current-inputs))]
     (cond-> (-> held (dissoc :inputs :binary :binary-tree :stale-binary) (assoc :boot boot :program (if one? (:program built) main-digest)))
       (:program built) (assoc :binary (:program built))
       (get-in built [:inputs :tree]) (assoc :binary-tree (get-in built [:inputs :tree]))
       ;; stale-binary's answer at this boot: what the :stale-binary row shows (seon.problems/stale-binary)
       stale (assoc :stale-binary stale)
-      (and one? (:inputs built)) (assoc :inputs (update (:inputs built) :config merge config-input)))))
+      inputs (assoc :inputs (update inputs :config merge config-input)))))
 
 (defn- build-input?
   "Is changed path p (with its git modes) something the binary bakes and no load of the db brings: a pin (a gitlink),
@@ -1503,14 +1524,22 @@
             config-errors (program/hold-config! @conn)
             digest (program/program-digest @conn)
             digest-ms (profile/ms-since t2)
-            contracts (contract/instrument! contract/boot-nss)]
+            contracts (contract/instrument! contract/boot-nss)
+            ;; a binary built from another tree than main's: main's tree's inputs, which booted-source hands agents when the
+            ;; binary is current for it by reach, as the plan that judged it current recorded them beside it (target/seon.inputs,
+            ;; keyed by their :tree). A file read: root runs no git, since clojure.java.shell's futures are threads root does not
+            ;; declare (seon.root-test/root-threads-are-what-root-declares, batch 28)
+            main-inputs (let [tree (:tree (:seon.root/source (d/pull @conn [:seon.root/source] [:seon.root/id :root])))
+                              f (java.io.File. (str (cfg/checkout) "/target/seon.inputs"))
+                              ins (when (and tree (.isFile f)) (sedn/decode (slurp f)))]
+                          (when (and (= tree (:tree ins)) (not= tree (get-in (binary-program) [:inputs :tree]))) ins))]
         (warm! conn)
         (lib/raise-open-files! (+ 256 (* 2 (cfg/value :seon.config.root/max-agents))))
         (lib/static!)
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
                  {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained
-                  :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts}))))))
+                  :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
 
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
@@ -1554,7 +1583,7 @@
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
-        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors digest digest-ms contracts pid fd compacted retained]}
+        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors digest digest-ms contracts pid fd compacted retained main-inputs]}
         (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
@@ -1634,7 +1663,9 @@
                                                                                   (into (root-session-boot-tx db)))
                                                                          prev (conj {:seon.root/id :root :seon.root/previous-end prev})
                                                                          ;; the program the binary was built from beside main's: one program, or seon.problems/stale-binary's row
-                                                                         held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (binary-program) digest (fx/config-input cfg/config (cfg/checkout)) stale)})
+                                                                         held (conj {:seon.root/id :root :seon.root/source (booted-source held boot (binary-program) digest (fx/config-input cfg/config (cfg/checkout)) stale
+                                                                                                    ;; a binary current for main's tree by reach, built from another: main's tree's inputs, read at boot
+                                                                                                    (when (and (not stale) (= (:tree held) (:tree main-inputs))) main-inputs))})
                                                                          ;; the test that started this boot (a test's main is its own: no other boot resumes it)
                                                                          started-by (conj {:seon.root/id :root :seon.root/started-by started-by}))}})]
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))

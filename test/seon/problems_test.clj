@@ -349,7 +349,19 @@
                                                             :seon.agent/status :busy}
                                                             {:seon.process/id "b0/a1/5" :seon.process/agent [:seon.agent/key "b0/a1"] :seon.process/running "(work!)"}])
           db (d/db-with db (seon.task/earlier-agents-tx db))]
-      (is (= [:dead nil] [(:seon.agent/status (d/entity db [:seon.agent/key "b0/a1"])) (:seon.process/running (d/entity db [:seon.process/id "b0/a1/5"]))])))))
+      (is (= [:dead nil] [(:seon.agent/status (d/entity db [:seon.agent/key "b0/a1"])) (:seon.process/running (d/entity db [:seon.process/id "b0/a1/5"]))]))))
+  ;; docs/users.md#roots-session: root's own session (key "root") outlives a boot and keeps its link to root, as the user does, so root's
+  ;; pull through it (:seon.agent/root, then :seon.agent/_root) reaches its agents after a restart; an earlier boot's agent is unlinked.
+  ;; Red before: every agent but a user lost the link, root's session too (Web's step 3 reading), and root-session-boot-tx rewrote only its pattern
+  (testing "a new boot keeps root's session linked to root, and unlinks an earlier boot's agent"
+    (let [db (d/db-with (world) [{:db/id "r" :seon.root/id :root}
+                                 {:seon.agent/key "root" :seon.agent/root "r" :seon.agent/status :busy}
+                                 {:seon.agent/key "b0/a2" :seon.agent/root "r" :seon.agent/status :idle}])
+          db (d/db-with db (seon.task/earlier-agents-tx db))
+          root-e (:db/id (d/entity db [:seon.root/id :root]))]
+      (is (= root-e (:db/id (:seon.agent/root (d/entity db [:seon.agent/key "root"])))) "root's session keeps its link")
+      (is (= :dead (:seon.agent/status (d/entity db [:seon.agent/key "root"]))) "though its process ended with the boot")
+      (is (nil? (:seon.agent/root (d/entity db [:seon.agent/key "b0/a2"]))) "an earlier boot's agent is unlinked"))))
 
 (deftest an-effect-error-is-counted-by-root
   (testing "the owner of an effect kind tells the api about each error outcome"
@@ -787,7 +799,7 @@
         held {:root "/c" :files 1 :forms 1 :ms 1 :tree "t1"}
         in {:env "e" :tree "t" :config {:seon.config.agent/max-turns "40"}}
         cfg-in {:seon.config.agent/max-turns "41"}
-        boot (fn [db b built main stale] (d/db-with db [{:seon.root/id :root :seon.root/source (root/booted-source held b built main cfg-in stale)}]))
+        boot (fn [db b built main stale & [current-inputs]] (d/db-with db [{:seon.root/id :root :seon.root/source (root/booted-source held b built main cfg-in stale current-inputs)}]))
         source #(:seon.root/source (d/pull % [:seon.root/source] [:seon.root/id :root]))
         rows #(mapv (juxt :binary :tree) (get-in (problems/health %) [:classes :stale-binary :rows]))
         messages #(mapv :message (get-in (problems/health %) [:classes :stale-binary :rows]))
@@ -796,6 +808,11 @@
     (is (= [["t0" "t1"]] (rows stale)) "a binary not current for main's tree: one row naming both trees")
     (is (some #(str/includes? % "seon.writer/commit-batch") (messages stale)) "and what between them reaches root's own code")
     (is (nil? (:inputs (source stale))) "and no inputs to key agents' verdicts by")
+    ;; task seon.root/every-reader-of-the-binarys-tree-asks-binary-current: a binary built from t0 and current for t1 by reach
+    (is (= "t1" (get-in (source (boot db0 "b3" {:program "p0" :inputs (assoc in :tree "t0")} "p3" nil (assoc in :tree "t1"))) [:inputs :tree]))
+        "a binary current for main's tree by reach, built from another, hands agents main's tree's inputs, never its own")
+    (is (nil? (:inputs (source (boot db0 "b4" {:program "p0" :inputs (assoc in :tree "t0")} "p4" {:binary "t0" :tree "t1" :reaches ['x/y]} (assoc in :tree "t1")))))
+        "and a stale one none")
     (is (= [[nil "t1"]] (rows (boot db0 "b1" nil "p1" {:binary nil :tree "t1" :missing :binary-tree}))) "a binary whose build recorded no tree is unknown, never current")
     (let [merged (boot stale "b2" {:program "p0" :inputs (assoc in :tree "t1")} "p2" nil)]
       (is (= [] (rows merged)) "a current binary, main moved by what its agents merged (p2): no row, the last boot's answer gone")

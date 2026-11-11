@@ -246,14 +246,16 @@
 (defn earlier-agents-tx
   "A new boot's root is no longer the root of the agents an earlier boot started: their link to
   root retracted (their processes ended with that boot; history keeps that root started them), so
-  root's agents are this boot's (root's walk, :seon.agent/_root), and the user, which outlives a boot; one still shown live (:busy,
+  root's agents are this boot's (root's walk, :seon.agent/_root), the user's, and root's own session (key \"root\",
+  seon.root/root-session-boot-tx), which outlive a boot and keep their link; one still shown live (:busy,
   :idle, :spawning: a root that crashed or was stopped wrote no end) is :dead, its running form
   retracted; and a stall one showed is over, its :seon.process/stall retracted with its process (an
   open :stalled problem never outlives it)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db] (let [live (:seon.status/live (contract/properties :seon.agent/status))
              agents (remove (fn [[a]] (:seon.user/name (d/entity db a))) (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db))]
-         (-> (vec (for [[a r] agents] [:db/retract a :seon.agent/root r]))
+         ;; root's session keeps its link to root, as the user does: it outlives a boot (its process does not)
+         (-> (vec (for [[a r] agents :when (not= "root" (:seon.agent/key (d/entity db a)))] [:db/retract a :seon.agent/root r]))
              (into (mapcat (fn [[a]] (when (live (:seon.agent/status (d/entity db a)))
                                        [[:db/add a :seon.agent/status :dead]])))
                    agents)
