@@ -41,12 +41,14 @@ Open with the owner, each brought when it blocks work: whether typing on home is
 
 The parts, in the order they unblock each other. Parts 4 to 7 run beside the others.
 
-1. **The data model** (Data model session; designed 2026-11-11, not yet agreed whole by the owner).
-   - A session is an agent: no session entity. An agent names the agent whose conversation it continues, a fork's branch is the cut, and the words that open a conversation are data.
+1. **The data model** (Data model session). A design was written on 2026-11-11 and is not agreed: the owner wants it worked through live in Seon, one small step at a time ("start smaller. What's the next step that will strain our data model and let's focus on refining the data model and keep building up from there").
+   - **The step being built:** a pattern can ask for the transaction an attribute was written in, beside its value, so an agent's messages are ordered by when they arrived and no code asks which turn read one. Nothing new is stored. Its proof: the recorded requests do not change by a byte.
+   - **The step after:** a finished agent that a task names as an example is drawn by the agent's own renders from the task's pull, which shows by running it whether a session is just an agent (the owner's lean).
+   - The rest of this list is the design's direction, built only as each step reaches it.
+   - A session is an agent: an agent names the agent whose conversation it continues, a fork's branch is the cut, and the words that open a conversation are data.
    - An agent holds a set of tasks, and all must pass.
    - The hierarchy is `:seon.agent/agents` at any depth; a question goes to whoever started the task; `:seon.agent/root` goes.
    - What is observed is a fact on the thing observed; what is computed from facts (a score, a problem, a standing against a bound) is a render, never stored.
-   - Open with the owner: how the turn that read a message is known (he deferred it on 2026-11-11 to work through with the Data model session). Until then nothing is built on either answer.
    - One store erase carries every change of a stored attribute. Debt: 34 sites in `src` branch on `:seon.task/kind` against the 2026-11-08 ruling; no template adds a value to it.
 2. **The self-improvement loop** (Context, once part 1 is agreed).
    - A chain by `:seon.task/needs`, each step a fresh agent handed what the one before produced: work → refine → review.
@@ -66,7 +68,7 @@ The parts, in the order they unblock each other. Parts 4 to 7 run beside the oth
 7. **The store** (Deep fixes): done, LMDB's locks are the kernel's and a crash with sync off never corrupts (batch 35). Next, what a commit and a diff cost.
 8. **How we work** is [AGENTS.md](../AGENTS.md) §2 and §3 and [sessions](sessions.md).
 
-**Waiting on the owner:** how a message's turn is known (part 1); whether verdicts are store facts or stay the evictable cache he ruled on 2026-10-28 (part 5); how the three waived request cost proofs are bounded (part 6).
+**Waiting on the owner:** the data model, step by step with him (part 1); whether verdicts are store facts or stay the evictable cache he ruled on 2026-10-28 (part 5); how the three waived request cost proofs are bounded (part 6).
 
 ## After that
 
