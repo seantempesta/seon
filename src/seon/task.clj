@@ -362,9 +362,9 @@
 
 (def entry-pattern
   "What an agent's entry reads where another's pull joins it (seon.render.ui/agent's nested form): its identity, its process's status, its
-  branch and turns, when it started, and its task's id, plan, outcome, reason and who started it. One pattern for every join of
+  branch and turns, when it started, its name when it is a user (root holds the user too), and its task's id, plan, outcome, reason and who started it. One pattern for every join of
   :seon.agent/agents (an agent's, a user's, root's). See docs/users.md#whats-on-screen."
-  [:seon.agent/key :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms
+  [:seon.agent/key :seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms
    {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]}])
 
 (defn agents-join

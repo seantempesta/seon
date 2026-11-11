@@ -2578,6 +2578,28 @@
 
 (defn- session-eid [db k] (seon.db/eid db :seon.agent/key k))
 
+(deftest roots-sessions-list-an-agent-once-under-its-starter
+  ;; docs/users.md#roots-session: root holds every agent, and an entry draws the agents it started under it, so the top level is what
+  ;; root's pull holds that no held agent started (Point's ruling, 2026-11-11); red before: a2 was listed twice, at the top and under a1
+  (let [db (sessions-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1] ["b2/a2" :a2 :running "x/works" :running :t2]])
+        db (d/db-with db [{:db/id (session-eid db "b2/a1") :seon.agent/agents (session-eid db "b2/a2")}])
+        html (root-page-html db)
+        hrefs (re-seq #"href=\"/agent/b2/a2\"" html)]
+    (is (= 1 (count hrefs)) html)
+    (is (re-find #"(?s)href=\"/agent/b2/a1\".*class=\"started\".*href=\"/agent/b2/a2\"" html) "under the agent that started it")))
+
+(deftest roots-sessions-show-the-user-as-the-person-seon-works-for
+  ;; docs/users.md#roots-session: root holds the user as it holds every agent, and nothing started it; its entry says what the data says
+  ;; it is (it holds :seon.user/name), the person Seon works for, never a session with a standing (Point's ruling, 2026-11-11)
+  (let [db (sessions-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1]])
+        db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/root [:seon.root/id :root]}])
+        html (root-page-html db)
+        person (re-find #"(?s)<section[^>]*data-standing=\"person\".*?</section>" html)]
+    (is (some? person) html)
+    (is (str/includes? person "the person Seon works for") person)
+    (is (str/includes? person "href=\"/agent/sean\"") "its page")
+    (is (not (re-find #"data-standing=\"finished\"[^>]*id=\"agent-sean\"" html)) "not a finished session")))
+
 (deftest a-stopped-agent-does-not-read-as-waiting-in-its-head-or-its-lists
   (let [a {:seon.agent/id :a6 :seon.agent/status :idle :seon.agent/max-turns 40 :seon.agent/key "b2/a6"}
         t {:seon.task/id "seon.ref/an-alias" :seon.task/outcome :cap :seon.task/reason "proof-red seon.ref-test/an-alias"}

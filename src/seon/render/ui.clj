@@ -1573,12 +1573,18 @@
   parts; and the conversation (c-rows, `conversation-list`), which it reads as messages. Each
   list is a component of its own, and the layout reads nothing, so a change of one list's members reruns that list alone: an eval
   added never reruns the task's. See docs/render.md#the-page and docs/render.md#a-layout-places-its-lists."
-  {:seon.render/style ".agent[data-standing=parked] { order: -1; } .agent[data-standing=finished] { order: 1; } .agent > .said { font-size: 0.8125rem; color: var(--color-text-300); } .agent .started { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.5rem 0 0 1rem; }"
+  {:seon.render/style ".agent[data-standing=person] { order: -2; } .agent[data-standing=parked] { order: -1; } .agent[data-standing=finished] { order: 1; } .agent > .said { font-size: 0.8125rem; color: var(--color-text-300); } .agent .started { display: flex; flex-direction: column; gap: 0.5rem; margin: 0.5rem 0 0 1rem; }"
    :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
   [opts c]
   (if (:seon.render/nested opts)
-    ;; placed by a parent (an agent another one started, joined in its pull): the agent's entry, from its own view alone
-    (agent-entry (:seon.db/db opts) c)
+    ;; placed by a parent (an agent another one started, joined in its pull): the agent's entry, from its own view alone; a user (it
+    ;; holds :seon.user/name, and nothing starts one: root's sessions hold it, as root holds every agent) is the person Seon works for
+    (if-let [n (get c :seon.user/name)]
+      [:section {:wire/for "page" :data-standing "person"}
+       [:a {:href (str "/agent/" (session-address {:seon.agent/key (get c :seon.agent/key)})) :title (str (get c :seon.agent/key))}
+        [:span {:class "flex items-baseline gap-2"} [:span {:class "min-w-0 flex-1 truncate font-semibold text-text-100"} n]
+         [:span {:class "shrink-0 text-2xs muted"} "the person Seon works for"]]]]
+      (agent-entry (:seon.db/db opts) c))
     [:div {:id "render-ctx"} [#'agent-parts {} c] [#'conversation-list {}]
      [#'rules-list {}]
      ;; a user's (it holds :seon.user/name): its agents list, which the frame shows on every page (seon.render.proc/user-sides)
@@ -1986,14 +1992,17 @@
 (defn- root-sessions
   "The sessions the system entity view r holds as root's session's pull joins it (:seon.agent/_root, newest first to
   :seon.config.ctx/window: seon.root/root-session-pattern), root's session itself left out: each by the agent's own render nested (its
-  entry), this boot's first, each earlier boot's under one fold, newest boot first; and how many root holds beyond the window (a count of
+  entry, under it the agents it started), so an agent is listed once, under the agent that started it: the top level is what the pull
+  holds that no held agent started (:seon.agent/agents; Point's ruling, 2026-11-11); this boot's first, each earlier boot's under one fold, newest boot first; and how many root holds beyond the window (a count of
   :seon.agent/root's datoms, never a silent cut). Reads the pull, the boot fact and that count. See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db :any] :any]}
   [db r]
   (let [as (get r :seon.agent/_root)
         ;; who it holds, read tracked by its key set: a session added or gone draws this again
         _ (doall (keys as))
-        ms (remove #(contains? #{nil "root"} (:seon.agent/key (ratom/untracked %))) (members as))
+        held (remove #(contains? #{nil "root"} (:seon.agent/key (ratom/untracked %))) (members as))
+        started (set (for [m held s (members (get m :seon.agent/agents))] (:db/id (ratom/untracked s))))
+        ms (remove #(started (:db/id (ratom/untracked %))) held)
         boot-of #(:seon.agent/boot (ratom/untracked %))
         now (task/boot-of db)
         boots (distinct (keep boot-of ms))
