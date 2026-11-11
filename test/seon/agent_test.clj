@@ -137,13 +137,19 @@
                ;; an attach that made no agent (refused: its fork server lost) ends the test with
                ;; that answer, never a wait for a hello that cannot come
                (nil? agent) {::attach-made-no-agent attach}
-               :else (do (eval-root (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (= :ready (:type e)) (= :" agent " (:agent e))) :ready (recur))))"))
-                         (f {:names names :ask ask :eval-root eval-root :root root}))))
+               ;; its hello, or its end (refused, died) first: an agent that ended answers the test with that end, never a wait
+               ;; for a hello that cannot come until the test's bound (Optimization's reading of batch 90, 2026-11-12)
+               :else (let [came (value-of (:response (eval-root (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ready :ended :dead :killed} (:type e)) (= :" agent " (:agent e))) (:type e) (recur))))"))))]
+                       (if (= :ready came)
+                         (f {:names names :ask ask :eval-root eval-root :root root})
+                         {::agent-ended-before-ready {:agent agent :end came}}))))
           (finally (vreset! stopped (end!))))]
     (when-let [a (and (map? out) (::attach-made-no-agent out))]
       (throw (ex-info (str "in-agent: the attach made no agent: " (pr-str a))
                       {:attach a})))
     (when-let [e (and (map? out) (::no-root out))] (throw (ex-info (str "with-agent: the root did not listen: " (pr-str e)) e)))
+    (when-let [e (and (map? out) (::agent-ended-before-ready out))]
+      (throw (ex-info (str "with-agent: the agent ended before its hello: " (pr-str e)) e)))
     out))
 
 (defn- root-value
