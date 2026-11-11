@@ -348,6 +348,8 @@
                                       :aria-current (when on? "page")} label])]
     [:nav {:class "seon-bar"}
      [:a {:href "/" :class "font-bold text-signal"} "◆ seon"] [:span {:class "hidden text-text-500 sm:inline"} "on jolt"]
+     ;; which system this is (`system-source`, the system walk's unit the frame places on every page)
+     [:span {:id "p-system"} (render/region "p-system")]
      (when focus
        (let [base (if (= :root focus) "/root" (str "/agent/" address))]
          [:div {:class "ml-auto flex items-baseline gap-1 text-xs"}
@@ -2160,6 +2162,26 @@
      (when (pos? held) [:p {:class "seon-note"} (str held (if (= 1 held) " task" " tasks") " not released yet.")])
      (root-quiet {} (relevant :seon.root/root-fact c))]))
 
+(defn source-line
+  "Which system a page is (the declared html render of :seon.root/source): the checkout main was last indexed from, by its folder's
+  name, the branch checked out there and its commit, short; the whole path, commit and tree on hover. See docs/render.md#the-page."
+  {:seon.render/style ".source-line { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.6875rem; color: var(--color-text-400); white-space: nowrap; }
+.source-line .commit { display: inline-block; max-width: 10ch; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }"
+   :malli/schema [:=> [:cat :seon.render/opts :map] :any]}
+  [_ {:keys [root branch commit tree]}]
+  ;; the commit whole (the page narrows it to its first characters, its text is all there: docs/render.md#no-clipping)
+  [:span {:class "source-line" :title (str/join " " (remove nil? [root (some->> commit (str "commit ")) (some->> tree (str "tree "))]))}
+   (str/join " · " (remove nil? [(last (str/split root #"/")) (or branch (when commit "detached"))]))
+   (when commit (list " · " [:span {:class "commit"} commit]))])
+
+(defn system-source
+  "The system's source as its schema draws it (`source-line`), a component over root's ctx: the frame places it on every page,
+  so a person always sees which checkout, branch and commit they are looking at. See docs/render.md#the-page. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx ix :seon.render/index}]
+  (when-let [src (some-> (:seon.root/source c) ratom/realize)]
+    (render/hiccup {:seon.render/index ix :schema :seon.root/source} src)))
+
 (defn problems-tile
   "Main's open problems (a component over root's ctx, its :health: the report the render proc keeps
   with root's process, seon.problems/health changed by each move of main, seon.render.proc/health!): what needs fixing by the report's render, and
@@ -2257,6 +2279,7 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :any] :any]}
   [_ _]
   [:div {:id "root-ctx"}
+   [:span {:id "p-system"} [#'system-source {}]]
    [:div {:id "p-head"} [#'root-head {}]]
    [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}] [#'root-evals {}]]])
 
