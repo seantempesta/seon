@@ -85,7 +85,7 @@
 
 (def ^:private observed-keys
   "The members of an agent's view entry recorded on its entity (seon.task/agent-tx)."
-  [:status :pid :mem-mb :running :task :branch :forked-ms :ended-ms :stalled :started-without-program])
+  [:status :pid :mem-mb :running :task :branch :forked-ms :ended-ms :stalled])
 
 (defn- observed
   "What root records of agent entry a: its observed-keys, less :task and :branch for an agent started on a task:
@@ -211,7 +211,6 @@
                 (contract/error :seon.agent/started-without-program #'seon.root/set-agent
                                 (str "this agent started without part of its program: " (str/join ", " (distinct (map :ns (:load-errors m)))) " did not load")
                                 {:errors (vec (:load-errors m))}))
-          m (cond-> m swp (assoc :started-without-program swp))
           a' (cond-> (merge a (dissoc m :ready :evals-add))
                (and (:ready m) (= :spawning (:status a))) (assoc :status :idle)
                ;; a stall ends with the process
@@ -226,6 +225,14 @@
         ;; its hello: the spawn is answered now, the agent ready
         ;; its hello answers the spawn, whatever a request sent before it made its status
         (:ready m) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)))
+        ;; and it is the agent's first fact: a message from Seon (the system entity) to it, in its conversation as any message is, written
+        ;; as a plain write (it wakes nothing): the agent's page and context show it from the pull they already make
+        swp ((fn [st] (step/out! o :to-writer {:op :tx :branch :db
+                                                :tx-data (task/message-tx (lib/unique-id) {:seon.root/id :root} [(name id)]
+                                                                          (str (:seon.error/message swp) "; each error: "
+                                                                               (str/join "; " (map (fn [{:keys [ns message]}] (str ns ": " message)) (:errors swp))))
+                                                                          (System/currentTimeMillis))})
+                       st))
         ;; and the evals given at its spawn are the first things its REPL queue holds, before any request the answer makes
         (:ready m) (insert-evals o id)
         ;; the agents with an eval in flight: the stall check's set (a gone one never)

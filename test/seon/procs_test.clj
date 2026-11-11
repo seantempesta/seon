@@ -475,8 +475,11 @@
             swp (:started-without-program (deref p 0 ::unanswered))]
         (is (= :seon.agent/started-without-program (:seon.error/type swp)) (pr-str (deref p 0 ::unanswered)))
         (is (= [e] (:errors swp)) "naming every load error")
-        (is (= swp (get-in st' [:view :agents :a1 :started-without-program])) "and held on the agent, whose recorded facts write it")
-        (is (= :idle (get-in st' [:view :agents :a1 :status])) "the agent runs")))))
+        (is (= :idle (get-in st' [:view :agents :a1 :status])) "the agent runs")
+        (let [msg (some #(when (= :tx (:op %)) (first (:tx-data %))) (:to-writer @o))]
+          (is (= {:seon.root/id :root} (:seon.message/from msg)) "and its first fact is a message from Seon to it")
+          (is (= [[:seon.agent/key "a1"]] (:seon.message/to msg)))
+          (is (clojure.string/includes? (:seon.message/body msg) "app.t") "naming what did not load"))))))
 
 (deftest fork-server-events
   (let [st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :log []}]
