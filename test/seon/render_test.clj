@@ -1827,6 +1827,15 @@
       (is (not (str/includes? t "\\\"")) (str what ": no escaped quote outside code"))
       (is (not (str/includes? t "items, depth")) (str what ": no printer's tree heading")))))
 
+(deftest a-plain-string-is-prose-by-default
+  ;; docs/render.md#a-value-draws-itself: a string whose attribute's schema names no render is Markdown (owner: "if it is a text field it
+  ;; is assumed to be markdown"), so a branch forked before its attribute became :seon.db/text draws it as main does; an id opts out
+  (let [old (assoc-in (seon.db/index) [:forms :seon.task/plan] :string)
+        draw-as (fn [ix k v] (h/html (r/hiccup {:seon.render/index ix :schema k} v)))]
+    (is (str/includes? (draw-as old :seon.task/plan "read `x` first") "<code>x</code>") "an old branch's plan: Markdown, its code span drawn")
+    (is (not (str/includes? (draw-as old :seon.task/plan "read `x` first") "`")) "no backtick left")
+    (is (not (str/includes? (draw-as (seon.db/index) :seon.task/id "demo/w") "<code>")) "an id is no prose: printed as the data it is")))
+
 (deftest a-whole-tasks-page-holds-its-instructions
   ;; the task part drew the plan and dropped the task's own data, its instructions with it, so no
   ;; agent read how its kind is worked (reproduce first, fail! when already right, stop reading once
