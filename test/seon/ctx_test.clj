@@ -1418,7 +1418,7 @@
 (deftest changes-step-costs-are-current
   ;; each step of seon.ctx/change-steps measured again on the case that isolates it, as the unit
   ;; table is (seon.cost-test/the-unit-table-is-current): a bound priced from stale steps is red here
-  (let [m (fn [a b] (select-keys (cost/measure ctx/changes [a b]) [:ticks :bytes]))
+  (let [m (fn [a b] (select-keys (cost/measure ctx/changes [a b] (seon.config/value :seon.config.proofs/cost-max-samples)) [:ticks :bytes]))
         t (record-of {:evals 0 :calls 0 :cites 0 :len 10})
         per (fn [case a b] (let [x (case a) y (case b)] (into {} (for [d [:ticks :bytes]] [d (/ (- (get y d) (get x d)) (double (- b a)))]))))
         ;; a collection of n members re-made as a new map: n entries stepped past, nothing changed

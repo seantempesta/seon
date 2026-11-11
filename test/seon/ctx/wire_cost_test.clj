@@ -213,3 +213,47 @@
                :per-n {:bytes 42000 :calls 0}
                :fixed {:bytes 100000 :calls 4}
                :sizes [10 40 160]}))
+
+(def ^:dynamic *conn*
+  "The branch's connection the flushed-pair proof builds its sessions on (bound by its deftest)."
+  nil)
+
+(defn flushed-pair-of
+  "seon.ctx.wire/page-parts-through's arguments for the next turn's pair of an agent with n turns on *conn*, after a flush between
+  turns drew the pending turn's page at the db's own point (one transaction past the last basis), as a :context read, a person's page
+  or an eval's own flush does: [db a [last-basis next-basis]], the kept walk left where that flush put it."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :int [:vector :map]]]}
+  [n]
+  (let [conn *conn* k (str "kp" n) tid (str "demo/kp" n)
+        point (fn [] (let [db @conn] {:commit (d/commit-id db) :t (:max-tx db)}))
+        turn! (fn [i] (d/transact conn (conj (ts/turn-tx k i {})
+                                             {:seon.model-call/id (seon.lib/call-id k i) :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/ms 1
+                                              :seon.model-call/basis (assoc (point) :task tid :turn i :max-turns 999 :origin :model :agent k)})))
+        ev! (fn [i] (d/transact conn [{:seon.eval/id (str k "-e" i) :seon.eval/by {:seon.agent/key k} :seon.eval/agent {:seon.agent/key k}
+                                       :seon.eval/call (seon.task/call-ref k i) :seon.eval/code (str "(f " i ")") :seon.eval/response {:handle (symbol "result" (str k "e" i)) :value i}
+                                       :seon.eval/call-id (str k "-c" i) :seon.eval/intent (str "Step " i ".")}]))]
+    (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name (str "kp" n) :seon.task/plan "Make f." :seon.task/proofs #{'demo-test/f-test}}]))
+    (d/transact conn [{:seon.task/id tid :seon.task/agent {:seon.agent/key k :seon.agent/task {:seon.task/id tid}}}])
+    (doseq [i (range 1 n)] (turn! i) (ev! i))
+    (let [a (pdb/eid @conn :seon.agent/key k)
+          pb (point)
+          _ (turn! n) _ (ev! n)
+          here (point)
+          _ (seon.ctx.wire/page-parts-through @conn a [pb here])
+          _ (ev! (inc n))
+          pn (point)]
+      [@conn a [pb pn]])))
+
+(deftest a-turns-pair-after-a-flush-costs-flat-in-turns
+  ;; docs/render.md#a-page-is-a-kept-walk: a flush between turns left the kept walk past the last basis, and the next turn's pair drew
+  ;; the page cold (2026-11-11: ~7.1M ticks a turn on an agent's live walk, the :context read's 80 ms); the page at the chain's first
+  ;; point is kept with the walk, so that pair advances it by what moved
+  (ts/test-branch!
+    (fn [_ conn]
+      (binding [*conn* conn]
+        (cost/proof {:of 'seon.ctx.wire/page-parts-through :input 'seon.ctx.wire-cost-test/flushed-pair-of
+                     :n "turns of the session before the pair"
+                     :work "the kept walk advanced by what moved between the flush's point and the next basis, the first point's page taken from the slot"
+                     :growth :constant
+                     :fixed {:bytes 600000 :calls 20}
+                     :sizes [10 30 100]})))))

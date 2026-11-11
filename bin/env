@@ -23,7 +23,8 @@ export HOME=$ROOT/target/home
 # - build-unit and runtime: keyed by the unit's text and the building runtime's fingerprint;
 # - AOT (JOLT_CACHE_DIR): keyed by the source, its requires' keys and what its compile read, each
 #   read named relative to the project root (JOLT_PWD), so a checkout hashes its own files;
-#   JOLT_CACHE_GENERATIONS runtimes are kept (one per Jolt pin in use; Seon's is 140 MB built once, more as variants accrue).
+#   JOLT_CACHE_GENERATIONS runtimes are kept (one per Jolt pin in use), and nothing inside a generation is removed, so it grows
+#   with every tree compiled: 27 GB on 2026-11-11 (task jolt.loader/an-aot-cache-is-bounded-by-bytes-least-recently-used-first).
 # No key holds a checkout's path, and entries are published by temp+rename. One directory in the main
 # tree's target/, found from git's common dir so a worktree anywhere (bin/worktree --at DIR too)
 # names the same absolute path.
