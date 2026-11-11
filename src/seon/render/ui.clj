@@ -1177,16 +1177,16 @@
 (declare standing)
 
 (defn turn
-  "The namespace the agent's REPL is in (a component over ctx), as its heading, and how many of its turns are left (its
-  :seon.agent/turn against its :seon.agent/max-turns, else :seon.config.agent/max-turns), which the system prompt's procedure points
-  at. See docs/render.md#the-agents-turn."
+  "The namespace the agent's REPL is in (a component over ctx), as its heading, and how many of its turns are left: its pulled
+  :seon.agent/turn against its pulled :seon.agent/max-turns, which its start writes on its branch; none shown where the pull holds no
+  cap. See docs/render.md#the-agents-turn."
   {:seon.render/style ":is(.turn, .own-problems, .ctx-key) { border-radius: 0.375rem; background: var(--color-base-900); padding: 0.5rem; min-width: 0; overflow-x: auto; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (let [in-ns (ctx/current-ns c)
         n (or (ratom/realize (:seon.agent/turn c)) 0)
-        m (or (ratom/realize (:seon.agent/max-turns c)) (config/value :seon.config.agent/max-turns))]
+        m (ratom/realize (:seon.agent/max-turns c))]
     [:section (when in-ns [:h2 (str "You're in " in-ns ".")])
-     [:p (str "Turn " n " of " m ": " (max 0 (- m n)) " left.")]]))
+     (when m [:p (str "Turn " n " of " m ": " (max 0 (- m n)) " left.")])]))
 
 (defn agent-state
   "The agent's state for the person (a component over ctx and the db), nothing of it for the model: how its work stands
