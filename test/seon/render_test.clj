@@ -56,6 +56,21 @@
     (is (nil? (resolve 'seon.render/ai)))
     (is (not-any? #(contains? (seon.contract/properties %) :seon.render/ai) (keys seon.contract/forms)) "no schema declares one")))
 
+;; docs/render.md#a-value-draws-itself: a value is drawn by the render its attribute's schema declares, by the one lookup
+(deftest an-attributes-value-is-drawn-by-its-schemas-render
+  (let [ix (seon.db/index) plan "Do `this`:\n\n- one\n- **two**"]
+    (testing "an attribute aliased to a registered schema inherits its render: a task's plan is Markdown"
+      (is (= 'seon.render.ui/text (r/render-for ix :seon.task/plan :seon.render/hiccup)))
+      (is (= 'seon.render.ui/text (r/render-for ix :seon.task/instructions :seon.render/hiccup))))
+    (testing "a code-composed string stays plain: no render"
+      (is (nil? (r/render-for ix :seon.task/reason :seon.render/hiccup))))
+    (testing "the task's plan drawn through task-box is its list, not preformatted text"
+      (let [out (h/html (r/hiccup {:seon.render/index ix :schema :seon.task/task} (assoc-in task [:seon.task/accumulated :plan] plan)))]
+        (is (= 2 (count (re-seq #"<li" out))) out)
+        (is (not (str/includes? out "<pre")) out)
+        (is (str/includes? out "<code") "a code span is its element, for the person and the model alike")
+        (is (not (str/includes? out "`this`")) "no Markdown delimiter is left")))))
+
 (deftest a-render-is-opts-then-children
   ;; Reagent's form (docs/render.md): a render takes its opts first and its
   ;; children after, and a call in hiccup is written [f opts & children]
@@ -1127,7 +1142,7 @@
   ;; page's own units: an agent the user started is on root's page twice (the list, root's sessions), so the user's walk names its elements
   ;; apart. Red before: agent-a3 twice, one unit overwriting the other in the view, a patch for one landing on the other
   (let [[main branch eid] (paged-dbs)
-        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern (seon.root/root-session-pattern)}
+        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]}
                                                 {:seon.agent/key "user" :seon.agent/agents [[:seon.agent/key "root"]]}])
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st :root)
@@ -1142,7 +1157,7 @@
   ;; :wire marks, other qualified keys, attribute values that are no plain value), counted on the pages the test world draws (an agent's,
   ;; root's, the user's), pinned so a count only goes down: each later change moves a render's look to CSS and its count to none
   (let [[main branch eid] (paged-dbs)
-        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern (seon.root/root-session-pattern)}
+        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]}
                                                 {:seon.agent/key "user" :seon.agent/agents [[:seon.agent/key "root"]]}])
         st (root-state (branch-state main branch) main)
         [st1 _] (pass-view st :root)
@@ -1789,6 +1804,38 @@
     (is (= [long] (titles without)) "no form: the title holds the whole")
     (is (not-any? nil? (tree-seq vector? seq with)) "and no empty child")))
 
+(defn- outside-code
+  "The text html shows outside its <code> and <pre> elements and the printer's string values (where a backtick or a quote is the
+  code's or the data's own)."
+  [html] (-> html (str/replace #"(?s)<pre[^>]*>.*?</pre>" " ") (str/replace #"(?s)<code[^>]*>.*?</code>" " ")
+             (str/replace #"(?s)<span[^>]*seon-print-string[^>]*>.*?</span>" " ") (str/replace #"<[^>]+>" " ")))
+
+(deftest a-person-reads-no-markup
+  ;; docs/render.md#the-page: what a person reads is drawn, never the marks that describe it: no Markdown delimiter, no escaped quote of
+  ;; a printed form, no printer's tree heading, outside code (the owner, on the session pages: "we still aren't rendering html")
+  (let [db (d/db-with (ts/test-db) (seon.task/create-tx (ts/test-db) (seon.template/request {:seon.task/ns 'demo :seon.task/name "w"
+                                                                                              :seon.task/plan "Make w true:\n\n1. read the field `x`\n2. write **one** test"})))
+        ;; drawn by the walk, as a page draws it: its joins (the task's search) drawn by their own renders
+        task (let [w (draw (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.task/id "demo/w") nil)) seon.ctx/changes db #'ui/task-view {})]
+               (try (apply str (map :html (seon.fixtures/page-units w))) (finally (r/dispose-walk! w))))
+        red (h/html (ui/status-hiccup {} {:proofs [{:test 'demo-test/w :status :fail
+                                                     :failures [{:assert {:seon.print/code "(str/includes? h \"[:code \\\"x\\\"]\")"} :got false}]}]}))
+        value (h/html (r/print-hiccup {:seon.render/index (seon.db/index)} {:a {:b [1 {:c 2}]}}))]
+    (doseq [[what html] [["a task's plan" task] ["a red proof" red] ["a value" value]]
+            :let [t (outside-code html)]]
+      (is (not (str/includes? t "`")) (str what ": no backtick outside code: " t))
+      (is (not (str/includes? t "\\\"")) (str what ": no escaped quote outside code"))
+      (is (not (str/includes? t "items, depth")) (str what ": no printer's tree heading")))))
+
+(deftest a-plain-string-is-prose-by-default
+  ;; docs/render.md#a-value-draws-itself: a string whose attribute's schema names no render is Markdown (owner: "if it is a text field it
+  ;; is assumed to be markdown"), so a branch forked before its attribute became :seon.db/text draws it as main does; an id opts out
+  (let [old (assoc-in (seon.db/index) [:forms :seon.task/plan] :string)
+        draw-as (fn [ix k v] (h/html (r/hiccup {:seon.render/index ix :schema k} v)))]
+    (is (str/includes? (draw-as old :seon.task/plan "read `x` first") "<code>x</code>") "an old branch's plan: Markdown, its code span drawn")
+    (is (not (str/includes? (draw-as old :seon.task/plan "read `x` first") "`")) "no backtick left")
+    (is (not (str/includes? (draw-as (seon.db/index) :seon.task/id "demo/w") "<code>")) "an id is no prose: printed as the data it is")))
+
 (deftest a-whole-tasks-page-holds-its-instructions
   ;; the task part drew the plan and dropped the task's own data, its instructions with it, so no
   ;; agent read how its kind is worked (reproduce first, fail! when already right, stop reading once
@@ -1796,7 +1843,7 @@
   (let [db (ts/test-db)
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
         ;; the task as its record pulls it, drawn by its html render
-        h (h/html (ui/task-view {} (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.task/id "demo/w") nil))))]
+        h (h/html (ui/task-view {:seon.render/index (seon.db/index)} (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.task/id "demo/w") nil))))]
     (is (str/includes? h "Your task: do what the plan below asks") "the whole instructions are on the page")
     (is (str/includes? h "your run then ends and root merges your branch") "whole: their last sentence too, nothing cut")
     (is (< (str/index-of h "Your task: do what the plan below asks") (str/index-of h "Make w true.")) "above the plan")))
@@ -2423,10 +2470,13 @@
 
 (defn- entry-of
   "Agent key's entry as a page draws it where its starter's pull joins it (seon.render.ui/agent nested, its pull by
-  seon.task/entry-pattern and one level of the agents it started): its hiccup, the started agents in it as the pulled maps a walk
+  :seon.agent/entry's pattern and one level of the agents it started): its hiccup, the started agents in it as the pulled maps a walk
   places as their own entries."
   [db key]
-  (#'ui/agent-entry db (d/pull db (into [:db/id] (conj seon.task/entry-pattern {:seon.agent/agents (into [:db/id] seon.task/entry-pattern)})) [:seon.agent/key key])))
+  (let [;; the entry's own clauses: its join of the agents it started (asked to a depth, its key a vector with :below) is asked here one level
+        started? (fn [c] (and (map? c) (some #(= :seon.agent/agents (if (vector? %) (first %) %)) (keys c))))
+        e (vec (remove started? (r/schema-property (seon.db/index) :seon.agent/entry :seon.ctx/pattern)))]
+    (#'ui/agent-entry db (d/pull db (into [:db/id] (conj e {:seon.agent/agents (into [:db/id] e)})) [:seon.agent/key key]))))
 
 (deftest an-agents-entry-says-what-it-works-on
   ;; docs/users.md#whats-on-screen: an agent's entry (seon.render.ui/agent nested, wherever a page joins it): its task in words, how it
@@ -2477,17 +2527,32 @@
         "an entry for each it started among its tiles")
     (is (not (str/includes? (in units "#p-task") "/agent/b2/a3")) "and not another's")
     (is (and (str/includes? (in units "#c-side") "href=\"/root\"") (str/includes? (in units "#c-side") "href=\"/agent/b2/a2\""))
-        "its agents list: root, then what it started")
-    (testing "an entry holds the agents it started; at the depth the user's pull stops, how many are below"
+        "its agents list: root, then what it started")))
+
+(deftest a-users-agents-list-counts-the-agents-below-its-depth
+  ;; docs/users.md#whats-on-screen: an entry holds the agents it started; at the depth the user's pull stops, how many are below
+  (let [db (sessions-db "b2" [["b2/a1" :a1 :running "seon.print/a-long-string" :running :task-a] ["b2/a2" :a2 :idle "x/asks" :parked :task-b] ["b2/a3" :a3 :idle "x/other" :parked :task-c]])
+        started (mapv #(:db/id (d/entity db [:seon.agent/key %])) ["b2/a1" "b2/a2"])
+        db (d/db-with db [{:seon.agent/key "sean" :seon.user/name "sean" :seon.agent/agents started}])
+        in (fn [units sel] (apply str (map :html (filter #(= sel (:container %)) units))))
+        units (user-units db "sean")]
       (let [a1 (d/entity db [:seon.agent/key "b2/a1"])
             a3 (d/entity db [:seon.agent/key "b2/a3"])
             ;; as my.task/launch! writes it: the task names who started it, the agent made for it, and the starter's :seon.agent/agents
             work (d/db-with db [{:db/id (:db/id (:seon.agent/task a3)) :seon.task/started-by (:db/id a1) :seon.task/agent (:db/id a3)}
                                 [:db/add (:db/id a1) :seon.agent/agents (:db/id a3)]])
+            ;; and on from a3, a chain one past the depth the user's pull reads (:seon.config.render/agent-tree-depth levels: a1 is the first)
+            n (seon.config/value :seon.config.render/agent-tree-depth)
+            chain (into ["b2/a3"] (map #(str "b2/c" %) (range 3 (+ n 2))))
+            work (d/db-with work (into (mapv (fn [k] {:seon.agent/key k :seon.agent/status :idle}) (rest chain))
+                                       (for [[x y] (map vector chain (rest chain))] {:seon.agent/key x :seon.agent/agents [[:seon.agent/key y]]})))
             side (in (user-units work "sean") "#c-side")]
-        ;; the schema's own pattern (no :seon.ctx/pattern written on this user) joins one level: a1's started agent is a count, not cut
-        (is (str/includes? side "1 more it started, below") (str "a1's started agent, beyond the pull's depth, counted: " side))
-        (is (not (str/includes? (in units "#c-side") "more it started")) "and nothing below an agent that started none")))))
+        ;; the user's pull (its schema's pattern: no :seon.ctx/pattern written on this user) holds entries to the depth, then ids
+        (is (str/includes? side "href=\"/agent/b2/a3\"") "a1's started agent, within the depth: an entry")
+        (is (str/includes? side (str "href=\"/agent/" (nth chain (- n 2)) "\"")) "the last level's agent: an entry")
+        (is (not (str/includes? side (str "href=\"/agent/" (last chain) "\""))) "the one below the depth: no entry")
+        (is (str/includes? side "1 more it started, below") (str "beyond the pull's depth, counted: " side))
+        (is (not (str/includes? (in units "#c-side") "more it started")) "and nothing below an agent that started none"))))
 
 (deftest an-entry-shows-the-last-exchange
   ;; docs/users.md#whats-on-screen: an agent's entry is titled by what the person typed and shows their newest message and its answer, never
@@ -2599,10 +2664,57 @@
     (is (= ["Hi root."] (mapv #(:seon.message/body (d/entity db (:e %))) (d/datoms db :avet :seon.message/to (:db/id s)))) "a message to root is its session's")
     (let [db2 (d/db-with db (seon.root/root-session-boot-tx db))
           same (fn [d] [(dissoc (d/pull d '[*] [:seon.agent/key "root"]) :db/id) (dissoc (d/pull d '[*] [:seon.task/id "request/root"]) :db/id)])]
-      (is (= (same db) (same db2)) "a boot after writes its pattern again and nothing else"))
+      (is (= (same db) (same db2)) "a boot after changes nothing of it"))
     (let [fresh (d/db-with (my.test/world) (into (seon.task/boot-tx "b1" "sean") (seon.root/root-session-boot-tx (my.test/world))))]
       (is (some? (d/entity fresh [:seon.agent/key "root"])) "a root no one has messaged has its session from its boot")
       (is (= :parked (:seon.task/outcome (d/entity fresh [:seon.task/id "request/root"]))) "parked until a message"))))
+
+(deftest a-boot-stores-the-role-names-and-writes-no-pattern-again
+  ;; docs/users.md#roots-session: the user stores no pattern (its pull is its schema's) and root's session stores its role's name and its one
+  ;; join, written once when it is made; a second boot writes no pattern datom (a whole pattern written by code at boot was a stored copy
+  ;; that went stale)
+  (let [two [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]
+        db (booted)
+        stored (fn [d] (set (map (juxt :e :v) (d/datoms d :aevt :seon.ctx/pattern))))]
+    (is (nil? (:seon.ctx/pattern (d/pull db [:seon.ctx/pattern] [:seon.user/name "sean"]))) "the user holds no pattern")
+    (is (= two (:seon.ctx/pattern (d/pull db [:seon.ctx/pattern] [:seon.agent/key "root"]))) "root's session: its role's name and one join")
+    (let [r (d/with db (into (seon.task/boot-tx "b2" "sean") (seon.root/root-session-boot-tx db)))]
+      (is (empty? (filter #(= :seon.ctx/pattern (:a %)) (:tx-data r))) "a second boot writes no pattern datom")
+      (is (= (stored db) (stored (:db-after r))) "and every stored pattern is as it was"))))
+
+(deftest a-clause-the-role-gains-reaches-roots-session-with-no-write
+  ;; docs/ctx.md#the-pattern: root's session names its role's pattern, so a clause the agent schema's pattern gains reaches its pull at once,
+  ;; with no boot and no write (an entity index in which :seon.db/agent-fact's pattern asks one clause more, as a branch's own index is: seon.db/index-of)
+  (let [ix (seon.db/index)
+        db (d/db-with (booted) [{:seon.agent/key "root" :seon.agent/holder "a clause the role gained"}])
+        a (seon.db/eid db :seon.agent/key "root")
+        props (update (seon.contract/properties :seon.db/agent-fact) :seon.ctx/pattern #(conj (vec %) :seon.agent/holder))
+        ;; the schema's own form with its pattern one clause longer: its entries are what make it an entity schema in the index
+        forms {:seon.db/agent-fact (assoc (get seon.contract/forms :seon.db/agent-fact) 1 props)}
+        before (seon.ctx/agent-ctx ix db a)
+        ;; a branch's changed schema is read by the index derived from it (seon.db/index-of), as an agent's is
+        after (seon.ctx/agent-ctx (seon.db/index-of {:forms forms}) db a)]
+    (is (nil? (:seon.agent/holder before)) "the role's pattern does not ask it")
+    (is (= "a clause the role gained" (:seon.agent/holder after)) "once the role's pattern asks it, root's session's pull holds it")
+    (is (= [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}] (:seon.ctx/pattern (d/pull db [:seon.ctx/pattern] a))) "with nothing written")))
+
+(deftest a-users-pull-holds-its-agents-to-the-depth-and-below-only-their-ids
+  ;; docs/users.md#whats-on-screen: the user's pull is its schema's pattern (:seon.db/user-fact's, the agents it started read by :seon.agent/entry's):
+  ;; on a chain user -> a1 -> a2 -> ... deeper than :seon.config.render/agent-tree-depth, the entries go that many levels and the last holds
+  ;; only the ids of the ones below it, so it says how many there are and nothing is cut silently
+  (let [n (seon.config/value :seon.config.render/agent-tree-depth)
+        ks (mapv #(str "b1/a" %) (range 1 (+ n 3)))
+        db (d/db-with (my.test/world) (into (seon.task/boot-tx "b1" "sean")
+                                            (concat (map (fn [k] {:seon.agent/key k :seon.agent/status :running}) ks)
+                                                    [{:seon.agent/key "sean" :seon.agent/agents [[:seon.agent/key (first ks)]]}]
+                                                    (for [[x y] (map vector ks (rest ks))] {:seon.agent/key x :seon.agent/agents [[:seon.agent/key y]]}))))
+        tree (seon.ctx/agent-ctx (seon.db/index) db (seon.db/eid db :seon.user/name "sean"))
+        levels (take-while some? (rest (iterate #(first (vals (:seon.agent/agents %))) tree)))]
+    (is (nil? (:seon.ctx/pattern (d/pull db [:seon.ctx/pattern] [:seon.user/name "sean"]))) "no pattern stored: its schema's")
+    (is (= (subvec ks 0 n) (vec (keep :seon.agent/key levels))) "entries to the configured depth")
+    (is (= (seon.db/eid db :seon.agent/key (nth ks n)) (:db/id (last levels))) "below the last, the next one's id")
+    (is (nil? (:seon.agent/key (last levels))) "and nothing else of it")
+    (is (= (inc n) (count levels)) "nothing deeper")))
 
 (deftest roots-session-page-lists-no-sessions
   ;; docs/users.md#roots-session: root's session's record holds the user's tree (its pattern's :seon.agent/_agents join); its model reads none of
@@ -2666,7 +2778,7 @@
     (is (not-any? #{:root} (keys tree)) "no :as name: keyed by attributes")))
 
 (deftest a-users-ctx-holds-the-agents-it-started
-  ;; docs/users.md#whats-on-screen: the user's pull (seon.task/user-pattern, written at boot): the agents it started, each with its status,
+  ;; docs/users.md#whats-on-screen: the user's pull (its schema's pattern, :seon.db/user-fact's; a user stores none): the agents it started, each with its status,
   ;; to the documented depth; its focus is main's, which the render proc reads to route home (seon.render.proc/location), not its page
   (let [db0 (d/db-with (my.test/world) (seon.task/boot-tx "b1" "sean"))
         db (d/db-with db0 [{:seon.agent/key "b1/a1" :seon.agent/status :running}
@@ -2811,14 +2923,14 @@
                 tid (assoc :seon.agent/task [:seon.task/id tid]))]))))
 
 (defn- tree-db
-  "`sessions-db` with the one tree (docs/users.md#who-started-whom): the person (:seon.user/name \"sean\", its pattern `seon.task/user-pattern`)
-  started root's session (the agent keyed \"root\", its pattern `seon.root/root-session-pattern`) and the agents of started (keys; default every
+  "`sessions-db` with the one tree (docs/users.md#who-started-whom): the person (:seon.user/name \"sean\", no pattern of its own: its schema's)
+  started root's session (the agent keyed \"root\", its pattern its role's name and a join to the user, as seon.root/root-session-tx writes it) and the agents of started (keys; default every
   session listed), which root's page reads through its session's pull."
   ([boot sessions] (tree-db boot sessions (map first sessions)))
   ([boot sessions started]
    (d/db-with (sessions-db boot sessions)
-              [{:seon.agent/key "root" :seon.ctx/pattern (seon.root/root-session-pattern)}
-               {:seon.agent/key "sean" :seon.user/name "sean" :seon.ctx/pattern (seon.task/user-pattern)
+              [{:seon.agent/key "root" :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]}
+               {:seon.agent/key "sean" :seon.user/name "sean"
                 :seon.agent/agents (vec (cons [:seon.agent/key "root"] (for [k started] [:seon.agent/key k])))}])))
 
 
@@ -3024,7 +3136,7 @@
 (deftest every-session-on-main-is-listed-across-boots
   ;; coordinator, 2026-11-05: after a root restarts its agents list drew "agent-side threw" and no agent; the person (user), with no status
   ;; and no task, made standing throw. Step 3: root's page lists every session root holds (its session's pull through the system entity,
-  ;; seon.root/root-session-pattern), each by its entry under the user who started it
+  ;; [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]), each by its entry under the user who started it
   (let [db (tree-db "b2" [["b2/user" :user nil nil nil nil]
                               ["b2/a1" :a1 :busy "seon.x/now" :running :task-now]
                               ["b1/a1" :a1 :dead "seon.x/old" :cap :task-old]
@@ -3099,10 +3211,10 @@
 (deftest the-task-line-of-the-side-panel-reads-through-standing
   ;; the chat's side panel said "task · seon.program · running" of a capped task: running is the task's execution, not how it stands
   (let [t {:seon.task/id "seon.program/x" :seon.task/execution :running :seon.task/outcome :cap :seon.task/plan "p"}
-        html (h/html (ui/task-view {} t))]
+        html (h/html (ui/task-view {:seon.render/index (seon.db/index)} t))]
     (is (str/includes? html "task · seon.program · stopped at its cap") html)
     (is (not (str/includes? html "running")))
-    (is (str/includes? (h/html (ui/task-view {} (dissoc t :seon.task/outcome))) "task · seon.program · running") "no outcome yet: its execution as before")
+    (is (str/includes? (h/html (ui/task-view {:seon.render/index (seon.db/index)} (dissoc t :seon.task/outcome))) "task · seon.program · running") "no outcome yet: its execution as before")
     ;; the agent's own end (an agent whose branch holds no outcome of its task) is the agent's own state, drawn by its render
     ;; (seon.render.ui/agent-state: a-merged-task-reads-merged-everywhere)
     ))
@@ -3187,7 +3299,12 @@
         (is (str/includes? t "<details") "its thinking folded")
         (is (str/includes? t "Read select first."))
         (is (not (str/includes? t "turn 1")) "its turn and tokens are for the debug tab"))
-      (is (nil? (ui/model-call-view {} (get-in c [:seon.model-call/_agent 3]))) "a turn that said nothing draws no bubble"))
+      (is (nil? (ui/model-call-view {} (get-in c [:seon.model-call/_agent 3]))) "a turn that said nothing draws no bubble")
+      (let [t (h (ui/model-call-view {} {:seon.model-call/n 3 :seon.model-call/origin :model :seon.model-call/reply ""
+                                         :seon.model-call/reasoning "First I read **it**.\n\nThen I check.\n\nThen I write."}))]
+        (is (str/includes? t "First I read <strong>it</strong>.") "a turn with no reply but reasoning: its first paragraph is the agent's words")
+        (is (str/includes? t "2 more paragraphs of thinking") "the rest folded under how much more there is")
+        (is (re-find #"(?s)<details>.*Then I check" t) "folded")))
     (testing "a message is a bubble with its sender"
       (let [m (h (ui/message {} (get-in c [:seon.message/_to 4])))]
         (is (str/includes? m "user"))
@@ -3934,7 +4051,7 @@
            :seon.agent/task {:seon.task/id "app.x/a-thing" :seon.task/outcome :merged}}
         opts {:seon.ctx/ctx c :seon.db/db (ts/test-db)}]
     (is (= "merged" (:text (ui/standing {:seon.agent/outcome :green} {:seon.task/outcome :merged}))))
-    (let [h (h/html (ui/task-view {} (:seon.agent/task c)))]
+    (let [h (h/html (ui/task-view {:seon.render/index (seon.db/index)} (:seon.agent/task c)))]
       (is (str/includes? h "task · app.x · merged") "the task's tile")
       (is (not (str/includes? h "· done")) "not the agent's own end"))
     (is (str/includes? (pr-str (ui/agent-state opts)) "● merged") "the agent state")
@@ -4321,3 +4438,15 @@
     (is (str/includes? tiles "href=\"/agent/a5\"") "the started agent's entry, a link to its page, among the tiles")
     (is (some #(= "agent-a5" (:id %)) units) "a unit of its own, keyed by the agent's key")
     (is (not (str/includes? (pr-str model) "a5")) "the model's page holds no entry")))
+
+;; docs/render.md#how-the-work-stands: the done rule's reasons are data the task holds (:seon.task/reasons), read in their schema's words
+;; (:seon.reconcile/reason's :seon.status/title), what each is about as code; never the flattened keyword string (Point, 2026-11-11: the
+;; header read "proof-red seon.render-test/x; open-problem ..." raw)
+(deftest an-agents-end-reasons-read-in-their-schemas-words
+  (let [t {:seon.task/outcome :cap :seon.task/reason "proof-red seon.render-test/x; open-problem k"
+           :seon.task/reasons [{:reason :proof-red :symbol 'seon.render-test/x} {:reason :open-problem :key "k"}]}
+        r (:reason (ui/standing {:seon.agent/outcome :cap} t))]
+    (is (= "proof red `seon.render-test/x`; problems to clear `k`" r) "each reason in its words, what it is about as code")
+    (is (not (str/includes? r "proof-red")) "no keyword read raw")
+    (is (= "root restarted" (:reason (ui/standing {} {:seon.task/outcome :cap :seon.task/reason "root restarted"})))
+        "a reason with no data behind it is its string")))

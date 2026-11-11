@@ -112,7 +112,7 @@
                         ;; the agents a message woke and a start has not taken yet, and the wakes held for agents that were running
                         ;; (seon.reconcile/wake): a waiting agent's task is ready when its agent is woken
                         [:woken {:optional true} set?] [:late {:optional true} set?]]
- :seon.reconcile/step [:enum :ignored :done :dead-read :spawned :started :briefed :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated]
+ :seon.reconcile/step [:enum :ignored :done :holder-ended :dead-read :spawned :started :briefed :worked :tested :read :diffed :merged :octopus-merged :write-back :main-read :committed :commit-recorded :built :gate-read :gated]
  ;; a task as Datahike pulls it (the readers' input)
  :seon.task/pulled [:map [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                     [:seon.task/plan :seon.task/plan] [:seon.task/execution [:enum :held :running :cancelled]]
@@ -132,8 +132,14 @@
                              [:deferred {:optional true} [:set :qualified-symbol]]
                              ;; the red tests that are main's, not this branch's change (red as base holds them): never a stray red
                              [:main-red {:optional true} [:set :qualified-symbol]]]
+ :seon.reconcile/reason [:enum {:description "Why the done rule says a task is not done (seon.reconcile/done-explain), one reason of :seon.reconcile/not-done; each read by a person and the model in its :seon.status/title words (docs/render.md#how-the-work-stands)."
+                                :seon.status/title {:open "still open" :no-proofs "no proof registered" :proof-red "proof red" :proof-unknown "proof has no verdict"
+                                                    :regression "green on main, red here" :stray-red "red test that is no proof" :contract-gap "functions without a contract"
+                                                    :unmerged "unmerged entries" :no-design "plan unchanged since the run began" :open-problem "problems to clear"
+                                                    :behind "judged before main moved"}}
+                         :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind]
  :seon.reconcile/not-done [:map {:closed true}
-                          [:reason [:enum :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind]]
+                          [:reason :seon.reconcile/reason]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]
  :seon.reconcile/action [:multi {:dispatch :op}
                          [:reap [:map {:closed true} [:op [:= :reap]] [:task :seon.task/id]]]

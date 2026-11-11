@@ -1056,6 +1056,15 @@
           (refer 'clojure.test :only '[deftest is are testing]))
         n)))
 
+(defonce ^{:private true :doc "{var form-id}: the form this process last evaluated for each var it loaded or recorded (load-form!,
+  note-loaded!): what program-differs compares with a branch. See docs/merging.md#a-session-proves-through-root."}
+  loaded (atom {}))
+
+(defn note-loaded!
+  "Record that this process now runs form id for each var of vars (an agent's REPL definition, as it records it). nil."
+  {:malli/schema [:=> [:cat [:sequential :qualified-symbol] :string] :nil]}
+  [vars id] (swap! loaded into (for [v vars] [v id])) nil)
+
 (defn- load-form!
   "Evaluate one form row in its namespace, and arm the contracted functions it defines
   (seon.contract/arm!). Answers nil, or an error map naming the form (its id and its text's first
@@ -1066,6 +1075,7 @@
     (try
       (binding [*ns* (ensure-ns! ns)]
         (eval (read-string src)))
+      (when id (note-loaded! (vec (keep (fn [[k s]] (when (= :var k) s)) defines)) id))
       (some (fn [[k s]]
               (when-let [v (and (= :var k) (find-var s))]
                 (let [r (contract/arm! v)]
@@ -1323,6 +1333,32 @@
       (when-let [es (cfg/entries after)]
         (let [r (cfg/of-entries es (schema-changes after))]
           (when (:seon.error/type r) r))))))
+
+(defn program-differs
+  "What this process runs that db-to's program does not, over what db-to changed from db-from (diff-plan's load set, the
+  diff an agent loads at its start): each var a changed form defines whose form this process last evaluated is another
+  (loaded), as {:var :form (db-to's) :loaded (this process's, nil when none)}; [] when the process runs db-to's program
+  there. The oracle a run asks before its first item (the runtime invariant: a process runs its branch's program). Costs
+  the diff, never the program. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector :map]]}
+  [db-from db-to]
+  (let [now @loaded]
+    (vec (for [f (:load (diff-plan db-from db-to)) [k s] (:defines f)
+               :when (and (= :var k) (not= (:id f) (get now s)))]
+           {:var s :form (:id f) :loaded (get now s)}))))
+
+(defn reload-dependents!
+  "Load again, in this process, the live forms of db that expanded a macro the forms ids (form ids, just recorded) define,
+  and theirs (dependents): what an eval that redefines a macro owes the code this process already compiled from it, which
+  Clojure's eval leaves on the old expansion (a test defined before its macro changed ran stale, and its process's
+  program-differs saw nothing, its form id unchanged: Data model's first task as a Seon agent). The same act
+  load-diff! does at a spawn. Each loaded form is noted as this process's (load-form!). Answers the load errors. See
+  docs/source.md#an-agent-changes-code-at-its-repl."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:vector :seon.program/error]]}
+  [db ids]
+  (let [rows (vec (keep #(some->> (:db/id (d/entity db [:form/id %])) (form-row db)) ids))
+        ds (if (seq rows) (dependents db rows) [])]
+    (if (seq ds) (load-forms! db ds) [])))
 
 (defn load-diff!
   "Make this process run db-to's program where it holds db-from's (diff-plan): each

@@ -664,6 +664,13 @@
   []
   {:roster (thread-roster) :gc-sweepers (lib/gc-sweepers! -1) :os (lib/nthreads)})
 
+(defn- settled-threads
+  "threads, read again until two readings in a row agree: the roster and the OS count of one moment, so a thread that
+  starts or ends between the two parts of a reading never counts as one over. A reading that never settles ends at the
+  step's own bound, a signal (bin/check), never a red. Read where nothing is starting."
+  {:malli/schema [:=> [:cat] :map]}
+  [] (loop [a (threads)] (let [b (threads)] (if (= a b) b (recur b)))))
+
 (defn thread-diff
   "Where measured threads (threads) differ from declared ones
   (declared-threads): {} when they are exactly what is declared, else each
@@ -726,7 +733,7 @@
         results (fan work ids)
         t-done (profile/ms-since t0)
         _ (doseq [r results :when (not (:ok r))] (out! "NOT OK: " (pr-str r)))
-        th-work (thread-diff (declared-threads sys) (threads))
+        th-work (thread-diff (declared-threads sys) (settled-threads))
         st (c/state sys)
         mem1 (lib/sysmem)
         agent-mb (keep #(get-in st [:agents % :mem-mb]) ids)
@@ -738,7 +745,7 @@
         _ (doseq [id ids] (c/kill! sys id))
         _ (await-agents ev ids #{:killed})
         mem2 (do (Thread/sleep (seon.config/value :seon.config.check/pages-ms)) (lib/sysmem))
-        th-end (thread-diff (declared-threads sys) (threads))
+        th-end (thread-diff (declared-threads sys) (settled-threads))
         ;; the target machine (a 16 GB M1, owner 2026-10-22): root, the fork server and the default
         ;; number of agents at once fit :seon.config.machine/memory-mb, each agent charged what the
         ;; machine's free plus inactive memory dropped per agent from before the agents started to their
@@ -766,9 +773,14 @@
                                :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}}
        ;; root's threads exactly as declared once agents run (at boot Jolt's io poller has not
        ;; started yet: it starts at the first socket wait, an agent's). The model's threads (Metal's
-       ;; GCD workers) are the embedding helper's, not root's, so the OS count is judged at every sample
+       ;; GCD workers) are the embedding helper's, not root's. The named roster is judged at every
+       ;; sample; the OS count only where nothing is starting (after the work and after the kills, each
+       ;; read after a wait on what it waited for, as one settled reading: settled-threads): all-ready is read as the agents finish spawning, and its
+       ;; roster and OS count are two reads at two instants, so a thread a spawn starts and ends between
+       ;; them counted one OS thread over (batch 73, 2026-11-11, :os [55 56] at load 25-30, the roster
+       ;; exact): a count load could turn red. Its :os stays in the report
        :checks {:every-eval-and-test-passed (every? :ok results) :ten-merges-went-in (every? :merged? merged)
-                :root-threads-as-declared (every? empty? [th-ready th-work th-end])
+                :root-threads-as-declared (every? empty? [(dissoc th-ready :os) th-work th-end])
                 :fits-the-machine (<= need budget)}}))))
 
 ;; ---- scale-work: agents that work --------------------------------------------------
@@ -1839,6 +1851,21 @@
   (vec (for [[code by] (d/q '[:find ?c ?by :in $ ?attr ?id :where [?a ?attr ?id] [?e :seon.eval/agent ?a] [?e :seon.eval/code ?c] [?e :seon.eval/by ?by]] db attr id)]
          {:code code :by (not-empty (into {} (remove (comp nil? val)) (d/pull db [:seon.agent/key :seon.root/id] by)))})))
 
+(defn agent-checks
+  "The runtime invariant's acceptance as an agent works (docs/merging.md#a-session-proves-through-root): bin/agent-checks, the
+  checkout's own script, against this step's root through bin/mcp call --port: an agent's eval that breaks a function, and a
+  registration that narrows a schema entry, each prove red with every proof named; killed and attached again, its new
+  process loads its branch's program and both are red again; put back, both green, reused at their digests. One script
+  for a session's hand run (on its tree's root, or the standing system) and this step, so the two cannot drift."
+  []
+  (run-check "AGENT CHECKS" {:datoms 2000}
+   (fn [sys]
+    (let [port (.getLocalPort ^java.net.ServerSocket (:server sys))
+          r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/agent-checks") (seon.config/checkout) (str port))
+          lines (filterv #(re-find #"^CHECK |^AGENT CHECKS" %) (clojure.string/split-lines (str (:out r))))]
+      {:report {:lines lines :exit (:exit r) :err (:err r)}
+       :checks {:every-check-ok (and (zero? (:exit r)) (some #{"AGENT CHECKS OK"} lines) (not-any? #(clojure.string/includes? % "FAILED") lines))}}))))
+
 (defn mcp-proof
   "The MCP phase's proof: an outside client (a separate process: bin/mcp PORT, the stdio
   relay, fed JSON-RPC on stdin) lists agents, evaluates in a running agent and as root, and
@@ -2222,6 +2249,7 @@
      "jobs" (fn [n more] (do (println (seon.config/value :seon.config.proofs/jobs)) (lib/c-exit 0)))
      "steps" (fn [n more] (do (println (clojure.string/join " " (sort (keys seon.proofs/check-steps)))) (lib/c-exit 0)))
      "mcp-proof" (fn [n more] (mcp-proof))
+     "agent-checks" (fn [n more] (agent-checks))
      "hotreload" (fn [n more] (hotreload))
      "idle" (fn [n more] (idle (n-or n "2000")))
      "smoke" (fn [_ _] (smoke)))))

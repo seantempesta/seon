@@ -463,7 +463,7 @@
  ;; reads and draws the file, a pattern a path whose one * stands for any name in that directory. Read by the import, the merge and the write-back
  ;; (seon.config/file-kind). Provenance: the owner, 2026-11-07: "an allow list with patterns seems like a good idea". At the bound: a file no pattern
  ;; names, under the dirs or not, is an ordinary file: no branch holds it and no merge carries it.
- :seon.config.source/things {"resources/seon/schemas/*.edn" :schema "resources/seon/config/default.edn" :config "bin/*" :script}
+ :seon.config.source/things {"resources/seon/schemas/*.edn" :schema "resources/seon/config/default.edn" :config "bin/*" :script "test/seon/*.edn" :fixture}
  ;; Unit: paths under the root, of those above. The program proper: a namespace whose file is under
  ;; one is the program's, one under test/ (a test's, a fixture's, a helper's like seon.check or
  ;; seon.fixtures, whose names do not end in -test) is not (seon.program/program-nss). Read where
