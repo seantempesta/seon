@@ -94,6 +94,20 @@
         (is (empty? (waiters-answered o)))
         (is (= 1 (count (asks o :spawn))))))))
 
+(deftest done-holds-only-what-can-be-asked-again
+  ;; docs/merging.md#the-test-service: a remembered answer whose key holds a digest the branch has moved past is never
+  ;; matched again, so the service keeps a branch's slots at its latest digest only, and none once its agent ended
+  (let [ask (fn [st rid t names] (let [[st o] (feed st [[:req (cond-> {:rid rid :branch :agent-3 :t t :digest (str "d" t) :agent :a3} names (assoc :names names))]])]
+                                   (first (run-through st o test-run-answer))))
+        st (-> (prove/prove-proc {}) (ask 1 5 nil) (ask 2 5 '#{a.b-test}))]
+    (is (= 2 (count (:done st))) "two slots at one digest: both can be asked again")
+    (let [st (ask st 3 6 nil)]
+      (is (= [[:agent-3 nil :judge]] (keys (:done st))) "the branch moved to d6: the slots at d5 are dropped")
+      (let [ended (seon.contract/error :seon.root/ended 'seon.root/api-proc "agent a3 ended" {:agent :a3})
+            [st o] (feed st [(req 4 :agent-3 7 :a3)])
+            [st _] (run-through st o ended)]
+        (is (empty? (:done st)) "its agent ended: nothing of the branch is kept")))))
+
 (deftest a-session-and-an-agents-turn-for-one-digest-are-one-run
   ;; the session's seon_prove for agent a3's branch at tx 7, and a3's turn asking for the same
   (let [[st outs] (feed (prove/prove-proc {}) [(req 10 :agent-3 7 :a3) (req 11 :agent-3 7 :a3)])]

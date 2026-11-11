@@ -52,6 +52,23 @@
   {:malli/schema [:=> [:cat :map] [:tuple :keyword [:maybe [:set :symbol]] [:enum :turn :judge :main :full]]]}
   [{:keys [branch names mode]}] [branch names mode])
 
+(defn- remember
+  "st with run's green answer r remembered at its slot, and every slot of a branch that can no longer be asked dropped:
+  the run's branch's slots at another digest (a key holds its digest, so an ask of the branch's code as it now is never
+  matches them), and, for an answer :seon.root/ended, every slot of the branch (its agent ended). :done so holds the slots
+  at each live branch's latest digest, a few each."
+  {:malli/schema [:=> [:cat :map :map :any] :map]}
+  [st run r]
+  (let [ended? (= :seon.root/ended (:seon.error/type r))
+        keep? (fn [[[b] v]] (not (and (= b (:branch run)) (or ended? (not= (:digest v) (:digest run))))))
+        st (update st :done #(into {} (filter keep?) %))]
+    (if (or (contract/error? r) (some :exit (:reports r)) (seq (:red r)))
+      st
+      (assoc-in st [:done (slot run)] {:key (:key r) :digest (:digest run)
+                                       :r (-> r (dissoc :measured) (assoc :ran 0)
+                                              (update :reports (partial mapv #(assoc % :reused true)))
+                                              (as-> x (assoc x :reused (count (distinct (keep :var (:reports x)))))))}))))
+
 ;; ---- items: a (test, digest) pair, run once whoever asks ------------------------------------
 ;; The test service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2): an asker names the items its plan
 ;; has no verdict for; each item is queued once with every asker waiting on it, granted in batches to the agent holding
@@ -345,14 +362,10 @@
   (let [{:keys [waiters] :as run} (get-in st [:runs k])
         err? (contract/error? r)
         ended? (= :seon.root/ended (:seon.error/type r))
-        died? (and (not err?) (some :exit (:reports r)))
         ;; a run's items name their own reds (run-answer: a step's among them); any other answer, by its failing reports
         r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (keys (proofs/failures r))))))))
-        st (cond-> (-> st (update :runs dissoc k) (assoc :last (:branch run)))
-             ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
-             (not (or err? died? (seq (:red r)))) (assoc-in [:done (slot run)] {:key k :r (-> r (dissoc :measured) (assoc :ran 0)
-                                                                                         (update :reports (partial mapv #(assoc % :reused true)))
-                                                                                         (as-> x (assoc x :reused (count (distinct (keep :var (:reports x)))))))}))
+        ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
+        st (remember (-> st (update :runs dissoc k) (assoc :last (:branch run))) run r)
         [st kill] (runner-done st run)]
     [st (cond-> (into (reply [] waiters r) kill) (and err? (not ended?)) (conj {:op :problem :class :platform :error r}))]))
 
@@ -396,7 +409,7 @@
         names (not-empty (:names m))
         mode (or (:mode m) :judge)
         key (run-key branch (:digest m) names mode)
-        req (-> m (select-keys [:branch :agent :proofs :checkout :tree]) (assoc :key key :t t :names names :mode mode))
+        req (-> m (select-keys [:branch :digest :agent :proofs :checkout :tree]) (assoc :key key :t t :names names :mode mode))
         done (get-in st [:done (slot req)])]
     (cond
       ;; the daily full run, a run of its own
