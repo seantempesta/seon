@@ -69,6 +69,9 @@
   ;; a merge's deferred process tests, run only when root asks (owner, 2026-10-23): prove's entry
   ;; (bin/prove --tests) on a worktree of the merge candidate, niced; one at a time
   :tests {:perform seon.fx/run-tests :workers 1}
+  ;; a session's prove items (seon.prove grants them, at most test-workers at once): a build, one process test, one check
+  ;; step, on the session's own checkout (docs/merging.md#a-session-proves-through-root)
+  :item {:perform seon.fx/run-item :workers :bind/test-workers}
   ;; the wiki's history from git: what each section was last written against (seon.doc/baseline-plan)
   :history {:perform seon.fx/wiki-history :workers 1}
   ;; a stalled agent's evidence (sample, lsof, ps, its fiber dump), captured as the stall is recorded

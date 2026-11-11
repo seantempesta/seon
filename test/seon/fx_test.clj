@@ -516,3 +516,21 @@
           (is (= "" (git "status" "--short")) "the checked-out tree untouched")
           (is (not (.exists (java.io.File. (str dir "/b.txt")))) "and no file written into it")))
       (finally (seon.lib/remove-tree! dir)))))
+
+(deftest a-sessions-item-runs-on-its-checkout-once
+  ;; docs/merging.md#a-session-proves-through-root (Flow step 4, with Tests): the :item effect runs one item seon.prove granted
+  ;; on the session's checkout, and its verdict is the cache's by digest: an item runs (a test as a shard of one, bin/test --shard,
+  ;; its green stored by the runner; one needing no binary, so this tree's own build is not the subject),
+  ;; the same item asked again is answered from the cache with no process started, and a checkout whose files are no longer
+  ;; the item's tree is refused. Red before: an asked-again item started its runner again only to reuse the green (2.3 s a test)
+  (let [co (str (cfg/checkout)) tree (fx/tree-id co)
+        ;; a digest of this run's own, so its first ask has no green to reuse
+        dg (subs (str (random-uuid)) 0 16)
+        item {:kind :process :tree tree :checkout co :name 'seon.fx-test/a-read-of-named-paths-reads-only-those-files :digest dg :binary? false}
+        one (fx/run-item {:req item})
+        two (fx/run-item {:req item})
+        moved (fx/run-item {:req (assoc item :tree "0000000000000000000000000000000000000000")})]
+    (is (= 1 (get-in one [:value :pass])) (pr-str one))
+    (is (not (get-in one [:value :reused])) "the first ask ran the test")
+    (is (= {:pass 1 :reused true} (select-keys (:value two) [:pass :reused])) (str "asked again, the cache answers: " (pr-str two)))
+    (is (and (contract/error? moved) (:tree-moved moved)) (pr-str moved))))
