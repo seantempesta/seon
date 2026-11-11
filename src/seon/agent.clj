@@ -887,7 +887,7 @@
         ;; (check-private! at its fork, whatever this process's own setting), never this process's value
         in (cond-> (-> in (assoc-in [:config :seon.config.contract/private-checked?] "true")
                        ;; a process test's config values are its root's (seon.program's index-answer reads them)
-                       (assoc :root-config (fx/config-input cfg/test-root-config (cfg/checkout))))
+                       (assoc :test-system-config (fx/config-input cfg/test-system-config (cfg/checkout))))
              (nil? (get-in in [:config :seon.env/index])) (as-> x (program/with-index-code g x)))
         g (program/reach-indexed g in)
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them

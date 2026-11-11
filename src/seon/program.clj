@@ -2037,26 +2037,26 @@
   (lib/digest (str/join " " (sort (distinct (keep #(some-> (comp-of %) cd) (mapcat #(get defs %) roots)))))))
 
 (defn- roots-of
-  "root-roots of g under the config a process test's root runs with (seon.config/test-root-config, the scripted profile, whichever
+  "root-roots of g under the config a process test's root runs with (seon.config/test-system-config, the scripted profile, whichever
   process plans), kept on g's index while its schemas, data-refs and that config are the same values
   (root-roots reads every schema row and every config value: the index would pay them at each update). Answers
   [roots key]. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map [:maybe :map]] [:tuple [:sequential :qualified-symbol] [:vector :any]]]}
   [g index]
-  (let [k [(:schemas g) (:data-refs g) cfg/test-root-config]]
+  (let [k [(:schemas g) (:data-refs g) cfg/test-system-config]]
     (if (and (= (count k) (count (:roots-key index))) (every? true? (map identical? k (:roots-key index))))
       [(:roots index) (:roots-key index)]
-      [(root-roots g cfg/test-root-config) k])))
+      [(root-roots g cfg/test-system-config) k])))
 
 (defn- index-answer
   "The function of a key and its starting forms' ids that answers {:digest :process? :binary?} (graph-index)
   over graph g under inputs: the config lines and env keys it shares are made once here, for every key asked."
   {:malli/schema [:=> [:cat :map :seon.program/inputs :boolean] :seon.host/fn]}
-  [{:keys [rows plain comp-of cd flags] :as g} {:keys [env tree code config root-config]} roots?]
+  [{:keys [rows plain comp-of cd flags] :as g} {:keys [env tree code config test-system-config]} roots?]
   (let [line (into {} (for [[ck v] config] [ck (str "\n" ck " " v)]))
-        ;; a test that runs a process takes the config its root runs with (:root-config, seon.config/test-root-config as the
+        ;; a test that runs a process takes the config its root runs with (:test-system-config, seon.config/test-system-config as the
         ;; planner renders it), never the planning process's: the standing system's local.edn moved 103 of 180 process digests
-        rline (if (seq root-config) (merge line (into {} (for [[ck v] root-config] [ck (str "\n" ck " " v)]))) line)
+        rline (if (seq test-system-config) (merge line (into {} (for [[ck v] test-system-config] [ck (str "\n" ck " " v)]))) line)
         ;; what root runs, taken by every test that starts a root or runs the binary (root-digest): made once, when one asks;
         ;; a test running the binary takes its check driver's too (a mode it names runs seon.check's code, which no reach of
         ;; the test names: seon.lib-test's fork cases kept one flaky digest across a fix to seon.check/fork-cases)
