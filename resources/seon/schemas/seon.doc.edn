@@ -2,40 +2,21 @@
 ;; per heading of docs/*.md, as one parse (seon.ref/parse) reads it. Its references are what
 ;; its own text cites (sections by link, vars by name), so a section's backlinks are who cites
 ;; it. Stored shapes; the Datahike attributes are derived from :seon.doc/fact.
-{;; the section's address, path#anchor as seon.ref/parse writes it (docs/flow.md#idioms)
- :seon.doc/address [:and {:seon.db/identity true} :string]
- ;; the heading as its line writes it, Markdown (a code span keeps its backticks), and its level (# is 1)
- :seon.doc/heading :string
- :seon.doc/level [:int {:min 1 :max 6}]
- ;; its place among its parent's docs as the page holds them (0 first): what draws the page back in its order
- :seon.doc/position :int
- ;; the heading's next block when it is a paragraph: what summary depth shows
- :seon.doc/lead :string
- ;; the section's own text: the lines after its heading, up to the next heading of any level
- :seon.doc/text :string
- ;; the enclosing section
- :seon.doc/parent [:and {:seon.db/to [:seon.doc/fact]} :seon.db/ref]
- ;; what its own text cites and resolves to: a section (a link) or a var (a name); a link to no section is refused at
- ;; the load (:seon.db/no-target, docs/references.md#the-wiki-in-the-store)
- :seon.doc/references [:set :seon.db/ref]
- ;; the names its own text cites as references (seon.ref/kept: a text word only when it named
- ;; something at load), kept as names: a var deleted later leaves its name here
+{:seon.doc/address [:and {:seon.db/identity true :description "The section's address, path#anchor as the parse writes it, such as docs/flow.md#idioms. See docs/references.md#the-wiki-in-the-store."} :string]
+ :seon.doc/heading [:string {:description "The heading as its line writes it, in Markdown (a code span keeps its backticks)."}]
+ :seon.doc/level [:int {:min 1 :max 6 :description "The heading's level, where a single # is 1."}]
+ :seon.doc/position [:int {:description "The section's place among its parent's sections as the page holds them, 0 first."}]
+ :seon.doc/lead [:string {:description "The heading's next block when it is a paragraph, which is what summary depth shows."}]
+ :seon.doc/text [:string {:description "The section's own text: the lines after its heading, up to the next heading of any level."}]
+ :seon.doc/parent [:and {:seon.db/to [:seon.doc/fact] :description "The enclosing section."} :seon.db/ref]
+ :seon.doc/references [:set {:description "What the section's own text cites and resolves to: a section by a link, or a var by a name. A link to no section refuses the load. See docs/references.md#the-wiki-in-the-store."} :seon.db/ref]
  ;; indexed (AVET): the sections that cite a name are sought by it, when a var or task of that name appears or
  ;; vanishes (seon.problems/caused-split, docs/cost.md#a-diff-per-attribute-costs-a-descent-each)
- :seon.doc/names [:set {:seon.db/index true} :qualified-symbol]
- ;; the form id of each var the section cites, as it stood when the section's text was last written
- ;; (seon.doc/load-tx keeps it while the text is unchanged): a var whose form id now differs leaves the
- ;; section stale (seon.problems, class :stale-section). From git's baseline (seon.doc/baseline-reads)
- ;; a var may instead be :absent (no form defined it at the section's commit) or :changed (its form's
- ;; docstring or contract changed since), each stale
- :seon.doc/read [:map-of :qualified-symbol [:or :string [:enum :absent :changed]]]
- ;; why the baseline of :read could not be taken from git (seon.doc/baseline-reads): the section's :read is as of
- ;; the load, shown as attention (seon.problems, :stale-section) until the section is edited
- :seon.doc/baseline-unread :string
- ;; the last review that read the section as it is though its code changed (my.doc/reviewed!): who, and
- ;; the form ids it read at. The older reviews stay in the history
- :seon.doc/reviewed [:map [:by :string] [:forms [:map-of :qualified-symbol :string]]]
- :seon.doc/fact [:map {:seon.db/attributes true}
+ :seon.doc/names [:set {:seon.db/index true :description "The names the section's own text cites as references, kept as names, so a var deleted later leaves its name here. A text word is kept only when it named something at load."} :qualified-symbol]
+ :seon.doc/read [:map-of {:description "The form id of each var the section cites, as it stood when the section's text was last written. A var whose form id now differs leaves the section stale. From git's baseline a var may instead be :absent (no form defined it at the section's commit) or :changed (its form's docstring or contract changed since), each stale. See docs/health.md#a-stale-section."} :qualified-symbol [:or :string [:enum :absent :changed]]]
+ :seon.doc/baseline-unread [:string {:description "Why the baseline of the section's :seon.doc/read could not be taken from git. The section's :seon.doc/read is then as of the load, and shows as attention until the section is edited. See docs/health.md#a-stale-section."}]
+ :seon.doc/reviewed [:map {:description "The last review that read the section as it is though its code changed: who reviewed it, and the form ids it read at. Older reviews stay in the history. See docs/health.md#a-stale-section."} [:by :string] [:forms [:map-of :qualified-symbol :string]]]
+ :seon.doc/fact [:map {:seon.db/attributes true :description "A section of the wiki as the store holds it, one entity per heading of each page. See docs/references.md#the-wiki-in-the-store."}
                      [:seon.doc/address :seon.doc/address]
                      [:seon.doc/heading :seon.doc/heading]
                      [:seon.doc/level {:optional true} :seon.doc/level]
@@ -48,9 +29,7 @@
                      [:seon.doc/read {:optional true} :seon.doc/read]
                      [:seon.doc/baseline-unread {:optional true} :seon.doc/baseline-unread]
                      [:seon.doc/reviewed {:optional true} :seon.doc/reviewed]]
- ;; a section as one parse reads it, before it is stored: its fact's values, its parent's
- ;; address, and the citations of its own text
- :seon.doc/parsed [:map {:closed true}
+ :seon.doc/parsed [:map {:closed true :description "A section as one parse reads it, before it is stored: its fact's values, its parent's address, and the citations of its own text. See docs/references.md#one-parse."}
                        [:seon.doc/address :seon.doc/address]
                        [:seon.doc/heading :seon.doc/heading]
                        [:seon.doc/level :seon.doc/level]
