@@ -80,7 +80,14 @@ NEEDS=1; [[ -n $SEL && -e $SEL/steps-binary && ! -s $SEL/steps-binary ]] && NEED
 VERDICT=CHECK; [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]] && VERDICT=${(U)1}
 # a binary built from another tree checks another program (and may refuse this tree's config
 # before it says anything): bin/build records the tree it built from, bin/tree names this one
-if (( NEEDS )); then
+# The plan's out/build (bin/test's run dir: the steps' SEL, or its parent for the fast tier) says it when empty: the binary is
+# current for this tree by reach (seon.root/binary-current), what differs reaching nothing root runs from its binary
+# A check a test of that run starts itself (bin/check MODE from a shard) has no steps dir: the run's out/build is
+# SEON_PLAN_BUILD, which bin/test exports, and it answers for that run's checkout alone (a test's own scratch checkout,
+# seon.check-test/a-stale-binary-is-refused, has a binary of its own)
+PLAN_BUILD=; [[ -n ${SEON_PLAN_BUILD:-} && $SEON_PLAN_BUILD == $ROOT/* ]] && PLAN_BUILD=$SEON_PLAN_BUILD
+CURRENT=; for b in ${SEL:+$SEL/build} ${SEL:+${SEL:h}/build} $PLAN_BUILD; do [[ -e $b && ! -s $b ]] && CURRENT=1; done
+if (( NEEDS )) && [[ -z $CURRENT ]]; then
   BUILT=$(cat "$ROOT/target/seon.tree" 2>/dev/null) HERE=$("$ROOT/bin/tree" "$ROOT")
   if [[ -z $BUILT || $BUILT != $HERE ]]; then
     echo "check: target/seon was built from tree ${BUILT:-unknown}; this checkout is tree ${HERE:-unknown}: run bin/build seon"
