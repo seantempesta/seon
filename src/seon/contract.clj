@@ -340,10 +340,42 @@
       ([a b c d e f] (if @p (checked a b c d e f) (raw a b c d e f)))
       ([a b c d e f & more] (if @p (apply checked a b c d e f more) (apply raw a b c d e f more))))))
 
+(clojure.core/defn- answered
+  "The schema contract form c says its function answers, when every arity's output is one registered name whose properties
+  declare a render (:seon.render/hiccup), else nil: read once, at the function's definition. See docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat :any] [:maybe :qualified-keyword]]}
+  [c]
+  (let [outs (cond (and (vector? c) (= :=> (first c))) [(nth c 2 nil)]
+                   (and (vector? c) (= :function (first c))) (map #(when (vector? %) (nth % 2 nil)) (rest c)))
+        k (first outs)]
+    (when (and (qualified-keyword? k) (apply = outs) (:seon.render/hiccup (properties k))) k)))
+
+(clojure.core/defn- named
+  "f, each value it answers that can hold metadata and is no map named by the schema its contract c answers (`answered`), as
+  metadata :seon.render/schema: what an eval of a call of it records as its :seon.eval/schema (seon.repl/record-details), so the
+  value is drawn by that schema's render wherever it is shown. A map says what it is by its own keys (an error by its variant,
+  seon.render/schema-of), which a contract's wider schema (:seon.error/base) would hide, so a map is never named here. f itself
+  when c answers no such schema: no cost on any call. See docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat :any :seon.host/fn] :seon.host/fn]}
+  [c f]
+  (if-let [k (answered c)]
+    (let [t (fn [v] (if (and (instance? clojure.lang.IObj v) (not (map? v))) (vary-meta v assoc :seon.render/schema k) v))]
+      (fn
+        ([] (t (f)))
+        ([a] (t (f a)))
+        ([a b] (t (f a b)))
+        ([a b c] (t (f a b c)))
+        ([a b c d] (t (f a b c d)))
+        ([a b c d e] (t (f a b c d e)))
+        ([a b c d e g] (t (f a b c d e g)))
+        ([a b c d e g & more] (t (apply f a b c d e g more)))))
+    f))
+
 (clojure.core/defn checked
   "f checked by contract form c (compiled once, here: seon.contract/wrap), errors
   named fn-sym (a public function's, without private?); for a private function (private?) checked only while this process checks
-  private contracts (switched); f itself when instrumentation is off. Not inlined (:redef): every
+  private contracts (switched); f itself when instrumentation is off; in every case its values named by the schema its contract answers
+  when that schema declares a render (`named`). Not inlined (:redef): every
   contracted definition calls it once, at its definition, and a spliced copy of its
   body (wrap, schema, seon.profile/counted) at each of the 1,500 definitions was 5 MB of
   code that runs once (docs/machine.md#roots-heap)."
@@ -351,9 +383,11 @@
                   [:=> [:cat :qualified-symbol :any :seon.host/fn :boolean] :seon.host/fn]] :redef true}
   ([fn-sym c f] (checked fn-sym c f false))
   ([fn-sym c f private?]
-   (if on?
-     (let [w (wrap fn-sym (schema c) f)] (if private? (switched w f) w))
-     f)))
+   ;; its values named by the schema its contract answers (`named`), checked or not
+   (let [f (named c f)]
+     (if on?
+       (let [w (wrap fn-sym (schema c) f)] (if private? (switched w f) w))
+       f))))
 
 (clojure.core/defn- contracted-def
   "The forms of a def whose value is checked from its definition on."
@@ -486,7 +520,7 @@
     (if (instance? Throwable s)
       (error :seon.contract/invalid by (str (symbol v) ": its contract does not compile: " (ex-message s))
              {:seon.contract/var (symbol v)})
-      (let [w (cond-> (wrap (symbol v) s raw) (:private (meta v)) (switched raw))]
+      (let [r (named c raw) w (cond-> (wrap (symbol v) s r) (:private (meta v)) (switched r))]
         (alter-var-root v (constantly w))
         (alter-meta! v assoc ::wrapper w ::raw raw)
         :armed))))
