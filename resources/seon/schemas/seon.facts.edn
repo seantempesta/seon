@@ -379,7 +379,10 @@
                              ;; what it names, by identity alone: its render reads the rest from the db (:seon.cite/of-read, :seon.cite/target-read)
                              :seon.ctx/pattern [:seon.cite/id :seon.cite/depth :seon.cite/order
                                                 {:seon.cite/of [:seon.task/id :seon.task/ns :seon.agent/key]}
-                                                {:seon.cite/target [:seon.doc/address :var/name :schema/key :ns/name :file/path :seon.task/id]}]}
+                                                ;; a cited task also by what an agent may edit of it at this path: the task content a run's end
+                                                ;; carries to main (seon.task/carry-tx), so a task that curates another reads and writes its plan here
+                                                {:seon.cite/target [:seon.doc/address :var/name :schema/key :ns/name :file/path
+                                                                    :seon.task/id :seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/cause]}]}
                        [:seon.cite/id :seon.cite/id] [:seon.cite/of {:optional true} :seon.cite/of] [:seon.cite/target :seon.cite/target]
                        [:seon.cite/depth :seon.cite/depth] [:seon.cite/order :seon.cite/order]]
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
@@ -425,7 +428,10 @@
  :seon.task/declared [:string {:description "The declaration that a task file last stated for this task, as EDN."}]
  ;; a task may hold config keys as its overrides, by their own names; each key is defined once, by its own schema
  ;; (seon.config.agent.edn, seon.config.merge.edn), never listed here (an attribute is named by one entity schema)
- :seon.task/task-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:seon.task/id
+ :seon.task/task-fact [:map {:seon.db/attributes true
+                              ;; what acts on a task wherever a pull holds it with its plan (its own, a need, a cite): path is filled by the reader
+                              :seon.render/more [["change its plan (it reaches main when your run ends)" (swap! ctx assoc-in (conj path :seon.task/plan) x)]]
+                              :seon.ctx/pattern [:seon.task/id
                                 :seon.task/ns
                                 :seon.task/plan
                                 :seon.task/execution

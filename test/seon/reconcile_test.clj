@@ -5,7 +5,7 @@
   (:require [seon.lib] [seon.test-store :as ts] [seon.profile :as profile] [clojure.test :refer [deftest is are testing]]
             [datahike.api :as d]
             [seon.db :as pdb]
-            [seon.task :as task]
+            [seon.task :as task] [seon.doc]
             [seon.reconcile :as r] [my.root]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg] [seon.edn :as sedn]
@@ -1212,7 +1212,9 @@
         (let [tk (task/task db' id)
               before (mdb two-tasks)]
           (is (= problem (get-in tk [:seon.task/failure :reason])))
-          (is (= (set (keys (task/tasks before))) (set (keys (task/tasks db')))) "no new task")
+          (is (= (if (= id "demo/add-merge") #{} #{(str id "-refine")}) (set (remove (set (keys (task/tasks before))) (keys (task/tasks db')))))
+              "no new task but its refine, held for root (docs/tasks.md#a-refine-curates-its-own-task); a merge task continues its work's branch and gets none")
+          (when-let [rf (task/task db' (str id "-refine"))] (is (= :running (:seon.task/execution rf)) "a task that ended not done gets its refine released: work, refine, rerun"))
           (is (not-any? #(= :cancelled (:seon.task/execution %)) (vals (task/tasks db'))) "none cancelled")
           (is (= :held (:seon.task/execution tk)))
           (is (= (:seon.task/agent tk) (get-in tk [:seon.task/failure :agent])) "naming the agent")
@@ -1319,7 +1321,8 @@
         {db' :db} (judge! db "add" {:outcome :red} :results {(t "add") :fail})
         problem "the same verdict again: proof-red demo-test/add-test"
         released (d/db-with db' (task/execution-tx ["demo/add"] :running))
-        [sp & more] (actions-for released)]
+        ;; its refine starts too (docs/tasks.md#a-refine-curates-its-own-task); the release is the task's own
+        [sp & more] (filter #(= "demo/add" (:task %)) (actions-for released))]
     (is (nil? more))
     (is (= (mspawn "add") sp) "a new agent's start, on the task's own branch")
     (is (= (:seon.agent/branch (d/entity db [:seon.agent/key "a-add"])) (get-in sp [:env :branch])))
@@ -1336,8 +1339,10 @@
   ;; the reconciler proc's own steps: the reason's hold is one write, made where it was judged (the judging); once it is committed
   ;; nothing is left to do (quiet, naming the held task as a root cause); a root-only commit after it asks nothing
   (let [red [{:reason :proof-red :symbol (t "add")}]
-        db (:db (judge! (mdb [(decl "add") (decl "twice" :needs ["add"])] :extra (work "add" :running :members {:seon.task/reasons red}))
-                        "add" {:outcome :red} :results {(t "add") :fail}))
+        ;; its refine (released: the task ended not done) cancelled by root, so what is left is the held task alone
+        db (-> (:db (judge! (mdb [(decl "add") (decl "twice" :needs ["add"])] :extra (work "add" :running :members {:seon.task/reasons red}))
+                            "add" {:outcome :red} :results {(t "add") :fail}))
+               (d/db-with (task/execution-tx ["demo/add-refine"] :cancelled)))
         commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
         main (fn [st db ops] (r/reconciler-proc st :main (assoc (ts/commit-of conn db) :ops ops)))
         reqs (fn [outs] (remove #(= :stat (:op %)) (:to-api outs)))
@@ -1538,7 +1543,7 @@
     (is (= f (:seon.task/failure (task/task judged "demo/a"))) "the failure, on main")
     (is (nil? (d/entity judged [:seon.message/id "v-demo/a-1"])) "no verdict is told for an end its agent marked failed")
     (is (= :failed (r/task-state idx "demo/a")))
-    (is (= [] (actions-for judged)) "nothing refines or retries it")
+    (is (= ["demo/a-refine"] (map :task (actions-for judged))) "nothing retries it; its refine starts (docs/tasks.md#a-refine-curates-its-own-task)")
     (let [[row & more] (get-in (problems/report judged) [:classes :failed :rows])]
       (is (nil? more))
       (is (= {:task "demo/a" :reason "the premise is refuted" :counterexample "(= 1 2)" :open? true}
@@ -1763,3 +1768,126 @@
   (is (= :tested (r/after-work {:value {:outcome :green}} nil)) "a claim of done is judged")
   (is (= :tested (r/after-work {:value {:outcome :failed}} nil)))
   (is (= :tested (r/after-work {:ex {:seon.error/message "threw"}} nil)) "and so is a loop that threw"))
+
+(defn- with-refine-section
+  "db holding the section a refine cites (docs/tasks.md#a-refine-curates-its-own-task), as a root's store holds the wiki: a test
+  world holds no page but the prompt's stub, and a plan's cite is written only to a section the store holds."
+  [db] (d/db-with db (seon.doc/load-tx db "docs" {"docs/tasks.md" "# Tasks\n\n## A refine curates its own task\n\nA refine curates the task it needs.\n"})))
+
+(deftest every-end-gets-one-refine-and-a-refine-gets-none
+  ;; docs/tasks.md#a-refine-curates-its-own-task (the owner, 2026-11-11: "every state should be convertable to a completed task"): an
+  ;; ended task's refine is written with its end, a :design task on its branch that needs it and cites the refine section; a refine
+  ;; gets none, and none is written twice
+  (let [db (with-refine-section (db-of [(decl "a")]))
+        tx (task/refine-tx db "demo/a" false)
+        db1 (d/db-with db tx)
+        r (task/task db1 "demo/a-refine")]
+    (is (seq tx) "an ended task gets its refine")
+    (is (= :design (:seon.task/kind r)) "judged by what it changed of the plan")
+    (is (some #(= "demo/a" (get-in % [:seon.cite/target :seon.task/id])) (task/cites-of db1 (seon.db/eid db1 :seon.task/id "demo/a-refine"))) "it cites the task it refines")
+    (is (empty? (:seon.task/needs r)) "and needs nothing: it is wanted whatever that task's outcome")
+    (is (= (:seon.task/branch (task/task db1 "demo/a")) (:seon.task/branch r)) "on its branch: the same agent continues")
+    (is (= :running (:seon.task/execution r)) "released")
+    (is (task/refine? db1 "demo/a-refine") (str "a refine by its cite of the section: " (pr-str (task/cites-of db1 (seon.db/eid db1 :seon.task/id "demo/a-refine")))))
+    (is (nil? (task/refine-tx db1 "demo/a" false)) "none twice")
+    (is (nil? (task/refine-tx db1 "demo/a-refine" false)) "a refine gets none")
+    (is (nil? (task/refine-tx db "demo/a" true))
+        "a task that finished gets no refine by default (:seon.config.agent/refine-finished :none): a held task reads as work not done")))
+
+(deftest a-refined-plan-starts-one-fresh-run-from-main
+  ;; docs/tasks.md#a-refine-curates-its-own-task (the owner, 2026-11-11: the refinement is tried from the earlier point, beside the
+  ;; original): a work task's failed end is held and gets its refine on its branch; the refine's end that changed the task's plan
+  ;; carries the plan to main and releases the task on a new branch from main; a refine that changed nothing starts no run
+  (let [red [{:reason :proof-red :symbol (t "a")}]
+        db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running :members {:seon.task/reasons red})))
+        {db1 :db} (judge! db0 "a" {:outcome :red} :results {(t "a") :fail})
+        old (:seon.task/branch (task/task db1 "demo/a-refine"))
+        db2 (d/db-with db1 (work "a-refine" :running))
+        better "Make a true. Start from (source demo/a): the red was its arity."]
+    (is (= :held (:seon.task/execution (task/task db1 "demo/a"))) "the failed work is held for root")
+    (is (task/refine? db1 "demo/a-refine") "and its refine is written with its end")
+    (testing "a refine that changed the plan"
+      (let [{db3 :db} (judge! db2 "a-refine" {:outcome :green} :on-branch [{:seon.task/id "demo/a" :seon.task/plan better}])
+            a (task/task db3 "demo/a")]
+        (is (= better (:seon.task/plan a)) "main holds the refined plan")
+        (is (= :running (:seon.task/execution a)) "the work is released")
+        (is (and (:seon.task/branch a) (not= old (:seon.task/branch a))) (str "on a new branch: " (:seon.task/branch a) " (was " old ")"))
+        (is (nil? (:seon.task/reasons a)) "root's last reasons are no news to the fresh run")
+        (is (= 1 (count (filter #(and (= :spawn (:op %)) (= "demo/a" (:task %))) (actions-for db3)))) "one fresh run")
+        (is (= [(:seon.task/branch a)] (keep #(when (= "demo/a" (:task %)) (get-in % [:env :branch])) (actions-for db3))) "from its new branch")
+        (is (nil? (task/session-key db3 "demo/a")) "by a new agent: the old one's conversation is on the old branch")
+        (is (contains? (get-in (r/index db3) [:by-branch (:seon.task/branch a)]) "demo/a") "the index holds it under its new branch")
+        (is (not (contains? (get-in (r/index db3) [:by-branch old]) "demo/a")) "and no longer under its old one")
+        (is (= (akey "a") (task/session-key db0 "demo/a")) "while the first run's agent is its session's on its own branch")))
+    (testing "a refine that changed nothing"
+      (let [{db3 :db} (judge! db2 "a-refine" {:outcome :green})]
+        (is (= :held (:seon.task/execution (task/task db3 "demo/a"))) "starts no run")))))
+
+(deftest a-refine-wakes-the-agent-it-continues
+  ;; docs/tasks.md#a-refine-curates-its-own-task: a refine continues the agent of the task it cites, on that task's branch. That agent's
+  ;; process stays at its cap, idle, and holds the branch, so the refine's start is a wake on it; a spawn would be refused ("branch ...
+  ;; is held by live agent", loop D0, 2026-11-11)
+  (let [db (with-refine-section (mdb [(decl "a")] :extra (work "a" :cap)))
+        db1 (d/db-with db (task/refine-tx db "demo/a" false))
+        acts (filter #(= "demo/a-refine" (:task %)) (actions-for db1))]
+    (is (= [:wake] (map :op acts)) (str "woken, not spawned: " (pr-str acts)))
+    (is (= [:a-a] (map :agent acts)) "on the agent it continues")))
+
+(deftest a-refined-plan-runs-a-capped-task-again
+  ;; docs/tasks.md#a-refine-curates-its-own-task: a task at its cap is waiting for a raised budget, not ended, so its judgment writes no
+  ;; refine (batch 88's e2e-held: a released refine took the turns the parked agent waited on); a refine asked for, that changed its plan,
+  ;; still starts it again on a new branch (loop D0, 2026-11-11)
+  (let [db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running)))
+        {db1 :db} (judge! db0 "a" {:outcome :cap})
+        _ (is (nil? (task/task db1 "demo/a-refine")) "a cap writes no refine")
+        db1 (d/db-with db1 (task/refine-tx db1 "demo/a" false))
+        old (:seon.task/branch (task/task db1 "demo/a-refine"))
+        db2 (d/db-with db1 (work "a-refine" :running))
+        better "Make a true. The example to copy: demo-test/a-test."
+        {db3 :db} (judge! db2 "a-refine" {:outcome :green} :on-branch [{:seon.task/id "demo/a" :seon.task/plan better}])
+        a (task/task db3 "demo/a")]
+    (is (= :cap (:seon.task/outcome (d/entity db1 [:seon.task/id "demo/a"]))) "capped, not held")
+    (is (= better (:seon.task/plan a)))
+    (is (and (:seon.task/branch a) (not= old (:seon.task/branch a))) "run again on a new branch")
+    (is (= :running (:seon.task/execution a)))))
+
+(deftest a-task-a-session-agent-takes-up-gets-its-own-turns
+  ;; docs/tasks.md#a-refine-curates-its-own-task (loop D2, 2026-11-11): a refine woken on the agent of the task it cites (seon.reconcile/holder-of)
+  ;; is a run of its own: the agent's budget, spent by the earlier task, is raised by the refine's own turns, not by a wake's allowance
+  (let [turns (cfg/value :seon.config.agent/max-turns)
+        db (d/db-with (with-refine-section (db-of [(decl "a")] :extra (work "a" :cap))) [])
+        db (d/db-with db (task/refine-tx db "demo/a" false))
+        act {:op :wake :task "demo/a-refine" :agent :a-a :env {:branch (task/default-branch "demo/a") :model nil :max-turns turns}}
+        max-of (fn [db] (:seon.agent/max-turns (d/entity db [:seon.agent/key (akey "a")])))
+        [_ outs] (#'r/start (st-of db) act)
+        after (d/db-with db (get-in (first outs) [:req :req :tx-data]))]
+    (is (= (+ (max-of db) turns) (max-of after)) "raised by the refine's own turns")))
+
+(deftest the-branch-holder-continues-the-session-or-is-stopped
+  ;; docs/tasks.md#a-refine-curates-its-own-task, one rule read from the holder's state (seon.reconcile/holder-of at the start, and
+  ;; a-refused-start-is-asked-again-when-its-holder-ends for the refusal): the agent holding a task's branch is its session's. IDLE (its
+  ;; task at its cap or parked) it is woken for the next task on the branch; ENDING (its task done) the next task is a spawn, which its
+  ;; branch refuses until the holder is stopped and asks again (Optimization's refusedholder). The two never both apply.
+  (let [refine-of (fn [outcome] (let [db (with-refine-section (db-of [(decl "a")] :extra (work "a" outcome)))]
+                                  (d/db-with db (task/refine-tx db "demo/a" false))))
+        idle-db (refine-of :cap)
+        ending-db (refine-of :done)
+        act (fn [db] (first (filter #(= "demo/a-refine" (:task %)) (actions-for db))))]
+    (is (= {:wake (get-in (r/index idle-db) [:agents (:seon.task/agent (get-in (r/index idle-db) [:tasks "demo/a"]))])}
+           (#'r/holder-of (r/index idle-db) "demo/a-refine")) "idle holder: holder-of names it")
+    (is (= [:wake :a-a] ((juxt :op :agent) (act idle-db))) "and the refine is a wake on it")
+    (is (nil? (#'r/holder-of (r/index ending-db) "demo/a-refine")) "ending holder: no wake")
+    (is (= :spawn (:op (act ending-db))) "the refine is a spawn, refused while the holder ends and asked again when it is stopped")))
+
+(deftest a-capped-task-its-agent-left-is-not-woken
+  ;; docs/tasks.md#a-refine-curates-its-own-task (loop D2-again, 2026-11-11: the refine's task-switch message woke its agent, and the work task
+  ;; it had left at its cap, still naming that agent, was started on it mid-refine): a task at its cap whose agent took up another task ended its
+  ;; wait; a stage's parked tasks still wake together (an-agents-boot-moving-re-derives-every-task-that-names-it)
+  (let [base (with-refine-section (db-of [(decl "a")] :extra (work "a" :cap)))
+        base (d/db-with base (task/refine-tx base "demo/a" false))
+        took-up (fn [outcome] (d/db-with base [{:seon.task/id "demo/a-refine" :seon.task/agent [:seon.agent/key (akey "a")] :seon.task/outcome outcome}
+                                               {:seon.agent/key (akey "a") :seon.agent/task [:seon.task/id "demo/a-refine"]}]))
+        tasks (fn [db] (set (map :task (actions-for db :woken [(akey "a")]))))]
+    (is (contains? (tasks base) "demo/a") "before its agent took up the refine, a message wakes it at its cap, as any capped task")
+    (is (not (contains? (tasks (took-up :running)) "demo/a")) "after, the task it left is not started by a message to it")
+    (is (= #{"demo/a-refine"} (tasks (took-up :cap))) "at the refine's own cap, a message wakes the refine alone")))

@@ -258,6 +258,10 @@
  ;; waits for an end; 0 starts nothing new while running work finishes. root's start! may
  ;; pass :max-running for one run; the fact on main says what the run used.
  :seon.config.agent/max-running 10
+ ;; How a DONE task's refine is written (docs/tasks.md#a-refine-curates-its-own-task): :none, no refine until the owner rules
+ ;; (Point, 2026-11-11: each finished task's refine is one more paid run; batch 88's e2e steps, 2026-11-12: a held task reads as work
+ ;; not done on the page and in every all-done check, so an offer is no task); :held for root to release; :running to start each at once.
+ :seon.config.agent/refine-finished :none
  ;; Unit: turns a run may take when its task sets none (a task's own
  ;; :seon.config.agent/max-turns wins). At the bound the run ends and the done rule judges it.
  ;; Provenance: v1's live runs measured turns-to-green median 14-40, run 11's p90 32
