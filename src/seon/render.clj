@@ -1196,10 +1196,11 @@
   [a] (if (str/starts-with? (name a) "_") (keyword (namespace a) (str/replace-first (name a) "_" "")) a))
 
 (def ^:private join-options
-  "A join's options: Datahike's pull's (:as, :limit; :reverse, our fork's newest first) and ctx's one
-  beside them, :by, the identity attribute a symbol value names (forward: each value read as [by v];
-  reverse: the entities whose attribute holds this entity's by)."
-  #{:as :limit :reverse :by})
+  "A join's options: Datahike's pull's (:as, :limit; :reverse, our fork's newest first) and ctx's two
+  beside them: :by, the identity attribute a symbol value names (forward: each value read as [by v];
+  reverse: the entities whose attribute holds this entity's by); :tx k, each member holding under k the transaction
+  that wrote its link (docs/ctx.md#the-pattern)."
+  #{:as :limit :reverse :by :tx})
 
 (defn pattern
   "Pull pattern p, what a record holds (docs/ctx.md#the-pattern: Datahike's syntax, '* the entity's
@@ -1208,7 +1209,7 @@
   :joins [{:attr :key :rev? :limit :reverse? :by :sub}]}, each join's attribute read forward, its
   key its :as else the attribute, its limit a count or a config key's value; :attrs also the name a
   reverse :by join reads. Throws :seon.ctx/invalid-pattern naming the clause it cannot read: no
-  vector, a clause that is no '*, attribute, [attribute :tx true] (its value and the transaction it was written in, :txs) or {[attribute :tx true] [...]} (and those attributes of that transaction) or join, a reverse attribute outside a join, an option
+  vector, a clause that is no '*, attribute, [attribute :tx k] (its value, and under k the transaction it was written in: :txs) or join (with :tx k, each member holding under k its link's transaction), a reverse attribute outside a join, an option
   neither pull's nor :by, a :limit with no :reverse (a window is newest first), a join with no
   pattern, an entity schema with none or whose pattern reaches itself. An entity schema's name is read in the entity index ix (seon.db/index-of)."
   {:malli/schema [:function [:=> [:cat :map :any] :seon.ctx/spec] [:=> [:cat :map :any [:set :qualified-keyword]] :seon.ctx/spec]]}
@@ -1220,36 +1221,34 @@
      (doseq [x p] (cond (= '* x) nil
                         (keyword? x) (when (reverse? x) (bad "a reverse attribute is read by a join: {:ns/_name pattern}" x))
                         (map? x) nil
-                        ;; an attribute with options, as pull's [attr :as x]: :tx true, the transaction each of its datoms was written in, beside its value
+                        ;; an attribute with options, as pull's [attr :as x]: :tx k, the transaction each of its datoms was written in, under the key k
                         (vector? x) (let [[a & opts] x]
-                                      (when-not (and (qualified-keyword? a) (not (reverse? a))) (bad "an attribute clause names an attribute: [:ns/name :tx true]" x))
-                                      (when-not (= [:tx true] (vec opts)) (bad "an attribute's one option is :tx true" x)))
+                                      (when-not (and (qualified-keyword? a) (not (reverse? a))) (bad "an attribute clause names an attribute: [:ns/name :tx :at]" x))
+                                      (when-not (and (= :tx (first opts)) (keyword? (second opts)) (= 2 (count opts))) (bad "an attribute's one option is :tx and the key it fills: [:ns/name :tx :at]" x)))
                         :else (bad "a clause is '*, an attribute or a join" x)))
-     (let [;; {[attr :tx true] sub}: the attributes sub names of the transaction that wrote attr's datom, never the ref followed
-           t-clause? (fn [k] (and (vector? k) (= [:tx true] (vec (rest k)))))
-           tx-subs (into {} (for [clause p :when (map? clause) [k sub] clause :when (t-clause? k)]
-                              (let [a (first k)]
-                                (when-not (and (qualified-keyword? a) (not (reverse? a))) (bad "a transaction's clause names an attribute: {[:ns/name :tx true] [...]}" k))
-                                (when-not (vector? sub) (bad "a transaction's pattern is a vector of its attributes" k))
-                                [a (pattern ix sub seen)])))
-           joins (vec (for [clause p :when (map? clause) [k sub] clause :when (not (t-clause? k))]
+     (let [joins (vec (for [clause p :when (map? clause) [k sub] clause]
                         (let [[a & opts] (if (vector? k) k [k])
                               o (if (even? (count opts)) (apply hash-map opts) (bad "a join's options are pairs" k))
                               _ (when-let [x (first (remove join-options (keys o)))] (bad (str "no join option " x) k))
                               _ (when-not (qualified-keyword? a) (bad "a join names an attribute" k))
                               _ (when (and (:limit o) (not (:reverse o))) (bad "a window is newest first: :limit with :reverse true" k))
+                              _ (when (and (contains? o :tx) (not (keyword? (:tx o)))) (bad ":tx names the key each member holds its link's transaction under: [:ns/_name :tx :at]" k))
+                              _ (when (and (:tx o) (:by o)) (bad "a lookup's members are joined by no datom: :tx with :by" k))
                               lim (:limit o)]
-                          {:attr (forward a) :key (or (:as o) a) :rev? (reverse? a) :by (:by o) :reverse? (boolean (:reverse o))
+                          (cond-> {:attr (forward a) :key (or (:as o) a) :rev? (reverse? a) :by (:by o) :reverse? (boolean (:reverse o))
                            :limit (if (keyword? lim) (config/value lim) lim)
-                           :sub (cond (vector? sub) (pattern ix sub seen)
+                           :sub (cond-> (cond (vector? sub) (pattern ix sub seen)
                                       ;; an entity schema's name: the pattern it declares
                                       (qualified-keyword? sub)
                                       (cond (seen sub) (bad (str sub "'s pattern reaches itself") clause)
                                             :else (pattern ix (or (schema-property ix sub :seon.ctx/pattern) (bad (str sub " declares no pattern") clause))
                                                            (conj seen sub)))
-                                      :else (bad "a join's pattern is a vector, or an entity schema's name" clause))})))]
+                                      :else (bad "a join's pattern is a vector, or an entity schema's name" clause))
+                                  ;; the key a member holds its link's transaction under is read-only there, as the pull's own keys are
+                                  (:tx o) (update :ro (fnil conj #{}) (:tx o)))}
+                            (:tx o) (assoc :tx (:tx o))))))]
        {:star? (boolean (some #{'*} p))
-        :attrs (-> #{} (into (filter keyword?) p) (into (keep #(when (vector? %) (first %))) p) (into (keys tx-subs)) (into (keep #(when (:rev? %) (:by %))) joins))
-        ;; each attribute asked with its transaction: nil, its id alone; else the pattern of the transaction's attributes
-        :txs (merge (into {} (keep #(when (vector? %) [(first %) nil])) p) tx-subs)
+        :attrs (-> #{} (into (filter keyword?) p) (into (keep #(when (vector? %) (first %))) p) (into (keep #(when (:rev? %) (:by %))) joins))
+        ;; each attribute asked with its transaction: the key it fills
+        :txs (into {} (keep #(when (vector? %) [(first %) (nth % 2)])) p)
         :joins joins}))))

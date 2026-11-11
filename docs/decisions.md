@@ -42,6 +42,58 @@ Asked whether sessions are a thing of their own or the agent's id would do: "I'm
 
 "In general I think the message shouldn't matter what turn it arrived on and what we are missing is either a timestamp or the ability to pull in tx-data from any attribute in addition to the attibute?" He asked to see it in the system before ruling further ("I want to see this visualized ideally in the system itself so we can keep improving our own capabilities for rendering"). It is the step being built; "no model call names a message" ([users](users.md#messages)) stands. Stated in [the plan](plan.md#the-plan), part 1.
 
+### A new session starts at the commit at or before a point; a read is exact at any transaction (owner, 2026-11-11)
+
+Asked what "resume from any point in time" means in the store: "Okay tell Point that works and we can build on this" (relayed by the Deep fixes session through the managing session). What it rules: a point is a branch and a transaction; reading the state there is exact at any transaction, since history is kept; a new session there is a fork at the commit at or before the point, a separate session on its own branch that copies nothing; and nothing is stored on a transaction to find that commit ("We don't need to store data that we can derive"): it is found from the branch's commits (```seon.ctx.wire/at-t```). Stated in [turn](turn.md#an-agent-goes-back-to-an-eval) for the one place it is wired today, a person's Back to here.
+
+### Root is the agent env at the top of the hierarchy; the system is not "root" (owner, 2026-11-11)
+
+"Let's be more clear and say that "root" refers to an agent env that is the top of the agent hierarchy and we use parents and subagents and keep this based on the literal data model that is stored in the db as refs and data"; and of everything else: "I want to stop calling anything that the system is doing without an active env as "root". The system is what a bunch of flow processes and static code that is called and it's on "main" which is just a branch like any other right?" (both relayed by the managing session).
+
+- **The system** writes and reads on main: its writer, its reconciler, its fork server. Main is a branch like any other.
+- **A sub-agent** of an agent is a member of its `:seon.agent/agents`. **The parent**, for a task, is that task's `:seon.task/started-by`: an agent can be in two agents' sets, so "its parent" is asked of a task, never of the agent alone.
+- **Root** is the agent env at the top. The stored refs cannot say that yet: read on the standing store that day, the agent keyed `"root"` holds its key and a ref to the system entity and nothing else, no agent's `:seon.agent/agents` holds it, its task `request/root` names no starter, and the user (an agent entity with no env) holds one started agent that is not it. So the top is told by the reserved key today. The one-tree trial closes it: the user starts root's session, and root is then the agent with an env that an entity with none started.
+
+Counted that day by a search for "root" as the subject of a system act: about 157 lines of the wiki and AGENTS.md, 201 of `src` and 27 of the schema files say root where they mean the system; none is swept by this entry. In the data it means the planned `:seon.root/*` to `seon.system/*` rename, `:seon.agent/root` going, and the reserved agent key. Stated in [vocabulary](vocabulary.md#words-we-do-not-use).
+
+### Ids are unique across every branch; time orders, not transaction ids (owner, 2026-11-11)
+
+"I want all IDs to be unique among all the branches and for us to use time for ordering not TX-ids" (relayed by the managing session). It replaces the managing session's answer of the same day (order by the transaction's id, its time for showing). A recorded time used to sort data is data, so it is no clock deciding ([clocks](clocks.md#time-measured-recorded-never-compared-to-decide)): a wait or a judgment by a clock stays ruled out.
+
+What the standing store held that day, read at the REPL across main and three agents' branches: no transaction id, no entity id and no eval id names two different things on two branches (the store issues them from one counter); a transaction's time is `:db/txInstant`, a millisecond; along main's 400 transactions and a branch's 158 it never went backwards and no two neighbours shared a millisecond. Not yet answered: what breaks a tie when two do, and that an import must write the original time or an imported conversation orders by when it was loaded. Stated in [the plan](plan.md#the-plan), part 1, as the open step.
+
+### A sync merges everything that does not conflict; no list of attributes decides (owner, 2026-11-11)
+
+Offered a smaller sync shaped from lists of attributes: "I don't want a hand made list of attributes to sync. I want all non conflicting data to merge and conflicts to be fixed before we merge anything else. We can hold off merging anything until the conflicts are resolved too if that's safer." (by the question tool, relayed by the managing session). Everything a branch holds merges unless it conflicts; a conflict is resolved before anything else merges; holding a whole turn's merge until its conflicts are resolved is acceptable. Today's merge is decided by such lists (```seon.merge/carried-platform-attrs```, its platform-record test, an empty set of data attributes), which this rules out as the design. Not built; the unlanded `jolt/sync` is not its base. Stated in [the plan](plan.md#the-plan), part 1.
+
+### An attribute nothing reads gets a purpose and a render, or is removed (owner, 2026-11-11)
+
+Of a model call's time taken, stop reason, error count and model, which are written and read by nothing: "If by reader you mean include them in pulls and render them with well written render functions that are focused on why were we are even storing them (if there's no purpose remove them)" (by the question tool, relayed). So each such attribute has one line of purpose and a render that shows it, in a pattern, to whoever acts on it; or it is deleted. Stated in [data modeling](data-modeling.md#before-you-add-something), whose first question it is.
+
+### Messages are ordered by when they arrived, from the pull (owner, 2026-11-11)
+
+Of the branch that orders an agent's messages by the transaction the pull carries, with the recorded requests unchanged by a byte: "Land it" (by the question tool, relayed). Stated in [ctx](ctx.md#the-pattern) when it lands.
+
+### The command and namespace names that say root change with the erase (owner, 2026-11-11)
+
+Of `bin/root`, `seon.root`, `my.root` and the `:seon.root/*` keys, after the vocabulary ruling: "Later, with the erase" (by the question tool, relayed). The wiki's wording is corrected as pages are touched; the command, the namespaces and the keys are renamed together, at the erase.
+
+### A merge replays the source's transactions on the branch that receives it: a fact is placed by when it arrived (owner, 2026-11-11)
+
+A fact has two times: when it happened, and when a branch learned it. The model's request must keep the second, or a fact that arrives late is placed in the agent's past and every byte after it moves. The Optimization, Deep fixes and Data model sessions first agreed a merge as one new transaction of the receiving branch; the owner corrected it: "I disagree. We should never record two transaction times that are the same" (relayed by the managing session). So, agreed by the three after that:
+
+- a merge writes the source's net change since the base grouped by the source's transactions, each group as its own transaction of the receiving branch, in source order, all in one commit or none;
+- each such transaction takes a new id and a new time, strictly later than the one before (arrival), and keeps the source's own facts about itself (which branch wrote it, which eval made it);
+- what it brings keeps its entity ids;
+- so a conversation orders by the transaction a pull carries (`:at`) alone, on any branch;
+- a conversation's own requests are made again on the branch that lived it, as of each call's basis commit.
+
+Datahike's merge takes the transaction data its caller gives it, so this is the caller's choice and needs no change in the fork. Not built: it is the rule the one-merge trial is held to. Its cost against one collapsed transaction is being measured. Stated in [the plan](plan.md#the-plan), part 1.
+
+### No derived value is stored; a judgment is run on the db state (owner, 2026-11-11)
+
+Asked whether a merge may skip values that are derived: "But we aren't storing derived values so what's the problem? If we are storing derived values stop that. If the branch says it's all good it's because the underlying data that will be synced means it's okay and when it syncs it should still be okay". And of moving them to a cache beside the store: "This shouldn't be a cache fix btw. I'm talking about the 'all good' being run on the db state" (both relayed by the managing session). It restates his ruling of 2026-10-26. So a value derived from the db's data (a test's status, a total, a standing, a score) is computed on the db state where it is read and its write is deleted; the same data after a sync gives the same answer, so nothing is carried and nothing can be stale. An observation the data cannot give back (a measured cost) is a fact, written by one writer under an identity that names who observed it, so two branches' observations never meet in one attribute. The merge therefore needs no rule for derived data. The digest-keyed verdicts ([merging](merging.md#verdicts-are-a-cache)) stay what they are, how a judgment avoids running a test twice. Read that day: a test's status on its branch, a function's summed cost, a task's cost reports and waste, and a first move's score are each stored today. Stated in [data modeling](data-modeling.md#derived-data-is-a-cache-never-relied-on).
+
 ### Work, then refine, then review; a refinement is tried from the store's history (owner, 2026-11-11)
 
 "For us this will be a task following their work step. Us doing a refine your previous session context and curate the task so it would have been done better. And then we can test those refinements without losing the previous one because we have db history." And of the fork that reflects mid-task: "What if we take advantage of our ability to fork sessions and make edits to the context? It's cheap from a tokens perspective since it's mostly cached data and we can inject a mini task at the end ... So lets say after 10 turns we do this reflect and improve step". Stated in [the plan](plan.md#the-plan), part 2; not built.

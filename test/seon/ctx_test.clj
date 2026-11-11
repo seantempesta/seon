@@ -298,58 +298,55 @@
     (doseq [[s p] ps]
       (is (= [] (vec (pattern-faults s p))) (str s ": every join keyed by its attribute, no *, each ref join one its refs imply")))))
 
-;; docs/ctx.md#the-pattern: [attr :tx true] holds an attribute's value and, under :seon.db/tx, the transaction its datom was written
-;; in, read off the datoms the entity's one seek reads (owner, 2026-11-11: "pull in tx-data from any attribute in addition to the
-;; attribute"); a member of a reverse join was joined by its own datom, so a message's [:seon.message/to :tx true] is when it reached
-;; the agent; a patch keeps it; a pattern that asks none holds none
+;; docs/ctx.md#the-pattern: a pattern's :tx names the key a transaction is held under, the transaction entity whole (:db/id,
+;; :db/txInstant, :seon.tx/branch), so what an agent does with it is a short clojure.core form (owner, 2026-11-11: "I want this to work
+;; easily with clojure to sort and filter things"): on a join, each member's link's transaction ({[:seon.message/_to :tx :at] ...});
+;; on an attribute, its datom's ([attr :tx :k]); a many-valued attribute's, a vector in link order, each value under :v. The five forms
+;; tried at a worktree root's REPL (notes context-tx-pull-shape-trial-2026-11-11.md) are its examples
 (declare as-agent!)
 
-(deftest an-attribute-asked-with-its-t-holds-the-transaction-it-was-written-in
-  (let [pattern [:seon.agent/key [:seon.agent/turn :tx true] {:seon.message/_to [:seon.message/id :seon.message/body [:seon.message/to :tx true]]}]
-        msg (fn [id] {:seon.message/id id :seon.message/from {:seon.agent/key "user"} :seon.message/body (str "Hello " id) :seon.message/to [[:seon.agent/key k]]})
-        r1 (d/with (ts/test-db) [{:seon.agent/key k :seon.agent/turn 1 :seon.ctx/pattern pattern}])
-        r2 (d/with (:db-after r1) [(msg "m1")])
-        db2 (:db-after r2)
-        a (aid db2)
-        tx-of (fn [db id] (:tx (first (d/datoms db :eavt (seon.db/eid db :seon.message/id id) :seon.message/to a))))
-        c (ctx/build (seon.db/index) db2 a :b)
-        m1 (fn [t] (get-in t [:seon.message/_to (seon.db/eid db2 :seon.message/id "m1")]))
-        r3 (d/with db2 [(msg "m2")])
-        db3 (:db-after r3)
-        c3 (ctx/patch c db3 (:tx-data r3) :b)
-        m2 (get-in (:tree c3) [:seon.message/_to (seon.db/eid db3 :seon.message/id "m2")])
-        plain (ctx/build (seon.db/index) (:db-after (d/with db3 [{:seon.agent/key k :seon.ctx/pattern [:seon.agent/key :seon.agent/turn {:seon.message/_to [:seon.message/id :seon.message/to]}]}])) a :b)]
-    (is (= {:seon.message/to {a {:db/id (tx-of db2 "m1")}}} (:seon.db/tx (m1 (:tree c)))) "a member holds the transaction of the datom that joined it, as a ref the pattern does not join")
-    (is (= #{{:db/id a}} (:seon.message/to (m1 (:tree c)))) "and its value as without it")
-    (is (= {:db/id (:tx (first (d/datoms db2 :eavt a :seon.agent/turn)))} (get-in (:tree c) [:seon.db/tx :seon.agent/turn])) "a single-valued attribute's")
-    (is (= {:seon.message/to {a {:db/id (tx-of db3 "m2")}}} (:seon.db/tx m2)) "a patch holds the new member's")
-    (is (< (tx-of db2 "m1") (tx-of db3 "m2")) "each the transaction it arrived in")
-    (let [timed (ctx/build (seon.db/index) (:db-after (d/with db3 [{:seon.agent/key k :seon.ctx/pattern [:seon.agent/key {:seon.message/_to [:seon.message/id {[:seon.message/to :tx true] [:db/txInstant]}]}]}])) a :b)
-          m1t (get-in (:tree timed) [:seon.message/_to (seon.db/eid db3 :seon.message/id "m1") :seon.db/tx :seon.message/to a])]
-      (is (= (tx-of db2 "m1") (:db/id m1t)) "{[attr :tx true] [...]}: the transaction, by its id")
-      (is (inst? (:db/txInstant m1t)) "with the attributes of it the pattern names: when it was written")
-      (is (= #{{:db/id a}} (get-in (:tree timed) [:seon.message/_to (seon.db/eid db3 :seon.message/id "m1") :seon.message/to])) "the ref itself not followed"))
-    (is (identical? (m1 (:tree c)) (m1 (:tree c3))) "and keeps the member nothing touched")
-    (is (not (str/includes? (pr-str (:tree plain)) ":seon.db/tx")) "a pattern that asks no t holds none")
-    (is (= :seon.ctx/invalid (first (as-agent! db2 #(try (swap! ctx/ctx assoc-in [:seon.db/tx :seon.agent/turn] 1) nil
-                                                       (catch clojure.lang.ExceptionInfo e (:seon.error/type (ex-data e)))))))
-        "the t is the db's: a swap! that edits it is refused, as one of the basis is")
-    (is (= :seon.ctx/invalid-pattern (:seon.error/type (try (render/pattern (seon.db/index) [[:seon.agent/turn :as :n]]) (catch clojure.lang.ExceptionInfo e (ex-data e)))))
-        "an attribute's one option is :tx true")
-    ;; one entity at two paths whose patterns differ in :tx: a patch that moves only its transaction changes the path that asked, and the
-    ;; other stays the same object (the agent at the root asks its turn's t; as the sender of its own message it does not)
-    (let [two [:seon.agent/key [:seon.agent/turn :tx true] {:seon.message/_to [:seon.message/id {:seon.message/from [:seon.agent/key :seon.agent/turn]}]}]
-          db (:db-after (d/with (ts/test-db) [{:seon.agent/key k :seon.agent/turn 1 :seon.ctx/pattern two}
-                                              {:seon.message/id "self" :seon.message/from {:seon.agent/key k} :seon.message/body "note" :seon.message/to [[:seon.agent/key k]]}]))
-          a (aid db)
-          c0 (ctx/build (seon.db/index) db a :b)
-          r1 (d/with db [[:db/retract a :seon.agent/turn 1]])
-          r2 (d/with (:db-after r1) [[:db/add a :seon.agent/turn 1]])
-          c1 (ctx/patch (ctx/patch c0 (:db-after r1) (:tx-data r1) :b) (:db-after r2) (:tx-data r2) :b)
-          from (fn [c] (get-in (:tree c) [:seon.message/_to (seon.db/eid db :seon.message/id "self") :seon.message/from]))]
-      (is (not= (get-in (:tree c0) [:seon.db/tx :seon.agent/turn]) (get-in (:tree c1) [:seon.db/tx :seon.agent/turn])) "the path that asked holds the new t")
-      (is (= (from c0) (from c1)) "the other holds what it held: a transaction moves only by a datom written again, and the value there is the same")
-      (is (not (contains? (from c1) :seon.db/tx)) "and no t, as its pattern asks none"))))
+(deftest a-pattern-names-the-key-a-transaction-is-held-under
+  (let [p [:seon.agent/key [:seon.agent/turn :tx :turned]
+           {[:seon.message/_to :tx :at] [:seon.message/id :seon.message/body [:seon.message/to :tx :to-at] {:seon.message/from [:seon.agent/key]}]}
+           {[:seon.model-call/_agent :tx :at] [:seon.model-call/n]}]
+        msg (fn [id] {:seon.message/id id :seon.message/from {:seon.agent/key "user"} :seon.message/body id :seon.message/to [[:seon.agent/key k]]})
+        call (fn [n] {:seon.model-call/id (str k "/" n) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n n})
+        db (reduce (fn [db [i tx]] (:db-after (d/with db tx)))
+                   (ts/test-db)
+                   (map-indexed vector [[{:seon.agent/key k :seon.agent/turn 1 :seon.ctx/pattern p}] [(call 1)] [(msg "m1")] [(call 2)] [(msg "m2")] [(call 3)]]))
+        a (aid db)
+        t (:tree (ctx/build (seon.db/index) db a :b))
+        msgs (vals (:seon.message/_to t)) calls (vals (:seon.model-call/_agent t))
+        first-msg (first (sort-by (comp :db/txInstant :at) msgs))
+        since (:db/txInstant (:at first-msg))
+        link-tx (fn [id] (:tx (first (d/datoms db :eavt (seon.db/eid db :seon.message/id id) :seon.message/to a))))]
+    (is (= (link-tx "m1") (:db/id (:at first-msg))) "a member holds its link's transaction under the key its join names")
+    (is (inst? (:db/txInstant (:at first-msg))) "the transaction whole: when it was written")
+    (is (= #{{:db/id a}} (:seon.message/to first-msg)) "the attribute keeps its value; at a ref, :tx never follows it")
+    (is (= [(link-tx "m1")] (mapv :db/id (:to-at first-msg))) "a many-valued attribute's: a vector in link order")
+    (is (= [{:db/id a}] (mapv :v (:to-at first-msg))) "each value under :v")
+    (is (= (:tx (first (d/datoms db :eavt a :seon.agent/turn))) (:db/id (:turned t))) "a single-valued attribute's, under its key")
+    ;; the five forms
+    (is (= [1 "m1" 2 "m2" 3] (map #(or (:seon.message/body %) (:seon.model-call/n %)) (sort-by (comp :db/txInstant :at) (concat msgs calls))))
+        "1. messages and model calls in one sequence, by when each reached the branch (owner, 2026-11-11: time orders, not transaction ids)")
+    (is (= ["m2"] (map :seon.message/body (filter #(pos? (compare (:db/txInstant (:at %)) since)) msgs))) "2. the messages since an inst")
+    (is (= {nil 5} (update-vals (group-by (comp :seon.tx/branch :at) (concat msgs calls)) count)) "3. by the branch that wrote each (none in a test db)")
+    (is (= {:db/id a} (:v (last (sort-by :db/txInstant (:to-at first-msg))))) "4. a many-valued attribute's newest value")
+    (is (= [2 3] (map :seon.model-call/n (take-last 2 (sort-by (comp :db/txInstant :at) calls)))) "5. a join's members in the order they were linked, the last n")
+    (let [r (d/with db [(msg "m3")])
+          c (ctx/patch (ctx/build (seon.db/index) db a :b) (:db-after r) (:tx-data r) :b)
+          m3 (get-in (:tree c) [:seon.message/_to (seon.db/eid (:db-after r) :seon.message/id "m3")])]
+      (is (= (:tx (first (d/datoms (:db-after r) :eavt (:db/id m3) :seon.message/to a))) (:db/id (:at m3))) "a patch: the new member holds its link's"))
+    (is (= :seon.ctx/invalid (first (as-agent! db #(try (swap! ctx/ctx assoc-in [:turned :db/id] 1) nil
+                                                      (catch clojure.lang.ExceptionInfo e (:seon.error/type (ex-data e)))))))
+        "a transaction the pull holds is the db's: a swap! that edits it is refused")
+    (is (= :seon.ctx/invalid (first (as-agent! db #(try (swap! ctx/ctx assoc-in [:seon.message/_to (:db/id first-msg) :at :db/id] 1) nil
+                                                      (catch clojure.lang.ExceptionInfo e (:seon.error/type (ex-data e)))))))
+        "and so is a member's link's")
+    (is (not (str/includes? (pr-str (:tree (ctx/build (seon.db/index) (:db-after (d/with db [{:seon.agent/key k :seon.ctx/pattern [:seon.agent/key :seon.agent/turn]}])) a :b))) ":db/txInstant"))
+        "a pattern that asks none holds none")
+    (doseq [bad [[[:seon.agent/turn :tx true]] [[:seon.agent/turn :as :n]] [{[:seon.task/proofs :by :var/name :tx :at] [:var/name]}]]]
+      (is (= :seon.ctx/invalid-pattern (:seon.error/type (try (render/pattern (seon.db/index) bad) (catch clojure.lang.ExceptionInfo e (ex-data e))))) (pr-str bad)))))
 
 ;; An agent pulled by the joins its schema implies, with no :as and no *, holds its task, evals, model calls and messages
 ;; under their attributes, and validates against the schema derived from the refs; a value that breaks its attribute's
@@ -1553,3 +1550,23 @@
     (is (str/includes? live "Heading 39") "live: whole")
     (is (str/includes? stored "Heading 39") "stored and read back: whole")
     (is (not (re-find #"…\d" stored)) "no cut")))
+
+(deftest an-own-pattern-written-before-a-join-asked-its-transaction-still-places-its-messages
+  ;; docs/ctx.md#the-pattern: an entity's own :seon.ctx/pattern stored before its schema's pattern asked a join's transaction
+  ;; ({[:seon.message/_to :tx :at] ..}, batch 44) is read with the transaction keys its schema's pattern asks on the same joins, so its
+  ;; messages are placed by time as any agent's (root's session's, written on its branch before that join, showed none: Web, 2026-11-11)
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [ix (seon.db/index)
+            schema-p (render/schema-property ix :seon.db/agent-fact :seon.ctx/pattern)
+            ;; the pattern as it was: each [attr :tx k] join key its bare attribute
+            before (walk/postwalk #(if (and (vector? %) (keyword? (first %)) (= :tx (second %))) (first %) %) schema-p)]
+        (is (not= before schema-p) "the old pattern lacks the transaction the schema's asks")
+        (d/transact conn [{:seon.agent/key "old" :seon.agent/turn 1 :seon.ctx/pattern before}])
+        (d/transact conn [{:seon.message/id "m1" :seon.message/to [[:seon.agent/key "old"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "Hello."}])
+        (d/transact conn [{:seon.model-call/id (seon.lib/call-id "old" 1) :seon.model-call/agent [:seon.agent/key "old"] :seon.model-call/n 1 :seon.model-call/origin :model :seon.model-call/reply "Hi."}])
+        (let [db @conn
+              c (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "old") :b))]
+          (is (= 1 (count (:seon.message/_to c))) "the pull holds the message")
+          (is (= ["m1"] (mapv second (get (ctx/placed-messages db c) 1))) "and it is placed, at the turn that read it"))))))
+
