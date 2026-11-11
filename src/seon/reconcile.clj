@@ -1096,7 +1096,10 @@
       ;; task's: it is left out of the gate's decision and told as the system's problem, one per test (docs/tasks.md#the-done-rule)
       :gated (let [unread (:unread r)
                    ok? (not (or (contract/error? r) (seq unread)))
-                   rs (if ok? (get-in r [:value :results]) (zipmap (:tests act) (repeat :error)))
+                   ;; a test the run answered nothing of is :none, never left out: a gate that judged 78 of its 242 tests
+                   ;; read as if it had judged them all (the standing store, 2026-11-11), and with main's reds left out of the
+                   ;; decision a missing one would have merged untested
+                   rs (if ok? (merge (zipmap (:tests act) (repeat :none)) (get-in r [:value :results])) (zipmap (:tests act) (repeat :error)))
                    mains (if ok? (set (get-in r [:value :main-red])) #{})
                    [st o] (write st id :done (gated st id rs (vec unread) (when (contract/error? r) r) mains))]
                [st (into [o] (for [t (sort-by str mains)]

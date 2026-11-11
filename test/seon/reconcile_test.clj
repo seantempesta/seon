@@ -1714,6 +1714,12 @@
         (is (= [:closed :held] ((juxt :seon.task/outcome :seon.task/execution) tk)))
         (is (str/includes? (get-in tk [:seon.task/failure :reason]) (str other " fail")))
         (is (not (str/includes? (get-in tk [:seon.task/failure :reason]) (str boots))))))
+    (testing "a test the run answered nothing of is recorded :none and holds the task, though the only red is main's"
+      (let [[_ outs] (#'r/advance st id :gated (answer {boots :fail} #{boots}))
+            tk (task/task (after outs) id)]
+        (is (= {boots :fail other :none} (:seon.task/deferred-results tk)))
+        (is (= :closed (:seon.task/outcome tk)))
+        (is (str/includes? (get-in tk [:seon.task/failure :reason]) (str other " none")))))
     (testing "no :main-red: every red is the task's, and no problem is told"
       (let [[_ outs] (#'r/advance st id :gated (answer {boots :fail other :pass} nil))]
         (is (= :closed (:seon.task/outcome (task/task (after outs) id))))
