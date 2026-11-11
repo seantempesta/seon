@@ -692,7 +692,7 @@
             tree (seon.fx/tree-id wt)
             go (promise)
             asker (fn [] (let [events (atom [])]
-                           ;; both released together; the wait ends at the answer or the connection's end (ask-streamed), bounded here
+                           ;; both released together; the wait ends at the answer or the connection's end (ask-streamed)
                            (future @go
                                    (let [answer (seon.server/ask-streamed port {:op :prove :checkout wt :tree tree :mode "judge" :stream true :names ["seon.two-askers-test"]}
                                                                           #(swap! events conj %))]
@@ -700,12 +700,11 @@
             a (asker)
             b (asker)
             _ (deliver go true)
-            ra (deref a 600000 ::timeout)
-            rb (deref b 600000 ::timeout)
+            ;; each wait ends with ask-streamed's: its answer or the connection's end (no clock of its own)
+            ra @a
+            rb @b
             tests (fn [r] (->> (:events r) (filter #(= :prove-verdict (:type %))) (filter :test)))]
-        (is (not= ::timeout ra) "the first asker's wait ended")
-        (is (not= ::timeout rb) "the second asker's wait ended")
-        (when-not (or (= ::timeout ra) (= ::timeout rb))
+        (do
           (is (not (contract/error? (:answer ra))) (pr-str (:answer ra)))
           (is (not (contract/error? (:answer rb))) (pr-str (:answer rb)))
           (is (= #{'seon.two-askers-test/one 'seon.two-askers-test/two} (set (map :test (tests ra)))) (pr-str (:events ra)))
