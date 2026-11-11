@@ -197,5 +197,7 @@ aotcachebudget
 providerfirstuse
 fibersecondmutator
 fiberuncaught
+fiberunread
+atomwatchorder
 imagelegacyclaim
 buildemptycacheentry
