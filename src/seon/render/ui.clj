@@ -2296,13 +2296,15 @@
                                    [:span {:class "min-w-0 break-all text-text-300"} (event-detail ev)]])]])]))
 
 (defn root-evals
-  "The evals sent to root (a component over its ctx): one closed line that opens to them, in the order written. They are how sessions debug root, not its work. See docs/render.md#the-page."
+  "The evals sent to root (a component over its ctx): one closed line that opens to them, in the order written, saying how many its window
+  did not pull (seon.print.emit/left-out, the printer's words). They are how sessions debug root, not its work. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (let [es (sort (keys (:evals c)))]
     (when (seq es)
       [:details {:data-preserve-attr "open"}
-       [:summary {:class "seon-note cursor-pointer"} (str (count es) (if (= 1 (count es)) " eval" " evals") " sent to root")]
+       [:summary {:class "seon-note cursor-pointer"} (str (count es) (if (= 1 (count es)) " eval" " evals") " sent to root"
+                                                          (some->> (emit/left-out (:evals c)) emit/left-out-words (str ", ")))]
        (into [:ol {:class "seon-stack mt-2"}] (for [eid es] (get-in c [:evals eid])))])))
 
 (defn sign-in

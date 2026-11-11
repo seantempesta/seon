@@ -193,6 +193,24 @@
 
 ;; ---- text: text read as itself, cut the printer's way -----------------------------------
 
+(deftest a-window-says-what-it-left-out
+  ;; a join with :limit holds the newest n of the members it has in the db, and says how many it has as its value's
+  ;; :seon.ctx/count (docs/ctx.md#the-pattern): the printer's one cut of that map says what it left out, beside what it held and did not show
+  (let [window (fn [held joined] (with-meta (into {} (for [i (range held)] [(- 1000 i) {:seon.eval/id (str "e" i)}])) {:seon.ctx/count joined}))
+        printed (fn [v budget] (:text (seon/print-value v {:handle 'result/h1 :budget budget})))]
+    (testing "every member held is shown: the cut is the members left out, and no form reads them"
+      (let [text (printed (window 20 112) 4000)]
+        (is (str/includes? text "…92 not pulled") text)
+        (is (= [{:n 92 :chars? false :name? false :form nil}] (cuts-of text)) text)))
+    (testing "a full window of all its members, and a value no window made, say nothing left out"
+      (is (empty? (cuts-of (printed (window 20 20) 4000))))
+      (is (empty? (cuts-of (printed (with-meta (window 20 20) nil) 4000)))))
+    (testing "held members cut too: the cut's count and form are the held rest's, then what the window left out"
+      (let [text (printed (window 20 112) 120)
+            [{:keys [n form]}] (cuts-of text)]
+        (is (= 'drop (first form)) text)
+        (is (str/includes? text (str "…" n " " (emit/form-text form) ", 92 not pulled")) text)))))
+
 (deftest plain-says-what-it-omitted
   (let [msg (str/join "\n" (for [i (range 40)] (str "line " i " of a long message that says what went wrong")))
         {:keys [text shown truncated? omitted lines offset continuation]} (seon/plain msg 60 {:source '(:message e)})]

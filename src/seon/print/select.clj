@@ -249,9 +249,12 @@
       (let [u (integer-digits (biginteger (.unscaledValue ^java.math.BigDecimal x)))]
         (big-number x (<= (+ u (count (str (.scale ^java.math.BigDecimal x)))) (:max-number-digits limits)) (str x "M") "bigdec" u))
       (map-classes c)
-      (let [lift (lifted-namespace x (:max-name context))]
-        {:kind :map :face :seon.print/map :open (if lift (str "#:" lift "{") "{") :lift lift :close "}" :total (count x) :indexed? true
-         :lookup? (keyword-lookup? x) :sorted? (sorts? x key) :members (held-order x key)})
+      (let [lift (lifted-namespace x (:max-name context)) left-out (when (meta x) (emit/left-out x))]
+        ;; ↑ a value with no metadata says nothing of a window: no read
+        (cond-> {:kind :map :face :seon.print/map :open (if lift (str "#:" lift "{") "{") :lift lift :close "}" :total (count x) :indexed? true
+                 :lookup? (keyword-lookup? x) :sorted? (sorts? x key) :members (held-order x key)}
+          ;; a window (a join's :limit) holds fewer members than its join has in the db, its value says how many: docs/ctx.md#the-pattern
+          left-out (assoc :left-out left-out)))
       (set-classes c)
       {:kind :coll :face :seon.print/set :open "#{" :close "}" :total (count x) :ordered? true :indexed? true
        :sorted? (sorts? x identity) :members (held-order x identity)}
@@ -336,6 +339,12 @@
         start? (and (< at total) (or (zero? at) (and (pos? k) (= (nth breaks (dec k)) (dec at)))))]
     (+ after (if start? 1 0))))
 
+(defn- held-cut?
+  "Whether a collection node shows less than it holds (the cut's count and form are then the held rest's), as against
+  showing every member it holds and only a window's members left out (:left-out)."
+  {:malli/schema [:=> [:cat :seon.print/alloc] :boolean]}
+  [node] (boolean (or (:pending? node) (seq (:pending node)) (< (:n node 0) (:total node 0)))))
+
 (defn- cut-text
   "The cut's text after a node's shown part, as `emit/elided-text` prints it."
   {:malli/schema [:=> [:cat :seon.print/alloc] :string]}
@@ -346,12 +355,15 @@
       :string (str (when (:code? node) " ") (emit/cut-words (- (:total node) (:shown node)) (lines-after (:breaks node) (:total node) (:shown node)) form))
       ;; a name has no line breaks: the same cut words, its unit and the form that reads the rest
       :name (emit/cut-words (- (:total node) (:shown node)) 0 form)
-      (cond-> (if (:pending? node) "…?" (str "…" (- (:total node) (:n node)))) form (str " " (emit/form-text form))))))
+      (if-not (and (:left-out node) (not (held-cut? node)))
+        (cond-> (if (:pending? node) "…?" (str "…" (- (:total node) (:n node)))) form (str " " (emit/form-text form))
+          (:left-out node) (str ", " (emit/left-out-words (:left-out node))))
+        (str "…" (emit/left-out-words (:left-out node)))))))
 
 (defn- more? {:malli/schema [:=> [:cat :seon.print/alloc] :boolean]} [node]
   (case (:kind node)
     (:string :name) (< (:shown node) (:total node))
-    (:map :coll) (boolean (or (:pending? node) (seq (:pending node)) (< (:n node) (:total node))))
+    (:map :coll) (boolean (or (:pending? node) (seq (:pending node)) (< (:n node) (:total node)) (:left-out node)))
     false))
 
 (defn- flat-width
@@ -434,7 +446,7 @@
     :string (cond-> (assoc (placed context depth path indent) :kind :string :value (:value c) :total (:total c) :breaks (line-breaks (:value c)))
               (:code? c) (assoc :code? (:code? c)))
     (merge (placed context depth path indent)
-           (select-keys c [:kind :face :open :lift :close :total :pending? :prefix :ordered? :indexed? :sorted? :lookup?])
+           (select-keys c [:kind :face :open :lift :close :total :pending? :prefix :ordered? :indexed? :sorted? :lookup? :left-out])
            {:pending (:members c)})))
 
 (defn- make-node
@@ -832,16 +844,20 @@
   prefix and the lines after it) and the form that reads the rest, or why there is none."
   {:malli/schema [:=> [:cat :seon.print/alloc :seon.print/context] :seon.print/node]}
   [node context]
-  (let [form (node-continuation node)
-        text? (#{:string :name} (:kind node))]
+  (let [text? (#{:string :name} (:kind node))
+        ;; a collection that shows every member it holds is cut only by the members its window left out: no form reads those
+        window? (and (not text?) (:left-out node) (not (held-cut? node)))
+        form (when-not window? (node-continuation node))]
     (cond-> {:seon.print/face :seon.print/elided
              :seon.print/elision-unit (cond text? :characters (:pending? node) :pending :else :children)}
-      (not (:pending? node)) (assoc :seon.print/omitted (max 1 (- (:total node) (if text? (:shown node) (:n node)))))
+      (and (not window?) (not (:pending? node))) (assoc :seon.print/omitted (max 1 (- (:total node) (if text? (:shown node) (:n node)))))
+      window? (assoc :seon.print/omitted (:left-out node) :seon.print/elision-unit :left-out)
+      (:left-out node) (assoc :seon.print/left-out (:left-out node))
       text? (assoc :seon.print/prefix (subs (if (= :name (:kind node)) (:text node) (:value node)) 0 (:shown node)))
       (= :string (:kind node)) (assoc :seon.print/lines (lines-after (:breaks node) (:total node) (:shown node)))
       (:code? node) (assoc :seon.print/code? (:code? node) :seon.print/indent (:indent node))
       form (assoc :seon.print/continuation form)
-      (nil? form) (assoc :seon.print/requery-refused (get-in context [:requery :seon.print/requery-refused] "the source has no stable requery identity")))))
+      (and (nil? form) (not window?)) (assoc :seon.print/requery-refused (get-in context [:requery :seon.print/requery-refused] "the source has no stable requery identity")))))
 
 (defn- tree-node
   "The print node of allotted `node`, its kids' first; each node that shows less than it holds

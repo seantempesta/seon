@@ -4482,3 +4482,11 @@
     (is (str/includes? text "(get-in result/e1 path)") "a form that reads more, naming the answer by its handle")
     (is (not (str/includes? text "(get-in v path)")) "never by a placeholder")
     (is (and (str/includes? plain ":value 2") (not (str/includes? plain ":is"))) (str "a plain value is itself: " plain))))
+
+;; docs/ctx.md#the-pattern: root's evals are a window (the newest :seon.config.ctx/window); its line says how many it did not pull, in the printer's words
+(deftest roots-evals-say-what-their-window-left-out
+  (let [evals (fn [held joined] (with-meta (into {} (for [i (range held)] [(- 1000 i) {:seon.eval/id (str "e" i)}])) {:seon.ctx/count joined}))
+        summary (fn [v] (let [[_ _ [_ _ s]] (seon.render.ui/root-evals {:seon.ctx/ctx {:evals v}})] s))]
+    (is (= "20 evals sent to root, 92 not pulled" (summary (evals 20 112))))
+    (is (= "20 evals sent to root" (summary (evals 20 20))) "a window holding every member says nothing left out")
+    (is (= "20 evals sent to root" (summary (with-meta (evals 20 20) nil))))))

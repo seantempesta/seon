@@ -562,6 +562,28 @@
         c (ctx/build (seon.db/index) db (aid db) :b) rep (d/with db (eval-tx (inc n)))]
     [c (:db-after rep) (:tx-data rep) :b]))
 
+;; docs/ctx.md#the-pattern: a window holds the newest n of a join's members and says, as metadata on the join's value
+;; (:seon.ctx/count), how many the join has in the db, so what it left out is data: at its build, after a member joins
+;; (the window moves, the count grows), after one the window never held leaves (the same members, one fewer joined),
+;; and when the window is not full (the count is the members held)
+(deftest a-window-says-how-many-members-its-join-has
+  (let [windowed (fn [n lim] (:db-after (d/with (seeded n) [[:db/add [:seon.agent/key k] :seon.ctx/pattern [(symbol "*") {[:seon.eval/_agent :as :evals :limit lim :reverse true] [(symbol "*")]}]]])))
+        db (windowed 30 5)
+        c (ctx/build (seon.db/index) db (aid db) :b)
+        held #(count (:evals (:tree %))) joined #(:seon.ctx/count (meta (:evals (:tree %))))
+        more (d/with db (eval-tx 31)) c1 (ctx/patch c (:db-after more) (:tx-data more) :b)
+        less (d/with (:db-after more) [[:db/retract (id db [:seon.eval/id "e3"]) :seon.eval/agent [:seon.agent/key k]]])
+        c2 (ctx/patch c1 (:db-after less) (:tx-data less) :b)
+        short (windowed 30 40) cs (ctx/build (seon.db/index) short (aid short) :b)]
+    (is (= [5 30] [(held c) (joined c)]) "built: the newest five held, thirty joined")
+    (is (= [5 31] [(held c1) (joined c1)]) "a member joined: the window moved, one more joined")
+    (is (= [5 30] [(held c2) (joined c2)]) "a member the window never held left: the same five, one fewer joined")
+    (is (= (keys (:evals (:tree c1))) (keys (:evals (:tree c2)))) "and the window's members are the ones they were")
+    (is (= [30 30] [(held cs) (joined cs)]) "a window not full: the count is the members held")
+    (let [all (:db-after (d/with (seeded 30) [[:db/add [:seon.agent/key k] :seon.ctx/pattern [(symbol "*") {[:seon.eval/_agent :as :evals :reverse true] [(symbol "*")]}]]]))
+          ca (ctx/build (seon.db/index) all (aid all) :b)]
+      (is (= [30 nil] [(held ca) (joined ca)]) "a join with no :limit carries none: its count is its count"))))
+
 (deftest an-agents-own-record-holds-every-message-and-turn
   ;; (the owner, 2026-10-30: "deliver all messages and errors"): an
   ;; agent's own record, pulled by its schema's pattern, holds every message and every turn it has,
