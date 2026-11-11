@@ -293,7 +293,7 @@
            (reduce (fn [acc m] (merge-with min acc m)) (repeatedly 5 #(once f []))))))
 
 (defn measure
-  "f on args, measured by one call (owner, 2026-11-11: a measure is not a loop by default; precision is what accumulates
+  "f on args, measured by one call (a measure is not a loop by default; precision is what accumulates
   as the system is exercised), or, given cap, by at most cap calls, the measure an agent asks for on a perf problem and
   the one `run` takes for a size whose one call was over its estimate (its first call filled what later calls read): its
   meta's :calls says how many it made. With cap,
