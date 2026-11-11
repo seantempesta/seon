@@ -61,7 +61,7 @@ Main is merged into your branch as it moves, between your turns. What doesn't co
 
 A proof is a `clojure.test/deftest` in the namespace's test namespace, built on a small test world, never the live db: `(my.test/world)`. Register it with `(my.task/update! :seon.task/proofs conj 'ns-test/name)`. `(prove)` runs your proofs and every test your change reaches, and records the verdicts; `clojure.test/run-test-var` records nothing.
 
-You're done when every proof is green and nothing blocks merging: tell the user what changed and how it's proved, in a reply with no calls.
+You're done when every proof is green and nothing blocks merging: tell the user what changed and how it's proved, in a reply with no calls. In that reply, say also what would have saved you turns: what your task's plan should have said or cited, what on your page you never needed, and what you had to find that it lacked.
 
 ## Seon's own forms, beyond Clojure's
 

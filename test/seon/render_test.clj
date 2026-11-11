@@ -3194,6 +3194,33 @@
           (d/transact conn [{:db/id s :seon.search/query "a tile of the dashboard"}])
           (is (str/includes? (pr-str (search-part (draw))) "app.srch/render-tile") "a new query: the part draws its hits"))))))
 
+(deftest a-definition-matching-the-request-moves-no-search-hit
+  ;; docs/vector.md#search: the demo.math/half request (2026-11-11) was sent
+  ;; its 10-hit search whole three times, each time its agent's own new definition re-ranked it (seon.render/settled replaces
+  ;; a reordered element whole). A page's search ranks main as the agent's branch last merged it (:seon.agent/base-commit), so
+  ;; what the agent writes on its branch moves no hit
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn ((my.test/code 'app.srch (str "(ns app.srch)\n"
+                                                     "(defn untaken-entries\n  \"The messages addressed to this session that it has not taken.\"\n  [db] db)\n"
+                                                     "(defn render-tile\n  \"A tile of the dashboard.\"\n  [x] x)\n")) @conn))
+      (d/transact conn (seon.template/request-tx @conn [{:seon.task/ns 'demo :seon.task/name "find" :seon.task/kind :whole
+                                                          :seon.task/plan "Messages addressed to the session go untaken."}]))
+      (let [s (:db/id (d/entity @conn [:seon.search/id "demo/find/request"]))
+            _ (d/transact conn (seon.vector/tx-data [s] ["query"] [(vec (repeat 768 0.036))] "m"))
+            base (d/commit-id @conn)
+            _ (d/transact conn [{:seon.agent/key "b/find" :seon.agent/task [:seon.task/id "demo/find"] :seon.agent/base-commit base}])
+            a (:db/id (d/entity @conn [:seon.agent/key "b/find"]))
+            draw #(seon.fixtures/drawn-parts @conn (seon.ctx/build (seon.db/index) @conn a (:seon.agent/branch (d/entity @conn a))))
+            search-part (fn [parts] (some #(when (and (vector? %) (= 'seon.render.ui/searched (first %))) %) (tree-seq coll? seq (vals parts))))
+            before (search-part (draw))
+            ;; the agent defines what its request's words name, on its branch, after its base
+            _ (d/transact conn ((my.test/code 'app.mine (str "(ns app.mine)\n"
+                                                             "(defn untaken-messages\n  \"The messages addressed to the session that go untaken.\"\n  [db] db)\n")) @conn))
+            after (search-part (draw))]
+        (is (str/includes? (pr-str before) "app.srch/untaken-entries") (str "the search finds what main held: " (pr-str before)))
+        (is (= before after) (str "the agent's own definition moves no hit: " (pr-str after)))))))
+
 (defn some-lists-part "A component (it reads ctx) with an element of its own that has an id, inside its root."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}] [:section [:p {:id "inner"} (:v c)]])

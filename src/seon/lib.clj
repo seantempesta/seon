@@ -361,14 +361,12 @@
   [k n] (id (digest (str k "/" n))))
 
 (defn remove-tree!
-  "Remove each directory and all it holds (`rm -rf`: a symbolic link is removed, never entered), and the
-  semaphore sets of the LMDB stores in it: this process closes the stores it has open there
-  (konserve.jolt.lmdb/close-envs-under!), whose last close removes the set, then target/remove-tree
-  (native/remove_tree.c) releases the locks of every store there that no process holds (a set its last
-  user left when it exited without closing) and removes the tree. The one way a directory is deleted,
-  since a store's set outlives its files otherwise (docs/failure-points.md#lmdb-robust-locks).
-  Answers nil; a directory that is not there is already removed."
+  "Remove each directory and all it holds (`rm -rf`: a symbolic link is removed, never entered), after
+  this process closes the LMDB stores it has open there (konserve.jolt.lmdb/close-envs-under!), so it
+  keeps no mapping of deleted files and a store made again at the path opens its own. The one way a
+  directory that may hold a store is deleted (docs/failure-points.md#lmdb-locks). Answers nil; a
+  directory that is not there is already removed."
   {:malli/schema [:=> [:cat :string [:* :string]] :nil]}
   [dir & dirs]
   (run! klmdb/close-envs-under! (cons dir dirs))
-  (apply sh (str (config/checkout) "/target/remove-tree") dir dirs) nil)
+  (apply sh "rm" "-rf" "--" dir dirs) nil)

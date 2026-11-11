@@ -71,7 +71,7 @@ SEL=
 [[ ${1:-} == --steps ]] && { SEL=$2; shift 2; set -- 100 }
 S=$ROOT/target/seon
 # NEEDS: does this run use the binary? Yes, unless its plan says none: a selected run whose
-# DIR/steps-binary is there and empty (laws, lmdb-kill, lmdb-sem: bin/prove's plan writes it) seeds no store,
+# DIR/steps-binary is there and empty (laws, lmdb-kill, lmdb-lock, lmdb-crash: bin/prove's plan writes it) seeds no store,
 # starts no root and wants no build. No steps-binary is unknown, never none: the run seeds and uses
 # the binary (a steps file written by hand ran durable on an empty store)
 NEEDS=1; [[ -n $SEL && -e $SEL/steps-binary && ! -s $SEL/steps-binary ]] && NEEDS=
@@ -211,19 +211,23 @@ fi
 
 # ---- the steps, each a unit u-NAME: what it runs, in order, on its own store ----
 u-laws() { echo "== laws (every law's sites: catch, clocks, measures, resolution)"; step laws "OK \(|FAILED" "$ROOT/bin/laws" }
-# lmdb-kill runs below Datahike, on an LMDB env of its own: a raw put has no branch to take,
-# and the store's env is konserve's key space (a raw key or a named sub-db there is a key
-# konserve reads). Its env is deleted when the step is green.
+# lmdb-kill, lmdb-lock and lmdb-crash run below Datahike, on LMDB envs of their own under one
+# directory each: a raw put has no branch to take, and the store's env is konserve's key space (a raw
+# key or a named sub-db there is a key konserve reads). Each directory is deleted when its step is green.
 u-lmdb-kill() {
-  echo "== lmdb-kill (a writer SIGKILLed inside a txn while this process holds the env; the next writes commit: robust locks)"
-  step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill.mdb"
-  is-green lmdb-kill && "$ROOT/bin/remove-tree" "$OUT/lmdb-kill.mdb" "$OUT/lmdb-kill.mdb-lock"
+  echo "== lmdb-kill (a writer SIGKILLed inside a txn, a dead reader table lock, fork with the writer lock held, killed readers past the table's size, a killed reader's pages, a kill after a sync: the next writes commit and nothing is held or lost)"
+  step lmdb-kill "" "$ROOT/target/lmdb-kill" "$OUT/lmdb-kill"
+  is-green lmdb-kill && "$ROOT/bin/remove-tree" "$OUT/lmdb-kill"
 }
-# lmdb-sem, below Datahike too, on envs of its own under one directory, deleted when green
-u-lmdb-sem() {
-  echo "== lmdb-sem (another env's set at an env's key, a set gone under a holder, 16 processes opening one env, 50 envs in one process, a killed opener's set, a deleted env's set released, a live holder's left to its close: each env's semaphore set is its own, costs no undo entry for its life, and goes with it)"
-  step lmdb-sem "" "$ROOT/target/lmdb-sem" "$OUT/lmdb-sem"
-  is-green lmdb-sem && "$ROOT/bin/remove-tree" "$OUT/lmdb-sem"
+u-lmdb-lock() {
+  echo "== lmdb-lock (no semaphore, 16 processes on one store, 8 threads over 2 envs of one store, 50 stores in one process, no lock left after a killed writer, a second env's close keeps the first's locks, a deleted store leaves nothing, another lock format refused)"
+  step lmdb-lock "" "$ROOT/target/lmdb-lock" "$OUT/lmdb-lock"
+  is-green lmdb-lock && "$ROOT/bin/remove-tree" "$OUT/lmdb-lock"
+}
+u-lmdb-crash() {
+  echo "== lmdb-crash (an OS crash at every write point of 40 commits, any subset of the unflushed writes landing torn at 4 KB: the store opens at its last synced commit, key for key, and commits after)"
+  step lmdb-crash "" "$ROOT/target/lmdb-crash" "$OUT/lmdb-crash"
+  is-green lmdb-crash && "$ROOT/bin/remove-tree" "$OUT/lmdb-crash"
 }
 # forks: the forks' own suites on Jolt, a process a unit (bin/forks), against test/forks/baseline.edn
 u-forks() { echo "== forks (Datahike's and konserve's own tests on Jolt, each unit's counts against its baseline)"; step forks "FAILED|^FORKS " "$ROOT/bin/forks" }
@@ -320,7 +324,7 @@ u-resume() {
 # seeded store (its data file; LMDB makes its lock file), the same content as a branch of it,
 # deleted when the unit is green. scale runs alone after them: it measures the machine's memory.
 if (( NEEDS )); then JOBS=$(run jobs); else JOBS=2; fi
-UNITS=(laws lmdb-kill lmdb-sem forks health contracts test-inputs mg-check fx config system mcp agent-tests threads instrument record problems smoke robust lifecycle
+UNITS=(laws lmdb-kill lmdb-lock lmdb-crash forks health contracts test-inputs mg-check fx config system mcp agent-tests threads instrument record problems smoke robust lifecycle
        backpressure hotreload drain idle orphan durable window ids e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
        e2e-sibling swarm e2e-loop e2e-held resume vectors)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):

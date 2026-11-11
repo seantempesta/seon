@@ -991,8 +991,8 @@
 
 (defn searched
   "Search s (the declared html render of :seon.search/search-fact, a component over the db), drawn as one compact hiccup that the
-  page shows and the model is sent as it is: its query searched on the branch's
-  db by seon.ctx.search/search (exact words, meaning once its query has a vector, and the names it holds;
+  page shows and the model is sent as it is: its query searched on main as the agent's branch last merged it (:seon.agent/base-commit), so the agent's own writes move no hit,
+  by seon.ctx.search/search (exact words, meaning once its query has a vector, and the names it holds;
   functions, wiki sections and schema keys, no relevance cut), its :seon.search/k hits (else
   :seon.config.render/search's), each a line: its name and the line of its text holding a word of the query, as grep
   shows a hit (a bare name was passed over; its first sentence, ~90 tokens a hit, added nothing a model used: docs/vector.md#search); the hits left out are not drawn (my.agent/search answers them);
@@ -1005,14 +1005,23 @@
   (when-let [s (some-> s0 ratom/realize)]
     (let [q (:seon.search/query s)
           ;; the search fact's own vector, once the pipeline has embedded its query (seon.vector's due texts)
-          e (pdb/eid db :seon.search/id (:seon.search/id s))]
+          e (pdb/eid db :seon.search/id (:seon.search/id s))
+          qv (when e (vector/vector-of db e))
+          ;; main as the agent's branch last merged it (:seon.agent/base-commit, the agent's of the search, or of its task, on this
+          ;; branch): what the agent writes on its branch moves no hit, so its page is not resent each time its own definitions
+          ;; re-rank the list (the demo.math/half request, 2026-11-11: whole three times); a db with no store has no commit, so it is searched as it is
+          of (when e (:seon.search/of (d/entity db e)))
+          base (some :seon.agent/base-commit (if (:seon.agent/key of) [of] (:seon.agent/_task of)))
+          at (if (and base (:store db)) (d/commit-as-db (:store db) base) db)]
       ;; drawn once its query has a vector, never by words alone: words alone found the same weak matches for a
       ;; request with nothing to find as for one with something (owner, 2026-11-08: wait for its vector)
-      (when (and e (vector/vector-of db e))
+      (when qv
         (let [;; its own count when it names one, else :seon.config.render/search's; the hits left out are not
-              ;; drawn: a count that moves each turn would resend the line (my.agent/search answers them)
-              hits (remove #(= :more (:kind %))
-                           (search/search db q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) e))]
+              ;; drawn: a count that moves each turn would resend the line (my.agent/search answers them);
+              ;; reads of the fixed past value at, which no later write can change, unrecorded, as seon.ctx.wire/page-diff-msgs' are
+              hits (binding [datahike.index.interface/*reads* (when (identical? at db) datahike.index.interface/*reads*)]
+                     (remove #(= :more (:kind %))
+                             (search/search at q (cond-> {:kinds #{:var :section :schema} :min 0.0} (:seon.search/k s) (assoc :k (:seon.search/k s))) qv)))]
           ;; the task's own request is on the page already: the heading names it rather than repeating it
           [:section [:h3 (if (= q (:seon.task/plan (:seon.search/of (d/pull db [{:seon.search/of [:seon.task/plan]}] e)))) "search: this task's request" (str "search: " q))]
            ;; each hit with the line of its text that holds a word of the query, as grep shows a hit: a bare name was passed over
