@@ -558,8 +558,7 @@
 (defn commit-tx
   "Main's write of the :git effect's answer r for the tasks of members, which wanted paths written
   and gave the effect those in written: a sha is :seon.task/commit on each, clears the
-  :seon.git/commit-failed error an earlier failure left (beside any note of forms that name no
-  file, which stays), and holds a new one for the paths main had no text for (wanted, not written);
+  :seon.git/commit-failed error an earlier failure left, and holds a new one for the paths main had no text for (wanted, not written);
   a failure is that error for every wanted path, as the task's :seon.task/error (root-causes names it
   until a commit holds the paths), and its :effect row (seon.error/asked-tx), closed by the next
   commit's sha. Nil when r is neither. The reconciler's write-back and my.root/write-back! write it

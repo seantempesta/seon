@@ -406,7 +406,7 @@
   "A recorded model turn n (the agent b/a1's) with basis b: its number and its model call (the
   maps of one transaction)."
   [b n]
-  (ts/turn-tx "a1" n {:seon.model-call/reply (str "reply " n) :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0
+  (ts/turn-tx "a1" n {:seon.model-call/reply (str "reply " n) :seon.model-call/basis b :seon.model-call/forms 1
                                    :seon.model-call/ms 1}))
 
 (defn- page-call?
@@ -726,7 +726,7 @@
             basis (fn [task n] {:commit (d/commit-id @conn) :task task :turn n :max-turns 9 :origin :model
                                 :agent "a1"})
             ;; as seon.turn goes: the turn recorded, then its request on the db that holds it
-            turn! (fn [b] (d/transact conn (ts/turn-tx "a1" (:turn b) {:seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/ms 1}))
+            turn! (fn [b] (d/transact conn (ts/turn-tx "a1" (:turn b) {:seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/ms 1}))
                     (wire/render @conn (assoc b :commit (d/commit-id @conn))))
             _ (work! "demo/d")
             _ (ev! "e0" "a1" 0)
@@ -801,7 +801,7 @@
                                           :origin :model :agent "a1"}]
                                    (d/transact conn (conj (ts/turn-tx "a1" n {})
                                                           {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis (assoc b :commit (d/commit-id @conn)) :seon.model-call/forms 1
-                                                           :seon.model-call/errors 0 :seon.model-call/ms 1}))
+                                                           :seon.model-call/ms 1}))
                                    (let [ms (:messages (wire/render @conn (assoc b :commit (d/commit-id @conn))))]
                                      ;; its reply comes of its request
                                      (when (seq more) (d/transact conn [(assoc more :seon.model-call/id (seon.lib/call-id "a1" n))]))
@@ -1322,7 +1322,7 @@
              b {:commit (d/commit-id @conn) :task "demo/f" :turn n :max-turns 9 :origin :model :agent "a1"}
              _ (d/transact conn (conj (ts/turn-tx "a1" n {})
                                       {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1
-                                       :seon.model-call/errors 0 :seon.model-call/ms 1}))]
+                                       :seon.model-call/ms 1}))]
          (wire/render @conn (assoc b :commit (d/commit-id @conn)))))
      ;; a record of the turn in force
      (fn ev! [id] (d/transact conn [{:seon.eval/id id :seon.eval/by {:seon.agent/key "a1"} :seon.eval/agent {:seon.agent/key "a1"} :seon.eval/call (seon.task/call-ref "a1" @turn)
@@ -1756,7 +1756,7 @@
   (let [n (inc n)
         b {:commit (d/commit-id @conn) :task "demo/g" :session "demo/g#1" :turn n :max-turns 9 :origin :model :agent "a1"}
         _ (d/transact conn (conj (ts/turn-tx "a1" n {})
-                                 {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/errors 0 :seon.model-call/ms 1}))]
+                                 {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/ms 1}))]
     (wire/render @conn (assoc b :commit (d/commit-id @conn)))))
 
 (deftest a-task-with-an-example-reads-it-between-the-system-prompt-and-its-own-session
@@ -2004,7 +2004,7 @@
                 (d/transact conn (ts/turn-tx "a1" n more))
                 (let [b {:commit (d/commit-id @conn) :task "demo/f" :turn n :max-turns 4 :origin :model :agent "a1"}
                       _ (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1
-                                           :seon.model-call/errors 0 :seon.model-call/ms 1}])
+                                           :seon.model-call/ms 1}])
                       ms (:messages (wire/render @conn b))]
                   (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/sent-hash (seon.lib/digest (seon.edn/encode ms))}])
                   ms))
@@ -2333,6 +2333,30 @@
           (is (nil? (d/commit-as-db (pdb/store-of db) (:commit collected))) "the store holds no such commit: its point is read as of its t")
           (is (seq held) "the state moved the page")
           (is (= held (wire/page-edits-between db ix a collected p1)) "from the collected basis: the same edits"))))))
+
+(deftest a-new-task-begins-where-the-agent-s-calls-change-task
+  ;; docs/tasks.md#a-refine-curates-its-own-task: an agent that goes on with a task needing the one it finished (seon.task/session-key) reads, at
+  ;; the call whose basis names the new task, a message saying the task before ended and which is its task now, before that turn's page;
+  ;; drawn from the calls' bases alone, so every later request holds it in the same place
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}
+                                              {:seon.task/ns 'demo :seon.task/name "g-refine" :seon.task/plan "Refine demo/g." :seon.task/needs #{"demo/g"}}]))
+      (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"}}}])
+      (let [turn (fn [n task] (let [b {:commit (d/commit-id @conn) :task task :session "demo/g#1" :turn n :max-turns 9 :origin :model :agent "a1"}]
+                                (d/transact conn (conj (ts/turn-tx "a1" n {}) {:seon.model-call/id (seon.lib/call-id "a1" n) :seon.model-call/basis b :seon.model-call/forms 1 :seon.model-call/ms 1}))
+                                (wire/render @conn (assoc b :commit (d/commit-id @conn)))))
+            r1 (turn 1 "demo/g")
+            r2 (turn 2 "demo/g")
+            _ (d/transact conn [{:seon.agent/key "a1" :seon.agent/task [:seon.task/id "demo/g-refine"]}])
+            r3 (turn 3 "demo/g-refine")
+            r4 (turn 4 "demo/g-refine")
+            begins (fn [r] (keep-indexed #(when (str/includes? (str (:content %2)) "<task id=\"demo/g-refine\"") %1) (:messages r)))]
+        (is (empty? (begins r2)) "one task: no boundary")
+        (is (= 1 (count (begins r3))) "the new task's first call: one boundary")
+        (is (str/includes? (:content (nth (:messages r3) (first (begins r3)))) "demo/g") "it names the task that ended")
+        (is (= (subvec (:messages r3) 0 (count (:messages r3))) (subvec (:messages r4) 0 (count (:messages r3)))) "the next request starts with this one, boundary included")))))
 
 (defn lab-list
   "A list a test render places, read by the model as a part. See docs/render.md#an-entity-may-name-its-own-render."
