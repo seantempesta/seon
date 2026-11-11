@@ -58,6 +58,9 @@
  ;; an agent's boot check found its SIGUSR1 handler never ran (seon.agent/interrupt-self-test)
  :seon.agent/interrupt-unreachable [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/interrupt-unreachable]]]]
  :seon.agent/load-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/load-failed]] [:ns :symbol]]]
+ ;; an agent's config cites a wiki section its store holds no entity for (seon.task/agent-cites-missing, said in its hello): it runs
+ ;; citing the rest (docs/references.md#an-entity-cites)
+ :seon.agent/cite-missing [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/cite-missing]] [:address :string]]]
  ;; an agent forked from a program that did not load (seon.root's set-agent at its hello): every load error it was given; the agent runs
  :seon.agent/program-differs [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/program-differs]] [:differs [:vector :map]]]]
  :seon.agent/started-without-program [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/started-without-program]] [:errors [:vector :seon.program/error]]]]
@@ -248,7 +251,17 @@
  ;; ---- the one read: seon.problems/report ----
  ;; each class's area, the group root's page and context show it under (docs/health.md),
  ;; declared once here and read through seon.contract/properties (as a status set is)
- :seon.problems/class [:enum {:seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced}
+ :seon.problems/class [:enum {;; what a class's open rows are, said before their count (\"tasks that cite no section: 168\"), read by a person and the model alike
+                             :seon.status/title {:stalled "stalled agents" :platform "platform errors" :eval "eval errors" :agent "agent errors" :effect "effect errors"
+                                                    :error "errors" :waste "runs that wasted turns" :red "red proofs" :cost "proofs over their cost bound"
+                                                    :merge "refused merges" :task-conflict "tasks in conflict with main" :unrun "merges whose tests did not run"
+                                                    :unsynced "merged tasks not yet in main's files" :dead "agents that died" :failed "failed tasks"
+                                                    :unnamed-site "catch sites the laws do not name" :stale-pin "stale pins" :stale-binary "binaries older than their source"
+                                                    :stale-section "wiki sections whose cited code changed" :orphan-page "wiki pages nothing links"
+                                                    :leadless-section "wiki sections with no lead" :uncited-task "tasks that cite no section"
+                                                    :stale-plan "task plans that went stale" :uncited-var "functions that cite no section"
+                                                    :problem-unlinked "problem classes with no wiki section" :long-form "forms too long" :waived-proof "proofs that pass by waiver"}
+                             :seon.problems/derived #{:stalled :unnamed-site :stale-pin :stale-binary :stale-section :orphan-page :leadless-section :uncited-task :stale-plan :uncited-var :problem-unlinked :long-form :waived-proof :unsynced}
                              ;; shown, never a reason to refuse done (root's ruling, 2026-10-23: every var edit stales the sections that cite it)
                              :seon.problems/attention #{:stale-section :uncited-var :long-form}
                              :seon.problems/areas [[:docs #{:stale-pin :stale-section :orphan-page :leadless-section :uncited-var}] [:tests #{:red :cost :waived-proof}]

@@ -374,8 +374,9 @@
     (is (true? (last (:value elsewhere))) "read from another namespace as @seon.ctx/ctx (the in-ns, then the read: each form's value)")
     (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
     (is (clojure.string/includes? (:context next-turn) (pr-str plan)) "the next read tells the plan as it is now")
-    (is (= 1 (count (re-seq #":seon.model-call/basis" (:context next-turn))))
-        "and the read before it by its id, never its record: the one basis shown is inside the first point's @ctx, whole (owner, 2026-11-11), which holds that turn's model call")))
+    (is (zero? (count (re-seq #":seon.model-call/basis" (:context next-turn))))
+        "and the read before it by its id, never its record: the first point describes @ctx (paths and what each holds), so no model call's basis is printed at all")
+    (is (clojure.string/includes? (:context next-turn) "(my.agent/describe @ctx)") "the record described at the first point")))
 
 (deftest a-task-is-declared-held-and-a-missing-argument-is-named
   ;; repl-audit B F3, F1: no op made a task, and an attach with no task printed root's whole system map. A plain op answers the id and starts nothing;
@@ -751,3 +752,33 @@
                  @seen
                  {:key k :ran 2 :verdicts [v1 v2]}))
        (is (= ['app.s-test/one 'app.s-test/two] (mapv :test @lines)) "each verdict once, the live one first")))))
+
+;; docs/server.md#ops: seon_done answers once the judge has decided the task's own work, at :gate too: the merge gate's run of
+;; the process tests the change reaches can outlast any client's wait (242 items, ~30 min, Data model's real task, 2026-11-11:
+;; the client gave up while the verdict was still to come). Red before: :gate was a state the done waited through
+(deftest done-answers-when-the-tasks-own-work-is-judged-not-after-its-gate
+  (ts/test-branch!
+   (fn [_ conn]
+     (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
+     (let [at (fn [o] (d/transact conn [{:seon.task/id "demo/g" :seon.task/outcome o}]) @conn)
+           settled? (fn [db] (#'seon.server/done-settled? db "demo/g" (constantly nil)))]
+       (is (not (settled? (at :running))) "still working: wait")
+       (is (not (settled? (at :ready))) "judged green, its merge next: wait (minutes)")
+       (is (not (settled? (at :gate))) "a gate with no process test to run is its merge (minutes): wait, as at :ready")
+       (d/transact conn [{:seon.task/id "demo/g" :seon.task/deferred #{'demo-test/p}}])
+       (is (settled? (at :gate)) "its gate running process tests: answer now, the verdict comes to the page")
+       (is (settled? (at :merged)))
+       (is (#'seon.server/done-settled? (at :running) "demo/g" (constantly {:seon.error/type :x})) "a defect stopped the judge: answer")))))
+
+;; docs/errors.md#nothing-crashes-and-nothing-hangs: a streamed prove whose run throws answers that throw as a typed defect: a
+;; spawned fiber keeps its throw for a joiner, and nobody joined this one, so its reader waited on done for good (code read,
+;; 2026-11-12). Red before: Jolt's deadlock detector ended the wait ("every fiber and thread of this process waits")
+(deftest a-streamed-prove-whose-run-throws-answers-the-throw
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [src (a/chan 8)
+           sys {:graph nil :ext (a/chan) :conn conn :events-mult (a/mult src)}
+           r (binding [seon.server/*emit* (fn [_])]
+               (#'seon.server/prove-streamed sys :tree-x (fn [] (throw (ex-info "the run broke" {})))))]
+       (is (= :seon.server/defect (:seon.error/type r)) (pr-str r))
+       (is (re-find #"the run broke" (str (:seon.error/message r))))))))

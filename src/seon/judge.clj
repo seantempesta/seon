@@ -29,10 +29,10 @@
                                                   :max-turns (config/value :seon.config.agent/max-turns) :origin :model :agent k})]
     {:messages messages
      :key (let [a (pdb/eid db :seon.agent/key k)
-                ;; the record shown at the first point, (my.render/ctx p), prints @ctx whole, its point (:t :commit :branch) among
-                ;; its keys: the key holds its value without them, as it holds no page call's point
+                ;; the record shown at the first point, (my.agent/describe @ctx) (seon.ctx.wire/describe-msgs), holds its point
+                ;; (:t :commit :branch) among its paths: the key holds the record's value without them, as it holds no page call's point
                 record (delay (dissoc (ctx/agent-ctx (program/index-of-db db) db a) :t :commit :branch))
-                rec-ids (set (for [m messages c (:tool-calls m) :when (str/starts-with? (str (:code c)) "(my.render/ctx ")] (:id c)))]
+                rec-ids (set (for [m messages c (:tool-calls m) :when (str/starts-with? (str (:code c)) "(my.agent/describe @ctx")] (:id c)))]
             (into [] (mapcat (fn [[ref ms]]
                                (if (= :page (first ref))
                                  [[:page (second ref) (mapv #(if (rec-ids (:tool-call-id %)) @record (:content %)) (filter #(= "tool" (:role %)) ms))]]
