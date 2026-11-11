@@ -643,7 +643,7 @@
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends
       :prove (let [[st rid] (pend st p :prove (:agent m))]
-               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :digest :agent :proofs :names :mode]) :rid rid))
+               (step/out! o [:prove :req] (assoc (select-keys m [:branch :t :digest :agent :proofs :names :mode :checkout :tree]) :rid rid))
                st)
       :kill (cond-> (if (get-in st [:agents id])
                       ;; :ended when root stops it because its run ended (the reconciler says so)
@@ -1888,19 +1888,23 @@
   with no result at its digest: seon.agent/run-tests-forked). The run is keyed by the digest of what it reads,
   its branch's program and tasks' proofs (seon.program/run-digest), as its turn's seon.agent/prove! takes it,
   so a session's request and the turn's are one run, and a request for main and the run main's
-  own program commit started (seon.prove) are one. A promise of the run's answer ({:key :ran
+  own program commit started (seon.prove) are one. With on ({:checkout :tree}, a session's: prove-tree!), the service runs
+  its process tests, check steps and build too, on that checkout (docs/merging.md#the-test-service). A promise of the run's answer ({:key :ran
   :reused :pass :fail :error :red :reports ...}), the same run for every asker of that key."
   {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]
                   [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol]] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol] [:enum :turn :judge :main]] :seon.host/promise]]}
+                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol] [:enum :turn :judge :main]] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol] [:enum :turn :judge :main] [:maybe [:map [:checkout :string] [:tree :string]]]] :seon.host/promise]]}
   ([sys agent-id] (prove! sys agent-id #{}))
   ([sys agent-id names] (prove! sys agent-id names (if agent-id :turn :main)))
-  ([sys agent-id names mode]
+  ([sys agent-id names mode] (prove! sys agent-id names mode nil))
+  ;; on: a session's checkout and its tree (prove-tree!), on which the service runs the run's process tests, steps and build
+  ([sys agent-id names mode on]
   (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
     (let [db (pdb/head (:conn sys) b)]
       (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx db) :mode mode
                           :digest (program/run-digest db)}
-                   agent-id (assoc :agent agent-id) (seq names) (assoc :names names))))
+                   agent-id (assoc :agent agent-id) (seq names) (assoc :names names) on (merge (select-keys on [:checkout :tree])))))
     (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
 
 (defn run-tests!
@@ -1997,7 +2001,7 @@
               _ (vreset! ag-of ag)]
           (cond (contract/error? w) w
                 (nil? ag) s
-                :else @(prove! sys ag (set (map symbol names)) (or mode :judge))))
+                :else @(prove! sys ag (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})))
          (finally (tree-leave! sys b @ag-of))))))))
 
 (defn store-clean!

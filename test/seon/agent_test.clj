@@ -2143,6 +2143,8 @@
 ;; the digest this branch gives it, so nothing is left to a gate
 (deftest a-checkouts-plan-names-its-process-tests-steps-and-build
   (let [t 'seon.repl-test/a-process-item-of-the-plan
+        ;; an edge each (seon.program/reach-step): what this judges runs in the agent, by a string no reference shows
+        _ '[seon.agent/handle! seon.agent/process-plan seon.agent/test-plan seon.proofs/plan-of]
         plan (str "(let [r (:result (first (seon.agent/handle! {:op :tests :id :x :plan? true :process? true :mode :judge})))]"
                   " {:process (:process r) :deferred (:deferred r) :ids (get-in r [:steps \"ids\"]) :build (:build r)})")
         [_ before _ after] (in-agent (fn [_] [(process-proof "a-process-item-of-the-plan" 2) plan
