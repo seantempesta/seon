@@ -497,3 +497,15 @@
       (is (= {:kind :seed :name :seed :digest "T"} (select-keys (get-in seed [:req :req]) [:kind :name :digest])))
       (is (= [] (fx-asks o3)) "the step is never granted")
       (is (= [:seon.prove/build-red :seed] [(:seon.error/type r) (:kind r)]) (pr-str r)))))
+
+;; docs/merging.md#the-test-service: a red step is the run's red by its name (a step's is no test var, so its failing report named
+;; nothing), and a red run is not remembered: the same key asked again runs again. Red before: :red [] and the run remembered green
+(deftest a-red-step-is-named-red-and-never-remembered
+  (let [[st o] (tree-run 4 {:items {} :steps {"laws" {:digest "dl" :binary? false :bound 100}} :build {:tree "T" :needed? false}})
+        [s] (fx-asks o)
+        [st o2] (feed st [(answer-of s {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message "measures FAILED"}]}})])
+        [r] (run-answers o2)
+        [_ o3] (feed st [[:req {:rid 2 :branch :tree-T :digest "dT" :agent :a1 :checkout "/ck" :tree "T"}]])]
+    (is (= [["laws"] 0 1] ((juxt :red :pass :fail) r)) (pr-str r))
+    (is (empty? (run-answers o3)) "asked again, it is not answered from a remembered green")
+    (is (= 1 (count (filter #(get-in % [:req :plan?]) (asks o3 :tests)))) "it is planned again")))

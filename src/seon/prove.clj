@@ -5,7 +5,9 @@
 
   - A request names a branch, its tx (t) and the digest of what its run reads (seon.root/prove!,
     seon.agent/prove!); its key (run-key) is \"branch@digest\", so a write that changes nothing
-    the run reads (its own facts, the eval that asked) never makes a second run.
+    the run reads (its own facts, the eval that asked) never makes a second run. A run is shared by its key, and the key
+    holds the mode and the names asked: a session's tree run (mode judge, with a checkout, on its tree's branch) never joins
+    a turn's run (mode turn, no checkout, keyed with !turn), whose plan holds no process item, check step or build.
   - Runs of different keys are in flight at once. A request whose key is in flight joins its waiters; it never starts a
     second run. Each run is planned by the agent holding its branch (what it would run, at their digests), and its
     items, (test, digest) pairs, join one queue: an item many runs need is queued once and run once, granted to a free
@@ -257,7 +259,8 @@
   asker's agent writes as its facts: seon.agent/record-answer!), the counts, what was selected, deferred and why, and
   any verdict the cache would not take (:unstored). A process test's and a check step's results count as a test's; a
   build's is no result of the run (an item that needed it answers its error); a step's signals are listed (:signals), no
-  verdict. See docs/merging.md#the-test-service."
+  verdict. :red names every red of the run by its item's name, a check step's (a string) among the tests (finish keeps it), as
+  its failing reports could not: a step's name is no test var. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map :map [:maybe [:vector :map]]] :map]}
   [base results signals]
   (let [results (into {} (remove (comp vector? key)) results)
@@ -273,7 +276,9 @@
              :fns (into {} (for [[_ r] results :when (map? (:answer r)) [t f] (:fns (:answer r))] [t f]))
              :measured (into {} (for [[_ r] results :when (map? (:answer r)) [t m] (:measured (:answer r))] [t m]))
              :selected (vec (:selected base)) :deferred (vec (:deferred base)) :at-judge (:at-judge base 0)
-             :reused (count (filter :reused (:reused-reports base))) :ran (count results)}
+             :reused (count (filter :reused (:reused-reports base))) :ran (count results)
+             :red (vec (sort-by str (distinct (concat (keys (proofs/failures {:reports (vec (:reused-reports base))}))
+                                                      (keep (fn [[t r]] (when (or (contract/error? r) (not (proofs/green? r))) t)) results)))))}
       (seq (:why base)) (assoc :why (:why base))
       (seq signals) (assoc :signals signals)
       (seq (:missing base)) (assoc :missing (:missing base))
@@ -300,7 +305,8 @@
         err? (contract/error? r)
         ended? (= :seon.root/ended (:seon.error/type r))
         died? (and (not err?) (some :exit (:reports r)))
-        r (if err? r (assoc r :key k :red (vec (sort-by str (keys (proofs/failures r))))))
+        ;; a run's items name their own reds (run-answer: a step's among them); any other answer, by its failing reports
+        r (if err? r (assoc r :key k :red (vec (sort-by str (distinct (concat (:red r) (keys (proofs/failures r))))))))
         st (cond-> (-> st (update :runs dissoc k) (assoc :last (:branch run)))
              ;; asked again, it ran nothing for that asker: each verdict reads as reused at its digest, with no measure to add
              (not (or err? died? (seq (:red r)))) (assoc-in [:done (slot run)] {:key k :r (-> r (dissoc :measured) (assoc :ran 0)
