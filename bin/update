@@ -1,5 +1,7 @@
 #!/bin/zsh
 # bin/update [ARGS]   bring the standing root up to date with main, from the main tree, in one go:
+# bin/update --merges-only DIR   step 1's merge alone on the write-back tree DIR (no build, no restart): what
+#   seon.source-test/an-update-never-says-ok-on-a-merge-that-did-nothing drives
 #   1. bring main into the write-back tree (jolt/merges: what the standing root's merges committed in the tree that
 #      config/local.edn's :seon.config.source/root names) and move both trees' submodules to main's pins (bin/worktree
 #      --sync for it). Nothing of jolt/merges enters main here: a merged task's files reach main by the reviewed sync
@@ -16,6 +18,25 @@
 setopt pipefail
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 fail() { print -u2 "update: $*"; print "UPDATE FAILED"; exit 1 }
+# main brought into the write-back tree $1. Its index and files must agree with its HEAD before the merge: a change staged
+# there (a ref moved under a checked-out branch left its index behind, until the write-back committed through that tree: docs/source.md#commit-the-merges-branch)
+# is refused by git's merge, and a merge that did not bring main in is no update. After it, HEAD contains main, or it failed:
+# eight updates on 2026-11-11 said UPDATE OK while the write-back tree stayed at batch 24
+merges_catch_up() {
+  local M=$1
+  # the index is refreshed first: a file whose stat alone moved reads as changed to
+  # git diff, which refused the first update after a merge and passed the next, once git status had refreshed it
+  git -C "$M" update-index -q --refresh --ignore-submodules || true
+  git -C "$M" diff --quiet --ignore-submodules || fail "$M has uncommitted changes: $(git -C "$M" status --short --ignore-submodules | tr '\n' ' ')"
+  git -C "$M" diff --cached --quiet --ignore-submodules || fail "$M has staged changes its HEAD does not hold: $(git -C "$M" status --short --ignore-submodules | tr '\n' ' ')"
+  # its branch may hold the standing root's merges main does not (unsynced tasks): main is merged into it, never it into main
+  git -C "$M" merge -q --no-edit main || fail "merging main into $M (a merged task's files and main's differ: sync or resolve it there)"
+  git -C "$M" merge-base --is-ancestor main HEAD || fail "the merge of main into $M did not bring main in: its HEAD is $(git -C "$M" rev-parse --short HEAD)"
+}
+if [[ ${1:-} == --merges-only ]]; then
+  [[ -d ${2:-} ]] || fail "--merges-only takes the write-back tree's path"
+  merges_catch_up "${2:A}"; print "UPDATE OK"; exit 0
+fi
 cd "$MAIN" || fail "no main tree"
 # the merges tree is the one the standing root writes back into: its path comes from one place, the main tree's
 # config/local.edn (:seon.config.source/root, #seon/checkout "rel/path" or an absolute string), before and after the cutover
@@ -34,13 +55,9 @@ git diff --quiet --ignore-submodules && git diff --cached --quiet --ignore-submo
 if [[ -d $MERGES ]]; then
   # main is brought into the write-back tree here: a boot reads no tree
   # a submodule behind main's new pin is not a change: --sync moves it, and names one that has changes
-  # refused, it names the files. The index is refreshed first: a file whose stat alone moved reads as changed to
-  # git diff, which refused the first update after a merge and passed the next, once git status had refreshed it
-  git -C "$MERGES" update-index -q --refresh --ignore-submodules || true
-  git -C "$MERGES" diff --quiet --ignore-submodules || fail "$MERGES has uncommitted changes: $(git -C "$MERGES" status --short --ignore-submodules | tr '\n' ' ')"
-  # --sync moves to the pins its HEAD records, so the write-back tree holds main's pins before the build. Its branch may hold
-  # the standing root's merges main does not (unsynced tasks): main is merged into it, never it into main
-  git -C "$MERGES" merge -q --no-edit main || fail "merging main into $MERGES (a merged task's files and main's differ: sync or resolve it there)"
+  # refused, it names the files (merges_catch_up). --sync then moves to the pins its HEAD records, so the write-back
+  # tree holds main's pins before the build
+  merges_catch_up "$MERGES"
   "$MAIN/bin/worktree" --sync "$MERGES" >/dev/null || fail "syncing $MERGES's submodules"
 fi
 git -c protocol.file.allow=always submodule update --init -q || fail "main's submodules"

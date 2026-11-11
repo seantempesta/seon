@@ -32,7 +32,10 @@
 (defn- own
   "Entity e on db, the attributes the pattern spec s names (nil, or a `*`: every one), and the ones its joins read (a forward
   join's attribute, a reverse lookup's name): a cardinality-many one as a set (pull answers a vector), a ref as {:db/id};
-  {:db/id e} alone when db holds none of it. One seek of e's datoms, a quarter of what the pull engine costs for the same answer."
+  {:db/id e} alone when db holds none of it. An attribute the pattern asks with its transaction ([attr :tx true], s's :txs) holds beside its value the
+  transaction its datom was written in, under :seon.db/tx ({attr {:db/id tx}}, as a ref the pattern does not join is held; a cardinality-many one
+  {attr {v {:db/id tx}}}, v a ref's entity id; {[attr :tx true] sub} holds sub's attributes of that transaction beside its id, :db/txInstant, :seon.tx/branch): read off the
+  same datoms, so a pattern that asks none costs what it did (docs/ctx.md#the-pattern). One seek of e's datoms, a quarter of what the pull engine costs for the same answer."
   {:malli/schema [:function [:=> [:cat :seon.host/db pos-int?] :map] [:=> [:cat :seon.host/db pos-int? [:maybe :map]] :map]]}
   ([db e] (own db e nil))
   ([db e s]
@@ -42,12 +45,28 @@
          named? (if (or (nil? s) (:star? s))
                   any?
                   (into (set (:attrs s)) (for [j (:joins s) :when (not (:rev? j))] (:attr j))))]
-     (reduce (fn [m {:keys [a v]}]
-               (if (named? a)
-                 (let [x (if (contains? ref a) {:db/id v} v)]
-                   (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x)))
-                 m))
-             {:db/id e} (d/datoms db :eavt e)))))
+     (if-let [ts (not-empty (:txs s))]
+       ;; the pattern asks the transaction of some attributes ([attr :tx true]: {:db/id tx}; {[attr :tx true] sub}: and sub's attributes of
+       ;; it, each transaction read once), beside each value, under :seon.db/tx
+       (let [seen (volatile! {})
+             tx-of (fn [a tx] (if-let [ts' (get ts a)]
+                                (or (get @seen [ts' tx]) (let [x (own db tx ts')] (vswap! seen assoc [ts' tx] x) x))
+                                {:db/id tx}))]
+         (reduce (fn [m {:keys [a v tx]}]
+                   (if (named? a)
+                     (let [x (if (contains? ref a) {:db/id v} v)
+                           m (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x))]
+                       (cond (not (contains? ts a)) m
+                             (contains? many a) (assoc-in m [:seon.db/tx a v] (tx-of a tx))
+                             :else (assoc-in m [:seon.db/tx a] (tx-of a tx))))
+                     m))
+                 {:db/id e} (d/datoms db :eavt e)))
+       (reduce (fn [m {:keys [a v]}]
+                 (if (named? a)
+                   (let [x (if (contains? ref a) {:db/id v} v)]
+                     (if (contains? many a) (update m a (fnil conj #{}) x) (assoc m a x)))
+                   m))
+               {:db/id e} (d/datoms db :eavt e))))))
 
 (defn- many?
   "Does join j hold a collection (a reverse ref, or a cardinality-many attribute)?"
@@ -477,9 +496,12 @@
     acc
     (let [many (get (dbi/-rschema db) :db.cardinality/many #{})
           js (:joins s)
-          skip (cond-> (into #{:db/id} (map :key) js) (empty? p) (into environment-keys))
+          skip (cond-> (into #{:db/id :seon.db/tx} (map :key) js) (empty? p) (into environment-keys))
           bad (fn [acc path a v] (if-let [w (why a v)] (update acc :invalid conj {:path path :why w}) acc))
           refuse (fn [acc path w] (update acc :invalid conj {:path path :why w}))
+          ;; the transaction a pulled attribute was written in ([attr :tx true]) is the db's, as the record's basis is: never written
+          acc (if (= (get old :seon.db/tx) (get new :seon.db/tx)) acc
+                (refuse acc (conj p :seon.db/tx) "the transaction an attribute was written in is the db's (the pattern's [attr :tx true]): it is read, never written"))
           own-ks (remove skip (distinct (concat (keys old) (keys new))))
           ;; this entity's change here: each attribute that differs, each join whose members differ (by id, or the swap!'s key)
           change (as-> {} c

@@ -25,6 +25,8 @@ One session manages the others; it owns no area of the code (owner, 2026-11-10: 
 - **It watches the clock on what it started:** a prove's expected end is written down when it starts, a run far past it is a hang to capture, and waits run in the background while other work goes on.
 - **A review goes to the session that owns the area** (owner, 2026-11-10: "reviewed by a competent agent in their speciality"): a task a Seon agent finished, a helper's diff in another session's namespace, a claim about another session's code.
 
+**A change that moves every verdict is run whole once** (owner, 2026-11-10: "just run it once so the other runs don't duplicate all the tests"). Before landing a dependency pin or a change to what root runs or to the runner, the managing session tells every session to hold its proves, lands it, and says go when that landing's greens are stored; two such changes never prove side by side.
+
 ## The way improves
 
 The standard is the best way known, written down, until a better one replaces it ([AGENTS.md §1](../AGENTS.md)). What turned a pain into a part of the way on 2026-11-10, as the pattern to follow:
@@ -37,6 +39,10 @@ The standard is the best way known, written down, until a better one replaces it
 
 How to do it: name the cost with its number; find what allowed it; change the script, the check or the wiki section so the better thing is the default; delete the old way in the same change; tell every session what to stop doing. A lesson kept only in a session's memory is lost at its next compaction.
 
+A compaction is where a session's own lessons are most easily lost, so it is where they are handed up: before it compacts a session reflects on its stretch of work and reports to its parent what would have saved it time; the parent turns each suggestion into an owned item of the plan or a small change made at once, and the session writes its findings into its state note and its post-compaction prompt (owner, 2026-11-11: "lots of base hits rather than swinging for homeruns"). The managing session does the same toward the owner. A Seon agent's form of this is its task: what it learned goes into the task's plan, so its evals can be dropped and its context made again from the task and its entity's data.
+
+**A session leaves the system up to date where each fact lives** (owner, 2026-11-11: "grep around and find the parts that might be out of date and not just edit an append log.md ... Over time I want to stop drift"). Before it concludes or compacts, a session greps the wiki, the task files, the docstrings and the schema descriptions for every place that states what its work changed, makes each true where it is, removes the task entries it completed and rewrites the plans it changed. One new page that restates the rest is drift.
+
 ## No fan-out
 
 A session does its work itself, in one conversation, and starts no other session unless the owner asks (owner, 2026-10-28: "This system of launching 10+ agents just burned my tokens and was not productive"; and "let's stick with just you and me and any subtasks you do are one use agents that are sonnet and haiku and mostly just to find info for you to read and you can preprocess and run longer tests on well spec'ed ideas (especially repl interactive building) with sonnet").
@@ -44,6 +50,8 @@ A session does its work itself, in one conversation, and starts no other session
 The night of 2026-10-27 ran sixteen sessions and a merge session, with wake pipes and orders files, each re-deriving context and reworking the others' branches. About a fifth of a week's tokens went on churn (109 merges, 6 Jolt pin bumps, 591 GB of worktrees), and the machine reached a memory limit at load 35. The tooling built to serve that parallel work is the second lesson of the night ([decisions](decisions.md#build-the-product-not-infrastructure-owner-2026-10-28)).
 
 A session uses as many helpers as its work needs (owner, 2026-11-10: "What I never said one helper? Yeah allocate whatever resources we need"): each is briefed from a plan the session understands, owns its own files so no two write the same ones, and has every line reviewed by the session. What the night above got wrong was sessions nobody steered reworking each other, not the number of hands; the machine still bounds it ([machine](machine.md#processes)).
+
+**No agent on the costliest model without the owner's yes** (owner, 2026-11-10: "Do not launch any fable agents without my approval"). Say which model a helper or a session would run on before starting it, and give a helper the cheapest model that fits its piece.
 
 ## Asking the owner
 

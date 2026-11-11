@@ -994,6 +994,28 @@
     (is (empty? (for [[id n] (frequencies ids) :when (> n 1)] id)) (str "no element id twice: " (pr-str (for [[id n] (frequencies ids) :when (> n 1)] id))))
     (r/dispose-walk! (get-in st [:root-walk :w]))))
 
+(deftest every-render-fits-the-hiccup
+  ;; docs/render.md#the-hiccup-is-checked: what each render writes that the intermediate refuses (seon.render/misfits: :class, :style,
+  ;; :wire marks, other qualified keys, attribute values that are no plain value), counted on the pages the test world draws (an agent's,
+  ;; root's, the user's), pinned so a count only goes down: each later change moves a render's look to CSS and its count to none
+  (let [[main branch eid] (paged-dbs)
+        main (d/db-with (signed-in main [eid]) [{:seon.agent/key "a3" :seon.agent/root [:seon.root/id :root]}])
+        st (root-state (branch-state main branch) main)
+        [st1 _] (pass-view st :root)
+        [st2 _] (pass-view st1 [:chat :a3])
+        ws (concat [(get-in st2 [:root-walk :w])] (keep #(some-> (:walk (val %)) deref :w) (:branch-reads st2)) (map :w (vals @(:user-walks st2))))
+        seen (apply merge-with #(merge-with + %1 %2) (map r/misfits-by-render ws))
+        ;; measured 2026-11-11, the walk's own class on each component's root (its render's name) among them: it goes when data-render replaces it
+        pinned '{seon.render.ui/agent {:wire 2 :class 12} seon.render.ui/agent-parts {:class 2} seon.render.ui/agent-state {:wire 2 :class 2}
+                 seon.render.ui/agents-list {:class 1} seon.render.ui/conversation-list {:class 2} seon.render.ui/eval-output {:class 7}
+                 seon.render.ui/evaluation {:class 5} seon.render.ui/page-rules {:class 2} seon.render.ui/problems-tile {:class 1}
+                 seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 4 :wire 1} seon.render.ui/root-evals {:class 3}
+                 seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 2}
+                 seon.render.ui/system-message {:class 4 :wire 2}}]
+    (try (is (= pinned seen) (str "a count moved: write the new one here when it went down, never when it went up\n"
+                                  (with-out-str (clojure.pprint/pprint (into (sorted-map) seen)))))
+         (finally (doseq [w ws] (r/dispose-walk! w))))))
+
 (deftest a-part-that-sorts-into-the-middle-goes-there
   ;; a new unit with held units on both sides of it in its container is placed after the one
   ;; before it, not at the container's end

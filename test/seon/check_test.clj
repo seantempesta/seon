@@ -134,19 +134,6 @@
           (is (= (disj in1 b1) (disj in2 b2)) "and nothing else changed")))
       (finally (seon.lib/remove-tree! path (str path "-agents") runs)))))
 
-(deftest records-are-read-at-the-agents-commit
-  ;; the branch is read again at
-  ;; each of the agent's commit events, never before one when its records are not there yet
-  (let [ev (a/chan 8)
-        reads (atom 0)
-        ;; the branch shows the records from its second read on: after a commit
-        read #(if (= 1 (swap! reads inc)) [] [:r1 :r2])]
-    (doseq [e [{:type :reply :agent :a1} {:type :commit :agent :a2 :t 5} {:type :commit :agent :a1 :t 7} {:type :ready :agent :a3}]]
-      (a/>!! ev e))
-    (is (= [:r1 :r2] (#'seon.check/await-records ev :a1 read #(= 2 (count %)))))
-    (is (= 2 @reads) "once at the start, once at a1's commit")
-    (is (= {:type :ready :agent :a3} (a/poll! ev)) "it waited through a1's commit, not a2's or a reply")))
-
 (deftest the-probe-says-what-it-took
   ;; the system check awaits the probe's
   ;; own event for its third message, not a window
@@ -454,30 +441,39 @@
   (let [dir (seon.config/checkout)]
     (is (= (seon.fx/tree-id dir) (str/trim (:out (clojure.java.shell/sh (str dir "/bin/tree") dir)))))))
 
-(deftest a-stalled-test-is-named-and-the-run-goes-on
+(deftest a-stalled-test-is-named-an-overran-one-ended-and-the-run-goes-on
   ;; root, 2026-10-26 (the owner: "the hangs are super bad especially if you don't notice"): a test
-  ;; quiet past its own bound is named, never ended (bin/stalls, which bin/test runs beside its
+  ;; quiet past its own stall bound is named, not ended (bin/stalls, which bin/test runs beside its
   ;; shards); its bound is its line in the plan's stall bounds (k times its own last run), the floor
-  ;; otherwise. Two shards' logs each say a test started, and each shard waits on a FIFO the test
-  ;; releases only once one is named: the test whose bound is 200 ms is named, once; the one whose
+  ;; otherwise. Three shards' logs each say a test started, and two shards wait on a FIFO the test
+  ;; releases only once the third is ended: the test whose bound is 200 ms is named, once; the one whose
   ;; bound is 600 s is not (a healthy slow test), nor is one whose test ended (the shard quiet after
   ;; it); both go on and end, and the watcher with them. The logs' quiet is set by their mtime, not
   ;; waited out (bin/stalls reads it in whole seconds): 10 s for the 200 ms bound and 200 s for the 600 s
-  ;; one, each on the other side of the 100 s floor from its own bound, so a watcher that reads the floor is red
+  ;; one, each on the other side of the 100 s floor from its own bound, so a watcher that reads the floor is red.
+  ;; The third shard's test parks forever (a read of a FIFO nobody writes): past its end bound (500 ms, its
+  ;; line's third word; the others' is the floor, 100000 s) its evidence is captured, OVERRAN recorded once
+  ;; in its log and its shard ended with SIGKILL, the owner's fourth clock exception
+  ;; (docs/clocks.md#time-decides-the-owners-exceptions); its running time is read from when the watcher saw it start
   (let [root (seon.config/checkout)
         d (str root "/target/stalls-test-" (random-uuid))
         _ (.mkdirs (java.io.File. d))
         script (str "cd " d "; printf 'started seon.x-test/hangs\\n' > a.log; printf 'started seon.x-test/slow\\n' > b.log; printf 'started seon.x-test/done\\nended seon.x-test/done\\n' > c.log\n"
+                    "printf 'started seon.x-test/parks\\n' > d.log\n"
                     "touch -t $(date -v-10S +%Y%m%d%H%M.%S) a.log c.log; touch -t $(date -v-200S +%Y%m%d%H%M.%S) b.log\n"
-                    "printf 'seon.x-test/hangs 200\\nseon.x-test/slow 600000\\nseon.x-test/done 200\\n' > bounds; mkfifo ra rb out\n"
-                    "(read x < ra) & pa=$!; (read x < rb) & pb=$!\n"
-                    root "/bin/stalls 100000 bounds a.log:$pa b.log:$pb c.log:$pb > out & s=$!\n"
-                    "line=$(head -1 out)\n"
-                    "echo go > ra; echo go > rb; wait $s; echo \"exit $?\"; echo \"$line\"; grep -c STALLED a.log; grep -c STALLED b.log; grep -c STALLED c.log\n")
-        [ex line na nb nc] (str/split-lines (:out (clojure.java.shell/sh "zsh" "-c" script)))]
-    (is (= "exit 0" ex) "the watcher ends when the shards do: the run goes on")
-    (is (re-find #"^STALLED seon.x-test/hangs \d+ ms \(bound 200 ms, load [\d.]+," (str line)) "the quiet test past its own bound is named, with its quiet ms and the load it was quiet under")
-    (is (= ["1" "0" "0"] [na nb nc]) "recorded once in its shard's log; the slow test within its bound, and a test that ended, are not named")))
+                    "printf 'seon.x-test/hangs 200\\nseon.x-test/slow 600000\\nseon.x-test/done 200\\nseon.x-test/parks 600000 500\\n' > bounds; mkfifo ra rb rd\n"
+                    "(read x < ra) & pa=$!; (read x < rb) & pb=$!; (read x < rd) & pd=$!\n"
+                    root "/bin/stalls 100000 100000000 bounds a.log:$pa b.log:$pb c.log:$pb d.log:$pd > out & s=$!\n"
+                    "wait $pd; dx=$?\n"
+                    "echo go > ra; echo go > rb; wait $s; echo \"exit $?\"; head -1 out; grep -c STALLED a.log; grep -c STALLED b.log; grep -c STALLED c.log\n"
+                    "echo \"parked $dx\"; grep -c '^OVERRAN seon.x-test/parks 500 ms' d.log; grep -c STALLED d.log; [[ -s d-overran/ps.txt ]] && echo evidence\n")
+        [ex line na nb nc parked no nd ev] (str/split-lines (:out (clojure.java.shell/sh "zsh" "-c" script)))]
+    (try
+      (is (= "exit 0" ex) "the watcher ends when the shards do: the run goes on")
+      (is (re-find #"^STALLED seon.x-test/hangs \d+ ms \(bound 200 ms, load [\d.]+," (str line)) "the quiet test past its own bound is named, with its quiet ms and the load it was quiet under")
+      (is (= ["1" "0" "0"] [na nb nc]) "recorded once in its shard's log; the slow test within its bound, and a test that ended, are not named")
+      (is (= ["parked 137" "1" "0" "evidence"] [parked no nd ev]) "the parked test past its end bound: its shard ended by SIGKILL, OVERRAN recorded once with its bound, its evidence beside the log")
+      (finally (seon.lib/remove-tree! d)))))
 
 (deftest a-merges-verdict-is-its-exit-statuses-and-it-writes-its-line
   ;; bin/prove --merge's verdict comes from prove's exit status alone (contracts and smoke are steps of

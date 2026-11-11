@@ -119,13 +119,14 @@
 
  ;; ==== the store ==============================================================================
 
- ;; The durable store's konserve backend: LMDB (one env sync per commit) or the POSIX filestore.
+ ;; The durable store's konserve backend: LMDB (a commit unsynced, the flusher's one env sync covering
+ ;; every commit since the last: docs/storage.md#durability-is-continuous-group-commit) or the POSIX filestore.
  :seon.config.store/backend :lmdb
  ;; Unit: bytes. LMDB's map size, the store's largest size. At the bound LMDB refuses the
  ;; write (MDB_MAP_FULL, a :seon.writer/refused answer). Provenance: the store's first
  ;; default was 1 GiB (seon.db's SEON_LMDB_MB); on 2026-10-21 the standing root's kept store
  ;; reached 747 MB and two agents died on Datahike's fatal-commit-error while recording. The map
- ;; is address space, not memory or disk: without MDB_WRITEMAP (the flags are MDB_NOSYNC) the
+ ;; is address space, not memory or disk: without MDB_WRITEMAP (the flags are MDB_NOSYNC|MDB_SAFENOSYNC) the
  ;; file grows only as it is used, so LMDB's guidance is a map as large as the store may ever
  ;; grow. 64 GiB.
  :seon.config.store/lmdb-map-bytes 68719476736
@@ -227,7 +228,8 @@
  ;; Unit: times. A bin/check step that runs this many times its median measured run (its greens' :ms, seon.fx/typical-ms),
  ;; floored at :seon.config.agent/stall-ms, is ended: bin/evidence captures it first (its process tree, samples, fiber
  ;; dumps, and its root's stall state), and it is red with the typed reason STEP-OVERRAN, never retried (the owner's
- ;; fourth clock exception, 2026-11-10: docs/clocks.md#time-decides-the-owners-exceptions). Provenance: of 6,239 green
+ ;; fourth clock exception, 2026-11-10: docs/clocks.md#time-decides-the-owners-exceptions). A test bin/test runs past this many
+ ;; times its last run (floored at this times :seon.config.agent/stall-ms) is ended the same way by bin/stalls, red as OVERRAN. Provenance: of 6,239 green
  ;; runs in the verdict cache of tests whose median is 2 s or more, 161 ran past 5 times it and 30 (0.5%) past 10, most
  ;; at load 30-40 before proves took slots; past 10 is a hang more often than a slow machine.
  :seon.config.check/step-end-factor 10
@@ -603,6 +605,12 @@
  ;; much sharding?"): each shard loads every test namespace and boots a shared root per test group, so three sessions'
  ;; four-shard runs at once took load to 40 on 18 cores.
  :seon.config.proofs/jobs #long #or [#env SEON_PROOF_JOBS 4]
+ ;; Unit: processes. The test children the test service (seon.prove) runs at once on this machine, each a fork of the agent
+ ;; holding its item's branch that runs one test and exits: the queue's workers, the one bound on the service's work, so
+ ;; however many agents and sessions ask, the machine runs this many tests. Provenance: 2026-11-11, a forked test child is
+ ;; 16-35 MB of its own and about a core while it runs (fork + one test + exit: ~10 ms); 18 cores, half kept for the roots
+ ;; and agents the tests drive: 8. Set it to the machine (config/local.edn) as the owner asked: configurable.
+ :seon.config.proofs/test-workers 8
  ;; Unit: ms. The least work a shard of an incremental run is worth (seon.proofs/worth-shards). Provenance: a shard's start
  ;; costs about 5 s, and 8 s more for its process tests' root (docs/testing.md#a-root-costs-what-it-boots), so it saves its cost past
  ;; about twice that on each side. At the bound: a run of less work than this runs in one shard, as the owner ruled 2026-10-30.
@@ -653,7 +661,7 @@
  ;; STALLED (bin/stalls): a test with no record, or a bound under :seon.config.agent/stall-ms, takes
  ;; that key. Provenance: at a flat 30 s, 21 healthy process tests were named STALLED in one run (each
  ;; quiet 31-32 s while a root booted or an agent ran, then green); 3x its own time names a hang and
- ;; leaves a slow test. Past it the test is named, never ended.
+ ;; leaves a slow test. Past it the test is named; only past :seon.config.check/step-end-factor is it ended.
  :seon.config.proofs/stall-factor 3
  ;; Unit: ms. A test measured at this or over is left out of bin/prove and a merge until it is fast
  ;; (seon.fx/slow-tests, docs/merging.md#a-slow-test-runs-last); naming it or the full run still runs it.
@@ -704,10 +712,14 @@
  ;; equal calls is not the end, so the count is twice that). Provenance: worktree session
  ;; a-call-allocates-the-same-bytes-each-time. At the bound: n/a.
  :seon.config.proofs/cost-settled 16
- ;; Unit: calls. The most calls one measure makes before it takes the last cost-settled as they are
- ;; (a function that never settles: another thread's collection falling in most calls). Provenance:
- ;; worktree session a-call-allocates-the-same-bytes-each-time; the warm-up above settled by call 14, so 30 calls settle it and this is twice that.
- ;; At the bound: the measure answers the least of the calls, marked :unsettled in its meta.
+ ;; Unit: calls. The most calls a cost proof makes of one function at one size when its one call was over its
+ ;; estimate (seon.cost/run): a measure is one call (owner, 2026-11-11: "oh god just remove this. I wanted results to
+ ;; accumulate and become more precise over time naturally as they are exercised in the system"), and only a call over
+ ;; its estimate is measured again, until cost-settled calls in a row allocate no fewer bytes (ruled by Point for the
+ ;; owner, 2026-11-11: "if we know that it needs to be called twice ... do not render a clear number until that is
+ ;; ready"). 19 of 127 cost proofs need it (2026-11-11): their first call fills what later calls read. Provenance: worktree
+ ;; session a-call-allocates-the-same-bytes-each-time; the warm-up settled by call 14, so 30 calls settle it and this is
+ ;; twice that. At the bound: the measure answers the least of the calls, marked :unsettled in its meta.
  :seon.config.proofs/cost-max-samples 60
  ;; Unit: test.check sizes. A generated cost proof draws case i at size (mod i this) (seon.cost/cases),
  ;; so a proof of this many cases or more reaches every size from 0 up. Provenance: worktree session
