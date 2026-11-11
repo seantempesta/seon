@@ -1745,8 +1745,8 @@
     (is (task/refine? db1 "demo/a-refine") (str "a refine by its cite of the section: " (pr-str (task/cites-of db1 (seon.db/eid db1 :seon.task/id "demo/a-refine")))))
     (is (nil? (task/refine-tx db1 "demo/a" false)) "none twice")
     (is (nil? (task/refine-tx db1 "demo/a-refine" false)) "a refine gets none")
-    (is (= :held (:seon.task/execution (some #(when (= "demo/a-refine" (:seon.task/id %)) %) (task/refine-tx db "demo/a" true))))
-        "a task that finished gets its refine held by default (:seon.config.agent/refine-finished): one more paid run a finished task only when released")))
+    (is (nil? (task/refine-tx db "demo/a" true))
+        "a task that finished gets no refine by default (:seon.config.agent/refine-finished :none): a held task reads as work not done")))
 
 (deftest a-refined-plan-starts-one-fresh-run-from-main
   ;; docs/tasks.md#a-refine-curates-its-own-task (the owner, 2026-11-11: the refinement is tried from the earlier point, beside the
@@ -1788,10 +1788,13 @@
     (is (= [:a-a] (map :agent acts)) "on the agent it continues")))
 
 (deftest a-refined-plan-runs-a-capped-task-again
-  ;; docs/tasks.md#a-refine-curates-its-own-task (Point's ruling: work, refine, rerun for every end that is not done): a task at its cap is
-  ;; not held (its execution stays :running), and a refine that changed its plan still starts it again on a new branch (loop D0, 2026-11-11)
+  ;; docs/tasks.md#a-refine-curates-its-own-task: a task at its cap is waiting for a raised budget, not ended, so its judgment writes no
+  ;; refine (batch 88's e2e-held: a released refine took the turns the parked agent waited on); a refine asked for, that changed its plan,
+  ;; still starts it again on a new branch (loop D0, 2026-11-11)
   (let [db0 (with-refine-section (mdb [(decl "a")] :extra (work "a" :running)))
         {db1 :db} (judge! db0 "a" {:outcome :cap})
+        _ (is (nil? (task/task db1 "demo/a-refine")) "a cap writes no refine")
+        db1 (d/db-with db1 (task/refine-tx db1 "demo/a" false))
         old (:seon.task/branch (task/task db1 "demo/a-refine"))
         db2 (d/db-with db1 (work "a-refine" :running))
         better "Make a true. The example to copy: demo-test/a-test."

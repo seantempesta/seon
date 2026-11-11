@@ -941,9 +941,9 @@
                                         now)))
                (into (:tx carried))
                ;; every end that holds or finishes the task gets its refine, the same agent continued on the same branch
-               ;; (docs/tasks.md#a-refine-curates-its-own-task): none while the agent goes on (parked, told a verdict, or behind main), none for a
-               ;; refine, none twice (seon.task/refine-tx)
-               (into (when-not (#{:parked :told :behind} outcome) (task/refine-tx main id (boolean (or (finished outcome) (judged-outcomes outcome))))))
+               ;; (docs/tasks.md#a-refine-curates-its-own-task): none while the agent goes on or waits (parked, told a verdict, behind main, or at
+               ;; its cap waiting for a raised budget), none for a refine, none twice (seon.task/refine-tx)
+               (into (when-not (#{:parked :told :behind :cap} outcome) (task/refine-tx main id (boolean (or (finished outcome) (judged-outcomes outcome))))))
                ;; a refine's end that changed the plan of the held task it cites runs that task again, fresh from main (seon.task/again-tx)
                (into (task/again-tx main id (:tx carried)))
                ;; marked failed (my.task/fail!): the failure on main and the task held for root (a compare-and-swap from :running),
