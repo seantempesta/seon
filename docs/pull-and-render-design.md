@@ -36,7 +36,7 @@ Each move with the pull form before and after it, and what it deletes.
 
 | move | before | after | deletes |
 |---|---|---|---|
-| the role named in the pattern | a whole pattern stored per entity, written by code at boot for root's session and the user (three copies of the user's that disagree) | `[:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]`: the role's name, then its own clauses; a join "again, to depth n" with n a config key | `seon.task/user-pattern`, `agents-join`, `seon.root/root-session-pattern`, the two boot writes |
+| the role named in the pattern | a whole pattern stored per entity, written by code at boot for root's session and the user (three copies of the user's that disagree) | `[:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]`: the role's name, then its own clauses; a join "again, to depth n" with n a config key | `seon.task/user-pattern`, `agents-join`, `seon.system/root-session-pattern`, the two boot writes |
 | required parts | any `swap!` of a pattern was written | a role's schema says what its pattern must keep (`:seon.ctx/required`); a `swap!` that drops one is refused naming it (on main) | silent loss of the task, the messages, the turns |
 | A | `agent-parts` lists six parts by name | each is the render on its attribute's schema, placed where the pattern asks the attribute | the tail of `agent-parts`, `added-keys` |
 | B | a render reads the db or a proc's state by hand | `{:seon.view/_of [...]}`: asked views, each drawn by the render of the value its function answers | the hand lists in `agent-parts` and `root`, `root-head`'s counts, the head's hand pull |

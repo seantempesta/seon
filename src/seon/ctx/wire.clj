@@ -21,7 +21,7 @@
 
 (def help-page
   "The help page, docs/agent.md: what `doc` answers of an anchor, each section on demand. Main holds
-  it as the wiki's sections from root's boot on (seon.root/start!)."
+  it as the wiki's sections from root's boot on (seon.system/start!)."
   "docs/agent.md")
 
 (defn help-text
@@ -567,11 +567,11 @@
   (let [evals (:seon.eval/_agent c)
         placed (ctx/placed-messages ix c)
         ;; what the model reads of the placed members (the page shows them all): an eval by another than the agent itself only when it is the
-        ;; system's (its :seon.eval/by the system entity, :seon.root/id) and holds an intent; a person's or another agent's eval, and the
+        ;; system's (its :seon.eval/by the system entity, :seon.system/id) and holds an intent; a person's or another agent's eval, and the
         ;; system's own work (seon.turn/work!, no intent), stay out (Context and Data model, 2026-11-11)
         ;; read untracked, member by its path: who made an eval and its intent are written with it, once
         plain (ratom/untracked c)
-        model-reads? (fn [p] (let [m (get-in plain p) by (:seon.eval/by m)] (or (nil? by) (= (:db/id by) (:db/id plain)) (and (:seon.root/id by) (not (str/blank? (:seon.eval/intent m)))))))
+        model-reads? (fn [p] (let [m (get-in plain p) by (:seon.eval/by m)] (or (nil? by) (= (:db/id by) (:db/id plain)) (and (:seon.system/id by) (not (str/blank? (:seon.eval/intent m)))))))
         ;; the newest call's basis is written after the commit it names (seon.turn/open-turn!), so read at that commit it holds none:
         ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message; a pull
         ;; that leaves bases out (a smaller pattern) shows no page

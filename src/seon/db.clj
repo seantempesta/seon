@@ -725,7 +725,7 @@
 
 (defn empty-db
   "An empty db value with Seon's schema (`schema`), in memory, keeping history when history?: a test's world
-  (my.test/world) and a tree indexed with no store (seon.root/built-program). See docs/testing.md#testing-in-the-world."
+  (my.test/world) and a tree indexed with no store (seon.system/built-program). See docs/testing.md#testing-in-the-world."
   {:malli/schema [:=> [:cat :boolean] :seon.host/db]}
   [history?] (datahike.core/empty-db (into {} (map (juxt :db/ident #(dissoc % :db/ident))) schema)
                                      {:keep-history? history? :schema-flexibility :write}))
@@ -744,7 +744,7 @@
     bs))
 
 (defn tree-branch?
-  "Whether b names a checkout's proving branch, tree-<its 40-hex tree id> (seon.root/tree-branch): the only branch the system
+  "Whether b names a checkout's proving branch, tree-<its 40-hex tree id> (seon.system/tree-branch): the only branch the system
   drops by itself. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :seon.db/branch] :boolean]}
   [b] (boolean (re-matches #"tree-[0-9a-f]{40}" (name b))))
@@ -938,16 +938,16 @@
 (defn collect!
   "Collect the store under conn (datahike.api/gc-storage: every key no branch reaches, nodes
   and values out of line, is swept) when a branch the last record saw is gone (main's
-  :seon.root/collected): the record to write, {:swept :ms :branches :gone}. With no record yet
+  :seon.system/collected): the record to write, {:swept :ms :branches :gone}. With no record yet
   (a new main) or none gone but branches made since, the record of what is here, nothing swept,
   so a branch seen at one quiescence and gone at a later one is reclaimed; {:skipped true} when
   the branches are the ones recorded. Only while no other process writes the store (owner:
   simplest first): root's writer runs it (:collect), root refuses it while an agent
   is live, and sole? (:seon.config.store/sole-writer?) says no other root writes it; when not,
   {:skipped true :shared true} (docs/storage.md#collection)."
-  {:malli/schema [:=> [:cat :seon.host/conn :boolean] [:or [:map [:skipped :boolean] [:shared {:optional true} :boolean]] :seon.root/collected]]}
+  {:malli/schema [:=> [:cat :seon.host/conn :boolean] [:or [:map [:skipped :boolean] [:shared {:optional true} :boolean]] :seon.system/collected]]}
   [conn sole?]
-  (let [last (:seon.root/collected (d/pull @conn [:seon.root/collected] [:seon.root/id :root]))
+  (let [last (:seon.system/collected (d/pull @conn [:seon.system/collected] [:seon.system/id :root]))
         now (set (d/branches conn))
         gone (count (remove now (:branches last)))]
     (cond
@@ -969,7 +969,7 @@
   [db] (or (:store db) (:store (:origin-db db))))
 
 (defn retain!
-  "Sweep the commit snapshots of the store under conn older than main's newest keep commits, when that many have landed since the last sweep (main's :seon.root/retained),
+  "Sweep the commit snapshots of the store under conn older than main's newest keep commits, when that many have landed since the last sweep (main's :seon.system/retained),
   counted by the commit graph's generation, never a clock. Kept whole, whatever their age: each branch's head, its merge base with main, and each commit an agent's facts
   name (:seon.agent/base-commit, :seon.agent/main-commit, :seon.agent/main-program), which is what a merge and a page read by id. Every datom, a branch's history and as-of reads stay: only reading
   another old commit by its id goes. Root calls it at boot, before any other process exists, so nothing live holds a swept commit, and as its sole writer. Answers
@@ -980,7 +980,7 @@
         main (get-in @conn [:config :branch])
         record #(d/commit-graph-record store %)
         generation (:datahike/generation (record (d/commit-id @conn)))
-        last-g (:generation (:seon.root/retained (d/pull @conn [:seon.root/retained] [:seon.root/id :root])) 0)]
+        last-g (:generation (:seon.system/retained (d/pull @conn [:seon.system/retained] [:seon.system/id :root])) 0)]
     (when (and generation (> generation keep) (>= (- generation last-g) keep))
       (let [t0 (profile/now-ns)
             ;; a commit older than the graph has no record, and one is derived from the commit record the sweep deletes: every commit gets its record first
@@ -1002,7 +1002,7 @@
             swept @(d/gc-storage conn cutoff {:datahike.gc/keep-commits (into #{} (remove nil?) (concat bases named))})
             r {:swept (count swept) :ms (profile/ms-since t0) :generation generation}]
         (when (seq swept) (compact-due! conn))
-        (d/transact conn [{:seon.root/id :root :seon.root/retained r}])
+        (d/transact conn [{:seon.system/id :root :seon.system/retained r}])
         r))))
 
 (defn after-fork!

@@ -462,7 +462,7 @@
 
 (defn bounded
   "The error map m with each member kept (`kept`): for root, which keeps other processes' errors
-  for its life (seon.root/flow-error); what an asker or an agent gets is the error whole."
+  for its life (seon.system/flow-error); what an asker or an agent gets is the error whole."
   {:malli/schema [:=> [:cat :map] :map]}
   [m] (into {} (map (fn [[k v]] [k (kept v)])) m))
 

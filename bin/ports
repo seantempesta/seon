@@ -42,7 +42,7 @@ if [[ -f $LOCAL ]]; then
     case $line in
       *:seon.config.root/server-port*|*:seon.config.web/port*) ;;
       ";; This checkout's own config layer"*|";; under the command line's --config"*|";; "*"worktree-ports"*) ;;
-      *";; root's server (bin/root, bin/mcp)"|*";; the dashboard; bin/check and bin/test set"*) ;;
+      *";; root's server (bin/system, bin/mcp)"|*";; the dashboard; bin/check and bin/test set"*) ;;
       *) [[ -n ${line//[[:space:]]/} ]] && others+=("$line") ;;
     esac
   done < "$LOCAL"
@@ -57,7 +57,7 @@ NEW=$LOCAL.new.$$
   print ";; This checkout's own config layer (gitignored), over resources/seon/config/default.edn and"
   print ";; under the command line's --config and --set (seon.config). Written by bin/ports from"
   print ";; the main tree's config/worktree-ports ($NAME); edit it to move this checkout's ports."
-  print "{;; root's server (bin/root, bin/mcp)"
+  print "{;; root's server (bin/system, bin/mcp)"
   print " :seon.config.root/server-port #long #or [#env SEON_SERVER_PORT $E]"
   print " ;; the dashboard; bin/check and bin/test set SEON_WEB_PORT=0, so their roots serve none"
   print -n " :seon.config.web/port #long #or [#env SEON_WEB_PORT $W]"
@@ -67,5 +67,5 @@ NEW=$LOCAL.new.$$
 # written only when it changes (nothing changed, nothing done)
 if cmp -s "$NEW" "$LOCAL"; then rm -f "$NEW"; else mv "$NEW" "$LOCAL"; fi
 [[ -n $WRITE ]] && exit 0
-# what the layer just written resolves to (its #or [#env ...]), with no process booted to read it: bin/root runs this on every call
+# what the layer just written resolves to (its #or [#env ...]), with no process booted to read it: bin/system runs this on every call
 print ${SEON_SERVER_PORT:-$E} ${SEON_WEB_PORT:-$W}

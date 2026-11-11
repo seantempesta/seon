@@ -195,7 +195,7 @@
     (is (= [{:op :kill :task "demo/x" :reason :held}] (actions-for db)))))
 
 (deftest an-outside-agent-is-not-killed-for-the-tasks-own-model
-  ;; task seon.root/an-outside-agent-is-a-first-class-worker (gap 5): attach starts an agent whose env
+  ;; task seon.system/an-outside-agent-is-a-first-class-worker (gap 5): attach starts an agent whose env
   ;; says model "outside" and leaves the task's model alone, so the task's next agent is its own
   (let [db (db-of [(decl "x" :model "m1")] :extra (work "x" :running :model "outside"))]
     (is (= [] (actions-for db)) "a live outside agent of a task of another model is not an env change"))
@@ -211,7 +211,7 @@
     (is (= [{:op :reap :task "demo/x"}] (actions-for db)) "a reap is the task's one action this pass")))
 
 (deftest root-takes-a-running-task-back-and-releases-it-again
-  ;; task seon.root/an-outside-agent-is-a-first-class-worker (gap 6): my.root/hold! pauses a running
+  ;; task seon.system/an-outside-agent-is-a-first-class-worker (gap 6): my.root/hold! pauses a running
   ;; task (cancel! is final); run! releases it and its next agent continues the branch
   (let [db (db-of [(decl "x") (decl "y")] :extra (concat (work "x" :running) (task/execution-tx ["demo/y"] :held)))
         {:keys [taken tx not-running]} (my.root/take-back-tx db ["demo/x" "demo/y" "demo/none"] "taken back for a hand repair")
@@ -237,7 +237,7 @@
         after (d/db-with db tx)]
     (is (= :cancelled (:seon.task/execution (task/task after "demo/x"))) "the task that exists is cancelled")
     (is (= #{"x" "demo/none"} (set (map :task unknown))) "each id that names no task is answered")
-    (is (= [:seon.root/unknown-task :seon.root/unknown-task] (mapv :seon.error/type unknown)))
+    (is (= [:seon.system/unknown-task :seon.system/unknown-task] (mapv :seon.error/type unknown)))
     (is (nil? (pdb/eid after :seon.task/id "x")) "and no task is made for it")
     (is (nil? (pdb/eid after :seon.task/id "demo/none")))))
 
@@ -410,7 +410,7 @@
   ;; on its branch before it exited (its cause), beside the death root observed (exit status);
   ;; a silent death (no end) is named by its exit; a turn loop that threw (the agent's REPL
   ;; answered the error, the process lives) is named by that error, not "wrote no end"
-  (let [died (contract/error :seon.agent/died 'seon.root/api-proc "agent a1 died: exit 70" {:agent :a1 :exit {:exit 70}})
+  (let [died (contract/error :seon.agent/died 'seon.system/api-proc "agent a1 died: exit 70" {:agent :a1 :exit {:exit 70}})
         cause (contract/error :seon.agent/eval-error 'seon.repl/serve! "boom" {:class "clojure.lang.ExceptionInfo"})
         db (db-of diamond :extra (work "a" :running))
         after (fn [tx] (task/task (d/db-with db tx) "demo/a"))]
@@ -433,7 +433,7 @@
   ;; root answers the turn loop's eval with the death itself (the one error map, no eval
   ;; item): the flight reads the branch's end next and keeps the death, exit and stderr,
   ;; rather than asking the dead agent for tests and recording "no live agent"
-  (let [died (contract/error :seon.agent/died 'seon.root/api-proc "agent a1 died: exit 70" {:agent :a1 :exit {:exit 70}})
+  (let [died (contract/error :seon.agent/died 'seon.system/api-proc "agent a1 died: exit 70" {:agent :a1 :exit {:exit 70}})
         st (st-of (db-of [(decl "a")]) :flights {"demo/a" {:act {:op :spawn :task "demo/a" :env {:branch :demo/a}} :agent :a1 :step :worked}})
         [st' outs] (#'r/advance st "demo/a" :worked died)]
     (is (= died (get-in st' [:flights "demo/a" :died])) "the death is the flight's cause")
@@ -456,7 +456,7 @@
         (is (= :told (:seon.task/outcome (task/task db "demo/a"))))
         (is (= red (:seon.task/reasons (task/task db "demo/a"))) "the reasons are the task's, so the next judging can compare")
         (is (= :running (:seon.task/execution (task/task db "demo/a"))) "and the task stays released")
-        (is (= [:root #{(akey "a")}] [(:seon.root/id (d/entity db (:db/id (:seon.message/from v)))) (set (map :seon.agent/key (:seon.message/to v)))]) "from the system, to the agent")
+        (is (= [:root #{(akey "a")}] [(:seon.system/id (d/entity db (:db/id (:seon.message/from v)))) (set (map :seon.agent/key (:seon.message/to v)))]) "from the system, to the agent")
         (is (= {:reasons red :results fail} (select-keys (sedn/decode (:seon.message/body v)) [:reasons :results])))))
     (testing "told, its process gone: the next start is a spawn, never a wake (a told task is not parked)"
       (let [told (db-of [(decl "a")] :extra (concat (work "a" :told :members {:seon.task/reasons red})
@@ -482,7 +482,7 @@
             max-b (cfg/value :seon.config.merge/max-behind)]
         (let [{:keys [db outcome]} (judged-behind 2)]
           (is (= :behind outcome) "under the bound: told again, as behind")
-          (is (= :root (:seon.root/id (d/entity db (:db/id (:seon.message/from (verdict-of db)))))) "from the system")
+          (is (= :root (:seon.system/id (d/entity db (:db/id (:seon.message/from (verdict-of db)))))) "from the system")
           (is (= :running (:seon.task/execution (task/task db "demo/a"))) "and not held"))
         (let [{:keys [db outcome]} (judged-behind max-b)]
           (is (= :closed outcome) "at the bound: held for root")
@@ -490,7 +490,7 @@
     (testing "different reasons: a verdict again, which wakes"
       (let [{:keys [db outcome]} (judge! (told [{:reason :no-proofs}]) "a" {:outcome :red} :results fail)]
         (is (= :told outcome))
-        (is (= :root (:seon.root/id (d/entity db (:db/id (:seon.message/from (verdict-of db)))))) "from the system")))
+        (is (= :root (:seon.system/id (d/entity db (:db/id (:seon.message/from (verdict-of db)))))) "from the system")))
     (testing "a merge refused by the done rule holds"
       (let [mdb' (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running)))
             j (judgment-of mdb' "a-merge" {:end {:outcome :red} :results fail})]
@@ -513,7 +513,7 @@
   ;; the judged attributes are the end's, never an earlier end's: an error and deferred results a task held from its last judging
   ;; do not survive a later one that has none (seon.task/outcome-tx)
   (let [stale {:seon.task/error {:seon.error/type :seon.fx/io-error :seon.error/message "the last gate failed"}
-               :seon.task/deferred #{'seon.root-test/boots} :seon.task/deferred-results {'seon.root-test/boots :error}
+               :seon.task/deferred #{'seon.system-test/boots} :seon.task/deferred-results {'seon.system-test/boots :error}
                :seon.task/waste {'seon.doc/resolve-ref {:forms 2 :turns 1}}}
         db (db-of [(decl "a")] :extra (work "a" :running :members stale))
         {after :db} (judge! db "a" {:outcome :green} :results {(t "a") :pass})
@@ -537,7 +537,7 @@
   ;; work! reached it, so root answers that agent ended; the task took nothing, so it is :lost, not a
   ;; death, and the session's next start is a spawn, a load of the session, never a wake of a
   ;; process that is gone
-  (let [ended (contract/error :seon.root/ended 'seon.root/api-proc "agent a-a1 ended" {:agent :a-a1})
+  (let [ended (contract/error :seon.system/ended 'seon.system/api-proc "agent a-a1 ended" {:agent :a-a1})
         flight {:act {:op :wake :task "demo/a" :env {:branch :demo/a}} :agent :a-a1 :step :worked}
         db (db-of [(decl "a")] :extra (work "a" :running))
         st (st-of db :flights {"demo/a" flight})
@@ -685,8 +685,8 @@
 (deftest actions-read-the-judgment-stored-on-the-task
   ;; the decision is made once, at the agent's end (`judgment`) and written; `actions` reads the outcome stored, never the done rule
   (let [octopus {:op :octopus-merge :task "demo/a-merge" :members [{:task "demo/a-merge"}]}
-        gate {:seon.root/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
-        boots 'seon.root-test/boots]
+        gate {:seon.system/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
+        boots 'seon.system-test/boots]
     (testing ":ready is the octopus merge"
       (is (= [octopus] (actions-for (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :ready)))))))
     (testing ":gate is the gate, with the tests its judging deferred"
@@ -955,10 +955,10 @@
   ;; member is gated first (alone); all passing, it merges; a red, or a run that could not run
   ;; them (:error), is refused as a red proof is, never hidden. With no checkout to run them on
   ;; (a root with no source), it is held, saying so: never merged with them unrun
-  (let [gate {:seon.root/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
-        boots 'seon.root-test/boots
-        other 'seon.root-test/other
-        self (assoc gate :seon.root/started-by "seon.root-test/boots")
+  (let [gate {:seon.system/id :root :seon.config.source/gate-checkout "/the/merges/tree"}
+        boots 'seon.system-test/boots
+        other 'seon.system-test/other
+        self (assoc gate :seon.system/started-by "seon.system-test/boots")
         ;; the merge task working, the work before it done; judged on a green end with the tests its change reaches deferred
         judged (fn [root deferred] (judgment-of (mdb [(decl "a")] :extra (concat (work "a" :done) (work "a-merge" :running) (when root (ts/root-tx root))))
                                                 "a-merge" {:end {:outcome :green} :results {(t "a") :pass} :deferred deferred}))
@@ -992,7 +992,7 @@
         (is (str/includes? (get-in tk [:seon.task/failure :reason])
                            "the gate could not run them: bin/worktree --at exited 1: no such branch; seon.generation: no :ns/file on the branch")
             (get-in tk [:seon.task/failure :reason]))))
-    (testing "the test whose process started this root is left out: a test cannot be its own gate (:seon.root/started-by)"
+    (testing "the test whose process started this root is left out: a test cannot be its own gate (:seon.system/started-by)"
       (is (= {:outcome :gate :reasons [] :deferred []} (judged self [boots])) "the only deferred test is the root's own: no test runs, and the tree is still analyzed")
       (is (= {:outcome :gate :reasons [] :deferred [other]} (judged self [boots other])) "another test beside it is still gated, itself not named")
       (let [db (mdb [(decl "a")] :extra (concat (work "a" :done) (ts/root-tx self) (work "a-merge" :gate :members {:seon.task/deferred #{boots other}})))]
@@ -1005,17 +1005,17 @@
 (deftest what-no-gate-runs-is-said-and-what-a-task-owes-is-its-proofs
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: seon.task/proof? is the one reading, a test var against the accumulated proofs (a
   ;; namespace's name is no proof); seon.task/unjudged says what the gate leaves and why, for the status and the run's end
-  (let [t 'seon.root-test/boots u 'seon.root-test/other
+  (let [t 'seon.system-test/boots u 'seon.system-test/other
         tk {:seon.task/kind :work :seon.task/accumulated {:proofs #{t}}}
-        db (fn [root] (d/db-with (ts/test-db) (when root (ts/root-tx (merge {:seon.root/boot "b" :seon.config.agent/max-running 1} root)))))
+        db (fn [root] (d/db-with (ts/test-db) (when root (ts/root-tx (merge {:seon.system/boot "b" :seon.config.agent/max-running 1} root)))))
         gate {:seon.config.source/gate-checkout "/the/tree"}]
     (is (task/proof? tk t))
     (is (not (task/proof? tk u)))
-    (is (not (task/proof? {:seon.task/accumulated {:proofs #{'seon.root-test}}} t)) "like with like: a test var, never a namespace")
+    (is (not (task/proof? {:seon.task/accumulated {:proofs #{'seon.system-test}}} t)) "like with like: a test var, never a namespace")
     (is (nil? (task/unjudged (db gate) tk [t u])) "the gate runs them all")
     (is (= [t u] (:tests (task/unjudged (db nil) tk [t u]))) "no checkout: all, with why")
     (is (= [t u] (:tests (task/unjudged (db gate) (assoc tk :seon.task/kind :design) [t u]))) "a design: all")
-    (is (= {:tests [u]} (select-keys (task/unjudged (db (assoc gate :seon.root/started-by (str u))) tk [t u]) [:tests])) "the test that started this root: itself")))
+    (is (= {:tests [u]} (select-keys (task/unjudged (db (assoc gate :seon.system/started-by (str u))) tk [t u]) [:tests])) "the test that started this root: itself")))
 
 (deftest a-deferred-proof-is-neither-red-nor-unknown
   ;; owner's ruling (2026-10-23): a process test never runs in an agent's turn or root's judge,
@@ -1081,7 +1081,7 @@
       (is (= [(mspawn "a-merge")] (actions-for db))))))
 
 (deftest a-merge-behind-again-and-again-is-held-for-root
-  ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 4): a :behind answer is green, so max-merge-turns
+  ;; task seon.system/a-behind-merge-is-bounded-and-merges-main-first (gap 4): a :behind answer is green, so max-merge-turns
   ;; never counted it and a merge refused behind ran again for ever; past :seon.config.merge/max-behind
   ;; behind judgings of one merge task (its outcome's history) the next behind answer holds the task for root with the evidence
   (let [cap (cfg/value :seon.config.merge/max-behind)
@@ -1107,7 +1107,7 @@
       (is (= :seon.merge/behind (:seon.error/type (:seon.task/error tk))) "with the writer's evidence"))))
 
 (deftest a-branch-behind-main-is-told-so-first
-  ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 7): a branch behind main was judged
+  ;; task seon.system/a-behind-merge-is-bounded-and-merges-main-first (gap 7): a branch behind main was judged
   ;; on a program main had moved from and read "proof-unknown"; the done rule leads with the fix, and the judging
   ;; records how far behind it was (a-task-is-judged-with-how-far-behind-main-its-branch-was)
   (let [in {:proofs #{'p/a} :results {} :main-green #{} :allowed-red #{} :uncontracted #{} :behind 3}]
@@ -1182,7 +1182,7 @@
         unknown [{:reason :proof-unknown :symbol (t "add")}]
         two-tasks [(decl "add") (decl "twice" :needs ["add"])]
         told (fn [reasons] (mdb two-tasks :extra (work "add" :running :members {:seon.task/reasons reasons})))
-        died (contract/error :seon.agent/died 'seon.root/api-proc "agent a-add died: exit 70" {:agent :a-add})
+        died (contract/error :seon.agent/died 'seon.system/api-proc "agent a-add died: exit 70" {:agent :a-add})
         dead-db (mdb two-tasks :extra (work "add" :running))]
     (doseq [[why id db' problem outcome]
             [["a red proof" "demo/add" (:db (judge! (told red) "add" {:outcome :red} :results {(t "add") :fail}))
@@ -1335,13 +1335,13 @@
         main (fn [st db ops] (r/reconciler-proc st :main (assoc (ts/commit-of conn db) :ops ops)))
         reqs (fn [outs] (remove #(= :stat (:op %)) (:to-api outs)))
         [st outs] (main (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
-        quiet (some #(get-in % [:req :req :tx-data 0 :seon.root/quiescent]) (reqs outs))]
+        quiet (some #(get-in % [:req :req :tx-data 0 :seon.system/quiescent]) (reqs outs))]
     (is (= :held (:seon.task/execution (task/task db "demo/add"))))
     (is (= [{:task "demo/add" :cause "the same verdict again: proof-red demo-test/add-test" :agent "a-add"
              :blocks ["demo/add-merge" "demo/twice" "demo/twice-merge"]}]
            (:root-causes quiet)) "quiet, naming the held task and what it blocks")
     (is (not-any? #(= :spawn (get-in % [:req :op])) (reqs outs)) "nothing starts")
-    (let [[db3 ops3] (commit db [{:seon.root/id :root :seon.root/quiescent quiet}])
+    (let [[db3 ops3] (commit db [{:seon.system/id :root :seon.system/quiescent quiet}])
           [_ outs3] (main st db3 ops3)]
       (is (empty? (reqs outs3)) "a commit of root's own report asks nothing")))))
 )
@@ -1376,7 +1376,7 @@
         db (d/commit-as-db conn (:commit (ts/commit-of conn db)))
         commit (fn [_ tx] (let [rep (d/transact conn {:tx-data tx})] [(:db-after rep) (pdb/report->tx rep)]))
         step (fn [st db ops] (let [[st outs] (r/reconciler-proc st :main (note db (:t st) ops))] [st (:to-api outs)]))
-        report-in (fn [outs] (some #(get-in % [:req :req :tx-data 0 :seon.root/quiescent]) outs))
+        report-in (fn [outs] (some #(get-in % [:req :req :tx-data 0 :seon.system/quiescent]) outs))
         [st outs] (step (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
         report (report-in outs)
         blocked ["demo/add-merge" "demo/twice" "demo/twice-merge"]]
@@ -1385,7 +1385,7 @@
       (is (= {:t (:max-tx db) :root-causes [{:task "demo/add" :cause "capped" :blocks blocked}]} report))
       (is (some #(= {:op :collect} (get-in % [:req :req])) outs) "and asks the writer to collect the store, once a spell")
       (is (:quiet st)))
-    (let [[db2 ops2] (commit db [{:seon.root/id :root :seon.root/quiescent report}])
+    (let [[db2 ops2] (commit db [{:seon.system/id :root :seon.system/quiescent report}])
           [st2 outs2] (step st db2 ops2)]
       (testing "the report's own commit (root only) makes no second report; main holds it"
         (is (:quiet st2))
@@ -1412,7 +1412,7 @@
         st (st-of db)
         flight {:act {:op :spawn :task "demo/a" :env {:branch :task-demo-a}} :agent :a-a}
         outcome (fn [[_ outs]] (:seon.task/outcome (task/task (d/db-with db (mapcat #(get-in % [:req :req :tx-data]) outs)) "demo/a")))
-        died (contract/error :seon.agent/died 'seon.root/end-agent "agent a-a died" {:agent :a-a})]
+        died (contract/error :seon.agent/died 'seon.system/end-agent "agent a-a died" {:agent :a-a})]
     (is (= :lost (outcome (#'r/start st {:op :reap :task "demo/a"}))) "a reap: lost")
     (is (= :killed (outcome (#'r/start st {:op :kill :task "demo/a" :reason :cancelled}))) "a kill of a live agent: killed")
     (is (= :dead (outcome (#'r/advance (assoc-in st [:flights "demo/a"] (assoc flight :died died)) "demo/a" :dead-read {:db nil})))
@@ -1437,7 +1437,7 @@
   (let [db (db-of [(decl "a")])
         [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))
         asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
-        held (contract/error :seon.root/refused 'seon.root/spawn! held-why {:branch :demo/a :agent :a9})
+        held (contract/error :seon.system/refused 'seon.system/spawn! held-why {:branch :demo/a :agent :a9})
         [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r held})
         written (vec (mapcat #(get-in % [:req :req :tx-data]) (filter #(= :write (get-in % [:req :op])) (:to-api outs2))))
         tk (task/task (d/db-with db written) "demo/a")]
@@ -1458,7 +1458,7 @@
         db (db-of [(decl "a")])
         [st outs] (main (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
         asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
-        [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.root/refused 'seon.root/spawn! held-why {:branch :demo/a :agent :a9})})
+        [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.system/refused 'seon.system/spawn! held-why {:branch :demo/a :agent :a9})})
         w (first (filter #(= :write (get-in % [:req :op])) (:to-api outs2)))
         [st outs3] (r/reconciler-proc st :answers {:tag (:tag w) :r {:ok true}})
         [db2 ops2] (commit db (get-in w [:req :req :tx-data]))
@@ -1487,7 +1487,7 @@
         db (db-of [(decl "a") (decl "b" :needs ["a"])] :extra (work "a" :done))
         [st outs] (main (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
         asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
-        [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.root/refused 'seon.root/spawn! why {:branch :demo/b :agent :a-a :task "demo/a"})})
+        [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.system/refused 'seon.system/spawn! why {:branch :demo/b :agent :a-a :task "demo/a"})})
         w (first (filter #(= :write (get-in % [:req :op])) (:to-api outs2)))
         k (first (filter #(= :kill (get-in % [:req :op])) (:to-api outs2)))
         [st outs3] (r/reconciler-proc st :answers {:tag (:tag w) :r {:ok true}})
@@ -1507,7 +1507,7 @@
   (let [db (db-of [(decl "a") (decl "b")] :extra (work "a" :running))
         [st outs] (r/reconciler-proc (r/reconciler-proc {:boot "boot-1" :conn conn}) :main (ts/commit-of conn db))
         asked (first (filter #(and (= :spawn (get-in % [:req :op])) (= "demo/b" (get-in % [:req :opts :task]))) (:to-api outs)))
-        [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.root/refused 'seon.root/spawn! "held" {:branch :demo/b :agent :a-a :task "demo/a"})})]
+        [_ outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.system/refused 'seon.system/spawn! "held" {:branch :demo/b :agent :a-a :task "demo/a"})})]
     (is (some? asked) (pr-str (:to-api outs)))
     (is (not-any? #(= :kill (get-in % [:req :op])) (:to-api outs2)) "nothing is stopped")))))
 
@@ -1686,13 +1686,13 @@
   ;; the Sonnet review of gate-schema (2026-10-30): the gate took the candidate's :text with no check, so a
   ;; writer that refused the candidate sent the gate no files, and it would have tested main as it is
   (let [id "demo/a-merge"
-        refused (contract/error :seon.root/refused #'seon.reconcile-test/a-refused-merge-candidate-is-the-gates-error "no branch demo/x")
-        st {:db (ts/test-db) :boot "b1" :rid 0 :pending {} :flights {id {:act {:op :gate :task id :tests ['seon.root-test/boots]}}}}
+        refused (contract/error :seon.system/refused #'seon.reconcile-test/a-refused-merge-candidate-is-the-gates-error "no branch demo/x")
+        st {:db (ts/test-db) :boot "b1" :rid 0 :pending {} :flights {id {:act {:op :gate :task id :tests ['seon.system-test/boots]}}}}
         [_ outs] (#'r/advance st id :gated refused)
         reqs (map :req outs)]
     (is (not-any? #(= :tests (:kind %)) reqs) "no tests run on a checkout with no candidate")
     (let [tx (some #(get-in % [:req :tx-data]) reqs)]
-      (is (some #(= {'seon.root-test/boots :error} (:seon.task/deferred-results %)) tx)
+      (is (some #(= {'seon.system-test/boots :error} (:seon.task/deferred-results %)) tx)
           (str "each deferred test :error: " (pr-str tx)))
       (is (some #(= refused (:seon.task/error %)) tx) "with why it was refused as the task's error"))))
 

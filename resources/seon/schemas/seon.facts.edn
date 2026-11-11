@@ -158,7 +158,7 @@
  ;; its id a digest (seon.repl/eval-id: a model's eval, of its call and its place in the reply; any other, of a fresh UUID); who evaluated it (the agent's id, "user", "outside", "context")
  :seon.eval/id [:and {:seon.db/identity true :description "The eval's identity: a digest for a model's eval, a fresh UUID for any other."} :string]
  :seon.eval/agent [:and {:seon.db/to [:seon.db/agent-fact] :description "The agent whose record holds this eval."} :seon.db/ref]
- :seon.eval/by [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact] :description "Who evaluated it: an agent, a user or the system."} :seon.db/ref]
+ :seon.eval/by [:and {:seon.db/to [:seon.db/agent-fact :seon.system/root-fact] :description "Who evaluated it: an agent, a user or the system."} :seon.db/ref]
  ;; opened by a reader of the agent's page: true once, never retracted; root writes it on main as the
  ;; agent's :seon.agent/opened (an eval's id names it only within its agent), its turn on its branch
  :seon.eval/opened [:boolean {:description "True once a reader of the agent's page has opened this eval; never retracted."}]
@@ -206,7 +206,7 @@
  :seon.agent/key [:and {:seon.db/identity true :seon.db/content-id true :description "The agent's identity: the digest of a fresh UUID, the same on main and on its branch."} :string]
  ;; an agent's id in root's process and its procs: the keyword whose name is its key; never stored
  :seon.agent/id [:keyword {:description "The agent's id in root's process and its procs: the keyword whose name is its key; never stored."}]
- :seon.agent/root [:and {:seon.db/to [:seon.root/root-fact] :description "The root that started this agent."} :seon.db/ref]
+ :seon.agent/root [:and {:seon.db/to [:seon.system/root-fact] :description "The root that started this agent."} :seon.db/ref]
  :seon.agent/branch [:keyword {:description "The branch this agent works on."}]
  ;; the task it works (the agent's record pulls it, docs/ctx.md#the-pattern) and the turns it may take: raised to extend the agent
  ;; (the agent is the unit, seon.agent/the-agent-is-the-unit-not-the-run; max-turns is written from its cut 2, until then work!'s
@@ -251,7 +251,7 @@
  :seon.user/name [:and {:seon.db/identity true} :string]
  ;; the agents this one started, a user or an agent alike (docs/users.md#what-each-thing-is)
  :seon.agent/agents [:set {:seon.db/to [:seon.db/agent-fact] :description "The agents this one started. See docs/users.md#what-each-thing-is."} :seon.db/ref]
- ;; the ids of its evals a reader of its page opened (seon.root/opened!), on main; its turn writes each
+ ;; the ids of its evals a reader of its page opened (seon.system/opened!), on main; its turn writes each
  ;; on its branch as the eval's :seon.eval/opened (seon.agent/untaken-facts)
  :seon.agent/opened [:set {:description "The ids of its evals that a reader of its page opened, kept on main."} :string]
  ;; main's head and its branch's merge base as it last heard them (seon.agent's state :main, :base), the commits the
@@ -297,8 +297,8 @@
                                {:seon.agent/task :seon.task/task-fact}
                                {:seon.agent/system [:db/id]}
                                {[:seon.model-call/_agent :tx :at] [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated :seon.model-call/error :seon.model-call/forms :seon.model-call/basis {[:seon.eval/_call :tx :at] [:db/id :seon.eval/call-id :seon.eval/agent]}]}
-                               {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.root/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}
-                               {[:seon.message/_to :tx :at] [:seon.message/id {:seon.message/from [:seon.agent/key :seon.user/name :seon.root/id]} :seon.message/to :seon.message/body]}
+                               {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.system/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}
+                               {[:seon.message/_to :tx :at] [:seon.message/id {:seon.message/from [:seon.agent/key :seon.user/name :seon.system/id]} :seon.message/to :seon.message/body]}
                                {:seon.cite/_of :seon.cite/cite-fact}
                                {:seon.search/_of :seon.search/search-fact}] :seon.render/hiccup seon.render.ui/agent :seon.render/openai-compat seon.ctx.wire/agent-msgs}
                        [:seon.agent/key :seon.agent/key] [:seon.agent/agents {:optional true} :seon.agent/agents] [:seon.agent/system {:optional true} :seon.agent/system]
@@ -318,7 +318,7 @@
  ;; a user: an agent with a person's name (docs/users.md#what-each-thing-is), its own schema by extending the agent's, so its
  ;; layout is its own and an entity holding both identities is a user whatever its keys' order (seon.render/entity-schema)
  ;; a started agent: an agent (it extends :seon.db/agent-fact, as a user does) with the boot of the root that started it and
- ;; when, both written by every start (seon.task/start-tx, seon.root's own spawn). Its branch comes only with a task and its
+ ;; when, both written by every start (seon.task/start-tx, seon.system's own spawn). Its branch comes only with a task and its
  ;; turn budget it also writes alone on its own branch (seon.turn), so they stay the agent's, optional
  :seon.db/agent-start-fact [:and {:seon.db/attributes true :description "An agent a root started: the boot of that root, and when."}
                             :seon.db/agent-fact [:map [:seon.agent/boot :seon.agent/boot] [:seon.agent/started-ms :seon.agent/started-ms]]]
@@ -448,7 +448,7 @@
                                 {:seon.task/needs [:seon.task/id :seon.task/ns :seon.task/plan :seon.task/execution :seon.task/kind :seon.task/instructions :seon.task/evidence :seon.task/failure :seon.task/cause :seon.task/outcome :seon.task/reason :seon.task/started-by {[:seon.task/proofs :by :var/name :as :proved] :seon.db/var-fact} {:seon.cite/_of :seon.cite/cite-fact}]}
                                 {:seon.cite/_of :seon.cite/cite-fact}
                                 {:seon.search/_of :seon.search/search-fact}
-                                {:seon.task/examples [:seon.agent/key :seon.agent/description {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.root/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}]}] :seon.render/hiccup seon.render.ui/task-view}
+                                {:seon.task/examples [:seon.agent/key :seon.agent/description {[:seon.eval/_agent :tx :at] [:seon.eval/id :seon.eval/agent {:seon.eval/by [:db/id :seon.agent/key :seon.system/id]} :seon.eval/code :seon.eval/intent :seon.eval/call-id :seon.eval/schema :seon.eval/basis :seon.eval/fns :seon.eval/call :seon.eval/response :seon.eval/result :seon.eval/opened]}]}] :seon.render/hiccup seon.render.ui/task-view}
                           [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name]
                           [:seon.task/plan :seon.task/plan] [:seon.task/execution :seon.task/execution]
                           [:seon.task/branch :seon.task/branch] [:seon.task/kind :seon.task/kind]
@@ -510,35 +510,35 @@
  ;; digest outside the store (docs/merging.md#verdicts-are-a-cache)
  :seon.proof/status [:enum :pass :fail :error :none]
  ;; ---- root's boot and config keys (main) ----
- :seon.root/id [:and {:seon.db/identity true} :keyword]
- :seon.root/boot :string
+ :seon.system/id [:and {:seon.db/identity true} :keyword]
+ :seon.system/boot :string
  ;; the config in force, an entity of its own (docs/config.md#facts-on-main): root's entity holds root's attributes only
- :seon.root/config [:and {:seon.db/to [:seon.config/config-fact]} :seon.db/ref]
+ :seon.system/config [:and {:seon.db/to [:seon.config/config-fact]} :seon.db/ref]
  ;; who is signed in: the user / is the page of (docs/users.md#whats-on-screen); until there is a login, boot signs in the OS account running root
- :seon.root/signed-in [:and {:seon.db/to [:seon.db/user-fact]} :seon.db/ref]
- :seon.root/started-by [:string {:description "The test whose process started this boot (ns/name, seon.test-store/start-root! from clojure.test/*testing-vars*, given to the root as --started-by): the merge gate leaves it out of a merge's deferred process tests, since a test cannot be its own gate. Absent: no test started it, and every deferred test is gated. See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
+ :seon.system/signed-in [:and {:seon.db/to [:seon.db/user-fact]} :seon.db/ref]
+ :seon.system/started-by [:string {:description "The test whose process started this boot (ns/name, seon.test-store/start-root! from clojure.test/*testing-vars*, given to the root as --started-by): the merge gate leaves it out of a merge's deferred process tests, since a test cannot be its own gate. Absent: no test started it, and every deferred test is gated. See docs/merging.md#a-merge-runs-what-the-change-reaches."}]
  ;; the reconciler's positive report of quiescence: at main's t nothing runs, nothing is to
  ;; judge, nothing is ready; :root-causes names each released task not done, with its root cause and
  ;; what it blocks (seon.reconcile/root-causes)
- :seon.root/quiescent [:map [:t :int] [:root-causes [:vector :seon.reconcile/root-cause]]]
- ;; Seon's own source as last indexed into main's program (seon.source: a seed, seon.root/import-tree!, or a re-index,
+ :seon.system/quiescent [:map [:t :int] [:root-causes [:vector :seon.reconcile/root-cause]]]
+ ;; Seon's own source as last indexed into main's program (seon.source: a seed, seon.system/import-tree!, or a re-index,
  ;; my.root/import!): the tree, its HEAD commit (none when it is no repository) and the branch checked out (none when detached), the revision it pins each reference-code
  ;; submodule at (its gitlink), the digest of the files and pins read (an index of a tree that reads the same writes
  ;; nothing), its files and forms, the program entities the index retracted, how long reading, analysing and transacting
  ;; took, or why it was refused
- :seon.root/source [:map {:seon.render/hiccup seon.render.ui/source-line}
+ :seon.system/source [:map {:seon.render/hiccup seon.render.ui/source-line}
                     [:root :string] [:commit {:optional true} :string] [:branch {:optional true} :string] [:tree {:optional true} :string] [:dirs {:optional true} [:vector :string]]
                     [:pins {:optional true} [:map-of :string :string]] [:digest {:optional true} :string]
                     [:files :int] [:forms :int] [:retracted {:optional true} :int] [:ms number?]
                     [:error {:optional true} :string]
-                    ;; as the last boot states it (seon.root/booted-source): its id, the git tree its binary was built from
+                    ;; as the last boot states it (seon.system/booted-source): its id, the git tree its binary was built from
                     ;; (:binary-tree) and that tree's program (:binary); only when that tree is :tree, the one main was last
                     ;; brought to from outside (an import or a landing; what agents merged since is main's own), the binary's
                     ;; inputs with no program facts (seon.fx/inputs), what its agents key their test results by, and :program the
                     ;; binary's, else main's at boot (seon.program/program-digest); two trees are seon.problems/stale-binary's row
                     [:boot {:optional true} :string] [:binary {:optional true} :string] [:binary-tree {:optional true} :string]
                     [:program {:optional true} :string]
-                    ;; seon.root/stale-binary's answer at the boot: why the binary is not current for main ({:binary :tree :reaches}, or what is
+                    ;; seon.system/stale-binary's answer at the boot: why the binary is not current for main ({:binary :tree :reaches}, or what is
                     ;; missing), absent when current; what the :stale-binary row shows
                     [:stale-binary {:optional true} :map]
                     ;; the build's index only: the code that made it (seon.program/index-code)
@@ -546,46 +546,46 @@
                     [:inputs {:optional true} :seon.program/inputs]]
  ;; the next generation (docs/source.md#the-next-generation): the merges commit the :build effect
  ;; built (seon.fx/build), its worktree and binary and how long the build took, or why it was
- ;; refused; recorded by its asker, the reconciler; bin/root next starts the binary on this store
- :seon.root/generation [:map [:commit :string] [:checkout {:optional true} :string] [:binary {:optional true} :string] [:ms number?]
+ ;; refused; recorded by its asker, the reconciler; bin/system next starts the binary on this store
+ :seon.system/generation [:map [:commit :string] [:checkout {:optional true} :string] [:binary {:optional true} :string] [:ms number?]
                         [:error {:optional true} :string]]
  ;; root's last collection of the store (seon.db/collect!, run by the writer when no agent is
  ;; live): how many keys it swept, how long it took, the branches it saw (a later collection
  ;; runs only once one of them is gone) and how many were gone since the one before
- :seon.root/retained [:map [:swept :int] [:ms number?] [:generation :int]]
+ :seon.system/retained [:map [:swept :int] [:ms number?] [:generation :int]]
  ;; no history: only the last collection is read (seon.db/collect!), and its history cost 4 nodes a write
- :seon.root/collected [:and {:seon.db/no-history? true} [:map [:swept :int] [:ms number?] [:branches [:set :keyword]] [:gone :int]]]
+ :seon.system/collected [:and {:seon.db/no-history? true} [:map [:swept :int] [:ms number?] [:branches [:set :keyword]] [:gone :int]]]
  ;; main's content mark: a t past every t main held before the commit that last moved main's content (a datom of an
  ;; attribute a program key's content reads, or carried task content: seon.merge/moves-content?); the writer moves it in that
  ;; same commit, and at its start, so two commits of main with one mark hold the same content (docs/storage.md#mains-content-mark)
- :seon.root/content-t :int
+ :seon.system/content-t :int
  ;; how a root ended: its boot, why (:stop! a caller's stop, :stdin-eof its owner closed its
- ;; stdin (bin/root stop), :signal SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks), :unclean
+ ;; stdin (bin/system stop), :signal SIGTERM, SIGINT or SIGHUP (Jolt's shutdown hooks), :unclean
  ;; no stop fact at all: SIGKILL or a crash, found by the next boot) and when
- :seon.root/end [:map [:boot :string] [:cause :keyword] [:at-ms :int]]
- ;; written by seon.root/stop! before anything stops, durable
+ :seon.system/end [:map [:boot :string] [:cause :keyword] [:at-ms :int]]
+ ;; written by seon.system/stop! before anything stops, durable
  ;; the outcome of root's last read of the task files (my.root/load-tasks!): how many files read, or
  ;; the refused read's message. A refused read's error names it as its subject
  ;; and is written in the same transaction, so it stays open until a good read writes another value
  ;; (seon.problems/closed?); the same outcome again writes no datom
- :seon.root/tasks [:or [:map [:files nat-int?]] [:map [:error :string]]]
- :seon.root/stopped :seon.root/end
+ :seon.system/tasks [:or [:map [:files nat-int?]] [:map [:error :string]]]
+ :seon.system/stopped :seon.system/end
  ;; what this boot found of the root before it on this main: its stop fact, or :unclean
- :seon.root/previous-end :seon.root/end
- :seon.root/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.root/id :seon.root/boot :seon.root/generation :seon.root/quiescent] :seon.ctx/pattern [* {:seon.root/config [*]} {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [*]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/hiccup seon.render.ui/root}
-                          [:seon.root/id :seon.root/id]
+ :seon.system/previous-end :seon.system/end
+ :seon.system/root-fact [:map {:seon.db/attributes true :seon.render/keys [:seon.system/id :seon.system/boot :seon.system/generation :seon.system/quiescent] :seon.ctx/pattern [* {:seon.system/config [*]} {[:seon.agent/_root :as :agents :limit :seon.config.ctx/window :reverse true] [* {[:seon.agent/task :as :task] [:seon.task/id :seon.task/outcome :seon.task/reason]} {[:seon.process/_agent :as :processes] [*]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}]} {[:seon.eval/_agent :as :evals :limit :seon.config.ctx/window :reverse true] [*]}] :seon.render/hiccup seon.render.ui/root}
+                          [:seon.system/id :seon.system/id]
                           ;; a seeded store's root holds no boot until a root first boots on it (seon.task/entity-value reads it so)
-                          [:seon.root/boot {:optional true} :seon.root/boot] [:seon.root/signed-in {:optional true} :seon.root/signed-in]
-                          [:seon.root/config {:optional true} :seon.root/config]
-                          [:seon.root/started-by {:optional true} :seon.root/started-by]
-                          [:seon.root/stopped {:optional true} :seon.root/stopped]
-                          [:seon.root/previous-end {:optional true} :seon.root/previous-end]
-                          [:seon.root/quiescent {:optional true} :seon.root/quiescent]
-                          [:seon.root/source {:optional true} :seon.root/source]
-                          [:seon.root/tasks {:optional true} :seon.root/tasks]
-                          [:seon.root/generation {:optional true} :seon.root/generation]
-                          [:seon.root/collected {:optional true} :seon.root/collected] [:seon.root/retained {:optional true} :seon.root/retained]
-                          [:seon.root/content-t {:optional true} :seon.root/content-t]]
+                          [:seon.system/boot {:optional true} :seon.system/boot] [:seon.system/signed-in {:optional true} :seon.system/signed-in]
+                          [:seon.system/config {:optional true} :seon.system/config]
+                          [:seon.system/started-by {:optional true} :seon.system/started-by]
+                          [:seon.system/stopped {:optional true} :seon.system/stopped]
+                          [:seon.system/previous-end {:optional true} :seon.system/previous-end]
+                          [:seon.system/quiescent {:optional true} :seon.system/quiescent]
+                          [:seon.system/source {:optional true} :seon.system/source]
+                          [:seon.system/tasks {:optional true} :seon.system/tasks]
+                          [:seon.system/generation {:optional true} :seon.system/generation]
+                          [:seon.system/collected {:optional true} :seon.system/collected] [:seon.system/retained {:optional true} :seon.system/retained]
+                          [:seon.system/content-t {:optional true} :seon.system/content-t]]
  ;; ---- on every transaction Seon makes, in its tx-meta (seon.db/tx-meta) ----
  ;; the runtime that made it, as its compiled units are keyed (jolt.host/runtime-fingerprint:
  ;; Jolt's version, its runtime fingerprint, its trace tag; docs/storage.md#history)
@@ -610,7 +610,7 @@
  ;; key, "root" or "owner"; to names its recipients by agent entity, a ref each, and a recipient's branch holds its own ref
  ;; only: removing the message from a ctx retracts that ref (the entity stays, so it is not delivered again)
  :seon.message/id [:and {:seon.db/identity true :seon.db/content-id true :description "The message's identity."} :string]
- :seon.message/from [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact] :seon.db/index true :description "Who sent the message: an agent, a user or the system."} :seon.db/ref]
+ :seon.message/from [:and {:seon.db/to [:seon.db/agent-fact :seon.system/root-fact] :seon.db/index true :description "Who sent the message: an agent, a user or the system."} :seon.db/ref]
  :seon.message/to [:set {:seon.db/to [:seon.db/agent-fact] :seon.db/index true :description "The agents that receive the message, a ref each."} :seon.db/ref]
  ;; when root's writer recorded it (ms): it orders and decides nothing (docs/clocks.md)
  :seon.message/sent-ms [:int {:description "When root's writer recorded the message, in ms; it orders and decides nothing. See docs/clocks.md."}]
