@@ -1848,7 +1848,8 @@
   the page; the whole pill links to root's page."
   {:seon.render/style "#c-side > :is(.root-side, .agent) { display: flex; flex-direction: column; max-width: 15rem; flex-shrink: 0; border-radius: 0.375rem; background: var(--color-base-900); }
 @media (min-width: 64rem) { #c-side > :is(.root-side, .agent) { max-width: none; background: transparent; } }
-#c-side > :is(.root-side, .agent):hover { background: var(--color-base-850); }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+#c-side > :is(.root-side, .agent):hover { background: var(--color-base-850); }
+#c-side > .root-side { order: -2; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [_]
   [:li [:a {:href "/root" :class pill-link :title "root: main"}
         [:span {:class "flex items-baseline gap-2"} [:span {:class "text-signal"} "●"] [:span {:class "font-semibold text-text-100"} "root"] [:span {:class "seon-note"} "main"]]]])
