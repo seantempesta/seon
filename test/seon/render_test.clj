@@ -1003,7 +1003,7 @@
         at #(str/index-of html %)]
     (is (< (at "check g") (at "it doubles") (at "f doubles?") (at "result/e3")) "in the order of the turn's number: the message, the reply, its eval's text, then the owner's eval")
     (is (< (at "id=\"c-rows\"") (at "id=\"p-input\"")) "the input under the conversation")
-    (is (not (str/includes? html "Your own session")) "no session opening: the model's request opens it (seon.ctx.wire/agent-msgs)")
+    (is (not (str/includes? html "Your own session")) "no session opening on the page: the model's request opens the session (seon.ctx.wire/agent-msgs)")
     (is (re-find #"<details [^>]*class=\"seon-eval\"" html) "an eval is a block that opens")
     (is (re-find #"<details [^>]*id=\"eval-e1\"" html) "the row is its handle's anchor, open or not")
     (is (re-find #"<summary[^>]*>.*f doubles\?.*result/e1" html) "folded: its message and its handle, never a copy of the eval")))
