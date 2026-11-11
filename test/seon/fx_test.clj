@@ -643,3 +643,15 @@
         t 'seon.fx-test/a-read-of-named-paths-reads-only-those-files
         r (fx/run-tests {:req {:repo co :branch branch :built? true :tests [t]}})]
     (is (= {t :pass} (get-in r [:value :results])) (str "judged with no system given (:ctx), by the checkout's own runner: " (pr-str r)))))
+
+;; docs/merging.md#verdicts-are-a-cache: a config value naming a file enters a test's digest as the file's name, never where the
+;; machine keeps it, so one test has one digest from any checkout (the embed model in the main tree's cache read "<checkout>/..."
+;; from the main tree and an absolute path from a worktree: 103 of 181 process digests apart on the standing system, 2026-11-12)
+(deftest a-config-file-is-its-name-from-every-checkout
+  (let [model "/home/m/main/target/cache/models/2188ac.gguf"
+        cfg {:seon.config.vector/model model :seon.config.root/wiki-dirs ["docs" "."]}]
+    (is (= (fx/config-input cfg "/home/m/main") (fx/config-input cfg "/home/m/main/.worktrees/w"))
+        "from the main tree and from a worktree, one rendering")
+    (is (= "<file>/2188ac.gguf" (get (fx/config-input cfg "/home/m/main") :seon.config.vector/model)))
+    (is (= "[\"docs\" \".\"]" (get (fx/config-input cfg "/x") :seon.config.root/wiki-dirs)) "a value that names no file is its text")))
+

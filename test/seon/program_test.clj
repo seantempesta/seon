@@ -1329,8 +1329,12 @@
         "a checkout's own ports, main, store and source are no input")
     (is (= (config cfg) (:config (inputs (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe.dylib") "/elsewhere")))
         "a path under the checkout is the same input in any checkout")
-    (is (not= (config cfg) (config (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe.dylib")))
-        "a path outside it is another input")
+    ;; a value naming a file is the file's name, never where the machine keeps it (seon.fx/config-input): the same file at
+    ;; another place is one input; a file of another name is another
+    (is (= (config cfg) (config (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe.dylib")))
+        "a path outside it, to the same file, is the same input")
+    (is (not= (config cfg) (config (assoc cfg :seon.config.native/probe-lib "/elsewhere/target/lib/libprobe2.dylib")))
+        "a file of another name is another input")
     (is (not= (:env (inputs cfg here)) (:env (inputs (assoc cfg :seon.config.agent/test-ticks 7) here)))
         "the tick bound every verdict is a function of is every test's input")
     (is (= (:env (inputs cfg here)) (:env (inputs (assoc cfg :seon.config.ai/model "b") here)))
