@@ -490,7 +490,8 @@
             text (str/join "\n\n" (map render/part-text (vals page)))
             times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
         (is (some #(= % "status") (keys page)) "how the work stands is on the page")
-        (is (= 1 (times "Make ```demo/g``` exact.")) "the plan, once, in the task")
+        (is (= 1 (count (re-seq #"Make .{0,40}?demo/g.{0,40}? exact\." text))) "the plan, once, in the task")
+        (is (zero? (times "```demo/g```")) "its code span an element, never its delimiters (docs/render.md#a-value-draws-itself)")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
         (is (= 1 (count (re-seq #"\[:code \"demo-test/f-test\"\]" text))) "the proofs' statuses once, in the status")))))
 
@@ -1169,7 +1170,7 @@
         html #(:html (some (fn [u] (when (str/starts-with? (:id u) %) u)) units))
         task (html "task-view")
         cites (apply str (map :html (filter #(str/starts-with? (:id %) "cite-") units)))]
-    (is (str/includes? task "Make ```demo/g``` say one thing") "D4: the whole plan")
+    (is (re-find #"Make <code[^>]*>demo/g</code> say one thing" task) "D4: the whole plan, its code span an element (docs/render.md#a-value-draws-itself)")
     (is (not (str/includes? task "(deftest g-test")) "D1: the proof's source is the status's, the task's part does not repeat it")
     (is (str/includes? (html "status") "demo-test/g-test") "D1: the proof written is the status's, by name")
 

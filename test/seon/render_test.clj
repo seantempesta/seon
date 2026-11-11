@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.fixtures :refer [flush! draw]] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.ctx] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx]))
+            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx] [malli.registry]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -55,6 +55,21 @@
     (is (vector? (r/hiccup {:seon.render/index (seon.db/index)} {:k 1})))
     (is (nil? (resolve 'seon.render/ai)))
     (is (not-any? #(contains? (seon.contract/properties %) :seon.render/ai) (keys seon.contract/forms)) "no schema declares one")))
+
+;; docs/render.md#a-value-draws-itself: a value is drawn by the render its attribute's schema declares, by the one lookup
+(deftest an-attributes-value-is-drawn-by-its-schemas-render
+  (let [ix (seon.db/index) plan "Do `this`:\n\n- one\n- **two**"]
+    (testing "an attribute aliased to a registered schema inherits its render: a task's plan is Markdown"
+      (is (= 'seon.render.ui/text (r/render-for ix :seon.task/plan :seon.render/hiccup)))
+      (is (= 'seon.render.ui/text (r/render-for ix :seon.task/instructions :seon.render/hiccup))))
+    (testing "a code-composed string stays plain: no render"
+      (is (nil? (r/render-for ix :seon.task/reason :seon.render/hiccup))))
+    (testing "the task's plan drawn through task-box is its list, not preformatted text"
+      (let [out (h/html (r/hiccup {:seon.render/index ix :schema :seon.task/task} (assoc-in task [:seon.task/accumulated :plan] plan)))]
+        (is (= 2 (count (re-seq #"<li" out))) out)
+        (is (not (str/includes? out "<pre")) out)
+        (is (str/includes? out "<code") "a code span is its element, for the person and the model alike")
+        (is (not (str/includes? out "`this`")) "no Markdown delimiter is left")))))
 
 (deftest a-render-is-opts-then-children
   ;; Reagent's form (docs/render.md): a render takes its opts first and its
@@ -1815,7 +1830,7 @@
   (let [db (ts/test-db)
         db (d/db-with db (seon.task/create-tx db (seon.template/request {:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."})))
         ;; the task as its record pulls it, drawn by its html render
-        h (h/html (ui/task-view {} (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.task/id "demo/w") nil))))]
+        h (h/html (ui/task-view {:seon.render/index (seon.db/index)} (:tree (seon.ctx/build (seon.db/index) db (seon.db/eid db :seon.task/id "demo/w") nil))))]
     (is (str/includes? h "Your task: do what the plan below asks") "the whole instructions are on the page")
     (is (str/includes? h "your run then ends and root merges your branch") "whole: their last sentence too, nothing cut")
     (is (< (str/index-of h "Your task: do what the plan below asks") (str/index-of h "Make w true.")) "above the plan")))
@@ -2898,6 +2913,36 @@
       (is (= :entity (:source mo)) "an entity holding its own pattern is read by it")
       (is (= [:seon.agent/task :seon.agent/turn] (:held-unasked mo)) "what the entity holds on the db that its pattern does not ask"))))
 
+(deftest a-pulled-entity-reads-a-schemas-name-in-its-pattern-as-that-schemas-pattern
+  ;; docs/ctx.md#the-pattern: seon.render/pulled reads an entity's own pattern expanded (seon.render/expanded): a schema's name among its
+  ;; clauses lists the clauses that schema's pattern asks, never the name, and the pattern is still the entity's own
+  (let [k "inspect/named"
+        db (:db-after (d/with (ts/test-db) [{:seon.agent/key k :seon.agent/turn 1}]))
+        ix (seon.db/index)
+        own [:seon.db/agent-fact :seon.agent/started-ms]
+        node {:db/id (seon.db/eid db :seon.agent/key k) :seon.agent/key k :seon.ctx/pattern own}
+        m (r/pulled db ix node nil)
+        asked (set (map :clause (:clauses m)))]
+    (is (= :entity (:source m)) "its own pattern")
+    (is (= (:clauses (r/pulled db ix node (conj (vec (r/schema-property ix :seon.db/agent-fact :seon.ctx/pattern)) :seon.agent/started-ms)))
+           (:clauses m))
+        "clause by clause, the schema's pattern and the added clause")
+    (is (every? asked [:seon.agent/key :seon.agent/started-ms]) "the schema's clauses and the added one")
+    (is (some #(and (contains? % :members) (= :seon.agent/task (:attr %))) (:clauses m)) "the joins the schema's pattern asks")
+    (is (not (asked :seon.db/agent-fact)) "never the schema's name as an attribute")))
+
+(deftest a-schemas-name-whose-pattern-reaches-itself-is-refused
+  ;; docs/ctx.md#the-pattern: a schema's name among a pattern's clauses is spliced by its pattern (seon.render/expanded); one whose pattern
+  ;; names it again, through another, is refused with a typed error naming it, as a join's schema that reaches itself is
+  (let [forms {:lab.loop/a-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:lab.loop/b-fact :lab.loop/x]} [:lab.loop/x :lab.loop/x]]
+               :lab.loop/b-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:lab.loop/a-fact :lab.loop/y]} [:lab.loop/y :lab.loop/y]]
+               :lab.loop/x :string :lab.loop/y :string}
+        ix (seon.db/index-of {:forms forms})
+        said (binding [malli.registry/*registry* (seon.contract/registry-of forms)]
+               (try (r/pattern ix [:lab.loop/a-fact]) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))]
+    (is (= :seon.ctx/invalid-pattern (:seon.error/type said)) (pr-str said))
+    (is (str/includes? (str said) "reaches itself") (pr-str said))))
+
 (deftest an-own-renders-part-is-the-models-unless-marked-for-the-page
   ;; docs/render.md#an-entity-may-name-its-own-render: the lists a walk reads as parts (seon.render/page-lists, what the model reads) hold
   ;; the pull view's front, a part like any, and not the stage's, which its render marks for the page alone (red before: the pull view's
@@ -3088,10 +3133,10 @@
 (deftest the-task-line-of-the-side-panel-reads-through-standing
   ;; the chat's side panel said "task · seon.program · running" of a capped task: running is the task's execution, not how it stands
   (let [t {:seon.task/id "seon.program/x" :seon.task/execution :running :seon.task/outcome :cap :seon.task/plan "p"}
-        html (h/html (ui/task-view {} t))]
+        html (h/html (ui/task-view {:seon.render/index (seon.db/index)} t))]
     (is (str/includes? html "task · seon.program · stopped at its cap") html)
     (is (not (str/includes? html "running")))
-    (is (str/includes? (h/html (ui/task-view {} (dissoc t :seon.task/outcome))) "task · seon.program · running") "no outcome yet: its execution as before")
+    (is (str/includes? (h/html (ui/task-view {:seon.render/index (seon.db/index)} (dissoc t :seon.task/outcome))) "task · seon.program · running") "no outcome yet: its execution as before")
     ;; the agent's own end (an agent whose branch holds no outcome of its task) is the agent's own state, drawn by its render
     ;; (seon.render.ui/agent-state: a-merged-task-reads-merged-everywhere)
     ))
@@ -3923,7 +3968,7 @@
            :seon.agent/task {:seon.task/id "app.x/a-thing" :seon.task/outcome :merged}}
         opts {:seon.ctx/ctx c :seon.db/db (ts/test-db)}]
     (is (= "merged" (:text (ui/standing {:seon.agent/outcome :green} {:seon.task/outcome :merged}))))
-    (let [h (h/html (ui/task-view {} (:seon.agent/task c)))]
+    (let [h (h/html (ui/task-view {:seon.render/index (seon.db/index)} (:seon.agent/task c)))]
       (is (str/includes? h "task · app.x · merged") "the task's tile")
       (is (not (str/includes? h "· done")) "not the agent's own end"))
     (is (str/includes? (pr-str (ui/agent-state opts)) "● merged") "the agent state")
