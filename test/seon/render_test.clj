@@ -4450,3 +4450,11 @@
     (is (not (str/includes? r "proof-red")) "no keyword read raw")
     (is (= "root restarted" (:reason (ui/standing {} {:seon.task/outcome :cap :seon.task/reason "root restarted"})))
         "a reason with no data behind it is its string")))
+
+;; docs/render.md#the-page: a number the system's process tile shows says what it measures (Point and Web, 2026-11-11: "fork lag 23952 ms"
+;; read as broken, "program load not measured" read as a gap): fork lag carries its meaning, and a boot that loaded no forms says so
+(deftest the-process-tile-says-what-fork-lag-is
+  (let [html (h/html (ui/process-tile {:seon.ctx/ctx {:process {:fork-server {:lag-ms 23952}} :seon.root/boot "b1"}}))]
+    (is (str/includes? html "how long a commit takes to reach the fork server") html)
+    (is (not (str/includes? html "not measured")) "no gap where the boot loaded nothing")
+    (is (str/includes? html "the image held main") html)))

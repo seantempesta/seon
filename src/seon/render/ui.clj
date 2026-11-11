@@ -2270,18 +2270,19 @@
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
   (let [{:keys [writer fork-server root-errors-total health events boot]} (ratom/realize (:process c))
-        stat (fn [label v] (when (some? v) [:span [:span {:class "muted"} (str label " ")] (str v)]))
+        stat (fn [label v & [means]] (when (some? v) [:span (cond-> {} means (assoc :title means)) [:span {:class "muted"} (str label " ")] (str v)]))
         sick (filter (fn [[_ h]] (pos? (:defects h 0))) health)]
     [:section [:h2 "root's process"]
      [:p {:class "text-xs text-text-400"} (str/join " · " (remove nil? [(some->> (ratom/realize (:seon.root/boot c)) (str "boot ")) (some->> (ratom/realize (:seon.root/generation c)) :commit (str "generation "))]))]
      [:p {:class "flex flex-wrap gap-x-3 text-xs tabular-nums"}
       (stat "batch p50" (some-> (:batch-p50-ms writer) ms-str)) (stat "tx/commit" (:tx-per-commit writer)) (stat "commits" (:commits writer))
-      (stat "fork p50" (some-> (:fork-ms-p50 fork-server) ms-str)) (stat "fork lag" (some-> (:lag-ms fork-server) ms-str))
+      (stat "fork p50" (some-> (:fork-ms-p50 fork-server) ms-str)) (stat "fork lag" (some-> (:lag-ms fork-server) ms-str)
+            "how long a commit takes to reach the fork server, the middle of its last 200; on an idle system it stays at the boot's own backlog")
       (stat "defects" root-errors-total)]
      [:p {:class "text-xs text-text-400"}
       (let [{:keys [loaded ms]} (:program boot)]
-        (cond (nil? loaded) "program load not measured"
-              (zero? loaded) "the image held main's program: no forms loaded"
+        ;; nil: the boot loaded no forms over its image, so it recorded no load (Optimization), as for a load of none
+        (cond (or (nil? loaded) (zero? loaded)) "the image held main's program: no forms loaded"
               :else (str loaded " forms loaded" (when ms (str " in " ms " ms")))))]
      (when (seq sick)
        [:ul {:class "text-xs"} (for [[pid {:keys [defects newest]}] sick]
