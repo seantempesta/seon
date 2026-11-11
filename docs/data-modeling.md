@@ -106,6 +106,8 @@ What follows from it:
 - **A value computed from other facts is not in either column.** A status, a spend, a waste, the conflicts of a merge are computed where they are read ([derived data](#derived-data-is-a-cache-never-relied-on)), so no pull holds them: a render computes them from what the pull does hold.
 - **What a process keeps in its own state is in no db.** The test service's queue and an effect's counters are shown to a person from the process; a model's request never reads them, since a request is made again from a commit.
 
+**What one attribute is** has two homes, and neither is the schema's properties. `(doc :the/attribute)` prints its schema form: `[:set ...]` is many values, a ref names what it points at (`:seon.db/to`). The db's own schema holds how it is stored: `(get (d/schema (my.db/db)) :the/attribute)` answers its `:db/cardinality` and `:db/valueType`. ```seon.contract/properties``` holds what a schema declares beside its shape (a render, a description), which is why a cardinality is not found there.
+
 The table says where; the living answer for one entity is `(my.db/pulled @ctx)` ([looking at what you pulled](agent.md#looking-at-what-you-pulled)), which lists every clause with what this db holds for it, and `(doc :an/attribute)` for one key's schema.
 
 ## Before you add something

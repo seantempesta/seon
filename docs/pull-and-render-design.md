@@ -79,10 +79,14 @@ Kept current by the Data model session; the newest landed state runs on the stan
 | 9 | move C, with the named sub-patterns | not started; waits on 2 and 3 |
 | 10 | move B | not started; a REPL trial with its cost comes first |
 | - | a turn's fold names each step's intent | proving in batch 62 (`jolt/stepintents`, Web) |
-| - | a component's root carries `:render`, the full symbol, in place of a class | Web's half built (`jolt/datarender`); Context's half open |
+| - | a component's root carries `:render`, the full symbol, in place of a class | both halves built, not yet run together (`jolt/datarender`, Web; `jolt/rendername` on it, Context) |
 | - | a render's output named by a `:seon.render/hiccup-value` schema, so a value that is hiccup is drawn as html | in build (`jolt/hiccupvalue`, Web's helper) |
+| - | a role's standing cites as data: the cites an agent starts with are read from its task first (`:seon.config.agent/cites`, which a task may hold), so a worker's and a preparer's differ | built, named tests not yet run (`jolt/rolecites`, Context); the worker's "program is your branch's facts" section rides there |
+| - | a stuck agent is stopped: a judgment on its own evals ends it with the outcome `:stuck`, read by whoever started it | not started (Context); what "near" compares is open: the functions an eval called include plumbing and fire on plain reading, so the calls' targets must be part of it |
+| - | the turn budget shown once (a line in the turn part would be a diff every turn) | not started; Web's render of the agent's `max-turns` in the first page |
+| - | a task whose plan names code its branch does not hold is flagged before it is released (a cite that resolves to nothing is already data: the cite's target is unresolved) | not started; a class of the problems report, Tests |
 | - | the planted-world proof (a schema with both renders, joined in a pattern, appears with no code edit) | in build (`jolt/planted`, Web); tips 8 and 9 land with its two halves |
 
 ## Not decided
 
-What "near" means for a stuck agent's repeats (the functions its evals called is the proposal; Context checks it on kept runs). Whether a view (move B) costs more at each draw than the components it replaces: not measured. A model call's previous call, which C needs for a call's page pair: a ref, or read through the agent. A compaction's point: one attribute on the agent, written with the compaction, is proposed and not built. Whether embeddings stay in the store. (Decided since: a render is never handed other renders' output, [what a render is handed](render.md#what-a-render-is-handed).)
+What "near" means for a stuck agent's repeats (the functions its evals called is the proposal; Context checks it on kept runs). Whether a view (move B) costs more at each draw than the components it replaces: not measured. A compaction's point is decided and not built: one attribute on the agent, written with the compaction, built with tip 6 (the page whole at that point is the same function as at the first). A model call's previous call is decided: read through the agent's calls by their number, no new ref. Whether embeddings stay in the store. (Decided since: a render is never handed other renders' output, [what a render is handed](render.md#what-a-render-is-handed).)
