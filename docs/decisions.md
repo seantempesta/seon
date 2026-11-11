@@ -78,16 +78,17 @@ Of the branch that orders an agent's messages by the transaction the pull carrie
 
 Of `bin/root`, `seon.root`, `my.root` and the `:seon.root/*` keys, after the vocabulary ruling: "Later, with the erase" (by the question tool, relayed). The wiki's wording is corrected as pages are touched; the command, the namespaces and the keys are renamed together, at the erase.
 
-### A merge is one transaction of the branch that receives it: a fact is placed by when it arrived (agreed 2026-11-11)
+### A merge replays the source's transactions on the branch that receives it: a fact is placed by when it arrived (owner, 2026-11-11)
 
-Agreed that day by the Optimization, Deep fixes and Data model sessions, on the owner's rulings that time orders and that a sync merges everything that does not conflict; put to the owner by the managing session with this as its pick. A fact has two times: when it happened, and when a branch learned it. The model's request must keep the second, or a fact that arrives late is placed in the agent's past and every byte after it moves. So:
+A fact has two times: when it happened, and when a branch learned it. The model's request must keep the second, or a fact that arrives late is placed in the agent's past and every byte after it moves. The Optimization, Deep fixes and Data model sessions first agreed a merge as one new transaction of the receiving branch; the owner corrected it: "I disagree. We should never record two transaction times that are the same" (relayed by the managing session). So, agreed by the three after that:
 
-- a merge is one new transaction of the receiving branch, and that transaction is when everything it brought arrived;
-- what it brings keeps its entity ids, not its transactions;
-- inside one arrival, order is by each entity's own making: its id where the store issued it (a model call, an eval), its stored time where its id is its content (a message's `:seon.message/sent-ms`);
-- a conversation is read on the branch that lived it: what a request held is that branch as of the call's basis commit.
+- a merge writes the source's net change since the base grouped by the source's transactions, each group as its own transaction of the receiving branch, in source order, all in one commit or none;
+- each such transaction takes a new id and a new time, strictly later than the one before (arrival), and keeps the source's own facts about itself (which branch wrote it, which eval made it);
+- what it brings keeps its entity ids;
+- so a conversation orders by the transaction a pull carries (`:at`) alone, on any branch;
+- a conversation's own requests are made again on the branch that lived it, as of each call's basis commit.
 
-Datahike's merge takes the transaction data its caller gives it, so this is the caller's choice and needs no change in the fork: a merge that passes each datom with its own transaction (as ```seon.merge/carried-tx``` does today) keeps "when it happened" and loses arrival. Not built: it is the rule the one-merge trial is held to. Stated in [the plan](plan.md#the-plan), part 1.
+Datahike's merge takes the transaction data its caller gives it, so this is the caller's choice and needs no change in the fork. Not built: it is the rule the one-merge trial is held to. Its cost against one collapsed transaction is being measured. Stated in [the plan](plan.md#the-plan), part 1.
 
 ### No derived value is stored; a judgment is run on the db state (owner, 2026-11-11)
 
