@@ -963,8 +963,8 @@
   a merge task made by seon.template/with-merge needs its work there, and the head of the branch is the plan worth curating);
   else nil. One refine a task, so a refine and the rerun it may start never loop by themselves. A task that ended not done gets
   its refine released (the chain: work, refine, rerun from main); one that finished gets it as :seon.config.agent/refine-finished
-  says (held for root by default: each is one more paid run). Every such end gets one, so every state of a task can be made a
-  completed task. See docs/tasks.md#a-refine-curates-its-own-task."
+  says (none by default: a held task reads as work not done everywhere, so an offer is no task until asked). A task at its cap is
+  waiting, not ended, and its judgment asks none (seon.reconcile's done step). See docs/tasks.md#a-refine-curates-its-own-task."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id :boolean] [:maybe [:vector :any]]]}
   [db id finished?]
   (let [t (task db id)
@@ -972,11 +972,11 @@
         refined? (some #(refine? db %) (citing-tasks db (pdb/eid db :seon.task/id id)))
         continues? (some #(= br (or (:seon.task/branch %) (default-branch (:seon.task/id %))))
                          (:seon.task/needs (d/pull db [{:seon.task/needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id])))]
-    (when (and t (:seon.task/ns t) (not (refine? db id)) (not refined?) (not continues?))
+    (when-let [ex (and t (:seon.task/ns t) (not (refine? db id)) (not refined?) (not continues?)
+                       (if finished? (#{:held :running} (cfg/value :seon.config.agent/refine-finished {:task t})) :running))]
       (let [tx (create-tx db [(refine-decl t)])]
         (when (vector? tx)
-          (into tx (execution-tx [(task-id (:seon.task/ns t) (str (:seon.task/name t) "-refine"))]
-                                    (if finished? (cfg/value :seon.config.agent/refine-finished {:task t}) :running))))))))
+          (into tx (execution-tx [(task-id (:seon.task/ns t) (str (:seon.task/name t) "-refine"))] ex)))))))
 
 (defn again-tx
   "Refine id's end on main, as its carried facts (seon.task/carry-tx's :tx) leave it: each task it cites on its own branch whose
