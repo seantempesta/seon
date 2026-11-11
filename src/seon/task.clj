@@ -280,7 +280,7 @@
 
 (def ^:private agent-attrs
   "Each member of root's view of an agent and the attribute recording it on the agent (agent-tx)."
-  {:status :seon.agent/status :task :seon.agent/description :branch :seon.agent/branch :boot :seon.agent/boot})
+  {:status :seon.agent/status :branch :seon.agent/branch :boot :seon.agent/boot})
 
 (def ^:private process-attrs
   "Each member of root's view of an agent's process and the attribute recording it on the process
@@ -321,7 +321,7 @@
 
 (defn agent-tx
   "What root observes of agent id, as facts: on the agent's entity (its key is its id's name) the root that
-  started it and its status, task's id or description and branch; on its process's entity
+  started it, its status and branch; on its process's entity
   (:seon.process/*, one per spawn, pointing at the agent) its pid, memory, the form running, when it
   forked and ended and a stall it shows: each member of root's view m, written when set and retracted
   when m holds it as nil (the form running, once it returned). Root writes it when its
