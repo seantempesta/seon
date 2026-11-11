@@ -4400,9 +4400,11 @@
 
 (defn- planted-world
   "The planted world (docs/render.md#the-page): on a test db, as an agent would make it, a schema with both renders
-  (:lab.planted/note-fact, drawn by planted-note and planted-note-msgs), joined by the agent's own :seon.ctx/pattern, and one note
-  for agent lab/a1. Answers {:c the agent's pull :ix :page html :msgs the request's messages, printed}."
-  []
+  (:lab.planted/note-fact, drawn by planted-note and planted-note-msgs; with history? false the html render alone, so no history),
+  joined by the agent's own :seon.ctx/pattern, one note for agent lab/a1, and tx-data more written after it. Answers {:c the agent's
+  pull :ix :page html :msgs the request's messages, printed}."
+  ([] (planted-world {}))
+  ([{:keys [history? more] :or {history? true}}]
   (let [reg (fn [db k form] (let [r (my.schema/registration db k form false)]
                               (when (seon.contract/error? r) (is false (str k " registers: " (pr-str r))))
                               (d/db-with db (:tx r))))
@@ -4410,18 +4412,19 @@
                (reg :lab.planted.note/id [:and {:seon.db/identity true} :string])
                (reg :lab.planted.note/text :string)
                (reg :lab.planted.note/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref])
-               (reg :lab.planted/note-fact [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/planted-note
-                                                  :seon.render/openai-compat 'seon.render-test/planted-note-msgs}
+               (reg :lab.planted/note-fact [:map (cond-> {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/planted-note}
+                                                   history? (assoc :seon.render/openai-compat 'seon.render-test/planted-note-msgs))
                                             [:lab.planted.note/id :lab.planted.note/id] [:lab.planted.note/text :lab.planted.note/text] [:lab.planted.note/agent :lab.planted.note/agent]]))
         pattern (conj (r/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) {[:lab.planted.note/_agent :tx :at] [:db/id :lab.planted.note/id :lab.planted.note/text]})
         db (d/db-with db [{:seon.agent/key "lab/a1" :seon.ctx/pattern pattern}])
         db (d/db-with db [{:lab.planted.note/id "n1" :lab.planted.note/text "the planted note" :lab.planted.note/agent [:seon.agent/key "lab/a1"]}])
+        db (reduce d/db-with db more)
         db (d/db-with db (seon.doc/load-tx db "docs" {seon.doc/system-page "# A stub of the system prompt\n\nBe brief."}))
         ix (seon.program/index-of-db db)
         c (:tree (seon.ctx/build ix db (seon.db/eid db :seon.agent/key "lab/a1") :b))
         w (draw c seon.ctx/changes db #'ui/agent {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
     (try {:c c :ix ix :page (apply str (map :html (seon.fixtures/page-units w))) :msgs (pr-str (:messages (seon.ctx.wire/request w)))}
-         (finally (r/dispose-walk! w)))))
+         (finally (r/dispose-walk! w))))))
 
 (deftest a-planted-entity-reaches-the-page
   ;; docs/render.md#the-page: what an agent's pull joins reaches the page by its schema's html render, no code naming it.
@@ -4439,3 +4442,18 @@
     (when-not (is (or (str/includes? msgs "PLANTED-MODEL the planted note") (str/includes? msgs "PLANTED-HTML the planted note"))
                   "the note reaches the request's messages, as history or in the page")
       (println "the request's messages:" msgs))))
+
+(deftest an-eval-by-another-hand-reaches-the-request-only-as-the-systems-with-an-intent
+  ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: an eval no call holds is placed (seon.ctx/placed-messages) and the
+  ;; page shows it; the model reads one by another than the agent only when it is the system's and holds an intent (seon.ctx.wire's
+  ;; turn-entities, Context and Data model 2026-11-11): the system's own work (seon.turn/work!, no intent) and another agent's stay out
+  (let [ev (fn [id by code intent] (cond-> {:seon.eval/id id :seon.eval/agent [:seon.agent/key "lab/a1"] :seon.eval/by by :seon.eval/code code
+                                            :seon.eval/response {:handle (symbol "result" id) :value 1}}
+                                     intent (assoc :seon.eval/intent intent)))
+        {:keys [page msgs]} (planted-world {:more [[(ev "e-work" {:seon.root/id :root} "(+ 100 1)" nil)]
+                                                   [(ev "e-said" {:seon.root/id :root} "(+ 200 2)" "Read the plan.")]
+                                                   [(ev "e-other" {:seon.agent/key "lab/b1"} "(+ 300 3)" nil)]]})]
+    (doseq [code ["(+ 100 1)" "(+ 200 2)" "(+ 300 3)"]] (is (str/includes? page code) (str "the page shows " code)))
+    (is (str/includes? msgs "(+ 200 2)") "the system's eval with an intent reaches the request")
+    (is (not (str/includes? msgs "(+ 100 1)")) "the system's work with no intent does not")
+    (is (not (str/includes? msgs "(+ 300 3)")) "nor another agent's")))

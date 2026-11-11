@@ -525,11 +525,18 @@
   mid-turn reads at the next turn, each by its path in c), its page message between the basis of the call before that holds one and its own (`page-diff-msgs`, a placed call
   whose parts come from one walk along the bases, drawn when a pair first asks: `pages-from`),
   the call, then its evals in the one order a turn's are read in (seon.ctx/turn-evals: the model's, then other hands'); a member c no longer holds (unlinked by a swap!) is
-  none. See docs/turn.md#the-turn-is-a-number."
+  none. The model reads of an eval no call holds by another hand than the agent's only one by the system with an intent (`model-reads?`).
+  See docs/turn.md#the-turn-is-a-number."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :any]]}
   [db c]
   (let [evals (:seon.eval/_agent c)
         placed (ctx/placed-messages c)
+        ;; what the model reads of the placed members (the page shows them all): an eval by another than the agent itself only when it is the
+        ;; system's (its :seon.eval/by the system entity, :seon.root/id) and holds an intent; a person's or another agent's eval, and the
+        ;; system's own work (seon.turn/work!, no intent), stay out (Context and Data model, 2026-11-11)
+        ;; read untracked, member by its path: who made an eval and its intent are written with it, once
+        plain (ratom/untracked c)
+        model-reads? (fn [p] (let [m (get-in plain p) by (:seon.eval/by m)] (or (nil? by) (= (:db/id by) (:db/id plain)) (and (:seon.root/id by) (not (str/blank? (:seon.eval/intent m)))))))
         ;; the newest call's basis is written after the commit it names (seon.turn/open-turn!), so read at that commit it holds none:
         ;; there the point is db's own (the basis it will name), so a request made again at its basis holds its page message; a pull
         ;; that leaves bases out (a smaller pattern) shows no page
@@ -558,7 +565,7 @@
                      task-of (fn [x] (or (:task (ratom/realize (:seon.model-call/basis x))) (when (= newest (:seon.model-call/n x)) (ratom/realize (get-in c [:seon.agent/task :seon.task/id])))))
                      t0 (some-> before task-of) t1 (task-of call)
                      ;; the members of its history it took, each by its path in c (a message, or any history join's member)
-                     ms (keep #(get-in c %) (get placed n))
+                     ms (keep #(get-in c %) (filter model-reads? (get placed n)))
                      ;; its evals in the one order a turn's are read in (seon.ctx/turn-evals: the model's, then other hands')
                      es (map first (ctx/turn-evals c (:db/id call)))
                      model? #(:seon.eval/call-id (get evals %))]
@@ -570,7 +577,7 @@
                          (map evals es))]
            x))
           ;; those delivered after the last turn's edge, which the turn now opening takes (:pending): never lost before that turn's call exists
-          (concat (keep #(get-in c %) (get placed :pending))
+          (concat (keep #(get-in c %) (filter model-reads? (get placed :pending)))
                   (opening-page (:db/id c) here (last (keep basis-of cs)) (empty? cs) newest)))))
 
 (defn example-session-msgs

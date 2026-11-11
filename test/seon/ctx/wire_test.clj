@@ -1919,7 +1919,10 @@
         (is (str/includes? (:seon.error/message none) "no agent is keyed"))
         (is (= [:seon.ctx/session-refused "b/bare"] ((juxt :seon.error/type :key) bare)) "an agent with no plan and no description has no request to show: not an empty one")
         (is (str/includes? (:seon.error/message bare) "no request to show"))
-        (is (vector? (session/session-tx @conn "b/src" "x")) "an agent that has a request is shown")))))
+        (is (vector? (session/session-tx @conn "b/src" "x")) "an agent that has a request is shown")
+        ;; a record is its own attributes less :db/id and :at (session-records): a ref it holds (a message's :seon.message/to) is re-keyed
+        ;; by its identity (example-rekey), never an entity id of the store it came from
+        (is (not-any? #(and (map? %) (contains? % :db/id)) (tree-seq coll? seq (session/session-tx @conn "b/src" "x"))) "no :db/id anywhere in what it answers")))))
 
 (deftest an-example-refuses-a-history-record-of-a-kind-it-does-not-hold-naming-its-schema
   ;; docs/tasks.md#a-task-names-example-sessions: a member the conversation places (seon.ctx/placed-messages) is recorded as the entity it is,
