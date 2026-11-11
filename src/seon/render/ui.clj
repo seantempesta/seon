@@ -1599,6 +1599,74 @@
      ;; a user's (it holds :seon.user/name): its agents list, which the frame shows on every page (seon.render.proc/user-sides)
      (when (get c :seon.user/name) [#'agents-list {}])]))
 
+(defn stage-front
+  "Agent pull c presented as a stage (docs/render.md#an-entity-may-name-its-own-render): what it says now in large type, the person's
+  last ask and the answer to it, each value that turn made drawn inline by its schema's render (the tile the model reads, `eval-tile`),
+  and the exchanges before it folded, still there. With nothing said yet, a welcome and what it holds. A fold shows the same page as
+  the conversation instead: the person's view, kept by the page as any fold's, never a write of the agent's render. Read from the
+  same pull and the same messages as the conversation (seon.ctx/placed-messages, seon.ctx/call-of), for the page alone. See
+  docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/style ".stage-front { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1rem 1rem; display: flex; flex-direction: column; gap: 1.25rem; color: var(--color-text-100); font-family: ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', sans-serif; }
+.stage-front h1 { font-size: 2.25rem; line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; }
+.stage-front > p, .stage-front blockquote { font-size: 1.375rem; line-height: 1.5; }
+.stage-front blockquote { color: var(--color-text-300); border-left: 3px solid var(--color-base-700); padding-left: 1rem; }
+.stage-front > div { font-size: 1.125rem; line-height: 1.6; }
+.stage-front section { font-size: 0.9375rem; }
+.stage-front details { font-size: 0.875rem; color: var(--color-text-300); }
+.stage-front details li { margin: 0.5rem 0; }
+.stage-front > details[data-as] > summary { font-size: 0.8125rem; color: var(--color-text-300); cursor: pointer; }
+.stage-front > details[data-as]:not([open]) [data-when=open], .stage-front > details[data-as][open] [data-when=closed] { display: none; }
+#app:has(.stage-front > details[data-as]:not([open])) :is(.seon-context, #c-rows, #p-agent-head) { display: none; }
+.stage-front:has(> details[data-as][open]) > :not(details[data-as]) { display: none; }
+#app:has(.stage-front > details[data-as]:not([open])) #p-input :is(input, textarea) { font-size: 1.25rem; padding: 0.875rem 1rem; font-family: ui-sans-serif, system-ui, sans-serif; }"
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db ix :seon.render/index}]
+  (let [k (ratom/realize (:seon.agent/key c))
+        ;; read as the conversation reads them, tracked: a turn begun or a message delivered draws this again
+        turn (or (ratom/realize (:seon.agent/turn c)) 0)
+        _ (let [v (get c :seon.message/_to)] (when (map? (ratom/untracked v)) (doall (keys v))))
+        placed (when k (ctx/placed-messages db c))
+        person? (fn [m] (some? (get-in m [:seon.message/from :seon.user/name])))
+        said-in (fn [n] (when-let [cid (ctx/call-of db n k)] (let [r (some-> (get-in c [:seon.model-call/_agent cid :seon.model-call/reply]) ratom/realize)] (when-not (str/blank? r) [cid r]))))
+        asks (vec (for [n (sort (filter int? (keys placed)))
+                        :let [asked (keep (fn [[m _]] (let [x (ratom/realize (get-in c [:seon.message/_to m]))] (when (person? x) (:seon.message/body x)))) (get placed n))]
+                        :when (seq asked)] [n (str/join "\n\n" asked)]))
+        ;; each ask and its answer: the last thing said before the next ask (the turns between work it out), with that turn's values
+        exchanges (vec (for [[[n asked] [n' _]] (map vector asks (concat (rest asks) [[(inc turn) nil]]))
+                             :let [[cid reply] (some said-in (range (dec n') (dec n) -1))]]
+                         {:n n :cid cid :asked asked :reply reply}))
+        waiting (keep (fn [[m _]] (let [x (ratom/realize (get-in c [:seon.message/_to m]))] (when (person? x) (:seon.message/body x)))) (:pending placed))
+        now (last exchanges)
+        ;; the sessions its pull holds through root, the person and itself aside
+        self (ratom/realize (:db/id c))
+        held (count (remove (fn [m] (or (= self (:db/id m)) (:seon.user/name m))) (vals (or (ratom/realize (get-in c [:seon.agent/root :seon.agent/_root])) {}))))
+        values (when (:cid now) (for [[e _] (ctx/turn-evals c (:cid now)) :let [k (:seon.eval/schema (d/entity db e))] :when (and k (render/declared ix k))]
+                           [#'eval-tile {:key (str (:n now) "-" e) :eid e}]))]
+    [:section {:wire/for "page"}
+     (cond
+       (seq waiting) (list [:blockquote (str/join "\n\n" waiting)] [:p "Working on it."])
+       now (list [:blockquote (:asked now)] (if (str/blank? (:reply now)) [:p "Working on it."] [#'markdown (:reply now) {:inline? true}]) (seq values))
+       :else (list [:h1 "Hello."]
+                   [:p "Say what you would like done, in a sentence. The answer comes back here, with whatever it makes drawn as it is."]
+                   (when (pos? held) [:p (str held (if (= 1 held) " session is" " sessions are") " in the list beside: ask about any of them.")])))
+     (when (> (count exchanges) (if (seq waiting) 0 1))
+       [:details [:summary (str (dec (count exchanges)) " earlier")]
+        (into [:ol] (for [x (if (seq waiting) exchanges (butlast exchanges))] [:li [:p (:asked x)] (when-not (str/blank? (:reply x)) [#'markdown (:reply x) {:inline? true}])]))])
+     ;; the person's view of the page, kept as any fold's (never a write: the render is the agent's own fact): the same data as the conversation
+     [:details {:data-as "conversation" :data-preserve-attr "open"} [:summary [:span {:data-when "closed"} "Show as the conversation"] [:span {:data-when "open"} "Show as the stage"]]]]))
+
+(defn stage-list
+  "The stage's own list (p-head), for the page alone: `stage-front` over the agent's pull. See docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/list "p-head" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div {:id "p-head"} [#'stage-front {}]])
+
+(defn stage
+  "An agent's page as a stage, a render an agent names as its own (:seon.render/hiccup) in place of its schema's `agent`: the same lists
+  over the same pull, so the model reads exactly what it reads by `agent`, and for the person the stage in front (`stage-list`), which
+  the conversation and the tiles stand behind. See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
+  [opts c] (if (:seon.render/nested opts) (agent opts c) (conj (agent opts c) [#'stage-list {:wire/for "page"}])))
+
 (defn eval-tiles
   "The tiles of agent pull c's evals whose value has a render (their record names its schema, :seon.eval/schema), each a component of its
   own (`eval-tile`), read by the seek that answers it: the evals holding :seon.eval/schema, by that attribute's index, this agent's of

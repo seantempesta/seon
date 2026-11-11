@@ -415,7 +415,8 @@
             ;; in the entity's own component alone, the one its schema's render runs (`declared-var`, the branch's own when it
             ;; redefines it): a part handed the same view ([#'agent-parts {} c]) draws a piece of the entity's page and answers no
             ;; output for it, so the model render runs once a walk, never once a part
-            fs (when (and s0 (= f (declared-var ix s0))) (into {} (keep (fn [o] (some->> (render-for ix s0 o) requiring-resolve (vector o)))) others))
+            ;; or the entity's own render (its :seon.render/hiccup, render-var-of): a stage is the entity's component as its schema's render is
+            fs (when (and s0 (or (= f (declared-var ix s0)) (= f (some-> (ratom/realize (:seon.render/hiccup e0)) resolve)))) (into {} (keep (fn [o] (some->> (render-for ix s0 o) requiring-resolve (vector o)))) others))
             ;; output o's answer: its values, and each entity or call it places run as a component (the one the hiccup placed is a
             ;; hit; a call answers o), kept as its marker, so the parent orders and each child's answer stays its own
             place (fn [o env' xs] (mapv (fn [x] (if-let [[ef eo] (entity-render ix x)]
@@ -1145,13 +1146,15 @@
   [ix e] (when e (or (:seon.ctx/pattern e) (some->> (entity-schema ix e nil) (#(schema-property ix % :seon.ctx/pattern))))))
 
 (defn render-var-of
-  "The render var of entity e (a ctx's tree, an entity pulled by its pattern): its entity schema's :seon.render/hiccup (`entity-schema`,
-  `declared-var`, so a branch that redefines that var renders by its own), the render a walk of e is rooted on as [f {} view]. An entity
-  no schema names a render for throws :seon.render/no-render naming its identity attributes. See docs/render.md#the-page."
+  "The render var of entity e (a ctx's tree, an entity pulled by its pattern): its own :seon.render/hiccup when it names one this process
+  has (an entity's own render, as its own :seon.ctx/pattern is its own pattern: an agent's stage, docs/render.md#an-entity-may-name-its-own-render),
+  else its entity schema's (`entity-schema`, `declared-var`, so a branch that redefines that var renders by its own), the render a walk of e
+  is rooted on as [f {} view]. An entity no schema names a render for throws :seon.render/no-render naming its identity attributes. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :map :map] :any]}
   [ix e]
   (let [s (entity-schema ix e nil)]
-    (or (some->> s (declared-var ix))
+    (or (some-> (ratom/realize (:seon.render/hiccup e)) resolve)
+        (some->> s (declared-var ix))
         (throw (ex-info (str "no render renders this entity: its schema " s " names none")
                         (contract/error :seon.render/no-render #'render-var-of "no entity schema of this entity names a render (:seon.render/hiccup)"
                                         {:schema s :identity (vec (filter (:identity-schemas ix) (keys e)))}))))))

@@ -404,8 +404,15 @@
         c' (if same? c (ctx/patch c db moved branch))]
     (vreset! at db)
     (reset! a (mark (:tree c')))
-    (render/flush! w moved)
-    (assoc kw :c c')))
+    (if (= (get-in c [:tree :seon.render/hiccup]) (get-in c' [:tree :seon.render/hiccup]))
+      (do (render/flush! w moved) (assoc kw :c c'))
+      ;; the entity names another render of its own (seon.render/render-var-of): the same ctx, walked again from that root
+      (let [[_ o view] (:root w)
+            w' (merge (render/walker (:src w) (:db w) [(render/render-var-of @(:index w) (merge (select-keys (:tree c) [:seon.agent/key]) (:tree c'))) o view] @(:index w))
+                      (select-keys w [:id-prefix]))]
+        (render/dispose-walk! w)
+        (render/flush! w' nil)
+        (assoc kw :w w' :c c')))))
 
 (defn- branch-walk!
   "The kept walk of agent e's page (e on main) on its branch, as of bdb, the evals main records it opened
@@ -590,11 +597,12 @@
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
-                      ;; its REPL and its messages while its process runs; its held task's release
-                      :input (if (or (:seon.user/name e) system?) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
+                      ;; its REPL and its messages while its process runs; its held task's release. Root's session is talked to as any
+                      ;; agent (a message wakes it, and it starts the work); only a user's page, no agent to talk to, asks for a task
+                      :input (if (:seon.user/name e) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
                               :value {:id (keyword (:seon.agent/key e)) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat?
                               ;; what its process can answer: a form running is interrupted (busy)
-                              :busy? (= :busy (:seon.agent/status e)) :talks? (some? (:seon.agent/task e))
+                              :busy? (= :busy (:seon.agent/status e)) :talks? (some? (or (:seon.agent/task e) (first (:seon.task/_agent e))))
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}})}
                      ;; its tabs name it by its id in this boot, else by its branch (an earlier boot's agent)
                      (focus db view))))

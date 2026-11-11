@@ -379,7 +379,7 @@
   levels (`agents-join`): its page and every page's agents list are this one pull. Written on the user at each boot (`boot-tx`), so a
   change of the key reaches it at the next. See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat] [:vector :any]]}
-  [] [:seon.agent/key :seon.user/name (agents-join (cfg/value :seon.config.render/agent-tree-depth))])
+  [] [:seon.agent/key :seon.user/name :seon.render/hiccup (agents-join (cfg/value :seon.config.render/agent-tree-depth))])
 
 (defn boot-tx
   "Root's boot: its id for this process lifetime (the config in force, max-running among its keys, is written with it,
