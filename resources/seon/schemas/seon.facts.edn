@@ -92,7 +92,7 @@
  :schema/key [:and {:seon.db/identity true :seon.db/content-id true} :qualified-keyword]
  :schema/form :string
  :schema/file [:and {:seon.db/index true} :string]
- :file/path [:and {:seon.db/identity true :seon.db/content-id true} :string]
+ :file/path [:and {:seon.db/identity true :seon.db/content-id true :description "A file of the program, by its path in the checkout (a script under bin/, the shipped config). It is changed on your branch as a definition is, (seon.repl/edit! path old new), and reaches disk after your merge. A file you write with the shell or spit is not on your branch and does not merge."} :string]
  :file/text :string
  :file/mode :string
  ;; An ENTRY of the config file (docs/source.md#a-program-file): its key, its value's exact text with its tags unread, and its file. The config a process reads is built from these (seon.config/of-entries).
@@ -376,7 +376,7 @@
  :seon.task/name :string
  :seon.task/plan [:string]
  :seon.task/instructions [:string]
- :seon.task/proofs [:set :qualified-symbol]
+ :seon.task/proofs [:set {:description "The tests that say this task is done. A proof is a clojure.test deftest in the test namespace of what it proves, built on a small test world, never the live db: (my.test/world). Register one with (my.task/update! :seon.task/proofs conj (quote ns-test/name)). (prove) runs your proofs and every test your change reaches, and records the verdicts; clojure.test/run-test-var records nothing."} :qualified-symbol]
  :seon.task/needs [:set {:seon.db/to [:seon.task/task-fact]} :seon.db/ref]
  ;; the example sessions its agent reads before its own (seon.ctx.wire/request): agents keyed "example/<id>"
  ;; (seon.ctx.session/session-tx), drawn by the renders that draw its own session
