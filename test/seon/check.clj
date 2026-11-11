@@ -1217,13 +1217,23 @@
   [row self]
   (boolean (and row (re-find #"[ZE]" (:stat row)) (not= (:ppid row) self))))
 
+(defn left?
+  "Is a pid a stop left running, given its ps row read after kill 0 found it (row, nil when ps lists it no more) and whether
+  kill 0 finds it again after that read (alive-after?): with a row, unless it can run nothing more (ran-nothing-more?);
+  with none, only if it is still there when asked again, for a pid that exited between the two reads is gone (batch 58b's
+  lifecycle red was {:pid 74564}, no row, under load). bin/check's orphan step says the same in ps's words. See
+  docs/processes.md#a-stop-reaps-every-child."
+  {:malli/schema [:=> [:cat [:maybe [:map [:stat :string] [:ppid :int]]] :boolean :int] :boolean]}
+  [row alive-after? self]
+  (if row (not (ran-nothing-more? row self)) alive-after?))
+
 (defn- still-there
-  "Of pids, the ones still there after a stop, each with its ps row (docs/processes.md#a-stop-reaps-every-child): every one
-  alive that can still run (ran-nothing-more? is false)."
+  "Of pids, the ones still there after a stop, each with its ps row, {:pid p} when ps lists none and it is still alive
+  (left?, docs/processes.md#a-stop-reaps-every-child)."
   [pids]
   (vec (for [p pids :when (alive? p)
              :let [row (ps-row p)]
-             :when (not (ran-nothing-more? row (lib/c-getpid)))]
+             :when (left? row (if row true (alive? p)) (lib/c-getpid))]
          (or row {:pid p}))))
 
 (defn- cycle-row

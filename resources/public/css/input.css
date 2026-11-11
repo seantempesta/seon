@@ -113,19 +113,25 @@
   .costrows td, .cfg td { font-variant-numeric: tabular-nums; }
 }
 
-/* Where things go: a page is a bar over three columns, each scrolling on its own on a wide screen, and the names say
-   which is which (seon.render.ui/page-chrome, docs/render.md#where-things-go). On a narrow screen they stack and the
-   page scrolls. */
+/* Where things go: a page is a bar over three columns, each scrolling on its own on a wide screen, and the ids say
+   which is which (seon.render.ui/page-chrome's agents list and the page, #p-page, whose render draws the chat and the
+   context: seon.render.ui/agent-page, docs/render.md#where-things-go). The page and its render's own element are no box,
+   so each column is the grid's. On a narrow screen they stack and the page scrolls. */
 @layer components {
   .seon-page { display: flex; flex-direction: column; min-height: 100dvh; }
   .seon-bar { @apply sticky top-0 z-10 flex items-baseline gap-3 border-b border-base-800 bg-base-950 px-4 py-2; }
   .seon-columns { @apply grid grid-cols-1 gap-4 p-3; }
-  .seon-agents, .seon-chat, .seon-context { min-width: 0; }
-  .seon-chat { @apply flex flex-col gap-3; }
-  .seon-chat-log { @apply flex flex-col gap-1; overflow-wrap: anywhere; }
-  .seon-context { @apply flex flex-col gap-2; }
-  .seon-blocks { @apply flex flex-col gap-2; }
-  .seon-blocks > * { @apply rounded-md border border-base-800 bg-base-900 p-2; min-width: 0; overflow-wrap: anywhere; }
+  #p-page, #p-page > * { display: contents; }
+  #p-agents, #p-chat, #p-context { min-width: 0; }
+  #p-agents > h2 { @apply mb-1 hidden; text-transform: uppercase; letter-spacing: .14em; font-size: 0.625rem; color: var(--color-text-400); }
+  #c-side { @apply flex gap-2 overflow-x-auto pb-1 text-xs; }
+  #p-chat { @apply flex flex-col gap-3; }
+  #c-rows { @apply flex flex-col gap-1; overflow-wrap: anywhere; }
+  #p-context { @apply flex flex-col gap-2; }
+  /* the context is there when it holds a part: an agent's task's list, root's tiles; a page with none is two columns */
+  #p-context:not(:has(#p-task > *, #p-tiles > *)) { display: none; }
+  #p-task, #p-tiles { @apply flex flex-col gap-2; }
+  #p-task > *, #p-tiles > * { @apply rounded-md border border-base-800 bg-base-900 p-2; min-width: 0; overflow-wrap: anywhere; }
   /* common styling, named once */
   .seon-note { @apply text-2xs text-text-500; }
   .seon-stack { @apply flex flex-col gap-1; }
@@ -136,12 +142,14 @@
 @media (min-width: 64rem) {
   .seon-page { height: 100dvh; overflow: hidden; }
   .seon-columns { flex: 1 1 0; min-height: 0; }
-  .seon-agents, .seon-chat, .seon-context { min-height: 0; }
+  #p-agents, #p-chat, #p-context { min-height: 0; }
+  #p-agents > h2 { display: block; }
+  #c-side { flex-direction: column; gap: 0.125rem; }
   /* the chat is the largest: the context takes a third at most, and gives way first */
   .seon-columns { grid-template-columns: 11rem minmax(0, 1fr) clamp(18rem, 30%, 30rem); }
-  .seon-columns-wide { grid-template-columns: 11rem minmax(0, 1fr); }
-  .seon-agents, .seon-context, .seon-chat-log { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--color-base-700) transparent; }
-  .seon-chat-log { flex: 1 1 0; min-height: 0; overflow-x: hidden; }
+  .seon-columns:not(:has(#p-task > *, #p-tiles > *)) { grid-template-columns: 11rem minmax(0, 1fr); }
+  #p-agents, #p-context, #c-rows { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--color-base-700) transparent; }
+  #c-rows { flex: 1 1 0; min-height: 0; overflow-x: hidden; }
 }
 
 /* The one printer's structural HTML (seon.print.emit): its classes are the printer's, so they are

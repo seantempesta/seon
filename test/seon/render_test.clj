@@ -638,10 +638,12 @@
         top (fn [l] (remove :parent (:seon.render/units l)))
         input (fn [l] (first (filter #(= "p-input" (:id %)) (:seon.render/units l))))]
     (testing "root is an agent: its page and an agent's are each its lists in one chrome (seon.render.ui/page-chrome)"
-      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules" "#p-tiles"} (set (map :container (top root))))
+      ;; the page (#p-page) is its layout's root unit, whose chat column (#p-chat) ends with the frame's caption and input
+      (is (= #{"#p-page" "#p-chat" "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules" "#p-tiles"} (set (map :container (top root))))
           "root's: its agent's page (its tiles, its conversation) and, beside it, the system's own view (p-tiles)")
-      (is (= #{nil "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (top agent))))
+      (is (= #{"#p-page" "#p-chat" "#c-side" "#p-head" "#p-task" "#c-rows" "#p-rules"} (set (map :container (top agent))))
           "an agent's: its task's list above its conversation; no eval of the fixture has a render of its own, so no tiles")
+      (is (= 1 (count (filter #(= "#p-page" (:container %)) (:seon.render/units root)))) "one page: the system walk's own root unit is not placed")
       (doseq [l [root agent] :let [by (into {} (map (juxt :id identity)) (:seon.render/units l))]
               u (:seon.render/units l) :when (:parent u) :let [p (by (:parent u))]]
         (is (some? p) (str (:id u) ": a nested unit's parent is a unit of the page"))
@@ -672,6 +674,72 @@
       (let [st2 (assoc st :main-db (d/db-with (:main-db st) [{:seon.root/id :root :seon.root/boot "b2"}]))]
         (is (str/includes? (str (#'p/page-value st2 eid)) "a3"))))
     (r/dispose-walk! (get-in st [:root-walk :w]))))
+
+(defn my-member
+  "A member of `my-list`, for a-render-places-its-own-regions: its number. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:key :int]]]] :any]}
+  [{n :key}] [:p (str "member " n)])
+
+(defn my-list
+  "A list in a container no frame region has (my-region), for a-render-places-its-own-regions. See docs/render.md#a-layout-places-its-lists."
+  {:seon.render/list "my-region" :malli/schema [:=> [:cat :seon.render/opts] :any]}
+  [_] [:section {:id "my-region"} [#'my-member {:key 1}] [#'my-member {:key 2}]])
+
+(defn my-layout
+  "A layout of its own, for a-render-places-its-own-regions: a heading and `my-list`. See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat :seon.render/opts] :any]}
+  [_] [:div [:h1 "mine"] [#'my-list {}]])
+
+(defn- page-html
+  "The page html of a walk's units laid out by the frame (seon.render.ui/page-chrome), as a tab is sent it: its units run against
+  nothing held and composed into the frame (seon.render.proc/view-html). See docs/render.md#a-layout-places-its-lists."
+  {:malli/schema [:=> [:cat [:vector :map]] :string]}
+  [units]
+  (let [out (ui/page-chrome {:units units :view "v" :tab :chat} :v)
+        us (:seon.render/units out)
+        [view patch] (#'p/step-units (seon.db/index) nil us)
+        [view _] (#'p/finish-patch view patch us)]
+    (p/view-html {:views {:v (assoc view :skeleton (h/html (:seon.render/hiccup out)))}} :v)))
+
+(deftest a-render-places-its-own-regions
+  ;; docs/render.md#a-layout-places-its-lists: the root render's output is the page (its root unit), so a list it places in a container
+  ;; no frame region has gets its members there; the frame holds only its bar, the agents list, the root unit and the input
+  (let [a (seon.ratom/atom {:db/id 1})
+        w (r/walker {:ref a :changes seon.ctx/changes} (constantly nil) [#'my-layout {}] (seon.db/index))]
+    (try
+      (r/flush! w nil)
+      (let [html (page-html (r/placed-units w))]
+        (is (re-find #"<section[^>]*id=\"my-region\"[^>]*>.*member 1.*member 2.*</section>" html) "its members, in its own region")
+        (is (str/includes? html "<h1>mine</h1>") "the layout's own content is the page's")
+        (is (= 1 (count (re-seq #"id=\"my-region\"" html))) "the region named once"))
+      (finally (r/dispose-walk! w)))))
+
+(deftest the-agent-page-holds-what-the-frame-held
+  ;; docs/render.md#a-layout-places-its-lists: the agent's layout draws the regions page-chrome drew by hand (measured on main
+  ;; b51de2877c, the chat page of a3 and root's page in this fixture), so the page holds the same elements and units
+  (let [[main branch eid] (paged-dbs)
+        st (root-state (proc-state (signed-in main [eid]) branch) (signed-in main [eid]))
+        ids (fn [html] (into (sorted-set) (map second) (re-seq #" id=\"([^\"]+)\"" html)))
+        [st1 _] (pass-view st [:chat :a3])
+        [st2 _] (pass-view st1 :root)
+        agent (ids (p/view-html st2 [:chat :a3]))
+        root (ids (p/view-html st2 :root))
+        ;; main's, b51de2877c
+        agent0 #{"agent-state" "app" "c-rows" "c-side" "chat-ask" "chat-end" "cite-demo_2Ff_20docs_2Frender_2Emd_23no-clipping" "cite-demo_2Ff_20seon_2Erender_2Fhiccup"
+                 "conversation-turn-1" "eval-e1" "eval-e2" "eval-e3" "eval-output-e1" "eval-output-e2" "eval-output-e3" "evaluation-e1" "evaluation-e2" "evaluation-e3"
+                 "message-m-1" "model-call-view-b8ce12ca44ca5601" "p-agent-head" "p-caption" "p-head" "p-input" "p-rules" "p-task" "p-tiles" "page-rules" "status"
+                 "step-back-a3-e1" "step-back-a3-e2" "step-back-a3-e3" "step-edit-a3-e1" "step-edit-a3-e2" "step-edit-a3-e3" "steps-1" "system-message" "task-view-demo_2Ff"
+                 "turn" "u-agent-a3" "u-root-side"}
+        root0 #{"agent-a3" "agent-state" "agent-user" "app" "c-rows" "c-side" "eval-output-root-1" "eval-root-1" "evaluation-root-1" "p-agent-head" "p-caption" "p-head"
+                "p-input" "p-rules" "p-task" "p-tiles" "page-rules" "problems-tile" "process-tile" "root-evals" "root-head" "stage-as" "stage-front" "system-message"
+                "u-agent-a3" "u-root-side"}
+        ;; what the frame's page-chrome drew by hand is now the layout's: its root (the page), its columns and the frame's slot for it
+        added #(remove (fn [id] (or (#{"p-page" "p-agents" "p-chat" "p-context"} id) (str/starts-with? id "agent-") (str/starts-with? id "stage-"))) (clojure.set/difference % %2))]
+    (is (= agent0 (clojure.set/intersection agent agent0)) "every element the agent's page held")
+    (is (empty? (added agent agent0)) "and no other but its layout's own")
+    (is (= root0 (clojure.set/intersection root root0)) "every element root's page held")
+    (is (empty? (added root root0)) "and no other but its layout's own")
+    (r/dispose-walk! (get-in st2 [:root-walk :w]))))
 
 (deftest a-location-names-root-an-agent-or-an-entity
   (is (= [:root :root [:chat :a3] :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "a3/ctx" "474"])) "an agent's path is its chat; /debug every render of its ctx"))
@@ -935,6 +1003,7 @@
         at #(str/index-of html %)]
     (is (< (at "check g") (at "it doubles") (at "f doubles?") (at "result/e3")) "in the order of the turn's number: the message, the reply, its eval's text, then the owner's eval")
     (is (< (at "id=\"c-rows\"") (at "id=\"p-input\"")) "the input under the conversation")
+    (is (not (str/includes? html "Your own session")) "no session opening on the page: the model's request opens the session (seon.ctx.wire/agent-msgs)")
     (is (re-find #"<details [^>]*class=\"seon-eval\"" html) "an eval is a block that opens")
     (is (re-find #"<details [^>]*id=\"eval-e1\"" html) "the row is its handle's anchor, open or not")
     (is (re-find #"<summary[^>]*>.*f doubles\?.*result/e1" html) "folded: its message and its handle, never a copy of the eval")))
@@ -1942,9 +2011,10 @@
   ;; the same components, so a person sees what the agent was told
   (let [[main branch _] (paged-dbs)
         [st _] (pass-view (proc-state main branch) [:chat :a3])
-        skel (get-in st [:views [:chat :a3] :skeleton])]
-    (is (str/includes? skel "id=\"p-task\"") "the page has the task's list's place")
-    (is (str/includes? skel "<!--s:task-view-demo_2Ff-->") "and the task's component in it, its own render's")))
+        html (p/view-html st [:chat :a3])]
+    ;; the place is the layout's (seon.render.ui/agent-page), the page's root unit, no longer the frame's skeleton
+    (is (str/includes? html "id=\"p-task\"") "the page has the task's list's place")
+    (is (re-find #"id=\"p-task\"[^>]*>(?:(?!</aside>).)*id=\"task-view-demo_2Ff\"" html) "and the task's component in it, its own render's")))
 
 (deftest a-working-agents-page-follows-its-branch
   ;; owner, 2026-11-08: "the user message doesn't show up until the agent has finished their turn". A live agent draws its own
@@ -3079,6 +3149,13 @@
   "A layout whose only component is interrupted while it draws."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
   [_] [:div [:div {:id "parts"} [#'interrupted-view {}]]])
+
+(deftest a-private-helpers-rules-reach-the-page
+  ;; docs/render.md#style: the rules of every var of a drawn render's namespace reach the page, a private helper's too (red before: read
+  ;; from ns-publics, the stage's rules on its private helpers stage-now and stage-folds never reached a page)
+  (let [rs (into {} (r/rules {#'ui/stage-front nil}))]
+    (is (str/includes? (get rs 'seon.render.ui/stage-now "") ".stage-front h1") (pr-str (keys rs)))
+    (is (str/includes? (get rs 'seon.render.ui/stage-folds "") "details[data-as]"))))
 
 (deftest a-component-that-throws-is-a-part-holding-its-error
   ;; owner, 2026-10-29: "the UI components are all separately rendered so it's okay if some are
