@@ -180,6 +180,14 @@
                (= :break kind) [:hr]
                :else (into [:p] (run from to))))))))
 
+(defn text
+  "A :seon.db/text value (a task's plan, a message's body: prose a person or a model wrote) as both readers read it: its Markdown's
+  structure, code spans as [:code ...] and emphasis drawn (`markdown` with :inline?), never its delimiters. The render the schema
+  declares, so a value is drawn by its attribute: (render/hiccup {:seon.render/index ix :schema :seon.task/plan} plan). See
+  docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat :seon.render/opts :string] :any]}
+  [_ s] (markdown s {:inline? true}))
+
 (defn slot
   "Where the part with element id goes: a marker the render proc fills with the part's
   retained HTML when it composes a page or a keyframe."
@@ -393,8 +401,8 @@
               (str (kname (:seon.task/kind t)) " · "
                    ;; what happened (the reconciler's observed state, when the producer carries it), else the desired execution
                    (if-let [st (:seon.task/state t)] (kname st) (kname (:seon.task/execution t)))))
-      [:pre {:class "plan" :title "its plan, accumulated along its needs: theirs first"} plan]
-      (when (:seon.task/instructions t) [:p {:class "muted"} (:seon.task/instructions t)])
+      [:div {:class "plan" :title "its plan, accumulated along its needs: theirs first"} (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/plan} plan)]
+      (when-let [i (:seon.task/instructions t)] [:div {:class "muted"} (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/instructions} i)])
       (when-let [{:keys [reason counterexample agent]} (:seon.task/failure t)]
         [:p {:class "err"} "failed" (when agent (str " in " agent)) ": " reason (when counterexample (list " · counterexample " [:code counterexample]))])
       (when (seq (:seon.task/needs t))
@@ -668,8 +676,8 @@
              (cond (:seon.task/outcome t) (str " · " (:text (standing nil {:seon.task/outcome (:seon.task/outcome t)})))
                    execution (str " · " (kname execution))))]
        [:p {:class "text-lg font-bold text-text-100"} (task-title id)]
-       (when instructions [:details [:summary "how the agent works it"] [:p {:class "seon-text"} instructions]])
-       (when plan (markdown plan))
+       (when instructions [:details [:summary "how the agent works it"] (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/instructions} instructions)])
+       (when plan (render/hiccup {:seon.render/index (:seon.render/index opts) :schema :seon.task/plan} plan))
        ;; its id, which an agent names its task by (my.task/*)
        [:p {:class "seon-note"} (str "Task: " id)]
        (seq (own-tiles (:seon.render/index opts) t))])))
@@ -1002,7 +1010,7 @@
    (cond
      (:seon.doc/address t) (section-hiccup t depth)
      (:seon.task/id t) [:section [:h3 (:seon.task/id t)] [:p "Another task your plan names."]
-                        (when-let [pl (:seon.task/plan t)] (markdown pl))]
+                        (when-let [pl (:seon.task/plan t)] (markdown pl {:inline? true}))]
      (:var/name t) (var-hiccup (:var/name t) t (boolean changing?))
      (:schema/key t) (key-hiccup db (:schema/key t) t (or lookups []))
      (:ns/name t) [:section [:h3 (str (:ns/name t))] [:p (str "A namespace your plan names." (when (:ns/doc t) (str " " (:ns/doc t))))] [:p "Read it: " [:code (help-form (:ns/name t))]]]
