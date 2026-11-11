@@ -1993,7 +1993,7 @@
   "The sessions the system entity view r holds as root's session's pull joins it (:seon.agent/_root, newest first to
   :seon.config.ctx/window: seon.root/root-session-pattern), root's session itself left out: each by the agent's own render nested (its
   entry, under it the agents it started), so an agent is listed once, under the agent that started it: the top level is what the pull
-  holds that no held agent started (:seon.agent/agents; Point's ruling, 2026-11-11); this boot's first, each earlier boot's under one fold, newest boot first; and how many root holds beyond the window (a count of
+  holds that no held agent started (:seon.agent/agents); this boot's first, each earlier boot's under one fold, newest boot first; and how many root holds beyond the window (a count of
   :seon.agent/root's datoms, never a silent cut). Reads the pull, the boot fact and that count. See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db :any] :any]}
   [db r]
