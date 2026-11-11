@@ -667,8 +667,10 @@
 
 (deftest two-sessions-proving-one-tree-at-once-each-get-every-verdict
   ;; docs/merging.md#a-session-proves-through-root (Flow step 4, two askers of one tree): two clients ask root for the same tree at
-  ;; the same time, each through seon.server/ask-streamed as bin/prove --root does, from two fibers of this process. Red before the
-  ;; Jolt pin ec4c1e44: two fibers first using a socket at once threw "No dependency provides java.net.Socket". The checkout is a
+  ;; the same time, each through seon.server/ask-streamed as bin/prove --root does, from two futures of this process released together.
+  ;; Red before the Jolt pin ec4c1e44: two of them first using a socket at once threw "No dependency provides java.net.Socket".
+  ;; One run, each item once: a second asker arriving after the run would be answered from :done with :ran 0, so :ran 2 in
+  ;; both answers and one :key say both joined the run in flight. The checkout is a
   ;; worktree of this tree with one test namespace of two green tests added (a run id in it, so no verdict is reused)
   (let [here (seon.config/checkout)
         root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str here))])
