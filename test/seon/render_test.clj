@@ -2649,6 +2649,23 @@
 
 (defn- session-eid [db k] (seon.db/eid db :seon.agent/key k))
 
+(deftest an-entity-shown-as-its-data-model
+  ;; docs/render.md#an-entity-may-name-its-own-render: an entity naming seon.render.ui/pull-view as its own render shows, from its pull and
+  ;; the entity index, where its pattern comes from, each clause with what the pull holds for it, and what its schema names that the
+  ;; pattern does not ask: root's session here, whose pattern is its own
+  (let [db (sessions-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1]])
+        st (root-state (branch-state db db) db)
+        main (:main-db st)
+        main (d/db-with main [{:db/id (seon.db/eid main :seon.agent/key "root") :seon.render/hiccup 'seon.render.ui/pull-view}])
+        html (root-page-html main)
+        front (re-find #"(?s)<section[^>]*pull-front.*?Show as data" html)]
+    (is (some? front) html)
+    (is (not (str/includes? html "component-defect")) "nothing threw")
+    (is (str/includes? front "its own (:seon.ctx/pattern on the entity)") "its pattern is its own")
+    (is (str/includes? front ":seon.agent/key") "a clause it asks")
+    (is (str/includes? front ":seon.agent/root") "a join it asks, with its members")
+    (is (str/includes? front "does not ask") "what its schema names beside")))
+
 (deftest roots-sessions-list-an-agent-once-under-its-starter
   ;; docs/users.md#roots-session: root holds every agent, and an entry draws the agents it started under it, so the top level is what
   ;; root's pull holds that no held agent started (Point's ruling, 2026-11-11); red before: a2 was listed twice, at the top and under a1
