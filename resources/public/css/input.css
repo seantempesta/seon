@@ -235,3 +235,8 @@ pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; bac
 .seon-turn .seon-eval > summary { padding: 0.15rem 0.3rem; }
 .seon-turn .seon-eval[open] > summary { border-bottom: 0; }
 .seon-eval-error { border-color: color-mix(in srgb, var(--color-error) 45%, var(--color-base-800)); }
+/* a failed assertion: what it asserted and what it got, each a value of its own (seon.render.ui/status-hiccup) */
+.seon-failure { display: grid; grid-template-columns: max-content 1fr; gap: 0.15rem 0.6rem; margin: 0.25rem 0; }
+.seon-failure > dt { color: var(--color-text-500); font-size: 0.75rem; }
+.seon-failure > dd { margin: 0; min-width: 0; }
+.seon-failure pre { white-space: pre-wrap; overflow-wrap: anywhere; }

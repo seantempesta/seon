@@ -616,7 +616,7 @@
 
 (defn- cited
   "Name n as a cite of it on the agent's page shows it, on demand: a cite of n's target (seon.ref/target) at doc depth made on
-  db (one d/with), pulled by the cite's own pattern (seon.ctx/build) and drawn by seon.render.ui/cite-hiccup, so on demand and on
+  db (one d/with), pulled by the cite's own pattern (seon.ctx/build) and drawn by its render seon.render.ui/cite, so on demand and on
   the page are one render. A name db holds nothing by is `no-var`'s answer, else said to resolve to nothing. See
   docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat :seon.host/db [:or :symbol :qualified-keyword]] :any]}
@@ -625,7 +625,7 @@
     (if (pdb/eid db a v)
       (let [r (pdb/speculate db [{:db/id "of" :seon.agent/key (str "help " n)} {:seon.cite/id (str "help " n) :seon.cite/of "of" :seon.cite/target t :seon.cite/depth :doc :seon.cite/order 0}])
             db' (:db-after r)]
-        (ui/cite-hiccup db' (:tree (seon.ctx/build (agent/branch-index) db' (pdb/eid db' :seon.cite/id (str "help " n)) nil))))
+        (ui/cite {:seon.db/db db' :seon.render/index (agent/branch-index)} (:tree (seon.ctx/build (agent/branch-index) db' (pdb/eid db' :seon.cite/id (str "help " n)) nil))))
       (or (when (symbol? n) (no-var db n)) [:section [:h3 (str n)] [:p (:unresolved ref/problem-messages)]]))))
 
 (defn- doc-view

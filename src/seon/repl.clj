@@ -478,7 +478,12 @@
                                               [tx (when tx (program/meaning-changes (agent/db) tx))])
                                             (catch Throwable e (undo-definition! l e)))]
                        ;; a namespace made at this REPL takes its file by its name with its first form, on the branch, so it merges as any other's and reaches disk
-                       (when tx (agent/transact! (cond-> tx (nil? (source/ns-file (agent/db) (:ns acct))) (conj {:ns/name (:ns acct) :ns/file (source/namespace-path (:ns acct))}))))
+                       (when tx (agent/transact! (cond-> tx (nil? (source/ns-file (agent/db) (:ns acct))) (conj {:ns/name (:ns acct) :ns/file (source/namespace-path (:ns acct))})))
+                             ;; this process now runs this form for the vars it defines (seon.program/program-differs reads it)
+                             (program/note-loaded! (mapv :var (:defs acct)) (:id acct))
+                             ;; a macro redefined: the forms that expanded it are compiled again here, as a spawn's load-diff! would
+                             (when (some #(contains? (set (:meta %)) :macro) (:defs acct))
+                               (program/reload-dependents! (agent/db) [(:id acct)])))
                        (cond-> (assoc m :recorded (vec (concat (map :var (:defs acct)) (when (:ns-form? acct) [(:ns acct)])
                                                                        (map (juxt :multi :dispatch) (:methods acct)) (map (juxt :protocol :type) (:impls acct))))
                                       :repl/defined (mapv :var (:defs acct)))

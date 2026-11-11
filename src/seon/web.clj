@@ -208,6 +208,9 @@
     (fn [req]
       (let [uri (:uri req) m (:request-method req) q (form-params (:query-string req))]
         (cond
+          ;; a POST is the dashboard's own page's, whichever route it names: one check before any route reads it
+          (and (= m :post) (not (same-origin? req)))
+          {:status 403 :headers {"Content-Type" "text/plain"} :body (str "a post is this dashboard's own page's: " (get-in req [:headers "origin"] (get-in req [:headers "sec-fetch-site"])) " is not")}
           (and (= m :get) (= uri "/")) (html-response (ask! ch {:op :page :view [:chat :home]}))
           ;; root's own page: every session on main, its process and its problems
           (and (= m :get) (= uri "/root")) (html-response (ask! ch {:op :page :view :root}))
@@ -250,8 +253,6 @@
           {:status 200 :headers {"Content-Type" "application/edn" "Cache-Control" "no-store"} :body (str (ask! ch {:op :render-stats}))}
           (and (= m :get) (= uri "/web.edn"))
           {:status 200 :headers {"Content-Type" "application/edn"} :body (sedn/encode (ask! ch {:op :stats}))}
-          (and (= m :post) (= uri "/call") (not (same-origin? req)))
-          {:status 403 :headers {"Content-Type" "text/plain"} :body (str "a call is this dashboard's own page's: " (get-in req [:headers "origin"] (get-in req [:headers "sec-fetch-site"])) " is not")}
           (and (= m :post) (= uri "/call"))
           (let [fields (into {} (for [[k v] (form-params (some-> (:body req) slurp))] [(keyword k) v]))
                 args (some-> (get q "args") edn/read-string)

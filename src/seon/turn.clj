@@ -425,8 +425,10 @@
   (let [;; read before begin!, which starts the turn state anew when it has none yet
         stop (get-in @agent/state [:turn :stop])
         _ (begin! task)
-        ;; main moved since its last merge: merged now, as a green turn's is, so green work is never judged for being behind; a conflict is an unmerged entry, a reason the status says
-        _ (when (agent/main-moved? (:base @agent/state) (agent/heard-main)) (branch/merge-main!))
+        ;; main taken now, as work! takes it at each start, so green work is never judged for being behind; a conflict is an
+        ;; unmerged entry, a reason the status says. Asked of main itself, never of what this process last heard of it (an
+        ;; outside agent's green task was judged behind 78 with that guard, 2026-11-11); a branch at main's head brings nothing
+        _ (branch/merge-main!)
         _ (observe task)
         s (judged (status-now))
         [outcome reason] (if (contract/error? s) [:error (:seon.error/message s)] (let [[o why] (hand-back-end stop (:reasons s))] [o (or why (unjudged-reason s))]))]

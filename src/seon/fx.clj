@@ -246,7 +246,7 @@
 
 (defn env-class
   "The class of the file at relative path p: :seon.env/system, /web, /deps, /bin (bin/ and the root's other files), /schemas, /docs (the
-  wiki), /tasks (the task files) or /src (the .clj
+  wiki: docs/ and the .md files at the checkout's root), /tasks (the task files) or /src (the .clj
   files, which env-input? leaves to the program facts: a class only for a reach that reads the program's text), each a part of the checkout one kind of test reads (seon.program/env-class-readers),
   or nil (every test's: native/, the pins, the fixtures, everything else)."
   {:malli/schema [:=> [:cat :string] [:maybe :keyword]]}
@@ -254,14 +254,16 @@
   (cond (= p "resources/seon/system.edn") :seon.env/system
         (or (str/starts-with? p "resources/public/") (str/starts-with? p "web/")) :seon.env/web
         (= p "deps.edn") :seon.env/deps
+        ;; the wiki and the task files, each read whole by its own reader (seon.doc/pages, seon.root/task-files): a class, so a
+        ;; wiki edit moves the tests that read the wiki and no other (a 4-line edit to docs/decisions.md ran 117 tests, 2026-11-11).
+        ;; A .md file at the checkout's root (AGENTS.md, README.md) is the wiki's too, its top page (seon.doc): as the bin class,
+        ;; which every process test and step takes, batch 77's AGENTS.md edit reran 463 of 1,785 tests and 36 of 40 steps
+        (or (str/starts-with? p "docs/") (and (not (str/includes? p "/")) (str/ends-with? p ".md"))) :seon.env/docs
         ;; a file at the checkout's root (.gitmodules, .gitignore, .mcp.json): git's and the tools', read by git and the
         ;; bin/ scripts. In :env, which every test takes, a new submodule moved every test's digest, and a .gitignore
         ;; edit reran 1,600 of 1,891 keys (each pin is its own input, pin-class)
         (or (str/starts-with? p "bin/") (not (str/includes? p "/"))) :seon.env/bin
         (str/starts-with? p "resources/seon/schemas/") :seon.env/schemas
-        ;; the wiki and the task files, each read whole by its own reader (seon.doc/pages, seon.root/task-files): a class, so a
-        ;; wiki edit moves the tests that read the wiki and no other (a 4-line edit to docs/decisions.md ran 117 tests, 2026-11-11)
-        (str/starts-with? p "docs/") :seon.env/docs
         (str/starts-with? p "resources/seon/tasks/") :seon.env/tasks
         ;; the program's text, which a test reading the whole program (a docstring, a form's source) reads
         (and (str/ends-with? p ".clj") (or (str/starts-with? p "src/") (str/starts-with? p "test/"))) :seon.env/src))
@@ -671,11 +673,13 @@
         (step "bin/build seon" ["nice" "-n" "15" (str dir "/bin/build") "seon"])
         {:value {:commit commit :checkout dir :binary (str dir "/target/seon") :ms (profile/ms-since t0)}})))
 (defn full-run-command
-  "The runner of the daily full run, as argv: every test, green or not (bin/test --all: the
-  plan ignores the results already recorded, runs the process tests, and measures each cost proof
-  at the sizes it states), its run written under out (its plan at out/tests.edn)."
-  {:malli/schema [:=> [:cat :string] [:vector :string]]}
-  [out] ["nice" "-n" "15" "bin/test" "--prove" "tests" out "--all"])
+  "The runner of a run on a checkout's own build, as argv, its run written under out (its plan at out/tests.edn): the daily
+  full run's, every test green or not (bin/test --all: the plan ignores the results already recorded, runs the process tests,
+  and measures each cost proof at the sizes it states); with names, those tests (the fallback route's named run,
+  run-on-checkout's :built?)."
+  {:malli/schema [:function [:=> [:cat :string] [:vector :string]] [:=> [:cat :string [:maybe [:sequential :string]]] [:vector :string]]]}
+  ([out] (full-run-command out nil))
+  ([out names] (into ["nice" "-n" "15" "bin/test" "--prove" "tests" out] (or (seq names) ["--all"]))))
 
 ;; ---- verdicts: a cache by digest, outside the store (docs/merging.md#verdicts-are-a-cache) ----
 
@@ -1013,12 +1017,14 @@
   names) is proved by the system through prove (seon.root/prove-tree!, mode :judge, named by exactly those tests): its
   process tests run as items on the checkout (docs/merging.md#a-session-proves-through-root), and its answer is read by
   gate-answer: {:value {:results {test status} :failures {test [failure ...]} :digests {test digest} :ms :log}}, or the
-  run's typed error. With :all? (the daily full run, seon.prove's :full mode) the tree's binary is built first
+  run's typed error. With :built? (the fallback route: a branch's program judged on a binary built from its own source, never
+  root's) the tree's binary is built first and the named tests run on it by the checkout's runner (full-run-command's names).
+  With :all? (the daily full run, seon.prove's :full mode) the tree's binary is built first
   (bin/build seon) and the runner is full-run-command, tests every test its plan names, each read from the verdict
   cache (test-results), a run not all green keeping its logs beside its log; repo defaults to this checkout and branch
   to git's main (:seon.config.source/main); its failure is :seon.fx/io-error naming the step and its log."
   {:malli/schema [:=> [:cat [:maybe :seon.host/fn] :string :map] :map]}
-  [prove sha {:keys [repo files tests all?]}]
+  [prove sha {:keys [repo files tests all? built?]}]
   (let [t0 (profile/now-ns)
         dir (str (cfg/value :seon.config.source/tests-dir) "/" sha "-" (random-uuid))
         log (str dir ".tests.log")
@@ -1071,14 +1077,14 @@
                         (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))))
               ;; a gate's run builds only through its runner, when the binary is not current for the candidate's tree
               ;; (bin/test's plan: seon.root/binary-current, rule (a)); the full run builds main's tree here, into its kept slot
-              b (if all? (apply lib/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])) {:exit 0})
+              b (if (or all? built?) (apply lib/sh (concat clean ["nice" "-n" "15" "bin/build" "seon"] [:dir dir])) {:exit 0})
               _ (when (and all? (empty? files) (zero? (:exit b)))
                   (.mkdirs (java.io.File. ^String slot))
                   (doseq [n kept-build] (lib/sh "cp" "-cf" (str dir "/target/" n) (str slot "/" n))))]
           (if (not (zero? (:exit b)))
             (do (spit log (str (:out b) (:err b)))
                 (error #'seon.fx/run-on-checkout :seon.fx/io-error (str (build-failure (str (:out b) (:err b)) files) "; its log: " log) {:path dir}))
-            (if-not all?
+            (if-not (or all? built?)
               ;; the gate: the system proves the candidate's checkout (prove, seon.root/prove-tree!, which root binds to this
               ;; effect's :ctx), named by exactly the deferred tests; its process tests run as items on dir, by the :item owner
               (let [a (if prove
@@ -1093,7 +1099,7 @@
             ;; so the verdicts read below are the ones its run wrote
             (let [out (str dir "/target/prove/run")
                   r (apply lib/sh (concat clean [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))]
-                                         (full-run-command out)
+                                         (full-run-command out (when-not all? (map str tests)))
                                          [:dir dir]))
                   plan (let [f (java.io.File. ^String out "tests.edn")] (when (.isFile f) (edn/read-string (slurp f))))
                   _ (spit log (str (:out r) (:err r)))
@@ -1184,7 +1190,7 @@
                  (catch Throwable e (error #'seon.fx/run-tests :seon.fx/io-error (step/error-msg e) {:path repo})))]
     (cond
       (contract/error? sha) sha
-      all? (run-on-checkout nil sha req)
+      (or all? (:built? req)) (run-on-checkout nil sha req)
       :else
       (run-held (partial run-on-checkout prove-tree) sha req))))
 
@@ -1230,7 +1236,7 @@
   "The :item effect: one item of a session's prove that the test service (seon.prove) granted, run on the session's
   checkout at tree, niced: :build is bin/build seon there; :seed brings the checkout's program store to the tree and, :binary?,
   seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :process is one test as a shard of one (bin/test --shard,
-  whose runner stores its verdict); :step is one check step (bin/check --steps, then bin/test --store-steps, which
+  whose runner stores its verdict; with a :bound, through bin/bounded, and past it the :signal :overran a step's is); :step is one check step (bin/check --steps, then bin/test --store-steps, which
   stores it green at its digest). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the
   cache by its digest, so an item asked again is reused there; a step bin/check ended past its bound (its DIR/overran) is
   :signal :overran, never a verdict. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
@@ -1281,7 +1287,10 @@
                         (sh "zsh" "-c" (str "ROOT=$PWD; . bin/env; "
                                             (when (:binary? req) "(cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-) && ")
                                             "HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test -e \"" prog "\"")))
-                :process (sh "bin/test" "--shard" (str dir "/shard-0.edn") "--set" (str ":seon.config.proofs/program-store=" (sedn/encode pstore)))
+                ;; with a :bound (seon.prove's plan-items, from its measured ms) it runs through bin/bounded: past the bound its
+                ;; evidence is kept and its whole process group ended, never left to hold a worker
+                :process (apply sh (concat (when bound ["bin/bounded" (str bound) (str dir "/evidence")])
+                                           ["bin/test" "--shard" (str dir "/shard-0.edn") "--set" (str ":seon.config.proofs/program-store=" (sedn/encode pstore))]))
                 :step (let [c (sh "bin/check" "--steps" dir)] (sh "bin/test" "--store-steps" dir) c))
             ms (profile/ms-since t0)
             stored (when-not (#{:build :seed} kind) (stored-results {name digest}))
@@ -1290,9 +1299,12 @@
                              (lib/remove-tree! (.getPath d))))
             v (when (map? stored) (get stored digest))
             ;; bin/check's own judgement of the step's bound, a signal it writes (DIR/overran): this measures nothing itself
-            overran? (when (= :step kind)
-                       (let [f (java.io.File. (str dir "/overran"))]
-                         (and (.isFile f) (contains? (set (str/split-lines (slurp f))) name))))]
+            ;; and bin/bounded's, a process item's (DIR/evidence/overran)
+            overran? (case kind
+                       :step (let [f (java.io.File. (str dir "/overran"))]
+                               (and (.isFile f) (contains? (set (str/split-lines (slurp f))) name)))
+                       :process (.isFile (java.io.File. (str dir "/evidence/overran")))
+                       false)]
         (cond
           (contract/error? stored) stored
           (= :build kind) (if (zero? (:exit r))
@@ -1428,14 +1440,16 @@
       st)))
 
 (defn- bound
-  "The owner's queue holds at most :seon.config.fx/buf requests; at the bound it reads only :done
-  (Flow's input filter), so agent procs park on :in: back-pressure to the asking agent."
+  "The owner's queue holds at most :seon.config.fx/buf requests of the agents; at the bound it stops reading :in (Flow's
+  input filter), so agent procs park on :in: back-pressure to the asking agent. :ask (root's) and :done are always read."
   {:malli/schema [:=> [:cat :map] :map]}
   [st] (assoc st ::flow/input-filter (if (>= (count (:queue st)) (cfg/value :seon.config.fx/buf)) #(not= :in %) identity)))
 
 (defn owner-proc
   "The owner of one effect kind. In :in (the agent procs' requests {:req :dest :prio
-  :budget :budget-key :agent}, addressed by id; :seon.config.fx/buf), :done (the workers'
+  :budget :budget-key :agent}, addressed by id; :seon.config.fx/buf), :ask (root's own asks, the api's: the same requests,
+  never held back by the bound, since the api that puts them answers every asker and must never wait on one owner; they are
+  bounded where they start: the test service's workers, the reconciler's flights), :done (the workers'
   outcomes). Out :to-workers (its performers' shared channel), :out (the api's :back:
   {:dest :r})."
   {:malli/schema :seon.step/step-fn}
@@ -1444,7 +1458,7 @@
                 :batch "the most requests one worker step takes from the queue (nil: one, as itself)"
                 :close? "the kind has a :close: when the queue is empty and nothing is in flight, its worker is told {:idle true}"
                 :tick "its clock's channel (external in-port, with :rate): a :tick when the bucket refilled"}
-       :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :done "its workers' outcomes"} :outs {}
+       :ins {:in "requests, addressed [:fx/<kind> :in] by any proc" :ask "root's own requests, never held back by the bound" :done "its workers' outcomes"} :outs {}
        ;; admission and routing only: never blocks, never computes long
        :workload :io
        :ping-map-fn (fn [st] (-> (select-keys st [:kind :workers :busy :done]) (assoc :queued (count (:queue st)) :spent (:spent st))))})
@@ -1461,7 +1475,7 @@
      (if (nil? m)
        [st nil]
        (case in
-         :in (let [n (inc (:seq st))]
+         (:in :ask) (let [n (inc (:seq st))]
                [(bound (dispatch (-> st (assoc :seq n) (assoc-in [:queue [(- (:prio m 0)) n]] (assoc m :in-ns (profile/now-ns)))) o)) @o])
          :done (let [st (bound (dispatch (reduce #(outcome %1 o %2) (update st :busy dec) (or (:batch m) [m])) o))]
                  ;; the kind's one worker holds a host object that ends when the work does (:close): the queue
@@ -1639,7 +1653,7 @@
       (let [work (a/chan workers) owner (keyword "fx" (name kind))]
         (-> acc
             (assoc owner {:proc (flow/process #'owner-proc)
-                          :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 workers)}}
+                          :chan-opts {:in {:buf-or-n (cfg/value :seon.config.fx/buf)} :ask {:buf-or-n (cfg/value :seon.config.fx/buf)} :done {:buf-or-n (* 2 workers)}}
                           :args (cond-> {:kind kind :workers workers :work work :back back}
                                   rate (assoc :rate rate :tick (a/chan 1))
                                   batch (assoc :batch batch)
