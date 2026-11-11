@@ -1294,6 +1294,47 @@
   that wrote its link (docs/ctx.md#the-pattern)."
   #{:as :limit :reverse :by :tx})
 
+(defn pulled
+  "Pulled entity node as its data model, a plain map a render lays out and an agent reads at its REPL: {:schema the entity schema
+  that names it; :source where its pattern came from (:entity, its own :seon.ctx/pattern; :schema, its schema's; :given, the
+  pattern handed in); :clauses, the pattern clause by clause; :unasked, the attributes its schema names that the pattern does
+  not ask; :held-unasked, the attributes the entity holds on db that the pattern does not ask (none when db is nil); :renders
+  {:hiccup :model}, the renders its schema names for a page and for the model}. A clause that asks an attribute is {:clause
+  :attr :key :value :tx}, :key where the pull holds it (an :as, else the attribute), :value nil when the pull holds nothing for
+  it and :tx the transaction of its datom when the pull holds that; one that joins is {:clause :attr :key :members n :pattern
+  :sub [{:clause :held k}]}, a sub-pattern given by a schema's name read as the pattern that schema declares, and :held how
+  many of the n members hold that sub-clause. One level: a member is read deeper by this same call with the join's :pattern.
+  nil for an entity with no pattern to read. The one producer of this reading: seon.render.ui/pull-front lays it out and
+  my.db/pulled is an agent's call of it. See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/db] :map :any [:maybe [:sequential :any]]] [:maybe :map]]}
+  [db ix node pattern]
+  (let [u (ratom/realize node)]
+    (when-let [p (or pattern (entity-pattern ix u))]
+      (let [s (entity-schema ix u nil)
+            attr-of (fn [k] (if (vector? k) (first k) k))
+            key-of (fn [k] (or (when (vector? k) (:as (apply hash-map (rest k)))) (attr-of k)))
+            members (fn [v] (cond (and (map? v) (contains? v :db/id)) [v] (map? v) (vec (vals v)) (sequential? v) (vec v) :else []))
+            sub-of (fn [sub] (if (qualified-keyword? sub) (schema-property ix sub :seon.ctx/pattern) sub))
+            sub-keys (fn [sub] (for [y (if (sequential? sub) sub [sub]) k (if (map? y) (keys y) [y]) :when (not= '* k)] k))
+            clause (fn [x]
+                     (if (map? x)
+                       (for [[k sub] x :let [ms (members (get u (key-of k))) sp (sub-of sub)]]
+                         {:clause k :attr (attr-of k) :key (key-of k) :members (count ms) :pattern sp
+                          :sub (vec (for [k2 (sub-keys sp)] {:clause k2 :held (count (filter #(some? (get % (key-of k2))) ms))}))})
+                       [(if (= '* x)
+                          {:clause x}
+                          (cond-> {:clause x :attr (attr-of x) :key (key-of x) :value (get u (key-of x))}
+                            (get-in u [:seon.ctx/tx (attr-of x)]) (assoc :tx (get-in u [:seon.ctx/tx (attr-of x)]))))]))
+            clauses (vec (mapcat clause p))
+            asked (into #{} (keep :attr) clauses)
+            held (when (and db (:db/id u)) (into #{} (map :a) (d/datoms db :eavt (:db/id u))))]
+        {:schema s
+         :source (cond pattern :given (:seon.ctx/pattern u) :entity :else :schema)
+         :clauses clauses
+         :unasked (if s (vec (sort (remove asked (pdb/attributes-of ix s)))) [])
+         :held-unasked (vec (sort (remove asked held)))
+         :renders {:hiccup (render-for ix s :seon.render/hiccup) :model (render-for ix s :seon.render/openai-compat)}}))))
+
 (defn pattern
   "Pull pattern p, what a record holds (docs/ctx.md#the-pattern: Datahike's syntax, '* the entity's
   every attribute, else the attributes it names; {attr sub} a join, attr as [attr & options], sub
