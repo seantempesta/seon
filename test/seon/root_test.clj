@@ -238,8 +238,8 @@
             "a boot that left no stop fact is found :unclean"))
       ;; docs/merging.md#a-session-proves-through-root (Deep fixes' review of jolt/treeprove): a root's end takes a tree run's agent
       ;; with it, so the run's drop never comes; the next boot drops every tree branch before any agent exists. Red before: kept
-      (is (= {:ok true :exists false} (printed (last first-boot))) "the first boot made the tree's branch")
-      (is (= [[tree-b] []] (printed (last second-boot))) "the second boot dropped it, and says so in its :boot view")
+      (is (= {:ok true :exists false} (printed (nth first-boot 9))) "the first boot made the tree's branch")
+      (is (= [[tree-b] []] (printed (nth second-boot 10))) "the second boot dropped it, and says so in its :boot view")
       ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent's id is the keyword of its :seon.agent/key,
       ;; minted once (seon.root/start-agent) and kept by the session's next agent (seon.task/session-key), so the restart leaves every
       ;; interface naming the task's agent as before: the attach, the task's agent, the server's agents list, root's view and the page's address
