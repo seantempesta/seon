@@ -1404,7 +1404,8 @@
   [opts v]
   (if (= :inline (:as opts))
     (render/print-hiccup opts v)
-    [:div v [:details [:summary "show as data"] (render/print-hiccup (dissoc opts :schema :as) v)]]))
+    ;; the fold is the person's: the model reads the value itself as data once, never a second printed copy
+    [:div v [:details {:wire/for "page"} [:summary "show as data"] (render/print-hiccup (dissoc opts :schema :as) v)]]))
 
 (defn proved
   "A prove's run as its eval's tile draws it (the declared html render of :seon.test/proved, from
