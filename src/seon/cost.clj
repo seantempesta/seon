@@ -293,7 +293,11 @@
            (reduce (fn [acc m] (merge-with min acc m)) (repeatedly 5 #(once f []))))))
 
 (defn measure
-  "f on args, measured at its steady state: calls until `:seon.config.proofs/cost-settled` calls
+  "f on args, measured by one call (owner, 2026-11-11: a measure is not a loop by default; precision is what accumulates
+  as the system is exercised), or, given cap, by at most cap calls, the measure an agent asks for on a perf problem and
+  the one `run` takes for a size whose one call was over its estimate (its first call filled what later calls read): its
+  meta's :calls says how many it made. With cap,
+  at its steady state: calls until `:seon.config.proofs/cost-settled` calls
   after the one that allocated the fewest bytes so far allocate no fewer; each dimension's minimum over
   all of them (bytes are the steady state's; ticks and calls their least, which noise only adds
   to), less what measuring itself costs. A call allocates more on its first calls (Jolt compiles
@@ -306,10 +310,11 @@
   then without end (a 32 MB call: the last new low at call 53 of 60), so \"no new low in a run of
   calls\" is a test that fails by chance, not a defect of the call; a call that never reaches a floor
   shows in that mark and in the spread of its bytes."
-  {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
-  [f args]
+  {:malli/schema [:function [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]
+                  [:=> [:cat :seon.host/fn [:sequential :any] pos-int?] :seon.cost/dims]]}
+  ([f args] (measure f args 1))
+  ([f args cap]
   (let [need (config/value :seon.config.proofs/cost-settled)
-        cap (config/value :seon.config.proofs/cost-max-samples)
         b @baseline
         [best n low-at] (loop [n 1 best (once f args) low-at 1]
                           (if (or (>= (- n low-at) need) (>= n cap))
@@ -317,7 +322,8 @@
                             (let [m (once f args) n (inc n)]
                               (recur n (merge-with min best m) (if (< (:bytes m) (:bytes best)) n low-at)))))
         dims (into {} (for [[d v] best] [d (max 0.0 (- v (if (= d :calls) 0.0 (get b d 0.0))))]))]
-    (cond-> dims (< (- n low-at) need) (vary-meta assoc :unsettled {:calls n :lowered-at low-at}))))
+    ;; one call is the measure asked for, not an unsettled one
+    (cond-> (vary-meta dims assoc :calls n) (and (< 1 cap) (< (- n low-at) need)) (vary-meta assoc :unsettled {:calls n :lowered-at low-at})))))
 
 (declare units)
 
@@ -392,6 +398,12 @@
         {:rows rows :verdict (judge e rows) :left-out left-out}
         (let [args (force args)
               row (cond-> {:n n :measured (measure f args) :expected (allowed)} (:cases e) (assoc :args args))
+              ;; one call, unless it is over its estimate: then the calls a warm-up needs, up to the cap, the least of them judged
+              ;; and their count kept on the row, so a function's warm-up is a fact its verdict states (owner, 2026-11-11, by Point)
+              row (if (:ok? (judge e [row]))
+                    row
+                    (let [m (measure f args (config/value :seon.config.proofs/cost-max-samples))]
+                      (assoc row :measured m :calls (:calls (meta m)))))
               rows (conj rows row)]
           (if (and (nil? (:overrun e)) (not (:ok? (judge e [row]))))
             {:rows rows :verdict (judge e rows) :left-out left-out}
@@ -441,10 +453,12 @@
   {:malli/schema [:=> [:cat :seon.cost/estimate [:vector {:gen/max 4} :seon.cost/row] :seon.cost/verdict] :string]}
   [e rows v]
   (let [dims (filter (set (mapcat (comp keys :expected) rows)) dimensions)
-        line (fn [{:keys [n measured expected]}]
+        line (fn [{:keys [n measured expected calls]}]
                (str n ": " (str/join "  " (for [d dims :let [m (get measured d) x (get expected d)]]
                                             (str (num-text m) "/" (num-text x)
-                                                 (when m (if (pos? x) (format " (%.2fx)" (/ m x)) (when (pos? m) " (inf x)"))))))))
+                                                 (when m (if (pos? x) (format " (%.2fx)" (/ m x)) (when (pos? m) " (inf x)"))))))
+                    ;; its one call was over: the least of a warm-up's calls
+                    (when calls (str "  (warm: the least of " calls " calls; the first was over)"))))
         ratios (fn [d] (sort (keep (fn [{:keys [measured expected]}] (let [m (get measured d) x (get expected d)] (when (and m x (pos? x)) (/ m x)))) rows)))
         over (set (map :n (:over v)))]
     (str/join "\n"

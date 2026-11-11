@@ -57,7 +57,7 @@
  :seon.cost/overrun [:map {:closed true} [:task :string] [:n {:optional true} pos-int?] [:measured :seon.cost/dims]]
  ;; one size measured: n, what it cost, what the estimate allows there
  ;; (a generated case: n its place, :args the arguments that reproduce it)
- :seon.cost/row [:map {:closed true} [:n pos-int?] [:measured :seon.cost/dims] [:expected :seon.cost/dims] [:args {:optional true} [:vector {:gen/max 3} :any]]]
+ :seon.cost/row [:map {:closed true} [:n pos-int?] [:measured :seon.cost/dims] [:expected :seon.cost/dims] [:args {:optional true} [:vector {:gen/max 3} :any]] [:calls {:optional true} pos-int?]]
  :seon.cost/over [:map {:closed true} [:dim :seon.cost/dim] [:n pos-int?] [:ratio [:double {:min 0.0}]]]
  ;; how a measured dimension grew over the sizes, against what the estimate's growth allows
  :seon.cost/fit [:map {:closed true} [:dim :seon.cost/dim] [:exponent :double] [:allowed :double]]

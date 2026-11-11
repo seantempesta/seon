@@ -710,10 +710,14 @@
  ;; equal calls is not the end, so the count is twice that). Provenance: worktree session
  ;; a-call-allocates-the-same-bytes-each-time. At the bound: n/a.
  :seon.config.proofs/cost-settled 16
- ;; Unit: calls. The most calls one measure makes before it takes the last cost-settled as they are
- ;; (a function that never settles: another thread's collection falling in most calls). Provenance:
- ;; worktree session a-call-allocates-the-same-bytes-each-time; the warm-up above settled by call 14, so 30 calls settle it and this is twice that.
- ;; At the bound: the measure answers the least of the calls, marked :unsettled in its meta.
+ ;; Unit: calls. The most calls a cost proof makes of one function at one size when its one call was over its
+ ;; estimate (seon.cost/run): a measure is one call (owner, 2026-11-11: "oh god just remove this. I wanted results to
+ ;; accumulate and become more precise over time naturally as they are exercised in the system"), and only a call over
+ ;; its estimate is measured again, until cost-settled calls in a row allocate no fewer bytes (ruled by Point for the
+ ;; owner, 2026-11-11: "if we know that it needs to be called twice ... do not render a clear number until that is
+ ;; ready"). 19 of 127 cost proofs need it (2026-11-11): their first call fills what later calls read. Provenance: worktree
+ ;; session a-call-allocates-the-same-bytes-each-time; the warm-up settled by call 14, so 30 calls settle it and this is
+ ;; twice that. At the bound: the measure answers the least of the calls, marked :unsettled in its meta.
  :seon.config.proofs/cost-max-samples 60
  ;; Unit: test.check sizes. A generated cost proof draws case i at size (mod i this) (seon.cost/cases),
  ;; so a proof of this many cases or more reaches every size from 0 up. Provenance: worktree session
