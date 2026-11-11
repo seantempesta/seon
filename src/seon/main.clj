@@ -95,14 +95,18 @@
     (lib/c-exit 0)))
 
 (defn- verdict-line
-  "One test's verdict as bin/prove --root prints it as it lands (seon.prove's :prove-verdict): PASS with its ms, RED with each
-  failure, NO-VERDICT with why. See docs/merging.md#a-session-proves-through-root."
+  "One item's verdict as bin/prove --root prints it as it lands (seon.prove's :prove-verdict): PASS with its whole ms, RED with
+  each failure, NO-VERDICT with why, SIGNAL for a step past its bound (no verdict, never red); a test or step by its name, the
+  tree's build or seed by its kind and tree. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :map] :string]}
-  [{:keys [test status ms failures]}]
-  (case status
-    :pass (str "PASS " test (when ms (str " " ms " ms")))
-    :no-verdict (str "NO-VERDICT " test ": " (clojure.string/join "; " (map :seon.error/message failures)))
-    (clojure.string/join "\n  " (cons (str "RED " test " (" (name status) ")") (map shown failures)))))
+  [{:keys [test kind digest status ms failures signal]}]
+  (let [what (if (#{:build :seed} kind) (str (name kind) " of tree " digest) (str test))
+        ms (when ms (str " " (long ms) " ms"))]
+    (case status
+      :pass (str "PASS " what ms)
+      :signal (str "SIGNAL " what ": " (some-> signal name) ms)
+      :no-verdict (str "NO-VERDICT " what ": " (clojure.string/join "; " (map :seon.error/message failures)))
+      (clojure.string/join "\n  " (cons (str "RED " what " (" (name status) ")") (map shown failures))))))
 
 (defn prove-client
   "bin/prove --root PORT's client: asks the root on port to prove checkout's files (the server's :prove with :checkout, its tree
@@ -115,7 +119,13 @@
         _ (out! "prove: asking root on port " port " for tree " tree)
         r (seon.server/ask-streamed port (cond-> {:op :prove :checkout checkout :tree tree :mode "judge" :stream true}
                                            (seq names) (assoc :names (vec names)))
-                                    #(when (= :prove-verdict (:type %)) (out! (verdict-line %))))]
+                                    #(case (:type %)
+                                       :prove-verdict (out! (verdict-line %))
+                                       ;; the service holding this run for the machine's load, and resuming it: never a silent wait
+                                       :prove-held (out! (if (:held %)
+                                                           (str "HELD: load " (:load %) " >= max-load " (:max-load %) ", " (:queued %) " items waiting")
+                                                           "RESUMED"))
+                                       nil))]
     (cond (seon.contract/error? r) (do (out! "prove: " (:seon.error/message r)) (out! "PROVE FAILED") 1)
           :else (do (out! "prove: " (shown (select-keys r [:key :ran :reused :pass :fail :error :deferred])))
                     (if (seq (:red r))

@@ -2,7 +2,7 @@
   "The agent's turn loop, inside its own process (sessions R1 and M1's proto.agents.turn). A
   turn observes the branch (the proofs run in a fork of this agent, the done rule), and
   either ends the run or acts: the context goes to the model (one interop edge), each of
-  the reply's calls of the one tool, eval, goes through the one REPL path
+  the reply's calls of the one tool, repl, goes through the one REPL path
   (seon.repl/eval-string: read, evaluate, record) and its answer is that call's result, which
   the next model call reads, and the turn's facts are written on the branch. The loop repeats until the done
   rule has no reason, a function ends it (my.turn/wait, my.task/fail!) or the turns run
@@ -255,7 +255,7 @@
   provider error. The model call is an effect (my.fx :model, session FX1): root's model owner
   admits, performs and answers it; the API key never enters this process."
   {:malli/schema [:=> [:cat :map :map :map [:maybe :string]] [:or :map :map]]}
-  [{:keys [turn max-turns merge? whole?] :as st} obs s model-name]
+  [{:keys [turn max-turns merge? merge-task?] :as st} obs s model-name]
   (let [t (:task obs)
         ;; the turn this is: the agent's number, one past the one in force, which the messages taken now and every record
         ;; this turn writes take
@@ -323,9 +323,10 @@
                                                  :shown {'seon.render.ui/cite (set (keep task/cited-name (task/task-cites db (:seon.task/id t))))
                                                          'seon.ctx.status/status (set (map :test (:proofs s)))}
                                                  :items (mapv (fn [{:keys [code response]}] {:form code :error (:ex response)}) calls)}))
-          ;; a merge turn: each turn of a merge task; a whole task's own work comes first, so
-          ;; only a turn with what both sides changed still to resolve
-          (and merge? (or (not whole?) (seq (:unmerged s)))) (update :merge-turns inc))))))
+          ;; a merge turn: each turn of a merge task; a task that merges its own work does that work first, so
+          ;; only a turn with what both sides changed still to resolve (merge-task?: the one place the kind still says what a
+          ;; turn is, since a merge task's every turn is merge work)
+          (and merge? (or merge-task? (seq (:unmerged s)))) (update :merge-turns inc))))))
 
 (defn context-block
   "The request of task as a model is sent it on this branch now, as one text: the system prompt, its conversation and its page.
@@ -367,7 +368,7 @@
      text)))
 
 (defn outside-reply!
-  "An outside agent's seon_eval on this process, one reply as a model's is: its evals (`seon.model/call-evals`) through the one REPL path in order, every one whatever the one before it did (docs/model.md#one-tool-eval). With turn?, the agent works task with its model outside: the reply is its turn, its message on its model call, opened as a model's turn is, so it reads as a model's in the conversation, and its answer is what a model's next request would add: any page eval Seon ran, before and after its evals. Otherwise it is someone at the REPL of an agent its own model drives: no turn moves. Answers each response as the wire carries it, printed as EDN for the server (`seon.server/op-answer`). See docs/turn.md#an-outside-agent."
+  "An outside agent's seon_eval on this process, one reply as a model's is: its evals (`seon.model/call-evals`) through the one REPL path in order, every one whatever the one before it did (docs/model.md#one-tool-repl). With turn?, the agent works task with its model outside: the reply is its turn, its message on its model call, opened as a model's turn is, so it reads as a model's in the conversation, and its answer is what a model's next request would add: any page eval Seon ran, before and after its evals. Otherwise it is someone at the REPL of an agent its own model drives: no turn moves. Answers each response as the wire carries it, printed as EDN for the server (`seon.server/op-answer`). See docs/turn.md#an-outside-agent."
   {:malli/schema [:=> [:cat [:maybe :seon.task/id] [:maybe :string] :any :boolean] :nil]}
   [task message evals turn?]
   (let [n (when turn? (begin! task) (inc (agent/turn-now)))
@@ -451,13 +452,13 @@
         _ (when-not (= max-turns (:seon.agent/max-turns (d/entity (agent/db) [:seon.agent/key (:key @agent/state)])))
             (agent/transact! [{:seon.agent/key (:key @agent/state) :seon.agent/max-turns max-turns}]))
         t0-task (task/task (agent/db) task)
-        merge? (task/merges? (:seon.task/kind t0-task))
+        merge? (task/merges-on? (agent/db) task)
         merge-cfg (r/merge-limits t0-task)]
     ;; every run starts on main: a kept branch made before main moved merges it first, so
     ;; the branch's db, its base and this process hold one program (its tests' digests are the
     ;; program it runs); a branch at main's head brings nothing
     (branch/merge-main!)
-    (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :whole? (= :whole (:seon.task/kind t0-task))
+    (loop [st {:turn 0 :merge-turns 0 :t0 (profile/now-ns) :merge-task? (= :merge (:seon.task/kind t0-task))
                :max-turns max-turns :merge? merge?}]
       ;; each turn under the branch's schemas as they are now (repl/with-branch-schemas): work! is one eval,
       ;; bound when it began, and a schema the agent registers since must be the one Seon's code checks its

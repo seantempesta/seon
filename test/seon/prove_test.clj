@@ -94,6 +94,20 @@
         (is (empty? (waiters-answered o)))
         (is (= 1 (count (asks o :spawn))))))))
 
+(deftest done-holds-only-what-can-be-asked-again
+  ;; docs/merging.md#the-test-service: a remembered answer whose key holds a digest the branch has moved past is never
+  ;; matched again, so the service keeps a branch's slots at its latest digest only, and none once its agent ended
+  (let [ask (fn [st rid t names] (let [[st o] (feed st [[:req (cond-> {:rid rid :branch :agent-3 :t t :digest (str "d" t) :agent :a3} names (assoc :names names))]])]
+                                   (first (run-through st o test-run-answer))))
+        st (-> (prove/prove-proc {}) (ask 1 5 nil) (ask 2 5 '#{a.b-test}))]
+    (is (= 2 (count (:done st))) "two slots at one digest: both can be asked again")
+    (let [st (ask st 3 6 nil)]
+      (is (= [[:agent-3 nil :judge]] (keys (:done st))) "the branch moved to d6: the slots at d5 are dropped")
+      (let [ended (seon.contract/error :seon.root/ended 'seon.root/api-proc "agent a3 ended" {:agent :a3})
+            [st o] (feed st [(req 4 :agent-3 7 :a3)])
+            [st _] (run-through st o ended)]
+        (is (empty? (:done st)) "its agent ended: nothing of the branch is kept")))))
+
 (deftest a-session-and-an-agents-turn-for-one-digest-are-one-run
   ;; the session's seon_prove for agent a3's branch at tx 7, and a3's turn asking for the same
   (let [[st outs] (feed (prove/prove-proc {}) [(req 10 :agent-3 7 :a3) (req 11 :agent-3 7 :a3)])]
@@ -323,7 +337,8 @@
 
 ;; ---- items: the service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2) ----------------------------
 
-(defn- items-st [slots] (assoc (prove/prove-proc {:conn nil}) :slots slots))
+(defn- items-st [workers] (assoc (prove/prove-proc {:conn nil}) :workers workers))
+(defn- free [st] (:slots (#'prove/state-view st)))
 (defn- batches [outs] (filterv #(= :tests (get-in % [:req :op])) outs))
 (defn- answers [outs] (into {} (for [o outs :when (= :asker-answered (:op o))] [(:asker o) (:r o)])))
 (def ^:private green-of (fn [& ts] {:pass (count ts) :fail 0 :error 0 :reports (mapv #(hash-map :type :pass :var (str "#'" %)) ts)}))
@@ -339,9 +354,22 @@
         [st o3] (prove/batch-ended st (parse-long (second m)) (green-of 'app.x-test/t))]
     (is (= {1 true 2 true} (update-vals (answers o3) :green)) "both answered green from the one run")
     (is (= {} (:items st)) "and the item has left the service: its verdict is the cache's")
-    (is (= 4 (:slots st)) "its slot free again")))
+    (is (= 4 (free st)) "its slot free again")))
 
 ;; an asker wants to know whether its tests pass: its first red answers it at once, and the work only it wanted is dropped
+(deftest a-run-held-for-the-load-is-told-so-and-told-when-it-resumes
+  ;; Point, 2026-11-11: a --root run held for the machine's load printed nothing, which reads as a hang. With max-load 0 any
+  ;; load holds the second item while the first runs: the asker is told once, and told again when the next grant goes
+  (let [held (fn [outs] (filterv #(= :prove-held (:op %)) outs))
+        [st o1] (prove/ask-items (assoc (items-st 2) :max-load 0.0) 1 :batch {['app.a-test/t "da"] {:agent :a1 :ms 10} ['app.b-test/u "db"] {:agent :a1 :ms 10}})
+        b (first (batches o1))
+        [st v] (step/answered st (:tag b))
+        [_ o2] (prove/batch-ended st (parse-long (second v)) (green-of (first (get-in b [:req :names]))))]
+    (is (= 1 (count (batches o1))) "one granted, the other held")
+    (is (= [[1 true 1]] (mapv (juxt :key :held :queued) (held o1))) "the asker told once that one item waits for the load")
+    (is (= [[1 false]] (mapv (juxt :key :held) (held o2))) "and told it resumed when the held item is granted")
+    (is (= 1 (count (batches o2))))))
+
 (deftest a-red-answers-its-asker-at-once-and-drops-what-only-it-wanted
   (let [[st o1] (prove/ask-items (items-st 1) 1 :batch {['app.a-test/t "da"] {:agent :a1 :ms 10} ['app.b-test/u "db"] {:agent :a1 :ms 10}})
         b (first (batches o1))
@@ -353,11 +381,35 @@
     (is (= [] (batches o2)) "the other item, which only it wanted, is never run")
     (is (= {} (:items st)) "and has left the queue")))
 
+(deftest every-proof-has-its-verdict-though-one-goes-red
+  ;; Sean, 2026-11-11 ("have them fix that"): an agent saw only its first red, a proof each turn. Past a red the asker keeps
+  ;; waiting for its own proofs and is answered at the last, every red named; what is no proof of its own it stops waiting on
+  (let [p (fn [n] [(symbol "app.p-test" n) (str "d" n)])
+        items (into {(p "x") {:agent :a1 :ms 10}} (for [n ["one" "two" "three"]] [(p n) {:agent :a1 :ms 10}]))
+        [st o] (prove/ask-items (items-st 1) 1 :batch items '#{app.p-test/one app.p-test/two app.p-test/three})
+        verdict (fn [ok? t] (if ok? {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var (str "#'" t)}]}
+                              {:pass 0 :fail 1 :error 0 :reports [{:type :fail :var (str "#'" t) :message "no"}]}))
+        ;; end each granted batch in turn: red for one and three, green for two and x
+        run (fn [st o]
+              (loop [st st o o all []]
+                (if-let [b (first (batches o))]
+                  (let [[st v] (step/answered st (:tag b))
+                        t (first (get-in b [:req :names]))
+                        [st o2] (prove/batch-ended st (parse-long (second v)) (verdict (#{"two" "x"} (name t)) t))]
+                    (recur st o2 (into all o2)))
+                  [st all])))
+        [st all] (run st o)
+        r (get (answers all) 1)]
+    (is (false? (:green r)) (pr-str r))
+    (is (= '[app.p-test/one app.p-test/three] (:red r)) "both red proofs named")
+    (is (every? (set (keys (:results r))) '[app.p-test/one app.p-test/two app.p-test/three]) "every proof has its verdict")
+    (is (= {} (:items st)) "nothing left queued")))
+
 ;; an agent's turn waits to act: its items go ahead of a batch's, however the batch's are valued
 (deftest a-turns-item-goes-ahead-of-a-batchs
   (let [[st _] (prove/ask-items (items-st 0) 1 :batch {['app.cheap-test/t "dc"] {:agent :a1 :ms 1}})
         [st _] (prove/ask-items st 2 :turn {['app.slow-test/u "ds"] {:agent :a2 :ms 100000}})
-        [st outs] (#'prove/grant (assoc st :slots 1))]
+        [st outs] (#'prove/grant (assoc st :workers 1))]
     (is (= [:a2 #{'app.slow-test/u}] ((juxt #(get-in % [:req :id]) #(get-in % [:req :names])) (first (batches outs))))
         "the free slot goes to the turn's item")
     (is (= 2.0 (prove/item-value (get-in st [:items ['app.cheap-test/t "dc"]]) (:bid st))) "and the batch's item passed over aged a grant: its one waiter plus one, over its 1 ms")))
@@ -377,7 +429,7 @@
         r (get (answers o2) 7)]
     (is (false? (:green r)))
     (is (seon.contract/error? (get-in r [:results 'app.x-test/t])) "the asker holds the typed error for the item")
-    (is (= 1 (:slots st)))))
+    (is (= 1 (free st)))))
 
 ;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
 ;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out
@@ -419,3 +471,191 @@
      :per-n {:ticks 100 :bytes 250}
      :fixed {:ticks 2000 :bytes 2000}
      :sizes [100 300 1000]}))
+
+;; ---- a checkout's process tests, check steps and build as items (notes test-system-as-a-flow-2026-11-10.md, step 4) ----
+
+(defn- tree-run
+  "A session's run of checkout /ck at tree T (agent a1 holds its branch), with slots workers, its plan answered with plan:
+  [st outputs of the plan's answer, the plan ask]."
+  [slots plan]
+  (let [[st o] (feed (items-st slots) [[:req {:rid 1 :branch :tree-T :digest "dT" :agent :a1 :checkout "/ck" :tree "T"}]])
+        ask (first (asks o :tests))
+        [st o2] (feed st [(answer-of ask plan)])]
+    [st o2 ask]))
+(defn- fx-asks [outs] (filterv #(= :fx (get-in % [:req :op])) outs))
+(defn- seeded-run
+  "tree-run, its tree's seed answered green: every step and process item needs the seed (it brings the checkout's program
+  store to the tree), so what a test of the steps reads is granted after it. [st outputs past the seed, the plan ask]."
+  [slots plan]
+  (let [[st o ask] (tree-run slots plan)
+        sd (first (filter #(= :seed (get-in % [:req :req :kind])) (fx-asks o)))]
+    (if sd
+      (let [[st o2] (feed st [(answer-of sd {:value {:pass 1 :fail 0 :error 0 :ms 1}})])] [st (into (vec (remove #{sd} o)) o2) ask])
+      [st o ask])))
+(defn- run-answers [outs] (mapv :r (filter #(= :prove-answer (:op %)) outs)))
+
+;; docs/merging.md#the-test-service: a process test runs on its checkout's binary, so it waits for its tree's build
+(deftest a-process-item-waits-for-its-trees-build-and-seed
+  (let [[st o ask] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? true}})
+        [b] (fx-asks o)]
+    (is (true? (get-in ask [:req :process?])) "a checkout's run asks its agent for its process items")
+    (is (= [{:kind :build :tree "T" :checkout "/ck" :name :build :digest "T" :binary? false :bound nil}] (mapv #(get-in % [:req :req]) (fx-asks o)))
+        "the build alone is granted, though three workers are free")
+    (let [[st o1] (feed st [(answer-of b {:value {:pass 1 :fail 0 :error 0 :ms 900}})])
+          [sd] (fx-asks o1)
+          _ (is (= :seed (get-in sd [:req :req :kind])) "the build green: the seed next, which makes the process tests' store")
+          [st o2] (feed st [(answer-of sd {:value {:pass 1 :fail 0 :error 0 :ms 2000}})])
+          [p] (fx-asks o2)]
+      (is (= {:kind :process :name 'a.p-test/t :digest "dp" :checkout "/ck"} (select-keys (get-in p [:req :req]) [:kind :name :digest :checkout])) "the seed green: its process test is granted")
+      (let [[_ o3] (feed st [(answer-of p {:value {:pass 1 :fail 0 :error 0 :ms 40}})])
+            [r] (run-answers o3)]
+        (is (= [1 0 0 []] ((juxt :pass :fail :error :deferred) r)) "counted as a test, nothing deferred")
+        (is (= [:process] (mapv :kind (filter #(= 'a.p-test/t (:test %)) (filter #(= :prove-verdict (:op %)) o3)))) "its verdict streams with its kind")))))
+
+(deftest a-trees-green-build-and-seed-are-made-once-for-its-checkout
+  ;; Web's read of step 4: a second run of one tree (another key: names or mode) queued the seed again, which removes
+  ;; and remakes the store the first run's steps were cloning; the build alike relinks the binary its items run
+  (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? true}})
+        [st o1] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 900}})])
+        [st o2] (feed st [(answer-of (first (fx-asks o1)) {:value {:pass 1 :fail 0 :error 0 :ms 2000}})])
+        [st _] (feed st [(answer-of (first (fx-asks o2)) {:value {:pass 1 :fail 0 :error 0 :ms 40}})])
+        [st o3] (feed st [[:req {:rid 2 :branch :tree-T :digest "dT" :agent :a1 :checkout "/ck" :tree "T" :names '#{a.p-test}}]])
+        [_ o4] (feed st [(answer-of (first (asks o3 :tests)) {:items {} :process {'a.p-test/u "du"} :build {:tree "T" :needed? true}})])]
+    (is (= [:process] (mapv #(get-in % [:req :req :kind]) (fx-asks o4))) "the second run's process item is granted at once: no build, no seed")))
+
+(deftest a-seed-that-kept-the-tree-only-is-not-a-seed-of-the-stores
+  ;; a run of a laws step seeds the tree only (no check store, no process tests' store); a later run of that tree with a
+  ;; process test needs both stores, so the checkout's green seed of the first kind is no seed of the second (:made)
+  (let [[st o] (seeded-run 4 {:items {} :steps {"laws" {:digest "dl" :binary? false}} :build {:tree "T" :needed? false}})
+        [st _] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 1}})])
+        [st o2] (feed st [[:req {:rid 2 :branch :tree-T :digest "dT" :agent :a1 :checkout "/ck" :tree "T" :names '#{a.p-test}}]])
+        [_ o3] (feed st [(answer-of (first (asks o2 :tests)) {:items {} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? false}})])]
+    (is (= [[:seed true]] (mapv #(vector (get-in % [:req :req :kind]) (get-in % [:req :req :binary?])) (fx-asks o3)))
+        "the process test's run seeds the stores first")))
+
+(deftest a-step-about-the-machine-runs-with-nothing-beside-it
+  ;; Optimization's e2e of step 4: scale (it measures what root's agents cost the machine's memory) was granted beside 29 other
+  ;; steps and 7 of its agents answered no verdict; bin/check runs it alone (seon.proofs/machine-steps)
+  (let [[st o] (seeded-run 4 {:items {} :steps {"scale" {:digest "ds" :binary? false :alone? true} "laws" {:digest "dl" :binary? false}
+                                              "fx" {:digest "df" :binary? false}}
+                            :build {:tree "T" :needed? false}})
+        names (fn [outs] (mapv #(get-in % [:req :req :name]) (fx-asks outs)))]
+    (is (= ["scale"] (names o)) "nothing running: scale, the most valuable, is granted, and nothing beside it though three workers are free")
+    (let [[st o1] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 10}})])]
+      (is (= #{"laws" "fx"} (set (names o1))) "it ended: the others at once")))
+  (let [[st o] (seeded-run 4 {:items {} :steps {"laws" {:digest "dl" :binary? false :ms 1} "scale" {:digest "ds" :binary? false :alone? true}}
+                            :build {:tree "T" :needed? false}})
+        names (fn [outs] (mapv #(get-in % [:req :req :name]) (fx-asks outs)))
+        ran (names o)]
+    (is (= 1 (count ran)) "one of the two at a time")
+    (let [[_ o1] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 10}})])]
+      (is (= 1 (count (names o1))) "and the other after it"))))
+
+;; every wait ends: a red build is every item's that needs it, and none of them runs on a binary that was never built
+(deftest a-red-build-answers-what-needs-it-with-its-error
+  (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :steps {"smoke" {:digest "ds" :binary? true :bound 5000}} :build {:tree "T" :needed? true}})
+        [b] (fx-asks o)
+        [_ o2] (feed st [(answer-of b {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message "bin/build exited 1"}]}})])
+        [r] (run-answers o2)]
+    (is (= 1 (count (fx-asks o))) "only the build was granted")
+    (is (= [] (fx-asks o2)) "and after it, nothing")
+    (is (= :seon.prove/build-red (:seon.error/type r)) (pr-str r))))
+
+;; docs/merging.md#the-test-service: one bound, the workers, for every kind: a build holds a worker while it runs
+(deftest one-bound-covers-builds-and-tests
+  (let [[st o] (tree-run 1 {:items {'a.b-test/t "dt"} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? true}})
+        granted (fn [outs] (+ (count (fx-asks outs)) (count (remove #(get-in % [:req :plan?]) (asks outs :tests)))))]
+    (is (= 1 (granted o)) "one worker: one item granted, of a build and a test queued")
+    (let [first-ask (first (concat (fx-asks o) (asks o :tests)))
+          r (if (seq (fx-asks o)) {:value {:pass 1 :fail 0 :error 0}} {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.b-test/t"}]})
+          [_ o2] (feed st [(answer-of first-ask r)])]
+      (is (= 1 (granted o2)) "it ended: the next one alone"))))
+
+;; a step past its bound is a signal (docs/clocks.md#time-decides-the-owners-exceptions), never a verdict: its asker is answered
+;; on the rest, and the answer names it
+(deftest a-step-that-overran-is-a-signal-not-a-red
+  (let [[st o] (seeded-run 4 {:items {'a.b-test/t "dt"} :steps {"laws" {:digest "dl" :binary? false :bound 100}} :build {:tree "T" :needed? false}})
+        [s] (fx-asks o)
+        [t] (remove #(get-in % [:req :plan?]) (asks o :tests))
+        [st o2] (feed st [(answer-of s {:value {:signal :overran :ms 150}})])
+        [_ o3] (feed st [(answer-of t {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.b-test/t"}]})])
+        [r] (run-answers o3)]
+    (is (= {:kind :step :name "laws" :bound 100 :binary? false} (select-keys (get-in s [:req :req]) [:kind :name :bound :binary?])) "no build: none is needed")
+    (is (empty? (run-answers o2)) "the signal answers no one")
+    (is (= [:signal] (mapv :status (filter #(= :prove-verdict (:op %)) o2))) "it streams as a signal")
+    (is (= [[] 1 0] ((juxt :red :pass :fail) r)) (pr-str r))
+    (is (= [{:test "laws" :digest "dl" :kind :step :signal :overran :ms 150}] (:signals r)))))
+
+;; docs/merging.md#the-test-service: a step on the binary needs its tree's seeded store, made once a tree after the build; a red seed is its steps'
+(deftest a-binary-step-waits-for-the-seed-and-a-red-seed-is-its-error
+  (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :steps {"smoke" {:digest "ds" :binary? true :bound 5000}} :build {:tree "T" :needed? true}})
+        [b] (fx-asks o)
+        [st o2] (feed st [(answer-of b {:value {:pass 1 :fail 0 :error 0}})])
+        kinds (fn [outs] (sort (map #(get-in % [:req :req :kind]) (fx-asks outs))))]
+    (is (= [:build] (kinds o)))
+    (is (= [:seed] (kinds o2)) "the build green: the seed alone; the step and the process test both need it (it makes the process tests' store)")
+    (let [seed (first (filter #(= :seed (get-in % [:req :req :kind])) (fx-asks o2)))
+          [_ o3] (feed st [(answer-of seed {:value {:pass 0 :fail 1 :error 0}})])
+          [r] (run-answers o3)]
+      (is (= {:kind :seed :name :seed :digest "T"} (select-keys (get-in seed [:req :req]) [:kind :name :digest])))
+      (is (= [] (fx-asks o3)) "neither the step nor the process test is ever granted")
+      (is (= [:seon.prove/build-red :seed] [(:seon.error/type r) (:kind r)]) (pr-str r)))))
+
+;; docs/merging.md#the-test-service: a red step is the run's red by its name (a step's is no test var, so its failing report named
+;; nothing), and a red run is not remembered: the same key asked again runs again. Red before: :red [] and the run remembered green
+(deftest a-red-step-is-named-red-and-never-remembered
+  (let [[st o] (seeded-run 4 {:items {} :steps {"laws" {:digest "dl" :binary? false :bound 100}} :build {:tree "T" :needed? false}})
+        [s] (fx-asks o)
+        [st o2] (feed st [(answer-of s {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message "measures FAILED"}]}})])
+        [r] (run-answers o2)
+        [_ o3] (feed st [[:req {:rid 2 :branch :tree-T :digest "dT" :agent :a1 :checkout "/ck" :tree "T"}]])]
+    (is (= [["laws"] 0 1] ((juxt :red :pass :fail) r)) (pr-str r))
+    (is (empty? (run-answers o3)) "asked again, it is not answered from a remembered green")
+    (is (= 1 (count (filter #(get-in % [:req :plan?]) (asks o3 :tests)))) "it is planned again")))
+
+;; ---- admission: three optional bounds, any combination (docs/merging.md#the-test-service) --------------------------------
+
+(defn- five-asked
+  "The items granted when one asker asks five items of a service under admission a (seon.prove/admission's map)."
+  [a]
+  (let [[_ outs] (prove/ask-items (merge (dissoc (prove/prove-proc {:conn nil}) :max-load) a) 1 :batch
+                                  (into {} (for [i (range 5)] [[(symbol "app.a-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
+    (count (batches outs))))
+
+;; docs/merging.md#the-test-service: a count bound grants that many of five
+(deftest max-workers-grants-that-many
+  (is (= 2 (five-asked (prove/admission {:max-workers 2 :cores 18})))))
+
+;; docs/merging.md#the-test-service: a share of the cores is a count of them, the least count set holds
+(deftest max-cores-is-a-share-of-the-cores
+  (is (= 2 (five-asked (prove/admission {:max-cores 0.5 :cores 4}))) "half of four cores: two")
+  (is (= 3 (five-asked (prove/admission {:max-cores 0.2 :max-workers 4 :cores 18}))) "a fifth of eighteen, under max-workers")
+  (is (= {:workers 1} (prove/admission {:max-cores 0.1 :cores 4})) "at least one"))
+
+;; docs/clocks.md#the-machines-load-admits-work: over max-load nothing more is granted while an item runs; with nothing
+;; running one item is granted anyway, so the queue never stalls with nothing to wake it
+(deftest max-load-admits-only-under-it-but-never-stalls
+  (let [reads (atom 0)
+        st0 (merge (prove/prove-proc {:conn nil}) (prove/admission {:max-workers 4 :max-load 10.0 :cores 18}))
+        it {:agent :a1 :ms 5}]
+    (with-redefs [prove/machine-load (fn [] (swap! reads inc) 30.0)]
+      (let [[st o1] (prove/ask-items st0 1 :batch {['app.l-test/a "da"] it ['app.l-test/b "db"] it ['app.l-test/c "dc"] it})
+            _ (is (= 1 (count (batches o1))) "nothing running: one granted though the load is over")
+            _ (is (= 30.0 (:load (#'prove/state-view st))) "the reading is in what the service reports")
+            [st v] (step/answered st (:tag (first (batches o1))))
+            [st o2] (prove/batch-ended st (parse-long (second v)) (green-of (first (get-in (first (batches o1)) [:req :names]))))]
+        (is (= 1 (count (batches o2))) "it ended: nothing running again, one more granted")
+        (let [[_ o3] (prove/ask-items st 2 :batch {['app.l-test/d "dd"] it})]
+          (is (= [] (batches o3)) "one running and the load over: nothing granted"))))
+    (with-redefs [prove/machine-load (fn [] 2.0)]
+      (let [[_ o] (prove/ask-items st0 1 :batch {['app.l-test/a "da"] it ['app.l-test/b "db"] it ['app.l-test/c "dc"] it})]
+        (is (= 3 (count (batches o))) "the load under it: as many as the workers allow")))))
+
+;; docs/merging.md#the-test-service: with max-cores and max-load unset, the shipped max-workers (8) is the bound; with no count
+;; set the machine's cores are
+(deftest the-shipped-bound-holds-when-the-others-are-unset
+  (let [st (prove/prove-proc {:conn nil})
+        [_ outs] (prove/ask-items st 1 :batch (into {} (for [i (range 10)] [[(symbol "app.s-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
+    (is (= [8 nil] [(:workers st) (:max-load st)]))
+    (is (= 8 (count (batches outs)))))
+  (is (= {:workers 4} (prove/admission {:cores 4}))))

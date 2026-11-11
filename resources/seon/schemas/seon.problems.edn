@@ -83,6 +83,8 @@
  ;; a request whose tree drew no system message (seon.ctx.wire/request): refused, what stood first in its place named
  ;; a definition that broke Seon's recording of it, undone (seon.repl/undo-definition!)
  :seon.repl/definition-undone [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/definition-undone]] [:vars [:vector :any]]]]
+ ;; a call Seon writes for the model whose function's var lacks its reply or its intent (seon.ctx.wire/page-message; docs/render.md#the-render-is-an-eval)
+ :seon.ctx/unworded [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/unworded]] [:function {:optional true} :symbol]]]
  :seon.ctx/no-system-message [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/no-system-message]] [:first {:optional true} [:maybe :map]]]]
  :seon.ctx/session-refused [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/session-refused]] [:key :string]]]
  ;; my.root/example-txs of an example file that is missing, does not read as EDN, or is not the vector of tx-data
@@ -98,7 +100,9 @@
  ;; full run is seen the next day, never a day skipped in silence
  :seon.prove/full-run-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-red]] [:tests [:vector :qualified-symbol]]]]
  :seon.prove/full-run-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/full-run-running]] [:running :string]]]
- :seon.prove/no-verdict [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/no-verdict]] [:test :qualified-symbol]]]
+ :seon.prove/no-verdict [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/no-verdict]] [:test [:or :qualified-symbol :string]]]]
+ ;; a tree's build or seed that is not green (seon.prove/item-ended): every item that needs it answers it, none granted
+ :seon.prove/build-red [:and :seon.error/base [:map [:seon.error/type [:= :seon.prove/build-red]] [:tree :string] [:kind [:enum :build :seed]]]]
  :seon.root/no-source-text [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/no-source-text]] [:paths [:vector :string]]]]
  ;; my.root/hold! of a task that is not running (held, cancelled, unknown): nothing to take back
  :seon.root/not-running [:and :seon.error/base [:map [:seon.error/type [:= :seon.root/not-running]] [:task :string]

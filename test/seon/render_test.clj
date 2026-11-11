@@ -798,10 +798,22 @@
     (is (not (str/includes? red "(deftest r")) "the test's own source is not repeated (owner, 2026-11-05)")
     (is (str/includes? red "`demo/f`") "what it calls")
     (is (str/includes? red "(defn helper [] 3)") "a helper of its own namespace, with its source")
-    (is (re-find #"test run failed[^<]*`demo-test/d`" st) "a proof the dead run left: the run is what to fix")
-    (is (re-find #"merges[^<]*`demo-test/p`[^<]*Nothing to do" st) "a deferred proof: it runs at the merge, nothing to do now")
-    (is (re-find #"Not judged yet[^<]*`demo-test/u`" st) "a proof not judged yet: (prove) runs it")
-    (is (= 1 (count (re-seq #"\(prove\)" st))) "(prove) is offered for that one alone")))
+    (let [explain (:seon.status/explain (seon.contract/properties :seon.ctx.status/proof-state))]
+      (doseq [[k t] [[:not-run 'demo-test/d] [:deferred 'demo-test/p] [:unknown 'demo-test/u]]]
+        (is (str/includes? st (str "<code>" t "</code>: ")) (str t ": its name, drawn as code"))
+        (is (str/includes? st (first (str/split (get explain k) #"`"))) (str t ": then what its state means and what helps it, the schema's words"))))
+    (is (str/includes? red (first (str/split (:fail (:seon.status/explain (seon.contract/properties :seon.ctx.status/proof-state))) #"`"))) "a red proof says what red means and what to do")
+    (is (= 1 (count (re-seq #"<code>\(prove\)</code>" st))) "(prove) is offered, as code, for the proof not judged yet alone")))
+
+(deftest every-proof-state-has-its-words
+  ;; docs/render.md#how-the-work-stands: each state a proof is shown in carries its title and its explanation as data on its schema, so a
+  ;; state added without words is red here, never a blank on the page
+  (let [props (seon.contract/properties :seon.ctx.status/proof-state)
+        members (seon.contract/enum-values :seon.ctx.status/proof-state)]
+    (is (seq members) "the enum's members")
+    (doseq [m members]
+      (is (not (str/blank? (get (:seon.status/title props) m))) (str m ": a title"))
+      (is (not (str/blank? (get (:seon.status/explain props) m))) (str m ": an explanation")))))
 
 (deftest a-location-names-root-an-agent-or-an-entity
   (is (= [:root :root [:chat :a3] :a3 474] (mapv #'seon.web/view-of ["" "root" "a3" "a3/ctx" "474"])) "an agent's path is its chat; /debug every render of its ctx"))
@@ -1334,7 +1346,7 @@
                                                                                 :seon.error/message "no model provider"}}])
                 html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-o2"})) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
-            (is (str/includes? html "my.render/page") "beside what it sent: the page, the turn's generated eval")))))))
+            (is (str/includes? html "my.render/ctx") "beside what it sent: the record, the turn's first generated eval")))))))
 
 (deftest a-page-opened-before-its-first-turn-takes-it
   ;; the browser check of 4bc612cf89: a debug page opened at "no model turn yet" never showed the turns that
@@ -1704,16 +1716,16 @@
   ;; docs/render.md#the-debug-page-is-the-wire-request: a row a message, typed by its wire role, and opening a row
   ;; replaces its line; its calls' arguments are the wire's JSON read as data
   (let [ms [{:role "system" :content "# Help\n\nread this"}
-            {:role "assistant" :tool_calls [{:id "a" :function {:name "eval" :arguments "{\"intent\":\"Read it\",\"code\":\"(first-call)\"}"}}]}
+            {:role "assistant" :tool_calls [{:id "a" :function {:name "repl" :arguments "{\"intent\":\"Read it\",\"code\":\"(first-call)\"}"}}]}
             {:role "tool" :tool_call_id "a" :content (str/join " " (repeat 8000 "word"))}]
         draw (fn [opened] (h/html (ui/debug-turn {:seon.render/index (seon.db/index) :unit "d-turn"} {:turn 1 :agent "a1" :view "a1" :origin :model :usage {} :opened opened
                                                                    :body {:messages ms} :sources [[[:section 1 1]] [[:eval "e1"]] [[:eval "e1"]]] :new [false false true]})))
         h (draw #{})]
     (is (= ["system" "assistant" "tool"] (mapv second (re-seq #"data-role=\"(\w+)\"" h))) "a row a message, in the wire's order, by its role")
     (is (not-any? #(str/includes? h %) ["tool_calls[0]" "arguments.code"]) "a closed row is its line: its fields are drawn when opened")
-    (is (str/includes? h "eval {") "an assistant's line is its calls as sent")
+    (is (str/includes? h "repl {") "an assistant's line is its calls as sent")
     (let [o (draw #{"d-turn-o1"})]
-      (is (str/includes? o "tool_calls[0] · eval · a") "opened, the call's fields as sent")
+      (is (str/includes? o "tool_calls[0] · repl · a") "opened, the call's fields as sent")
       (is (str/includes? o "arguments.code") "its arguments by their wire names")
       (is (str/includes? o "(first-call)"))
       (is (str/includes? o "group-open:hidden") "the line gives way to the fields, so nothing is shown twice"))
@@ -3760,7 +3772,7 @@
     (is (= :h2 (first (second h))) "headed")
     (is (str/includes? t "Your proofs") "headed to the agent")
     (is (str/includes? t "<ul><li><code>seon.program-test/a-vars-history</code>") "several proofs: a list of their states")
-    (is (str/includes? t "not written yet") "each proof's state")
+    (is (str/includes? t (:undefined (:seon.status/title (seon.contract/properties :seon.ctx.status/proof-state)))) "each proof's state, its schema's title")
     (is (str/includes? t "Unknown class program") "a failure in a line")
     (is (not (str/includes? t "(deftest a-vars-history")) "the failing proof's source is the agent's own: not repeated")
     (is (str/includes? t "seon.program/history is public") "what blocks merging")
