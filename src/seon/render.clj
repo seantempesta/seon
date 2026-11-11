@@ -1225,10 +1225,12 @@
                                                 {:schemas (:ambiguous s)}))))))
 
 (defn schema-property
-  "Property p of schema k, else of the nearest schema it extends (`parents`, in the entity index ix), else nil. See docs/ctx.md#the-pattern."
+  "Property p of schema k, else of the nearest schema it extends (`parents`, in the entity index ix), else nil: read from ix
+  (`props`), the one place a schema's properties are read for a render or a pattern, so a schema a branch registers declares its
+  pattern as it declares its render (it read the process's registry, which holds no branch's schemas outside its own REPL). See docs/ctx.md#the-pattern."
   {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword] :keyword] :any]}
   [ix k p]
-  (when k (or (get (contract/properties k) p) (some #(schema-property ix % p) (parents ix k)))))
+  (when k (or (get (props ix k) p) (some #(schema-property ix % p) (parents ix k)))))
 
 (defn- join-targets
   "The entity schemas join [k sub] of a pattern reaches, as the entity index ix says: sub itself when the pattern names a schema there,
