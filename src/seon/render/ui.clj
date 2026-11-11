@@ -1261,7 +1261,7 @@
   [ix c]
   (let [joined (set (map first (pattern-joins (or (when ix (render/entity-pattern ix c)) []))))
         ;; what its schema's own pattern names (a user's :seon.user/name) is the entity's, never a key it added
-        declared (set (filter keyword? (when ix (render/schema-property ix (render/entity-schema ix c nil) :seon.ctx/pattern))))]
+        declared (set (filter keyword? (when ix (some->> (render/schema-property ix (render/entity-schema ix c nil) :seon.ctx/pattern) (render/expanded ix)))))]
     (filter #(and (qualified-keyword? %) (not (#{"seon.agent" "db" "seon.ctx"} (namespace %))) (not (str/starts-with? (name %) "_")) (not (joined %)) (not (declared %)))
             (sort-by str (keys c)))))
 
