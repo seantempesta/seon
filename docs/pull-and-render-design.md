@@ -23,9 +23,9 @@ The 36 hand-placed components are the work ([one rendering system](render.md#one
 
 | move | what it is | the components it covers | count |
 |---|---|---|---|
-| C | the conversation is one ordered join; each member is drawn by its schema's render for that output | `system-message`, `system-source`, `session-examples`, `example-session`, `chat-ask`, `chat-end`, `conversation-turn`, `proof-story`; in the request `example-msgs`, `example-session-msgs`, `model-parts`, `page-diff-msgs` (which stays a function of two stored points, called from the model call's render) | 12 |
+| C | the conversation is one ordered join; each member is drawn by its schema's render for that output | `system-message`, `session-examples`, `example-session`, `chat-ask`, `chat-end`, `conversation-turn`, `proof-story`; in the request `example-msgs`, `example-session-msgs`, `model-parts`, `page-diff-msgs` (which stays a function of two stored points, called from the model call's render) | 11 |
 | A | an attribute whose schema declares a render is placed by the walk, in pattern order | `turn`, `agent-state`, `status`, `status-hiccup`, `ctx-key`, `ctx-keys` | 6 |
-| B | a judgment a page shows is an asked view: a small entity that names it, joined by the pattern, as a search already is | `own-problems`, `eval-tiles`, `eval-tile`, `eval-output`, `problems-tile`, `process-tile`, `root-evals`, `root-head`, `root-quiet`, `root-side`, `agent-head`, `sign-in`, `unresolved-render` | 13 |
+| B | a judgment a page shows is an asked view: a small entity that names it, joined by the pattern, as a search already is | `own-problems`, `eval-tiles`, `eval-tile`, `eval-output`, `problems-tile`, `process-tile`, `root-evals`, `root-head`, `root-quiet`, `root-side`, `agent-head`, `sign-in`, `unresolved-render`, `system-source` (the top bar's identity line, a view of the system entity) | 14 |
 | stays | an entity names its own render, or layout glue | `pull-view`, `pull-front`, `stage`, `stage-front`; `page-rules` | 5 |
 
 After the three moves (an estimate until each is built): about 20 of the 31 become declared renders, about 11 are deleted, 5 stay.
@@ -57,7 +57,7 @@ Each row is one tip, small enough to land alone, with who builds it, its proof a
 | 4 | descriptions on an eval's answer keys, a file's path, a task's proofs; a join's shape in the pattern's description | Data model | named tests; `(doc :seon.repl/answer)` answers each key | the system message can drop those sections |
 | 5 | the system message cut to what is true for every agent | Context | each kept sentence checked against the code and a recorded request | the same task, old message against new |
 | 6 | `@ctx` and the hiccup at the first point; a cite's pull shortened to what its render shows | Context; Data model for the cite | two requests around turn 1 equal up to the page | no `(my.db/pulled @ctx)` call by hand in the first turns |
-| 7 | a proof's four states; a red proof shows every failure and its source | Web, Context | one test a state (the physics audit's three high rows) | no repeated `(prove)` on a deferred or dead proof |
+| 7 | a proof's four states; a red proof shows every failure and what it calls (its own source is not repeated: an owner's ruling of 2026-11-05 a test pins; showing it needs a new ruling) | Web, Context | one test a state (the physics audit's three high rows) | no repeated `(prove)` on a deferred or dead proof |
 | 8 | move A | Web; Data model for the schema entries | the planted-world proof, the attribute half | a new attribute with a render appears with no code edit |
 | 9 | move C, with the named sub-patterns | Context; Data model for the patterns | recorded requests byte for byte; the planted-world proof, the entity half | a new kind of member reaches the page and the request |
 | 10 | move B | Web, Optimization; Data model for the view's schema | a REPL trial on root's page with its cost, then the planted proof | root's page with no hand-read state |
@@ -66,20 +66,23 @@ Each row is one tip, small enough to land alone, with who builds it, its proof a
 
 Kept current by the Data model session; the newest landed state runs on the standing system, http://127.0.0.1:7777/. "Running to see" is that system showing a live agent's session with hiccup drawn as html, Markdown drawn, structured evals, proofs and diffs, `@ctx` and the page at the first point, and the short system message.
 
-| # | tip | state (2026-11-11 16:35) |
+| # | tip | state (2026-11-11 16:45) |
 |---|---|---|
 | 1 | a cited schema drawn as what it is; the pattern's description and required parts | landed, main 61a2d46eb0 |
-| 2 | the role named in a pattern; a join to a depth | built, named tests green, in review with Context: `jolt/rolenames` 6939f6c397 |
+| 2 | the role named in a pattern; a join to a depth | reviewed and approved by Context; two changes in build on `jolt/rolenames` (one join asked twice becomes one join; the form agents are told names the role) |
 | 3 | the boot writes and pattern functions deleted, with the check | not started; follows 2 |
-| 4 | descriptions on the answer's keys, a file's path, a task's proofs | named tests green, mailed for a batch: `jolt/descs` 78ca6dc004; the join-shape sentence not started |
-| 5 | the short system message | in build (Context) |
+| 4 | descriptions on the answer's keys, a file's path, a task's proofs | proving in batch 62 (`jolt/descs`); the join-shape sentence not started |
+| 5 | the short system message | proving in batch 62 (`jolt/prompt`, 2.5 KB) |
 | 6 | `@ctx` and the hiccup at the first point; the cite's pull shortened | not started (Context; the cite's pull is Data model's) |
-| 7 | a proof's four states; every failure and its source | in build (Context has the status half on a branch; Web the page half) |
-| 8 | move A, and with it text fields as Markdown by a `:seon.db/text` schema | not started; waits on Web confirming a render is called with an attribute's value by the schema lookup |
+| 7 | a proof's four states; every failure and what it calls | proving in batch 62 (`jolt/proofstates`) |
+| 8 | move A, and with it text fields as Markdown by a `:seon.db/text` schema | not started. Its first commit is Web's: where the walk places an attribute, the render its schema declares draws its value (today only an entity is drawn by a schema lookup) |
 | 9 | move C, with the named sub-patterns | not started; waits on 2 and 3 |
 | 10 | move B | not started; a REPL trial with its cost comes first |
-| also | a component's root carries `:render`, the full symbol, in place of a class; a render's output named by a `:seon.render/hiccup-value` schema | in build (Web, Context) |
+| - | a turn's fold names each step's intent | proving in batch 62 (`jolt/stepintents`, Web) |
+| - | a component's root carries `:render`, the full symbol, in place of a class | Web's half built (`jolt/datarender`); Context's half open |
+| - | a render's output named by a `:seon.render/hiccup-value` schema, so a value that is hiccup is drawn as html | in build (`jolt/hiccupvalue`, Web's helper) |
+| - | the planted-world proof (a schema with both renders, joined in a pattern, appears with no code edit) | in build (`jolt/planted`, Web); tips 8 and 9 land with its two halves |
 
 ## Not decided
 
-What "near" means for a stuck agent's repeats (the functions its evals called is the proposal; Context checks it on kept runs). Whether a view (move B) costs more at each draw than the components it replaces: not measured. A model call's previous call, which C needs for a call's page pair: a ref, or read through the agent. A compaction's point: one attribute on the agent, written with the compaction, is proposed and not built. Whether embeddings stay in the store.
+What "near" means for a stuck agent's repeats (the functions its evals called is the proposal; Context checks it on kept runs). Whether a view (move B) costs more at each draw than the components it replaces: not measured. A model call's previous call, which C needs for a call's page pair: a ref, or read through the agent. A compaction's point: one attribute on the agent, written with the compaction, is proposed and not built. Whether embeddings stay in the store. (Decided since: a render is never handed other renders' output, [what a render is handed](render.md#what-a-render-is-handed).)
