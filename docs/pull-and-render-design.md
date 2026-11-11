@@ -52,11 +52,11 @@ Each row is one tip, small enough to land alone, with who builds it, its proof a
 | # | tip | builder | proof, red first | what the next live run should show |
 |---|---|---|---|---|
 | 1 | a cited schema drawn as what it is; the pattern's description and required parts | Data model | landed (batch 61) | no turn spent finding how a schema declares a render |
-| 2 | the role named in a pattern; a join to a depth | Data model (a helper builds, Context reviews) | a stored `[role, clause]` pulls the role's joins; depth 2 pulls two levels | nothing visible; it is what 3 stands on |
+| 2 | the role named in a pattern; a join to a depth | landed, main b7c5f8f82b (`jolt/rolenames`). A read of a pattern costs what it did before: the step's cost bound is unchanged |
 | 3 | the two boot writes and three pattern functions deleted; a check that no function writes `:seon.ctx/pattern` | Data model | the check, at zero | a join added to a role reaches root's session with no boot |
 | 4 | descriptions on an eval's answer keys, a file's path, a task's proofs; a join's shape in the pattern's description | Data model | named tests; `(doc :seon.repl/answer)` answers each key | the system message can drop those sections |
 | 5 | the system message cut to what is true for every agent | Context | each kept sentence checked against the code and a recorded request | the same task, old message against new |
-| 6 | `@ctx` and the hiccup at the first point; a cite's pull shortened to what its render shows | Context; Data model for the cite | two requests around turn 1 equal up to the page | no `(my.db/pulled @ctx)` call by hand in the first turns |
+| 6 | `@ctx` and the hiccup at the first point; the cite's pull shortened | the real `@ctx` built, out of batch 65 on one law, Context remails (`jolt/ctxfirst`); with it each call Seon makes carries an intent and a message. The cite's pull is in build (`jolt/citepull`, Data model's helper): a cite pulls only what is cited and its render reads the content from the db, since cites were 115,000 of a real record's 142,000 characters |
 | 7 | a proof's four states; a red proof shows every failure and what it calls (its own source is not repeated: an owner's ruling of 2026-11-05 a test pins; showing it needs a new ruling) | Web, Context | one test a state (the physics audit's three high rows) | no repeated `(prove)` on a deferred or dead proof |
 | 8 | move A | Web; Data model for the schema entries | the planted-world proof, the attribute half | a new attribute with a render appears with no code edit |
 | 9 | move C, with the named sub-patterns | Context; Data model for the patterns | recorded requests byte for byte; the planted-world proof, the entity half | a new kind of member reaches the page and the request |
@@ -66,28 +66,30 @@ Each row is one tip, small enough to land alone, with who builds it, its proof a
 
 Kept current by the Data model session; the newest landed state runs on the standing system, http://127.0.0.1:7777/. "Running to see" is that system showing a live agent's session with hiccup drawn as html, Markdown drawn, structured evals, proofs and diffs, `@ctx` and the page at the first point, and the short system message.
 
-| # | tip | state (2026-11-11 17:40) |
+| # | tip | state (2026-11-11 18:30) |
 |---|---|---|
 | 1 | a cited schema drawn as what it is; the pattern's description and required parts | landed |
 | 2 | the role named in a pattern; a join to a depth | in batch 63, proving: `jolt/rolenames` da7b4f6004 (reviewed by Data model and Context) |
-| 3 | the boot writes and pattern functions deleted, with the check | built and reviewed by Data model, Context's review asked, for the batch after 63: `jolt/rolesource` 2ab92afc41. Root's session stores `[:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]` (63 characters where the standing store holds 2,621) and the user stores none. A depth join gained its last level on the way: a plain join of the same key beside it. The standing store needs an erase for it to take effect there |
+| 3 | the boot writes and pattern functions deleted, with the check | built; back in rework after Context's review: the last level of a depth becomes an option of the depth join (`{[:j :below [:id]] 2}`), so adding a plain join always merges (`jolt/rolesource`, Data model's helper). The standing store is erased when it and the rename are on main (the owner's yes) |
 | 4 | descriptions on the answer's keys, a file's path, a task's proofs | landed, main f56a85c416; the join-shape sentence not started |
-| 5 | the short system message | in batch 63, proving, last in it (`jolt/prompt` b989058353) |
+| 5 | the short system message | out of batch 65 on two server-test reds; Context fixes and remails (`jolt/prompt`) |
 | 6 | `@ctx` and the hiccup at the first point; the cite's pull shortened | built, for the batch after 63: the real `@ctx`, byte for byte (`jolt/ctxfirst`, Context); the cite's pull not started (Data model) |
 | 7 | a proof's four states; every failure and what it calls | landed, main f56a85c416 (`jolt/proofstates`) |
 | 8 | move A, and with it text fields as Markdown by a `:seon.db/text` schema | not started. Its first commit is Web's: where the walk places an attribute, the render its schema declares draws its value (today only an entity is drawn by a schema lookup) |
 | 9 | move C, with the named sub-patterns | not started; waits on 2 and 3 |
 | 10 | move B | not started; a REPL trial with its cost comes first |
-| - | a turn's fold names each step's intent | in batch 63, proving (`jolt/stepintents` 8390060f22) |
-| - | a component's root carries `:render`, the full symbol, in place of a class | in batch 63, proving (`jolt/rendername` 6d71c46074) |
-| - | a render's output named by a `:seon.render/hiccup-value` schema, so a value that is hiccup is drawn as html | built, for the batch after 63 (`jolt/hiccupvalue`, Web). The schema says the value's form only, never what a page may hold |
-| - | a role's standing cites as data: the cites an agent starts with are read from its task first (`:seon.config.agent/cites`, which a task may hold), so a worker's and a preparer's differ | in batch 63, proving: `jolt/rolecites` 0ece40c25e (Context); the task's config admits the key |
+| - | a turn's fold names each step's intent | landed (`jolt/stepintents`) |
+| - | a component's root carries `:render`, the full symbol, in place of a class | landed (`jolt/rendername`) |
+| - | a render's output named by a `:seon.render/hiccup-value` schema, so a value that is hiccup is drawn as html | landed (`jolt/hiccupvalue`). The schema says the value's form only, never what a page may hold |
+| - | a role's standing cites as data: the cites an agent starts with are read from its task first (`:seon.config.agent/cites`, which a task may hold) | landed (`jolt/rolecites`) |
 | - | a stuck agent is stopped: a judgment on its own evals ends it with the outcome `:stuck`, read by whoever started it | not started (Context); what "near" compares is open: the functions an eval called include plumbing and fire on plain reading, so the calls' targets must be part of it |
 | - | the turn budget shown once (a line in the turn part would be a diff every turn) | not started; Web's render of the agent's `max-turns` in the first page |
 | - | a task whose plan names code its branch does not hold is flagged before it is released (a cite that resolves to nothing is already data: the cite's target is unresolved) | not started; a class of the problems report, Tests |
 | - | a render may read the page as it stood at the previous stored point: its contract names `:seon.render/previous` and it is handed that page's hiccup, nil at the first point (the owner's ruling, 2026-11-11; never the tree of the walk in progress) | ruled and tried at a REPL on a real agent (one walk answers both pages; a render finds its own element by its id); lands with its first user, a render that says what changed since the last turn |
 | - | the named values as schema entries (`:seon.render/page-edits`, `:seon.ctx/status`, `:seon.render/pulled`) and the ctx schema of a role derived from its pattern, which says for each join one entity or members by id | not started (Data model); after tip 3, for the batch after 63 |
-| - | a task merges when green by data, not by its kind: no task on its branch needs it (read from `:seon.task/needs` and the branch, no new attribute) | proposed, run on the standing store's 414 tasks: agrees for the 381 whole tasks, and says the 31 work tasks nothing merges should merge; the reconciler's owner builds it |
+| - | a task merges when green by data, not by its kind: no task on its branch needs it (read from `:seon.task/needs` and the branch, no new attribute) | built by Context, for batch 66 (`jolt/mergeneeds`), Optimization reviews. Run on the standing store's 414 tasks and on the ladder store: the work task of rung 1, which nothing merged, reads true |
+| - | each state a proof is shown in carries its explanation as data: one enum, `:seon.ctx.status/proof-state`, its Markdown under `:seon.status/explain` per member, with a fifth computed state (not run: a red ended this run) | built by Web, for batch 66 (`jolt/statewords`) |
+| - | equal values print the same bytes (Point's ruling): a map's keys in one order whatever its size or history; a join's members, keyed by id, are the case to check | not started (Context), after step 4 |
 | - | the planted-world proof (a schema with both renders, joined in a pattern, appears with no code edit) | in build (`jolt/planted`, Web); tips 8 and 9 land with its two halves |
 
 ## Not decided
