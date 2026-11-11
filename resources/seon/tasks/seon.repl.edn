@@ -76,4 +76,8 @@ Handed to Optimization (owner, 2026-11-08: \"record the details and hand it to o
   :seon.task/plan "Loop R (Point 2029, row R5): an agent learned that a public var's docstring cites a docs/ section only when the merge check refused it, 2 turns. The rule is shown where the agent acts: the eval that defines a public var whose docstring cites no docs/ section answers so in its result, from the law's own data (the same reader the merge check uses, seon.problems' uncited-function class), as the eval already says an uncontracted function will be refused. Proof: an eval of (defn f \"no cite\" [x] x) in an agent namespace answers the cite rule and its form; one with a cite answers nothing of it."
   :seon.task/kind :work
   :seon.task/proofs #{seon.repl-test/an-uncited-public-defn-is-told-at-its-eval}}
+ {:seon.task/name "an-unresolved-name-answers-the-nearest"
+  :seon.task/plan "Loop D (2026-11-11, t3-t6, four turns of forty): the agent wrote (seon.db/q '[...] (seon.db/db)) to list tasks; seon.db/db and seon.db/q are no vars, the eval answered 'No such var', and it took two more evals of ns-resolve and ns-publics to find my.db/q and my.db/db, the agent's own. The doc macro already answers a name that is none with the nearest names (my.agent/no-var); an eval's unresolved symbol does not. The change: an eval's 'No such var' or 'Unable to resolve symbol' error carries the nearest names the same way (one function, my.agent/no-var's, read by the eval's error), so (seon.db/db) answers that my.db/db is the one. Proof: an eval of (seon.db/db) answers an error naming my.db/db."
+  :seon.task/kind :work
+  :seon.task/proofs #{seon.repl-test/an-unresolved-name-answers-the-nearest}}
 ]
