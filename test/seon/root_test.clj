@@ -56,6 +56,26 @@
 ;; docs/clocks.md#time-decides-the-owners-exceptions: a run ended past its bound takes its Seon state first (bin/evidence asks it of
 ;; root's server, read-only): root's stall check (::stall-armed ::busy ::lost), each agent proc's (:inflight :fx-out :stall-seen
 ;; :last-frame-ms), and which procs answered the ping, so a proc mid-step is seen missing, never read as nil
+(deftest roots-session-and-what-root-releases-are-the-users
+  ;; docs/users.md#who-started-whom (owner, 2026-11-11: one open graph of agents): the agents are one tree rooted at the user.
+  ;; Root's session is started by the user (seon.root/root-session-tx), and a task released at root's REPL is started by its
+  ;; evaluator, the user (my.root/run!), so its agent joins the user's :seon.agent/agents at its start. Red before: neither
+  ;; wrote a starter, and those agents were reached only through :seon.agent/root
+  (let [user (seon.config/value :seon.config.root/user-name)
+        db0 (d/db-with (ts/test-db) [{:seon.root/id :root}])
+        db (d/db-with db0 (root/root-session-tx db0))]
+    (is (= user (get-in (d/entity db [:seon.task/id "request/root"]) [:seon.task/started-by :seon.agent/key])) "root's session's task was started by the user")
+    (is (some #{"root"} (map :seon.agent/key (:seon.agent/agents (d/entity db [:seon.agent/key user])))) "and the user's tree holds root's session"))
+  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
+        ns (str "started" (seon.lib/unique-id))
+        resp (:response (ts/ask root {:op :eval :agent "root"
+                                                :code (str "(do (my.root/create! sys [{:seon.task/ns '" ns " :seon.task/name \"t\" :seon.task/plan \"Work.\" :seon.task/kind :work :seon.task/proofs #{}}])"
+                                                           " (my.root/run! sys [\"" ns "/t\"])"
+                                                           " (let [by (:seon.task/started-by (datahike.api/pull @(:conn sys) [{:seon.task/started-by [:seon.agent/key]}] [:seon.task/id \"" ns "/t\"]))]"
+                                                           "   (my.root/cancel! sys [\"" ns "/t\"]) by))")}))
+        r (ts/value-of resp)]
+    (is (= {:seon.agent/key (seon.config/value :seon.config.root/user-name)} r) (str "a task released at root's REPL is the user's: " (pr-str resp)))))
+
 (deftest a-hangs-evidence-holds-roots-stall-state
   (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
         ;; with an agent of its own running, so an agent proc's state is read, then ended

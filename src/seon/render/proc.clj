@@ -286,10 +286,11 @@
   (cond (vector? view) (location db (second view))
         ;; root's page is root's agent's (its session, the agent keyed "root", made at boot), drawn as any agent's is
         (= :root view) (or (:db/id (d/entity db [:seon.agent/key "root"])) (:db/id (d/entity db [:seon.root/id :root])))
-        ;; home: whoever is signed in (docs/users.md#whats-on-screen)
+        ;; home: the signed-in person's focus (docs/users.md#whats-on-screen); with none, root's page, which presents the system
+        ;; to them (owner, 2026-11-11: "the goal is mostly root running the presentation"); no one signed in, the sign-in page
         (= :home view) (let [u (:seon.root/signed-in (d/entity db [:seon.root/id :root])) f (:seon.user/focus u)]
-                         ;; a focused task is its agent's page once its agent exists, else the person's own
-                         (:db/id (or (if (:seon.task/id f) (:seon.task/agent f) f) u)))
+                         ;; a focused task is its agent's page once its agent exists
+                         (when u (or (:db/id (if (:seon.task/id f) (:seon.task/agent f) f)) (location db :root))))
         (keyword? view) (session-of db (address-of view))
         :else view))
 
@@ -404,8 +405,15 @@
         c' (if same? c (ctx/patch c db moved branch))]
     (vreset! at db)
     (reset! a (mark (:tree c')))
-    (render/flush! w moved)
-    (assoc kw :c c')))
+    (if (= (get-in c [:tree :seon.render/hiccup]) (get-in c' [:tree :seon.render/hiccup]))
+      (do (render/flush! w moved) (assoc kw :c c'))
+      ;; the entity names another render of its own (seon.render/render-var-of): the same ctx, walked again from that root
+      (let [[_ o view] (:root w)
+            w' (merge (render/walker (:src w) (:db w) [(render/render-var-of @(:index w) (merge (select-keys (:tree c) [:seon.agent/key]) (:tree c'))) o view] @(:index w))
+                      (select-keys w [:id-prefix]))]
+        (render/dispose-walk! w)
+        (render/flush! w' nil)
+        (assoc kw :w w' :c c')))))
 
 (defn- branch-walk!
   "The kept walk of agent e's page (e on main) on its branch, as of bdb, the evals main records it opened
@@ -576,10 +584,10 @@
         own-side (set (map :id (list-units (or units []) "#c-side")))
         units (vec (remove (comp own-side :id) units))
         sides (user-sides st db)
-        ;; an agent whose own pattern joins the system entity (root's session's, seon.root/root-session-pattern): beside its page, the
+        ;; root's session (the agent keyed "root", the reserved key `location` names for root's page): beside its page, the
         ;; system's own view (its head, process and problems: root's runtime values, never written) from the system's walk, placed by
         ;; the frame as the agents list is, the same mechanism
-        system? (some #(and (map? %) (contains? % :seon.agent/root)) (:seon.ctx/pattern e))
+        system? (= "root" (:seon.agent/key e))
         system (when (and chat? system?) (some-> (:root-walk st) :w render/placed-units))
         head (cond-> (or (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid) {:seon.agent/key (:seon.agent/key e)})
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now
@@ -590,11 +598,12 @@
                       ;; never a wait: drawn from its branch until its process answers, the page says so
                       :caption (when (and chat? (not own?))
                                  (when (:error held) (str "Its process didn't answer, so this may be behind: " (:seon.error/message (:error held)))))
-                      ;; its REPL and its messages while its process runs; its held task's release
-                      :input (if (or (:seon.user/name e) system?) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
+                      ;; its REPL and its messages while its process runs; its held task's release. Root's session is talked to as any
+                      ;; agent (a message wakes it, and it starts the work); only a user's page, no agent to talk to, asks for a task
+                      :input (if (:seon.user/name e) {:schema :seon.render/root-input :value {}} {:schema :seon.render/agent-input
                               :value {:id (keyword (:seon.agent/key e)) :address (keyword (:seon.agent/key e)) :live? (live? st id) :focus? chat?
                               ;; what its process can answer: a form running is interrupted (busy)
-                              :busy? (= :busy (:seon.agent/status e)) :talks? (some? (:seon.agent/task e))
+                              :busy? (= :busy (:seon.agent/status e)) :talks? (some? (or (:seon.agent/task e) (first (:seon.task/_agent e))))
                                       :held (d/q '[:find ?id . :in $ ?a :where [?a :seon.agent/task ?t] [?t :seon.task/execution :held] [?t :seon.task/id ?id]] db eid)}})}
                      ;; its tabs name it by its id in this boot, else by its branch (an earlier boot's agent)
                      (focus db view))))

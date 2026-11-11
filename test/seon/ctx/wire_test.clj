@@ -1476,6 +1476,55 @@
                   "request 3 holds request 2 whole: the message stays at turn 2's start, before turn 2's eval, never moved after it")))
           (finally (d/release main)))))))
 
+(deftest a-stage-changes-nothing-the-model-reads
+  ;; docs/render.md#an-entity-may-name-its-own-render: an agent's own render (the stage) is a layout: its request and its parts are byte
+  ;; for byte the ones its schema's render makes (the Data model session's condition: a stage that changed them would move the cached prefix); the
+  ;; model output a request is made of (seon.ctx.wire/request), compared before the system message this world holds none of
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask! ev!] (parts-session conn)]
+        (ask! 0)
+        (ev! "e1")
+        (ask! 1)
+        (let [db0 @conn ix (seon.db/index) a (pdb/eid db0 :seon.agent/key "a1")
+              ;; drawn as a page is: by the render its entity names (its own when it holds one, seon.render/render-var-of)
+              drawn (fn [db] (let [t (:tree (ctx/build ix db a :b))
+                                   w (render/draw t ctx/changes db (render/render-var-of ix t) {:index ix :outputs #{:seon.render/hiccup :seon.render/openai-compat}})]
+                              (try [(pr-str (mapv first (render/answer-sources w :seon.render/openai-compat))) (pr-str (render/placed-hiccup w (render/page-lists w)))]
+                                   (finally (render/dispose-walk! w)))))
+              staged (d/db-with db0 [{:db/id a :seon.render/hiccup 'seon.render.ui/stage}])
+              [m0 p0] (drawn db0)
+              [m1 p1] (drawn staged)]
+          (is (= #'seon.render.ui/stage (render/render-var-of ix (:tree (ctx/build ix staged a :b)))) "the agent names its stage")
+          (is (pos? (count m0)) "a request was made")
+          (is (= m0 m1) "the same messages, byte for byte")
+          (is (= p0 p1) "the same parts, byte for byte"))))))
+
+(deftest a-stage-shows-the-last-ask-and-its-answer
+  ;; docs/render.md#an-entity-may-name-its-own-render: the stage (seon.render.ui/stage-front) shows what a person asked last and what the
+  ;; agent said last before they asked again, the turns between it working out; with nothing asked, a welcome. Red before: an ask was
+  ;; paired with the reply of the turn that read it, and the sender's user name was not in the pull, so no ask was a person's
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[ask! _] (parts-session conn)
+            staged #(let [db @conn ix (seon.db/index) a (pdb/eid db :seon.agent/key "a1")
+                          db (d/db-with db [{:db/id a :seon.render/hiccup 'seon.render.ui/stage}])
+                          t (:tree (ctx/build ix db a :b))
+                          w (render/draw t ctx/changes db (render/render-var-of ix t) {:index ix})]
+                      (try (apply str (map :html (filter #(= "#p-head" (:container %)) (seon.fixtures/page-units w)))) (finally (render/dispose-walk! w))))]
+        (is (str/includes? (staged) "Hello.") "nothing asked: the welcome")
+        (d/transact conn [{:seon.agent/key "sean" :seon.user/name "sean"}])
+        (d/transact conn [{:seon.message/id "q1" :seon.message/to [[:seon.agent/key "a1"]] :seon.message/from {:seon.agent/key "sean"} :seon.message/body "What is f?"}])
+        (ask! 0)
+        (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" 1) :seon.model-call/reply "Let me look."}])
+        (ask! 1)
+        (d/transact conn [{:seon.model-call/id (seon.lib/call-id "a1" 2) :seon.model-call/reply "f is the identity."}])
+        (let [html (staged)]
+          (is (str/includes? html "What is f?") (str "the ask, in front: " html))
+          (is (str/includes? html "f is the identity.") "the answer: the last thing said before the next ask")
+          (is (not (str/includes? html "Let me look.")) "not the turn that only began the work")
+          (is (not (str/includes? html "Hello.")) "no welcome once something was asked"))))))
+
 (deftest the-chat-and-the-request-walk-one-sequence
   ;; docs/turn.md#the-turn-is-a-number: the page's chat and the model's request are one walk of the agent's entities, so they hold
   ;; its messages and evals in one order: turn 1's eval of the model's, an eval of another hand in turn 1, a message delivered mid-turn

@@ -270,6 +270,23 @@
                               (when (next all) (str " (and " (dec (count all)) " more, each in :entities)")))
                          {:entity (text b) :schema k :missing broke :entities (mapv text all)}))))))
 
+(defn supplied-instant
+  "The typed refusal of a transaction that supplies its own time, or nil: :db/txInstant in tx-meta, or asserted by a map or a
+  :db/add of tx-data. The store stamps a transaction's time, strictly after its branch's last (Datahike's next-tx-instant), so
+  no two transactions of a branch share an instant and none is back-dated (the owner: \"We should never record two
+  transaction times that are the same\"). A carried datom (a record, a merge's) is not asked, as invalid-datom does not ask
+  it. See docs/storage.md#the-write-checks-every-entity-it-touches."
+  {:malli/schema [:=> [:cat :any [:maybe :map]] [:maybe :seon.error/base]]}
+  [tx-data tx-meta]
+  (when (or (contains? tx-meta :db/txInstant)
+            (some (fn [op] (cond (map? op) (and (not (record? op)) (contains? op :db/txInstant))
+                                 (vector? op) (and (= :db/add (first op)) (= :db/txInstant (nth op 2 nil)))
+                                 :else false))
+                  tx-data))
+    (contract/error :seon.db/invalid-datom #'supplied-instant
+                    "a transaction's time is the store's: :db/txInstant is never supplied (in tx-data or tx-meta); the store stamps it after the branch's last"
+                    {:attribute :db/txInstant})))
+
 (defn- refuse!
   "Throw error e (a typed refusal) as the transaction's answer. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :map] :nil]}
@@ -282,6 +299,7 @@
   A refusal throws its typed error, and the value is as it was. See docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :any [:maybe :map] ifn?] :map]}
   [db tx-data schemas apply-fn]
+  (when-let [e (supplied-instant tx-data nil)] (refuse! e))
   (let [ix (write-index schemas)
         ;; ends-with: tx-data with each entity retracted whole followed by the entities that require a ref to it (a vector's
         ;; identity, :seon.vector/of; a cite's :seon.cite/target; a form's :form/ns): such an entity has no meaning without its
@@ -352,6 +370,7 @@
   docs/storage.md#the-write-checks-every-entity-it-touches."
   {:malli/schema [:=> [:cat :any :map] :map]}
   [db arg-map]
+  (when-let [e (supplied-instant nil (:tx-meta arg-map))] (refuse! e))
   (checked db (:tx-data arg-map) (:seon.db/schemas arg-map) #(datahike.writing/transact! db (-> arg-map (dissoc :seon.db/schemas) (assoc :tx-data %)))))
 
 (defn with

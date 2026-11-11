@@ -311,8 +311,7 @@
            {[:seon.model-call/_agent :tx :at] [:seon.model-call/n]}]
         msg (fn [id] {:seon.message/id id :seon.message/from {:seon.agent/key "user"} :seon.message/body id :seon.message/to [[:seon.agent/key k]]})
         call (fn [n] {:seon.model-call/id (str k "/" n) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n n})
-        ;; each transaction at its own instant, a second apart, as a production write's own clock gives it
-        db (reduce (fn [db [i tx]] (:db-after (d/with db (conj tx [:db/add :db/current-tx :db/txInstant (java.util.Date. (+ 1767225600000 (* 1000 i)))]))))
+        db (reduce (fn [db [i tx]] (:db-after (d/with db tx)))
                    (ts/test-db)
                    (map-indexed vector [[{:seon.agent/key k :seon.agent/turn 1 :seon.ctx/pattern p}] [(call 1)] [(msg "m1")] [(call 2)] [(msg "m2")] [(call 3)]]))
         a (aid db)

@@ -129,6 +129,25 @@
           out (conj out [start nl])]
       (if (< nl to) (recur (inc nl) out) out))))
 
+(defn- table-cells
+  "A Markdown table's rows in text from to, each its cells as [a b] offsets of their text (trimmed), the rule row under the head left out:
+  for a person's reading of the table (`markdown`'s :inline?), each cell's inline marks drawn from the one scan's spans. See
+  docs/render.md#text-and-the-one-string-cutter."
+  {:malli/schema [:=> [:cat :string :int :int] [:vector [:vector [:tuple :int :int]]]]}
+  [text from to]
+  (let [trim (fn [a b] (let [a (loop [a a] (if (and (< a b) (Character/isWhitespace (.charAt ^String text a))) (recur (inc a)) a))
+                             b (loop [b b] (if (and (> b a) (Character/isWhitespace (.charAt ^String text (dec b)))) (recur (dec b)) b))] [a b]))
+        lines (loop [a from out []] (if (>= a to) out (let [nl (or (str/index-of text "\n" a) to) e (min nl to)] (recur (inc e) (conj out [a e])))))]
+    (vec (for [[a b] lines
+               :let [bars (filter #(= \| (.charAt ^String text %)) (range a b))
+                     edges (concat [(dec a)] bars [b])
+                     cells (vec (keep (fn [[x y]] (let [[c d] (trim (inc x) y)] (when (< x y) [c d]))) (partition 2 1 edges)))
+                     ;; a leading and a trailing bar make an empty first and last cell
+                     cells (cond-> cells (and (seq bars) (= a (first (trim a b))) (= (first bars) (first (trim a b)))) (subvec 1))
+                     cells (cond-> cells (and (seq cells) (= (first (peek cells)) (second (peek cells)))) pop)]
+               :when (and (seq cells) (not (every? (fn [[c d]] (re-matches #":?-+:?" (subs text c d))) cells)))]
+           cells))))
+
 (defn markdown
   "Markdown text (a plan, an agent's message, a message) as a person reads it: its blocks by the one
   parse (seon.ref/scan): a heading at its level, a paragraph, a list of the scan's items (numbered
@@ -153,6 +172,10 @@
                                     (for [[a b] items] (into [:li] (run a b))))
                (and inline? (= :quote kind)) (into [:blockquote {:class "border-l-2 border-base-700 pl-3 text-text-300"}]
                                                   (for [[a b] (quote-lines text from to)] (into [:p] (run a b))))
+               ;; a table, for a person: its head and its rows, each cell's marks drawn; for the model, as its lines
+               (and inline? (= :table kind)) (let [[head & rows] (table-cells text from to)]
+                                               [:table [:thead (into [:tr] (for [[a b] head] (into [:th] (run a b))))]
+                                                (into [:tbody] (for [r rows] (into [:tr] (for [[a b] r] (into [:td] (run a b))))))])
                (#{:quote :table} kind) [:pre {:class "whitespace-pre-wrap text-text-300"} body]
                (= :break kind) [:hr]
                :else (into [:p] (run from to))))))))
@@ -412,7 +435,8 @@
   :address :live? :held :focus? :busy? :talks?}: address, its key, whom a word goes to in any boot; talks?, it has a task, so what's said wakes it, process or none; live, root's view holds its process in this boot; busy?, it runs a form (what interrupt stops); capped?, its task is
   focus?, its field takes focus as the page loads (the chat's:
   @ctx's page is long and the field ends it)."
-  {:malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
+  {:seon.render/style "#p-input button[data-interrupt][disabled] { visibility: hidden; }"
+   :malli/schema [:=> [:cat :seon.render/opts :seon.render/agent-input] :any]}
   [opts {:keys [id address live? held focus? busy? talks?]}]
   [:section {:id (:unit opts) :class "seon-stack-2"}
    (if (or live? talks?)
@@ -426,10 +450,12 @@
                                        :else "(+ 1 2) evaluates in its REPL (Enter; Shift+Enter: a new line)")}
                    ;; the chat takes focus (it follows its tail); a browser scrolls a focused field into view, and this one ends the page
                    focus? (assoc :autofocus true))]
-      ;; a form to interrupt only while its process runs one (status :busy)
-      (when busy?
-        [:button {:type "button" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
-                  :seon/call 'seon.root/interrupt! :seon/agent id} "⏹ interrupt"])]
+      ;; a form to interrupt, usable only while its process runs one (status :busy): there, disabled and unseen, while its process lives,
+      ;; so the field keeps its width as the agent goes busy and idle within a turn (it came and went, and the field jumped each time)
+      (when (or live? busy?)
+        [:button (cond-> {:type "button" :data-interrupt "" :class "rounded border border-base-700 px-2" :title "interrupt the running form; the agent keeps its state"
+                          :seon/call 'seon.root/interrupt! :seon/agent id}
+                   (not busy?) (assoc :disabled true)) "⏹ interrupt"])]
      [:p {:class "muted"} "This agent isn't running, so it can't answer. What it did is above."])
    (when held
      [:button {:class "self-start rounded border border-base-700 px-2" :title (str "release " held ": the reconciler runs its next run (my.root/run!)")
@@ -1510,7 +1536,7 @@
 
 (declare agent-parts conversation-list tiles)
 
-(declare standing task-name session-address tone-class members agents-list)
+(declare standing task-name session-address tone-class members started-agents agents-list)
 
 (defn- last-exchange
   "The newest message a person sent agent e (a seek of :seon.message/to, the newest by eid, from a :seon.user/name) and its task
@@ -1575,6 +1601,23 @@
      (when (seq shown) (into [:div {:class "started"}] shown))
      (when (seq below) [:p {:class "seon-note"} (str (count below) (if (= 1 (count below)) " more it started, below" " more it started, below"))])]))
 
+(defn unresolved-render
+  "The page's head when its entity names a render of its own (:seon.render/hiccup) that names no var this process has: the typed error,
+  naming the symbol, where that render would draw, and the page drawn by the schema's render beneath it (never a quiet return to the
+  default: the Data model session's condition). See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx ix :seon.render/index}]
+  (let [r (ratom/realize (get c :seon.render/hiccup))
+        e (contract/error :seon.render/no-render #'unresolved-render
+                          (str r " names no render this process has, so this page is drawn by its schema's render")
+                          {:schema (render/entity-schema ix (ratom/untracked c) nil) :identity [:seon.agent/key]})]
+    [:section [:p (:seon.error/message e)] (render/hiccup {:seon.render/index ix :as :block} e)]))
+
+(defn unresolved-list
+  "The list (p-head) `unresolved-render` is placed in, for the page alone. See docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/list "p-head" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div {:id "p-head"} [#'unresolved-render {}]])
+
 (defn agent
   "An agent's page, the render of its pull c, the one tree the model and the person read (the declared html render of
   :seon.db/agent-fact, which an agent overrides on its branch like any render): components placed in its
@@ -1592,12 +1635,124 @@
       [:section {:wire/for "page" :data-standing "person"}
        [:a {:href (str "/agent/" (session-address {:seon.agent/key (get c :seon.agent/key)})) :title (str (get c :seon.agent/key))}
         [:span {:class "flex items-baseline gap-2"} [:span {:class "min-w-0 flex-1 truncate font-semibold text-text-100"} n]
-         [:span {:class "shrink-0 text-2xs muted"} "the person Seon works for"]]]]
+         [:span {:class "shrink-0 text-2xs muted"} "the person Seon works for"]]]
+       ;; the agents it started, each by its own entry (root's session is the page itself, not listed)
+       ;; who it started, read tracked by the join's key set: one added draws the entry again (read untracked, a live root's page never placed it)
+       (let [as (get c :seon.agent/agents)]
+         (when (map? (ratom/untracked as)) (doall (keys as)))
+         (when-let [kids (seq (started-agents as))] (into [:div {:class "started"}] kids)))]
       (agent-entry (:seon.db/db opts) c))
     [:div {:id "render-ctx"} [#'agent-parts {} c] [#'conversation-list {}]
      [#'rules-list {}]
+     ;; it names a render of its own this process has none of: drawn by this, its schema's, the reason said where its own would be
+     (when-let [r (some-> (get c :seon.render/hiccup) ratom/realize)] (when-not (resolve r) [#'unresolved-list {:wire/for "page"}]))
      ;; a user's (it holds :seon.user/name): its agents list, which the frame shows on every page (seon.render.proc/user-sides)
      (when (get c :seon.user/name) [#'agents-list {}])]))
+
+(defn- stage-exchanges
+  "Agent pull c's exchanges with a person, as the stage shows them: {:exchanges [{:n :until :cid :asked :reply}] :waiting [body]}, each turn
+  that read what a person said with the last thing said before the next ask (the turns between work it out), and what a person said that
+  no turn has read yet. Read as the conversation reads them (seon.ctx/placed-messages, seon.ctx/call-of). See
+  docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat :seon.host/db :any :string :int] [:map [:exchanges [:vector :map]] [:waiting [:sequential :string]]]]}
+  [db c k turn]
+  (let [placed (ctx/placed-messages db c)
+        bodies (fn [ms] (keep (fn [[m _]] (let [x (ratom/realize (get-in c [:seon.message/_to m]))]
+                                             (when (some? (get-in x [:seon.message/from :seon.user/name])) (:seon.message/body x)))) ms))
+        said-in (fn [n] (when-let [cid (ctx/call-of db n k)]
+                          (let [r (some-> (get-in c [:seon.model-call/_agent cid :seon.model-call/reply]) ratom/realize)] (when-not (str/blank? r) [cid r]))))
+        asks (vec (for [n (sort (filter int? (keys placed))) :let [asked (bodies (get placed n))] :when (seq asked)] [n (str/join "\n\n" asked)]))]
+    {:exchanges (vec (for [[[n asked] [n' _]] (map vector asks (concat (rest asks) [[(inc turn) nil]]))
+                           :let [[cid reply] (some said-in (range (dec n') (dec n) -1))]]
+                       {:n n :until n' :cid cid :asked asked :reply reply}))
+     :waiting (vec (bodies (:pending placed)))}))
+
+(defn- stage-values
+  "The values exchange x made, in every turn of it (the one that answered is often not the one that evaluated), each its eval's tile
+  (`eval-tile`) when its value's schema declares a render. See docs/render.md#a-value-draws-itself."
+  {:malli/schema [:=> [:cat :seon.host/db :map :any :string :map] [:sequential :any]]}
+  [db ix c k x]
+  (for [m (range (:n x) (:until x)) :let [cid (ctx/call-of db m k)] :when cid
+        [e _] (ctx/turn-evals c cid) :let [sk (:seon.eval/schema (d/entity db e))] :when (and sk (render/declared ix sk))]
+    [#'eval-tile {:key (str m "-" e) :eid e}]))
+
+(defn- stage-now
+  "What the stage says now: what a person said that no turn has read yet, else the last exchange (its ask, its answer, or that the agent
+  works on it, or that its turn ended without one, and the values it made), else a welcome and how many sessions the person's tree
+  holds. See docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/style ".stage-front h1 { font-size: 2.25rem; line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; }
+.stage-front > p, .stage-front blockquote { font-size: 1.375rem; line-height: 1.5; }
+.stage-front blockquote { color: var(--color-text-300); border-left: 3px solid var(--color-base-700); padding-left: 1rem; }
+.stage-front > div { font-size: 1.125rem; line-height: 1.6; }
+.stage-front table { border-collapse: collapse; font-size: 0.9375rem; }
+.stage-front :is(th, td) { text-align: left; padding: 0.25rem 1rem 0.25rem 0; border-bottom: 1px solid var(--color-base-800); }
+.stage-front [data-working] { color: var(--color-text-300); }
+.stage-front [data-working]::after { content: '…'; display: inline-block; animation: stage-pulse 1.2s ease-in-out infinite; }
+@keyframes stage-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }"
+   :malli/schema [:=> [:cat [:sequential :string] [:maybe :map] :boolean [:sequential :any] nat-int?] :any]}
+  [waiting now working? values held]
+  (cond
+    (seq waiting) (list [:blockquote (str/join "\n\n" waiting)] [:p {:data-working ""} "Working on it"])
+    now (list [:blockquote (:asked now)]
+              (cond (not (str/blank? (:reply now))) [#'markdown (:reply now) {:inline? true}]
+                    working? [:p {:data-working ""} "Working on it"]
+                    :else [:p "It ended its turn without an answer. Its steps are in the conversation."])
+              (seq values))
+    :else (list [:h1 "Hello."]
+                [:p "Say what you would like done, in a sentence. The answer comes back here, with whatever it makes drawn as it is."]
+                (when (pos? held) [:p (str held (if (= 1 held) " session is" " sessions are") " in the list beside: ask about any of them.")]))))
+
+(defn- stage-folds
+  "The stage's two folds, each named so one appearing before the other is no morph of it: the exchanges before the one in front, and the
+  person's view of the page as the conversation (kept by the page as any fold's, never a write of the agent's render). See
+  docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/style ".stage-front details { font-size: 0.875rem; color: var(--color-text-300); }
+.stage-front details li { margin: 0.5rem 0; }
+.stage-front > details[data-as] > summary { font-size: 0.8125rem; color: var(--color-text-300); cursor: pointer; }
+.stage-front > details[data-as]:not([open]) [data-when=open], .stage-front > details[data-as][open] [data-when=closed] { display: none; }
+#app:has(.stage-front > details[data-as]:not([open])) :is(.seon-context, #c-rows, #p-agent-head) { display: none; }
+.stage-front:has(> details[data-as][open]) > :not(details[data-as]) { display: none; }
+#app:has(.stage-front > details[data-as]:not([open])) #p-input :is(input, textarea) { font-size: 1.25rem; padding: 0.875rem 1rem; font-family: ui-sans-serif, system-ui, sans-serif; }"
+   :malli/schema [:=> [:cat [:vector :map] :boolean] [:sequential :any]]}
+  [exchanges waiting?]
+  (list
+    (when (> (count exchanges) (if waiting? 0 1))
+      [:details {:id "stage-earlier"} [:summary (str (dec (count exchanges)) " earlier")]
+       (into [:ol] (for [x (if waiting? exchanges (butlast exchanges))] [:li [:p (:asked x)] (when-not (str/blank? (:reply x)) [#'markdown (:reply x) {:inline? true}])]))])
+    [:details {:id "stage-as" :data-as "conversation" :data-preserve-attr "open"}
+     [:summary [:span {:data-when "closed"} "Show as the conversation"] [:span {:data-when "open"} "Show as the stage"]]]))
+
+(defn stage-front
+  "Agent pull c presented as a stage (docs/render.md#an-entity-may-name-its-own-render): what it says now in large type (`stage-now`),
+  over the exchanges a person had with it (`stage-exchanges`) and the values they made (`stage-values`), and its folds (`stage-folds`).
+  Read from the same pull and the same messages as the conversation, for the page alone (its list's call is placed :wire/for \"page\").
+  See docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/style ".stage-front { max-width: 46rem; margin: 0 auto; padding: 2.5rem 1rem 1rem; display: flex; flex-direction: column; gap: 1.25rem; color: var(--color-text-100); font-family: ui-sans-serif, system-ui, -apple-system, 'Helvetica Neue', sans-serif; }
+.stage-front section { font-size: 0.9375rem; }"
+   :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  [{c :seon.ctx/ctx db :seon.db/db ix :seon.render/index}]
+  (let [k (ratom/realize (:seon.agent/key c))
+        ;; read as the conversation reads them, tracked: a turn begun or a message delivered draws this again
+        turn (or (ratom/realize (:seon.agent/turn c)) 0)
+        working? (> turn (or (ratom/realize (:seon.agent/ended-turn c)) 0))
+        _ (let [v (get c :seon.message/_to)] (when (map? (ratom/untracked v)) (doall (keys v))))
+        {:keys [exchanges waiting]} (if k (stage-exchanges db c k turn) {:exchanges [] :waiting []})
+        now (peek exchanges)
+        ;; the sessions the person's tree holds (root's session pulls who started it, the user, and what they started), itself aside
+        held (count (for [u (members (get c :seon.agent/_agents)) a (started-agents (get u :seon.agent/agents))] a))]
+    [:section (stage-now waiting now working? (if now (stage-values db ix c k now) []) held) (stage-folds exchanges (boolean (seq waiting)))]))
+
+(defn stage-list
+  "The stage's own list (p-head), for the page alone: `stage-front` over the agent's pull. See docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/list "p-head" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [_] [:div {:id "p-head"} [#'stage-front {}]])
+
+(defn stage
+  "An agent's page as a stage, a render an agent names as its own (:seon.render/hiccup) in place of its schema's `agent`: the same lists
+  over the same pull, so the model reads exactly what it reads by `agent`, and for the person the stage in front (`stage-list`), which
+  the conversation and the tiles stand behind. See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
+  [opts c] (if (:seon.render/nested opts) (agent opts c) (conj (agent opts c) [#'stage-list {:wire/for "page"}])))
 
 (defn eval-tiles
   "The tiles of agent pull c's evals whose value has a render (their record names its schema, :seon.eval/schema), each a component of its
@@ -1640,6 +1795,12 @@
           ;; a join as d/pull answers it, a vector of its members
           (sequential? u) (for [i (range (count u)) :let [m (nth u i)] :when (and (map? m) (:db/id m))] (get v i))
           :else [])))
+
+(defn- started-agents
+  "The agents join value v holds (`members`), root's session left out: root's own line (`root-side`) is its entry in the agents list, and
+  the page it is on needs no entry of itself. Its key is the reserved one root's page names (seon.render.proc/location). See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :any] [:sequential :any]]}
+  [v] (remove #(= "root" (:seon.agent/key (ratom/untracked %))) (members v)))
 
 (defn tiles
   "The tiles entity c's pull joins, read by pattern p: each entity its joins hold that is a tile (`tile?`), in the pattern's order, as
@@ -1996,49 +2157,18 @@
   (let [as (get c :seon.agent/agents)]
     ;; who is in it, read tracked (its key set): a member added or gone draws the list again; each entry is its own component
     (doall (keys as))
-    [:ol {:id "c-side"} [#'root-side {}] (seq (members as))]))
-
-(defn- root-sessions
-  "The sessions the system entity view r holds as root's session's pull joins it (:seon.agent/_root, newest first to
-  :seon.config.ctx/window: seon.root/root-session-pattern), root's session itself left out: each by the agent's own render nested (its
-  entry, under it the agents it started), so an agent is listed once, under the agent that started it: the top level is what the pull
-  holds that no agent it lists started (:seon.agent/agents; the user is the person, so what a person asked for is at the top); this boot's first, each earlier boot's under one fold, newest boot first; and how many root holds beyond the window (a count of
-  :seon.agent/root's datoms, never a silent cut). Reads the pull, the boot fact and that count. See docs/users.md#roots-session."
-  {:malli/schema [:=> [:cat :seon.host/db :any] :any]}
-  [db r]
-  (let [as (get r :seon.agent/_root)
-        ;; who it holds, read tracked by its key set: a session added or gone draws this again
-        _ (doall (keys as))
-        held (remove #(contains? #{nil "root"} (:seon.agent/key (ratom/untracked %))) (members as))
-        ;; started by an agent listed as an entry: the user is drawn as the person, so what it started stays at the top
-        started (set (for [m held :when (nil? (get m :seon.user/name)) s (members (get m :seon.agent/agents))] (:db/id (ratom/untracked s))))
-        ms (remove #(started (:db/id (ratom/untracked %))) held)
-        boot-of #(:seon.agent/boot (ratom/untracked %))
-        now (task/boot-of db)
-        boots (distinct (keep boot-of ms))
-        by (group-by boot-of ms)
-        beyond (- (count (d/datoms db :aevt :seon.agent/root)) (count (members as)))]
-    [:section {:wire/for "page"}
-     [:h2 {:class "kicker"} "Sessions"]
-     (if (seq ms) (into [:div {:class "started"}] (concat (get by now) (get by nil))) [:p {:class "muted"} "No work yet."])
-     (when-let [earlier (seq (remove #(= now %) boots))]
-       [:details {:data-preserve-attr "open"}
-        [:summary {:class "seon-note"} "Earlier"]
-        (for [b earlier] (into [:div {:class "started"}] (get by b)))])
-     (when (pos? beyond) [:p {:class "seon-note"} (str beyond " more, older, beyond the window (:seon.config.ctx/window)")])]))
+    [:ol {:id "c-side"} [#'root-side {}] (seq (started-agents as))]))
 
 (defn root
-  "The system entity (the declared html render of :seon.root/root-fact), one render, top or nested. At the top, on the system's own walk
-  (seon.render.proc's root walk, which holds root's runtime values beside its pull): what the system is doing (p-head), its process, main's
-  problems and the evals sent to root (p-tiles), which the frame places beside root's agent's page. Nested, where root's session's pull
-  joins it: the sessions root holds, by boot (`root-sessions`). See docs/render.md#the-page."
+  "The system entity (the declared html render of :seon.root/root-fact), on the system's own walk (seon.render.proc's root walk, which holds
+  root's runtime values beside its pull): what the system is doing (p-head), its process, main's problems and the evals sent to root
+  (p-tiles), which the frame places beside root's agent's page. The sessions are not here: root's session's page draws the user's tree
+  (`agent`'s person entry). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :any] :any]}
-  [{db :seon.db/db :as opts} r]
-  (if (:seon.render/nested opts)
-    (root-sessions db r)
-    [:div {:id "root-ctx"}
-     [:div {:id "p-head"} [#'root-head {}]]
-     [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}] [#'root-evals {}]]]))
+  [_ _]
+  [:div {:id "root-ctx"}
+   [:div {:id "p-head"} [#'root-head {}]]
+   [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}] [#'root-evals {}]]])
 
 (defn page-chrome
   "A page in root's chrome (root's, an agent's): the top bar, then the units its walks drew, each
