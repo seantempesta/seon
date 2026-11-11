@@ -1550,3 +1550,23 @@
     (is (str/includes? live "Heading 39") "live: whole")
     (is (str/includes? stored "Heading 39") "stored and read back: whole")
     (is (not (re-find #"…\d" stored)) "no cut")))
+
+(deftest an-own-pattern-written-before-a-join-asked-its-transaction-still-places-its-messages
+  ;; docs/ctx.md#the-pattern: an entity's own :seon.ctx/pattern stored before its schema's pattern asked a join's transaction
+  ;; ({[:seon.message/_to :tx :at] ..}, batch 44) is read with the transaction keys its schema's pattern asks on the same joins, so its
+  ;; messages are placed by time as any agent's (root's session's, written on its branch before that join, showed none: Web, 2026-11-11)
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [ix (seon.db/index)
+            schema-p (render/schema-property ix :seon.db/agent-fact :seon.ctx/pattern)
+            ;; the pattern as it was: each [attr :tx k] join key its bare attribute
+            before (walk/postwalk #(if (and (vector? %) (keyword? (first %)) (= :tx (second %))) (first %) %) schema-p)]
+        (is (not= before schema-p) "the old pattern lacks the transaction the schema's asks")
+        (d/transact conn [{:seon.agent/key "old" :seon.agent/turn 1 :seon.ctx/pattern before}])
+        (d/transact conn [{:seon.message/id "m1" :seon.message/to [[:seon.agent/key "old"]] :seon.message/from {:seon.agent/key "owner"} :seon.message/body "Hello."}])
+        (d/transact conn [{:seon.model-call/id (seon.lib/call-id "old" 1) :seon.model-call/agent [:seon.agent/key "old"] :seon.model-call/n 1 :seon.model-call/origin :model :seon.model-call/reply "Hi."}])
+        (let [db @conn
+              c (:tree (ctx/build ix db (pdb/eid db :seon.agent/key "old") :b))]
+          (is (= 1 (count (:seon.message/_to c))) "the pull holds the message")
+          (is (= ["m1"] (mapv second (get (ctx/placed-messages db c) 1))) "and it is placed, at the turn that read it"))))))
+
