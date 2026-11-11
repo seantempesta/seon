@@ -151,8 +151,9 @@
                          ;; merge candidate first (seon.fx/run-tests), and gate it like proofs
                          [:gate [:map {:closed true} [:op [:= :gate]] [:task :seon.task/id]
                                  [:tests [:vector :qualified-symbol]]
-                                 ;; each test's digest at the task's base (:seon.task/deferred): main's verdict of it is read by this
-                                 [:base [:map-of :qualified-symbol [:maybe :string]]]]]
+                                 ;; each test's digest at the task's base, by which main's verdict of it is read; :tests stays beside it,
+                                 ;; sorted, because root's one :gate request is asked by an agent's judge too, which names tests and no base
+                                 [:base :seon.task/deferred]]]
                          ;; a judged task whose execution is no longer running: closed
                          [:close [:map {:closed true} [:op [:= :close]] [:task :seon.task/id]]]
                          [:spawn [:map {:closed true} [:op [:= :spawn]] [:task :seon.task/id] [:env :seon.task/env]]]
