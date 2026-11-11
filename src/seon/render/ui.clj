@@ -1510,7 +1510,7 @@
 
 (declare agent-parts conversation-list tiles)
 
-(declare standing task-name session-address tone-class members agents-list)
+(declare standing task-name session-address tone-class members started-agents agents-list)
 
 (defn- last-exchange
   "The newest message a person sent agent e (a seek of :seon.message/to, the newest by eid, from a :seon.user/name) and its task
@@ -1592,7 +1592,9 @@
       [:section {:wire/for "page" :data-standing "person"}
        [:a {:href (str "/agent/" (session-address {:seon.agent/key (get c :seon.agent/key)})) :title (str (get c :seon.agent/key))}
         [:span {:class "flex items-baseline gap-2"} [:span {:class "min-w-0 flex-1 truncate font-semibold text-text-100"} n]
-         [:span {:class "shrink-0 text-2xs muted"} "the person Seon works for"]]]]
+         [:span {:class "shrink-0 text-2xs muted"} "the person Seon works for"]]]
+       ;; the agents it started, each by its own entry (root's session is the page itself, not listed)
+       (when-let [kids (seq (started-agents (get c :seon.agent/agents)))] (into [:div {:class "started"}] kids))]
       (agent-entry (:seon.db/db opts) c))
     [:div {:id "render-ctx"} [#'agent-parts {} c] [#'conversation-list {}]
      [#'rules-list {}]
@@ -1640,6 +1642,12 @@
           ;; a join as d/pull answers it, a vector of its members
           (sequential? u) (for [i (range (count u)) :let [m (nth u i)] :when (and (map? m) (:db/id m))] (get v i))
           :else [])))
+
+(defn- started-agents
+  "The agents join value v holds (`members`), root's session left out: root's own line (`root-side`) is its entry in the agents list, and
+  the page it is on needs no entry of itself. Its key is the reserved one root's page names (seon.render.proc/location). See docs/users.md#roots-session."
+  {:malli/schema [:=> [:cat :any] [:sequential :any]]}
+  [v] (remove #(= "root" (:seon.agent/key (ratom/untracked %))) (members v)))
 
 (defn tiles
   "The tiles entity c's pull joins, read by pattern p: each entity its joins hold that is a tile (`tile?`), in the pattern's order, as
@@ -1996,49 +2004,18 @@
   (let [as (get c :seon.agent/agents)]
     ;; who is in it, read tracked (its key set): a member added or gone draws the list again; each entry is its own component
     (doall (keys as))
-    [:ol {:id "c-side"} [#'root-side {}] (seq (members as))]))
-
-(defn- root-sessions
-  "The sessions the system entity view r holds as root's session's pull joins it (:seon.agent/_root, newest first to
-  :seon.config.ctx/window: seon.root/root-session-pattern), root's session itself left out: each by the agent's own render nested (its
-  entry, under it the agents it started), so an agent is listed once, under the agent that started it: the top level is what the pull
-  holds that no agent it lists started (:seon.agent/agents; the user is the person, so what a person asked for is at the top); this boot's first, each earlier boot's under one fold, newest boot first; and how many root holds beyond the window (a count of
-  :seon.agent/root's datoms, never a silent cut). Reads the pull, the boot fact and that count. See docs/users.md#roots-session."
-  {:malli/schema [:=> [:cat :seon.host/db :any] :any]}
-  [db r]
-  (let [as (get r :seon.agent/_root)
-        ;; who it holds, read tracked by its key set: a session added or gone draws this again
-        _ (doall (keys as))
-        held (remove #(contains? #{nil "root"} (:seon.agent/key (ratom/untracked %))) (members as))
-        ;; started by an agent listed as an entry: the user is drawn as the person, so what it started stays at the top
-        started (set (for [m held :when (nil? (get m :seon.user/name)) s (members (get m :seon.agent/agents))] (:db/id (ratom/untracked s))))
-        ms (remove #(started (:db/id (ratom/untracked %))) held)
-        boot-of #(:seon.agent/boot (ratom/untracked %))
-        now (task/boot-of db)
-        boots (distinct (keep boot-of ms))
-        by (group-by boot-of ms)
-        beyond (- (count (d/datoms db :aevt :seon.agent/root)) (count (members as)))]
-    [:section {:wire/for "page"}
-     [:h2 {:class "kicker"} "Sessions"]
-     (if (seq ms) (into [:div {:class "started"}] (concat (get by now) (get by nil))) [:p {:class "muted"} "No work yet."])
-     (when-let [earlier (seq (remove #(= now %) boots))]
-       [:details {:data-preserve-attr "open"}
-        [:summary {:class "seon-note"} "Earlier"]
-        (for [b earlier] (into [:div {:class "started"}] (get by b)))])
-     (when (pos? beyond) [:p {:class "seon-note"} (str beyond " more, older, beyond the window (:seon.config.ctx/window)")])]))
+    [:ol {:id "c-side"} [#'root-side {}] (seq (started-agents as))]))
 
 (defn root
-  "The system entity (the declared html render of :seon.root/root-fact), one render, top or nested. At the top, on the system's own walk
-  (seon.render.proc's root walk, which holds root's runtime values beside its pull): what the system is doing (p-head), its process, main's
-  problems and the evals sent to root (p-tiles), which the frame places beside root's agent's page. Nested, where root's session's pull
-  joins it: the sessions root holds, by boot (`root-sessions`). See docs/render.md#the-page."
+  "The system entity (the declared html render of :seon.root/root-fact), on the system's own walk (seon.render.proc's root walk, which holds
+  root's runtime values beside its pull): what the system is doing (p-head), its process, main's problems and the evals sent to root
+  (p-tiles), which the frame places beside root's agent's page. The sessions are not here: root's session's page draws the user's tree
+  (`agent`'s person entry). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]] :any] :any]}
-  [{db :seon.db/db :as opts} r]
-  (if (:seon.render/nested opts)
-    (root-sessions db r)
-    [:div {:id "root-ctx"}
-     [:div {:id "p-head"} [#'root-head {}]]
-     [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}] [#'root-evals {}]]]))
+  [_ _]
+  [:div {:id "root-ctx"}
+   [:div {:id "p-head"} [#'root-head {}]]
+   [:aside {:id "p-tiles"} [#'process-tile {}] [#'problems-tile {}] [#'root-evals {}]]])
 
 (defn page-chrome
   "A page in root's chrome (root's, an agent's): the top bar, then the units its walks drew, each

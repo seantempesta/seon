@@ -576,10 +576,10 @@
         own-side (set (map :id (list-units (or units []) "#c-side")))
         units (vec (remove (comp own-side :id) units))
         sides (user-sides st db)
-        ;; an agent whose own pattern joins the system entity (root's session's, seon.root/root-session-pattern): beside its page, the
+        ;; root's session (the agent keyed "root", the reserved key `location` names for root's page): beside its page, the
         ;; system's own view (its head, process and problems: root's runtime values, never written) from the system's walk, placed by
         ;; the frame as the agents list is, the same mechanism
-        system? (some #(and (map? %) (contains? % :seon.agent/root)) (:seon.ctx/pattern e))
+        system? (= "root" (:seon.agent/key e))
         system (when (and chat? system?) (some-> (:root-walk st) :w render/placed-units))
         head (cond-> (or (d/pull db [:seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/description :seon.agent/max-turns {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure]} {[:seon.process/_agent :as :processes] [:seon.process/pid :seon.process/forked-ms]}] eid) {:seon.agent/key (:seon.agent/key e)})
                ;; an earlier boot's process recorded no end (its root went away): its pid names nothing now

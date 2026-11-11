@@ -1120,13 +1120,13 @@
   "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/sessions) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
 (defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through the system entity to the sessions root
-  holds, newest first to :seon.config.ctx/window, each with what its entry reads, its boot and the agents it started as the user's pull joins them (seon.task/entry-pattern,
-  seon.task/agents-join: root's page draws each under its starter, not again at the top), which root's page
-  draws (seon.render.ui/root nested) and root's model asks for at its REPL (my.user/sessions). See docs/users.md#whats-on-screen."
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join to whoever started it (:seon.agent/_agents, the
+  user: its :seon.agent/agents holds root's session as one of the agents it started), pulled as the user's own pull is (seon.task/user-pattern: the
+  agents it started, each with the ones it started, to :seon.config.render/agent-tree-depth levels). Root's page draws that tree (seon.render.ui/agent's
+  person entry, the agents under it) and root's model asks for it at its REPL (my.user/sessions). See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat] [:vector :any]]}
   [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
-           {:seon.agent/root [:seon.root/id {[:seon.agent/_root :limit :seon.config.ctx/window :reverse true] (conj task/entry-pattern :seon.agent/boot (task/agents-join (cfg/value :seon.config.render/agent-tree-depth)))}]}))
+           {:seon.agent/_agents (task/user-pattern)}))
 
 (defn root-session-tx
   "Root's session, made at the boot of a main that has none (`root-session-boot-tx`), an ordinary agent made the ordinary way: an agent
