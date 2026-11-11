@@ -523,7 +523,7 @@
                     ;; seon.root/stale-binary's answer at the boot: why the binary is not current for main ({:binary :tree :reaches}, or what is
                     ;; missing), absent when current; what the :stale-binary row shows
                     [:stale-binary {:optional true} :map]
-                    ;; the build's index only: the code that made it (seon.root/index-code)
+                    ;; the build's index only: the code that made it (seon.program/index-code)
                     [:indexed-by {:optional true} :string]
                     [:inputs {:optional true} :seon.program/inputs]]
  ;; the next generation (docs/source.md#the-next-generation): the merges commit the :build effect

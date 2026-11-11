@@ -1262,12 +1262,6 @@
         (cond-> (assoc r :forms (count (d/datoms db :aevt :form/id)))
           (contract/error? tasks) (assoc :tasks tasks))))))
 
-(def index-roots
-  "The vars an index of a tree reaches: what makes a program's facts from its files (import-tree!, down through the
-  analysis and the account) and what digests them. See docs/source.md#the-binary-records-its-program."
-  '[seon.root/import-tree! seon.program/program-digest])
-
-
 (defn landed-tx
   "What root writes on main for a change git landed (bin/land's bridge, docs/source.md#a-landing-enters-main-as-data):
   changed-tx of its changed files and modes, and root's :seon.root/source fact moved to the landed tree (its :tree,
@@ -1322,28 +1316,9 @@
                  (changed-tx db changed modes tasks-dir)
                  (landed-tx db changed modes (:tree r) (:commit r)))}))))))
 
-(defn index-code
-  "The code that indexes a tree, as db's program states it, under inputs: the reach digest of roots
-  (seon.program/graph-index over db's seon.program/reach-graph, as a check step's root is digested), its components and
-  the runtime pins and config keys they read, never the tree or the program's source (blank in inputs: the files are the
-  index's other input). nil when db defines none of roots. What a kept index was made by, so one whose code moved is
-  made again. See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat [:or :seon.host/db :map] :seon.program/inputs [:vector :qualified-symbol]] [:maybe :string]]}
-  [db-or-graph inputs roots]
-  (let [g (if (:rows db-or-graph) db-or-graph (program/reach-graph db-or-graph nil))]
-    (get-in (program/graph-index g (assoc inputs :tree "" :code "") {"index" roots}) ["index" :digest])))
-
-(defn with-index-code
-  "inputs with the code that indexes the process store, the seeded store a process test's root takes (index-code of
-  index-roots over db or its reach graph), as :seon.env/index in its :config: every process test's digest takes it, so a
-  verdict of a run on a store indexed by other code is no verdict of this one. See docs/source.md#the-binary-records-its-program."
-  {:malli/schema [:=> [:cat [:or :seon.host/db :map] :seon.program/inputs] :seon.program/inputs]}
-  [db-or-graph inputs]
-  (assoc-in inputs [:config :seon.env/index] (or (index-code db-or-graph inputs index-roots) "none")))
-
 (defn- kept-index!
   "The kept store at path (its :db) brought to a tree by index (a function of the connection answering import-tree!'s
-  answer: a seed's, or the program alone), and keyed by the code that made it (index-code of roots under inputs, kept as
+  answer: a seed's, or the program alone), and keyed by the code that made it (program/index-code of roots under inputs, kept as
   :indexed-by on its :seon.root/source fact, read before the index, whose fact replaces it): when what the tree changed
   moves that code, or the store holds an index no key names, the store is removed and the tree indexed into it again from nothing, since a store brought up to
   date keeps what the old code made of each form whose text did not change, its id included
@@ -1357,7 +1332,7 @@
                      before (fact)
                      held (:indexed-by before)
                      r (index conn)
-                     code (when (and (not (:error r)) (or (:imported? r) (nil? held))) (index-code @conn inputs roots))
+                     code (when (and (not (:error r)) (or (:imported? r) (nil? held))) (program/index-code @conn inputs roots))
                      ;; a store indexed before it held a key is no less stale: made by a code nobody recorded
                      moved? (and code (not= held code) (some? before))]
                  ;; the index's fact replaced the one held: the key is written again whenever the fact lacks it
@@ -1382,7 +1357,7 @@
   [path]
   (let [t0 (profile/now-ns)
         root (get cfg/config :seon.config.source/root)
-        r (kept-index! path #(seed! % {:root root :dirs (cfg/value :seon.config.source/dirs)} t0) (fx/inputs root) index-roots)
+        r (kept-index! path #(seed! % {:root root :dirs (cfg/value :seon.config.source/dirs)} t0) (fx/inputs root) program/index-roots)
         out (if (:error r) (assoc (:error r) :imported? false) r)]
     (assoc out :ms (lib/r2 (profile/ms-since t0)))))
 
@@ -1396,7 +1371,7 @@
   default), so a build pays for what changed. What bin/build records beside the binary it built (target/seon.program,
   `binary-program`). See docs/source.md#the-binary-records-its-program."
   {:malli/schema [:function [:=> [:cat :string :string] :map] [:=> [:cat :string :string [:vector :qualified-symbol]] :map]]}
-  ([root base] (built-program root base index-roots))
+  ([root base] (built-program root base program/index-roots))
   ([root base roots]
    (let [inputs (fx/inputs root)
          r (kept-index! (str (pdb/kept-store! base) "/index") #(import-tree! % {:root root :dirs (cfg/value :seon.config.source/dirs)} (profile/now-ns)) inputs roots)]
