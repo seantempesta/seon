@@ -418,8 +418,10 @@
   [port m on-event]
   (let [unanswered #(contract/error :seon.server/unanswered #'seon.server/ask-streamed
                                     (str "root on port " port (case % :refused " refused the connection: no root listens there"
-                                                                     :eof " closed the connection before its answer"
-                                                                     :reset " reset the connection before its answer"))
+                                                                     ;; the system ended under the ask: a landing's restart (bin/update) is the
+                                                                     ;; usual one, and a red the asker could read as a test's says so
+                                                                     :eof " closed the connection before its answer: the system ended or restarted (a landing restarts it); ask again, the verdicts that landed are kept"
+                                                                     :reset " reset the connection before its answer: the system ended or restarted (a landing restarts it); ask again, the verdicts that landed are kept"))
                                     {:port port :why %})]
     ;; the edge where a client's socket failures become the one typed error (docs/failure-points.md)
     (try
