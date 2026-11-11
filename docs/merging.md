@@ -43,6 +43,10 @@ Sessions' ready branches land together, proved once (owner, 2026-11-10: "Can we 
 4. **A red batch is taken apart, not waited on:** the failure is read; the branch at fault is found from it, or by running the one failing test on each merge; that branch is taken out (`git revert -m 1 <its merge>` when it applies cleanly, else the batch is built again without it), the rest is proved and landed, and the owner of the branch gets the evidence. A fix of a line or two that is plainly right (a site's name in the wiki, a date in a docstring) is made in the batch and said in the note.
 5. **Land:** `bin/land -F MSGFILE`; the note says what the batch holds, what was taken out and why, and what is open.
 
+- **While a batch proves, sessions start no test run, prove, check or build:** the managing session puts a file `mail/PROVING` in the mailbox ([sessions](sessions.md#the-mailbox)) naming the batch, and removes it at the landing (owner, 2026-11-11, asked with the question tool: load 25-31 on 18 cores failed one batch four times on checks that are red only under load).
+- **A red test is never rerun on the batch's own tree to see if it passes:** a green after a red at one digest marks it flaky and holds the batch until a change moves it. The cause is bisected in a scratch worktree on main plus each suspect.
+- **After a clean merge of main, a pin tip's hand-over set** is laws, health and the namespaces the merge touched, not the whole set again.
+
 What a whole prove caught on 2026-11-10 that a session's own runs had not: a dependency pin (6 reds after runs of parts), a change to root's writer (10 reds behind greens reused from before the change: [what a digest holds](#what-a-digest-holds-and-what-it-does-not-yet)), and a digest change (13 reds after 88 named tests). So a change to selection, to what root runs or to a pin is proved whole by its own session first, and the batch's prove is the second look, not the first.
 
 ## A landing message carries its audit
