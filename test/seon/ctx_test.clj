@@ -222,7 +222,8 @@
         db (:db-after (d/with (ts/test-db)
                               (into [{:seon.agent/key k :seon.agent/task {:seon.task/id "lab/ctx"}}
                                      {:seon.task/id "lab/ctx" :seon.task/ns 'app.x :seon.task/name "ctx" :seon.task/plan "Make app.x/f0 pass."
-                                      :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx}]
+                                      :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :running :seon.task/branch :main/lab-ctx
+                                      :seon.task/reasons [{:reason :proof-red :symbol 'app.x-test/f0-passes} {:reason :behind :behind 3}]}]
                                     (concat (mapcat eval-tx (range 1 6))
                                             (for [t (range 3)] {:seon.model-call/id (str "lab/ctx#1/" t) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n t})
                                             [{:seon.message/id "m1" :seon.message/from {:seon.agent/key "user"} :seon.message/body "How is it going?"
@@ -230,6 +231,9 @@
         t (:tree (ctx/build (seon.db/index) db (aid db) :b))]
     (is (= "lab/ctx" (get-in t [:seon.agent/task :seon.task/id])) "the task, pulled whole by the agent's own ref")
     (is (= "Make app.x/f0 pass." (get-in t [:seon.agent/task :seon.task/plan])))
+    ;; docs/tasks.md#the-done-rule: what the judge said was not done is data the agent's pull holds, each reason a map its schema names
+    (is (= [{:reason :proof-red :symbol 'app.x-test/f0-passes} {:reason :behind :behind 3}] (get-in t [:seon.agent/task :seon.task/reasons]))
+        "the task's judged reasons, as the maps the done rule answers")
     (is (= 4 (count (:seon.model-call/_agent t))) "every model call, those its records name among them")
     (is (= 5 (count (:seon.eval/_agent t))) "every eval")
     (is (= ["m1"] (names (:seon.message/_to t) :seon.message/id)) "the messages it holds")
