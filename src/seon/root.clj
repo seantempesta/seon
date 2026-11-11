@@ -1941,15 +1941,19 @@
         (if (compare-and-set! tree-runs cur (assoc cur b {:n (dec (:n e))})) nil (recur))
         (let [p (promise)]
           (if (compare-and-set! tree-runs cur (assoc cur b {:dropping p}))
-            (do (when (and ag (not (gone-statuses (get-in (state sys) [:agents ag :status]))))
-                  (let [ev (events sys)]
-                    (kill! sys ag)
-                    (loop [] (let [x (a/<!! ev)] (when (and x (not (and (#{:ended :dead :killed} (:type x)) (= ag (:agent x))))) (recur))))
-                    (a/untap (:events-mult sys) ev)))
-                @(write! sys {:op :drop-tree-branch :branch b})
-                (swap! tree-runs dissoc b)
-                (deliver p true)
-                nil)
+            ;; whatever the drop meets, a run waiting on it is let in and the tree's entry cleared: a throw here never strands one
+            (try
+              (when ag
+                ;; the tap first, then the status: an agent that ends between the two has sent its end where this reads it
+                (let [ev (events sys)]
+                  (try
+                    (when-not (gone-statuses (get-in (state sys) [:agents ag :status]))
+                      (kill! sys ag)
+                      (loop [] (let [x (a/<!! ev)] (when (and x (not (and (#{:ended :dead :killed} (:type x)) (= ag (:agent x))))) (recur)))))
+                    (finally (a/untap (:events-mult sys) ev)))))
+              @(write! sys {:op :drop-tree-branch :branch b})
+              nil
+              (finally (swap! tree-runs dissoc b) (deliver p true)))
             (recur)))))))
 
 (defn tree-branch
@@ -1981,17 +1985,20 @@
       (do
         ;; counted before the branch is made or found: a last run's drop never takes it from under this one
         (tree-enter! b)
+        ;; the run's count is given back however it ends (a throw included): a tree's branch is always dropped by its last run
+        (let [ag-of (volatile! nil)]
+         (try
         (let [w @(write! sys {:op :branch-for-tree :branch b :tx (:tx c)})
               full (pdb/on-main (pdb/conn-main (:conn sys)) b)
               live (fn [] (some (fn [[aid a]] (when (and (= full (:branch a)) (not (gone-statuses (:status a)))) aid)) (:agents (state sys))))
               ;; the spawn's answer: the new agent, or, for an asker who came second, the refusal naming the live holder
               s (when-not (or (contract/error? w) (live)) @(request! sys 'spawn! nil {:branch b}))
               ag (when-not (contract/error? w) (or (live) (:id s) (:agent s)))
-              r (cond (contract/error? w) w
-                      (nil? ag) s
-                      :else @(prove! sys ag (set (map symbol names)) (or mode :judge)))]
-          (tree-leave! sys b ag)
-          r)))))
+              _ (vreset! ag-of ag)]
+          (cond (contract/error? w) w
+                (nil? ag) s
+                :else @(prove! sys ag (set (map symbol names)) (or mode :judge))))
+         (finally (tree-leave! sys b @ag-of))))))))
 
 (defn store-clean!
   "A promise of the writer's answer once its store is clean ({:ok :commits :flushes}): every
