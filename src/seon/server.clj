@@ -465,11 +465,14 @@
   "Whether seon_done may answer on db: task's own work is judged, so its outcome has left :running and :ready (judged green,
   waiting for its merge, minutes at most), or a root defect stopped the judge (defect, a fn of db). At :gate the judge has
   decided the task's own proofs and the merge gate runs the process tests its change reaches, which can take as long as the
-  run (longer than an MCP client waits): done answers there, saying so,
-  and the gate's verdict reaches the agent's page and the task's outcome. See docs/server.md#ops."
+  run (242 items, ~30 min on the standing system, longer than an MCP client waits): done answers there, saying so, and the
+  gate's verdict reaches the agent's page and the task's outcome. A gate with no process test to run (:seon.task/deferred
+  empty: only the candidate is analyzed) is its merge, minutes at most, so done waits through it as through :ready.
+  See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id ifn?] :boolean]}
   [db task defect]
-  (boolean (or (not (#{:running :ready} (:seon.task/outcome (d/pull db [:seon.task/outcome] [:seon.task/id task])))) (defect db))))
+  (let [{o :seon.task/outcome ts :seon.task/deferred} (d/pull db [:seon.task/outcome :seon.task/deferred] [:seon.task/id task])]
+    (boolean (or (not (or (#{:running :ready} o) (and (= :gate o) (empty? ts)))) (defect db)))))
 
 (defmethod op-answer :done [sys ag req]
   (if-let [{:keys [task env]} (work-of sys ag)]
