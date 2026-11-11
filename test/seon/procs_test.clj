@@ -465,21 +465,30 @@
             [_ outs] (step #'ap/agent-proc ap0 :from {:op :hello :t 1 :start-ms 1.0 :mem-mb 1.0 :interrupt-ok true :load-errors [e]})
             pr (filter #(= :problem (:op %)) (:to-api outs))]
         (is (= [[:a1 :seon.agent/load-failed 'app.t]] (mapv (juxt :agent (comp :seon.error/type :error) (comp :ns :error)) pr)))))
-    (testing "root answers its spawn with the typed error, and it is a fact of the agent's (written with its view: record-agents)"
-      (let [p (promise)
-            st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
-                                 :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
-            st (-> st (assoc-in [:view :agents :a1] {:status :spawning}) (assoc-in [:seon.root/spawning :a1] p))
-            o (volatile! {})
-            st' (#'root/set-agent st o :a1 {:ready true :load-errors [e]})
-            swp (:started-without-program (deref p 0 ::unanswered))]
-        (is (= :seon.agent/started-without-program (:seon.error/type swp)) (pr-str (deref p 0 ::unanswered)))
-        (is (= [e] (:errors swp)) "naming every load error")
-        (is (= :idle (get-in st' [:view :agents :a1 :status])) "the agent runs")
-        (let [msg (some #(when (= :tx (:op %)) (first (:tx-data %))) (:to-writer @o))]
-          (is (= {:seon.root/id :root} (:seon.message/from msg)) "and its first fact is a message from Seon to it")
-          (is (= [[:seon.agent/key "a1"]] (:seon.message/to msg)))
-          (is (clojure.string/includes? (:seon.message/body msg) "app.t") "naming what did not load"))))))
+    (testing "root answers its spawn with the typed error, and Seon tells the agent once, in a message"
+      (ts/test-branch!
+       (fn [_ conn]
+         (let [fresh (fn [p] (-> (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
+                                                   :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
+                                 (assoc :conn conn)
+                                 (assoc-in [:view :agents :a1] {:status :spawning}) (assoc-in [:seon.root/spawning :a1] p)))
+               p (promise) o (volatile! {})
+               st' (#'root/set-agent (fresh p) o :a1 {:ready true :load-errors [e]})
+               swp (:started-without-program (deref p 0 ::unanswered))
+               tx (some #(when (= :tx (:op %)) (:tx-data %)) (:to-writer @o))
+               msg (first tx)]
+           (is (= :seon.agent/started-without-program (:seon.error/type swp)) (pr-str (deref p 0 ::unanswered)))
+           (is (= [e] (:errors swp)) "naming every load error")
+           (is (= :idle (get-in st' [:view :agents :a1 :status])) "the agent runs")
+           (is (= {:seon.root/id :root} (:seon.message/from msg)) "and its first fact is a message from Seon to it")
+           (is (= [[:seon.agent/key "a1"]] (:seon.message/to msg)))
+           (is (clojure.string/includes? (:seon.message/body msg) "app.t") "naming what did not load")
+           (testing "once per standing set of errors: a second hello that meets them, main holding the message, writes none"
+             (d/transact conn (into [{:seon.agent/key "a1"}] tx))
+             (let [p2 (promise) o2 (volatile! {})]
+               (#'root/set-agent (fresh p2) o2 :a1 {:ready true :load-errors [e]})
+               (is (= :seon.agent/started-without-program (:seon.error/type (:started-without-program (deref p2 0 ::unanswered)))) "its spawn still answers typed")
+               (is (not-any? #(= :tx (:op %)) (:to-writer @o2)) "and no second message is written")))))))))
 
 (deftest fork-server-events
   (let [st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :log []}]
