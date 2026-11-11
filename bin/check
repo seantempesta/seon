@@ -109,7 +109,14 @@ trap 'exit 143' TERM INT HUP
 # every process a step starts takes it, not only those run starts (idle, orphan and lifecycle's cycles seeded the
 # checkout's task files onto an example program, whose cites name vars it does not hold: refused, 2026-11-10)
 export SEON_TASKS=$ROOT/target/check/tasks; mkdir -p "$SEON_TASKS"
-run() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" --profile scripted 2>&1 7>&- 3>&-) }
+# a step runs the binary only through run: a selection whose plan said none of its steps needs it (NEEDS empty: no build
+# checked, no store seeded) refuses the step that does, by name, rather than run it on no seeded store (a steps file
+# written by hand ran durable on an empty store, and it failed two phases later: task
+# seon.check/a-selection-derives-what-it-needs-from-its-steps)
+run() {
+  (( NEEDS )) || { echo "check: $1 runs target/seon on the seeded store, but this selection's steps-binary ($SEL/steps-binary) says none of its steps needs them: no store was seeded; select by bin/prove's plan, or name $1 in steps-binary"; return 70 }
+  (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" --profile scripted 2>&1 7>&- 3>&-)
+}
 run-embedding() { SEON_EMBED_TEXTS=64 run "$@" }
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green
 if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
