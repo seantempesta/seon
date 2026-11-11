@@ -2,7 +2,7 @@
   "Root's server as an outside agent reaches it (seon.server, through the built root:
   seon.agent-test/in-agent). Run: bin/test seon.server-test"
   (:require [clojure.test :refer [deftest is]] [jolt.fibers] [seon.agent-test :as at] [seon.contract :as contract] [seon.server] [clojure.data.json] [clojure.edn] [clojure.string]
-            [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d] [clojure.java.shell]))
+            [seon.test-store :as ts] [seon.task :as task] [datahike.api :as d] [clojure.java.shell] [clojure.core.async :as a]))
 
 (deftest each-op-has-its-answer
   ;; the ops table (each op's doc and args, the MCP tool list) and op-answer's methods are one set of
@@ -622,8 +622,7 @@
   ;; docs/merging.md#a-session-proves-through-root (Flow step 3, the client): bin/prove --root PORT asks that root to prove its
   ;; checkout's tree, prints each test's verdict as root streams it, and ends on the answer. The checkout is a worktree of this
   ;; tree with two test namespaces added, one green and one red (a run id in each, so no verdict is reused); each is asked
-  ;; alone, since an asker is answered at its first red (seon.prove's item-ended) and a green ending after it would print
-  ;; nothing. Its target/ holds links to this checkout's binary, libraries and home, what bin/prove --root runs
+  ;; alone, so each answer is one namespace's. Its target/ holds links to this checkout's binary, libraries and home, what bin/prove --root runs
   (let [here (seon.config/checkout)
         root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str here))])
         tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-prove-client-" (random-uuid))) (.mkdirs)))
@@ -641,6 +640,9 @@
       (doseq [[n body] [["green" "(deftest a-green (is (string? run)))"] ["red" "(deftest a-red (is (= \"another run\" run)))"]]]
         (spit (str wt "/test/seon/prove_client_" n "_test.clj")
               (str "(ns seon.prove-client-" n "-test (:require [clojure.test :refer [deftest is]]))\n\n(def run " (pr-str run) ")\n\n" body "\n")))
+      ;; a schema resource the tree changes: the binary baked main's, so the run must say its in-process verdicts read that bake
+      (let [f (str wt "/resources/seon/schemas/seon.config.proofs.edn")]
+        (spit f (clojure.string/replace-first (slurp f) "The most items" "The most items (a fixture's edit)")))
       (.mkdirs (java.io.File. (str wt "/target")))
       (doseq [^java.io.File l links]
         (java.nio.file.Files/createSymbolicLink (.toPath l) (.toPath (java.io.File. (str here "/target/" (.getName l)))) (make-array java.nio.file.attribute.FileAttribute 0)))
@@ -652,6 +654,8 @@
             none (prove "--root" (str free) "seon.prove-client-green-test")]
         (is (= 0 (:exit green)) (:out green))
         (is (= "PROVE OK" (last (:lines green))) (:out green))
+        (is (some #(clojure.string/includes? % "this tree changes baked values (resources/seon/schemas/seon.config.proofs.edn)") (:lines green))
+            (str "a tree that changes a baked value is told so, never silently judged on main's: " (:out green)))
         (is (some #(clojure.string/starts-with? % "PASS seon.prove-client-green-test/a-green") (:lines green))
             (str "the green's verdict printed as it landed: " (:out green)))
         (is (= 1 (:exit red)) (:out red))
@@ -721,3 +725,29 @@
         (doseq [^java.io.File l links] (.delete l))
         (clojure.java.shell/sh "git" "-C" here "worktree" "remove" "--force" wt)
         (seon.lib/remove-tree! tmp)))))
+
+;; docs/server.md#ops: a streaming :prove writes every verdict its answer names, though the answer came before the verdict's
+;; event (two paths with no order between them: root's events mult and the asker's answer) or the event never came (a
+;; sliding tap); one the events brought is not written twice. The race is forced: the run answers before any event is put.
+(deftest a-streamed-prove-writes-every-verdict-its-answer-names
+  (ts/test-branch!
+   (fn [_ conn]
+     (let [src (a/chan 8)
+           sys {:graph nil :ext (a/chan) :conn conn :events-mult (a/mult src)}
+           v1 {:test 'app.s-test/one :digest "d1" :status :pass :ms 3}
+           v2 {:test 'app.s-test/two :digest "d2" :status :pass :ms 4}
+           k "tree-x@d:app.s-test"
+           lines (atom [])
+           seen (promise)
+           stream (fn [run] (binding [seon.server/*emit* (fn [l] (swap! lines conj l) (when (= 'app.s-test/one (:test l)) (deliver seen true)))]
+                              (#'seon.server/prove-streamed sys :tree-x run)))]
+       ;; the answer first, no event at all: today nothing is written
+       (stream (fn [] {:key k :ran 2 :verdicts [v1 v2]}))
+       (is (= [['app.s-test/one :pass] ['app.s-test/two :pass]] (mapv (juxt :test :status) @lines)) (pr-str @lines))
+       (is (every? #(and (= :prove-verdict (:type %)) (= k (:key %))) @lines) "each line a verdict of the run")
+       ;; one brought live, then the answer: one is not written again, two is written from the answer
+       (reset! lines [])
+       (stream (fn [] (a/>!! src {:type :prove-verdict :key k :test 'app.s-test/one :digest "d1" :status :pass :ms 3})
+                 @seen
+                 {:key k :ran 2 :verdicts [v1 v2]}))
+       (is (= ['app.s-test/one 'app.s-test/two] (mapv :test @lines)) "each verdict once, the live one first")))))

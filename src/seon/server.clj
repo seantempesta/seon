@@ -392,21 +392,29 @@
 (defn- prove-streamed
   "run's answer (a function answering a run's answer), and before it each :prove-verdict event of root's whose run key is
   of branch's runs (seon.prove/run-key: \"<branch>@<digest>...\"), written through *emit* as it comes: the events tapped
-  before run starts (on a fiber of its own), let go after. See docs/server.md#ops."
+  before run starts (on a fiber of its own), let go after. The answer's :verdicts (seon.prove's answer-asker: every
+  verdict the run was told) are what the client is owed: one the events did not bring before the answer (another path
+  than the answer's, and a sliding tap) is written then, so none is lost and none written twice. See docs/server.md#ops."
   {:malli/schema [:=> [:cat :seon.root/sys :keyword ifn?] :any]}
   [sys branch run]
   (let [ev (c/events sys)
         done (a/chan 1)
-        prefix (str (name branch) "@")]
+        prefix (str (name branch) "@")
+        line #(select-keys % [:type :key :test :digest :status :ms :failures :held :load :max-load :queued])
+        id (juxt :test :digest :kind)
+        owed (fn [written answer]
+               (doseq [w (:verdicts answer) :when (not (written (id w)))]
+                 (*emit* (line (assoc w :type :prove-verdict :key (:key answer)))))
+               answer)]
     (fibers/spawn #(a/>!! done (run)))
-    (try (loop []
+    (try (loop [written #{}]
            (let [[v ch] (a/alts!! [done ev])]
-             (cond (= ch done) v
+             (cond (= ch done) (owed written v)
                    ;; root's events ended (it stopped): only the answer is left to wait on
-                   (nil? v) (a/<!! done)
-                   :else (do (when (and (#{:prove-verdict :prove-held} (:type v)) (str/starts-with? (str (:key v)) prefix))
-                               (*emit* (select-keys v [:type :key :test :digest :status :ms :failures :held :load :max-load :queued])))
-                             (recur)))))
+                   (nil? v) (owed written (a/<!! done))
+                   :else (if (and (#{:prove-verdict :prove-held} (:type v)) (str/starts-with? (str (:key v)) prefix))
+                           (do (*emit* (line v)) (recur (cond-> written (= :prove-verdict (:type v)) (conj (id v)))))
+                           (recur written)))))
          (finally (a/untap (:events-mult sys) ev)))))
 
 (defn ask-streamed
@@ -418,8 +426,10 @@
   [port m on-event]
   (let [unanswered #(contract/error :seon.server/unanswered #'seon.server/ask-streamed
                                     (str "root on port " port (case % :refused " refused the connection: no root listens there"
-                                                                     :eof " closed the connection before its answer"
-                                                                     :reset " reset the connection before its answer"))
+                                                                     ;; the system ended under the ask: a landing's restart (bin/update) is the
+                                                                     ;; usual one, and a red the asker could read as a test's says so
+                                                                     :eof " closed the connection before its answer: the system ended or restarted (a landing restarts it); ask again, the verdicts that landed are kept"
+                                                                     :reset " reset the connection before its answer: the system ended or restarted (a landing restarts it); ask again, the verdicts that landed are kept"))
                                     {:port port :why %})]
     ;; the edge where a client's socket failures become the one typed error (docs/failure-points.md)
     (try
@@ -441,16 +451,17 @@
         ;; a checkout's files, on their tree's branch (seon.root/prove-tree!), its verdicts streamed when asked; else an agent's branch, or main
         r (cond (and (:checkout req) (:stream req) *emit*) (prove-streamed sys (c/tree-branch (:tree req)) run)
                 (:checkout req) (run)
-                :else @(c/prove! sys ag (set (map symbol (:names req)))))]
+                :else @(c/prove! sys (if ag (or (c/agent-ref sys ag) {}) {:branch :main}) (set (map symbol (:names req)))))]
     ;; each red named with its first failing assertion (message, expected, actual), and the
     ;; process tests left to the judge with why (seon.agent/run-tests-forked's :deferred :why)
     (if (contract/error? r)
       r
       (cond-> (select-keys r [:key :ran :pass :fail :error :red :reused :ms])
         (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
-        (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))
+        (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))
+        (seq (:baked r)) (assoc :baked (:baked r))))))
 
-(defmethod op-answer :done [sys ag _]
+(defmethod op-answer :done [sys ag req]
   (if-let [{:keys [task env]} (work-of sys ag)]
     ;; the end first, as a turn loop's end is written, so the judge reads it
     (let [r @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task)) {:origin :outside})]
@@ -468,6 +479,9 @@
                         ;; a judge that has not moved by root's quiet never will: that, or root
                         ;; stopped, is the answer
                         (cond (contract/error? db) (assoc db :task task)
+                              ;; green, behind main alone (seon.reconcile's judgment, bounded by max-behind): handed back again,
+                              ;; which takes main first, as a model agent's turn loop does when it is told so
+                              (= :behind (outcome db)) (op-answer sys ag req)
                               :else (if-let [p (and (= :running (outcome db)) (c/defect db t "seon.reconcile"))]
                                       {:task task :defect (select-keys p [:seon.error/type :seon.error/message])}
                                       (let [files (fx/uncommitted (str (cfg/checkout)))]

@@ -24,7 +24,7 @@
   (:require [seon.edn :as sedn] [seon.profile :as profile] [seon.contract :refer [defn defn-]] [datahike.api :as d] [datahike.query.execute] [clojure.main] [clojure.string :as str] [seon.db :as pdb] [seon.ctx.wire :as wire] [seon.lib :as lib]
             [seon.sock :as sock] [jolt.async.remote :as remote] [konserve.jolt.fasl :as codec] [seon.fx :as fx] [seon.fork-server :as fs] [seon.agent-proc :as ap]
             [seon.writer :as writer] [seon.problems :as problems] [seon.prove] [seon.cron] [seon.vector :as vector] [seon.source :as source] [seon.reconcile :as reconcile] [seon.system :as system] [seon.program :as program] [seon.step :as step]
-            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [clojure.java.shell]
+            [seon.config :as cfg] [seon.contract :as contract] [seon.print :as print] [seon.task :as task] [seon.template :as tpl] [seon.render :as render] [seon.doc :as doc] [seon.error :as err] [seon.agent :as agent] [konserve.jolt.lmdb :as klmdb] [datahike.versioning] [clojure.java.shell]
             [clojure.core.async :as a]
             ;; the agent side, loaded here so the fork server and every agent inherit it compiled
             [seon.turn] [my.fx] [my.task] [my.user] [my.turn] [my.render] [my.branch] [my.doc] [my.test] [clojure.core.async.flow :as flow] [clojure.test]
@@ -294,7 +294,7 @@
                       (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:agent-facts [id]}})
                       ;; a hang is evidence: captured now, before a restart takes the process
                       (when (and pid (contains? (system/fx-owners (get-in st [:system :procs])) :fx/evidence))
-                        (step/out! o [:fx/evidence :in]
+                        (step/out! o [:fx/evidence :ask]
                                    {:req {:pid pid :dir (str (cfg/value :seon.config.root/runs-dir) "/stalls/" (:seon.task/name decl))
                                           :stderr (agent/stderr-path (get-in st [:view :store :agents-dir]) id)}
                                     :prio 0 :dest {:stall-evidence tid :agent id}}))
@@ -666,7 +666,7 @@
       :fx (let [owner (keyword "fx" (name (:kind m)))]
             (if (contains? (system/fx-owners (get-in st [:system :procs])) owner)
               (let [[st rid] (pend st p :fx nil)]
-                (step/out! o [owner :in] {:req (:req m) :prio 0 :dest {:rid rid}})
+                (step/out! o [owner :ask] {:req (:req m) :prio 0 :dest {:rid rid}})
                 st)
               (reply! st o p (contract/error :seon.fx/unknown-kind #'seon.root/ext-op (str "no effect kind " (:kind m))))))
       :fs (let [[st rid] (pend st p :fs nil)]
@@ -734,7 +734,7 @@
                              (seq unread) (deliver-rid st o rid {:unread unread})
                              ;; no process test reached: the writer's analysis of the candidate was the check
                              (empty? (:tests dest)) (deliver-rid st o rid {:value {:results {}}})
-                             :else (do (step/out! o [:fx/tests :in] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
+                             :else (do (step/out! o [:fx/tests :ask] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
                                                                      :prio (:prio dest 0) :dest {:rid rid}})
                                        st)))
         (:asked dest) (deliver-rid st o (:rid dest) (if (contract/error? r) r {:task (:asked dest)}))
@@ -1135,19 +1135,11 @@
   "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-session."
   "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/sessions) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
-(defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join to whoever started it (:seon.agent/_agents, the
-  user: its :seon.agent/agents holds root's session as one of the agents it started), pulled as the user's own pull is (seon.task/user-pattern: the
-  agents it started, each with the ones it started, to :seon.config.render/agent-tree-depth levels). Root's page draws that tree (seon.render.ui/agent's
-  person entry, the agents under it) and root's model asks for it at its REPL (my.user/sessions). See docs/users.md#roots-session."
-  {:malli/schema [:=> [:cat] [:vector :any]]}
-  [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
-           {:seon.agent/_agents (task/user-pattern)}))
-
 (defn root-session-tx
   "Root's session, made at the boot of a main that has none (`root-session-boot-tx`), an ordinary agent made the ordinary way: an agent
-  entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern
-  `root-session-pattern`, its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
+  entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern written once as
+  its role's name and its one addition, a join to whoever started it read by the user's own pattern ([:seon.db/agent-fact
+  {:seon.agent/_agents :seon.db/user-fact}]: what either schema gains later reaches it with no write), its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
   chat template (seon.template/request-tx), parked, its agent that entity, so the first message's wake spawns it. The user started it
   (:seon.task/started-by, the user's :seon.agent/agents: docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
   derives from its identity, so it cannot take a key too. See docs/users.md#roots-session."
@@ -1159,17 +1151,17 @@
       ;; started by the user: the user's tree holds root's session and what it launches (docs/users.md#who-started-whom); drawn as a
       ;; stage (seon.render.ui/stage, its own render, which a person turns back to the conversation): the page a fresh system opens on
       (let [user (task/sender (cfg/value :seon.config.root/user-name))]
-        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)
+        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]
                 :seon.render/hiccup 'seon.render.ui/stage}
                (assoc user :seon.agent/agents "root-session")]
               (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
 (defn root-session-boot-tx
   "At boot, root's session: made when main has none (`root-session-tx`; the owner's ruling, root's agent is there from boot), else
-  its pattern written again (`root-session-pattern`), so an edit of the agent's pattern reaches it at the next boot, its task and
-  conversation untouched. See docs/users.md#roots-session."
+  nothing: its pattern names its role's, so an edit of the agent's or the user's pattern reaches it with no write. See
+  docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
-  [db] (if (pdb/eid db :seon.agent/key "root") [{:seon.agent/key "root" :seon.ctx/pattern (root-session-pattern)}] (root-session-tx db)))
+  [db] (if (pdb/eid db :seon.agent/key "root") [] (root-session-tx db)))
 
 (defn import-tree!
   "Main's program on conn brought to the source tree {:root :dirs}, only what it changed since root's :seon.root/source fact
@@ -1963,30 +1955,56 @@
          (filter #(= :platform (:v %)) (d/datoms db :aevt :seon.error/class)))))
 
 (defn prove!
-  "Ask the test service (seon.prove) to prove a branch at its head, the tests of namespaces names
-  (a set of symbols; none: all it selects): agent id's own branch in mode :turn (as its turn
-  proves it; mode :judge, as root's judge does), or main (agent nil) in mode :main (every test
-  with no result at its digest: seon.agent/run-tests-forked). The run is keyed by the digest of what it reads,
-  its branch's program and tasks' proofs (seon.program/run-digest), as its turn's seon.agent/prove! takes it,
-  so a session's request and the turn's are one run, and a request for main and the run main's
-  own program commit started (seon.prove) are one. With on ({:checkout :tree}, a session's: prove-tree!), the service runs
-  its process tests, check steps and build too, on that checkout (docs/merging.md#the-test-service). A promise of the run's answer ({:key :ran
-  :reused :pass :fail :error :red :reports ...}), the same run for every asker of that key."
-  {:malli/schema [:function [:=> [:cat :seon.root/sys [:maybe :seon.agent/id]] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol]] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol] [:enum :turn :judge :main]] :seon.host/promise]
-                  [:=> [:cat :seon.root/sys [:maybe :seon.agent/id] [:set :symbol] [:enum :turn :judge :main] [:maybe [:map [:checkout :string] [:tree :string]]]] :seon.host/promise]]}
-  ([sys agent-id] (prove! sys agent-id #{}))
-  ([sys agent-id names] (prove! sys agent-id names (if agent-id :turn :main)))
-  ([sys agent-id names mode] (prove! sys agent-id names mode nil))
+  "Prove a reference to a db value, ref (the shape a kept db value is: {:branch b} its head, {:branch b :commit c} or
+  {:branch b :t t} a point in its history; docs/storage.md#a-kept-db-value-is-a-reference): the one call every prover asks
+  (my.agent/prove, the server's :prove, bin/prove through prove-tree!, main's commit run), the tests of namespaces names
+  (a set of symbols; none: all it selects). The run is the test service's (seon.prove), keyed by the digest of what it reads
+  (seon.program/run-digest), so every asker of one program at one point is one run. Main at its head is proved as main
+  (mode :main by default). Another branch at its head is proved by the agent holding it, or one spawned onto it (whose
+  spawn loads the branch's program over main's, seon.program/load-diff!). A point in the past always forks: an agent of
+  the branch is at its head, not at that point, so one is spawned on a new branch made at that commit (a :t is found as
+  its commit, datahike.versioning/commit-at-tx), which loads that point's program, runs, and is ended. With on
+  ({:checkout :tree}, a session's: prove-tree!), the service runs its process tests, check steps and build too, on that
+  checkout (docs/merging.md#the-test-service). A promise of the run's answer ({:key :ran :reused :pass :fail :error :red
+  :reports ...}), the same run for every asker of that key."
+  {:malli/schema [:function [:=> [:cat :seon.root/sys :map] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys :map [:set :symbol]] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys :map [:set :symbol] [:enum :turn :judge :main]] :seon.host/promise]
+                  [:=> [:cat :seon.root/sys :map [:set :symbol] [:enum :turn :judge :main] [:maybe [:map [:checkout :string] [:tree :string]]]] :seon.host/promise]]}
+  ([sys ref] (prove! sys ref #{}))
+  ([sys ref names] (prove! sys ref names nil))
+  ([sys ref names mode] (prove! sys ref names mode nil))
   ;; on: a session's checkout and its tree (prove-tree!), on which the service runs the run's process tests, steps and build
-  ([sys agent-id names mode on]
-  (if-let [b (if agent-id (get-in @(call! sys {:op :state}) [:agents agent-id :branch]) (pdb/conn-main (:conn sys)))]
-    (let [db (pdb/head (:conn sys) b)]
-      (call! sys (cond-> {:op :prove :branch (if agent-id b :main) :t (:max-tx db) :mode mode
-                          :digest (program/run-digest db)}
-                   agent-id (assoc :agent agent-id) (seq names) (assoc :names names) on (merge (select-keys on [:checkout :tree])))))
-    (doto (promise) (deliver (absent (get-in @(call! sys {:op :state}) [:agents agent-id]) agent-id))))))
+  ([sys ref names mode on]
+   (let [{:keys [branch commit t]} ref
+         main (pdb/conn-main (:conn sys))
+         b (if (= :main branch) main branch)
+         ask (fn [ag mode]
+               (let [db (pdb/head (:conn sys) (if ag (get-in (state sys) [:agents ag :branch]) main))]
+                 (call! sys (cond-> {:op :prove :branch (if ag (:branch (get-in (state sys) [:agents ag])) :main) :t (:max-tx db) :mode mode
+                                     :digest (program/run-digest db)}
+                              ag (assoc :agent ag) (seq names) (assoc :names names) on (merge (select-keys on [:checkout :tree]))))))]
+     (cond
+       ;; no branch: an agent root does not hold (agent-ref answered nil), answered so, never a spawn of nothing
+       (nil? b) (doto (promise) (deliver (refused 'seon.root/prove! "no branch to prove: the reference names none (an agent root does not hold?)" {})))
+       ;; a point in the past: a new branch made at its commit, its own agent, ended once answered
+       (or commit t)
+       (let [c (or commit (:commit (datahike.versioning/commit-at-tx (:conn sys) b t)))
+             ag (spawn! sys {:branch (keyword (str "at-" c)) :commit c})
+             r @(ask ag (or mode :judge))]
+         (kill! sys ag)
+         (doto (promise) (deliver r)))
+       (= b main) (ask nil (or mode :main))
+       :else (let [live (some (fn [[aid a]] (when (and (= b (:branch a)) (not (gone-statuses (:status a)))) aid)) (:agents (state sys)))
+                   ag (or live (spawn! sys {:branch b}))]
+               (ask ag (or mode :turn)))))))
+
+(defn agent-ref
+  "The reference prove! takes for agent id's branch at its head, {:branch b}, or nil when root holds no such agent. See
+  docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] [:maybe :map]]}
+  [sys agent-id]
+  (some->> (get-in (state sys) [:agents agent-id :branch]) (hash-map :branch)))
 
 (defn run-tests!
   "The agent's branch proved by the test service as root's judge proves it (prove! in mode
@@ -1994,7 +2012,7 @@
   promise of the run's answer {:pass :fail :error :reports [...]} (each test bounded by its
   work: :seon.config.agent/test-ticks)."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.agent/id] :seon.host/promise]}
-  [sys agent-id] (prove! sys agent-id #{} :judge))
+  [sys agent-id] (prove! sys (or (agent-ref sys agent-id) {}) #{} :judge))
 
 (defn- write! {:malli/schema [:=> [:cat :seon.root/sys :seon.writer/request] :seon.host/promise]}
   [sys req] (call! sys {:op :write :req req}))
@@ -2028,14 +2046,10 @@
           (if (compare-and-set! tree-runs cur (assoc cur b {:dropping p}))
             ;; whatever the drop meets, a run waiting on it is let in and the tree's entry cleared: a throw here never strands one
             (try
-              (when ag
-                ;; the tap first, then the status: an agent that ends between the two has sent its end where this reads it
-                (let [ev (events sys)]
-                  (try
-                    (when-not (gone-statuses (get-in (state sys) [:agents ag :status]))
-                      (kill! sys ag)
-                      (loop [] (let [x (a/<!! ev)] (when (and x (not (and (#{:ended :dead :killed} (:type x)) (= ag (:agent x))))) (recur)))))
-                    (finally (a/untap (:events-mult sys) ev)))))
+              ;; its agent stopped first: the kill's own answer, given once root's view holds it stopped (the api's :kill), is the
+              ;; wait's end; never an end event read from a tap, which slides and can drop the one event waited for
+              (when (and ag (not (gone-statuses (get-in (state sys) [:agents ag :status]))))
+                @(request! sys 'kill! ag nil))
               @(write! sys {:op :drop-tree-branch :branch b})
               nil
               (finally (swap! tree-runs dissoc b) (deliver p true)))
@@ -2046,6 +2060,18 @@
   its agent, its plan and its run key. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :string] :keyword]}
   [tree] (keyword (str "tree-" tree)))
+
+(defn baked-paths
+  "Of a checkout's changed paths, those a build bakes into the binary, so a process forked from the system's binary holds the
+  system's value of them however the tree's branch states it: the schema resources (seon.config/baked-schema-forms), the
+  shipped config (baked-shipped-text), system.edn (seon.system/baked-decl-text) and deps.edn (seon.fork-server/baked-deps-text).
+  A tree's run that changes one says so (prove-tree!'s :baked): its in-process verdicts read main's bake for them, until the
+  one call holds the runtime invariant for bakes. See docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat [:sequential :string]] [:vector :string]]}
+  [paths]
+  (filterv #(or (str/starts-with? % "resources/seon/schemas/") (= % cfg/shipped-file)
+                (= % "resources/seon/system.edn") (= % "deps.edn"))
+           paths))
 
 (defn prove-tree!
   "Prove the files of checkout (a worktree of this root's repository) at tree, its tree id (seon.fx/tree-id, what bin/build records):
@@ -2082,7 +2108,10 @@
               _ (vreset! ag-of ag)]
           (cond (contract/error? w) w
                 (nil? ag) s
-                :else @(prove! sys ag (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})))
+                ;; a verdict partly another program's says so: the baked files the tree changed (baked-paths), never silence
+                :else (let [r @(prove! sys {:branch full} (set (map symbol names)) (or mode :judge) {:checkout checkout :tree tree})
+                            baked (baked-paths (:paths c))]
+                        (cond-> r (and (seq baked) (map? r) (not (contract/error? r))) (assoc :baked baked)))))
          (finally (tree-leave! sys b @ag-of))))))))
 
 (defn store-clean!
