@@ -615,3 +615,27 @@
                                                 (or (gone (entity k)) (some-> (target k now) gone)))]
                       {:key k side now other ::gone}))]
     (vec (concat both (onto-gone ko gt :ours :theirs) (onto-gone kt go :theirs :ours)))))
+
+(defn replay
+  "The source's net change since base as the transactions a merge writes on the branch that receives it: one
+  group for each of the source's transactions that made part of it, in the source's order, each {:tx the source
+  transaction :meta that transaction's own facts (which branch wrote it, which eval; never its time) :ops
+  [[:db/add e a v] | [:db/retract e a v] ...]}. Ops, never datoms, so the receiving branch writes each group
+  as a new transaction of its own with a new time; entity ids are kept (they are the store's, issued once:
+  docs/storage.md#ids). A fact the source asserted and retracted again since base is in no group. A retraction
+  whose transaction the source's history does not hold (an attribute that keeps no history) rides the last
+  group. See docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:vector [:map [:tx :int] [:meta :map] [:ops [:vector :any]]]]]}
+  [base src]
+  (let [tx? (memoize (fn [e] (boolean (or (seq (d/datoms src :eavt e :db/txInstant)) (seq (d/datoms base :eavt e :db/txInstant))))))
+        [gone added] (d/datoms-diff base src :eavt [])
+        hist (d/history src)
+        ;; the source transaction that retracted a datom base holds: its last retraction after the datom's own
+        retracted-in (fn [dt] (:tx (last (filter #(and (not (:added %)) (> (:tx %) (:tx dt))) (d/datoms hist :eavt (:e dt) (:a dt) (:v dt))))))
+        adds (for [dt added :when (not (tx? (:e dt)))] [(:tx dt) [:db/add (:e dt) (:a dt) (:v dt)]])
+        rets (for [dt gone :when (not (tx? (:e dt)))] [(retracted-in dt) [:db/retract (:e dt) (:a dt) (:v dt)]])
+        last-tx (reduce max 0 (keep first (concat adds rets)))
+        by-tx (reduce (fn [m [t op]] (update m (or t last-tx) (fnil conj []) op)) (sorted-map) (concat rets adds))]
+    (vec (for [[t ops] by-tx]
+           {:tx t :ops ops
+            :meta (into {} (for [dt (d/datoms src :eavt t) :when (not= :db/txInstant (:a dt))] [(:a dt) (:v dt)]))}))))

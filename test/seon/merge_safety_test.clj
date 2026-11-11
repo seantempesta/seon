@@ -453,3 +453,22 @@
          (fn [_ theirs]
            (is (= #{#{:note/text :note/agent}} (:unidentified theirs)) "a note bears no identity: the change names its attributes")
            (is (empty? (:keys theirs)) "and no key falls back to its entity id"))))
+
+(deftest a-replay-is-the-sources-transactions-in-order-and-brings-its-net-change
+  (branched
+   (fn [conn bc br]
+     (let [base @conn t (pdb/eid base :task/name :gen/t)]
+       (apply! bc :branch [[:db/add t :task/plan "first"]])
+       (apply! bc :branch [{:task/name :gen/new :task/plan "made on the branch" :task/status :held}])
+       (apply! bc :branch [[:db/add t :task/plan "second"] [:db/add t :task/status :ready]])
+       (apply! bc :branch [{:task/name :gen/gone :task/plan "made and retracted" :task/status :held}])
+       (apply! bc :branch [[:db/retractEntity (pdb/eid @bc :task/name :gen/gone)]])
+       (let [groups (pm/replay base @bc)
+             landed (reduce (fn [db g] (pdb/speculate-db db (:ops g))) @conn groups)]
+         (is (= 3 (count groups)) "one group for each source transaction that made part of the net change; the entity made and retracted is in none")
+         (is (apply < (map :tx groups)) "in the source's order")
+         (is (every? #(= br (:seon.tx/branch (:meta %))) groups) "each carries its source transaction's own facts: the branch that wrote it")
+         (is (not-any? #(contains? (:meta %) :db/txInstant) groups) "and never its time: the receiving branch gives each a new one")
+         (spit "/tmp/fsafe/replay-groups.out" (pr-str {:groups (mapv :ops groups) :first-group-through-the-write-check (error-of #(apply! conn :main (:ops (first groups))))}))
+         (is (= (:keys (pm/net-change base @bc)) (:keys (pm/net-change base landed)))
+             "main after the replay holds the branch's net change, key for key, by identity"))))))
