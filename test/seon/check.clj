@@ -1335,12 +1335,14 @@
    "memory-gauge"
    ;; the largest block a test allocates (one process, no fan-out: docs/machine.md#processes); Chez keeps a
    ;; bytevector this large in place (a large object is never copied by a collection)
-   #(let [before (lib/real-mb)
+   ;; each reading after a collection: the block's own allocation may start one, and in a large process (a test child forked from
+   ;; an agent holding 540 MB) what it freed came off the charge, so a 64 MB block read 53.7 MB (batch 82, through the system)
+   #(let [before (do (System/gc) (lib/real-mb))
           block (byte-array (* 64 1024 1024))]
       ;; bytes macOS cannot compress: one byte repeated was compressed under the machine's pressure, and the
       ;; charge read 206 MB of the 300 written (a 300 MB block then; 64 MB resolves above the gauge's noise) (run 29's gate, 2026-10-30)
       (.nextBytes (java.util.Random. 42) block)
-      (let [held (lib/real-mb)
+      (let [held (do (System/gc) (lib/real-mb))
             child (in-child-bounded (fn [] (let [b0 (lib/real-mb)]
                                           (doseq [i (range 0 (* 8 1024 1024) 16384)] (aset block i (byte 1)))
                                           (< 7 (- (lib/real-mb) b0) 20))))]
