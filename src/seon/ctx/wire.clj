@@ -482,7 +482,14 @@
                 ;; the page whole, unless it shows nothing (what moved from nothing to it is no edits: a pull holding no page)
                 q0 (page-message id 'my.render/diff [q0 q1] edits)
                 ;; the first point: the record whole as data (Sean, 2026-11-11: "the @ctx and the hiccup displayed in full"), then the page
-                :else (into (page-message (lib/id (lib/digest (str "ctx " q1))) 'my.render/ctx [q1] (ctx-at db a p1))
+                :else (into (page-message (lib/id (lib/digest (str "ctx " q1))) 'my.agent/describe ["@ctx"]
+                                          ;; the record described, never printed whole (owner, 2026-11-11: "Instead of dumping the whole @ctx value we are
+                                          ;; now doing this more metadata approach"): what (describe @ctx) answers at this point
+                                          (let [d0 (db-at db p1) ix0 (program/index-of-db d0)
+                                                es (with-meta (render/describe ix0 (ctx-at db a p1) [] (cfg/value :seon.config.agent/describe-depth))
+                                                     {:seon.render/schema :my.agent/described})]
+                                            ;; printed as an eval of it prints, through its schema's model render (seon.render/model)
+                                            (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es)))
                             (page-message id 'my.render/page [q1] h1))))))
 
 (defn model-call-msgs

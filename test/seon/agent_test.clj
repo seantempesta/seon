@@ -1124,7 +1124,7 @@
                              (str "(let [db (seon.agent/db) k (:key @seon.agent/state)"
                                   "      basis (fn [n] {:commit (datahike.api/commit-id db) :task " (pr-str task) " :turn n :max-turns 2 :origin :model :agent k})"
                                   "      msgs (fn [n] (let [b (:seon.model-call/basis (datahike.api/pull db '[:seon.model-call/basis] [:seon.model-call/id (seon.lib/call-id k n)]))] (:messages (seon.ctx.wire/render (datahike.api/commit-as-db (:store db) (:commit b)) b))))"
-                                  "      page? (fn [m] (boolean (some-> m :tool-calls first :code (.startsWith \"(my.render/\"))))"
+                                  "      page? (fn [m] (boolean (some-> m :tool-calls first :code (#(or (.startsWith % \"(my.render/\") (.startsWith % \"(my.agent/describe \"))))))"
                                   "      calls (fn [ms] (vec (keep #(some-> % :tool-calls first :code) (remove page? ms))))"
                                   "      pages (fn [ms] (vec (for [[a b] (partition 2 1 ms) :when (page? a)] (:content b))))"
                                   "      m1 (msgs 1) m2 (msgs 2) m3 (:messages (seon.ctx.wire/render db (basis 3)))"
@@ -1135,7 +1135,7 @@
                                   "   :by (vec (sort (datahike.api/q '[:find [?c ...] :where [?e :seon.eval/by ?s] [?s :seon.root/id :root] [?e :seon.eval/code ?c]] db)))"
                                   "   :pages [(count (pages m1)) (count (pages m2)) (count (pages m3))]"
                                   "   :hashes [(redrawn 1) (redrawn 2)]"
-                                  "   :first-page (str (first (pages m1)))"
+                                  "   :first-page (apply str (pages m1))"
                                   "   :first-code (some-> (first (filter page? m1)) :tool-calls first :code)})")])
                           {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
         {:keys [calls prefix by pages hashes first-page first-code]} (:value r)]
@@ -1147,7 +1147,7 @@
     (is (= [] by) "Seon ran no eval: the page is its message")
     (is (= [2 2 2] pages) "the record and the page whole once, in the first request; nothing they show moved after, so no other message")
     (is (every? (fn [[sent redraw]] (and (string? sent) (= sent redraw))) hashes) (str "the hash a turn recorded is its redraw's: " (pr-str hashes)))
-    (is (str/starts-with? first-code "(my.render/ctx {:commit #uuid \"") "the first request holds the record first, as the call (my.render/ctx p), then the page")
+    (is (= "(my.agent/describe @ctx)" first-code) "the first request describes the record first, (describe @ctx), then the page")
     (is (str/includes? first-page "Your task") "the task's part")))
 
 (deftest a-printed-page-call-runs-at-the-agents-repl
@@ -1262,7 +1262,7 @@
         (in-agent (fn [{:keys [task]}]
                     [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                      (str "(seon.turn/work! {:task " (pr-str task) " :max-turns 2})")
-                     (str "(let [db (seon.agent/db)] (count (filter #(some-> % :tool-calls first :code (.startsWith \"(my.render/\")) (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :turn 3 :max-turns 2 :origin :model :agent (:key @seon.agent/state)})))))")
+                     (str "(let [db (seon.agent/db)] (count (filter (fn [m] (some-> m :tool-calls first :code (as-> c (or (.startsWith c \"(my.render/\") (.startsWith c \"(my.agent/describe \"))))) (:messages (seon.ctx.wire/render db {:commit (datahike.api/commit-id db) :task " (pr-str task) " :turn 3 :max-turns 2 :origin :model :agent (:key @seon.agent/state)})))))")
                      "(count (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/origin :model]] (seon.agent/db)))"])
                   {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})]
     (is (= 2 (:value calls)) "the second wake took a turn, so it had the chance to show the page")

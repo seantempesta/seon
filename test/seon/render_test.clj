@@ -1361,7 +1361,7 @@
                                                                                 :seon.error/message "no model provider"}}])
                 html (page (-> st (assoc :main-db db) (assoc-in [:branches [:debug :a1] :db] db) (assoc-in [:tab [:debug :a1] :open] #{"d-turn-o2"})) e0)]
             (is (str/includes? html "no model provider") "its error, by the error's render")
-            (is (str/includes? html "my.render/ctx") "beside what it sent: the record, the turn's first generated eval")))))))
+            (is (str/includes? html "my.agent/describe") "beside what it sent: the record described, the turn's first generated eval")))))))
 
 (deftest a-page-opened-before-its-first-turn-takes-it
   ;; the browser check of 4bc612cf89: a debug page opened at "no model turn yet" never showed the turns that
@@ -4450,3 +4450,35 @@
     (is (not (str/includes? r "proof-red")) "no keyword read raw")
     (is (= "root restarted" (:reason (ui/standing {} {:seon.task/outcome :cap :seon.task/reason "root restarted"})))
         "a reason with no data behind it is its string")))
+
+(deftest describe-says-what-a-value-holds-by-path
+  ;; docs/agent.md#looking-at-what-you-pulled (owner, 2026-11-11: "Instead of dumping the whole @ctx value we are now doing this more
+  ;; metadata approach"): a value's paths and what each holds, never the value shown; keys, never positions; a plain value has no schema
+  (let [v {:a 1 :n "demo/f" :s (apply str (repeat 20 "a word ")) :m {:b [1 2 3]} :ms (sorted-map 5 {:db/id 5 :x 1} 3 {:db/id 3 :x 2})}
+        es (r/describe (seon.db/index) v [] 2)
+        by (into {} (map (juxt :path :holds)) es)]
+    (is (= 1 (by [:a])) "a scalar as itself")
+    (is (= "demo/f" (by [:n])) "a name as itself")
+    (is (= {:chars 140} (by [:s])) "text as its size, however short: what it says is read by its path")
+    (is (= {:map 1 :keys [:b]} (by [:m])) "a map as its count and keys")
+    (is (= {:vector 3} (by [:m :b])) "one level in, at depth 2")
+    (is (= {:members 2 :ids [3 5]} (by [:ms])) "a map keyed by ids as its members")
+    (is (every? #(not= ::none (get-in v (:path %) ::none)) es) "every entry's path reads back by get-in")
+    (is (not-any? :schema es) "a plain value has no schema")
+    (is (= [{:path [:a] :holds 1}] (r/describe (seon.db/index) v [:a] 2)) "a path to a scalar describes it alone")))
+
+(deftest an-answer-says-what-it-is-and-what-reads-more
+  ;; docs/render.md#a-render-is-a-value-printed-once (Point's ruling 2026-11-11, one way for every tool's answer): a value whose schema
+  ;; says what brings more (:seon.render/more) prints as what it is (its description's first sentence), the value, and the forms that
+  ;; act on it, each naming the answer by its handle; a plain value prints as itself: (+ 1 1) answers 2
+  (let [ix (seon.db/index)
+        render #(r/model ix %)
+        es (with-meta [{:path [:a] :holds 1}] {:seon.render/schema :my.agent/described})
+        text (seon.print/response-text {:handle 'result/e1 :value es} render)
+        plain (seon.print/response-text {:handle 'result/e2 :value 2} render)]
+    (is (str/includes? text "What a value holds, by path") (str "what it is, from its schema: " text))
+    (is (not (str/includes? text "See docs/")) "the first sentence only")
+    (is (str/includes? text "[:a]") "the value")
+    (is (str/includes? text "(get-in result/e1 path)") "a form that reads more, naming the answer by its handle")
+    (is (not (str/includes? text "(get-in v path)")) "never by a placeholder")
+    (is (and (str/includes? plain ":value 2") (not (str/includes? plain ":is"))) (str "a plain value is itself: " plain))))
