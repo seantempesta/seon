@@ -1017,9 +1017,9 @@
         ;; bounded by :seon.config.agent/test-ticks: root dies long before the bound
         _ (c/run-tests! sys b)
         ;; busy when root dies: each loop began, and the test child is forked (its pid on
-        ;; the event), or the run answered first (no child)
+        ;; the event), or the run answered first (no child); the plan's answer (a :tests with no counts) is neither
         [_ _ forked] (await-each ev [(started a "(loop [] (recur))") (started (:id cl) "(loop [] (recur))")
-                                     #(and (= b (:agent %)) (#{:tests-started :tests} (:type %)))])
+                                     #(and (= b (:agent %)) (or (= :tests-started (:type %)) (and (= :tests (:type %)) (some? (:pass %)))))])
         test-child (when (= :tests-started (:type forked)) (:pid forked))
         pids (keep #(get-in (c/state sys) [:agents % :pid]) [a b (:id cl)])]
     (out! "PIDS " (clojure.string/join " " (concat pids [(get-in (c/state sys) [:fork-server :pid])] (when test-child [test-child]))))

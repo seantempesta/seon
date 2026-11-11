@@ -1296,6 +1296,7 @@
   what the branch changed; else the plan's), those deferred to the gate (process tests), those reused at their digest with
   the reports they read as, and run, the rest, with each one's digest; or {:unread error} when the cache could not be read.
   See docs/merging.md#the-test-service."
+  {:malli/schema [:=> [:cat [:set :symbol] [:enum :turn :judge :main] [:maybe [:set :symbol]]] :map]}
   [proofs mode names]
   ;; the tests of the namespaces a request names are selected as proofs are: named, they run whatever the branch changed
   (let [named (when (seq names) (named-tests (db) names))

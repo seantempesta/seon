@@ -214,7 +214,9 @@
                         [{:type :error :var (str "#'" t) :message (:seon.error/message r) :seon.error/type (:seon.error/type r)}]
                         (filterv #(= (str "#'" t) (:var %)) (:reports (:answer r)))))
         reports (into (vec (:reused-reports base)) (mapcat (fn [[t r]] (own t r))) (sort-by (comp str key) results))
-        counts (frequencies (map :type reports))]
+        ;; the reused reports' types, and each item's own counts (its answer keeps one pass report a test, its counts every assertion)
+        counts (merge-with + (frequencies (map :type (:reused-reports base)))
+                           (apply merge-with + {} (for [[_ r] results] (if (contract/error? r) {:error 1} (select-keys (:answer r) [:pass :fail :error])))))]
     (cond-> {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :reports reports
              :digests (into (or (:digests base) {}) (for [[_ r] results :when (map? (:answer r)) [t d] (:digests (:answer r))] [t d]))
              :fns (into {} (for [[_ r] results :when (map? (:answer r)) [t f] (:fns (:answer r))] [t f]))
@@ -256,14 +258,19 @@
 
 (defn- settle
   "Outputs of the queue (ask-items, batch-ended) carried out: an :asker-answered of run k finishes it with its answer
-  (run-answer of its plan and its items' results); every other output passes through. Answers [st outputs]."
+  (run-answer of its plan and its items' results, or the typed error of an item with no verdict); every other output passes through. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map [:sequential :map]] [:tuple :map [:vector :map]]]}
   [st outs]
   (reduce (fn [[st acc] o]
             (if (= :asker-answered (:op o))
               (let [k (:asker o) run (get-in st [:runs k])]
                 (if run
-                  (let [[st more] (finish st k (run-answer (:base run) (:results (:r o))))] [st (into acc more)])
+                  ;; an item with no verdict (its fork refused, its batch errored) is the run's answer: the typed error, as a run
+                  ;; that could not run answers; the verdicts that did land are the cache's
+                  (let [rs (:results (:r o))
+                        [st more] (finish st k (or (some (fn [[_ r]] (when (contract/error? r) r)) (sort-by (comp str key) rs))
+                                                   (run-answer (:base run) rs)))]
+                    [st (into acc more)])
                   [st acc]))
               [st (conj acc o)]))
           [st []] outs))
