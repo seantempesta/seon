@@ -738,7 +738,6 @@
                 id (update :seon.eval/response #(into {:handle (symbol "result" (lib/id (first (clojure.string/split h #"-"))))} %))))
       schema (assoc :seon.eval/schema schema)
       basis (assoc :seon.eval/basis basis)
-      (:seon.render/page (meta v)) (assoc :seon.eval/page (:seon.render/page (meta v)))
       (:issued req) (assoc :db/id (:issued req))
       (:intent req) (assoc :seon.eval/intent (:intent req))
       (:call-id req) (assoc :seon.eval/call-id (:call-id req))

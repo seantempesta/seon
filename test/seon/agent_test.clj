@@ -1211,6 +1211,22 @@
     (is (str/includes? (:content r1) "boom") "the second call's error")
     (is (str/includes? (:content r2) ":value 2") (str "(inc a) ran after the call that threw: " (:content r2)))))
 
+(deftest a-model-call-holds-no-errors-or-finish
+  ;; docs/turn.md#the-turn-is-a-number: a turn records its call's forms, ms and model, and nothing reads a count of its errors or how its reply
+  ;; finished, so a call holds neither (:seon.model-call/errors, :seon.model-call/finish); nor an eval the page its value carried (:seon.eval/page)
+  (let [[_ _ held] (in-agent (fn [{:keys [task]}]
+                             [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
+                              "(seon.repl/eval-string \"(with-meta [1] {:seon.render/page :p})\" {\"ns\" \"user\" :origin :outside})"
+                              (str "(let [db (seon.agent/db)]"
+                                   " {:calls (mapv #(datahike.api/pull db '[*] %) (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/forms _]] db))"
+                                   "  :evals (mapv #(datahike.api/pull db '[*] %) (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/code _]] db))})")])
+                           {:config {:seon.config.ai/script 'seon.fixtures/calls-one-throws}})
+        {:keys [calls evals]} (:value held)]
+    (is (seq calls) (str "a turn left its model call: " (pr-str held)))
+    (is (seq evals) "and its evals")
+    (is (every? #(not-any? #{:seon.model-call/errors :seon.model-call/finish} (keys %)) calls) (str "no errors or finish on a call: " (pr-str calls)))
+    (is (not-any? :seon.eval/page evals) (str "no page on an eval: " (pr-str evals)))))
+
 (deftest a-call-after-an-error-answer-still-runs
   ;; docs/prompt.md: a call answering an error value (a refused edit!) is one result; the reply's later calls run, as after a throw (owner, 2026-11-08)
   (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
