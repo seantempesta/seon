@@ -24,7 +24,7 @@
                     :reports (vec (for [i (range 51)]
                                     {:var (str "#'seon.reconcile-test/a-test-" i) :type :error :exit {:signal 9}
                                      :message "jolt: out of memory: the heap ceiling of 2139350976 bytes was exceeded"
-                                     :trace (apply str (repeat 1200 "gc-enforce-ceiling! enable-interrupts seon.root/start!/start!\n"))}))}}
+                                     :trace (apply str (repeat 1200 "gc-enforce-ceiling! enable-interrupts seon.system/start!/start!\n"))}))}}
         frame-bytes (alength (sock/frame v))
         sent (promise)
         w (doto (Thread. #(deliver sent (sock/send! a v))) (.setDaemon true) (.start))

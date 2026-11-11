@@ -122,7 +122,7 @@
 ;; ready set, so a pass costs what changed plus what is in flight, never the number of tasks.
 
 (def ^:private watched-ns
-  #{"seon.task" "seon.root" "seon.config.agent" "seon.config.merge"})
+  #{"seon.task" "seon.system" "seon.config.agent" "seon.config.merge"})
 
 (def ^:private watched-attrs
   "The agent attributes the index reads: when its root started it, and when (a start writes both, and the environment with
@@ -457,7 +457,7 @@
           ;; nobody asking (owner's ruling, 2026-10-27: process tests the change reaches run automatically at the judge)
           (and (empty? rs) merge?)
           (let [self (get-in idx [:root :started-by])
-                ;; a test cannot be its own gate (:seon.root/started-by): left out, with no result recorded
+                ;; a test cannot be its own gate (:seon.system/started-by): left out, with no result recorded
                 deferred (vec (sort-by str (remove #(= self (str %)) deferred)))]
             (cond (and (empty? deferred) (nil? (get-in idx [:root :gate-checkout]))) {:outcome :ready :reasons rs}
                   ;; no process test reached: :gate analyzes the candidate's files and runs nothing (docs/merging.md#a-merge-runs-what-the-change-reaches)
@@ -664,9 +664,9 @@
 
 (defn quiescent
   "Main's last quiescence report on db ({:t :root-causes}, written by the reconciler proc), or nil."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/quiescent]]}
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.system/quiescent]]}
   [db]
-  (:seon.root/quiescent (d/pull db [:seon.root/quiescent] [:seon.root/id :root])))
+  (:seon.system/quiescent (d/pull db [:seon.system/quiescent] [:seon.system/id :root])))
 
 (defn last-commit
   "The merges commit of db's last merged task (the write-back's sha), or nil."
@@ -678,9 +678,9 @@
   "The next generation on db: the last merges commit the :build effect built or refused
   ({:commit :checkout :binary :ms} or {:commit :ms :error}, written by my.root/build!), or
   nil."
-  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.root/generation]]}
+  {:malli/schema [:=> [:cat :seon.host/db] [:maybe :seon.system/generation]]}
   [db]
-  (:seon.root/generation (d/pull db [:seon.root/generation] [:seon.root/id :root])))
+  (:seon.system/generation (d/pull db [:seon.system/generation] [:seon.system/id :root])))
 
 ;; ---- queries, over one index (list it once: (index db)) -----------------------------
 
@@ -972,7 +972,7 @@
 (defn- dead-tx
   "Task id's agent's death on main: the end it wrote on its branch before it exited (its
   reason, and its error as the cause), beside e, the death root observed (:seon.agent/died:
-  exit status, stderr tail, last op; or :seon.root/no-agent or :seon.root/ended). A silent death wrote no end. The task is
+  exit status, stderr tail, last op; or :seon.system/no-agent or :seon.system/ended). A silent death wrote no end. The task is
   held for root (the hold of `judgment`), or closed when it no longer runs."
   {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :seon.error/base [:maybe :map]] [:vector :any]]}
   [st id e end]
@@ -1020,7 +1020,7 @@
         one (fn [[st o]] [st [o]])
         now (System/currentTimeMillis)
         ;; its agent died: the one error map root answered with (:seon.agent/died: exit
-        ;; status, last op, stderr tail; or :seon.root/no-agent or :seon.root/ended), and the end the agent wrote
+        ;; status, last op, stderr tail; or :seon.system/no-agent or :seon.system/ended), and the end the agent wrote
         ;; on its branch before it exited, read from the branch
         dead (fn [st e] (one (request (assoc-in st [:flights id :died] e) id :dead-read
                                       {:op :write :req {:op :branch-db :branch (get-in act [:env :branch])}})))
@@ -1037,7 +1037,7 @@
       ;; root answers a spawn at its agent's hello, or at the end the agent met first: a death,
       ;; a failed spawn or a stop (each names the agent) is this task's death, its start
       ;; written first; the flight keeps the error's base and exit status, which `dead` records
-      :spawned (if-let [ag (or (:id r) (when (#{:seon.agent/died :seon.agent/failed :seon.root/no-agent :seon.root/ended} (:seon.error/type r)) (:agent r)))]
+      :spawned (if-let [ag (or (:id r) (when (#{:seon.agent/died :seon.agent/failed :seon.system/no-agent :seon.system/ended} (:seon.error/type r)) (:agent r)))]
                  (one (write (cond-> (assoc-in st [:flights id :agent] ag)
                                (:seon.error/type r) (assoc-in [:flights id :died-at-spawn]
                                                               (select-keys r [:seon.error/type :seon.error/operation :seon.error/message :exit :agent])))
@@ -1075,7 +1075,7 @@
                 ;; a wake whose parked process had ended before the work! reached it (root's
                 ;; view: ended or never there): the agent took nothing, so it is lost, not a death, and
                 ;; the task starts again as a spawn, a load of the session (docs/turn.md#parked)
-                (and (= :wake (:op act)) (#{:seon.root/ended :seon.root/no-agent} (:seon.error/type r)))
+                (and (= :wake (:op act)) (#{:seon.system/ended :seon.system/no-agent} (:seon.error/type r)))
                 (one (write st id :done (into (task/move-tx id :running :lost {:seon.task/reason (str "its parked process was gone: " (:seon.error/message r))})
                                               (ended-ms-tx (:db st) id now))))
                 (contract/error? r) (dead st r)
@@ -1155,7 +1155,7 @@
                        files (doc/files (:db r) paths)]
                    ;; paths main holds no text for: no commit, held on each member's task as a lost write-back
                    (if (empty? files)
-                     (one (write st id :done (commit-tx (:db st) (contract/error :seon.root/no-source-text #'seon.reconcile/commit-tx
+                     (one (write st id :done (commit-tx (:db st) (contract/error :seon.system/no-source-text #'seon.reconcile/commit-tx
                                                                                  (str "main holds no text for " (str/join ", " paths)) {:paths (vec paths)})
                                                         members paths [])))
                      (one (request (assoc-in st [:flights id :writeback :written] (vec (keys files))) id :committed
@@ -1169,7 +1169,7 @@
 
 (defn- quiet
   "Report quiescence positively, once per quiet spell: when no flight is in the air and no
-  task is live after a pass that started nothing, write main's :seon.root/quiescent (the
+  task is live after a pass that started nothing, write main's :seon.system/quiescent (the
   t judged, and the root causes), and ask the writer to collect the store (:collect: it sweeps
   only when a branch is gone, and root refuses it while an agent is live). Their answers are
   not awaited (no flight), and the commits they make touch only root, which does not end the
@@ -1179,13 +1179,13 @@
   (if (or (:quiet st) (seq outs) (seq (:flights st)) (seq (:live (:idx st))))
     [st outs]
     (let [fact {:t (:t st) :root-causes (root-causes (:idx st))}
-          [st q] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data [{:seon.root/id :root :seon.root/quiescent fact}]}})
+          [st q] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :tx :branch :db :tx-data [{:seon.system/id :root :seon.system/quiescent fact}]}})
           [st c] (step/ask st [:reconciler :answers] nil {:op :write :req {:op :collect}})]
       ;; :report, the report's request until its answer: a wait is answered once main holds it
       [(assoc st :quiet true :quiescent fact :report (:tag q)) [q c]])))
 
 (defn- answer-waits
-  "Deliver each held wait on main (seon.root/await-db, through :quiet) whose :after the
+  "Deliver each held wait on main (seon.system/await-db, through :quiet) whose :after the
   reconciler has seen, {:quiet t}, once quiet: nothing in flight, nothing live, nothing left to
   start, so nothing root runs will commit again until something outside it does; and the spell's
   report committed (its write answered), so a wait reads it. A wait asked before the reconciler
@@ -1301,7 +1301,7 @@
   Starts deepest-first (finish chains under way)."
   {:malli/schema :seon.step/step-fn}
   ([] {:params {:boot "root's boot id"
-                :judge "outside agents' tasks to judge {:op :judge :task :env :agent}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.root/await-db)"}
+                :judge "outside agents' tasks to judge {:op :judge :task :env :agent}, and waits on main {:op :quiet :after t :p promise}, each answered at the first quiet at or after t (external; seon.system/await-db)"}
        :ins {:main "main's commits" :answers "the api's answers" :wake "an agent a message reached, {:agent key}"} :outs {:to-api "requests"}
        :workload :io
        :ping-map-fn (fn [st] {:seen (:seen st 0) :lists (:lists st 0) :t (:t st) :flights (count (:flights st)) :pending (count (:pending st)) :behind (count (:behind st))
@@ -1325,7 +1325,7 @@
                        (reduce #(wake %1 db %2) (index db) (into (:woken (:idx st)) (:late (:idx st)))))
                  ;; a commit touching tasks, runs or config keys ends a quiet spell (root's own
                  ;; quiescent fact does not)
-                 work? (or (not next?) (some (fn [[_ _ a]] (and (keyword? a) (watched-ns (namespace a)) (not= "seon.root" (namespace a)))) (:ops m)))
+                 work? (or (not next?) (some (fn [[_ _ a]] (and (keyword? a) (watched-ns (namespace a)) (not= "seon.system" (namespace a)))) (:ops m)))
                  ;; a commit holding only the writes of a refused start (the outcome and what it sets, seon.task/refused-tx) changes
                  ;; nothing that refused it; any other work, an edit of the refused task itself too, lets it ask again
                  only-refused? (and next? (every? (fn [[_ e a]] (or (not (and (keyword? a) (watched-ns (namespace a))))

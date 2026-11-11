@@ -1,9 +1,9 @@
 #!/bin/zsh
-# bin/root [start [--reindex] [ARGS]|stop|kill|status|next]   this checkout's standing root, on this checkout's own
+# bin/system [start [--reindex] [ARGS]|stop|kill|status|next]   this checkout's standing root, on this checkout's own
 # ports (bin/ports): its server (reached by bin/mcp, or `printf '{:op :agents}\n' | bin/ask
 # PORT`) and its dashboard. `start` (the default) runs it detached: double-forked so it
 # is re-parented to PID 1, because the tool host kills a background task's whole process tree
-# when the task stops or its agent exits (ISOLATION, 2026-10-21). It runs until `bin/root stop`
+# when the task stops or its agent exits (ISOLATION, 2026-10-21). It runs until `bin/system stop`
 # closes its stdin. ARGS go to the root (`--profile deepseek`, `--set :seon.config.source/root=\"DIR\"`, ...). Its
 # output: runs/root.log; its pids: runs/root.pids ("TAIL ROOT"); the server port it was started
 # bound (what bin/mcp relays to; the root's ROOT LISTENING line names it): runs/root.port, while
@@ -19,14 +19,14 @@
 # it asks the running root for the generation main records (my.root/next-generation: the tree
 # my.root/build! built from the last merges commit, and the arguments resuming this root's store
 # and main), stops the root, and starts that tree's binary on them. A process never replaces
-# itself: bin/root owns it. Only what cannot load in place needs a new binary (a pin, deps.edn,
+# itself: bin/system owns it. Only what cannot load in place needs a new binary (a pin, deps.edn,
 # native code); a merge loads in place, and a restart catches up on main at boot.
 # `start --reindex [ARGS]` is the full outside-in (docs/source.md#files-and-the-db-two-directions): refused while a
-# root of this checkout runs (bin/root stop first); otherwise it erases this checkout's store (SEON_STORE, else
+# root of this checkout runs (bin/system stop first); otherwise it erases this checkout's store (SEON_STORE, else
 # <SEON_RUNS>/store, and its -agents dir) and starts, so the fresh store's first boot seeds main from the tree
 # (the program, the wiki and the task files). It stops nothing and touches no other checkout's store.
 # `inputs [ARGS]` writes runs/root-inputs.edn for the files as they are now (write_inputs, below), what `start` does first.
-# bin/root run CHECKOUT PORT WEB [ARGS]   one root of CHECKOUT's build in the foreground, until
+# bin/system run CHECKOUT PORT WEB [ARGS]   one root of CHECKOUT's build in the foreground, until
 # stdin closes (what `start` and `next` run).
 #
 # It runs on the one kept store, <SEON_RUNS>/store (<this tree>/runs/store), and resumes its
@@ -39,7 +39,7 @@ export SEON_RUNS=${SEON_RUNS:-$ROOT/runs}
 # after): :seon.config.source/root's default; config/local.edn or --set names another tree
 export SEON_SOURCE_ROOT=${SEON_SOURCE_ROOT:-$ROOT}
 # the inputs of the files checkout G's root reads (its source root, else G), written to G's runs/root-inputs.edn by G's binary's
-# `inputs` mode, here where git runs (root runs none): what a boot hands its agents (seon.root/held-inputs), and what a landing
+# `inputs` mode, here where git runs (root runs none): what a boot hands its agents (seon.system/held-inputs), and what a landing
 # kept in place hands them again (bin/update, my.root/landed!). ARGS: the root's config arguments
 write_inputs() {
   local G=$1; shift
@@ -51,7 +51,7 @@ write_inputs() {
   rm -f "$G/runs/root-inputs.edn.new"
   return $ok
 }
-# bin/root inputs [ARGS]: write_inputs for this checkout, with its config/local.edn as `start` passes it
+# bin/system inputs [ARGS]: write_inputs for this checkout, with its config/local.edn as `start` passes it
 if [[ ${1:-} == inputs ]]; then
   shift; L=$ROOT/config/local.edn; [[ -f $L ]] && set -- --config "$L" "$@"
   write_inputs "$ROOT" "$@"; exit
@@ -73,7 +73,7 @@ if [[ ${1:-} == run ]]; then
   [[ -n $N ]] && export GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME:-$N} GIT_COMMITTER_NAME=${GIT_COMMITTER_NAME:-$N}
   [[ -n $E ]] && export GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL:-$E} GIT_COMMITTER_EMAIL=${GIT_COMMITTER_EMAIL:-$E}
   # the inputs of the files this boot reads (its catch-up's checkout as it is now), computed here where git runs (root
-  # runs none): the boot hands them to its agents, which key test results by them (seon.root/boot-inputs). A root under a
+  # runs none): the boot hands them to its agents, which key test results by them (seon.system/boot-inputs). A root under a
   # starter (a test's, a check step's) is handed none and keys by its binary's record, as before
   # (runs/root-inputs.edn: the runs dir this checkout's root keeps its store and port in, which a test's root does not share)
   if [[ -z ${SEON_STARTER_FIFO:-} ]]; then write_inputs "$G" "$@"; fi
@@ -82,7 +82,7 @@ if [[ ${1:-} == run ]]; then
     SEON_SERVER_PORT=$P SEON_WEB_PORT=$W exec ./seon root "$@"
 fi
 if [[ ${1:-} == seed ]]; then
-  # bin/root seed STORE: the program and the wiki of this tree on STORE's :db (seon.root/seed-program!), so a
+  # bin/system seed STORE: the program and the wiki of this tree on STORE's :db (seon.system/seed-program!), so a
   # root whose main is made from it imports nothing: a test store's, made by bin/test after it builds the binary
   cd "$ROOT/target" && SEON_CHECKOUT=$ROOT HOME=$ROOT/target/home JOLT_LMDB_LIB=$ROOT/target/lib/liblmdb.dylib \
     JOLT_LZ4_LIB=$ROOT/target/lib/liblz4.dylib JOLT_ZSTD_LIB=$ROOT/target/lib/libzstd.dylib exec ./seon seed-program "${@:2}"
@@ -94,7 +94,7 @@ read PORT WEB <<< "$("$ROOT/bin/ports")"
 running() { [[ -f $PIDS ]] && read T R < "$PIDS" && kill -0 $R 2>/dev/null }
 # launch CHECKOUT [ARGS]: `run` detached (double fork), until its listening line or its death
 launch() {
-  # whether target/seon is main's program is root's boot's fact (:seon.root/source :binary beside :program,
+  # whether target/seon is main's program is root's boot's fact (:seon.system/source :binary beside :program,
   # seon.problems/stale-binary), not a tree read here at every start (0.3 s a root, every process test's); when they
   # differ the root prints ROOT STALE BINARY (the acts that bring them into agreement) before listening, and start's
   # last line is that line (docs/source.md#files-and-the-db-two-directions)
@@ -108,10 +108,10 @@ launch() {
   # on the done fifo (made here, held keeps it open) that bin/held --end reads. A root started with SEON_STARTER_FIFO (a test's) ends with its
   # starter. (A `tail -f /dev/null | root` holder outlived every root that crashed or was killed.)
   "$ROOT/bin/held" --detach --drain --log "$LOG" --pids "$PIDS" --ready "$READY" --done "$DONE" \
-    "$ROOT/bin/root" run "$1" "$PORT" "$WEB" "${@:2}"
+    "$ROOT/bin/system" run "$1" "$PORT" "$WEB" "${@:2}"
   read -r T R P < "$READY"
   rm -f "$READY"
-  if [[ -n ${P:-} ]]; then print $P > "$PORTF"; "$ROOT/bin/root" status
+  if [[ -n ${P:-} ]]; then print $P > "$PORTF"; "$ROOT/bin/system" status
     # a binary of another program than main's: the root said so before listening, and start ends on it (its last line)
     s=$(grep -m1 '^ROOT STALE BINARY' "$LOG"); [[ -z $s ]] || print -r -- "$s"
   else print -u2 "root failed to start; its log:"; tail -20 "$LOG" >&2; exit 1; fi
@@ -156,7 +156,7 @@ case ${1:-start} in
   start)
     if [[ ${2:-} == --reindex ]]; then
       # the full outside-in: this checkout's store erased and a root started on it, so main seeds from the tree
-      if running; then read T R < "$PIDS"; print -u2 "a root of this checkout is running (pid $R): bin/root stop first"; exit 1; fi
+      if running; then read T R < "$PIDS"; print -u2 "a root of this checkout is running (pid $R): bin/system stop first"; exit 1; fi
       S=${SEON_STORE:-$SEON_RUNS/store}
       "$ROOT/bin/remove-tree" "$S" "$S-agents"; print "erased $S: the root seeds it from $SEON_SOURCE_ROOT"
       launch "$ROOT" "${@:3}"; exit $?
@@ -164,7 +164,7 @@ case ${1:-start} in
     if running; then "$0" status; exit 0; fi
     launch "$ROOT" "${@:2}"
     # the boot caught main up with this checkout (docs/source.md#a-boot-catches-up-with-its-checkout); when what changed reaches
-    # the binary's own code or a build input (seon.root/binary-current, the ROOT STALE BINARY line after a ROOT CAUGHT UP one), it
+    # the binary's own code or a build input (seon.system/binary-current, the ROOT STALE BINARY line after a ROOT CAUGHT UP one), it
     # is built and the root started again, once: a second stale line is reported (start's last line), never built again; a root
     # that caught up nothing (a test's: no catch-up) is never built here
     # built only when main's tree is this checkout's (a root on another source tree, a test's, is never built from this one)
@@ -185,5 +185,5 @@ case ${1:-start} in
     (( ${#gen} )) || { print -u2 "no next generation built on the running root's main (my.root/generation)"; exit 1 }
     stop
     launch "${gen[@]}" ;;
-  *) print -u2 "usage: bin/root [start [--reindex] [ARGS]|stop|kill|status|next] | bin/root run CHECKOUT PORT WEB [ARGS]"; exit 2 ;;
+  *) print -u2 "usage: bin/system [start [--reindex] [ARGS]|stop|kill|status|next] | bin/system run CHECKOUT PORT WEB [ARGS]"; exit 2 ;;
 esac

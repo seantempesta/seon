@@ -24,7 +24,7 @@ The first steps of a fresh session, in the main tree (`~/src/seon-next`):
    - `git log --oneline --first-parent -15`;
    - `git branch --no-merged main`;
    - `uptime`;
-   - `bin/root status`;
+   - `bin/system status`;
    - `git worktree list`, which should be just the main tree, plus `.worktrees/merges`, which the standing root writes back into.
 3. Tell the owner in five lines what stands and what you'll do first: the first open problem of the plan's step, unless he names another.
 

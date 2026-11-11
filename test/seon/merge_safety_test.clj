@@ -675,7 +675,7 @@
 ;; exception's refusal). The exceptions: a transaction's own facts (:seon.tx/meta, never merged), a merge's stored conflict entry
 ;; (:seon.merge/entry-fact, deleted with the one merge's schema commit) and a note (:seon.db/note-fact); and three attribute
 ;; groups that ride an entity identified otherwise: :seon.config/config (the keys of :seon.config/config-fact, named by
-;; :seon.config/id), :seon.config/sources-fact (on root's entity, :seon.root/id) and :seon.script/fact (on a file, :file/path)
+;; :seon.config/id), :seon.config/sources-fact (on root's entity, :seon.system/id) and :seon.script/fact (on a file, :file/path)
 (deftest every-entity-schema-names-an-identity
   (let [ix (pdb/index) forms (:forms ix)
         entity? (fn [k] (let [f (get forms k)] (and (vector? f) (map? (second f)) (:seon.db/attributes (second f)))))

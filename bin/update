@@ -9,9 +9,9 @@
 #      and until then the task is an :unsynced problem;
 #   2. keep the standing root running when the landing allows it (my.root/landed!: main holds main's tree as data and the
 #      running binary is current for it; UPDATE OK: kept running ...), else build (bin/build: each step skips what is up to date)
-#      and restart it on its store (bin/root stop, start), saying why (restart: ...): it boots on main's build and resumes its
+#      and restart it on its store (bin/system stop, start), saying why (restart: ...): it boots on main's build and resumes its
 #      main, catching up the files its checkout changed since main last indexed it (docs/source.md#a-boot-catches-up-with-its-checkout).
-# ARGS go to the restarted root (bin/root start ARGS): the standing root's profile is one of them
+# ARGS go to the restarted root (bin/system start ARGS): the standing root's profile is one of them
 #   (bin/update --profile deepseek), as it is on every root's command line (docs/config.md#layers).
 # bin/land runs it after it moves main (docs/merging.md#a-branch-lands-with-binland); the owner runs it by hand too.
 # Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED (UPDATE FAILED: ROOT STALE BINARY ... when the
@@ -64,13 +64,13 @@ fi
 git -c protocol.file.allow=always submodule update --init -q || fail "main's submodules"
 # a landing kept in place (docs/source.md#a-landing-enters-main-as-data): when the running system's main already holds main's
 # tree as data (bin/land's bridge) and its binary is current for it, it keeps running, its agents with it: the inputs of the
-# files now are written (bin/root inputs, the running binary's) and root writes its source fact again (my.root/landed!).
+# files now are written (bin/system inputs, the running binary's) and root writes its source fact again (my.root/landed!).
 # Anything else (no bridge, a build input or a form root runs changed, a binary stale at its boot) is a restart, its reason said
 # quoted: unquoted in an assignment, zsh applies no %% to a nested $(...) and port held both ports ("7888 7777"), so every
 # ask of landed! was a refused connection and every landing from batch 89 on restarted the system
 port="${$(bin/ports)%% *}"
-if bin/root status >/dev/null 2>&1; then
-  if tree=$(bin/tree "$MAIN" HEAD) && bin/root inputs "$@"; then
+if bin/system status >/dev/null 2>&1; then
+  if tree=$(bin/tree "$MAIN" HEAD) && bin/system inputs "$@"; then
     kept=$(printf '{:op :eval :agent "root" :code "(my.root/landed! sys \"%s\")"}\n' "$tree" | bin/ask "$port")
     if [[ $kept == *':kept '* ]]; then
       printf '{:op :eval :agent "root" :code "(my.root/file-slow-tests! sys)"}\n' | bin/ask "$port" >/dev/null || print "filing the slow tests' tasks failed: run (my.root/file-slow-tests! sys) at root"
@@ -84,8 +84,8 @@ if bin/root status >/dev/null 2>&1; then
 fi
 nice -n 15 bin/build > target/update-build.log 2>&1 || { tail -5 target/update-build.log >&2; fail "build (target/update-build.log)" }
 print "built $(ls -l target/seon | awk '{print $6, $7, $8}')"
-bin/root stop >/dev/null 2>&1
-out=$(bin/root start "$@") || fail "the standing root did not start (runs/root.log)"
+bin/system stop >/dev/null 2>&1
+out=$(bin/system start "$@") || fail "the standing root did not start (runs/root.log)"
 # a root whose binary is another program than its main's forks no agent: the update's last line says so, with its acts
 stale=$(print -r -- "$out" | grep -m1 '^ROOT STALE BINARY')
 [[ -n $stale ]] || print -r -- "${out##*$'\n'}"

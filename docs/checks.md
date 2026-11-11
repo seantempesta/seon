@@ -58,7 +58,7 @@ Measured on this tree (212 keys): nothing changed, 2.2 s, nothing ran; a docstri
 
 Each end-to-end run is an entry of data worked by one runner with real agent processes, ending on what the system observes (the reconciler's quiescence, an event, a fact on main), never on a deadline: ```seon.e2e/run```.
 
-Its entries: the six-task graph with a cancel (`calc`), a root restarted in two phases (`resume`), the merge scenarios (`conflict`, `semantic`, `hairy`, `newns`, `sibling`), a swarm of tasks over shared definitions (`swarm N M`), a task that always fails, held for root and then released by root (`held`, [root](root.md#root-causes-at-quiescence)), a real model's run (`model`, a paid run: [model](model.md#paid-runs)), and the self-improvement loop's first turn on a clone of this repository (`loop`, [source](source.md#the-next-generation)). `seon.root/await-db` and `seon.await/await-quiet` are its waits: a watch on main's connection, run once per commit.
+Its entries: the six-task graph with a cancel (`calc`), a root restarted in two phases (`resume`), the merge scenarios (`conflict`, `semantic`, `hairy`, `newns`, `sibling`), a swarm of tasks over shared definitions (`swarm N M`), a task that always fails, held for root and then released by root (`held`, [root](root.md#root-causes-at-quiescence)), a real model's run (`model`, a paid run: [model](model.md#paid-runs)), and the self-improvement loop's first turn on a clone of this repository (`loop`, [source](source.md#the-next-generation)). `seon.system/await-db` and `seon.await/await-quiet` are its waits: a watch on main's connection, run once per commit.
 
 The task graphs, their stub programs and proofs, and the scripted model's replies are data in `seon.fixtures`: ```seon.fixtures/calc```, ```seon.fixtures/scenarios``` (each with what a fresh agent must print on main afterwards), and `seon.fixtures/reply`, the scripted provider `bin/test` and `bin/check` run under ([model](model.md)). A new run is one more entry.
 
@@ -67,7 +67,7 @@ The task graphs, their stub programs and proofs, and the scripted model's replie
 A change to what the owner sees (`seon.render.ui`, `seon.render.proc`, `seon.web`, `resources/public/app.css`) is checked by a light subagent with the built-in browser that compares each page against the facts the system records, and judges whether the page is useful to someone debugging an agent ([render](render.md#the-page)).
 
 The session that made the change launches it with the Agent tool (Haiku for a facts pass, Sonnet for a usefulness pass), fixes what it finds and launches it again until it finds no mismatch. Its brief holds four blanks:
-- **ROOT**: the ports of a root of the session's own (`bin/ports`, started with `bin/root start --profile scripted`), never the owner's 7888/7777;
+- **ROOT**: the ports of a root of the session's own (`bin/ports`, started with `bin/system start --profile scripted`), never the owner's 7888/7777;
 - **PAGES**: the URLs to check, such as `http://127.0.0.1:WEB/` and `/agent/a4`;
 - **FACTS**: the forms that answer what each page should show, sent to the server's port with `printf '%s\n' FORM | nc -w 60 127.0.0.1 SERVER`: `{:op :agents}` (live agents, every task with its agent and outcome), `{:op :context :agent "a1"}` (what a live agent reads now), and `{:op :eval :agent "root" :code "(my.root/problems sys)"}` or a query over a task's attributes and its agent's for how its work ended;
 - **ACTIONS**: what to do on the page (an eval, a message, a click), and which fact confirms each.

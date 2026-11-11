@@ -6,7 +6,7 @@
 # however it ended (a harness's alarm, a SIGKILL), held SIGKILLs CMD's group: the agents'
 # mechanism (an end is EOF), never a clock (8 `seon lease` roots outlived the bin/check that
 # started them by hours; root, 2026-10-23). With no SEON_STARTER_FIFO, CMD only runs held.
-#   --detach  double-forked out of the caller's session (bin/root start: the tool host kills a
+#   --detach  double-forked out of the caller's session (bin/system start: the tool host kills a
 #             background task's whole tree), CMD's stdin a pipe held keeps open: TERM to held
 #             closes it, and CMD stops cleanly
 #   --drain   held outlives CMD until every process it started is gone: CMD and each descendant
@@ -22,7 +22,7 @@
 # held exits with CMD's status (128+N for a signal).
 #
 # bin/held --end SIG PID FIFO N   (no CMD) sends signal SIG to PID and prints the first N lines
-# held writes on FIFO (its --done fifo: CMD's status, then "drained"): what bin/root stop and kill
+# held writes on FIFO (its --done fifo: CMD's status, then "drained"): what bin/system stop and kill
 # wait on. The reader is opened before the signal goes, and the wait ends on a line or on the
 # fifo's last writer closing: the holder's exit, never a clock. Held keeps the fifo open for its
 # whole life, so a holder that is gone (or died without writing) has no writer, and this
@@ -100,7 +100,7 @@ if ($fifo ne "") {
     # a starter fifo it cannot open is a starter it cannot watch: CMD does not run unwatched. Opened
     # non-blocking and waited on with select, never a blocking read: on macOS a fifo's last writer
     # closing wakes ONE blocked reader, so of the several holders watching one starter (the outer
-    # holder of `bin/root start` and the root's own, every root a test started) the rest stayed
+    # holder of `bin/system start` and the root's own, every root a test started) the rest stayed
     # asleep for good and their roots outlived the runner (~50 found, 2026-10-29); select wakes all.
     # No writer at all (the starter gone before this opened) reads as EOF at once: CMD is killed.
     sysopen(my $s, $fifo, O_RDONLY | O_NONBLOCK) or do { kill "KILL", -$cmd; print STDERR "held: starter fifo $fifo: $!: CMD killed\n"; exit 1 };

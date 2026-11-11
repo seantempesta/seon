@@ -227,7 +227,7 @@
                             (d/release c)
                             (pdb/head conn s)))
         r [(pdb/head conn b)
-           (side "main" [[{:seon.root/id :root :seon.root/boot "moved"}]])
+           (side "main" [[{:seon.system/id :root :seon.system/boot "moved"}]])
            (side "branch" (for [i (range 20)] (vec (for [j (range 5)] {:task/name (keyword "cost" (str "t" i "-" j)) :task/plan (str "plan " i j) :task/status :held}))))]]
     (d/release bc)
     r))
