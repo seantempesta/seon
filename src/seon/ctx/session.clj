@@ -111,7 +111,7 @@
    (vec (for [[n cid] (ctx/turns c)
              :let [messages (get placed n) evals (ctx/turn-evals c cid)
                    call (get-in c [:seon.model-call/_agent cid])]
-             r (concat (for [[m] messages] [(assoc (select-keys (get-in c [:seon.message/_to m]) [:seon.message/id :seon.message/from :seon.message/body]) :turn n) :seon.message/fact])
+             r (concat (for [p messages] [(assoc (select-keys (get-in c p) [:seon.message/id :seon.message/from :seon.message/body]) :turn n) :seon.message/fact])
                        (when (= :model (:seon.model-call/origin call))
                          [[(select-keys call [:seon.model-call/id :seon.model-call/n :seon.model-call/origin :seon.model-call/reply :seon.model-call/reasoning :seon.model-call/truncated]) :seon.model-call/fact]])
                        (for [[e] evals :let [ev (get-in c [:seon.eval/_agent e]) whole (pdb/response-of db ev)]]

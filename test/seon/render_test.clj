@@ -4413,7 +4413,7 @@
                (reg :lab.planted/note-fact [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/planted-note
                                                   :seon.render/openai-compat 'seon.render-test/planted-note-msgs}
                                             [:lab.planted.note/id :lab.planted.note/id] [:lab.planted.note/text :lab.planted.note/text] [:lab.planted.note/agent :lab.planted.note/agent]]))
-        pattern (conj (r/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) {:lab.planted.note/_agent [:db/id :lab.planted.note/id :lab.planted.note/text]})
+        pattern (conj (r/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) {[:lab.planted.note/_agent :tx :at] [:db/id :lab.planted.note/id :lab.planted.note/text]})
         db (d/db-with db [{:seon.agent/key "lab/a1" :seon.ctx/pattern pattern}])
         db (d/db-with db [{:lab.planted.note/id "n1" :lab.planted.note/text "the planted note" :lab.planted.note/agent [:seon.agent/key "lab/a1"]}])
         db (d/db-with db (seon.doc/load-tx db "docs" {seon.doc/system-page "# A stub of the system prompt\n\nBe brief."}))
@@ -4425,7 +4425,7 @@
 
 (deftest a-planted-entity-reaches-the-page
   ;; docs/render.md#the-page: what an agent's pull joins reaches the page by its schema's html render, no code naming it.
-  ;; Planted as data, as an agent would (planted-world). Red until task seon.render/a-planted-entity-reaches-the-page-and-the-request's page half is done
+  ;; Planted as data, as an agent would (planted-world): its schema is history (seon.render/history?), so the conversation places it (seon.ctx/placed-messages)
   (let [{:keys [c ix page]} (planted-world)]
     (is (= ["the planted note"] (map :lab.planted.note/text (vals (:lab.planted.note/_agent c)))) "the agent's pull holds the note it joins")
     (is (= :lab.planted/note-fact (r/entity-schema ix (first (vals (:lab.planted.note/_agent c))) nil)) "the note is its planted schema's entity")
@@ -4434,7 +4434,7 @@
 (deftest a-planted-entity-reaches-the-request
   ;; docs/render.md#the-models-context-a-cached-prefix-then-the-turn: what an agent's pull joins reaches the model's request by its schema's
   ;; renders, no code naming it (planted-world): by its model render where it is history, by its html inside the page eval
-  ;; (my.render/page) where it is a part. Red until the task's request half is done
+  ;; (my.render/page) where it is a part
   (let [{:keys [msgs]} (planted-world)]
     (when-not (is (or (str/includes? msgs "PLANTED-MODEL the planted note") (str/includes? msgs "PLANTED-HTML the planted note"))
                   "the note reaches the request's messages, as history or in the page")

@@ -1614,8 +1614,8 @@
               placed (ctx/placed-messages c)]
           (is (= 3 (count (:seon.message/_to c))) "the pull holds every message")
           (is (every? (comp :db/txInstant :at) (vals (:seon.message/_to c))) "each with the transaction that delivered it, its role's :tx :at")
-          (is (= ["m1"] (mapv second (get placed 1))) "the first placed at the turn that read it")
-          (is (= ["m3" "m2"] (mapv second (:pending placed))) "the later two for the turn after, in the order delivered (not by id)"))))))
+          (is (= ["m1"] (mapv #(get-in c (conj % :seon.message/id)) (get placed 1))) "the first placed at the turn that read it")
+          (is (= ["m3" "m2"] (mapv #(get-in c (conj % :seon.message/id)) (:pending placed))) "the later two for the turn after, in the order delivered (not by id)"))))))
 
 
 (deftest a-pattern-that-drops-a-required-join-is-refused-naming-it

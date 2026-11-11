@@ -1679,7 +1679,7 @@
   "The ids of the messages the running agent's turn n reads, as its record holds them (seon.ctx/placed-messages) on its branch's db."
   [n]
   (let [db (agent/db) k (:key @agent/state) c (seon.ctx/agent-ctx (seon.db/index) db (pdb/eid db :seon.agent/key k))]
-    (mapv second (get (seon.ctx/placed-messages c) n []))))
+    (mapv #(get-in c (conj % :seon.message/id)) (get (seon.ctx/placed-messages c) n []))))
 
 (deftest a-message-taken-by-one-agent-is-still-owed-to-the-other
   ;; docs/users.md#messages (owner, 2026-11-09: the message on the agent's branch is the proof of delivery): a's taking it writes a's branch alone
