@@ -166,7 +166,7 @@
 (defn- keeps?
   "Whether a task of kind, whose agent ended with outcome, keeps its agent's process at its end (:diffed):
   the agent ended on a park outcome, and the task is no merge (a merge's agent ends its
-  process; a whole task, which merges too (seon.task/merges?), keeps its process, since its
+  process; a whole task, which merges too (seon.task/merges?: nothing on its branch needs it), keeps its process, since its
   own work is what parked). Its judge then parks it, or stops the kept process (stop-kept)."
   {:malli/schema [:=> [:cat [:maybe :keyword] [:maybe :keyword]] :boolean]}
   [kind outcome] (boolean (and (park-outcomes outcome) (not= :merge kind))))
@@ -395,7 +395,7 @@
                   [:map [:outcome :seon.task/outcome] [:reasons [:vector :seon.reconcile/not-done]]
                    [:hold {:optional true} :string] [:verdict {:optional true} [:vector :seon.reconcile/not-done]]]]}
   [idx id {:keys [end died results main-red uncontracted unmerged caused behind plan plan-before basis deferred behinds told]}]
-  (let [t (get-in idx [:tasks id]) kind (:seon.task/kind t) merge? (task/merges? kind) oc (:outcome end) execution (:seon.task/execution t)
+  (let [t (get-in idx [:tasks id]) kind (:seon.task/kind t) merge? (task/merges? (assoc t :seon.task/id id) (keep #(some-> (get-in idx [:tasks %]) (assoc :seon.task/id %)) (get-in idx [:needed-by id]))) oc (:outcome end) execution (:seon.task/execution t)
         outside (outside? (:seon.agent/env (task-agent idx id)))]
     (cond
       (not= :running execution) {:outcome :closed :reasons []}
