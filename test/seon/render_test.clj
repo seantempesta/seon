@@ -1006,12 +1006,14 @@
         ws (concat [(get-in st2 [:root-walk :w])] (keep #(some-> (:walk (val %)) deref :w) (:branch-reads st2)) (map :w (vals @(:user-walks st2))))
         seen (apply merge-with #(merge-with + %1 %2) (map r/misfits-by-render ws))
         ;; measured 2026-11-11, the walk's own class on each component's root (its render's name) among them: it goes when data-render replaces it
-        pinned '{seon.render.ui/agent {:wire 2 :class 12} seon.render.ui/agent-parts {:class 2} seon.render.ui/agent-state {:wire 2 :class 2}
+        pinned '{seon.render.ui/agent {:wire 2 :class 11} seon.render.ui/agent-parts {:class 2} seon.render.ui/agent-state {:wire 2 :class 2}
                  seon.render.ui/agents-list {:class 1} seon.render.ui/conversation-list {:class 2} seon.render.ui/eval-output {:class 7}
                  seon.render.ui/evaluation {:class 5} seon.render.ui/page-rules {:class 2} seon.render.ui/problems-tile {:class 1}
                  seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 4 :wire 1} seon.render.ui/root-evals {:class 3}
                  seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 2}
-                 seon.render.ui/system-message {:class 4 :wire 2}}]
+                 seon.render.ui/system-message {:class 4 :wire 2}
+                 ;; root's session drawn by its stage (2026-11-11): the walk's own class on each of its three components' roots
+                 seon.render.ui/stage {:class 1} seon.render.ui/stage-list {:class 1} seon.render.ui/stage-front {:class 1}}]
     (try (is (= pinned seen) (str "a count moved: write the new one here when it went down, never when it went up\n"
                                   (with-out-str (clojure.pprint/pprint (into (sorted-map) seen)))))
          (finally (doseq [w ws] (r/dispose-walk! w))))))

@@ -1642,7 +1642,8 @@
         held (count (remove (fn [m] (or (= self (:db/id m)) (:seon.user/name m))) (vals (or (ratom/realize (get-in c [:seon.agent/root :seon.agent/_root])) {}))))
         values (when (:cid now) (for [[e _] (ctx/turn-evals c (:cid now)) :let [k (:seon.eval/schema (d/entity db e))] :when (and k (render/declared ix k))]
                            [#'eval-tile {:key (str (:n now) "-" e) :eid e}]))]
-    [:section {:wire/for "page"}
+    ;; for the page alone, as its list's call says (stage-list is placed :wire/for "page")
+    [:section
      (cond
        (seq waiting) (list [:blockquote (str/join "\n\n" waiting)] [:p "Working on it."])
        now (list [:blockquote (:asked now)] (if (str/blank? (:reply now)) [:p "Working on it."] [#'markdown (:reply now) {:inline? true}]) (seq values))
