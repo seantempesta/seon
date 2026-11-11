@@ -734,6 +734,22 @@
                             acc))))
           {} cand)))
 
+(defn reds-at
+  "Of digests ({test digest}), the tests whose cached verdict at that digest is red, whoever ran it (a shell's run, a test
+  service's item, the daily full run), each with its first failure: {test failure}; a test with no verdict at its digest is
+  not red. What the judge's done-input and the merge gate read to tell a red that is main's (red at that digest without the
+  task's change) from the task's own. Answers the :seon.fx/io-error a file gives, never a partial answer. dir: the cache's
+  (:seon.config.proofs/results-dir unless given). See docs/merging.md#verdicts-are-a-cache."
+  {:malli/schema [:function [:=> [:cat [:map-of :qualified-symbol :string]] [:or [:map-of :qualified-symbol :map] :seon.error/base]]
+                  [:=> [:cat :string [:map-of :qualified-symbol :string]] [:or [:map-of :qualified-symbol :map] :seon.error/base]]]}
+  ([digests] (reds-at (cfg/value :seon.config.proofs/results-dir) digests))
+  ([dir digests]
+   (let [r (if (seq digests) (stored-results dir digests) {})]
+     (if (contract/error? r)
+       r
+       (into {} (for [[t dg] digests :let [v (get r dg)] :when (and v (not (proofs/green? v)))]
+                  [t (or (first (:failures v)) {:message (str "red at digest " dg ", with no failure kept")})]))))))
+
 (defn- verdict-files
   "Key k's cached verdict files, each [digest status file]."
   {:malli/schema [:=> [:cat :string [:or :qualified-symbol :string]] [:vector [:tuple :string :keyword :any]]]}
