@@ -557,6 +557,15 @@
     (is (not (seon.check/ran-nothing-more? {:pid 9 :ppid self :stat "Z" :command "(seon)"} self)) "a child the stop failed to reap stays")
     (is (not (seon.check/ran-nothing-more? nil self)) "a pid ps did not find is judged by alive?, not here")))
 
+;; docs/processes.md#a-stop-reaps-every-child: batch 58b's lifecycle left {:pid 74564} with no ps row, under load: kill 0
+;; found it, then ps listed it no more, so it had exited between the two reads, and the check counted it left
+(deftest a-pid-gone-between-two-reads-is-not-left-by-a-stop
+  (let [self 4242]
+    (is (not (seon.check/left? nil false self)) "no ps row and kill 0 finds it no more: it exited, not left")
+    (is (seon.check/left? nil true self) "no ps row but still there when asked again: left")
+    (is (seon.check/left? {:pid 9 :ppid 1 :stat "S"} true self) "a row still running: left")
+    (is (not (seon.check/left? {:pid 9 :ppid 1 :stat "Z"} true self)) "a row that can run nothing more: not left")))
+
 ;; docs/machine.md#builds-and-checks: a wait on main runs its predicate in main's writer at every commit (seon.root/await-db's
 ;; watch; datahike's writer resets the connection), so a predicate that reads main's whole problems report costs the report
 ;; once a commit and holds every commit behind it: batches 32 and 38 lost the `problems` step to it, root at 98.6% CPU for
