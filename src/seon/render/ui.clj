@@ -909,15 +909,21 @@
   (when (seq xs) [:p {:key label} (str label ": " (str/join ", " (map str xs)))]))
 
 (defn call-in
-  "One real call of sym in source src: the first form opening `(sym ` or `(name `, as written (`seon.ctx.status/form-at`), or nil
-  when src has none or it is only the function's name and bare symbols (that is its arglist, which the source above says). What a
-  test or a caller that reaches a function shows of how it is called."
+  "One real call of sym in source src: the first form opening `(sym ` or `(name `, as written (`seon.ctx.status/form-at`), that is a call
+  an agent can evaluate, or nil when src has none: one that is only the function's name and bare symbols is its arglist, which the
+  source above says, and one that holds an unquote is a macro's template (its syntax-quote), never a call. What a test or a caller
+  that reaches a function shows of how it is called. See docs/references.md#an-entity-cites."
   {:malli/schema [:=> [:cat [:maybe :string] :qualified-symbol] [:maybe :string]]}
   [src sym]
   (when src
-    (let [starts (keep #(str/index-of src %) [(str "(" sym " ") (str "(" sym ")") (str "(" (name sym) " ") (str "(" (name sym) ")")])
-          call (when (seq starts) (status/form-at src (reduce min starts)))]
-      (when (and call (not (re-matches #"\([^\s()\"]+(\s+[A-Za-z][\w\-?!*.<>=/]*)*\)" call)) (not (re-find #"[a-z]{3,} [a-z]{3,} [a-z]{3,}" (str/replace call #"\"[^\"]*\"" "")))) call))))
+    (let [opens [(str "(" sym " ") (str "(" sym ")") (str "(" (name sym) " ") (str "(" (name sym) ")")]
+          at (fn [o] (loop [from 0 acc []] (if-let [k (str/index-of src o from)] (recur (inc k) (conj acc k)) acc)))
+          bare (fn [call] (str/replace call #"\"[^\"]*\"" ""))
+          call? (fn [call] (and call
+                                (not (re-matches #"\([^\s()\"]+(\s+[A-Za-z][\w\-?!*.<>=/]*)*\)" call))
+                                (not (re-find #"[a-z]{3,} [a-z]{3,} [a-z]{3,}" (bare call)))
+                                (not (str/includes? (bare call) "~"))))]
+      (some #(let [call (status/form-at src %)] (when (call? call) call)) (sort (distinct (mapcat at opens)))))))
 
 (defn- section-hiccup
   "A wiki section as pulled (its :seon.doc/_parent joined) at depth: what it is in a sentence, its heading and address, its text at that
@@ -1058,6 +1064,16 @@
                        :changing? (boolean (and sym (or (contains? reach sym) (= task-ns (namespace sym)))))}))))
 
 
+(defn- hit-line
+  "The line a search hit named n shows under its name: line, the line of its text holding a word of the query, as it is; but when that is
+  only the opening of its own definition (`(defn- n`), which says nothing its name does not, its arglist read from its source (src-of,
+  called only then, answering the source or nil), or nil with no source. See docs/vector.md#search."
+  {:malli/schema [:=> [:cat [:maybe :string] :any ifn?] [:maybe :string]]}
+  [line n src-of]
+  (if (and (seq line) (symbol? n) (re-matches (re-pattern (str "\\(def[a-z-]*\\s+(\\^\\S+\\s+)*" (java.util.regex.Pattern/quote (name n)) "\\s*")) (str/trim line)))
+    (when-let [src (src-of)] (str (reader/arglists src (symbol (namespace n)))))
+    line))
+
 (defn searched
   "Search s (the declared html render of :seon.search/search-fact, a component over the db), drawn as one compact hiccup that the
   page shows and the model is sent as it is: its query searched on main as the agent's branch last merged it (:seon.agent/base-commit), so the agent's own writes move no hit,
@@ -1096,7 +1112,8 @@
            ;; each hit with the line of its text that holds a word of the query, as grep shows a hit: a bare name was passed over
            ;; (curated pair 1, 2026-11-10) where a line says why it matters
            ;; each hit its name, the line folded under it: a person reads the names and opens one (folding is presentation)
-           (into [:ol] (for [{:keys [name line]} hits]
+           (into [:ol] (for [{:keys [name line]} hits
+                             :let [line (hit-line line name #(doc/source-of at name))]]
                          (if (seq line)
                            [:li [:details {:data-preserve-attr "open"} [:summary [:code (str name)]] [:p line]]]
                            [:li [:code (str name)]])))])))))

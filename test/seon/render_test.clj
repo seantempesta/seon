@@ -3538,6 +3538,23 @@
     (is (str/includes? text "before you prove again") "to its last step")))
 
 ;; docs/render.md#a-citation-says-why-it-is-there: each kind of cite read cold
+(deftest a-cites-part-shows-a-callable-form
+  ;; docs/references.md#an-entity-cites: what a cite shows of how a function is called is a form an agent can evaluate. A call inside a
+  ;; macro's syntax-quote holds an unquote and is a template, never a call; a search hit whose line is only its own definition's opening
+  ;; says nothing its name does not, and shows its arglist
+  (let [macro "(defmacro doc [x] `(do (println (my.agent/doc-of ~x)) nil))"
+        both (str macro "\n(defn g [] (my.agent/doc-of \"docs/x.md\"))")
+        v {:var/doc "What it names, as data." :var/form {:form/src "(defn doc-of [x] x)"}
+           :callers {1 {:form/src macro :form/defines {2 {:var/name 'my.agent/doc :var/meta #{:macro}}}}}}
+        part (r/part-text ['seon.render.ui/cite {} (#'ui/var-hiccup 'my.agent/doc-of v false)])
+        hit-line #'ui/hit-line]
+    (is (nil? (ui/call-in macro 'my.agent/doc-of)) "a template is no call")
+    (is (= "(my.agent/doc-of \"docs/x.md\")" (ui/call-in both 'my.agent/doc-of)) "a real call after it in the same source is the one shown")
+    (is (not (str/includes? part "~")) (str "a cited function's part holds no template: " part))
+    (is (not (str/includes? part "A real call")) "and says nothing of a call when it has none to show")
+    (is (= "([v])" (hit-line "(defn- doc-view" 'my.agent/doc-view (constantly "(defn- doc-view [v] v)"))) "a hit whose line is its own definition's opening shows its arglist")
+    (is (= "a line that says why it matters" (hit-line "a line that says why it matters" 'my.agent/doc-view #(throw (ex-info "read" {})))) "any other line is shown as it is, its source never read")))
+
 (deftest a-cited-thing-is-drawn-by-what-it-is
   (let [[db aid] (cited-world)
         tree (:tree (seon.ctx/build (seon.db/index) db aid :b))
