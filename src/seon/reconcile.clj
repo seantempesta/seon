@@ -789,7 +789,11 @@
         one (fn [[st o]] [st [o]])
         ;; a woken agent starts with its allowance of turns more, whoever sent the message (`wake`), and is no longer woken
         k (:seon.agent/key (task-agent (:idx st) id))
-        raise (if (and k (contains? (get-in st [:idx :woken]) k)) (cfg/value :seon.config.agent/wake-turns {:task (get-in st [:idx :tasks id])}) 0)
+        ;; a task its session's agent takes up (a refine on the agent of the task it cites: seon.reconcile/holder-of) is a run of its own:
+        ;; the budget is raised by the task's own turns, never left at what the earlier task spent
+        raise (cond (and k (contains? (get-in st [:idx :woken]) k)) (cfg/value :seon.config.agent/wake-turns {:task (get-in st [:idx :tasks id])})
+                    (and (= :wake op) (not= (some-> (:agent act) name) k)) (get-in act [:env :max-turns] 0)
+                    :else 0)
         st (cond-> st k (update-in [:idx :woken] disj k) (pos? raise) (assoc-in [:flights id :raise] raise))]
     (case op
       :wake (let [ag (:agent act)]

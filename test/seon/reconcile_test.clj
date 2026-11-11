@@ -1750,3 +1750,15 @@
     (is (= better (:seon.task/plan a)))
     (is (and (:seon.task/branch a) (not= old (:seon.task/branch a))) "run again on a new branch")
     (is (= :running (:seon.task/execution a)))))
+
+(deftest a-task-a-session-agent-takes-up-gets-its-own-turns
+  ;; docs/tasks.md#a-refine-curates-its-own-task (loop D2, 2026-11-11): a refine woken on the agent of the task it cites (seon.reconcile/holder-of)
+  ;; is a run of its own: the agent's budget, spent by the earlier task, is raised by the refine's own turns, not by a wake's allowance
+  (let [turns (cfg/value :seon.config.agent/max-turns)
+        db (d/db-with (with-refine-section (db-of [(decl "a")] :extra (work "a" :cap))) [])
+        db (d/db-with db (task/refine-tx db "demo/a" false))
+        act {:op :wake :task "demo/a-refine" :agent :a-a :env {:branch (task/default-branch "demo/a") :model nil :max-turns turns}}
+        max-of (fn [db] (:seon.agent/max-turns (d/entity db [:seon.agent/key (akey "a")])))
+        [_ outs] (#'r/start (st-of db) act)
+        after (d/db-with db (get-in (first outs) [:req :req :tx-data]))]
+    (is (= (+ (max-of db) turns) (max-of after)) "raised by the refine's own turns")))

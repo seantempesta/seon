@@ -920,7 +920,11 @@
   {:seon.task/ns (:seon.task/ns t) :seon.task/name (str (:seon.task/name t) "-refine") :seon.task/kind :design
    :seon.task/branch (or (:seon.task/branch t) (default-branch (:seon.task/id t)))
    :seon.task/plan (str "Refine the task `" (:seon.task/id t) "` you just worked, as " refine-section " says: make its plan, what it "
-                        "cites and the wiki sections you pulled better for whoever works it next, from your own turns. Change no code.")})
+                        "cites and the wiki sections you pulled better for whoever works it next, from your own turns. Change no code. "
+                        "Its plan is one swap! on what your task cites: (let [[e c] (first (filter #(= \"" (:seon.task/id t)
+                        "\" (:seon.task/id (:seon.cite/target (val %)))) (:seon.cite/_of (:seon.agent/task @ctx))))] (swap! ctx assoc-in "
+                        "[:seon.agent/task :seon.cite/_of e :seon.cite/target :seon.task/plan] (str (:seon.task/plan (:seon.cite/target c)) "
+                        "\"\\n\\n\" \"what would have saved a turn\")))")})
 
 (defn- cited-tasks
   "The ids of the tasks task e's plan cites (its cites whose target is a task), on db."
