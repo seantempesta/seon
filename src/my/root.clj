@@ -32,10 +32,12 @@
   ([sys decl] (request! sys decl tpl/request))
   ([sys decl template]
    (let [ds (template decl)
-         tx (tpl/request-tx @(:conn sys) ds)]
+         tx (tpl/request-tx @(:conn sys) ds)
+         by (task/sender (config/value :seon.config.root/user-name))]
      (if (contract/error? tx)
        tx
-       (assoc @(root/transact-main! sys tx)
+       ;; released here, by root's REPL's evaluator, the user: its starter (docs/users.md#who-started-whom)
+       (assoc @(root/transact-main! sys (into (vec tx) (for [d ds] {:seon.task/id (task/task-id (:seon.task/ns d) (:seon.task/name d)) :seon.task/started-by by})))
               :tasks (mapv #(task/task-id (:seon.task/ns %) (:seon.task/name %)) ds))))))
 
 (defn run!
@@ -45,7 +47,9 @@
   under :not-held, and only the held ones are written. A release is a person's continue: the reasons root last gave
   (:seon.task/reasons) are retracted, so the same again is news to the next judgment (seon.reconcile/judgment); to go
   on past a turn cap, raise the agent's :seon.agent/max-turns first (docs/turn.md#the-cap). Answers the writer's answer (or
-  {:ok true :changed 0} when none is held) with :not-held when any."
+  {:ok true :changed 0} when none is held) with :not-held when any. Who released it is its starter (:seon.task/started-by): root's REPL
+  evaluates as the user (seon.server's root eval records its evals by the user), so the user, and its agent is in the user's tree
+  (:seon.agent/agents, seon.task/start-tx). See docs/users.md#who-started-whom."
   {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [db @(:conn sys)
@@ -56,7 +60,9 @@
                                        (str "task " id (if-let [e (x id)] (str " is " (name e)) " does not exist") ", not held: nothing to release")
                                        {:task id :execution (x id)})))]
     (cond-> (if (seq held)
-              @(root/transact-main! sys (into [] (mapcat #(vector [:db/cas [:seon.task/id %] :seon.task/execution :held :running] [:db.fn/retractAttribute [:seon.task/id %] :seon.task/reasons])) held))
+              @(root/transact-main! sys (into [] (mapcat #(vector [:db/cas [:seon.task/id %] :seon.task/execution :held :running] [:db.fn/retractAttribute [:seon.task/id %] :seon.task/reasons]
+                                                                  {:seon.task/id % :seon.task/started-by (task/sender (config/value :seon.config.root/user-name))}))
+                                              held))
               {:ok true :changed 0})
       (seq refused) (assoc :not-held refused))))
 
@@ -189,41 +195,6 @@
                 :else @(root/effect! sys :git (assoc req :dir root)))]
     (cond-> (if (contract/error? r) r {:branch (when (seq tasks) (:branch req)) :sha (get-in r [:value :sha]) :tasks tasks :paths paths})
       (seq not-unsynced) (assoc :not-unsynced not-unsynced))))
-
-(defn gate!
-  "The process tests each of tasks ids' change reaches (a fork, a root, the binary) run on the
-  gate checkout (:seon.config.source/gate-checkout). A merge's gate runs them before it merges
-  with nobody asking (seon.reconcile's :gate), so the :seon.task/gate? this sets is no longer
-  read; it stays until THE PLAN step 0.7 has exercised the gate (task
-  seon.proofs/prove-is-the-one-runner). A task
-  that already merged unasked (its open :unrun problem) has them run now, through the
-  :tests effect on the merges branch's head, which holds its change; their results are
-  recorded on it (:seon.task/deferred-results), which closes the problem when each passed.
-  Answers {:asked ids :ran {task {test status}}}; without a gate checkout declared, the
-  merged ones' tests are each :error, with :seon.root/no-gate-checkout on the task."
-  {:malli/schema [:=> [:cat :seon.root/sys [:sequential :seon.task/id]] :map]}
-  [sys ids]
-  @(root/transact-main! sys (vec (for [id ids] {:seon.task/id id :seon.task/gate? true})))
-  (let [want (set ids)
-        db @(:conn sys)
-        unrun (for [id (sort want)
-                    :let [t (d/pull db [:seon.task/outcome :seon.task/deferred :seon.task/deferred-results] [:seon.task/id id])]
-                    :when (and (= :merged (:seon.task/outcome t))
-                               (seq (:seon.task/deferred t))
-                               (not-every? #(= :pass (get (:seon.task/deferred-results t) %)) (:seon.task/deferred t)))]
-                [id (vec (sort-by str (:seon.task/deferred t)))])
-        ran (into {} (for [[aid tests] unrun
-                           :let [repo (config/value :seon.config.source/gate-checkout)
-                                 r (if repo
-                                     @(root/effect! sys :tests {:repo repo :branch (config/value :seon.config.source/branch) :files {} :tests tests})
-                                     (contract/error :seon.root/no-gate-checkout #'my.root/gate!
-                                                     "no gate checkout declared (:seon.config.source/gate-checkout): the process tests cannot run here" {:tests tests}))
-                                 rs (if (contract/error? r) (zipmap tests (repeat :error)) (get-in r [:value :results]))]]
-                       (do @(root/transact-main! sys (err/asked-tx @(:conn sys) r :seon.task/deferred-results
-                                                                   (cond-> [{:seon.task/id aid :seon.task/deferred-results rs}]
-                                                                     (contract/error? r) (conj {:seon.task/id aid :seon.task/error r}))))
-                           [aid rs])))]
-    {:asked (vec ids) :ran ran}))
 
 (defn tasks-read-tx
   "The write of outcome, the last read of the task files (:seon.root/tasks: {:files} or {:error}),

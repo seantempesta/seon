@@ -56,6 +56,26 @@
 ;; docs/clocks.md#time-decides-the-owners-exceptions: a run ended past its bound takes its Seon state first (bin/evidence asks it of
 ;; root's server, read-only): root's stall check (::stall-armed ::busy ::lost), each agent proc's (:inflight :fx-out :stall-seen
 ;; :last-frame-ms), and which procs answered the ping, so a proc mid-step is seen missing, never read as nil
+(deftest roots-session-and-what-root-releases-are-the-users
+  ;; docs/users.md#who-started-whom (owner, 2026-11-11: one open graph of agents): the agents are one tree rooted at the user.
+  ;; Root's session is started by the user (seon.root/root-session-tx), and a task released at root's REPL is started by its
+  ;; evaluator, the user (my.root/run!), so its agent joins the user's :seon.agent/agents at its start. Red before: neither
+  ;; wrote a starter, and those agents were reached only through :seon.agent/root
+  (let [user (seon.config/value :seon.config.root/user-name)
+        db0 (d/db-with (ts/test-db) [{:seon.root/id :root}])
+        db (d/db-with db0 (root/root-session-tx db0))]
+    (is (= user (get-in (d/entity db [:seon.task/id "request/root"]) [:seon.task/started-by :seon.agent/key])) "root's session's task was started by the user")
+    (is (some #{"root"} (map :seon.agent/key (:seon.agent/agents (d/entity db [:seon.agent/key user])))) "and the user's tree holds root's session"))
+  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
+        ns (str "started" (seon.lib/unique-id))
+        resp (:response (ts/ask root {:op :eval :agent "root"
+                                                :code (str "(do (my.root/create! sys [{:seon.task/ns '" ns " :seon.task/name \"t\" :seon.task/plan \"Work.\" :seon.task/kind :work :seon.task/proofs #{}}])"
+                                                           " (my.root/run! sys [\"" ns "/t\"])"
+                                                           " (let [by (:seon.task/started-by (datahike.api/pull @(:conn sys) [{:seon.task/started-by [:seon.agent/key]}] [:seon.task/id \"" ns "/t\"]))]"
+                                                           "   (my.root/cancel! sys [\"" ns "/t\"]) by))")}))
+        r (ts/value-of resp)]
+    (is (= {:seon.agent/key (seon.config/value :seon.config.root/user-name)} r) (str "a task released at root's REPL is the user's: " (pr-str resp)))))
+
 (deftest a-hangs-evidence-holds-roots-stall-state
   (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
         ;; with an agent of its own running, so an agent proc's state is read, then ended
@@ -116,7 +136,7 @@
   (let [checkout (seon.config/checkout)
         path (str checkout "/target/root-test-resume-" (random-uuid))
         later? #(or (str/starts-with? (namespace (:db/ident %)) "seon.config") (= "seon.ai.model" (namespace (:db/ident %)))
-                    (#{:ns/file :ns/tail :form/lead :form/source :seon.task/commit :seon.task/commit-error} (:db/ident %)))
+                    (#{:ns/file :ns/tail :form/lead :form/source :seon.task/commit} (:db/ident %)))
         cfg (pdb/store-cfg :lmdb path)
         _ (d/create-database cfg)
         c (pdb/connect cfg)
@@ -197,19 +217,23 @@
         ev (fn [code] {:op :eval :agent "root" :code code})
         main (ev "(name (seon.db/conn-main (:conn sys)))")
         held (ev "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys))))]")
+        tree-b (keyword (str "tree-" (apply str (repeat 40 "a"))))
         by (ev "(:started-by (seon.task/root @(:conn sys)))")
         ;; every name the interfaces give an agent: root's view and the page's address (its key, seon.render.ui/session-address)
         view (ev "(vec (sort (keys (:agents (seon.root/state sys)))))")
         addresses (ev "(mapv #(seon.render.ui/session-address (d/pull @(:conn sys) '[:seon.agent/key] [:seon.agent/key %])) (keys (seon.task/agents @(:conn sys))))")
         first-boot (str/split-lines (root-answers path "main" [main (ev (str "(my.root/load-tasks! sys " (pr-str tasks) ")"))
                                                            {:op :attach :task "demo/t"} held (ev "(:boot sys)") by
-                                                           {:op :agents} view addresses]
+                                                           {:op :agents} view addresses
+                                                           ;; a tree's branch whose last run this root's end cuts short
+                                                           (ev (str "@(#'seon.root/write! sys {:op :branch-for-tree :branch " tree-b " :tx []})"))]
                                                   {:args bare}))
         second-boot (str/split-lines (root-answers path "main" [main held
                                                                 (ev "(:seon.root/previous-end (d/pull @(:conn sys) [:seon.root/previous-end] [:seon.root/id :root]))")
                                                                 (ev "(#'seon.root/previous-end (d/db-with @(:conn sys) [{:seon.root/id :root :seon.root/boot \"killed-boot\"}]))")
                                                                 by (ev "(= [\"--started-by\" \"seon.root-test/another\"] (vec (take-last 2 (my.root/resume-args sys))))")
-                                                                {:op :attach :task "demo/t"} {:op :agents} view addresses]
+                                                                {:op :attach :task "demo/t"} {:op :agents} view addresses
+                                                                (ev "[(get-in (seon.root/state sys) [:boot :dropped-trees]) (filterv seon.db/tree-branch? (d/branches (:conn sys)))]")]
                                                    {:args (into bare ["--started-by" "seon.root-test/another"])}))
         raw (fn [l] (try (edn/read-string {:default tagged-literal} l) (catch Exception _ nil)))
         printed (fn [l] (ts/value-of (:response (raw l))))]
@@ -232,6 +256,10 @@
             "the second boot found the first's clean end: its stdin closed")
         (is (= {:boot "killed-boot" :cause :unclean} (select-keys killed [:boot :cause]))
             "a boot that left no stop fact is found :unclean"))
+      ;; docs/merging.md#a-session-proves-through-root (Deep fixes' review of jolt/treeprove): a root's end takes a tree run's agent
+      ;; with it, so the run's drop never comes; the next boot drops every tree branch before any agent exists. Red before: kept
+      (is (= {:ok true :exists false} (printed (nth first-boot 9))) "the first boot made the tree's branch")
+      (is (= [[tree-b] []] (printed (nth second-boot 10))) "the second boot dropped it, and says so in its :boot view")
       ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent's id is the keyword of its :seon.agent/key,
       ;; minted once (seon.root/start-agent) and kept by the session's next agent (seon.task/session-key), so the restart leaves every
       ;; interface naming the task's agent as before: the attach, the task's agent, the server's agents list, root's view and the page's address

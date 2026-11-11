@@ -1026,6 +1026,18 @@
                          (catch Exception e (some (comp :error ex-data) (take-while some? (iterate ex-cause e)))))))))
          (finally (d/release bc) (d/delete-branch! conn b)))))))
 
+(deftest a-nested-map-takes-its-content-id
+  ;; docs/storage.md#ids: a map nested under a ref takes its content id as a top-level map does, so an eval's
+  ;; result (seon.db/with-response, which names no id) is the entity at its hash's content id on every branch
+  (let [db (mt/world)
+        e (pdb/with-response {:seon.eval/code "x"} {:value 1})
+        h (get-in e [:seon.eval/result :seon.result/hash])
+        ce (dbt/content-eid :seon.result/hash h)]
+    (is (not (contains? (:seon.eval/result e) :db/id)) "with-response names no id")
+    (is (= ce (pdb/eid (d/db-with db [e]) :seon.result/hash h)))
+    (is (= (dbt/content-eid :seon.result/hash "h")
+           (pdb/eid (d/db-with db [{:seon.eval/code "x" :seon.eval/result {:seon.result/hash "h"}}]) :seon.result/hash "h")))))
+
 (deftest content-ids-cost-the-writes-the-model-says
   ;; content eids scatter a commit's new identities over the indexes (the content-eids pricing study, 2026-10-23, not kept
   ;; §3): nodes written per commit against counter eids, the ratio the model priced (1.3-1.7x at
@@ -1772,3 +1784,19 @@
      :per-n {:ticks 22 :bytes 13}
      :fixed {:ticks 7000 :bytes 4500 :calls 1}
      :sizes [100 300 1000]}))
+
+;; docs/storage.md#the-write-checks-every-entity-it-touches (the owner, 2026-11-11: "We should never record two transaction
+;; times that are the same"; Point's ruling, option A): the store stamps a transaction's time, after its branch's last, so the
+;; one write path refuses a supplied :db/txInstant, in tx-data (a speculation through seon.db/with) or in tx-meta (a
+;; connection's transact). Red before: both were written, the second back-dated before the branch's last
+(deftest a-transaction-never-supplies-its-own-time
+  (let [past (java.util.Date. 0)
+        refused (fn [f] (try (f) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))]
+    (is (= :db/txInstant (:attribute (refused #(pdb/with (ts/test-db) [{:seon.agent/key "t1"} [:db/add :db/current-tx :db/txInstant past]]))))
+        "in tx-data, through the one path a speculation takes")
+    (is (= :db/txInstant (:attribute (refused #(pdb/with (ts/test-db) [{:seon.agent/key "t2"} {:db/id :db/current-tx :db/txInstant past}]))))
+        "as a map on the current transaction")
+    (ts/test-branch! (fn [_ conn]
+      (is (= :db/txInstant (:attribute (refused #(d/transact conn {:tx-data [{:seon.agent/key "t3"}] :tx-meta {:db/txInstant past}}))))
+          "in tx-meta, through a connection's checked transact")
+      (is (some? (:db-after (d/transact conn {:tx-data [{:seon.agent/key "t4"}]}))) "and a write that supplies none is the store's to stamp")))))

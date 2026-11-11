@@ -33,6 +33,13 @@
   {:malli/schema [:=> [:cat :string] :string]}
   [id] (str "<session id=\"" id "\" from=\"seon\">\nYour own session: the work you are asked to do."))
 
+(defn task-begins
+  "What an agent reads where its calls change task, at the first call of task id after the calls of task before: the task before
+  has ended, and which is its task now, on its page (seon.task/session-key: a task needing the one it finished, on its branch, is
+  worked by the same agent). See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [before id] (str "<task id=\"" id "\" from=\"seon\">\nYour task " before " has ended. Your task is now " id ": its plan is on your page."))
+
 (defn example-open
   "What opens example session k, whose request was desc (Seon's framing, not a person's: a user message is the one turn every provider renders in place). See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."

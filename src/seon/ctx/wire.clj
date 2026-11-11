@@ -287,12 +287,27 @@
                               (or (empty? todo) (>= i steps)) false
                               :else (recur (into #{} (mapcat #(:datahike/parents (d/commit-graph-record store %))) todo) (inc i))))))))
 
+(defn model-parts
+  "The parts of entity c's page the model reads, as one component: the lists its page render places (seon.render/render-var-of: its own
+  render, else its schema's) that hold no messages and are not for the page alone, as seon.render/page-lists keeps them, in the order the
+  render places them; none at a point before the entity was made. The root of the parts walk (`parts-walk`), so a list an entity's own render adds is read by the model as the
+  task's parts are. See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
+  [opts c]
+  ;; at a point before the entity was made its pull holds nothing, and nothing draws its page: no parts
+  (let [out (if (:db/id (ratom/untracked c)) ((render/render-var-of (:seon.render/index opts) c) opts c) [])
+        placed (if (and (vector? out) (keyword? (first out))) (drop-while map? (rest out)) out)
+        model? (fn [x] (and (vector? x) (var? (first x))
+                            (let [m (meta (first x))]
+                              (and (:seon.render/list m) (not (:seon.render/messages m)) (not= "page" (:wire/for m)) (not= "page" (:wire/for (second x)))))))]
+    (into [:div {:id "model-parts"}] (filter model?) placed)))
+
 (defn- parts-walk
   "Agent a's page-parts walk drawn at db d0 (its branch's own, at t), cold: {:id :t :at :c :r :w}, the walk the model reads (:model-only:
   what is the page's alone is not drawn) over the agent pulled by what the parts read (seon.render/page-pattern of its own pattern)."
   {:malli/schema [:=> [:cat :seon.host/db :int :int [:tuple :any :any :int]] :map]}
   [d0 t a id]
-  (let [parts (requiring-resolve 'seon.render.ui/agent-parts)
+  (let [parts #'model-parts
         branch (nth id 1)
         ix0 (program/index-of-db d0)
         c0 (assoc-in (ctx/build ix0 d0 a branch (render/page-pattern ix0 (or (render/entity-pattern ix0 (d/pull d0 '[*] a)) []))) [:ix :own-index?] true)
@@ -468,6 +483,13 @@
   (when (and here (not= (:t here) (:t last-b)) (or no-calls? last-b))
     [[#'page-diff-msgs {} a last-b here (inc (or newest 0))]]))
 
+(defn task-msgs
+  "Where an agent's calls change task, what it reads at the first call of task id after task before's (seon.ctx.session/task-begins),
+  placed by the agent's model render as [#'task-msgs {} before id], so the walk keeps it as a component keyed by the two tasks and every
+  later request holds it at the same place. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :map :string :string] [:vector :seon.model/message]]}
+  [_ before id] [{:role "user" :content (session/task-begins before id)}])
+
 (defn- turn-entities
   "Agent record c's turns as the entities the model reads, ordered from its pull: its model calls by number, each turn's
   messages as it read them (seon.ctx/placed-messages: those delivered by its basis, so one delivered mid-turn reads at the next
@@ -501,13 +523,17 @@
         withb (filter basis-of cs)
         parts (pages-from db (:db/id c) (into [nil] (map basis-of) withb))
         pair (zipmap (map :seon.model-call/n withb) (range))]
-    (into (vec (for [[prev call] (map vector (reductions (fn [b x] (or (basis-of x) b)) nil cs) cs)
+    (into (vec (for [[prev call before] (map vector (reductions (fn [b x] (or (basis-of x) b)) nil cs) cs (cons nil cs))
                :let [n (:seon.model-call/n call)
+                     ;; the task a call served, from its basis (the newest, written after its commit, serves the agent's task now)
+                     task-of (fn [x] (or (:task (ratom/realize (:seon.model-call/basis x))) (when (= newest (:seon.model-call/n x)) (ratom/realize (get-in c [:seon.agent/task :seon.task/id])))))
+                     t0 (some-> before task-of) t1 (task-of call)
                      ms (keep (fn [[m _]] (get msgs m)) (get placed n))
                      ;; its evals in the one order a turn's are read in (seon.ctx/turn-evals: the model's, then other hands')
                      es (map first (ctx/turn-evals c (:db/id call)))
                      model? #(:seon.eval/call-id (get evals %))]
-               x (concat ms
+               x (concat (when (and t0 t1 (not= t0 t1)) [[#'task-msgs {} t0 t1]])
+                         ms
                          (when-let [b (basis-of call)] (let [i (pair n)] [[#'page-diff-msgs (with-meta {} {::parts #(parts i)}) (:db/id c) prev b n]]))
                          ;; a reply with no words whose calls c no longer holds (each unlinked by a swap!) says nothing: none of it stays
                          (when (or (some model? es) (not (str/blank? (:seon.model-call/reply call)))) [call])

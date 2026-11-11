@@ -130,6 +130,13 @@
 
 (declare deliver-rid answer-taken)
 
+(def ^:private not-restored
+  "What a spawn at a commit (:commit in its opts) does not restore, as the spawn's answer says it: only a session's definitions are in the store.
+  See docs/storage.md#compiled-code."
+  ["the system's own code (src): the binary is main's"
+   "main's changes since the session's base"
+   "host state: atoms, open files, sockets, fibers"])
+
 (declare answer-spawn insert-evals start-spawn no-room binary-program binary-current kill!)
 
 (defn- record-death
@@ -160,7 +167,7 @@
   {:malli/schema [:=> [:cat :seon.root/api-state :seon.host/volatile :seon.agent/id :any] :seon.root/api-state]}
   [st o id r]
   (if-let [p (get-in st [::spawning id])]
-    (-> (reply! st o p r) (update ::spawning dissoc id))
+    (-> (reply! st o p r) (update ::spawning dissoc id) (update ::restored dissoc id))
     st))
 
 (defn- deliver-rid
@@ -224,7 +231,8 @@
         e (problem (err/occurrence e :agent {:agent id :task (:task a)} (System/currentTimeMillis)))
         ;; its hello: the spawn is answered now, the agent ready
         ;; its hello answers the spawn, whatever a request sent before it made its status
-        (:ready m) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)))
+        (:ready m) (answer-spawn o id (cond-> {:id id} swp (assoc :started-without-program swp)
+                                                              (get-in st [::restored id]) (assoc :not-restored not-restored)))
         ;; and it is the agent's first fact: a message from Seon (the system entity) to it, in its conversation as any message is, written
         ;; as a plain write (it wakes nothing): the agent's page and context show it from the pull they already make
         ;; once per standing set of errors: its id is the agent's and the errors', so a resume or a second hello that meets the same
@@ -443,10 +451,13 @@
   (let [[st aid fd] (start-agent st opts)
       branch (get-in st [:agents aid :branch])]
   ;; the agent's key named here, in root's boot: the child reads none from main
-  (step/out! o :to-writer {:op :spawn :agent aid :branch branch :task (:task opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}
-                           :key (name aid)})
+  (step/out! o :to-writer (cond-> {:op :spawn :agent aid :branch branch :task (:task opts) :ns (profile/now-ns) :fd fd :dest {:spawn aid}
+                           :key (name aid)}
+                    ;; a restore at a commit of a session's branch (docs/storage.md#compiled-code): the writer makes the branch from it
+                    (:commit opts) (assoc :commit (:commit opts))))
   ;; answered at its hello (set-agent's :ready), or the end it meets first
   (cond-> (assoc-in st [::spawning aid] p)
+    (:commit opts) (assoc-in [::restored aid] true)
     (seq (:evals opts)) (assoc-in [::inserting aid] (:evals opts)))))
 
 (defn stale-binary
@@ -1122,27 +1133,33 @@
   "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/sessions) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
 (defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join through the system entity to the sessions root
-  holds, newest first to :seon.config.ctx/window, each with what its entry reads, its boot and the agents it started as the user's pull joins them (seon.task/entry-pattern,
-  seon.task/agents-join: root's page draws each under its starter, not again at the top), which root's page
-  draws (seon.render.ui/root nested) and root's model asks for at its REPL (my.user/sessions). See docs/users.md#whats-on-screen."
+  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join to whoever started it (:seon.agent/_agents, the
+  user: its :seon.agent/agents holds root's session as one of the agents it started), pulled as the user's own pull is (seon.task/user-pattern: the
+  agents it started, each with the ones it started, to :seon.config.render/agent-tree-depth levels). Root's page draws that tree (seon.render.ui/agent's
+  person entry, the agents under it) and root's model asks for it at its REPL (my.user/sessions). See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat] [:vector :any]]}
   [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
-           {:seon.agent/root [:seon.root/id {[:seon.agent/_root :limit :seon.config.ctx/window :reverse true] (conj task/entry-pattern :seon.agent/boot (task/agents-join (cfg/value :seon.config.render/agent-tree-depth)))}]}))
+           {:seon.agent/_agents (task/user-pattern)}))
 
 (defn root-session-tx
   "Root's session, made at the boot of a main that has none (`root-session-boot-tx`), an ordinary agent made the ordinary way: an agent
   entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern
-  `root-session-pattern`, and the task request/root of the chat template (seon.template/request-tx), parked, its agent that entity, so
-  the first message's wake spawns it. Root's own entity is untouched: an entity's id derives from its identity, so it cannot take a
-  key too. See docs/users.md#roots-session."
+  `root-session-pattern`, its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
+  chat template (seon.template/request-tx), parked, its agent that entity, so the first message's wake spawns it. The user started it
+  (:seon.task/started-by, the user's :seon.agent/agents: docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
+  derives from its identity, so it cannot take a key too. See docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db]
   (let [tx (tpl/request-tx db (tpl/from (tpl/templates :user) {:seon.task/ns 'request :seon.task/name "root" :seon.task/plan root-session-plan}))]
     (if (contract/error? tx)
       (throw (ex-info (str "root's session task was refused: " (:seon.error/message tx)) tx))
-      (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)}]
-            (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked})))))
+      ;; started by the user: the user's tree holds root's session and what it launches (docs/users.md#who-started-whom); drawn as a
+      ;; stage (seon.render.ui/stage, its own render, which a person turns back to the conversation): the page a fresh system opens on
+      (let [user (task/sender (cfg/value :seon.config.root/user-name))]
+        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)
+                :seon.render/hiccup 'seon.render.ui/stage}
+               (assoc user :seon.agent/agents "root-session")]
+              (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
 (defn root-session-boot-tx
   "At boot, root's session: made when main has none (`root-session-tx`; the owner's ruling, root's agent is there from boot), else
@@ -1503,6 +1520,8 @@
             compacted (when (and (= :lmdb backend) (cfg/value :seon.config.store/sole-writer?)) (pdb/compact-if-due! path))
             sole? (and (= :lmdb backend) (cfg/value :seon.config.store/sole-writer?))
             opened (pdb/open! backend path datoms main)
+            ;; before any agent: a tree's branch left by an earlier root's end, its last run cut short, is dropped as that run would have
+            dropped-trees (pdb/drop-trees! (:conn opened) main)
             ;; still the only process: old snapshots swept when enough commits have landed, and the freed pages compacted at once
             retained (when sole? (pdb/retain! (:conn opened) (cfg/value :seon.config.store/keep-commits)))
             compacted (if (pos? (:swept retained 0))
@@ -1542,7 +1561,7 @@
         (lib/static!)
         (let [db @conn]
           (merge opened (fs/fork-server db store-cfg)
-                 {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained
+                 {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained :dropped-trees dropped-trees
                   :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
 
 (defn- flow-error
@@ -1587,7 +1606,7 @@
         max-running (or max-running (cfg/value :seon.config.agent/max-running))
         source (or source (when-let [r (get cfg/config :seon.config.source/root)]
                             {:root r :dirs (cfg/value :seon.config.source/dirs) :branch (cfg/value :seon.config.source/branch)}))
-        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors digest digest-ms contracts pid fd compacted retained main-inputs]}
+        {store-cfg :cfg conn :conn recovered? :recovered? :keys [db agents-dir open-ms seeded caught-up seed-ms config-errors digest digest-ms contracts pid fd compacted retained dropped-trees main-inputs]}
         (boot! backend path datoms main source t0)
         recovered (if recovered? (pdb/of-main main (d/branches conn)) [])
         ;; this root's boot id (runs of an earlier boot are reaped); its fact is written
@@ -1621,7 +1640,7 @@
               :fork-server {:agents-forked 0 :pid pid :status :up :restarts 0}
               :store {:backend backend :path path :main main :agents-dir agents-dir :recovered? (boolean recovered?)
                       :recovered-branches recovered :open-ms (lib/r2 open-ms)}
-              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :seeded seeded :caught-up caught-up :seed-ms (lib/r2 seed-ms)
+              :boot {:gc-sweepers sweepers :compacted compacted :retained retained :dropped-trees dropped-trees :seeded seeded :caught-up caught-up :seed-ms (lib/r2 seed-ms)
                      :config-errors config-errors :digest digest :digest-ms (lib/r2 digest-ms)
                      :contracts (select-keys contracts [:armed :unchanged :invalid :ms]) :instrument (if contract/on? :on :off)
                      :stale-binary stale}}
@@ -1784,7 +1803,8 @@
   "Fork an agent from the fork server onto a new branch of main; answers its id once it is
   ready (its hello), so what is sent to it next reaches a live agent; an agent that ends first
   (refused, stopped, or died, with its exit status) throws that end. opts {:branch kw :task
-  string}; an existing :branch is resumed."
+  string}; an existing :branch is resumed; :commit (a uuid) with a new :branch restores the session at that commit of its branch,
+  the answer of request! naming what is not restored (not-restored)."
   {:malli/schema [:=> [:cat :seon.root/sys :seon.root/spawn-opts] :seon.agent/id]}
   [sys opts]
   (let [r @(request! sys 'spawn! nil opts)]

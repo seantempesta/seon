@@ -251,7 +251,8 @@
   open :stalled problem never outlives it)."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
   [db] (let [live (:seon.status/live (contract/properties :seon.agent/status))
-             agents (remove (fn [[a]] (:seon.user/name (d/entity db a))) (d/q '[:find ?a ?r :where [?r :seon.root/id :root] [?a :seon.agent/root ?r]] db))]
+             ;; every agent still shown live, read by its status (no join through the system entity: docs/users.md#who-started-whom)
+             agents (remove (fn [[a]] (:seon.user/name (d/entity db a))) (d/q '[:find ?a :in $ [?s ...] :where [?a :seon.agent/status ?s]] db (vec live)))]
          (-> []
              (into (mapcat (fn [[a]] (when (live (:seon.agent/status (d/entity db a)))
                                        [[:db/add a :seon.agent/status :dead]])))
@@ -379,7 +380,7 @@
   levels (`agents-join`): its page and every page's agents list are this one pull. Written on the user at each boot (`boot-tx`), so a
   change of the key reaches it at the next. See docs/users.md#whats-on-screen."
   {:malli/schema [:=> [:cat] [:vector :any]]}
-  [] [:seon.agent/key :seon.user/name (agents-join (cfg/value :seon.config.render/agent-tree-depth))])
+  [] [:seon.agent/key :seon.user/name :seon.render/hiccup (agents-join (cfg/value :seon.config.render/agent-tree-depth))])
 
 (defn boot-tx
   "Root's boot: its id for this process lifetime (the config in force, max-running among its keys, is written with it,
@@ -448,7 +449,7 @@
   retracts when they did not: otherwise an earlier end's error or deferred results read as this one's. Beside
   :seon.task/reasons, which a start keeps (the same verdict twice holds, seon.reconcile/judgment) and a person's
   continue retracts (my.root/run!). See docs/reconcile.md#a-task-holds-how-its-work-ended."
-  [:seon.task/reason :seon.task/commit :seon.task/commit-error :seon.task/merged-t :seon.task/error :seon.task/deferred
+  [:seon.task/reason :seon.task/commit :seon.task/merged-t :seon.task/error :seon.task/deferred
    :seon.task/deferred-results :seon.task/gate-unread :seon.task/changed :seon.task/conflicts :seon.task/unmerged
    :seon.task/task-conflicts :seon.task/failures :seon.task/costs :seon.task/waste])
 

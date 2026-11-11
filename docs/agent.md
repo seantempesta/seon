@@ -149,7 +149,7 @@ A script this branch holds (``bin/root``, at that name or its absolute path) cha
   - your task's plan: ``(swap! ctx assoc-in [:seon.agent/task :seon.task/plan] "...")``, or ``(swap! ctx update-in [:seon.agent/task :seon.task/plan] str "\n\nFound: ...")``;
   - its proofs, or what it cites: ``(swap! ctx update-in [:seon.agent/task :seon.task/proofs] conj 'app.x-test/t1)``;
   - a member gone: ``(swap! ctx update :seon.eval/_agent dissoc eid)``; a new one, its identity in its value: ``(swap! ctx assoc-in [:seon.message/_to "m-note"] {:seon.message/id "m-note" :seon.message/from "agent" :seon.message/body "..."})``;
-  - your own datum: register its key, name it in your pattern (a pull holds only the attributes it names): ``(swap! ctx assoc :seon.ctx/pattern (conj (seon.render/schema-property :seon.db/agent-fact :seon.ctx/pattern) :app.x/notes))``, then ``(swap! ctx assoc :app.x/notes [...])``;
+  - your own datum: register its key, name it in your pattern (a pull holds only the attributes it names): ``(swap! ctx assoc :seon.ctx/pattern (conj (seon.render/schema-property (seon.agent/branch-index) :seon.db/agent-fact :seon.ctx/pattern) :app.x/notes))``, then ``(swap! ctx assoc :app.x/notes [...])``;
   - what your page searches for: a search is a member like any other, its query searched on your branch at each draw and its hits shown as a part of your page (a function's name and first sentence, a section's heading). Your task's request has one, under ``(:seon.search/_of (:seon.agent/task @ctx))``; change its words by a `swap!` that puts new words at ``[:seon.agent/task :seon.search/_of e :seon.search/query]``, e its key in that map, and add your own beside it: ``(swap! ctx assoc-in [:seon.search/_of "a1/where-sets-are-logged"] {:seon.search/id "a1/where-sets-are-logged" :seon.search/query "sets a workout has not logged" :seon.search/k 5})``. Only that part is drawn again, and your next turn is sent what changed of it;
   - what you read beside your task: ``(cite! "docs/flow.md?full#idioms")`` and ``(uncite! "docs/flow.md#idioms")`` (a page whole with no anchor; a name too);
   - a var the task cites is changed by its definition, as at any REPL: ``(in-ns 'app.x)`` then ``(defn f0 ...)``, and its cite's ``:seon.cite/target`` (under ``[:seon.agent/task :seon.cite/_of]``) holds the new source at the next deref (a `swap!` of it is refused, naming that form).
@@ -157,6 +157,17 @@ A script this branch holds (``bin/root``, at that name or its absolute path) cha
   The change is one transaction on your branch, each value checked by its schema, or it is refused with the error that says why and nothing is written: ``:seon.ctx/invalid`` (no schema, or a value its schema refuses), ``:seon.ctx/not-held`` (the db would not hold it), ``:seon.ctx/basis`` (the swap!'s function wrote the db itself, or wrote `:t`, `:branch` or `:commit`, which are read-only). A refused swap! is never retried.
 - What arrives: before your first turn your page whole, as the call ``(my.render/page p)`` and its answer, and before each later turn where something on your page moved ``(my.render/diff p0 p1)``, only what moved, as edits by name (docs/render.md#a-change-is-edits-by-name), each a call in your conversation like your own (docs/render.md#the-render-is-an-eval). Your own evals and replies are your conversation, never repeated in a component. An eval runs once, when you send it: nothing is evaluated again for you.
 - Attached from outside, a `seon_context` read shows the page as a turn does: the same calls and their results, in your conversation.
+
+## Looking at what you pulled
+
+A pull is data, and one function gives a pulled entity as its data model: ``(my.db/pulled @ctx)``. It answers `{:schema :source :clauses :unasked :held-unasked :renders}`:
+
+- `:schema` is the entity schema that names it, and `:source` where its pattern came from (`:entity`, its own; `:schema`, its schema's).
+- `:clauses` is the pattern clause by clause. An attribute's clause holds its `:value` (nil when the pull holds nothing for it). A join's holds `:members`, how many it joined (0 when it was asked and is empty), its `:pattern` (a schema's name already read as the pattern it stands for) and `:sub`, each sub-clause with how many members hold it.
+- `:unasked` is what its schema names that the pattern does not ask; `:held-unasked` what the entity holds on your branch that the pattern does not ask.
+- `:renders` names the render that draws it for a person and the one that makes its messages for the model.
+
+A node joined inside another's pull was pulled by the sub-pattern at its path: read a member with the join's `:pattern`, ``(my.db/pulled (:seon.agent/task @ctx) (:pattern j))``. A clause with no value was asked on a db that holds nothing for it: on your own branch that is every fact main keeps about you (your status, your branch), since a pull reads the one db it is made on. The pull view of a page lays this same map out (```seon.render/pulled```, the one producer), so what a person sees there and what you read here are one thing.
 
 ## Finding your way
 
