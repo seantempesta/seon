@@ -294,7 +294,7 @@
                       (step/out! o :to-writer {:op :tx :branch :db :tx-data tx :dest {:agent-facts [id]}})
                       ;; a hang is evidence: captured now, before a restart takes the process
                       (when (and pid (contains? (system/fx-owners (get-in st [:system :procs])) :fx/evidence))
-                        (step/out! o [:fx/evidence :in]
+                        (step/out! o [:fx/evidence :ask]
                                    {:req {:pid pid :dir (str (cfg/value :seon.config.root/runs-dir) "/stalls/" (:seon.task/name decl))
                                           :stderr (agent/stderr-path (get-in st [:view :store :agents-dir]) id)}
                                     :prio 0 :dest {:stall-evidence tid :agent id}}))
@@ -666,7 +666,7 @@
       :fx (let [owner (keyword "fx" (name (:kind m)))]
             (if (contains? (system/fx-owners (get-in st [:system :procs])) owner)
               (let [[st rid] (pend st p :fx nil)]
-                (step/out! o [owner :in] {:req (:req m) :prio 0 :dest {:rid rid}})
+                (step/out! o [owner :ask] {:req (:req m) :prio 0 :dest {:rid rid}})
                 st)
               (reply! st o p (contract/error :seon.fx/unknown-kind #'seon.root/ext-op (str "no effect kind " (:kind m))))))
       :fs (let [[st rid] (pend st p :fs nil)]
@@ -734,7 +734,7 @@
                              (seq unread) (deliver-rid st o rid {:unread unread})
                              ;; no process test reached: the writer's analysis of the candidate was the check
                              (empty? (:tests dest)) (deliver-rid st o rid {:value {:results {}}})
-                             :else (do (step/out! o [:fx/tests :in] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
+                             :else (do (step/out! o [:fx/tests :ask] {:req {:repo (:repo dest) :branch (:branch (:source st)) :files (:text r) :tests (:tests dest)}
                                                                      :prio (:prio dest 0) :dest {:rid rid}})
                                        st)))
         (:asked dest) (deliver-rid st o (:rid dest) (if (contract/error? r) r {:task (:asked dest)}))
@@ -1135,19 +1135,11 @@
   "What root's session is for, its task's plan: what educates it, beside the docs it cites. See docs/users.md#roots-session."
   "You are root's session: the person talks to Seon through you. Answer the person yourself when you can. When they want work done, look first for a session already on it: (my.user/sessions) lists every session on main and how each stands; if one is on it, move their view to it with (my.user/focus! \"<its key>\") and tell them what it is doing. More: docs/users.md#roots-session")
 
-(defn root-session-pattern
-  "What root's session's record pulls: the agent's pattern (:seon.db/agent-fact's), and a join to whoever started it (:seon.agent/_agents, the
-  user: its :seon.agent/agents holds root's session as one of the agents it started), pulled as the user's own pull is (seon.task/user-pattern: the
-  agents it started, each with the ones it started, to :seon.config.render/agent-tree-depth levels). Root's page draws that tree (seon.render.ui/agent's
-  person entry, the agents under it) and root's model asks for it at its REPL (my.user/sessions). See docs/users.md#roots-session."
-  {:malli/schema [:=> [:cat] [:vector :any]]}
-  [] (conj (render/schema-property (pdb/index) :seon.db/agent-fact :seon.ctx/pattern)
-           {:seon.agent/_agents (task/user-pattern)}))
-
 (defn root-session-tx
   "Root's session, made at the boot of a main that has none (`root-session-boot-tx`), an ordinary agent made the ordinary way: an agent
-  entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern
-  `root-session-pattern`, its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
+  entity keyed \"root\" (a reserved key, as the user's is its name), linked to root by :seon.agent/root, its pattern written once as
+  its role's name and its one addition, a join to whoever started it read by the user's own pattern ([:seon.db/agent-fact
+  {:seon.agent/_agents :seon.db/user-fact}]: what either schema gains later reaches it with no write), its own render the stage (seon.render.ui/stage: the page a fresh system opens on), and the task request/root of the
   chat template (seon.template/request-tx), parked, its agent that entity, so the first message's wake spawns it. The user started it
   (:seon.task/started-by, the user's :seon.agent/agents: docs/users.md#who-started-whom). Root's own entity is untouched: an entity's id
   derives from its identity, so it cannot take a key too. See docs/users.md#roots-session."
@@ -1159,17 +1151,17 @@
       ;; started by the user: the user's tree holds root's session and what it launches (docs/users.md#who-started-whom); drawn as a
       ;; stage (seon.render.ui/stage, its own render, which a person turns back to the conversation): the page a fresh system opens on
       (let [user (task/sender (cfg/value :seon.config.root/user-name))]
-        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern (root-session-pattern)
+        (into [{:db/id "root-session" :seon.agent/key "root" :seon.agent/root [:seon.root/id :root] :seon.ctx/pattern [:seon.db/agent-fact {:seon.agent/_agents :seon.db/user-fact}]
                 :seon.render/hiccup 'seon.render.ui/stage}
                (assoc user :seon.agent/agents "root-session")]
               (conj (vec tx) {:seon.task/id "request/root" :seon.task/agent "root-session" :seon.task/outcome :parked :seon.task/started-by user}))))))
 
 (defn root-session-boot-tx
   "At boot, root's session: made when main has none (`root-session-tx`; the owner's ruling, root's agent is there from boot), else
-  its pattern written again (`root-session-pattern`), so an edit of the agent's pattern reaches it at the next boot, its task and
-  conversation untouched. See docs/users.md#roots-session."
+  nothing: its pattern names its role's, so an edit of the agent's or the user's pattern reaches it with no write. See
+  docs/users.md#roots-session."
   {:malli/schema [:=> [:cat :seon.host/db] [:vector :any]]}
-  [db] (if (pdb/eid db :seon.agent/key "root") [{:seon.agent/key "root" :seon.ctx/pattern (root-session-pattern)}] (root-session-tx db)))
+  [db] (if (pdb/eid db :seon.agent/key "root") [] (root-session-tx db)))
 
 (defn import-tree!
   "Main's program on conn brought to the source tree {:root :dirs}, only what it changed since root's :seon.root/source fact
@@ -2054,14 +2046,10 @@
           (if (compare-and-set! tree-runs cur (assoc cur b {:dropping p}))
             ;; whatever the drop meets, a run waiting on it is let in and the tree's entry cleared: a throw here never strands one
             (try
-              (when ag
-                ;; the tap first, then the status: an agent that ends between the two has sent its end where this reads it
-                (let [ev (events sys)]
-                  (try
-                    (when-not (gone-statuses (get-in (state sys) [:agents ag :status]))
-                      (kill! sys ag)
-                      (loop [] (let [x (a/<!! ev)] (when (and x (not (and (#{:ended :dead :killed} (:type x)) (= ag (:agent x))))) (recur)))))
-                    (finally (a/untap (:events-mult sys) ev)))))
+              ;; its agent stopped first: the kill's own answer, given once root's view holds it stopped (the api's :kill), is the
+              ;; wait's end; never an end event read from a tap, which slides and can drop the one event waited for
+              (when (and ag (not (gone-statuses (get-in (state sys) [:agents ag :status]))))
+                @(request! sys 'kill! ag nil))
               @(write! sys {:op :drop-tree-branch :branch b})
               nil
               (finally (swap! tree-runs dissoc b) (deliver p true)))
