@@ -1130,6 +1130,28 @@
       (let [tk (answer (err t))]
         (is (= [:held :closed] [(:seon.task/execution tk) (:seon.task/outcome tk)]) (str t ": held for root"))))))
 
+;; docs/errors.md#problems: an answer that is the writer's own fault (its invariant broken: something pending when a merge op
+;; began, :seon.writer/pending) is a problem of the system, never the task's outcome: the merge's tasks stay :ready and a gated
+;; task stays at its gate, to be tried again. Red before: the octopus step zipped the members with no results and recorded
+;; nothing anywhere; the gate marked every test :error with the writer's fault on the task
+(deftest a-writers-own-fault-is-the-systems-problem-not-the-tasks
+  (let [fault (fn [op] (contract/error :seon.writer/pending 'seon.writer/pending-refused "a merge found something pending" {:op op}))
+        db (d/db-with (mdb [(decl "add")] :extra (concat (work "add" :done) (work "add-merge" :running)))
+                      [{:seon.task/id "demo/add-merge" :seon.task/outcome :ready}])
+        act (first (filter #(= :octopus-merge (:op %)) (actions-for db)))
+        [st _] (#'r/start (st-of db) act)
+        [st2 outs] (#'r/advance st "demo/add-merge" :octopus-merged (fault :octopus-merge))
+        problems (filter #(= :problem (:op %)) outs)
+        writes (filter #(= :write (get-in % [:req :op])) outs)]
+    (is (= [:platform] (map :class problems)) "the octopus op's own refusal is the system's problem")
+    (is (empty? writes) "and nothing is written on its tasks: they stay :ready")
+    (is (nil? (get-in st2 [:flights "demo/add-merge"])) "the flight ends, so the next pass tries again")
+    (let [[st3 outs3] (#'r/advance (assoc-in st [:flights "demo/add-merge" :act] {:op :gate :task "demo/add-merge" :tests ['demo-test/add-test]})
+                                   "demo/add-merge" :gated (fault :merge-candidate))]
+      (is (= [:platform] (map :class (filter #(= :problem (:op %)) outs3))) "the gate's candidate refused by the writer: the system's problem")
+      (is (empty? (filter #(= :write (get-in % [:req :op])) outs3)) "no test marked :error, nothing on the task")
+      (is (nil? (get-in st3 [:flights "demo/add-merge"]))))))
+
 (deftest a-branch-behind-main-is-told-so-first
   ;; task seon.root/a-behind-merge-is-bounded-and-merges-main-first (gap 7): a branch behind main was judged
   ;; on a program main had moved from and read "proof-unknown"; the done rule leads with the fix, and the judging

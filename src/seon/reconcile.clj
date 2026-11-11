@@ -145,6 +145,14 @@
    :live #{} :reap #{} :kill {} :judge #{} :merging #{} :woken #{} :late #{}})
 
 (def ^:private finished task/finished)
+(defn- system-fault?
+  "Whether answer r is the writer's own fault, not the task's: an error of the writer's namespace (its invariant broken, as
+  :seon.writer/pending: something was pending when a merge op began). Such an answer is a problem of the system, recorded
+  on main through the api (:op :problem, class :platform), and the task is left as it stood, to be tried again; never an
+  outcome written on the task. See docs/errors.md#problems."
+  {:malli/schema [:=> [:cat :any] :boolean]}
+  [r] (boolean (and (contract/error? r) (= "seon.writer" (namespace (:seon.error/type r))))))
+
 (def ^:private behind-types
   "The merge refusals that a merge of main into the branch first resolves, so the merge task runs again (its outcome
   :behind, bounded by :seon.config.merge/max-behind): main changed what the branch's merge reads (:seon.merge/behind),
@@ -1067,7 +1075,11 @@
       ;; the merged members' namespaces that are Seon's own source are written back: main's
       ;; files after the octopus merge, committed on the merges branch (:git), the sha recorded on
       ;; each merged task (the self-improvement loop: the next generation builds it)
-      :octopus-merged (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
+      ;; the op itself refused (the writer's fault, or any answer with no member results): nothing merged and nothing is the
+      ;; members' to answer for, so it is the system's problem and the tasks stay :ready for the next pass
+      :octopus-merged (if (contract/error? r)
+                        [(update st :flights dissoc id) [{:op :problem :class :platform :error r}]]
+                       (let [merged (keep (fn [[m x]] (when (:merged? x) [m x])) (map vector (:members act) (:results r)))
                             paths (vec (sort (distinct (mapcat (comp :files second) merged))))
                             back? (and (:source st) (seq paths) (cfg/value :seon.config.source/write-back-on-merge))]
                         (one (write (cond-> st back? (assoc-in [:flights id :writeback] {:files paths :members (vec (for [[m x] merged :when (seq (:files x))] m))}))
@@ -1090,14 +1102,17 @@
                                                        (task/move-tx task :ready :behind {:seon.task/reason (:seon.error/message r) :seon.task/error r})
                                                        :else (hold-tx (:db st) task (task/move-tx task :ready :closed {:seon.task/reason problem :seon.task/error r})
                                                                       problem {:conflicts (:seon.task/conflicts t) :unmerged (:seon.task/unmerged t)}))))
-                                                 (:members act) (:results r))))))
+                                                 (:members act) (:results r)))))))
       ;; each deferred test's status on the task. The candidate is the writer's: the files the octopus merge would write
       ;; (seon.writer's :merge-candidate), forms', tests' and schema resources' alike (a :seon.ref/block change left out would
       ;; meet its new seon.ref/scan in the checkout, and the seed would throw on scan's contract). A refused candidate (an
       ;; error), or one over a tree missing a changed namespace (:unread), vouches for none: each :error, and no test ran
-      :gated (let [unread (:unread r)
+      ;; the gate's candidate refused by the writer's own fault: the system's problem, the task left at its gate to be tried again
+      :gated (if (system-fault? r)
+               [(update st :flights dissoc id) [{:op :problem :class :platform :error r}]]
+              (let [unread (:unread r)
                    rs (if (or (contract/error? r) (seq unread)) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
-               (one (write st id :done (gated st id rs (vec unread) (when (contract/error? r) r)))))
+               (one (write st id :done (gated st id rs (vec unread) (when (contract/error? r) r))))))
       :write-back (one (request st id :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (doc/files (:db r) paths)]
