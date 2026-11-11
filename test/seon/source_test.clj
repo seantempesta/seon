@@ -224,6 +224,13 @@
     (is (nil? (current tree)) "the same tree")
     (is (nil? (current (built-with "test/seon/required_whole.clj" #(str % "\n;; a test changed\n")))) "a test's change: a process loads it from main")
     (is (nil? (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form's change: the agent loads it from main")
+    ;; batch 90 (Point, 2026-11-12): the plan judged the binary current for a change root runs none of, built nothing, and each
+    ;; test's system refused every spawn, judging the same two trees over its own store, which holds another program: one answer
+    ;; for two trees, the one the plan judged over the tree's program, whatever db reads it after
+    (let [from (built-with "src/seon/agent.clj" (tweak "(defn test-plan"))]
+      (is (nil? (current from)) "judged over the tree's program: current")
+      (is (nil? (root/binary-current (pdb/empty-db false) {:inputs {:tree from}} tree))
+          "a store holding none of that program (a test's system) reads the same answer, never its own guess"))
     (let [r (current (built-with "src/seon/writer.clj" (tweak "(defn writer-proc")))]
       (is (some #{'seon.writer/writer-proc} (:reaches r)) (str "a root proc's step is root's own code: not current " (pr-str r)))
       ;; rule (a), as bin/test reads it (the plan's out/build): a process test selected, and a build only for a binary not current
