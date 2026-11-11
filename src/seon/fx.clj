@@ -1185,8 +1185,8 @@
   step takes a clone of it, as bin/check's steps do); :process is one test as a shard of one (bin/test --shard,
   whose runner stores its verdict); :step is one check step (bin/check --steps, then bin/test --store-steps, which
   stores it green at its digest). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the
-  cache by its digest, so an item asked again is reused there; a step's overrun of its bound is :signal :overran, never
-  a verdict. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
+  cache by its digest, so an item asked again is reused there; a step bin/check ended past its bound (its DIR/overran) is
+  :signal :overran, never a verdict. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
   stored under a digest of files that are not there. A green already stored is answered at once, :reused, with no process
   started. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :map] :map]}
@@ -1219,16 +1219,21 @@
                 :build (sh "bin/build" "seon")
                 ;; the store every binary step of this tree branches from (each step takes a clone of it, bin/check's unit),
                 ;; seeded once, fresh, as bin/check's seed step seeds it: so steps at once never race to make it
+                ;; and the process tests' store, made by this checkout's own runtime (its path is its schema's digest), as
+                ;; bin/test's plan makes it before any shard: a process item on a fresh checkout found none
                 :seed (do (lib/remove-tree! store)
-                          (sh "zsh" "-c" "ROOT=$PWD; . bin/env; cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-"))
+                          (sh "zsh" "-c" (str "ROOT=$PWD; . bin/env; (cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-)"
+                                              " && HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test"
+                                              " -e \"(require 'seon.test-store) (seon.test-store/make-process-store! \\\"$PWD\\\")\"")))
                 :process (sh "bin/test" "--shard" (str dir "/shard-0.edn"))
                 :step (let [c (sh "bin/check" "--steps" dir)] (sh "bin/test" "--store-steps" dir) c))
             ms (profile/ms-since t0)
             stored (when-not (#{:build :seed} kind) (stored-results {name digest}))
             v (when (map? stored) (get stored digest))
-            step-ms (when (= :step kind)
-                      (let [f (java.io.File. (str dir "/step-ms"))]
-                        (when (.isFile f) (reduce + 0 (keep #(some-> (re-matches #"\S+ (\d+)" %) second parse-long) (str/split-lines (slurp f)))))))]
+            ;; bin/check's own judgement of the step's bound, a signal it writes (DIR/overran): this measures nothing itself
+            overran? (when (= :step kind)
+                       (let [f (java.io.File. (str dir "/overran"))]
+                         (and (.isFile f) (contains? (set (str/split-lines (slurp f))) name))))]
         (cond
           (contract/error? stored) stored
           (= :build kind) (if (zero? (:exit r))
@@ -1238,8 +1243,8 @@
                            {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
                            (error #'seon.fx/run-item :seon.fx/io-error (str "the seed of " store " failed (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log) {:path checkout}))
           ;; a step that ended red with no verdict stored, over its bound: the overrun is a signal, its verdict none
-          (and (= :step kind) (not (proofs/green? v)) bound step-ms (> step-ms bound))
-          {:value {:signal :overran :ms step-ms}}
+          (and overran? (not (proofs/green? v)))
+          {:value {:signal :overran :ms ms}}
           v {:value (assoc (select-keys v [:pass :fail :error :failures]) :ms ms)}
           (= :step kind) {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message (str "bin/check --steps " name ": " (runner-end (str (:out r) (:err r))))}] :ms ms}}
           :else (error #'seon.fx/run-item :seon.fx/io-error (str "the shard stored no verdict for " name " (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log)
