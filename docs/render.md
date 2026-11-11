@@ -84,11 +84,11 @@ A render is `(f opts node)`: opts, then the pulled node. Everything else it read
 | `:seon.render/index` | the entity index: what every schema lookup takes as `ix` (```seon.render/schema-property```, ```seon.render/entity-pattern```, ```seon.render/entity-schema```) | always, by the walk (```seon.render/render!```) |
 | `:seon.ctx/ctx` | the whole pull, as a tracking view | only when the render's contract names it in its opts map |
 | `:seon.db/db` | the branch's db, read under `d/with-reads` | only when its contract names it |
-| `:seon.render/drawn` | the renders this walk has drawn | only when its contract names it |
+| `:seon.render/drawn` | the renders this walk has drawn, each var with its function: not what they drew | only when its contract names it |
 | `:seon.render/nested` | true where a parent placed this entity; absent at the page's top | by the walk |
 | `:key` | the name of what it shows, its element's id | by whoever placed it |
 
-A contract names a key as `[:and :seon.render/opts [:map [:seon.ctx/ctx :any]]]` in place of opts' `:map` (```seon.render/inputs``` reads it). At a REPL the index is `(seon.agent/branch-index)`, so a render is tried on one node as `(f {:seon.render/index (seon.agent/branch-index)} node)`.
+A contract names a key as `[:and :seon.render/opts [:map [:seon.ctx/ctx :any]]]` in place of opts' `:map` (```seon.render/inputs``` reads it). Another render's output is never handed to a render: a render reading what others drew would depend on the order they are drawn in, and two reading each other would never end; what a whole walk drew is `(my.render/tree)` after it, and the page at a point is `(my.render/page p)`. An agent reads this beside its own render, as `:seon.render/hiccup`'s description, which its pull view draws at that clause (```seon.render.ui/pull-clause```). At a REPL the index is `(seon.agent/branch-index)`, so a render is tried on one node as `(f {:seon.render/index (seon.agent/branch-index)} node)`.
 
 ### A component answers hiccup
 
