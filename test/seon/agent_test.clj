@@ -2447,13 +2447,13 @@
     (is (apply = turns) (str "no more turns while nothing arrives: " (pr-str turns)))))
 
 (deftest a-reply-with-no-evals-stops-with-turns-left
-  ;; docs/model.md#one-tool-eval: a reply with text and no call is its message alone: nothing runs and the
+  ;; docs/model.md#one-tool-repl: a reply with text and no call is its message alone: nothing runs and the
   ;; agent waits, with turns left
   (let [reply (fn [text calls] {:usage {:prompt_tokens 10 :completion_tokens 2}
                                 :choices [{:finish_reason "stop" :message (cond-> {:content text} calls (assoc :tool_calls calls))}]})
         text-only (seon.model/reply-of (reply "Nothing to run; I wait for you." nil) 1 100)
-        one-eval (seon.model/reply-of (reply "Reading." [{:id "c1" :function {:name "eval" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
-        no-text (seon.model/reply-of (reply nil [{:id "c1" :function {:name "eval" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
+        one-eval (seon.model/reply-of (reply "Reading." [{:id "c1" :function {:name "repl" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
+        no-text (seon.model/reply-of (reply nil [{:id "c1" :function {:name "repl" :arguments "{\"intent\":\"read\",\"code\":\"(+ 1 2)\"}"}}]) 1 100)
         [end] (in-agent #(vector (str "(seon.turn/work! {:task " (pr-str (:task %)) " :max-turns 5})"))
                           {:config {:seon.config.ai/script 'seon.fixtures/text-reply}})]
     (is (= ["Nothing to run; I wait for you." nil] [(:text text-only) (:tool-calls text-only)]) "text and no call: its message, no call")

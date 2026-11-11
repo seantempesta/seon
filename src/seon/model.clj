@@ -1,6 +1,6 @@
 (ns seon.model
   "The model, as one function of a provider value and a request: `complete` answers
-  `:seon.model/completion` (the reply text, its calls of the one tool `eval`, and its token
+  `:seon.model/completion` (the reply text, its calls of the one tool, `repl`, and its token
   usage) or the declared `:seon.model/provider-error`. Every request declares that one tool
   (`eval-tool`), so the model sees each evaluation's answer before its next call.
 
@@ -110,14 +110,19 @@
                    (finally (http/s-close s))))))
         (catch Throwable e (transport-error (step/error-msg e) {:url url}))))))
 
+(def tool-name
+  "The name of the model's one tool: repl, which is no Clojure function, so a model does not write its code as (eval '(...)) inside it
+  (Point's ruling 2026-11-11, from the ladder's rung 1). See docs/model.md#one-tool-repl."
+  "repl")
+
 (def eval-tool
-  "The model's one tool (v1's): a call is one eval, its intent and its code, read as reply text is; a reply's message is its text, and each of its evals is a call of its own. See docs/model.md#one-tool-eval."
+  "The model's one tool (v1's): a call is one eval, its intent and its code, read as reply text is; a reply's message is its text, and each of its evals is a call of its own. See docs/model.md#one-tool-repl."
   {:type "function"
    ;; the response keys are those an agent reads in its tool message and at its handle; :text (the message itself), :record
    ;; (the id of the kept record) and :fns (the costliest functions, drawn on the page) are in :seon.eval/response and are not
    ;; shown to the agent, so they are left out here and in docs/prompt.md
-   :function {:name "eval"
-              :description "Run Clojure code at your REPL: one eval, one call. Write your message to your user as the text of your reply, then make a call for each eval you want run. Your system message says how the calls run and what comes back."
+   :function {:name tool-name
+              :description "Run code at your REPL: Clojure exactly as you would type it. Your system message says how the calls run and what comes back."
               ;; in the order a model fills them: it thinks before the code
               :parameters {:type "object"
                            :properties (array-map :intent {:type "string" :description "What this eval is about to do. A sentence is fine."}
@@ -127,14 +132,14 @@
 
 (defn- wire-message
   "A conversation message as the chat API reads it: a reply's text as its content and each of its evals as a call of its own (its id, its intent and code as its JSON arguments), and its reasoning as reasoning_content (DeepSeek's thinking mode with tools needs every earlier reply's reasoning back, a 400 otherwise); a
-  tool result named by its call's id. See docs/model.md#one-tool-eval."
+  tool result named by its call's id. See docs/model.md#one-tool-repl."
   {:malli/schema [:=> [:cat :seon.model/message] :map]}
   [{:keys [role content tool-calls tool-call-id reasoning]}]
   (cond-> {:role role :content content}
     reasoning (assoc :reasoning_content reasoning)
     (seq tool-calls) (assoc :tool_calls (mapv (fn [{:keys [id code intent]}]
                                                 {:id id :type "function"
-                                                 :function {:name "eval"
+                                                 :function {:name tool-name
                                                             ;; in the tool's order
                                                             :arguments (json/write-str (cond-> (array-map) intent (assoc :intent intent) true (assoc :code code)))}})
                                               tool-calls))
@@ -165,7 +170,7 @@
   (DeepSeek's), the one provider format function: each wire message from its group (`wire-groups`), a
   reply as one assistant message whose text is its message and whose calls are its evals, then one tool message for each, its result with its handle; reasoning as
   reasoning_content, left out only when replay is false (:seon.config.ai/replay-reasoning; a config
-  with thinking on refuses that at load). A message's :reply never reaches the wire. See docs/model.md#one-tool-eval."
+  with thinking on refuses that at load). A message's :reply never reaches the wire. See docs/model.md#one-tool-repl."
   {:malli/schema [:=> [:cat [:maybe :boolean] [:vector :seon.model/message]] [:vector :map]]}
   [replay msgs]
   (mapv (fn [[i & more]]
@@ -194,7 +199,7 @@
     reasoning-effort (assoc :reasoning_effort (name reasoning-effort))))
 
 (defn- eval-call
-  "One eval e as read ({\"intent\" \"code\"}) under id: {:id :code} with its :intent when it is a string; an eval whose code is missing or not a string is that eval's :problem, shape saying what is right, and :code holds what came, for the record. See docs/model.md#one-tool-eval."
+  "One eval e as read ({\"intent\" \"code\"}) under id: {:id :code} with its :intent when it is a string; an eval whose code is missing or not a string is that eval's :problem, shape saying what is right, and :code holds what came, for the record. See docs/model.md#one-tool-repl."
   {:malli/schema [:=> [:cat :any :string :string] [:map [:id :string] [:code :string] [:intent {:optional true} :string] [:problem {:optional true} :string]]]}
   [e id shape]
   (let [code (when (map? e) (get e "code"))]
@@ -233,12 +238,12 @@
   "A call of eval is {\"intent\": <string>, \"code\": <string>}; write your message as the text of your reply and make one call for each eval.")
 
 (defn- eval-of
-  "A provider's tool call as the eval it is ({:id :code :intent}), from its tool name, its JSON arguments and its id; another tool's name or arguments cut off or not JSON are its :problem, :code holding what came. See docs/model.md#one-tool-eval."
+  "A provider's tool call as the eval it is ({:id :code :intent}), from its tool name, its JSON arguments and its id; another tool's name or arguments cut off or not JSON are its :problem, :code holding what came. See docs/model.md#one-tool-repl."
   {:malli/schema [:=> [:cat [:maybe :string] [:maybe :string] :string] :map]}
   [tool arguments id]
   (let [a (or arguments "")
         j (try (json/read-str a) (catch Throwable _ nil))
-        problem (cond (and tool (not= "eval" tool)) (str "there is one tool, eval; " tool " is not a tool here")
+        problem (cond (and tool (not= tool-name tool)) (str "there is one tool, " tool-name "; " tool " is not a tool here")
                       (not (map? j)) "the arguments are cut off or are not JSON")]
     (if problem
       {:id id :code a :problem (str "this call was not run: " problem ". " call-shape)}
@@ -251,12 +256,12 @@
 
 (defn- text-as-call
   "A reply with no call whose text ends in the provider's tool-call markup as the one eval that says so: it meant a call, so it isn't a reply
-  that parks the agent, and what it held is no call to run. Its usage is recorded as any turn's. See docs/model.md#one-tool-eval."
+  that parks the agent, and what it held is no call to run. Its usage is recorded as any turn's. See docs/model.md#one-tool-repl."
   {:malli/schema [:=> [:cat [:maybe :string] [:vector :map]] [:vector :map]]}
   [text calls]
   (if (and (empty? calls) text (str/includes? text markup))
     [{:id "text-as-call" :code text
-      :problem (str "your call came back as text, with the tool-call markup in it, so nothing ran. Send it again as a call of the eval tool. " call-shape)}]
+      :problem (str "your call came back as text, with the tool-call markup in it, so nothing ran. Send it again as a call of your repl tool. " call-shape)}]
     calls))
 
 (defn reply-of

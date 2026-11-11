@@ -259,7 +259,7 @@
     (is (clojure.string/includes? (:seon.error/message old) "message-md") "the old shape is told the new one, nothing run")
     (is (= 2 (:value turn-of)) "each reply is a turn: no one growing turn 0")
     (is (= ["seon.print"] (filterv string? (map :value (:responses ns-after)))) (str "the namespace a reply moved to is where the next one runs: " (pr-str moved-ns)))
-    (is (= ["eval"] (mapv #(get-in % ["function" "name"]) (get body "tools"))) "the body holds the tool a model is given")
+    (is (= ["repl"] (mapv #(get-in % ["function" "name"]) (get body "tools"))) "the body holds the tool a model is given")
     (is (= (clojure.data.json/read-str (clojure.data.json/write-str seon.model/eval-tool)) (first (get body "tools"))) "that very tool")
     (is (= "system" (get (first msgs) "role")))
     (is (= "Adding, then adding again." (get call "content")) "the message is the reply's text, as a model's")
