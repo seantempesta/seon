@@ -800,9 +800,10 @@
     (is (str/includes? red "(defn helper [] 3)") "a helper of its own namespace, with its source")
     (let [explain (:seon.status/explain (seon.contract/properties :seon.ctx.status/proof-state))]
       (doseq [[k t] [[:not-run 'demo-test/d] [:deferred 'demo-test/p] [:unknown 'demo-test/u]]]
-        (is (str/includes? st (str "`" t "`: " (get explain k))) (str t ": its name, then what its state means and what helps it, the schema's words"))))
-    (is (str/includes? red (:fail (:seon.status/explain (seon.contract/properties :seon.ctx.status/proof-state)))) "a red proof says what red means and what to do")
-    (is (= 1 (count (re-seq #"\(prove\)" st))) "(prove) is offered for the proof not judged yet alone")))
+        (is (str/includes? st (str "<code>" t "</code>: ")) (str t ": its name, drawn as code"))
+        (is (str/includes? st (first (str/split (get explain k) #"`"))) (str t ": then what its state means and what helps it, the schema's words"))))
+    (is (str/includes? red (first (str/split (:fail (:seon.status/explain (seon.contract/properties :seon.ctx.status/proof-state))) #"`"))) "a red proof says what red means and what to do")
+    (is (= 1 (count (re-seq #"<code>\(prove\)</code>" st))) "(prove) is offered, as code, for the proof not judged yet alone")))
 
 (deftest every-proof-state-has-its-words
   ;; docs/render.md#how-the-work-stands: each state a proof is shown in carries its title and its explanation as data on its schema, so a

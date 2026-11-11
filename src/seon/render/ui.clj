@@ -1163,7 +1163,7 @@
      (for [{:keys [test failures calls status]} red]
        [:div {:key test}
         [:p [:code (str test)] " fails."]
-        (markdown (proof-state :seon.status/explain status))
+        (markdown (proof-state :seon.status/explain status) {:inline? true})
         (for [[i {a :assert as :asserts g :got m :message}] (map-indexed vector failures)]
           [:p {:key i} "It asserts " [:code (str/join ", " (map #(as-text %) (or as [a])))] " and got " [:code (as-text g)] (when m (str " (" m ")")) "."])
         (when (seq calls)
@@ -1171,7 +1171,7 @@
            (for [{v :var src :source} calls :when src] [:pre {:key (str v)} [:code src]])])])
      ;; each state with no verdict: what it means and what helps it, its schema's words, then its proofs
      (for [[st ps] [[:not-run died] [:deferred deferred] [:unknown unknown]] :when (seq ps)]
-       [:div {:key st} (markdown (str (str/join ", " (map #(str "`" (:test %) "`") ps)) ": " (proof-state :seon.status/explain st)))])
+       [:div {:key st} (markdown (str (str/join ", " (map #(str "`" (:test %) "`") ps)) ": " (proof-state :seon.status/explain st)) {:inline? true})])
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)
        [:div {:key :unmerged}
