@@ -374,8 +374,9 @@
     (is (true? (last (:value elsewhere))) "read from another namespace as @seon.ctx/ctx (the in-ns, then the read: each form's value)")
     (is (= plan (:value on-branch)) "written on the agent's branch, one transaction")
     (is (clojure.string/includes? (:context next-turn) (pr-str plan)) "the next read tells the plan as it is now")
-    (is (= 1 (count (re-seq #":seon.model-call/basis" (:context next-turn))))
-        "and the read before it by its id, never its record: the one basis shown is inside the first point's @ctx, whole (owner, 2026-11-11), which holds that turn's model call")))
+    (is (zero? (count (re-seq #":seon.model-call/basis" (:context next-turn))))
+        "and the read before it by its id, never its record: the first point describes @ctx (paths and what each holds), so no model call's basis is printed at all")
+    (is (clojure.string/includes? (:context next-turn) "(my.agent/describe @ctx)") "the record described at the first point")))
 
 (deftest a-task-is-declared-held-and-a-missing-argument-is-named
   ;; repl-audit B F3, F1: no op made a task, and an attach with no task printed root's whole system map. A plain op answers the id and starts nothing;
