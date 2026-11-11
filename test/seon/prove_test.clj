@@ -434,15 +434,18 @@
 (defn- run-answers [outs] (mapv :r (filter #(= :prove-answer (:op %)) outs)))
 
 ;; docs/merging.md#the-test-service: a process test runs on its checkout's binary, so it waits for its tree's build
-(deftest a-process-item-waits-for-its-trees-build
+(deftest a-process-item-waits-for-its-trees-build-and-seed
   (let [[st o ask] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? true}})
         [b] (fx-asks o)]
     (is (true? (get-in ask [:req :process?])) "a checkout's run asks its agent for its process items")
     (is (= [{:kind :build :tree "T" :checkout "/ck" :name :build :digest "T" :binary? false :bound nil}] (mapv #(get-in % [:req :req]) (fx-asks o)))
         "the build alone is granted, though three workers are free")
-    (let [[st o2] (feed st [(answer-of b {:value {:pass 1 :fail 0 :error 0 :ms 900}})])
+    (let [[st o1] (feed st [(answer-of b {:value {:pass 1 :fail 0 :error 0 :ms 900}})])
+          [sd] (fx-asks o1)
+          _ (is (= :seed (get-in sd [:req :req :kind])) "the build green: the seed next, which makes the process tests' store")
+          [st o2] (feed st [(answer-of sd {:value {:pass 1 :fail 0 :error 0 :ms 2000}})])
           [p] (fx-asks o2)]
-      (is (= {:kind :process :name 'a.p-test/t :digest "dp" :checkout "/ck"} (select-keys (get-in p [:req :req]) [:kind :name :digest :checkout])) "the build green: its process test is granted")
+      (is (= {:kind :process :name 'a.p-test/t :digest "dp" :checkout "/ck"} (select-keys (get-in p [:req :req]) [:kind :name :digest :checkout])) "the seed green: its process test is granted")
       (let [[_ o3] (feed st [(answer-of p {:value {:pass 1 :fail 0 :error 0 :ms 40}})])
             [r] (run-answers o3)]
         (is (= [1 0 0 []] ((juxt :pass :fail :error :deferred) r)) "counted as a test, nothing deferred")
@@ -490,12 +493,12 @@
         [st o2] (feed st [(answer-of b {:value {:pass 1 :fail 0 :error 0}})])
         kinds (fn [outs] (sort (map #(get-in % [:req :req :kind]) (fx-asks outs))))]
     (is (= [:build] (kinds o)))
-    (is (= [:process :seed] (kinds o2)) "the build green: the seed and the process test, not the step")
+    (is (= [:seed] (kinds o2)) "the build green: the seed alone; the step and the process test both need it (it makes the process tests' store)")
     (let [seed (first (filter #(= :seed (get-in % [:req :req :kind])) (fx-asks o2)))
           [_ o3] (feed st [(answer-of seed {:value {:pass 0 :fail 1 :error 0}})])
           [r] (run-answers o3)]
       (is (= {:kind :seed :name :seed :digest "T"} (select-keys (get-in seed [:req :req]) [:kind :name :digest])))
-      (is (= [] (fx-asks o3)) "the step is never granted")
+      (is (= [] (fx-asks o3)) "neither the step nor the process test is ever granted")
       (is (= [:seon.prove/build-red :seed] [(:seon.error/type r) (:kind r)]) (pr-str r)))))
 
 ;; docs/merging.md#the-test-service: a red step is the run's red by its name (a step's is no test var, so its failing report named

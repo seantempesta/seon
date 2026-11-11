@@ -29,6 +29,17 @@
             (when-not (and d? in-digits?) (.append sb (if d? \N c)))
             (recur (inc i) d?))))))
 
+(defn thrown-in
+  "The fn throwable e was thrown in, as a qualified symbol (ns/var; an anonymous fn inside a var is that var), from Clojure's
+  triage of its trace, or nil when it names none. A contract's wrapper (malli's instrumented fn, seon.contract's) is never where an
+  error is: whether its frame tops the trace depends on what is armed. The one reading of it: an eval's error (seon.repl's
+  located) and a component's defect (seon.render/render!). See docs/render.md#a-component-answers-hiccup."
+  {:malli/schema [:=> [:cat :seon.host/throwable] [:maybe :qualified-symbol]]}
+  [e]
+  (let [d (merge (clojure.main/ex-triage (assoc (Throwable->map e) :clojure.error/phase :execution)) (ex-data e))]
+    (some-> (:clojure.error/symbol d) (#(symbol (namespace %) (first (clojure.string/split (name %) #"\$"))))
+            (#(when-not (#{"malli.core" "seon.contract"} (namespace %)) %)))))
+
 (defn cause
   "The cause of error map e, as a value: its variant, operation, member, the paths and
   expected schemas of its Malli problems, a foreign exception's class, an exit status or

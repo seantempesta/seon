@@ -375,16 +375,18 @@
   answer to a :process? plan) that root's effect owner runs on run's checkout (main's, the checkout this root runs from, for
   a run that names none) at its tree (the run's, else the plan's): the build, [[:build tree] tree], once a tree when it is
   needed; the seed, [[:seed tree] tree], which needs the build, when a step needs the binary; each process test, needing
-  the build; and each step, a :binary? one needing the seed. See docs/merging.md#the-test-service."
+  the seed (which also makes the process tests' store); and each step, a :binary? one needing the seed. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map :map] [:map-of :any :map]]}
   [run r]
   (let [tree (or (:tree run) (get-in r [:build :tree]))
         on {:tree tree :checkout (or (:checkout run) (cfg/checkout))}
         bk [[:build tree] tree] sk [[:seed tree] tree]
         build? (get-in r [:build :needed?])
-        seed? (and build? (some :binary? (vals (:steps r))))]
+        ;; the seed also makes the process tests' store (seon.fx/run-item: seon.test-store/make-process-store!), so a process item
+        ;; needs it, as a binary step does
+        seed? (and build? (or (seq (:process r)) (some :binary? (vals (:steps r)))))]
     (cond-> (into {}
-                  (concat (for [[t d] (:process r)] [[t d] (cond-> (assoc on :kind :process :binary? true) build? (assoc :needs #{bk}))])
+                  (concat (for [[t d] (:process r)] [[t d] (cond-> (assoc on :kind :process :binary? true) build? (assoc :needs #{sk}))])
                           (for [[s {:keys [digest binary? bound]}] (:steps r)]
                             [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?)) bound (assoc :bound bound) (and seed? binary?) (assoc :needs #{sk}))])))
       build? (assoc bk (assoc on :kind :build))
