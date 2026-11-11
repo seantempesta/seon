@@ -47,6 +47,7 @@
   ;; the machine
   [:seon.config.machine/memory-mb {:optional true} :seon.config.machine/memory-mb]
   [:seon.config.machine/relay-mb {:optional true} :seon.config.machine/relay-mb]
+  [:seon.config.machine/cores {:optional true} :seon.config.machine/cores]
   ;; the check harness
   [:seon.config.check/ping-ms {:optional true} :seon.config.check/ping-ms]
   [:seon.config.check/step-end-factor {:optional true} :seon.config.check/step-end-factor]
@@ -101,7 +102,9 @@
   [:seon.config.source/generations-dir {:optional true} :seon.config.source/generations-dir]
   [:seon.config.source/tests-dir {:optional true} :seon.config.source/tests-dir]
   [:seon.config.proofs/jobs {:optional true} :seon.config.proofs/jobs]
-  [:seon.config.proofs/test-workers {:optional true} :seon.config.proofs/test-workers]
+  [:seon.config.proofs/max-workers {:optional true} :seon.config.proofs/max-workers]
+  [:seon.config.proofs/max-cores {:optional true} :seon.config.proofs/max-cores]
+  [:seon.config.proofs/max-load {:optional true} :seon.config.proofs/max-load]
   [:seon.config.proofs/child-min-ms {:optional true} :seon.config.proofs/child-min-ms]
   [:seon.config.proofs/unmeasured-ms {:optional true} :seon.config.proofs/unmeasured-ms]
   [:seon.config.proofs/unmeasured-process-ms {:optional true} :seon.config.proofs/unmeasured-process-ms]

@@ -75,6 +75,11 @@ Names that look like clock reads but are quoted as data, so no time decides at t
 - `seon.render-test/no-position?`: the test after it asserts that `:vec-timeout nil` holds no deadline.
 - `seon.check/hidden-inputs`, `seon.check/named-test-inputs`: the lists the `test-inputs` check step reads test forms against (a clock read, a sleep, a timeout among the names they hold); they name those vars as data and read no clock.
 
+## The machine's load admits work
+
+A reading of the machine, not a clock: what it reads is how busy the machine is now, never when, and nothing waits on it or is woken by it.
+- `seon.prove/machine-load`, `seon.prove/grant` (with `seon.lib/load-average`, libc's `getloadavg`): with `:seon.config.proofs/max-load` set, the test service grants an item only while the machine's 1-minute load average is under it ([merging](merging.md#the-test-service)). It is read only inside a step the service is already taking (an ask arrived, an item ended), once a grant pass, and only when it decides (an item to grant, one running): never polled, no timer. With nothing running one item is always granted whatever the load, so the queue never stalls waiting for a step nothing would send: the item's end is the next step, and the next reading. It decides admission only, never a verdict, and the reading is shown in the state the service reports (`:load`).
+
 ## Time orders a queue (measured workload)
 
 A measured time chooses which work goes first, never whether a result is green (work is admitted by its measured workload).

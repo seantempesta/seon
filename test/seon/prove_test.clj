@@ -323,7 +323,8 @@
 
 ;; ---- items: the service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2) ----------------------------
 
-(defn- items-st [slots] (assoc (prove/prove-proc {:conn nil}) :slots slots))
+(defn- items-st [workers] (assoc (prove/prove-proc {:conn nil}) :workers workers))
+(defn- free [st] (:slots (#'prove/state-view st)))
 (defn- batches [outs] (filterv #(= :tests (get-in % [:req :op])) outs))
 (defn- answers [outs] (into {} (for [o outs :when (= :asker-answered (:op o))] [(:asker o) (:r o)])))
 (def ^:private green-of (fn [& ts] {:pass (count ts) :fail 0 :error 0 :reports (mapv #(hash-map :type :pass :var (str "#'" %)) ts)}))
@@ -339,7 +340,7 @@
         [st o3] (prove/batch-ended st (parse-long (second m)) (green-of 'app.x-test/t))]
     (is (= {1 true 2 true} (update-vals (answers o3) :green)) "both answered green from the one run")
     (is (= {} (:items st)) "and the item has left the service: its verdict is the cache's")
-    (is (= 4 (:slots st)) "its slot free again")))
+    (is (= 4 (free st)) "its slot free again")))
 
 ;; an asker wants to know whether its tests pass: its first red answers it at once, and the work only it wanted is dropped
 (deftest a-red-answers-its-asker-at-once-and-drops-what-only-it-wanted
@@ -357,7 +358,7 @@
 (deftest a-turns-item-goes-ahead-of-a-batchs
   (let [[st _] (prove/ask-items (items-st 0) 1 :batch {['app.cheap-test/t "dc"] {:agent :a1 :ms 1}})
         [st _] (prove/ask-items st 2 :turn {['app.slow-test/u "ds"] {:agent :a2 :ms 100000}})
-        [st outs] (#'prove/grant (assoc st :slots 1))]
+        [st outs] (#'prove/grant (assoc st :workers 1))]
     (is (= [:a2 #{'app.slow-test/u}] ((juxt #(get-in % [:req :id]) #(get-in % [:req :names])) (first (batches outs))))
         "the free slot goes to the turn's item")
     (is (= 2.0 (prove/item-value (get-in st [:items ['app.cheap-test/t "dc"]]) (:bid st))) "and the batch's item passed over aged a grant: its one waiter plus one, over its 1 ms")))
@@ -377,7 +378,7 @@
         r (get (answers o2) 7)]
     (is (false? (:green r)))
     (is (seon.contract/error? (get-in r [:results 'app.x-test/t])) "the asker holds the typed error for the item")
-    (is (= 1 (:slots st)))))
+    (is (= 1 (free st)))))
 
 ;; docs/merging.md#the-test-service: each asker is told an item's verdict as it lands, before it is answered, so a session's
 ;; bin/prove prints each test as it ends; an item with no verdict is told as :no-verdict, never left out
@@ -512,3 +513,50 @@
     (is (= [["laws"] 0 1] ((juxt :red :pass :fail) r)) (pr-str r))
     (is (empty? (run-answers o3)) "asked again, it is not answered from a remembered green")
     (is (= 1 (count (filter #(get-in % [:req :plan?]) (asks o3 :tests)))) "it is planned again")))
+
+;; ---- admission: three optional bounds, any combination (docs/merging.md#the-test-service) --------------------------------
+
+(defn- five-asked
+  "The items granted when one asker asks five items of a service under admission a (seon.prove/admission's map)."
+  [a]
+  (let [[_ outs] (prove/ask-items (merge (dissoc (prove/prove-proc {:conn nil}) :max-load) a) 1 :batch
+                                  (into {} (for [i (range 5)] [[(symbol "app.a-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
+    (count (batches outs))))
+
+;; docs/merging.md#the-test-service: a count bound grants that many of five
+(deftest max-workers-grants-that-many
+  (is (= 2 (five-asked (prove/admission {:max-workers 2 :cores 18})))))
+
+;; docs/merging.md#the-test-service: a share of the cores is a count of them, the least count set holds
+(deftest max-cores-is-a-share-of-the-cores
+  (is (= 2 (five-asked (prove/admission {:max-cores 0.5 :cores 4}))) "half of four cores: two")
+  (is (= 3 (five-asked (prove/admission {:max-cores 3 :max-workers 4 :cores 18}))) "a count of cores, under max-workers")
+  (is (= {:workers 1} (prove/admission {:max-cores 0.1 :cores 4})) "at least one"))
+
+;; docs/clocks.md#the-machines-load-admits-work: over max-load nothing more is granted while an item runs; with nothing
+;; running one item is granted anyway, so the queue never stalls with nothing to wake it
+(deftest max-load-admits-only-under-it-but-never-stalls
+  (let [reads (atom 0)
+        st0 (merge (prove/prove-proc {:conn nil}) (prove/admission {:max-workers 4 :max-load 10.0 :cores 18}))
+        it {:agent :a1 :ms 5}]
+    (with-redefs [prove/machine-load (fn [] (swap! reads inc) 30.0)]
+      (let [[st o1] (prove/ask-items st0 1 :batch {['app.l-test/a "da"] it ['app.l-test/b "db"] it ['app.l-test/c "dc"] it})
+            _ (is (= 1 (count (batches o1))) "nothing running: one granted though the load is over")
+            _ (is (= 30.0 (:load (#'prove/state-view st))) "the reading is in what the service reports")
+            [st v] (step/answered st (:tag (first (batches o1))))
+            [st o2] (prove/batch-ended st (parse-long (second v)) (green-of (first (get-in (first (batches o1)) [:req :names]))))]
+        (is (= 1 (count (batches o2))) "it ended: nothing running again, one more granted")
+        (let [[_ o3] (prove/ask-items st 2 :batch {['app.l-test/d "dd"] it})]
+          (is (= [] (batches o3)) "one running and the load over: nothing granted"))))
+    (with-redefs [prove/machine-load (fn [] 2.0)]
+      (let [[_ o] (prove/ask-items st0 1 :batch {['app.l-test/a "da"] it ['app.l-test/b "db"] it ['app.l-test/c "dc"] it})]
+        (is (= 3 (count (batches o))) "the load under it: as many as the workers allow")))))
+
+;; docs/merging.md#the-test-service: with max-cores and max-load unset, the shipped max-workers (8) is the bound; with no count
+;; set the machine's cores are
+(deftest the-shipped-bound-holds-when-the-others-are-unset
+  (let [st (prove/prove-proc {:conn nil})
+        [_ outs] (prove/ask-items st 1 :batch (into {} (for [i (range 10)] [[(symbol "app.s-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
+    (is (= [8 nil] [(:workers st) (:max-load st)]))
+    (is (= 8 (count (batches outs)))))
+  (is (= {:workers 4} (prove/admission {:cores 4}))))

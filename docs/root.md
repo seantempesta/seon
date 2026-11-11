@@ -13,7 +13,7 @@ Root's procs are declared as data in `resources/seon/system.edn` and started all
 | `:flusher` | `seon.writer/flusher-proc` | the store's sync ([storage](storage.md)) |
 | `:fork-server` | `seon.fork-server/fork-server-proc` | the fork server's command pipe, its events, its standby ([processes](processes.md#the-fork-server)) |
 | `:reconciler` | `seon.reconcile/reconciler-proc` | main's commits, turned into actions ([judging](#runs-and-judging)) |
-| `:prove` | `seon.prove/prove-proc` | the test service: every request to run tests, whoever asks, each (test, digest) item run once for every asker by as many workers as `:seon.config.proofs/test-workers`, and its state told to root for a stall's evidence ([merging](merging.md#the-test-service)) |
+| `:prove` | `seon.prove/prove-proc` | the test service: every request to run tests, whoever asks, each (test, digest) item run once for every asker by as many workers as its admission allows (`:seon.config.proofs/max-workers`, `max-cores`, `max-load`: ```seon.prove/admission```), and its state told to root for a stall's evidence ([merging](merging.md#the-test-service)) |
 | `:vectors` | `seon.vector/vectors-proc` | main's missing text vectors: sends due texts to `:embed`, writes their vectors through the writer ([vectors](vector.md)) |
 | `:render` | `seon.render.proc/render-proc` | the dashboard's views ([dashboard](dashboard.md)) |
 | `:web` | `seon.web/web-proc` | the HTTP listener and the tabs ([dashboard](dashboard.md)) |

@@ -1331,7 +1331,7 @@
   root's answer while this proc serves root's request for the run, and the run's
   work is this fiber's, never charged to the eval that waits. An item the test service granted (:items, one test at
   its plan's digest) runs on a fiber of its own instead, so the agent runs as many at once as root grants it (the
-  service's workers bound them, :seon.config.proofs/test-workers), each answered when its child ends; it writes the
+  service's admission bounds them, seon.prove/admission), each answered when its child ends; it writes the
   verdict cache only, nothing of the branch, and a throw is answered as a step's is (serve-item!). See
   docs/processes.md#the-agent-process, docs/merging.md#the-test-service."
   {:malli/schema :seon.step/step-fn}
