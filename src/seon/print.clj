@@ -82,13 +82,13 @@
   (inc (emit/chars-tokens (count (str ", :cost " (pr-str (emit/cost-text {:ms 1e12 :ticks 1e15 :bytes 1e15 :tok default-budget})))))))
 
 (defn at-handle
-  "Answer a (seon.render/answer: :seon.print/answer in its metadata) with `v` in its :to-use forms read as handle, the name its
+  "Answer a (seon.render/answer: :seon.print/answer in its metadata) with `v` in its :seon.print/to-use forms read as handle, the name its
   reader reads it by (an eval's result/..., the first point's @ctx), so each form is one to copy as it stands. Any other value is
   itself. See docs/render.md#a-render-is-a-value-printed-once."
   {:malli/schema [:=> [:cat :any :any] :any]}
   [handle a]
   (if (and (map? a) (:seon.print/answer (meta a)))
-    (with-meta (update a :to-use (fn [ps] (mapv (fn [[w f]] [w (clojure.walk/postwalk-replace {'v handle} f)]) ps))) (meta a))
+    (with-meta (update a :seon.print/to-use (fn [ps] (mapv (fn [[w f]] [w (clojure.walk/postwalk-replace {'v handle} f)]) ps))) (meta a))
     a))
 
 (defn response-text
