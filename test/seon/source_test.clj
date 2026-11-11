@@ -434,6 +434,22 @@
     (is (= ["/r" ["src"]] [(:root fact) (:dirs fact)]) "what the import read from stays")
     (is (some? (d/entity db1 [:var/name 'app.landed/f])) "and the landed file's facts are main's")))
 
+(deftest a-landing-keeps-the-system-running-only-when-nothing-calls-for-a-restart
+  ;; docs/source.md#a-landing-enters-main-as-data: after the bridge moved main's source fact to the landed tree, bin/update keeps
+  ;; the system running (my.root/landed!) when its binary is current for that tree and the inputs of the files were written;
+  ;; 7 of 11 landings on 2026-11-11 changed nothing the binary runs, and each restarted, ending every agent's work
+  (let [held {:root "/r" :dirs ["src"] :tree "t1" :commit "c1"}
+        inputs {:tree "t1m" :env "e" :code "c" :config {}}
+        why #(root/restart-for %1 %2 %3 %4)]
+    (is (nil? (why held "t1" nil inputs)) "main holds the files' tree, the binary is current for it, inputs written: keep running")
+    (is (re-find #"no landing brought it in" (why held "t2" nil inputs)) "main is not at the files' tree (no bridge ran): restart, whose boot catches up")
+    (is (re-find #"reaches seon.writer/commit-batch" (why held "t1" {:binary "t0" :tree "t1" :reaches ['seon.writer/commit-batch]} inputs))
+        "what the landing changed reaches code root runs from its binary: restart, naming it")
+    (is (re-find #"git said no" (why held "t1" {:binary "t0" :tree "t1" :error "git said no"} inputs)) "a diff git could not make is no answer of current")
+    (is (re-find #"stale at its boot" (why (assoc held :stale-binary {:binary "t0"}) "t1" nil inputs)) "a binary stale since its boot: restart")
+    (is (re-find #"no inputs" (why held "t1" nil nil)) "no inputs written for the files: restart")
+    (is (re-find #"no source fact" (why nil "t1" nil inputs)) "main never brought to a tree: restart")))
+
 (deftest a-landing-through-the-bridge-is-a-zero-diff
   ;; task seon.root/a-boot-resumes-from-the-db: a Claude session's landing enters main as data, the changed files' facts
   ;; (seon.root/changed-tx, what bin/land's bridge has root write on main).
