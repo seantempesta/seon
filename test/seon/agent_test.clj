@@ -2164,22 +2164,17 @@
     (is (not= (:value after) (:value after-script)) "and so does a script the branch writes")))
 
 ;; docs/sharing.md#what-a-branchs-nodes-are: a process test that is no proof keeps its :deferred fact and takes the gate's green over it,
-;; docs/sharing.md#a-functions-cost-is-a-fact: what a function cost is queryable on the branch, and adds up across commits, written only with a commit going out anyway
-(deftest what-a-function-cost-is-a-fact-on-the-branch
-  (let [stats "(:seon.fn/stats (datahike.api/pull (seon.agent/db) [:seon.fn/stats] [:seon.fn/var 'seon.lib/digest]))"
-        called "(do (seon.lib/digest \"x\") (seon.lib/digest \"y\") (seon.agent/transact! [{:seon.eval/id \"probe\" :seon.eval/by {:seon.agent/key \"probe\"}}]) (seon.agent/commit!) :ok)"
+;; docs/sharing.md#a-functions-cost-is-a-fact (the owner, 2026-11-11: no derived or observed value that collides is stored; :seon.fn/stats
+;; stops being written): what an agent's functions cost is measured live in its process, (:fn-costs @seon.agent/state), and no
+;; commit or end writes a :seon.fn/* datom on the branch. Red before: the end wrote one :seon.fn/stats sum a function
+(deftest what-a-function-cost-is-measured-live-and-never-stored
+  (let [called "(do (seon.lib/digest \"x\") (seon.lib/digest \"y\") (seon.agent/transact! [{:seon.eval/id \"probe\" :seon.eval/by {:seon.agent/key \"probe\"}}]) (seon.agent/commit!) :ok)"
         ended "(do (seon.agent/write-end! {:outcome :waiting}) :ok)"
-        [_ committed _ first-stats _ _ second-stats q]
-        (in-agent [called stats ended stats called ended stats
-                   "(datahike.api/q '[:find ?v :where [?f :seon.fn/var ?v] [?f :seon.fn/stats ?s] [(get ?s :calls) ?c] [(>= ?c 2)]] (seon.agent/db))"])
-        a (:value first-stats) b (:value second-stats)]
-    (is (nil? (:value committed)) "a commit writes no cost: the turn's datoms stay its own work")
-    (is (<= 2 (:calls a)) (str "the end writes them: " (pr-str first-stats)))
-    (is (= 4 (- (:calls b) (- (:calls a) 2))) (pr-str [a b]))
-    (is (pos? (:bytes b)) "bytes are counted")
-    (is (pos? (reduce + (vals (:hist b)))) "calls by size")
-    (is (string? (get-in b [:worst :eval])) "the worst eval, to find it again")
-    (is (contains? (set (map first (:value q))) 'seon.lib/digest) (str "and a plain query reaches it: " (pr-str q)))))
+        stored "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.fn/stats))"
+        live "(get-in @seon.agent/state [:fn-costs 'seon.lib/digest :calls])"
+        [_ _ n-stored calls] (in-agent [called ended stored live])]
+    (is (= 0 (:value n-stored)) (str "the branch holds no function cost: " (pr-str n-stored)))
+    (is (<= 2 (or (:value calls) 0)) (str "the live measure holds the calls: " (pr-str calls)))))
 
 ;; so it never reads as unjudged after it passed and the gate is not asked again; one green in the cache was never deferred, so it needs no fact
 (deftest a-deferred-test-that-is-no-proof-is-judged-once
