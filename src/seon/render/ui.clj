@@ -1157,6 +1157,21 @@
         t (if (and (seq? form) (= 'do (first form))) (str/join "\n" (map one (rest form))) (one form))]
     (if (str/includes? t "\n") [:pre [:code t]] [:code t])))
 
+(defn data-conflict
+  "One merge conflict (the declared html render of :seon.merge/data-conflict) as the agent and a person read it: which value of which
+  entity, by its identity; what the base held (when it held one), your end and main's (a side that removed it says so); and the form
+  that settles it, its value the agent's to write. See docs/agent.md#merging."
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.merge/data-conflict] :any]}
+  [_ {:keys [key ours theirs resolve] :as c}]
+  (let [[id-attr id-v attr v] key
+        side (fn [x] (if (= :seon.merge/gone x) [:em "removed"] [:pre [:code (as-text x)]]))]
+    [:div {:key (str key)}
+     [:p [:code (str attr)] " of " [:code (str id-attr " " (as-text id-v))] (when (some? v) (list ", the value " [:code (as-text v)]))]
+     (into [:dl {:class "seon-conflict"}]
+           (concat (when (contains? c :base) [[:dt "base"] [:dd (side (:base c))]])
+                   [[:dt "yours"] [:dd (side ours)] [:dt "main's"] [:dd (side theirs)]]))
+     (when resolve [:p "Settle it: " [:code (as-text resolve)]])]))
+
 (defn status-hiccup
   "How the work stands (seon.ctx.status/status's data s), written to the agent at the moment it reads it. Each proof answers the
   question its state asks: not written, where it goes and a test to copy; red, what it asserted and what it got; every proof
@@ -1229,10 +1244,9 @@
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)
        [:div {:key :unmerged}
-        [:p "Main changed these too, so they are unmerged. Settle each: keep yours, or take main's."]
-        (for [{:keys [key ours theirs]} unmerged]
-          [:div {:key key} [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
-           [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
+        [:p "Main changed these too since your base, so they are unmerged. Settle each by writing its value in the form shown."]
+        ;; each by its schema's render (:seon.merge/data-conflict), the same the person's page draws
+        (for [c unmerged] (data-conflict {} c))])
      (cond
        (and green? (empty? blocks) (empty? unmerged))
        [:p {:key :merging} "Every proof passes and nothing blocks merging."]

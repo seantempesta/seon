@@ -52,7 +52,7 @@
  ;; identity, [identity-attr identity-value attribute] (and the value, for an attribute of cardinality many), and each side's
  ;; end: a value, true (a member asserted), or :seon.merge/gone (retracted). :base, the base's value at the key, is present for a
  ;; key of cardinality one that base held a value of (seon.merge/net-change reads it from the value retracted)
- :seon.merge/data-conflict [:map {:description "One key both sides of a merge changed to different ends since their base, by the entity's identity: its base's value, each side's end, and the form that settles it. See docs/agent.md#merging."} [:key [:or [:tuple :keyword :any :keyword] [:tuple :keyword :any :keyword :any]]] [:base {:optional true} :any] [:ours :any] [:theirs :any]
+ :seon.merge/data-conflict [:map {:seon.render/hiccup seon.render.ui/data-conflict :description "One key both sides of a merge changed to different ends since their base, by the entity's identity: its base's value, each side's end, and the form that settles it. See docs/agent.md#merging."} [:key [:or [:tuple :keyword :any :keyword] [:tuple :keyword :any :keyword :any]]] [:base {:optional true} :any] [:ours :any] [:theirs :any]
                             [:resolve {:optional true :description "The form that settles it on a merge of main into the branch (seon.agent/resolving-form), its value the agent's to write."} :any]]
  ;; a merge refused because the two sides' net changes conflict (seon.merge/refusal): the agent resolves them
  :seon.merge/conflicts [:and :seon.error/base [:map [:seon.error/type [:= :seon.merge/conflicts]] [:conflicts [:vector {:min 1} :seon.merge/data-conflict]]]]

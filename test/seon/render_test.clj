@@ -1810,6 +1810,21 @@
   [html] (-> html (str/replace #"(?s)<pre[^>]*>.*?</pre>" " ") (str/replace #"(?s)<code[^>]*>.*?</code>" " ")
              (str/replace #"(?s)<span[^>]*seon-print-string[^>]*>.*?</span>" " ") (str/replace #"<[^>]+>" " ")))
 
+
+(deftest a-merge-conflict-shows-its-three-sides
+  ;; docs/agent.md#merging: a merge conflict is data (:seon.merge/data-conflict, computed by the one merge, never stored), drawn by its
+  ;; schema's render: which value of which entity, its base, each side's end (a removal said as such), and the form that settles it; the
+  ;; status the agent reads and the person's page draw it by that one render
+  (let [c {:key [:demo.note/id "n1" :demo.note/text] :base "draft" :ours "mine" :theirs :seon.merge/gone
+           :resolve '(my.branch/merge-main! {[:demo.note/id "n1" :demo.note/text] "?"})}
+        html (h/html (ui/status-hiccup {} {:proofs [] :unmerged [c]}))]
+    (is (str/includes? html ":demo.note/text") html)
+    (is (str/includes? html "n1") "the entity by its identity")
+    (is (every? #(str/includes? html %) ["base" "draft" "yours" "mine" "main's" "removed"]) html)
+    (is (str/includes? html "my.branch/merge-main!") "the form that settles it")
+    (is (not (str/includes? html "resolve!")) "never the old form")
+    (is (= #'ui/data-conflict (some-> (r/render-for (seon.db/index) :seon.merge/data-conflict :seon.render/hiccup) requiring-resolve)) "drawn by the render its schema declares")))
+
 (deftest a-person-reads-no-markup
   ;; docs/render.md#the-page: what a person reads is drawn, never the marks that describe it: no Markdown delimiter, no escaped quote of
   ;; a printed form, no printer's tree heading, outside code (the owner, on the session pages: "we still aren't rendering html")
