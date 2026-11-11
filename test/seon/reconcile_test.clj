@@ -1845,3 +1845,14 @@
     (is (contains? (tasks base) "demo/a") "before its agent took up the refine, a message wakes it at its cap, as any capped task")
     (is (not (contains? (tasks (took-up :running)) "demo/a")) "after, the task it left is not started by a message to it")
     (is (= #{"demo/a-refine"} (tasks (took-up :cap))) "at the refine's own cap, a message wakes the refine alone")))
+
+(deftest a-task-after-another-starts-when-it-ends-whatever-its-outcome
+  ;; docs/tasks.md#a-refine-curates-its-own-task (Data model's ruling, 2026-11-12): :seon.task/after waits for the END of a task, its
+  ;; outcome whatever it is, where :seon.task/needs waits for its result (merged or done); a refine is after the task it refines
+  (let [decls [(decl "a") (assoc (decl "r") :seon.task/after #{"demo/a"}) (decl "n" :needs ["a"])]
+        starts (fn [db] (set (keep #(when (#{:spawn :wake} (:op %)) (:task %)) (actions-for db))))
+        running (db-of decls :extra (work "a" :running))
+        capped (db-of decls :extra (work "a" :cap))]
+    (is (not (contains? (starts running) "demo/r")) "not while the task it is after runs")
+    (is (contains? (starts capped) "demo/r") "a cap is an end: the task after it starts")
+    (is (not (contains? (starts capped) "demo/n")) "a task that needs a's result still waits: a cap is no result")))

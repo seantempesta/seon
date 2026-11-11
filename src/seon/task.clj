@@ -247,13 +247,15 @@
   {:malli/schema [:=> [:cat :seon.host/db [:vector :seon.task/id] [:vector :map]] [:vector :map]]}
   [db' ids decls]
   (let [graph (zipmap ids (map #(set (:seon.task/needs %)) decls))
-        tasks (mapv (fn [id {:seon.task/keys [config needs evidence] :as decl}]
-                      (cond-> (-> decl (dissoc :seon.task/config :seon.task/needs :seon.task/evidence)
+        ref-of #(if (graph %) % [:seon.task/id %])
+        tasks (mapv (fn [id {:seon.task/keys [config needs after evidence] :as decl}]
+                      (cond-> (-> decl (dissoc :seon.task/config :seon.task/needs :seon.task/after :seon.task/evidence)
                                   (assoc :db/id id :seon.task/id id :seon.task/execution :held)
                                   (update :seon.task/branch #(or % (default-branch id)))
                                   ;; a declaration that names no kind is work: the task holds it (:seon.task/task-fact requires it)
                                   (update :seon.task/kind #(or % :work)))
-                        (seq needs) (assoc :seon.task/needs (mapv #(if (graph %) % [:seon.task/id %]) needs))
+                        (seq needs) (assoc :seon.task/needs (mapv ref-of needs))
+                        (seq after) (assoc :seon.task/after (mapv ref-of after))
                         evidence (assoc :seon.task/evidence evidence)
                         (seq config) (merge config)))
                     ids decls)]
@@ -620,7 +622,7 @@
 
 ;; ---- the reader ------------------------------------------------------------------
 
-(def ^:private task-pull '[* {:seon.task/needs [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}])
+(def ^:private task-pull '[* {:seon.task/needs [:seon.task/id]} {:seon.task/after [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}])
 
 (defn- task-value
   "A pulled task's own members (needs as a set of ids, proofs and references sets), without
@@ -634,6 +636,7 @@
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))
     (:seon.task/agent t) (update :seon.task/agent :seon.agent/key)
+    (:seon.task/after t) (update :seon.task/after #(set (map :seon.task/id %)))
     ;; a pull answers a card-many attribute as a vector; these are sets on the task's schema
     (:seon.task/deferred t) (update :seon.task/deferred set)
     (:seon.task/changed t) (update :seon.task/changed set)
@@ -733,6 +736,8 @@
 (def judged "Outcomes root has the next step to take on (a merge ready, or at its gate)." (:seon.status/judged (contract/properties :seon.task/outcome)))
 
 (def failed "Outcomes of a death (its agent died or was lost)." (:seon.status/failed (contract/properties :seon.task/outcome)))
+
+(def ended "Outcomes that end a run, whatever came of it: finished, failed, held after a judging (closed) or out of turns (cap); what a task :seon.task/after waits for (docs/tasks.md#a-refine-curates-its-own-task)." (:seon.status/ended (contract/properties :seon.task/outcome)))
 
 (defn done?
   "Has task entity te finished (finished: done or merged)? One datom read; the reconciler's index

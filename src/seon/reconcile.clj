@@ -194,6 +194,8 @@
   (let [t (get-in idx [:tasks id]) o (:seon.task/outcome t)]
     (boolean (and t (= :running (:seon.task/execution t)) (not (get-in idx [:done id :any?]))
                   (every? #(get-in idx [:done % :any?]) (:seon.task/needs t))
+                  ;; :seon.task/after: each has ended, whatever came of it (a refine starts when the task it refines ends)
+                  (every? #(get-in idx [:done % :ended?]) (:seon.task/after t))
                   ;; not live: working in this boot's root
                   (not (and (= :running o) (= (:boot (:root idx)) (:seon.agent/boot (get-in idx [:agents (:seon.task/agent t)])))))
                   (not (judged-outcomes o))
@@ -215,8 +217,11 @@
   (let [old (get-in idx [:done id :any?])
         t (get-in idx [:tasks id])
         d {:any? (boolean (finished (:seon.task/outcome t)))
+           ;; an end of any outcome, what a task :seon.task/after this one waits for
+           :ended? (boolean (task/ended (:seon.task/outcome t)))
            :merged-t (when (= :merged (:seon.task/outcome t)) (:seon.task/merged-t t 0))}]
-    [(if t (assoc-in idx [:done id] d) (update idx :done dissoc id)) (not= old (:any? d))]))
+    [(if t (assoc-in idx [:done id] d) (update idx :done dissoc id))
+     (or (not= old (:any? d)) (not= (get-in idx [:done id :ended?]) (:ended? d)))]))
 
 (defn- refresh-ready
   "Move task id's key in the ready set to what its values say now."
@@ -247,8 +252,9 @@
   "Task value t (nil: gone) under id, with the reverse needs index and the branch index moved."
   {:malli/schema [:=> [:cat :seon.reconcile/index :seon.task/id [:maybe :seon.task/own]] :seon.reconcile/index]}
   [idx id t]
-  (let [old (get-in idx [:tasks id :seon.task/needs] #{})
-        new (:seon.task/needs t #{})
+  (let [;; a task's waits, on a result (:seon.task/needs) or on an end (:seon.task/after): an end of either re-reads it
+        old (into (get-in idx [:tasks id :seon.task/needs] #{}) (get-in idx [:tasks id :seon.task/after]))
+        new (into (:seon.task/needs t #{}) (:seon.task/after t))
         nb (as-> (:needed-by idx) nb
              (reduce (fn [nb n] (let [s (disj (get nb n #{}) id)] (if (seq s) (assoc nb n s) (dissoc nb n)))) nb (remove new old))
              (reduce (fn [nb n] (update nb n (fnil conj #{}) id)) nb (remove old new)))
