@@ -1135,6 +1135,39 @@
     (is (str/includes? text "What x does.") "the page shows the section's text, read by the render")
     (is (str/includes? text "(defn f0 [x] x)") "and the function's source")))
 
+;; docs/references.md#a-section-read-at-a-depth-with-its-edges: doc reads the value a local names as it reads a literal (a macro
+;; sees its locals), and a page's listing names each of its sections (address, heading, summary) and leaves their edges to
+;; (doc address). Found by working the task as an agent: a let-bound address printed "names no var or namespace", and one page's
+;; listing was 239,943 characters with every section's references and citers
+(deftest doc-reads-a-local-and-a-page-lists-its-sections-without-their-edges
+  (let [db (my.test/with (my.test/world) (my.test/page "docs/small.md" "# Small\n\nThe lead of small, citing app.calc/add.\n\n## Below\n\nThe text below, citing app.calc/total.\n"))]
+    (with-redefs [seon.agent/db (fn [] db)]
+      (let [printed (with-out-str (let [a "docs/small.md#small"] (my.agent/doc a)))
+            listing (my.agent/doc-of "docs/small.md")]
+        (is (clojure.string/includes? printed "The lead of small") "a let-bound address is read as a literal is")
+        (is (clojure.string/includes? printed "docs/small.md#below") "and names the section below")
+        (is (not (clojure.string/includes? printed "The text below")) "without its text")
+        (is (= ["docs/small.md#small" "docs/small.md#below"] (mapv :seon.ref/address listing)) "a page lists its sections")
+        (is (not-any? #(or (:seon.ref/references %) (:seon.ref/cited-by %)) listing) "each without its edges")))))
+
+;; docs/references.md#an-entity-cites: a cite holds its target by identity, and of a cited task also what an agent may edit there
+;; (its plan, instructions, proofs and cause: the task content a run's end carries to main), so a task that curates another
+;; reads and writes that task's plan at the cite's path, by a swap!, with no ref of its own
+(deftest a-cited-task-is-held-with-what-may-be-edited-there
+  (let [db0 (:db-after (d/with (seeded 0 nil)
+                               [{:seon.task/id "lab/other" :seon.task/ns 'app.x :seon.task/name "other" :seon.task/plan "The plan before."
+                                 :seon.task/kind :work :seon.task/proofs #{} :seon.task/execution :held :seon.task/branch :main/lab-other}
+                                {:seon.cite/id "lab/ctx lab/other" :seon.cite/of [:seon.task/id "lab/ctx"] :seon.cite/target [:seon.task/id "lab/other"]
+                                 :seon.cite/depth :doc :seon.cite/order 9}]))
+        path [:seon.agent/task :seon.cite/_of (id db0 [:seon.cite/id "lab/ctx lab/other"]) :seon.cite/target]
+        [[before said] db'] (as-agent! db0 #(let [b (get-in @ctx/ctx path)]
+                                              [b (try (swap! ctx/ctx assoc-in (conj path :seon.task/plan) "The plan after.") :written
+                                                      (catch clojure.lang.ExceptionInfo e (pr-str (ex-data e))))]))]
+    (is (= "lab/other" (:seon.task/id before)) "the cited task, by its identity")
+    (is (= "The plan before." (:seon.task/plan before)) "and its plan, which the agent may edit")
+    (is (= :written said) "a swap! at the cite's path is a write")
+    (is (= "The plan after." (:seon.task/plan (d/pull db' [:seon.task/plan] [:seon.task/id "lab/other"]))) "of the cited task's own plan")))
+
 (deftest a-cite-joins-its-target-and-a-symbol-joins-by-name
   ;; a cite's target is a ref (docs/references.md#an-entity-cites): the cite joins the var it names, its form and its
   ;; callers, which join by :by, ctx's one option beside Datahike's pull syntax (docs/ctx.md#the-pattern): a symbol a form
@@ -1510,7 +1543,9 @@
                   :entity entity
                   :collection (merge-with - (per coll-at 100 1000) (per str-at 100 1000) (update-vals entry #(* 2 %)))
                   :eq (update-vals (merge-with - (per eq-at 100 1000) entity (update-vals entry #(* 2 %)) (update-vals key #(* 12 %))) #(/ % (:eq rec-size)))}]
-    (doseq [[step dims] measured [d v] dims :let [stated (get-in ctx/change-steps [step d])]]
+    ;; a step's cost is a difference of measured rates: floating arithmetic leaves 3e-15 B where the bytes cancel (Jolt
+    ;; 6a8df52a, when a forced lazy node stopped allocating its claim), and that is zero: a billionth of a unit is not a cost
+    (doseq [[step dims] measured [d v0] dims :let [stated (get-in ctx/change-steps [step d]) v (if (< (Math/abs (double v0)) 1e-9) 0.0 v0)]]
       ;; within the slack above (the bound would be under), and not past a third below (it would be loose)
       (is (<= (* cost/loose stated) v (* (get cost/slack d) stated)) (str step " " d ": measured " v " against " stated " stated")))))
 

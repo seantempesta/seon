@@ -401,6 +401,14 @@
   [db]
   (not-empty (into {} (for [dt (d/datoms db :aevt :config/form)] [(:config/key (d/entity db (:e dt))) (:v dt)]))))
 
+(def test-root-config
+  "The config a process test's root runs with: the shipped file's scripted profile (every test starts its roots under
+  --profile scripted) over this process's config, one value a process. What a process test's digest takes for what root
+  runs (seon.program/roots-of), so that digest is one whichever process plans the test: an agent under its own root's
+  profile and the shell's runner under scripted gave 103 of seon.agent-test's 139 different root digests (measured in
+  task seon.prove/one-digest-whichever-runner-plans-it). See docs/source.md#tests-run-by-reach."
+  (merge config (read-layer (str (checkout) "/" shipped-file) :scripted (checkout))))
+
 (defn hold!
   "Make this process's config what es and changes state (of-entries), when they differ from what it holds. Its :schema follows changes even when the entries are refused, so a branch can name a key before it states it; what it reads stays as it was. Answers nil, or the refusal. es nil (nothing stated) holds nothing. See docs/config.md#a-process-holds-its-branchs-config."
   {:malli/schema [:=> [:cat [:maybe [:map-of :qualified-keyword :string]] [:map-of :qualified-keyword :any]] [:maybe :seon.config/refused]]}
@@ -465,7 +473,7 @@
 ;; ---- the model provider, as the config states it --------------------------------------------
 
 (defn provider
-  "The model provider config c names (:seon.config.ai/*, resolved for its model): none, the
+  "The model provider config c names (:seon.config.ai/*, resolved for its model: thinking too, so a model's or a task's wins over the file's, and a task's reasoning effort; docs/model.md#thinking-is-off-by-default): none, the
   scripted provider (a test fixture), or the OpenAI-compatible endpoint with the NAME of its key's
   environment variable (never the key)."
   {:malli/schema [:=> [:cat :seon.config/config] :seon.model/provider]}
@@ -477,8 +485,11 @@
       :openai-compat (cond-> {:kind :openai-compat :base-url (v :seon.config.ai/base-url) :model (:seon.config.ai/model c)
                               :api-key-env (v :seon.config.ai/api-key-variable) :max-tokens (v :seon.config.ai/max-tokens)
                               :replay-reasoning (v :seon.config.ai/replay-reasoning)}
+                       ;; thinking is shipped (default.edn), so the resolver reads it, a model's or a task's over the file's; temperature
+                       ;; and effort are left out of the file on purpose (the provider's own default), so they are read where a layer
+                       ;; states them, the task's merged into c by provider-at (docs/model.md#thinking-is-off-by-default)
+                       true (assoc :thinking (v :seon.config.ai/thinking))
                        (:seon.config.ai/temperature c) (assoc :temperature (:seon.config.ai/temperature c))
-                       (:seon.config.ai/thinking c) (assoc :thinking (:seon.config.ai/thinking c))
                        (:seon.config.ai/reasoning-effort c) (assoc :reasoning-effort (:seon.config.ai/reasoning-effort c))))))
 
 (defn with-provider

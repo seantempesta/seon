@@ -423,14 +423,28 @@
   one printer, no wrapper. The call's id is a function of the points alone, so the bytes are the same at every render; no eval entity is
   written for it. A function whose var lacks either word is :seon.ctx/unworded, never an empty message
   (docs/render.md#what-the-agent-reads-is-its-native-history-and-everything-else-through-the-hiccup)."
-  {:malli/schema [:=> [:cat :string :qualified-symbol [:sequential :string] :any] [:vector :seon.model/message]]}
-  [id f args v]
-  (let [{:seon.model-call/keys [reply] :seon.eval/keys [intent]} (meta (requiring-resolve f))]
+  {:malli/schema [:function [:=> [:cat :string :qualified-symbol [:sequential :string] :any] [:vector :seon.model/message]]
+                  [:=> [:cat :string :qualified-symbol [:sequential :string] :any [:maybe :string]] [:vector :seon.model/message]]]}
+  ([id f args v] (page-message id f args v nil))
+  ([id f args v said]
+  (let [{:seon.model-call/keys [reply] :seon.eval/keys [intent]} (meta (requiring-resolve f))
+        reply (or said reply)]
     (when-not (and (string? reply) (seq reply) (string? intent) (seq intent))
       (throw (ex-info (str f " has no :seon.model-call/reply and :seon.eval/intent on its var: a call Seon writes for the model is a whole reply")
                       (contract/error :seon.ctx/unworded #'page-message (str "add both to " f "'s metadata") {:function f}))))
     [{:role "assistant" :content reply :tool-calls [{:id id :intent intent :code (str "(" (str/join " " (cons f args)) ")")}]}
-     {:role "tool" :tool-call-id id :content (print/text (vary-meta v assoc :seon.print/full true))}]))
+     {:role "tool" :tool-call-id id :content (print/text (vary-meta v assoc :seon.print/full true))}])))
+
+(defn diff-reply
+  "What a diff's reply says, a function of its edits alone: the parts that moved, each by its name in the edit's path (the
+  first name past the page and its lists, \"p-...\"), in the order they first move: \"My page changed: status, cite.\". Said
+  in a few words that differ with what moved, since a model copies its history word for word and a fixed sentence becomes
+  filler in its mouth (loop 2, call 16); what a diff is, is said once, at the first point (`my.render/page`'s reply). See
+  docs/render.md#the-render-is-an-eval."
+  {:malli/schema [:=> [:cat [:sequential :any]] :string]}
+  [edits]
+  (let [part (fn [[path]] (or (first (remove #(or (= "page" %) (and (string? %) (str/starts-with? % "p-"))) path)) "page"))]
+    (str "My page changed: " (str/join ", " (distinct (map (comp str part) edits))) ".")))
 
 (defn page-edits-between
   "The edits that take agent a's page parts at basis p0 (nil: nothing before, so the parts whole) to its parts at basis p1, on
@@ -459,6 +473,18 @@
             (vreset! drawn [i hs])
             [(hs 0) (hs 1)]))))))
 
+(defn- describe-msgs
+  "Agent a's record at point p described at path (what (describe @ctx path) answers there: seon.render/describe, printed through its
+  schema's model render as an eval of it prints), as the generated eval `(my.agent/describe @ctx path)` and its result: the first
+  point's (path []) and a task switch's ([:seon.agent/task], `task-msgs`). Reads a fixed past point only. See docs/agent.md#looking-at-what-you-pulled."
+  {:malli/schema [:=> [:cat :seon.host/db :int :map [:vector :any]] [:vector :seon.model/message]]}
+  [db a p path]
+  (let [q (point-text db p) d0 (db-at db p) ix0 (program/index-of-db d0)
+        es (with-meta (render/describe ix0 (ctx-at db a p) path (cfg/value :seon.config.agent/describe-depth)) {:seon.render/schema :my.agent/described})]
+    (page-message (lib/id (lib/digest (str "ctx " q (when (seq path) (str " " (pr-str path))))))
+                  'my.agent/describe (cond-> ["@ctx"] (seq path) (conj (pr-str path)))
+                  (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es))))
+
 (defn page-diff-msgs
   "What agent a's page shows the model before its turn n, between basis p0 (nil: nothing before) and basis p1: generated evals,
   never written to the db. The first page (p0 nil) is the call `(my.render/page p1)` and its result the page parts whole; a later
@@ -483,10 +509,11 @@
               edits (render/page-edits ix (render/forms-moved (if q0 {"page" h0} {}) {"page" h1}))]
           (cond (empty? edits) []
                 ;; the page whole, unless it shows nothing (what moved from nothing to it is no edits: a pull holding no page)
-                q0 (page-message id 'my.render/diff [q0 q1] edits)
+                q0 (page-message id 'my.render/diff [q0 q1] edits (diff-reply edits))
                 ;; the first point: the record whole as data (Sean, 2026-11-11: "the @ctx and the hiccup displayed in full"), then the page
-                :else (into (page-message (lib/id (lib/digest (str "ctx " q1))) 'my.render/ctx [q1] (ctx-at db a p1))
-                            (page-message id 'my.render/page [q1] h1))))))
+                ;; the record described, never printed whole (owner, 2026-11-11: "Instead of dumping the whole @ctx value we are now doing
+                ;; this more metadata approach"), then the page
+                :else (into (describe-msgs db a p1 []) (page-message id 'my.render/page [q1] h1))))))
 
 (defn model-call-msgs
   "A model call (:seon.model-call/fact) as the model reads it: what the model said and its reasoning. Whether those are sent is
@@ -517,10 +544,15 @@
 
 (defn task-msgs
   "Where an agent's calls change task, what it reads at the first call of task id after task before's (seon.ctx.session/task-begins),
-  placed by the agent's model render as [#'task-msgs {} before id], so the walk keeps it as a component keyed by the two tasks and every
-  later request holds it at the same place. See docs/tasks.md#a-refine-curates-its-own-task."
-  {:malli/schema [:=> [:cat :map :string :string] [:vector :seon.model/message]]}
-  [_ before id] [{:role "user" :content (session/task-begins before id)}])
+  then the new task described at the switching call's point p (`describe-msgs`, path [:seon.agent/task]); placed by the agent's model
+  render as [#'task-msgs {} before id a p], so the walk keeps it as a component keyed by the two tasks and every later request holds it
+  at the same place. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat [:map [:seon.db/db :seon.host/db]] :string :string :int [:maybe :map]] [:vector :seon.model/message]]}
+  [{db :seon.db/db} before id a p]
+  ;; and the new task described where the agent's record holds it (its cites, what each holds, the forms that act on them), read at the
+  ;; switching call's point: a fixed past point, so every later request holds the same bytes
+  (into [{:role "user" :content (session/task-begins before id)}]
+        (when p (binding [datahike.index.interface/*reads* nil] (describe-msgs db a p [:seon.agent/task])))))
 
 (defn- turn-entities
   "Agent record c's turns as the entities the model reads, ordered from its pull: its model calls by number, each turn's
@@ -572,7 +604,7 @@
                      ;; its evals in the one order a turn's are read in (seon.ctx/turn-evals: the model's, then other hands')
                      es (map first (ctx/turn-evals c (:db/id call)))
                      model? #(:seon.eval/call-id (get evals %))]
-               x (concat (when (and t0 t1 (not= t0 t1)) [[#'task-msgs {} t0 t1]])
+               x (concat (when (and t0 t1 (not= t0 t1)) [[#'task-msgs {} t0 t1 (:db/id c) (basis-of call)]])
                          ms
                          (when-let [b (basis-of call)] (let [i (pair n)] [[#'page-diff-msgs (with-meta {} {::parts #(parts i)}) (:db/id c) prev b n]]))
                          ;; a reply with no words whose calls c no longer holds (each unlinked by a swap!) says nothing: none of it stays

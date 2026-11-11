@@ -456,6 +456,20 @@
     (is (clojure.string/includes? (str (:text nested)) "not program") "its record says why it stays an eval")
     (is (= [true false] (:value branch)) "the branch's program holds a, not b")))
 
+(deftest a-plain-def-in-a-program-namespace-says-where-it-landed
+  ;; loop 2 (2026-11-11): an agent's (def conn ...) to look at something became program in the task's namespace, and it spent eight
+  ;; turns learning what :recorded meant; Data model's real tasks: a scratch defn and a macro became program unnoticed. A var NEW on the
+  ;; branch, whatever form made it, is said where it lands, with the form that takes it back; a var redefined is the change itself
+  (let [[d f g] (at/in-agent (fn [{:keys [ns]}]
+                               [(str "(ns " ns ".core) (def look 1)")
+                                (str "(in-ns '" ns ".core) (defn g \"G.\" {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+                                (str "(in-ns '" ns ".core) (defn g \"G.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")]))
+        found (fn [r] (some #(when (= :program-def (:seon.repl/finding %)) %) (:warnings r)))]
+    (is (= "look" (some-> (found d) :vars first name)) (str "a def that recorded: said, with its var: " (pr-str d)))
+    (is (str/includes? (str (:seon.repl/fix (found d))) "ns-unmap") "and the form that takes it back")
+    (is (= "g" (some-> (found f) :vars first name)) (str "a new defn too: " (pr-str f)))
+    (is (nil? (found g)) (str "a var redefined is the change it means: nothing said: " (pr-str g)))))
+
 (deftest a-definition-inside-a-top-level-do-is-program
   ;; owner, 2026-10-28: match Clojure, whose compiler evaluates each form of a top-level do as a
   ;; top-level form; an agent's (do (in-ns ..) (defn f ..)) never reached its branch, and its run
@@ -1387,3 +1401,14 @@
     (let [r (clojure.core.async/<!! sent)]
       (is (= [:tests :a3] [(:op r) (:id r)]) "a run that throws is answered, as a step's throw is")
       (is (map? (:result r))))))
+
+(deftest a-repair-that-changes-the-form-is-not-run
+  ;; docs/prompt.md (loop D2-again, 2026-11-11: a refine's swap! had its lines commented out by the reader's repair, and the let it was in ran
+  ;; as nothing): an eval call whose repair adds closers at the end runs; one whose repair drops text, comments a line out or inserts inside the
+  ;; form is not run, its answer naming the repairs
+  (let [rp #(#'seon.repl/repair-problem % (:repairs (seon.reader/forgive %)))]
+    (is (nil? (rp "(+ 1 2)")) "nothing repaired")
+    (is (nil? (rp "(let [a 1] (inc a)")) "a closer added at the end runs")
+    (is (= :repaired (:problem (rp "(+ 1 2))"))) "a closer dropped does not")
+    (is (= :repaired (:problem (rp "(let [s 1]\n# the plan, better\n  (swap! ctx assoc :x s))")))
+        "a line inside the form the reader would comment out (D2: the swap!'s lines) does not")))

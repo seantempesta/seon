@@ -160,6 +160,8 @@ A script this branch holds (``bin/root``, at that name or its absolute path) cha
 
 ## Looking at what you pulled
 
+Your record can be large, so look at what it holds before you print it: ``(describe @ctx)`` answers each path and what is there, its schema and that schema's doc in a line, two levels in (`:seon.config.agent/describe-depth`), never the value whole: a short string or number as itself, a longer one as `{:chars n}`, a join as `{:members n :ids [...]}`. ``(describe @ctx path)`` goes in at a path; ``(get-in @ctx path)`` reads one; ``(swap! ctx assoc-in path x)`` changes one in your record; ``(doc :the/key)`` says what a key means. Paths are keys, never positions, so a path read at one turn reads the same part at the next. Your first point shows it in place of `@ctx` whole (```seon.ctx.wire/page-message```).
+
 A pull is data, and one function gives a pulled entity as its data model: ``(my.db/pulled @ctx)``. It answers `{:schema :source :clauses :unasked :held-unasked :renders}`:
 
 - `:schema` is the entity schema that names it, and `:source` where its pattern came from (`:entity`, its own; `:schema`, its schema's).
