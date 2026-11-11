@@ -245,11 +245,12 @@
   [{:role "user" :content (print/text (array-map :render-threw (some-> in str) :message (str message)) (:context print/budgets))}])
 
 (defn- presentation-free
-  "Hiccup h without what is the page's alone: each element's class, style and id, its :data-* and :aria-* attributes (what the page's script
-  and a screen reader read; :href, :title and :alt stay), but for a component's root (an element the walk
-  gave an id), which keeps its render's name, the first word of its class, so the model can look up the function that drew a part
-  (`(source seon.render.ui/task-view)`) and its CSS on that var's metadata, and its id (seon.render/key-id: the render and what it shows), by which
-  a diff names it (seon.render/keyed); each element's children vectors only (`children`). See docs/render.md#style."
+  "Hiccup h without what is the page's alone: every element's class and style, its :data-* and :aria-* attributes (what the page's script
+  and a screen reader read; :href, :title and :alt stay) and its id, but for a component's root (an element the walk gave an id), which
+  keeps its id (seon.render/key-id: the render and what it shows), by which a diff names it (seon.render/keyed), and :render, the
+  render that drew it as data, its full symbol (seon.render's with-id), so the model can look up the function that drew a part
+  (`(source seon.render.ui/task-view)`); nothing presentational reaches the model; each element's children vectors only (`children`).
+  See docs/render.md#style."
   {:malli/schema [:=> [:cat :any] :any]}
   [h]
   ;; an element's children as the tree holds them: a seq a render returned (a `for`) spliced in its place, nils dropped, so the
@@ -257,13 +258,12 @@
   (letfn [(children [xs] (into [] (comp (mapcat #(if (seq? %) (children %) [%])) (remove nil?)) xs))]
   (clojure.walk/postwalk (fn [x] (if (and (vector? x) (keyword? (first x)) (map? (second x)))
                                        (let [m (second x)
-                                             r (when (:id m) (first (str/split (str (:class m)) #"\s+")))
                                              ;; and the page's own marks (:wire/for \"page\"): what the page alone shows says nothing to the model
                                              ;; and what drives the page's script or a screen reader (:data-*, :aria-*): the page's alone too
                                              a (cond-> (into {} (remove (fn [[k _]] (or (#{:class :style :id} k) (= "wire" (namespace k))
                                                                                         (and (nil? (namespace k)) (or (str/starts-with? (name k) "data-") (str/starts-with? (name k) "aria-"))))))
                                                              m)
-                                                 (seq r) (assoc :class r :id (:id m)))]
+                                                 (and (:id m) (:render m)) (assoc :id (:id m)))]
                                          (into (if (seq a) [(first x) a] [(first x)]) (children (nnext x))))
                                        (if (and (vector? x) (keyword? (first x))) (into [(first x)] (children (next x))) x)))
                              h)))
