@@ -1,0 +1,26 @@
+#!/bin/zsh
+# bin/bounded MS DIR CMD ARG...: CMD run in a process group of its own (bin/held), ended whole past MS ms. Under the bound it is CMD
+# itself: its output and its exit status, and what it left running in its group is ended as it ends. Past it (the owner's fourth clock exception, docs/clocks.md#time-decides-the-owners-exceptions):
+# its evidence first (bin/evidence DIR PID), DIR/overran written with MS, then every process of its group ended with SIGKILL, an
+# orphan reparented to pid 1 included, and bin/end-tree PID for any group started under it; the exit status is then 124. A group of
+# its own because a caller's group is never ended (bin/end-tree spares it) and a walk by parent never reaches an orphan: a forked
+# shard runner, ppid 1 in bin/test's group, held a prove 22 minutes after its shard was ended (2026-11-11). seon.fx/run-item runs
+# an item with a bound through it (docs/merging.md#a-session-proves-through-root).
+MS=$1 DIR=$2; shift 2
+HERE=${0:a:h}
+mkdir -p "$DIR"; rm -f "$DIR/overran" "$DIR/held.pids"
+# CMD in a process group of its own: bin/held, the one holder of such a child, which writes "HELD CMD" pids before it waits
+"$HERE/held" --pids "$DIR/held.pids" "$@" & H=$!
+cmd() { [[ -s $DIR/held.pids ]] && awk '{print $2}' "$DIR/held.pids" }
+( trap 'kill $S 2>/dev/null; exit 0' TERM; sleep $(( MS / 1000.0 )) & S=$!; wait $S || exit 0
+  c=$(cmd)
+  "$HERE/evidence" "$DIR" ${c:-$H} > /dev/null 2>&1
+  print -r -- "$MS" > "$DIR/overran"
+  [[ -n $c ]] && { "$HERE/end-tree" $c; kill -KILL -$c 2>/dev/null } ) & W=$!
+wait $H; st=$?
+kill $W 2>/dev/null; wait $W 2>/dev/null
+# what CMD left in its group when it ended (a daemon, a forked child) is ended too: it holds CMD's output open, so a caller
+# reading to its end would wait on it, and nothing a bounded command starts outlives it
+c=$(cmd); [[ -n $c ]] && kill -KILL -$c 2>/dev/null
+[[ -e $DIR/overran ]] && { echo "OVERRAN $MS ms: $* (evidence in $DIR)" >&2; exit 124 }
+exit $st

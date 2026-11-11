@@ -1230,7 +1230,7 @@
   "The :item effect: one item of a session's prove that the test service (seon.prove) granted, run on the session's
   checkout at tree, niced: :build is bin/build seon there; :seed brings the checkout's program store to the tree and, :binary?,
   seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :process is one test as a shard of one (bin/test --shard,
-  whose runner stores its verdict); :step is one check step (bin/check --steps, then bin/test --store-steps, which
+  whose runner stores its verdict; with a :bound, through bin/bounded, and past it the :signal :overran a step's is); :step is one check step (bin/check --steps, then bin/test --store-steps, which
   stores it green at its digest). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the
   cache by its digest, so an item asked again is reused there; a step bin/check ended past its bound (its DIR/overran) is
   :signal :overran, never a verdict. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
@@ -1281,7 +1281,10 @@
                         (sh "zsh" "-c" (str "ROOT=$PWD; . bin/env; "
                                             (when (:binary? req) "(cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-) && ")
                                             "HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test -e \"" prog "\"")))
-                :process (sh "bin/test" "--shard" (str dir "/shard-0.edn") "--set" (str ":seon.config.proofs/program-store=" (sedn/encode pstore)))
+                ;; with a :bound (seon.prove's plan-items, from its measured ms) it runs through bin/bounded: past the bound its
+                ;; evidence is kept and its whole process group ended, never left to hold a worker
+                :process (apply sh (concat (when bound ["bin/bounded" (str bound) (str dir "/evidence")])
+                                           ["bin/test" "--shard" (str dir "/shard-0.edn") "--set" (str ":seon.config.proofs/program-store=" (sedn/encode pstore))]))
                 :step (let [c (sh "bin/check" "--steps" dir)] (sh "bin/test" "--store-steps" dir) c))
             ms (profile/ms-since t0)
             stored (when-not (#{:build :seed} kind) (stored-results {name digest}))
@@ -1290,9 +1293,12 @@
                              (lib/remove-tree! (.getPath d))))
             v (when (map? stored) (get stored digest))
             ;; bin/check's own judgement of the step's bound, a signal it writes (DIR/overran): this measures nothing itself
-            overran? (when (= :step kind)
-                       (let [f (java.io.File. (str dir "/overran"))]
-                         (and (.isFile f) (contains? (set (str/split-lines (slurp f))) name))))]
+            ;; and bin/bounded's, a process item's (DIR/evidence/overran)
+            overran? (case kind
+                       :step (let [f (java.io.File. (str dir "/overran"))]
+                               (and (.isFile f) (contains? (set (str/split-lines (slurp f))) name)))
+                       :process (.isFile (java.io.File. (str dir "/evidence/overran")))
+                       false)]
         (cond
           (contract/error? stored) stored
           (= :build kind) (if (zero? (:exit r))

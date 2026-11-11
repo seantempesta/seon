@@ -567,3 +567,54 @@
     (is (not (get-in one [:value :reused])) "the first ask ran the test")
     (is (= {:pass 1 :reused true} (select-keys (:value two) [:pass :reused])) (str "asked again, the cache answers: " (pr-str two)))
     (is (and (contract/error? moved) (:tree-moved moved)) (pr-str moved))))
+
+;; docs/merging.md#a-session-proves-through-root: an item's command past its bound is ended whole (bin/bounded): its evidence kept,
+;; every process of its group ended, an orphan reparented to pid 1 included, and the exit 124. Red before: bin/end-tree, which
+;; bin/check and bin/stalls end an overran run with, walks by parent and spares its caller's group, so an orphan of the command
+;; lived on (a forked shard runner held a prove 22 minutes, 2026-11-11). Under the bound the command's output and status are its own,
+;; and what it left in its group is ended as it ends
+(deftest a-bounded-command-is-ended-whole-past-its-bound
+  (let [root (str (cfg/checkout)) dir (str (System/getProperty "java.io.tmpdir") "/seon-bounded-" (random-uuid))
+        ;; a sleep of a length no other process has, so the check reads only this test's orphan
+        n (+ 40000 (rand-int 20000))
+        alive? (fn [m] (some #(clojure.string/ends-with? % (str "sleep " m)) (clojure.string/split-lines (:out (seon.lib/sh "ps" "-axo" "command")))))
+        over (seon.lib/sh (str root "/bin/bounded") "1000" (str dir "/over") "zsh" "-c" (str "( sleep " n " & ) ; sleep " (inc n)))
+        under (seon.lib/sh (str root "/bin/bounded") "60000" (str dir "/under") "zsh" "-c" (str "( sleep " (+ 2 n) " & ) ; echo kept; exit 3"))]
+    (try
+      (is (= 124 (:exit over)) (pr-str over))
+      (is (.isFile (java.io.File. (str dir "/over/overran"))) "the bound it ran past is written")
+      (is (.isFile (java.io.File. (str dir "/over/ps.txt"))) "its evidence was captured before it was ended")
+      (is (not (alive? n)) "the orphan, ppid 1 in the command's group, is ended with it")
+      (is (not (alive? (inc n))) "and the command itself")
+      (is (= [3 "kept\n"] [(:exit under) (:out under)]) (pr-str under))
+      (is (not (.exists (java.io.File. (str dir "/under/overran")))) "under its bound no overran")
+      (is (not (alive? (+ 2 n))) "what it left in its group is ended as it ends")
+      (finally (seon.lib/remove-tree! dir)))))
+
+;; a test that hangs only when its fixture asks it to: it reads the fifo target/prove/hang.fifo of its checkout when one is there,
+;; which with no writer never ends (a-process-item-past-its-bound-is-a-signal-and-nothing-of-it-runs-on makes it); with none it
+;; passes at once, so a prove pays nothing for it
+(deftest a-test-that-hangs-while-its-fifo-is-there
+  (let [f (java.io.File. (str (cfg/checkout) "/target/prove/hang.fifo"))]
+    (is (or (not (.exists f)) (string? (slurp f))))))
+
+;; docs/merging.md#a-session-proves-through-root: a process item past its bound is ended whole and answers the signal a step past
+;; its bound does, :overran with no verdict, never a red and never a worker held (f1 sets :bound, f2 honors it). The item is a test
+;; that hangs (a-test-that-hangs-while-its-fifo-is-there, its fifo made here). Red before: the bound was not read, and the item held
+;; its worker until the fifo went
+(deftest a-process-item-past-its-bound-is-a-signal-and-nothing-of-it-runs-on
+  (let [co (str (cfg/checkout)) tree (fx/tree-id co)
+        dg (subs (str (random-uuid)) 0 16)
+        fifo (str co "/target/prove/hang.fifo")
+        t 'seon.fx-test/a-test-that-hangs-while-its-fifo-is-there]
+    (.mkdirs (java.io.File. (str co "/target/prove")))
+    (seon.lib/sh "mkfifo" fifo)
+    (try
+      (let [;; 3 s: past the shard's start, so the test is running (hung) when it is reached
+            r (fx/run-item {:req {:kind :process :tree tree :checkout co :name t :digest dg :binary? false :bound 3000}})
+            ev (str co "/target/prove/items/process-" dg "/evidence")]
+        (is (= :overran (get-in r [:value :signal])) (pr-str r))
+        (is (nil? (get-in r [:value :pass])) "no verdict")
+        (is (.isFile (java.io.File. (str ev "/ps.txt"))) "its evidence was kept")
+        (is (not (proofs/green? (get (fx/stored-results {t dg}) dg))) "nothing stored at its digest"))
+      (finally (.delete (java.io.File. fifo))))))
