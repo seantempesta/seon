@@ -435,6 +435,11 @@
           ;; to the agent, with what root judged on, which wakes the session; the same verdict twice holds. A whole task's
           ;; goes back to its own session too (it merges itself, so it is told why it could not); a merge task's holds,
           ;; and an outside agent's: it read the verdict as :done's answer, and no turn loop takes messages
+          ;; an outside agent's green work behind main alone: told again as behind too, never closed for main's motion;
+          ;; its client hands back again, taking main first (seon.server's :done), bounded as a model agent's is
+          (and (not= :merge kind) outside (= :green oc) (every? #(= :behind (:reason %)) rs)
+               (< behinds (cfg/value :seon.config.merge/max-behind)))
+          {:outcome :behind :reasons rs :verdict rs}
           (and (not= :merge kind) (not outside) (#{:green :red} oc))
           (let [behind-only? (every? #(= :behind (:reason %)) rs)
                 ;; behind alone is main moving under the branch, not the agent's news: the same count twice is two different

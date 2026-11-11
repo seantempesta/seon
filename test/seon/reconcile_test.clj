@@ -497,6 +497,18 @@
         (is (= :closed (:outcome j)))
         (is (some? (:hold j)))))))
 
+;; docs/reconcile.md#a-task-holds-how-its-work-ended: an outside agent's green work behind main alone is judged :behind, as a model
+;; agent's is, so its client hands back again taking main (seon.server's :done), never closed for main's motion; at
+;; :seon.config.merge/max-behind it is held as a model agent's is. Red before: closed, "ended green: behind 78" (Data model's real
+;; task on the standing system, 2026-11-11)
+(deftest an-outside-agents-green-work-behind-main-is-judged-behind-not-closed
+  (let [db (db-of [(decl "a")] :extra (work "a" :running :model "outside"))
+        facts {:end {:outcome :green} :results {(t "a") :pass} :behind 3}
+        max-b (cfg/value :seon.config.merge/max-behind)]
+    (is (= :behind (:outcome (judgment-of db "a" facts))) "behind alone: told again, not closed")
+    (is (= :closed (:outcome (judgment-of db "a" (assoc facts :behinds max-b)))) "at the bound: held, as a model agent's")
+    (is (= :closed (:outcome (judgment-of db "a" (assoc facts :end {:outcome :red} :results {(t "a") :fail})))) "red is no motion of main: closed as before")))
+
 (deftest a-judging-retracts-what-it-does-not-set
   ;; the judged attributes are the end's, never an earlier end's: an error and deferred results a task held from its last judging
   ;; do not survive a later one that has none (seon.task/outcome-tx)

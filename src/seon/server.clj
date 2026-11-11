@@ -458,7 +458,7 @@
         (seq (:red r)) (assoc :failures (into (sorted-map) (for [[t fs] (proofs/failures r)] [t (first fs)])))
         (seq (:deferred r)) (assoc :deferred (:deferred r) :why (:why r))))))
 
-(defmethod op-answer :done [sys ag _]
+(defmethod op-answer :done [sys ag req]
   (if-let [{:keys [task env]} (work-of sys ag)]
     ;; the end first, as a turn loop's end is written, so the judge reads it
     (let [r @(c/submit! sys ag (sedn/encode (list 'seon.turn/hand-back! task)) {:origin :outside})]
@@ -476,6 +476,9 @@
                         ;; a judge that has not moved by root's quiet never will: that, or root
                         ;; stopped, is the answer
                         (cond (contract/error? db) (assoc db :task task)
+                              ;; green, behind main alone (seon.reconcile's judgment, bounded by max-behind): handed back again,
+                              ;; which takes main first, as a model agent's turn loop does when it is told so
+                              (= :behind (outcome db)) (op-answer sys ag req)
                               :else (if-let [p (and (= :running (outcome db)) (c/defect db t "seon.reconcile"))]
                                       {:task task :defect (select-keys p [:seon.error/type :seon.error/message])}
                                       (let [files (fx/uncommitted (str (cfg/checkout)))]
