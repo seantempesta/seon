@@ -90,7 +90,7 @@ The session reads every line a helper writes and lands it itself; review is neve
 
 ## Briefing a subagent
 
-A brief is complete, or the subagent spends its turns rediscovering. Every brief states:
+A brief is complete, or the subagent spends its turns rediscovering. Every brief states: A brief for anything in a shared path (the store's locks, a write, a render every page uses) names the caller's path the helper must run before it reports, not only its own test: a helper's "it works" on its own test has been wrong where the system's heavier path was not run (the first lock layer failed only under two processes with threads). A change to a lock or to durability is read whole by its session before it is called reviewed.
 1. **the question**, and which step of THE PLAN it serves;
 2. **what is known**, as paths: the task entry, wiki sections, the exact failing command and its output;
 3. **the scope**: read-only, or what it may run and which files it owns; what not to touch (the standing store, `~/src/seon`);
