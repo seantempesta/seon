@@ -2052,8 +2052,11 @@
   "The function of a key and its starting forms' ids that answers {:digest :process? :binary?} (graph-index)
   over graph g under inputs: the config lines and env keys it shares are made once here, for every key asked."
   {:malli/schema [:=> [:cat :map :seon.program/inputs :boolean] :seon.host/fn]}
-  [{:keys [rows plain comp-of cd flags] :as g} {:keys [env tree code config]} roots?]
+  [{:keys [rows plain comp-of cd flags] :as g} {:keys [env tree code config root-config]} roots?]
   (let [line (into {} (for [[ck v] config] [ck (str "\n" ck " " v)]))
+        ;; a test that runs a process takes the config its root runs with (:root-config, seon.config/test-root-config as the
+        ;; planner renders it), never the planning process's: the standing system's local.edn moved 103 of 180 process digests
+        rline (if (seq root-config) (merge line (into {} (for [[ck v] root-config] [ck (str "\n" ck " " v)]))) line)
         ;; what root runs, taken by every test that starts a root or runs the binary (root-digest): made once, when one asks;
         ;; a test running the binary takes its check driver's too (a mode it names runs seon.check's code, which no reach of
         ;; the test names: seon.lib-test's fork cases kept one flaky digest across a fix to seon.check/fork-cases)
@@ -2067,6 +2070,8 @@
     (fn [k ids]
       (let [cs (distinct (map comp-of (into (vec ids) (mapcat #(get plain (:ns (rows %)))) ids)))
             ;; the config keys its reach reads (config-reads) that the config holds
+            proc? (some #(let [f (flags %)] (or (:proc f) (:bin f))) cs)
+            line (if proc? rline line)
             ks (into #{} (comp (mapcat #(:config (flags %))) (filter line)) cs)
             ;; a process (a root, an agent, the binary) can read any class of files (:seon.env/*): it runs
             ;; bin/ scripts and loads system.edn, web/ and the schema resources. A form reading files takes

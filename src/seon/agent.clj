@@ -885,7 +885,9 @@
         ;; one digest whichever runner plans a test (seon.prove/one-digest-whichever-runner-plans-it): the index class the shell's
         ;; runner takes (seon.program/with-index-code over this graph), and private contracts as the test child runs them, checked
         ;; (check-private! at its fork, whatever this process's own setting), never this process's value
-        in (cond-> (assoc-in in [:config :seon.config.contract/private-checked?] "true")
+        in (cond-> (-> in (assoc-in [:config :seon.config.contract/private-checked?] "true")
+                       ;; a process test's config values are its root's (seon.program's index-answer reads them)
+                       (assoc :root-config (fx/config-input cfg/test-root-config (cfg/checkout))))
              (nil? (get-in in [:config :seon.env/index])) (as-> x (program/with-index-code g x)))
         g (program/reach-indexed g in)
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
