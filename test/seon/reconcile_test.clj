@@ -307,6 +307,18 @@
     (is (= "the agent wrote no end" (:seon.task/reason tk)) "said so")
     (is (not-any? #(contains? tk %) [:seon.task/waste :seon.task/costs :seon.task/failures]) "and nothing measured of it is recorded")))
 
+(deftest an-ends-words-the-judgment-does-not-share-are-named-as-its-agents
+  ;; docs/reconcile.md#a-task-holds-how-its-work-ended: Context's loop D3, a task capped saying "proof-unknown ..." while root,
+  ;; reading its proof green at its digest, found nothing open: the sentence stood as the task's reason beside root's outcome
+  ;; and misled whoever read it. Named as its agent's, beside what root found; words root agrees with stay as they are
+  (let [db (db-of [(decl "a")] :extra (work "a" :running))
+        reason #(:seon.task/reason (task/task (:db %) "demo/a"))]
+    (is (= "its agent ended cap saying \"proof-unknown demo-test/a-test\"; the done rule found nothing open"
+           (reason (judge! db "a" {:outcome :cap :reason "proof-unknown demo-test/a-test"} :results {(t "a") :pass}))))
+    (is (= "proof-red demo-test/a-test" (reason (judge! db "a" {:outcome :red :reason "proof-red demo-test/a-test"} :results {(t "a") :fail})))
+        "a red end root agrees with keeps its words")
+    (is (= "all green" (reason (judge! db "a" {:outcome :green :reason "all green"} :results {(t "a") :pass}))) "a green end keeps its words")))
+
 (defn- fn-tx
   "A recorded definition of fn app.gaps/nm (as seon.program/record-tx writes it), with its
   contract c or none."

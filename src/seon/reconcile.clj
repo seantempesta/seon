@@ -884,7 +884,13 @@
                             :plan-before (when (= :design kind) (some-> (task/task base id) :seon.task/accumulated :plan))
                             :behinds (behinds main id) :told (:seon.task/reasons t)})
         conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
-        reason (or (:reason end) (when-not end (if worked-error (str "seon.turn/work! threw: " (:seon.error/message worked-error)) "the agent wrote no end")))
+        ;; the agent's words are the task's reason as they are, unless its end was not green and the done rule found nothing open:
+        ;; then they are named as its agent's, beside what root found, so a reader never takes them for the judgment (Context's loop
+        ;; D3: "proof-unknown ..." stood beside :gate, written by an agent whose last prove answer was a gate build's failure)
+        reason (cond
+                 (and (:reason end) (not= :green (:outcome end)) (empty? (:reasons j)) (not (:hold j)))
+                 (str "its agent ended " (some-> (:outcome end) name) " saying \"" (:reason end) "\"; the done rule found nothing open")
+                 :else (or (:reason end) (when-not end (if worked-error (str "seon.turn/work! threw: " (:seon.error/message worked-error)) "the agent wrote no end"))))
         error (or (:error end) worked-error)
         now (System/currentTimeMillis)
         ;; what this end measured, each only when there is one to say (and what an earlier end set that this did not, retracted)
