@@ -618,3 +618,13 @@
         (is (.isFile (java.io.File. (str ev "/ps.txt"))) "its evidence was kept")
         (is (not (proofs/green? (get (fx/stored-results {t dg}) dg))) "nothing stored at its digest"))
       (finally (.delete (java.io.File. fifo))))))
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: the fallback route of a branch's run: a checkout of its commit, the tree's
+;; own binary built there (bin/build seon: current already when the tree is the running one's, so here it is a check), and the
+;; named tests run by that checkout's runner, never proved by root's program. Red before: :built? was not read, the run went to
+;; the gate's path, and with no system to prove on it answered that error
+(deftest a-built-run-judges-the-named-tests-on-the-checkouts-own-build
+  (let [co (str (cfg/checkout))
+        branch (clojure.string/trim (:out (seon.lib/sh "git" "-C" co "rev-parse" "--abbrev-ref" "HEAD")))
+        t 'seon.fx-test/a-read-of-named-paths-reads-only-those-files
+        r (fx/run-tests {:req {:repo co :branch branch :built? true :tests [t]}})]
+    (is (= {t :pass} (get-in r [:value :results])) (str "judged with no system given (:ctx), by the checkout's own runner: " (pr-str r)))))
