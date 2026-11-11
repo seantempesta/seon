@@ -906,10 +906,11 @@
                                                                     :basis (or base-t (:max-tx main))})
                                         now)))
                (into (:tx carried))
-               ;; every end gets its refine, the same agent continued on the same branch (docs/tasks.md#a-refine-curates-its-own-task):
-               ;; none for a refine, none twice (seon.task/refine-tx)
-               (into (task/refine-tx main id))
-               ;; a refine's end that changed the plan of the held task it needs runs that task again, fresh from main (seon.task/again-tx)
+               ;; every end that holds or finishes the task gets its refine, the same agent continued on the same branch
+               ;; (docs/tasks.md#a-refine-curates-its-own-task): none while the agent goes on (parked, or told a verdict), none for a
+               ;; refine, none twice (seon.task/refine-tx)
+               (into (when-not (#{:parked :told} outcome) (task/refine-tx main id (boolean (or (:hold j) marked?)))))
+               ;; a refine's end that changed the plan of the held task it cites runs that task again, fresh from main (seon.task/again-tx)
                (into (task/again-tx main id (:tx carried)))
                ;; marked failed (my.task/fail!): the failure on main and the task held for root (a compare-and-swap from :running),
                ;; so the judge closes it (no retry); one root already cancelled or held keeps root's
@@ -931,7 +932,9 @@
         j (judgment (:idx st) id {:died (assoc e :seon.error/message msg)})
         want {:seon.task/reason msg :seon.task/error (cond-> e (:error end) (assoc :cause (:error end)))}
         move (if (:hold j) (hold-tx main id (task/outcome-tx main id :running :dead want) (:hold j) {}) (task/outcome-tx main id :running (:outcome j) want))]
-    (into move (ended-ms-tx main id now))))
+    ;; a death that holds the task is an end: its refine, held for root (seon.task/refine-tx)
+    (cond-> (into move (ended-ms-tx main id now))
+      (:hold j) (into (task/refine-tx main id true)))))
 
 (defn- gated
   "Task id's gate answered: rs, each deferred test's status (the gate's run of them, or :error for each when it

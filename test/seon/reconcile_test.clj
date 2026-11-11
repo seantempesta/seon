@@ -1188,7 +1188,9 @@
         (let [tk (task/task db' id)
               before (mdb two-tasks)]
           (is (= problem (get-in tk [:seon.task/failure :reason])))
-          (is (= (set (keys (task/tasks before))) (set (keys (task/tasks db')))) "no new task")
+          (is (= (if (= id "demo/add-merge") #{} #{(str id "-refine")}) (set (remove (set (keys (task/tasks before))) (keys (task/tasks db')))))
+              "no new task but its refine, held for root (docs/tasks.md#a-refine-curates-its-own-task); a merge task continues its work's branch and gets none")
+          (when-let [rf (task/task db' (str id "-refine"))] (is (= :held (:seon.task/execution rf)) "what follows a failure is root's to start"))
           (is (not-any? #(= :cancelled (:seon.task/execution %)) (vals (task/tasks db'))) "none cancelled")
           (is (= :held (:seon.task/execution tk)))
           (is (= (:seon.task/agent tk) (get-in tk [:seon.task/failure :agent])) "naming the agent")
@@ -1677,17 +1679,18 @@
   ;; ended task's refine is written with its end, a :design task on its branch that needs it and cites the refine section; a refine
   ;; gets none, and none is written twice
   (let [db (with-refine-section (db-of [(decl "a")]))
-        tx (task/refine-tx db "demo/a")
+        tx (task/refine-tx db "demo/a" false)
         db1 (d/db-with db tx)
         r (task/task db1 "demo/a-refine")]
     (is (seq tx) "an ended task gets its refine")
     (is (= :design (:seon.task/kind r)) "judged by what it changed of the plan")
-    (is (= #{"demo/a"} (set (map :seon.task/id (:seon.task/needs (d/pull db1 [{:seon.task/needs [:seon.task/id]}] [:seon.task/id "demo/a-refine"]))))) "it needs the task it refines")
+    (is (some #(= "demo/a" (get-in % [:seon.cite/target :seon.task/id])) (task/cites-of db1 (seon.db/eid db1 :seon.task/id "demo/a-refine"))) "it cites the task it refines")
+    (is (empty? (:seon.task/needs r)) "and needs nothing: it is wanted whatever that task's outcome")
     (is (= (:seon.task/branch (task/task db1 "demo/a")) (:seon.task/branch r)) "on its branch: the same agent continues")
     (is (= :running (:seon.task/execution r)) "released")
     (is (task/refine? db1 "demo/a-refine") (str "a refine by its cite of the section: " (pr-str (task/cites-of db1 (seon.db/eid db1 :seon.task/id "demo/a-refine")))))
-    (is (nil? (task/refine-tx db1 "demo/a")) "none twice")
-    (is (nil? (task/refine-tx db1 "demo/a-refine")) "a refine gets none")))
+    (is (nil? (task/refine-tx db1 "demo/a" false)) "none twice")
+    (is (nil? (task/refine-tx db1 "demo/a-refine" false)) "a refine gets none")))
 
 (deftest a-refined-plan-starts-one-fresh-run-from-main
   ;; docs/tasks.md#a-refine-curates-its-own-task (the owner, 2026-11-11: the refinement is tried from the earlier point, beside the
