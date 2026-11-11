@@ -1347,6 +1347,19 @@
                :when (and (= :var k) (not= (:id f) (get now s)))]
            {:var s :form (:id f) :loaded (get now s)}))))
 
+(defn reload-dependents!
+  "Load again, in this process, the live forms of db that expanded a macro the forms ids (form ids, just recorded) define,
+  and theirs (dependents): what an eval that redefines a macro owes the code this process already compiled from it, which
+  Clojure's eval leaves on the old expansion (a test defined before its macro changed ran stale, and its process's
+  program-differs saw nothing, its form id unchanged: Data model's first task as a Seon agent). The same act
+  load-diff! does at a spawn. Each loaded form is noted as this process's (load-form!). Answers the load errors. See
+  docs/source.md#an-agent-changes-code-at-its-repl."
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :string]] [:vector :seon.program/error]]}
+  [db ids]
+  (let [rows (vec (keep #(some->> (:db/id (d/entity db [:form/id %])) (form-row db)) ids))
+        ds (if (seq rows) (dependents db rows) [])]
+    (if (seq ds) (load-forms! db ds) [])))
+
 (defn load-diff!
   "Make this process run db-to's program where it holds db-from's (diff-plan): each
   definition db-from had that db-to has none of is removed, and each live form db-to has

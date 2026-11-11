@@ -6,6 +6,12 @@
   (:require [clojure.test :refer [deftest is testing]] [datahike.api :as d]
             [seon.test-store :as ts] [clojure.java.shell :as sh] [seon.agent-test :as at] [clojure.edn] [seon.prove :as prove] [seon.step :as step] [seon.agent] [seon.cost] [seon.proofs :as proofs] [seon.program] [seon.config]))
 
+;; the service's state as a test starts it: the shipped worker count, and no load bound unless the test sets one, so no
+;; verdict here reads the machine's load (docs/cost.md#what-is-measured: no assertion the load can turn red). prove-proc's own
+;; init reads the config in force: in an agent of the standing system, the main tree's local.edn (max-load 18.0 turned five
+;; of these red on a busy machine, 2026-11-11)
+(defn- proc0 [] (dissoc (prove/prove-proc {:conn nil}) :max-load))
+
 (defn- feed
   "State st after the messages ([in m] ...) in order, with every output it made (the :to-api messages)."
   [st msgs]
@@ -38,7 +44,7 @@
         [st all]))))
 
 (deftest a-running-key-is-joined-and-every-waiter-is-answered-once
-  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 5) (req 2 :main 5) (req 3 :main 5)])]
+  (let [[st outs] (feed (proc0) [(req 1 :main 5) (req 2 :main 5) (req 3 :main 5)])]
     (is (= 1 (count (asks outs :spawn))) "three askers of one key: one run")
     (let [[st all] (run-through st outs test-run-answer)]
       (is (= [1 2 3] (waiters-answered all)) "each answered, once")
@@ -57,7 +63,7 @@
   ;; runs anything, and a session's request for main runs as ever, at the t the notice recorded
   (let [db (ts/test-db)
         dg (seon.program/program-digest db)
-        [st o] (feed (prove/prove-proc {}) [[:main {:t 5 :ops [[:db/add 900 :task/name "x" 5 true]] :db db}]
+        [st o] (feed (proc0) [[:main {:t 5 :ops [[:db/add 900 :task/name "x" 5 true]] :db db}]
                                             [:main {:t 6 :ops [[:db/add 901 :form/src "(defn f [] 1)" 6 true]] :db db}]])]
     (is (empty? o) "no run from either commit")
     (is (= 6 (:main-t st)))
@@ -72,7 +78,7 @@
   ;; of its key from memory, so the held task's next run (seon_done again, same branch, same
   ;; program) got the same death and never ran its proof. A death is no verdict: the next ask runs
   (let [died {:pass 0 :fail 0 :error 1 :reports [{:type :error :var "#'a.b-test/t" :exit {:exit 1} :message "test process died"}] :digests {'a.b-test/t "d1"} :ms 5}
-        [st outs] (feed (prove/prove-proc {}) [(req 1 :main 5)])
+        [st outs] (feed (proc0) [(req 1 :main 5)])
         [st all] (run-through st outs died)
         _ (is (= [1] (waiters-answered all)) "its waiter is answered the death")
         [_ o] (feed st [(req 2 :main 5)])]
@@ -83,7 +89,7 @@
   ;; seon.root/prove! and seon.agent/prove! name the digest of what the run reads: a branch's tx
   ;; moves with any write, the run's own facts, its prove agent's end and the eval that asked among them
   (let [main (fn [rid t digest] [:req {:rid rid :branch :main :t t :digest digest}])
-        [st outs] (feed (prove/prove-proc {}) [(main 1 5 "d0")])
+        [st outs] (feed (proc0) [(main 1 5 "d0")])
         [st _] (run-through st outs test-run-answer)]
     (testing "main at a later tx, nothing it reads changed: the ended run's answer, nothing runs"
       (let [[_ o] (feed st [(main 2 9 "d0")])]
@@ -99,7 +105,7 @@
   ;; matched again, so the service keeps a branch's slots at its latest digest only, and none once its agent ended
   (let [ask (fn [st rid t names] (let [[st o] (feed st [[:req (cond-> {:rid rid :branch :agent-3 :t t :digest (str "d" t) :agent :a3} names (assoc :names names))]])]
                                    (first (run-through st o test-run-answer))))
-        st (-> (prove/prove-proc {}) (ask 1 5 nil) (ask 2 5 '#{a.b-test}))]
+        st (-> (proc0) (ask 1 5 nil) (ask 2 5 '#{a.b-test}))]
     (is (= 2 (count (:done st))) "two slots at one digest: both can be asked again")
     (let [st (ask st 3 6 nil)]
       (is (= [[:agent-3 nil :judge]] (keys (:done st))) "the branch moved to d6: the slots at d5 are dropped")
@@ -110,7 +116,7 @@
 
 (deftest a-session-and-an-agents-turn-for-one-digest-are-one-run
   ;; the session's seon_prove for agent a3's branch at tx 7, and a3's turn asking for the same
-  (let [[st outs] (feed (prove/prove-proc {}) [(req 10 :agent-3 7 :a3) (req 11 :agent-3 7 :a3)])]
+  (let [[st outs] (feed (proc0) [(req 10 :agent-3 7 :a3) (req 11 :agent-3 7 :a3)])]
     (is (= 1 (count (asks outs :tests))) "one plan request, to the agent that holds the branch")
     (is (= {:op :tests :id :a3 :mode :judge :plan? true} (:req (first (asks outs :tests)))))
     (is (empty? (asks outs :spawn)) "the agent runs its own branch: no prove agent")
@@ -119,7 +125,7 @@
       (is (= [true nil] (mapv #(get-in % [:req :plan?]) (asks all :tests))) "one plan and one run of its item, for both"))))
 
 (deftest a-failed-run-answers-its-waiters-with-the-error
-  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :a 1 :aa) (req 2 :a 1 :aa)])
+  (let [[st outs] (feed (proc0) [(req 1 :a 1 :aa) (req 2 :a 1 :aa)])
         err (seon.contract/error :seon.root/no-agent 'seon.root/run-tests! "no live agent" {})
         [st all] (run-through st outs err)]
     (is (= [1 2] (waiters-answered all)))
@@ -129,7 +135,7 @@
 ;; docs/merging.md#verdicts-are-a-cache: the daily run is what catches what a digest can't see, so what it finds is told, not only cached
 (deftest a-red-in-the-full-run-is-a-problem
   (let [request [:req {:branch :main :digest "full-2026-11-07" :mode :full}]
-        [st outs] (feed (prove/prove-proc {}) [request])
+        [st outs] (feed (proc0) [request])
         fx (first (filter #(= :fx (get-in % [:req :op])) outs))
         told (fn [answer] (let [[st2 o] (feed st [(answer-of fx answer)])] [st2 (filter #(= :problem (:op %)) o)]))
         [st-r reds] (told {:value {:results '{a/green :pass a/red :fail a/died :error}}})
@@ -151,7 +157,7 @@
   ;; can stall: an agent's turn never waits on it); its executor is the :tests effect (bin/test --all
   ;; in a worktree of main, an OS child), whose shards cache their verdicts as any run does
   (let [request [:req {:branch :main :digest "full-2026-10-28" :mode :full}]
-        [st outs] (feed (prove/prove-proc {}) [request])
+        [st outs] (feed (proc0) [request])
         fx (first (filter #(= :fx (get-in % [:req :op])) outs))]
     (is (= "main@full-2026-10-28!full" (prove/run-key :main "full-2026-10-28" nil :full)))
     (is (empty? (asks outs :spawn)) "no prove agent is spawned")
@@ -205,7 +211,7 @@
 
 (deftest an-error-is-answered-recorded-and-never-remembered
   (let [err (seon.contract/error :seon.root/no-agent 'seon.root/run-tests! "no live agent" {})
-        [st outs] (feed (prove/prove-proc {}) [(req 1 :agent-3 7 :a3)])
+        [st outs] (feed (proc0) [(req 1 :agent-3 7 :a3)])
         [st all] (run-through st outs err)]
     (is (= [1] (waiters-answered all)))
     (is (some #(and (= :problem (:op %)) (= :platform (:class %))) all) "recorded as a :platform problem, as well as answered")
@@ -223,21 +229,21 @@
   ;; ended from never-was), the run's waiter is answered with it, and nothing is recorded as a
   ;; :platform problem: the agent's end is its run's record
   (let [ended (seon.contract/error :seon.root/ended 'seon.root/api-proc "agent a3 ended" {:agent :a3})
-        [st outs] (feed (prove/prove-proc {}) [(req 1 :agent-3 7 :a3)])
+        [st outs] (feed (proc0) [(req 1 :agent-3 7 :a3)])
         [st all] (run-through st outs ended)]
     (is (= [1] (waiters-answered all)) "its waiter is answered with the error")
     (is (not-any? #(= :problem (:op %)) all) "and no :platform problem is recorded")
     (is (empty? (:done st)) "nothing remembered")))
 
 (deftest a-spawn-failure-and-a-prove-agent-that-dies-are-answered-and-recorded
-  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1) (req 2 :main 1)])
+  (let [[st outs] (feed (proc0) [(req 1 :main 1) (req 2 :main 1)])
         spawn (first (asks outs :spawn))
         refused (seon.contract/error :seon.root/refused 'seon.root/spawn! "too many live agents" {})
         [st o] (feed st [(answer-of spawn refused)])]
     (is (= [1 2] (waiters-answered o)) "a spawn refused: both waiters answered the error")
     (is (some #(= :problem (:op %)) o))
     (is (nil? (:running st))))
-  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
+  (let [[st outs] (feed (proc0) [(req 1 :main 1)])
         [st o2] (feed st [(answer-of (first (asks outs :spawn)) {:id :p1})])
         died (seon.contract/error :seon.agent/died 'seon.root/api-proc "agent p1 died" {:agent :p1})
         [st o3] (feed st [(answer-of (first (asks o2 :tests)) died)])]
@@ -247,7 +253,7 @@
     (is (empty? (:done st)))))
 
 (deftest a-stale-answer-is-counted
-  (let [[st outs] (feed (prove/prove-proc {}) [(req 1 :main 1)])
+  (let [[st outs] (feed (proc0) [(req 1 :main 1)])
         [st _] (feed st [[:answers {:tag 99 :r {}}]])]
     (is (= 1 (:stale st)))
     (is (= 1 (:stale-answers ((:ping-map-fn (prove/prove-proc)) st))))))
@@ -262,7 +268,7 @@
   open (a success or an :seon.root/ended error, as an agent ending answers). Then every ask left is
   answered with a success, until none. Answers [final-state rids-asked answers-seen]."
   [seed steps]
-  (loop [i 0 x seed st (prove/prove-proc {}) open [] asked [] answers []]
+  (loop [i 0 x seed st (proc0) open [] asked [] answers []]
     (let [x (lcg x) pick (quot (mod x 1000003) 7)]
       (if (< i steps)
         (if (or (empty? open) (even? (quot (mod x 100003) 3)))
@@ -299,7 +305,7 @@
   ;; a hang in a run's chain is read from what the service holds (seon.root keeps it for a stall's
   ;; evidence): each run in flight with its stage and who waits, the queue, the free workers, and the api's asks it has open
   (let [state-of (fn [outs] (:r (last (filter #(= :prove-state (:op %)) outs))))
-        [st outs] (feed (prove/prove-proc {}) [(req 1 :main 5) (req 2 :main 5)])
+        [st outs] (feed (proc0) [(req 1 :main 5) (req 2 :main 5)])
         s1 (state-of outs)]
     (is (= {"main@d5" {:stage :spawn :waiting 2}} (:runs s1)))
     (is (= [[:spawn "main@d5"]] (:open s1)) "the ask it waits on")
@@ -337,7 +343,7 @@
 
 ;; ---- items: the service's unit of work (notes test-system-as-a-flow-2026-11-10.md, step 2) ----------------------------
 
-(defn- items-st [workers] (assoc (prove/prove-proc {:conn nil}) :workers workers))
+(defn- items-st [workers] (assoc (proc0) :workers workers))
 (defn- free [st] (:slots (#'prove/state-view st)))
 (defn- batches [outs] (filterv #(= :tests (get-in % [:req :op])) outs))
 (defn- answers [outs] (into {} (for [o outs :when (= :asker-answered (:op o))] [(:asker o) (:r o)])))
@@ -411,7 +417,7 @@
   (let [one 'a.x-test/one two 'a.x-test/two
         red (fn [t] {:pass 0 :fail 1 :error 0 :reports [{:type :fail :var (str "#'" t) :message "no"}]})
         run (fn [mode]
-              (let [[st0 o0] (feed (assoc (prove/prove-proc {}) :workers 1) [[:req {:rid 1 :branch :b :t 5 :digest "d5" :agent :a1 :mode mode}]])]
+              (let [[st0 o0] (feed (assoc (proc0) :workers 1) [[:req {:rid 1 :branch :b :t 5 :digest "d5" :agent :a1 :mode mode}]])]
                 (loop [st st0 all o0 seen 0]
                   (if-let [m (first (filter :req (drop seen all)))]
                     (let [r (if (get-in m [:req :plan?]) {:items {one "d1" two "d2"} :selected [one two]}
@@ -590,6 +596,14 @@
           [_ o2] (feed st [(answer-of first-ask r)])]
       (is (= 1 (granted o2)) "it ended: the next one alone"))))
 
+;; docs/merging.md#the-test-service: a process test's item carries its bound as a step's does (f1), so its runner ends one that
+;; hangs (seon.fx/run-item); one never measured has none. Before, only steps had a bound: a hung process test held a worker
+(deftest a-process-tests-item-carries-its-bound
+  (let [[_ o] (seeded-run 4 {:items {} :process {'a.p-test/t "dp" 'a.p-test/u "du"} :bounds {'a.p-test/t 5000} :build {:tree "T" :needed? false}})
+        reqs (into {} (for [a (fx-asks o) :let [q (get-in a [:req :req])] :when (= :process (:kind q))] [(:name q) q]))]
+    (is (= 5000 (:bound (reqs 'a.p-test/t))) (pr-str reqs))
+    (is (nil? (:bound (reqs 'a.p-test/u))) "never measured: no bound")))
+
 ;; a step past its bound is a signal (docs/clocks.md#time-decides-the-owners-exceptions), never a verdict: its asker is answered
 ;; on the rest, and the answer names it
 (deftest a-step-that-overran-is-a-signal-not-a-red
@@ -637,7 +651,7 @@
 (defn- five-asked
   "The items granted when one asker asks five items of a service under admission a (seon.prove/admission's map)."
   [a]
-  (let [[_ outs] (prove/ask-items (merge (dissoc (prove/prove-proc {:conn nil}) :max-load) a) 1 :batch
+  (let [[_ outs] (prove/ask-items (merge (proc0) a) 1 :batch
                                   (into {} (for [i (range 5)] [[(symbol "app.a-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
     (count (batches outs))))
 
@@ -655,7 +669,7 @@
 ;; running one item is granted anyway, so the queue never stalls with nothing to wake it
 (deftest max-load-admits-only-under-it-but-never-stalls
   (let [reads (atom 0)
-        st0 (merge (prove/prove-proc {:conn nil}) (prove/admission {:max-workers 4 :max-load 10.0 :cores 18}))
+        st0 (merge (proc0) (prove/admission {:max-workers 4 :max-load 10.0 :cores 18}))
         it {:agent :a1 :ms 5}]
     (with-redefs [prove/machine-load (fn [] (swap! reads inc) 30.0)]
       (let [[st o1] (prove/ask-items st0 1 :batch {['app.l-test/a "da"] it ['app.l-test/b "db"] it ['app.l-test/c "dc"] it})
@@ -673,8 +687,11 @@
 ;; docs/merging.md#the-test-service: with max-cores and max-load unset, the shipped max-workers (8) is the bound; with no count
 ;; set the machine's cores are
 (deftest the-shipped-bound-holds-when-the-others-are-unset
-  (let [st (prove/prove-proc {:conn nil})
+  ;; the service's init takes the admission of the config in force (seon.prove/config-admission), whatever machine runs it
+  (let [init (prove/prove-proc {:conn nil})
+        st (proc0)
         [_ outs] (prove/ask-items st 1 :batch (into {} (for [i (range 10)] [[(symbol "app.s-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
-    (is (= [8 nil] [(:workers st) (:max-load st)]))
+    (is (= (prove/config-admission) (select-keys init [:workers :max-load])))
+    (is (= 8 (:workers st)) "the shipped max-workers")
     (is (= 8 (count (batches outs)))))
   (is (= {:workers 4} (prove/admission {:cores 4}))))

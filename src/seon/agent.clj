@@ -1613,7 +1613,8 @@
   bound (a step never measured has none, as under bin/prove: it ends by its own waits' bounds, and that run measures it), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
   steps it names among them (bin/prove --root PORT seon.config-test config), as the plain bin/prove NS runs none; :missing, the steps with no digest here (one naming a
   function the program lacks; health, keyed by a base tree no branch holds); :build {:tree :needed?}, needed when a process
-  test or a binary step is among them; :deferred, what it left that is no process item. Or {:unread error}: the cache
+  test or a binary step is among them; :bounds {test ms}, each process test's bound as a step's (the factor times its median
+  measured ms, floored; none when never measured), which its item carries (seon.prove/plan-items); :deferred, what it left that is no process item. Or {:unread error}: the cache
   could not be read."
   {:malli/schema [:=> [:cat :map [:maybe [:set :symbol]]] :map]}
   [sel names]
@@ -1623,14 +1624,16 @@
                           (fn [cand] (let [r (fx/stored-results cand)] (if (contract/error? r) (do (vreset! unread r) {}) r))))
         process (into {} (for [t (:deferred sel) :let [d (get-in sel [:digests t])] :when (and d (contains? (:process plan) t))] [t d]))
         run (vec (cond->> (remove proofs/mg-key? (:run-steps p)) (seq names) (filter #(contains? names (symbol %)))))
-        ms (if (seq run) (fx/typical-ms run) {})
+        ms (if (or (seq run) (seq process)) (fx/typical-ms (into run (keys process))) {})
         k (cfg/value :seon.config.check/step-end-factor) floor (cfg/value :seon.config.agent/stall-ms)
+        ;; a process test's bound, as a step's: the factor times its median measured ms, floored; none when never measured
+        bounds (into {} (for [t (keys process) :let [m (ms t)] :when m] [t (max floor (* k m))]))
         steps (into {} (for [s run] [s (cond-> {:digest (get (:steps p) s) :binary? (proofs/step-needs-binary? s) :bound nil}
                                          (ms s) (assoc :bound (max floor (* k (ms s))))
                                          (proofs/machine-steps s) (assoc :alone? true))]))]
     (if-let [u @unread]
       {:unread u}
-      {:process process :steps steps :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))
+      {:process process :bounds bounds :steps steps :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))
        :build {:tree (:tree (:inputs plan)) :needed? (boolean (or (seq process) (some :binary? (vals steps))))}})))
 
 (defn handle!
@@ -1670,7 +1673,7 @@
                                       :at-judge (count (:judge sel)) :reused-reports (:reused-reports sel)
                                       :digests (select-keys (:digests sel) (filter (:reused sel) (:selected sel)))}
                                (seq (:deferred sel)) (assoc :why (into {} (for [t (:deferred sel)] [t (program/process-path (:graph (:plan sel)) t)])))
-                               pp (merge (select-keys pp [:process :steps :build :missing]))))}])
+                               pp (merge (select-keys pp [:process :bounds :steps :build :missing]))))}])
            (let [proofs (or (some->> (:task m) (task/task (db)) :seon.task/accumulated :proofs) #{})
                  ;; items of a run of a session's checkout: their test children read that checkout's files (test-child)
                  _ (when (and (:checkout m) (:held-plan @state)) (swap! state assoc-in [:held-plan :plan :checkout] (:checkout m)))

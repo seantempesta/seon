@@ -427,6 +427,17 @@
     (is (and (map? (:value undone)) (nil? (get-in undone [:value :ex]))) (str "an eval that redefines scan back works: " (pr-str undone)))
     (is (true? (:value works)) (str "and scan is whole again: " (pr-str works)))))
 
+;; docs/source.md#an-agent-changes-code-at-its-repl: Data model's first task as a Seon agent (2026-11-11): a test defined before
+;; the macro it calls was redefined ran the old expansion, and (prove) ran it stale; a dummy edit to the test fixed it.
+;; Clojure's eval recompiles nothing that already expanded a macro, so the REPL does it (seon.program/reload-dependents!)
+(deftest a-macros-redefinition-reaches-the-forms-that-expanded-it
+  (let [[_ _ _ r] (at/in-agent (fn [{:keys [ns]}]
+                                 [(str "(ns " ns ".mac) (defmacro m [] 1)")
+                                  (str "(in-ns '" ns ".mac) (defn f [] (m))")
+                                  (str "(in-ns '" ns ".mac) (defmacro m [] 2)")
+                                  (str "(in-ns '" ns ".mac) (f)")]))]
+    (is (= 2 (last (:value r))) (str "f runs the macro's new expansion: " (pr-str (select-keys r [:value :text :ex]))))))
+
 (deftest a-def-beside-calls-stays-a-recorded-eval
   ;; root's ruling, 2026-10-27: a branch's program held the eval (let [r (my.agent/prove)] (def
   ;; last-prove r) r), so every agent loading the branch ran prove at load and died ("nil where a

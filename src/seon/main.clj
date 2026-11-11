@@ -127,7 +127,14 @@
                                                            "RESUMED"))
                                        nil))]
     (cond (seon.contract/error? r) (do (out! "prove: " (:seon.error/message r)) (out! "PROVE FAILED") 1)
-          :else (do (out! "prove: " (shown (select-keys r [:key :ran :reused :pass :fail :error :deferred])))
+          :else (do ;; the plan line every prove prints (bin/prove's merge verdict reads it for the landing's message)
+                    (out! "prove: " (count (:selected r)) " keys, " (:reused r 0) " green at their digest (reused), " (:ran r 0)
+                          " run (tests, process tests and check steps) through the system's one admission")
+                    (out! "prove: " (shown (select-keys r [:key :ran :reused :pass :fail :error :deferred])))
+                    ;; never silent: a tree that changes what the binary baked is judged in-process on main's bake of it
+                    (when (seq (:baked r))
+                      (out! "prove: this tree changes baked values (" (clojure.string/join " " (:baked r)) "): its in-process verdicts"
+                            " read main's bake of them; its process tests run on its own build"))
                     (if (seq (:red r))
                       (do (out! "prove: red " (clojure.string/join " " (:red r))) (out! "PROVE FAILED") 1)
                       (do (out! "PROVE OK") 0))))))
