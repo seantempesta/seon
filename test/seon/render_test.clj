@@ -2680,6 +2680,19 @@
     (is (not (re-find #"data-standing=\"finished\"[^>]*id=\"agent-sean\"" html)) "not a finished session")
     (is (str/includes? html "href=\"/agent/b2/a1\"") "what the person asked for stays in root's list (red before: the user's join hid it)")))
 
+(deftest roots-page-follows-the-person-starting-an-agent
+  ;; docs/users.md#roots-session: root's page is a kept walk; an agent the person starts afterwards is placed under them as it happens
+  ;; (red before: the person's entry read its started agents untracked, so a live page never placed one)
+  (let [db (tree-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1]] [])
+        st (root-state (branch-state db db) db)
+        [st1 _] (pass-view st :root)
+        main' (d/db-with (:main-db st1) [{:seon.agent/key "sean" :seon.agent/agents [[:seon.agent/key "b2/a1"]]}])
+        st2 (#'p/advance-main st1 main')
+        [st3 _] (pass-view st2 :root)]
+    (try (is (not (str/includes? (p/view-html st1 :root) "href=\"/agent/b2/a1\"")) "before: not started by the person")
+         (is (str/includes? (p/view-html st3 :root) "href=\"/agent/b2/a1\"") "after: under the person, live")
+         (finally (r/dispose-walk! (get-in st [:root-walk :w]))))))
+
 (deftest a-stopped-agent-does-not-read-as-waiting-in-its-head-or-its-lists
   (let [a {:seon.agent/id :a6 :seon.agent/status :idle :seon.agent/max-turns 40 :seon.agent/key "b2/a6"}
         t {:seon.task/id "seon.ref/an-alias" :seon.task/outcome :cap :seon.task/reason "proof-red seon.ref-test/an-alias"}

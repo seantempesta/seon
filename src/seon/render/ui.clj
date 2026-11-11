@@ -1594,7 +1594,10 @@
         [:span {:class "flex items-baseline gap-2"} [:span {:class "min-w-0 flex-1 truncate font-semibold text-text-100"} n]
          [:span {:class "shrink-0 text-2xs muted"} "the person Seon works for"]]]
        ;; the agents it started, each by its own entry (root's session is the page itself, not listed)
-       (when-let [kids (seq (started-agents (get c :seon.agent/agents)))] (into [:div {:class "started"}] kids))]
+       ;; who it started, read tracked by the join's key set: one added draws the entry again (read untracked, a live root's page never placed it)
+       (let [as (get c :seon.agent/agents)]
+         (when (map? (ratom/untracked as)) (doall (keys as)))
+         (when-let [kids (seq (started-agents as))] (into [:div {:class "started"}] kids)))]
       (agent-entry (:seon.db/db opts) c))
     [:div {:id "render-ctx"} [#'agent-parts {} c] [#'conversation-list {}]
      [#'rules-list {}]
