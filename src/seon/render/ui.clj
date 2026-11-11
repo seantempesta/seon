@@ -1708,7 +1708,7 @@
   docs/render.md#an-entity-may-name-its-own-render."
   {:malli/schema [:=> [:cat :seon.host/db :any :string :int] [:map [:exchanges [:vector :map]] [:waiting [:sequential :string]]]]}
   [db c k turn]
-  (let [placed (ctx/placed-messages db c)
+  (let [placed (ctx/placed-messages c)
         bodies (fn [ms] (keep (fn [[m _]] (let [x (ratom/realize (get-in c [:seon.message/_to m]))]
                                              (when (some? (get-in x [:seon.message/from :seon.user/name])) (:seon.message/body x)))) ms))
         said-in (fn [n] (when-let [cid (ctx/call-of db n k)]
