@@ -2004,13 +2004,17 @@
   {:seon.render/list "c-rows" :seon.render/messages true :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (let [k (ratom/realize (:seon.agent/key c))
-        turn (or (ratom/realize (:seon.agent/turn c)) 0)
         ;; where each message was read, once for every turn (a turn is given its own, so a message delivered runs this list and the turn it reached)
-        placed (when k (ctx/placed-messages c))]
+        placed (when k (ctx/placed-messages c))
+        ;; the turn number and whether a task is held are read untracked: placed-messages reads c's key set tracked, which a turn moved
+        ;; or a task set or unset reaches (seon.ratom: a node's key set is reached by a direct value replaced), so a read of each here
+        ;; was a second read of one change; with no key there is nothing placed and nothing to draw for either
+        plain (ratom/untracked c)
+        turn (or (:seon.agent/turn plain) 0)]
     [:ol {:id "c-rows"}
      [#'system-message {}]
      [#'session-examples {}]
-     (when (:seon.agent/task c) [#'chat-ask {:wire/for "page"}])
+     (when (:seon.agent/task plain) [#'chat-ask {:wire/for "page"}])
      ;; one past the turn in force: what was taken for the turn that reads it comes before that turn begins (seon.turn/take!, tell-error!); a turn no record names draws nothing
      (for [n (range 0 (+ 2 turn))] [#'conversation-turn (let [ms (get placed n (when (= n (inc turn)) (:pending placed)))] (cond-> {:key n} ms (assoc :messages ms)))])
      [#'chat-end {:wire/for "page"}]
