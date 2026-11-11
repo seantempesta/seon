@@ -577,12 +577,25 @@
           (recur (into out more) (into (pop todo) (vals more))))
         out))))
 
+(defn file-reading-expansions
+  "{relative path namespace} of db's files holding a form that expands a macro reading files (a macro whose form refers to one
+  of seon.program/file-readers: slurp, file-seq, io/resource), as seon.config/schema-forms bakes the schema resources: such a
+  form's facts are the analysis of what the macro read, so a refresh changing a file no namespace holds reads them again.
+  Derived from the program's facts, never listed. See docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :symbol]]}
+  [db]
+  (into {} (d/q '[:find ?file ?nsn :in $ [?r ...]
+                  :where [?mf :form/refs ?r] [?mf :form/defines ?m] [?m :var/meta :macro] [?m :var/name ?mn]
+                  [?f :form/refs ?mn] [?f :form/ns ?ns] [?ns :ns/file ?file] [?ns :ns/name ?nsn]]
+                db (vec program/file-readers))))
+
 (defn refresh-tx
   "The facts that bring db's program up to date with the files that changed ({relative path
   text}, a removed file's text nil), and only those: each changed file's namespace read
   again, and, when what its dependents read of it was lost (its interface: names and kinds, macros,
   protocols, types), every namespace requiring it that references a name lost (or any, for a macro,
-  protocol, type or inline function's text), read again from the file db holds (file-text), and so on through theirs; each changed schema resource. Each
+  protocol, type or inline function's text), read again from the file db holds (file-text), and so on through theirs; each changed schema resource, and, when a
+  changed file is no namespace's, every file holding a form whose macro read files as it expanded (file-reading-expansions). Each
   form is written only where it differs from db (program-tx). The same program as replace-tx
   of the whole tree, at the cost of what changed: a body edit reads one file and writes its
   changed forms, whatever the program's size or the file's dependents (task
@@ -591,7 +604,12 @@
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string [:maybe :string]]] :seon.db/tx-data]}
   [db changed]
   (let [ns-of-path (fn [p] (some #(when (= p (:v %)) (:ns/name (d/entity db (:e %)))) (d/datoms db :aevt :ns/file)))
-        texts (into {} (filter val) changed)
+        ;; a changed file that is no namespace's (a schema resource, the config file, a script) may be what a macro read as
+        ;; it expanded: the files of the forms expanding one are read again with it (file-reading-expansions)
+        texts (into (if (some config/file-kind (keys changed))
+                      (into {} (for [[p n] (file-reading-expansions db) :when (not (contains? changed p))] [p (file-text db n)]))
+                      {})
+                    (filter val) changed)
         gone (into {} (for [[p t] changed :when (and (nil? t) (str/ends-with? p ".clj")) :let [n (ns-of-path p)] :when n] [n nil]))
         read (loop [round texts check (keys gone) read gone tree {}]
                (if (and (empty? round) (empty? check))
