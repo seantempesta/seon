@@ -2673,6 +2673,37 @@
 
 (defn- session-eid [db k] (seon.db/eid db :seon.agent/key k))
 
+(deftest an-entity-shown-as-its-data-model
+  ;; docs/render.md#an-entity-may-name-its-own-render: an entity naming seon.render.ui/pull-view as its own render shows, from its pull and
+  ;; the entity index, where its pattern comes from, each clause with what the pull holds for it, and what its schema names that the
+  ;; pattern does not ask: root's session here, whose pattern is its own
+  (let [db (sessions-db "b2" [["b2/a1" :a1 :idle "x/asks" :parked :t1]])
+        st (root-state (branch-state db db) db)
+        main (:main-db st)
+        main (d/db-with main [{:db/id (seon.db/eid main :seon.agent/key "root") :seon.render/hiccup 'seon.render.ui/pull-view}])
+        html (root-page-html main)
+        front (re-find #"(?s)<section[^>]*pull-front.*?Show as data" html)]
+    (is (some? front) html)
+    (is (not (str/includes? html "component-defect")) "nothing threw")
+    (is (str/includes? front "its own (:seon.ctx/pattern on the entity)") "its pattern is its own")
+    (is (str/includes? front ":seon.agent/key") "a clause it asks")
+    (is (str/includes? front ":seon.agent/_agents") "a join it asks, with its members: who started it")
+    (is (str/includes? front "does not ask") "what its schema names beside")))
+
+(deftest an-own-renders-part-is-the-models-unless-marked-for-the-page
+  ;; docs/render.md#an-entity-may-name-its-own-render: the lists a walk reads as parts (seon.render/page-lists, what the model reads) hold
+  ;; the pull view's front, a part like any, and not the stage's, which its render marks for the page alone (red before: the pull view's
+  ;; list was marked page-only, so an agent putting it on itself never read its own pull)
+  (let [db (booted)
+        a (seon.db/eid db :seon.agent/key "root")
+        ix (seon.db/index)
+        lists (fn [r] (let [db (d/db-with db [{:db/id a :seon.render/hiccup r}])
+                            t (:tree (seon.ctx/build ix db a :db))
+                            w (r/draw t seon.ctx/changes db (r/render-var-of ix t) {:index ix})]
+                        (try (set (r/page-lists w)) (finally (r/dispose-walk! w)))))]
+    (is (contains? (lists 'seon.render.ui/pull-view) "#p-head") "the pull view's front is a part")
+    (is (not (contains? (lists 'seon.render.ui/stage) "#p-head")) "the stage's front is the page's alone")))
+
 (deftest a-render-name-that-resolves-to-nothing-is-said
   ;; docs/render.md#an-entity-may-name-its-own-render: an entity naming a render of its own that this process has no var for is drawn by
   ;; its schema's render with the typed error naming the symbol where its own would be (red before: the default, and nothing said why)
@@ -2975,6 +3006,26 @@
   ;; its list inside its root element, as render-ctx's #p-task is (the walk gives a component's root its own id)
   [:div [:div {:id "parts"} [#'throwing-view {}] [#'fine-view {}]]])
 
+(defn boom "A helper a render calls, which throws." {:malli/schema [:=> [:cat] :any]} [] (throw (ex-info "no such key" {})))
+(defn helper-throwing-view "A component whose helper throws."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [_opts] [:p (boom)])
+(defn helper-layout "A list of one component whose helper throws."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
+  [_opts] [:div [:div {:id "parts"} [#'helper-throwing-view {}]]])
+
+(deftest a-components-defect-says-what-threw-and-where-in-a-line
+  ;; docs/errors.md#nothing-crashes-and-nothing-hangs: a defect's first line, as text, names the render, what was thrown and the fn it
+  ;; was thrown in (seon.error/thrown-in), so a reader takes it without walking the error's data (red before: the error was only a
+  ;; map nested in the part; a model spent 18 turns finding what threw, Context's trial 2026-11-11)
+  (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'helper-layout {}])]
+    (try (r/flush! w nil)
+         (seon.fixtures/no-error-render @(:defects w) {:expects #{"seon.render-test/helper-throwing-view"}})
+         (let [[[_ part]] (seq (r/placed-hiccup w ["#parts"]))
+               line (some #(when (and (vector? %) (= :p (first %))) (second %)) (tree-seq coll? seq part))]
+           (is (= "seon.render-test/helper-throwing-view threw: no such key (in seon.render-test/boom)" line) (pr-str part)))
+         (finally (r/dispose-walk! w)))))
+
 (defn interrupted-view
   "A component whose run is interrupted."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
@@ -2994,7 +3045,9 @@
          (seon.fixtures/no-error-render @(:defects w) {:expects #{"seon.render-test/throwing-view"}})
          (is (= 1 (count @(:defects w))) "the one error is on purpose")
          (let [placed (r/placed-hiccup w ["#parts"])
-               [[_ [_ _ [_ _ broken]]] [_ [_ _ fine]]] (seq placed)]
+               [[_ broken-part] [_ [_ _ fine]]] (seq placed)
+               ;; the part: its line, then the error's render called on the error as data (its last argument)
+               broken (last (last broken-part))]
            (is (= :seon.render/component-defect (:seon.error/type broken)) (str "the model reads the error as data: " (pr-str placed)))
            (is (str/includes? (:seon.error/message broken) "seon.ref/scan invalid-output") "what threw")
            (is (= [{:in [:seon.ref/blocks 3]}] (get-in broken [:seon.render/threw :problems])) "and the thrown error's own data")

@@ -935,7 +935,7 @@
       (testing "a render that throws in the agent is answered as its error, and the agent goes on"
         (let [db (:db-after (d/with db (:tx (my.schema/registration db :lab.ctx/boom '[:vector {:seon.render/hiccup seon.ctx-test/boom} :any] false))))
               db (:db-after (d/with db [{:seon.agent/key k :lab.ctx/boom []}]))
-              r (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent! {:expects #{"seon.render.ui/ctx-key threw: cannot draw this"}})))
+              r (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx) (finally (end-agent! {:expects #{"seon.render.ui/ctx-key"}})))
               html (fn [id] (:html (some #(when (= id (:id %)) %) (:units r))))]
           (is (re-find #"cannot draw this" (html "ctx-key-lab_2Ectx_2Fboom")) "the render's throw, as its error's render in its component's place")
           (is (re-find #"<ol><li>read the plan" (html "ctx-key-lab_2Ectx_2Fsteps")) "and every other component drawn"))))))

@@ -456,7 +456,7 @@
         (is (str/starts-with? (page-code r0) "(my.render/page {:commit #uuid \"") "the page is the call (my.render/page p)")
         (is (every? #(re-find % (:content (peek r0))) [#":class \"cite\"" #"Doubles\." #":class \"status\""]) "the page whole, each part by the function that drew it: how the work stands too")
         (is (str/starts-with? (page-code r1) "(my.render/diff {:commit #uuid \"") "what moved is a generated eval of its own at the end, after turn 1's own eval")
-        (is (re-find #"\[\"page\" \"task-view-demo_2Ff\" \"cite-[^\"]*demo_2Ff\" :pre\]" (:content (peek r1)))
+        (is (re-find #"\[\"page\" \"p-task\" \"task-view-demo_2Ff\" \"cite-[^\"]*demo_2Ff\" :pre\]" (:content (peek r1)))
             "the cited var's edit at its own part, nested in its task's as the pull nests it: the ids name each render and what it shows, and only what moved inside the cite is sent")
         (is (not (str/includes? (:content (peek r1)) "Your proofs")) "one edit at the part that moved, never the page whole")
         (is (str/includes? (:content (peek r1)) "Triples."))
@@ -2333,3 +2333,29 @@
           (is (nil? (d/commit-as-db (pdb/store-of db) (:commit collected))) "the store holds no such commit: its point is read as of its t")
           (is (seq held) "the state moved the page")
           (is (= held (wire/page-edits-between db ix a collected p1)) "from the collected basis: the same edits"))))))
+
+(defn lab-list
+  "A list a test render places, read by the model as a part. See docs/render.md#an-entity-may-name-its-own-render."
+  {:seon.render/list "p-lab" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
+  [{c :seon.ctx/ctx}] [:div {:id "p-lab"} [:p (str "LAB-PART at turn " (get c :seon.agent/turn))]])
+
+(defn lab-view
+  "An agent's own render for a test: the agent's page and one list of its own after it. See docs/render.md#an-entity-may-name-its-own-render."
+  {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db {:optional true} :seon.host/db]]] :any] :any]}
+  [opts c] (if (:seon.render/nested opts) (seon.render.ui/agent opts c) (conj (seon.render.ui/agent opts c) [#'lab-list {}])))
+
+(deftest an-own-renders-list-is-in-the-models-page
+  ;; docs/render.md#an-entity-may-name-its-own-render: the page parts the model reads are the lists of the entity's own render (seon.ctx.wire/model-parts),
+  ;; so an agent that names a render of its own reads what that render's list draws, in its request, as it reads its task's part
+  (ts/test-branch!
+    (fn [_ conn]
+      (d/transact conn (doc/load-tx @conn "docs" {doc/system-page (slurp (str (seon.config/checkout) "/" doc/system-page))}))
+      (d/transact conn (task/create-tx @conn [{:seon.task/ns 'demo :seon.task/name "g" :seon.task/plan "Make g." :seon.task/proofs #{'demo-test/g-test}}]))
+      (d/transact conn [{:seon.task/id "demo/g" :seon.task/agent {:seon.agent/key "a1" :seon.agent/task {:seon.task/id "demo/g"} :seon.render/hiccup 'seon.ctx.wire-test/lab-view}}])
+      (let [r0 (turn! conn 0)
+            page (apply str (map :content (:messages r0)))
+            r1 (turn! conn 1)
+            diff (:content (peek (:messages r1)))]
+        (is (str/includes? page "LAB-PART at turn 1") "the own render's list is in what the model reads")
+        (is (str/includes? page "task-view") "beside the task's part, as before")
+        (is (str/includes? diff "LAB-PART at turn 2") "and what it draws next is in the next turn's page edits, as the task's part's are")))))
