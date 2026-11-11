@@ -3019,3 +3019,12 @@
     (is (= :seon.writer/refused (:cause v)) (pr-str v))
     (is (str/includes? (str (:message v)) "gone") (pr-str v))
     (is (false? (:made v)) "no branch made")))
+
+(deftest my-task-status-shows-a-failing-proofs-source-as-the-page-does
+  ;; the physics audit (2026-11-11, high 3): docs/agent.md says (my.task/status) answers what the page's status shows, and the page draws a
+  ;; red proof's :source and :calls; my.task/status stripped both, so an agent had to (source the-proof) to read the test it failed
+  (let [read #'my.task/proof-as-read
+        red {:test 'app.x-test/t :status :fail :source "(deftest t (is false))" :calls ['app.x/f] :shape {:n 1}}
+        green {:test 'app.x-test/u :status :pass :source "(deftest u (is true))" :calls ['app.x/g] :shape {:n 1}}]
+    (is (= (dissoc red :shape) (read red)) "a failing proof keeps its source and what it calls")
+    (is (= {:test 'app.x-test/u :status :pass} (read green)) "a passing one is its name and status")))

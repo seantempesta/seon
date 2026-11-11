@@ -134,11 +134,12 @@
   {:malli/schema [:=> [:cat :int] :string]}
   [pid] (str (cfg/value :seon.config.agent/cwd) "/tests/" pid))
 
-(def ^:private child-env-scrub
+(def child-env-scrub
   "The `env -u` argv that gives a child process the tree's own environment (docs/source.md#the-next-generation):
   bin/env and bin/root export names for this root's checkout, runs and home, and a child inheriting
   SEON_SOURCE_ROOT listed its test namespaces from that checkout, not the tree it ran in (a full run's plan
-  named a test of the root's working tree that main does not hold, and its shard died at once). Used by build and run-tests."
+  named a test of the root's working tree that main does not hold, and its shard died at once). Used by build, run-tests
+  and the health step's base (test-runner/base-program)."
   ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
    "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"])
 
@@ -974,7 +975,7 @@
            (if (seq form) (str ", where your change wrote: " form) ", a place your change's files don't hold")))
     "the gate's build failed and named no exception"))
 
-(defn- runner-end
+(defn runner-end
   "The last lines of what a runner said, joined, enough to hold what stopped it: its error, where, and the verdict lines after them. Three lost the error, leaving
   only where and the two verdicts."
   {:malli/schema [:=> [:cat :string] :string]}
