@@ -124,6 +124,20 @@
                       {:seon.error/type :seon.lib/sysmem-refused :seon.error/message "host_statistics64 refused the machine's memory"}))
       {:free-mb (mb 0) :inactive-mb (mb 8) :compressed-mb (mb 16) :available-mb (+ (mb 0) (mb 8))})))
 
+(defc c-getloadavg "getloadavg" [:pointer :int] :int)
+
+(defn load-average
+  "The machine's 1-minute load average (libc getloadavg): a reading of the machine, which the test service's admission
+  reads in a step it already takes (seon.prove/machine-load), never polled. Throws :seon.lib/load-refused when the OS
+  refuses it. See docs/clocks.md#the-machines-load-admits-work."
+  {:malli/schema [:=> [:cat] :double]}
+  []
+  (let [b (ffi/alloc 8)]
+    (if (= 1 (c-getloadavg b 1))
+      (ffi/read b :double 0)
+      (throw (ex-info "getloadavg refused the machine's load average"
+                      {:seon.error/type :seon.lib/load-refused :seon.error/message "getloadavg refused the machine's load average"})))))
+
 (defn dir-texts
   "The text of each file in dir whose name ends with suffix, by name, sorted: the one read of a
   directory of files (the wiki's pages, the task files). A file listed and gone when it is read

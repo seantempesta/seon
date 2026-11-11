@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.fixtures :refer [flush! draw]] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.ctx] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx]))
+            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.root] [seon.error] [my.agent] [my.test] [seon.ctx] [malli.registry]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -2867,6 +2867,36 @@
       (is (= :entity (:source mo)) "an entity holding its own pattern is read by it")
       (is (= [:seon.agent/task :seon.agent/turn] (:held-unasked mo)) "what the entity holds on the db that its pattern does not ask"))))
 
+(deftest a-pulled-entity-reads-a-schemas-name-in-its-pattern-as-that-schemas-pattern
+  ;; docs/ctx.md#the-pattern: seon.render/pulled reads an entity's own pattern expanded (seon.render/expanded): a schema's name among its
+  ;; clauses lists the clauses that schema's pattern asks, never the name, and the pattern is still the entity's own
+  (let [k "inspect/named"
+        db (:db-after (d/with (ts/test-db) [{:seon.agent/key k :seon.agent/turn 1}]))
+        ix (seon.db/index)
+        own [:seon.db/agent-fact :seon.agent/started-ms]
+        node {:db/id (seon.db/eid db :seon.agent/key k) :seon.agent/key k :seon.ctx/pattern own}
+        m (r/pulled db ix node nil)
+        asked (set (map :clause (:clauses m)))]
+    (is (= :entity (:source m)) "its own pattern")
+    (is (= (:clauses (r/pulled db ix node (conj (vec (r/schema-property ix :seon.db/agent-fact :seon.ctx/pattern)) :seon.agent/started-ms)))
+           (:clauses m))
+        "clause by clause, the schema's pattern and the added clause")
+    (is (every? asked [:seon.agent/key :seon.agent/started-ms]) "the schema's clauses and the added one")
+    (is (some #(and (contains? % :members) (= :seon.agent/task (:attr %))) (:clauses m)) "the joins the schema's pattern asks")
+    (is (not (asked :seon.db/agent-fact)) "never the schema's name as an attribute")))
+
+(deftest a-schemas-name-whose-pattern-reaches-itself-is-refused
+  ;; docs/ctx.md#the-pattern: a schema's name among a pattern's clauses is spliced by its pattern (seon.render/expanded); one whose pattern
+  ;; names it again, through another, is refused with a typed error naming it, as a join's schema that reaches itself is
+  (let [forms {:lab.loop/a-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:lab.loop/b-fact :lab.loop/x]} [:lab.loop/x :lab.loop/x]]
+               :lab.loop/b-fact [:map {:seon.db/attributes true :seon.ctx/pattern [:lab.loop/a-fact :lab.loop/y]} [:lab.loop/y :lab.loop/y]]
+               :lab.loop/x :string :lab.loop/y :string}
+        ix (seon.db/index-of {:forms forms})
+        said (binding [malli.registry/*registry* (seon.contract/registry-of forms)]
+               (try (r/pattern ix [:lab.loop/a-fact]) nil (catch clojure.lang.ExceptionInfo e (ex-data e))))]
+    (is (= :seon.ctx/invalid-pattern (:seon.error/type said)) (pr-str said))
+    (is (str/includes? (str said) "reaches itself") (pr-str said))))
+
 (deftest an-own-renders-part-is-the-models-unless-marked-for-the-page
   ;; docs/render.md#an-entity-may-name-its-own-render: the lists a walk reads as parts (seon.render/page-lists, what the model reads) hold
   ;; the pull view's front, a part like any, and not the stage's, which its render marks for the page alone (red before: the pull view's
@@ -3786,6 +3816,49 @@
     (let [v {:n 1 :seon.render/hiccup 'agent.nobody/chart}]
       (is (nil? (r/render-of (seon.db/index) v nil)))
       (is (str/includes? (pr-str (r/hiccup {:seon.render/index (seon.db/index)} v)) ":n")))))
+
+(deftest a-value-that-is-hiccup-is-drawn-on-the-page
+  ;; docs/render.md#a-value-draws-itself: an agent's call of a render at its REPL (seon.render.ui/pull-front, whose contract answers
+  ;; :seon.render/hiccup-value) answers hiccup; its eval names that schema from the contract alone, its value is drawn on the page as
+  ;; html with the data folded under it, and the model reads the value as the data it is, as before
+  (let [[_ branch eid] (paged-dbs)
+        k "a3"
+        v (ui/pull-front {:seon.ctx/ctx (d/pull branch '[*] eid) :seon.render/index (seon.db/index)})
+        code "(seon.render.ui/pull-front opts)"
+        rec (seon.repl/record-details code {:value v} {})
+        db (d/db-with branch (seon.repl/record-tx {:seon.agent/key k} "h1" (seon.task/sender "a3")
+                                                  (merge rec {:seon.eval/call (seon.task/call-ref k 1) :seon.eval/response {:handle 'result/h1 :value (get-in rec [:seon.eval/response :value])}})))
+        html (component-html db "evaluation-h1")
+        read (pr-str (seon.fixtures/eval-messages {:db db} (d/pull db '[*] [:seon.eval/id "h1"])))]
+    (is (= :seon.render/hiccup-value (:seon.eval/schema rec)) "the eval names the schema the called render's contract answers")
+    (is (some? html) "the eval, a component of the page")
+    (is (str/includes? html "<h1>a3 as data</h1>") (str "the value drawn as html: " html))
+    (is (re-find #"(?s)<details><summary>show as data</summary>.*:section" html) "and under it, folded, the value as data")
+    (is (str/includes? read "[:section") "the model reads the value as data")
+    (is (not (str/includes? read "<h1>")) "never as html")))
+
+(def ^:private called (atom 0))
+
+(defn planted-fn
+  "A system function an agent's value names: counts each call, so a test sees whether drawing a value called it."
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
+  [& _] (swap! called inc) [:p "CALLED"])
+
+(deftest an-agents-hiccup-value-calls-nothing
+  ;; docs/render.md#a-value-draws-itself: a value an agent's eval answered is drawn from the db, where a var is its symbol, and the walk
+  ;; calls only a var or a fn at a vector's head: a value naming a system function is drawn as data and calls nothing
+  (let [[_ branch _] (paged-dbs)
+        k "a3"
+        v [:section [:p "kept"] ['seon.render-test/planted-fn {} "x"]]
+        db (d/db-with branch (seon.repl/record-tx {:seon.agent/key k} "h2" (seon.task/sender "a3")
+                                                  {:seon.eval/code "(my-render)" :seon.eval/schema :seon.render/hiccup-value
+                                                   :seon.eval/call (seon.task/call-ref k 1) :seon.eval/response {:handle 'result/h2 :value v}}))
+        _ (reset! called 0)
+        html (component-html db "evaluation-h2")]
+    (is (some? html) "the eval is drawn")
+    (is (str/includes? html "kept") "its plain elements are drawn")
+    (is (= 0 @called) "the function the value names is never called")
+    (is (not (str/includes? html "CALLED")) "and nothing it would answer is on the page")))
 
 (deftest an-agents-own-draw-replaces-roots-at-the-same-revision
   ;; docs/render.md#a-value-draws-itself: root draws a live agent's page first, from its branch, and root holds no render the agent defined; the agent's answer must reach the page though each process counts revisions of its own

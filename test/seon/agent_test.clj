@@ -2193,6 +2193,28 @@
     (is (= {t :pass} (:proofs (:value again))))
     (is (= 2 (:value asks)) "one ask for each change: at the same digest its verdict stands, and no gate is asked")))
 
+;; docs/merging.md#the-test-service: a run on a checkout plans its process tests, check steps and build as items of the service, each at
+;; the digest this branch gives it, so nothing is left to a gate
+(deftest a-checkouts-plan-names-its-process-tests-steps-and-build
+  (let [t 'seon.repl-test/a-process-item-of-the-plan
+        ;; an edge each (seon.program/reach-step): what this judges runs in the agent, by a string no reference shows
+        _ '[seon.agent/handle! seon.agent/process-plan seon.agent/test-plan seon.proofs/plan-of]
+        plan (str "(let [r (:result (first (seon.agent/handle! {:op :tests :id :x :plan? true :process? true :mode :judge})))]"
+                  " {:process (:process r) :deferred (:deferred r) :ids (get-in r [:steps \"ids\"]) :build (:build r)})")
+        ;; a run naming tests or a step runs the steps it names and no other
+        named (fn [names] (str "(set (keys (:steps (:result (first (seon.agent/handle! {:op :tests :id :x :plan? true :process? true :mode :judge :names '" names "}))))))"))
+        [_ before _ after by-ns by-step] (in-agent (fn [_] [(process-proof "a-process-item-of-the-plan" 2) plan
+                                                             "(do (in-ns 'seon.check) (clojure.core/defn ids [] :changed) (in-ns 'user) :ok)" plan
+                                                             (named "#{seon.repl-test}") (named "#{seon.repl-test ids}")]))
+        {:keys [process deferred ids build]} (:value before)]
+    (is (string? (get process t)) (str "the process test the branch wrote is an item, at its digest: " (pr-str before)))
+    (is (not-any? #{t} deferred) "and is no longer left to the gate")
+    (is (and (string? (:digest ids)) (true? (:binary? ids))) (str "a check step with no green at its digest is an item, on the binary: " (pr-str ids)))
+    (is (true? (:needed? build)) "so the tree's build is needed")
+    (is (not= (:digest ids) (get-in after [:value :ids :digest])) (str "a change to what the step reaches moves its digest: " (pr-str after)))
+    (is (= #{} (:value by-ns)) (str "a run naming only a namespace runs no step: " (pr-str by-ns)))
+    (is (= #{"ids"} (:value by-step)) (str "and one naming a step runs it alone: " (pr-str by-step)))))
+
 ;; "if another agent has already run the same exact test we remove those" (owner, 2026-11-07)
 (deftest a-process-test-green-at-its-digest-asks-no-gate
   ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not, and a schema the branch registers moves the
@@ -2692,7 +2714,7 @@
         [_ _ swapped before drawn after gone]
         (in-agent #(vector "(my.schema/register! :lab.ctx/steps '[:vector {:seon.render/hiccup lab.ui/steps} :string])"
                    "(ns lab.ui) (defn steps \"The steps, numbered.\" {:malli/schema [:=> [:cat :map [:vector :string]] :any]} [_ v] [:ol (for [s v] [:li s])])"
-                   "(do (swap! seon.ctx/ctx assoc :seon.ctx/pattern (conj (seon.render/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern) :lab.ctx/steps)) (swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"]))"
+                   "(do (swap! seon.ctx/ctx update :seon.ctx/pattern (fnil conj [:seon.db/agent-fact]) :lab.ctx/steps) (swap! seon.ctx/ctx assoc :lab.ctx/steps [\"read the plan\" \"write the test\"]))"
                    n
                    {:op :eval :agent "root"
                     :code (str "(let [id :" (:agent %) "]"
@@ -2997,3 +3019,12 @@
     (is (= :seon.writer/refused (:cause v)) (pr-str v))
     (is (str/includes? (str (:message v)) "gone") (pr-str v))
     (is (false? (:made v)) "no branch made")))
+
+(deftest my-task-status-shows-a-failing-proofs-source-as-the-page-does
+  ;; the physics audit (2026-11-11, high 3): docs/agent.md says (my.task/status) answers what the page's status shows, and the page draws a
+  ;; red proof's :source and :calls; my.task/status stripped both, so an agent had to (source the-proof) to read the test it failed
+  (let [read #'my.task/proof-as-read
+        red {:test 'app.x-test/t :status :fail :source "(deftest t (is false))" :calls ['app.x/f] :shape {:n 1}}
+        green {:test 'app.x-test/u :status :pass :source "(deftest u (is true))" :calls ['app.x/g] :shape {:n 1}}]
+    (is (= (dissoc red :shape) (read red)) "a failing proof keeps its source and what it calls")
+    (is (= {:test 'app.x-test/u :status :pass} (read green)) "a passing one is its name and status")))
