@@ -883,7 +883,10 @@
         g (program/reach-indexed g (branch-inputs in db (or base (:base @state)) (:config (cfg/in-force))))
         ;; a stall task's proofs read that task's cause, so they judge only a task that names them
         idx (into {} (filter (fn [[t _]] (and (judges? t) (or (contains? proofs t) (not (template/stall-proofs t)))))) (program/index-of g))
-        cd (update-vals idx :digest)
+        ;; a proof over the branch's data (:data?: its own call of a branch reader, seon.program/test-class-of) reads db's
+        ;; point, which no reach holds: it is one more input of its digest (docs/merging.md#verdicts-are-a-cache)
+        point (let [[c t] (pdb/point db)] (str c " " t))
+        cd (update-vals idx #(cond-> (:digest %) (:data? %) (-> (str "\ndata " point) lib/digest)))
         ;; main's tests the branch removed: each judges from base's definition, loaded in the test
         ;; child, its namespace's ns form first when the branch removed the namespace too; one
         ;; that reaches a process of its own (base's index says) stays a process test
