@@ -5,6 +5,21 @@
  :seon.ctx/ctx [:map {:seon.render/hiccup seon.render.ui/ctx} [:t :int] [:branch :seon.db/branch] [:commit {:optional true} :uuid]]
  ;; a swap! of @ctx refused, nothing written (seon.ctx/write!): a value its schema refuses, or a key
  ;; with no schema, each with where it is and why
+ ;; the state a proof is shown in (seon.ctx.status/status derives it; the stored verdict is :seon.test/status): each member's
+ ;; title and its explanation, Markdown, what it means and what the agent does next, which the status render draws for the person
+ ;; and the model alike (docs/render.md#how-the-work-stands)
+ :seon.ctx.status/proof-state
+ [:enum {:seon.status/title {:pass "green" :fail "red" :error "red" :undefined "not written" :not-run "no verdict" :deferred "runs at merge" :unknown "not judged yet"}
+         :seon.status/explain
+         {:pass "Passed on your code as it is now. Nothing to do for it."
+          :fail "An assertion failed: each one and what it got is shown. Change the code, or the test if the test is wrong, then `(prove)`."
+          :error "The test threw before it could judge: the error is shown. Fix what threw, then `(prove)`."
+          :undefined "Your branch has no test by this name. Write it where the page says, then `(prove)`."
+          :not-run "The test run itself failed, so nothing was judged. Fix what stopped the run (shown above it); proving again before that fails the same way."
+          :deferred "It starts a process of its own, so it runs when your task merges, not in your turn. Nothing to do for it now."
+          :unknown "No verdict yet for your code as it is now. `(prove)` runs it."}
+         :description "The state a proof is shown in, judged from its stored verdict and the task (seon.ctx.status/status). See docs/render.md#how-the-work-stands."}
+  :pass :fail :error :undefined :not-run :deferred :unknown]
  :seon.ctx/invalid [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/invalid]]
                                            [:invalid [:vector [:map [:path [:vector :any]] [:why :any]]]]]]
  ;; written, the db would not hold what the swap! says at these paths (it would hold :held)
