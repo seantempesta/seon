@@ -137,7 +137,7 @@
    "main's changes since the session's base"
    "host state: atoms, open files, sockets, fibers"])
 
-(declare answer-spawn insert-evals start-spawn no-room binary-program binary-current kill! prove-tree!)
+(declare answer-spawn insert-evals start-spawn no-room binary-program binary-current kill! prove-tree! stop!)
 
 (defn- record-death
   "Agent aid's death, folded, and answered to the requests it died in (inflight): its died
@@ -1567,6 +1567,13 @@
                  {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained :dropped-trees dropped-trees
                   :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
 
+(defn- thrown-in
+  "The fn throwable ex was thrown in: clojure.main's triage of its top frame (as seon.repl/located reads an eval's), a
+  qualified symbol, or nil when the triage names none."
+  {:malli/schema [:=> [:cat :any] [:maybe :symbol]]}
+  [ex] (let [in (:clojure.error/symbol (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution)))]
+         (when (qualified-symbol? in) in)))
+
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
   data, the message its step took (:msg), and the fn it was thrown in (:in, clojure.main's triage
@@ -1575,9 +1582,48 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [e]
   (let [ex (::flow/ex e)
-        in (when ex (:clojure.error/symbol (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution))))]
+        in (when ex (thrown-in ex))]
     (cond-> {:op :error :pid (::flow/pid e) :message (or (some-> ex ex-message) (str e)) :data (some-> ex ex-data contract/bounded) :msg (::flow/msg e)}
       (qualified-symbol? in) (assoc :in in))))
+
+(defonce ^:private uncaught
+  ;; where an error no thread, fiber or go body caught goes (uncaught!): kept under :early until this process's root listens,
+  ;; which start! fails on; then root's :back, as a defect the api records on main
+  (atom {:back nil :early []}))
+
+(defn uncaught-message
+  "An error ex that no one caught, in thread (nil: a go or fiber body, which the runtime reports with no thread), as the api's
+  :error message: :pid :uncaught and its own typed defect (:seon.root/proc-defect, its operation the fn it was thrown in), so it
+  lands on main as any proc's defect does, named, never only on stderr. See docs/errors.md#nothing-crashes-and-nothing-hangs."
+  {:malli/schema [:=> [:cat :any :any] :map]}
+  [thread ex]
+  (let [in (thrown-in ex)
+        where (if thread (str "thread " (.getName ^Thread thread)) "a go or fiber body")
+        msg (str "uncaught in " where ": " (or (ex-message ex) (str ex)))]
+    (cond-> {:op :error :pid :uncaught :message msg
+             :data (contract/error :seon.root/proc-defect (or in 'clojure.core.async/go) msg
+                                   (cond-> {:pid :uncaught} (ex-data ex) (assoc :data (contract/bounded (ex-data ex)))))}
+      in (assoc :in in))))
+
+(defn- uncaught!
+  "The default uncaught-exception handler's body (start! sets it): ex's message to root's :back once root listens, else kept
+  (:early) for start! to fail on. A :back too full to take it says so on stderr, never silently."
+  {:malli/schema [:=> [:cat :any :any] :nil]}
+  [thread ex]
+  (let [m (uncaught-message thread ex) {:keys [back]} @uncaught]
+    (cond (nil? back) (swap! uncaught update :early conj m)
+          (a/offer! back m) nil
+          :else (binding [*out* *err*] (println "uncaught, and root's :back is full:" (:message m)))))
+  nil)
+
+(defn- catch-uncaught!
+  "This process's default uncaught-exception handler set to uncaught!, its errors kept until root listens (start! calls it
+  first): the one place a thread's, a fiber's or a go body's uncaught error is taken, so none is only printed."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (reset! uncaught {:back nil :early []})
+  (Thread/setDefaultUncaughtExceptionHandler (reify Thread$UncaughtExceptionHandler (uncaughtException [_ t ex] (uncaught! t ex))))
+  nil)
 
 (defn start!
   "Boot the control process, the fork server and the root graph on its main, a branch of
@@ -1598,6 +1644,8 @@
   [{:keys [datoms log? path main backend max-running provider stall-ms source started-by] :or {datoms 0}}]
   (lib/ignore-sigpipe!)
   (when-not log? (trove/set-log-fn! nil))
+  ;; first of all, before anything spawns: an error no thread, fiber or go body catches reaches root (uncaught!), never only stderr
+  (catch-uncaught!)
   (let [t0 (profile/now-ns)
         ;; agents write their own branches, so the store is shared: the one durable store
         ;; (the kept runs store, bin/check's, a test's). This root resumes its main, a branch
@@ -1702,6 +1750,11 @@
       (when (contract/error? r) (throw (ex-info (str "root's boot fact was refused: " (:seon.error/message r)) r))))
     ;; what the first agent's fork would wait for is done now, as main stands (seon.fork-server/preload); nothing waits on its answer
     (call! sys {:op :fs :req {:op :preload :t (:max-tx @conn)}})
+    ;; an error no one caught while this root started fails its start, its errors in the answer; from here they reach :back
+    (let [early (:early (swap! uncaught assoc :back (:back sys)))]
+      (when (seq early)
+        (stop! sys :uncaught-at-start)
+        (throw (ex-info (str "root's start met " (count early) " uncaught error(s): " (:message (first early))) {:uncaught early}))))
     sys))
 
 ;; ====================================================================================

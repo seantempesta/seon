@@ -436,7 +436,7 @@
     (loop [db (seeded 30 small-window-pattern) c (ctx/build (seon.db/index) db (aid db) :b) i 0 bad [] unshared [] checked 0]
       (if (= i 70)
         (do (is (empty? bad) (str "the change after which the patch and a build differ: " (first bad)))
-            (is (< 1000 checked) (str "the sharing check reads the paths no change touched: " checked))
+            (is (< 500 checked) (str "the sharing check reads the paths no change touched: " checked))
             (is (empty? unshared) (str "a path no change touched that is a new object: " (first unshared))))
         (let [tx (change db i r) rep (d/with db tx) db' (:db-after rep) c' (ctx/patch c db' (:tx-data rep) :b)
               b (ctx/build (seon.db/index) db' (aid db') :b)
@@ -725,13 +725,14 @@
 
 (deftest a-lookups-patch-costs-its-change
   ;; a task's lookups (:by) patched in the work of what moved, whatever the session's size
-  ;; (measured at 100 and 1,000 evals: a redefinition 23 calls and 118 KB, a new caller 22 and
-  ;; 113 KB, a plan edit 10 and 86 KB), and each names the one path it changed
+  ;; (measured at 100 and 1,000 evals: a plan edit 10 calls and 86 KB), and each names the one path it changed;
+  ;; a cited var's redefinition and a new caller of it change no path (docs/references.md#an-entity-cites)
   (let [changed (fn [[c db tx b]] [db (set (map second (ctx/changes c (ctx/patch c db tx b))))])
         task (fn [_] [:task])
         f0 #(into (task %) [:seon.cite/_of (id % [:seon.cite/id "lab/ctx app.x/f0"]) :seon.cite/target])]
-    (let [[db ps] (changed (cited-redefined 10))] (is (= #{(conj (f0 db) :var/form)} ps) "a redefinition: the cited var's form"))
-    (let [[db ps] (changed (new-caller 10))] (is (= #{(conj (f0 db) :callers (id db [:form/id "app.x/c-2"]))} ps) "a new caller: that caller"))
+    ;; a cite holds its target by identity (docs/references.md#an-entity-cites): its form and callers are its render's reads, so neither moves the record
+    (let [[_ ps] (changed (cited-redefined 10))] (is (= #{} ps) "a redefinition of a cited var: nothing of the record"))
+    (let [[_ ps] (changed (new-caller 10))] (is (= #{} ps) "a new caller of it: nothing of the record"))
     (let [[db ps] (changed (plan-edited 10))] (is (= #{(conj (task db) :seon.task/plan)} ps) "a plan edit: the plan")))
   (cost/proof
     {:of 'seon.ctx/patch :input 'seon.ctx-test/cited-redefined
@@ -1067,8 +1068,11 @@
   ;; what each proof calls, by name (D5: its form's :form/refs)
   (let [db (seeded 10)
         t (get-in (:tree (ctx/build (seon.db/index) db (aid db) :b)) [:task])
-        f0 (get-in t [:seon.cite/_of (id db [:seon.cite/id "lab/ctx app.x/f0"]) :seon.cite/target])]
-    (is (= "What x does." (get-in t [:seon.cite/_of (id db [:seon.cite/id "lab/ctx docs/x.md#the-x"]) :seon.cite/target :seon.doc/text])) "D3: the cited section's text, its target")
+        ;; a cite's target as its render reads it from the db (docs/references.md#an-entity-cites): the record holds it by identity
+        read #(:tree (ctx/build (seon.db/index) db (get-in t [:seon.cite/_of (id db [:seon.cite/id %]) :seon.cite/target :db/id]) nil
+                                (render/schema-property (seon.db/index) :seon.cite/target-read :seon.ctx/pattern)))
+        f0 (read "lab/ctx app.x/f0")]
+    (is (= "What x does." (:seon.doc/text (read "lab/ctx docs/x.md#the-x"))) "D3: the cited section's text, its target")
     (is (= "(defn f0 [x] x)" (get-in f0 [:var/form :form/src])) "D2: the cited var's source")
     (is (= #{(id db [:form/id "app.x/c-1"]) (id db [:form/id "app.x-test/t0-1"])} (set (keys (:callers f0)))) "D1: its callers, the test among them")
     (let [t0 (get-in t [:proved (id db [:var/name 'app.x-test/t0]) :var/form])]
@@ -1090,6 +1094,19 @@
     (is (= [{:type :fail :message "no"}] (:seon.test/failures v)))
     (is (= 40 (:seon.test/ticks v)))))
 
+(deftest a-cite-holds-what-it-names-and-its-render-reads-the-rest
+  ;; docs/references.md#an-entity-cites: the record holds what a cite names, each target by its identity alone, and the
+  ;; cite's render reads the section's text and the function's source from the db; the page shows them as before
+  (let [db (seeded 10)
+        c (:tree (ctx/build (seon.db/index) db (aid db) :b))
+        targets (map :seon.cite/target (vals (get-in c [:task :seon.cite/_of])))
+        page (try (enter-agent! {:db db :key k :branch :b}) (seon.repl/render-ctx-hiccup) (finally (end-agent!)))
+        text (str/join "\n" (map seon.render/part-text (filter #(and (vector? %) (= 'seon.render.ui/cite (first %))) (tree-seq coll? seq page))))]
+    (is (= #{#{:db/id :var/name} #{:db/id :seon.doc/address}} (set (map (comp set keys) targets)))
+        (str "each target by its identity alone, no :seon.doc/text, no :form/src: " (pr-str targets)))
+    (is (str/includes? text "What x does.") "the page shows the section's text, read by the render")
+    (is (str/includes? text "(defn f0 [x] x)") "and the function's source")))
+
 (deftest a-cite-joins-its-target-and-a-symbol-joins-by-name
   ;; a cite's target is a ref (docs/references.md#an-entity-cites): the cite joins the var it names, its form and its
   ;; callers, which join by :by, ctx's one option beside Datahike's pull syntax (docs/ctx.md#the-pattern): a symbol a form
@@ -1099,8 +1116,10 @@
         c (ctx/build (seon.db/index) db (aid db) :b)]
     (let [cite #(get-in (t %1) [:seon.cite/_of (id db [:seon.cite/id (str "lab/ctx " %2)])])]
       (is (= ['app.x/f0] (keep #(get-in % [:seon.cite/target :var/name]) (vals (:seon.cite/_of (t c))))) "the cite of the var: its target")
-      (is (= "(defn f0 [x] x)" (get-in (cite c 'app.x/f0) [:seon.cite/target :var/form :form/src])) "the var whole, its form joined")
-      (is (some #{"app.x/c-1"} (names (get-in (cite c 'app.x/f0) [:seon.cite/target :callers]) :form/id)) "its caller: the form naming it, by the same name reversed")
+      (let [f0 (:tree (ctx/build (seon.db/index) db (get-in (cite c 'app.x/f0) [:seon.cite/target :db/id]) nil
+                                 (render/schema-property (seon.db/index) :seon.cite/target-read :seon.ctx/pattern)))]
+        (is (= "(defn f0 [x] x)" (get-in f0 [:var/form :form/src])) "the var whole as its render reads it, its form joined")
+        (is (some #{"app.x/c-1"} (names (:callers f0) :form/id)) "its caller: the form naming it, by the same name reversed"))
       (let [rep (d/with db [{:db/id "f" :form/id "app.x/f1-1" :form/src "(defn f1 [])"} {:db/id "v" :var/name 'app.x/f1 :var/form "f"}
                             {:seon.cite/id "lab/ctx app.x/f1" :seon.cite/of [:seon.task/id "lab/ctx"] :seon.cite/target "v" :seon.cite/depth :doc :seon.cite/order 5}])
             c' (ctx/patch c (:db-after rep) (:tx-data rep) :b)]

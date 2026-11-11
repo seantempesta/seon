@@ -78,16 +78,17 @@
   [forms k] (let [f (get forms k)] (when (and (vector? f) (map? (second f))) (second f))))
 
 (defn- parents-in
-  "The named schemas k's form in forms extends ([:and p ...] or [:merge p ...]). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
+  "The named schemas k's form in forms extends ([:and p ...] or [:merge p ...]), or the one it is an alias of (a form that is a
+  registered schema's name, :seon.task/plan :seon.db/text), so an alias inherits its properties. See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] [:vector :qualified-keyword]]}
   [forms k]
   (let [form (get forms k)]
-    (if (and (vector? form) (#{:and :merge} (first form)))
-      (filterv #(and (qualified-keyword? %) (contains? forms %)) (rest form))
-      [])))
+    (cond (and (vector? form) (#{:and :merge} (first form))) (filterv #(and (qualified-keyword? %) (contains? forms %)) (rest form))
+          (and (qualified-keyword? form) (contains? forms form)) [form]
+          :else [])))
 
 (defn parents
-  "The named schemas k's form extends ([:and p ...] or [:merge p ...]), in the forms index ix was built from (`entity-index`: the
+  "The named schemas k's form extends ([:and p ...] or [:merge p ...]) or is an alias of (`parents-in`), in the forms index ix was built from (`entity-index`: the
   binary's `index`, or a branch's, `index-of`, `index-of-db`). See docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together."
   {:malli/schema [:=> [:cat :map [:maybe :qualified-keyword]] [:vector :qualified-keyword]]}
   [ix k] (parents-in (:forms ix) k))

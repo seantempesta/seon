@@ -155,20 +155,23 @@
     (is (= '(drop 1 (get-in result/e5 [:value :proofs])) (open-form "c12-chat/(drop 1 (get-in result/e5 [:value :proofs]))")) "a form's symbols hold a slash")
     (is (= :seon.web/unread (open-form "c12-chat/(drop 1")) "unreadable text")))
 
-(clojure.test/deftest a-cross-origin-call-is-refused
-  ;; seon.web/handler's edge: a page of another origin is refused before the call reaches the proc; the dashboard's own page, and a client naming no origin, are served
+(clojure.test/deftest a-cross-origin-post-is-refused
+  ;; seon.web/handler's edge: a POST from a page of another origin is refused before it reaches the proc, whichever route it names
+  ;; (a call, a cut opened, a debug step); the dashboard's own page, and a client naming no origin, are served
   (let [ch (a/chan 8)
         handle (w/handler ch)
-        post (fn [headers]
-               (handle {:request-method :post :uri "/call" :query-string "fn=seon.root%2Fsubmit%21"
+        posts {"/call" ["fn=seon.root%2Fsubmit%21" :call] "/open" ["view=c1&unit=c1-row&open=true" :toggle] "/at" ["view=c1&turn=latest" :at]}
+        post (fn [uri headers]
+               (handle {:request-method :post :uri uri :query-string (first (posts uri))
                         :headers headers :body (java.io.StringReader. "")}))
         own (str "http://127.0.0.1:" (seon.config/value :seon.config.web/port))]
-    (doseq [headers [{"origin" "https://evil.example"} {"sec-fetch-site" "cross-site"}]]
-      (clojure.test/is (= 403 (:status (post headers))) (str "refused: " (pr-str headers)))
-      (clojure.test/is (nil? (a/poll! ch)) (str "and nothing sent: " (pr-str headers))))
-    (doseq [headers [{} {"origin" own} {"sec-fetch-site" "same-origin"}]]
-      (clojure.test/is (= 204 (:status (post headers))) (str "served: " (pr-str headers)))
-      (clojure.test/is (= :call (:op (a/poll! ch))) (str "the call reached the proc: " (pr-str headers))))))
+    (doseq [[uri [_ op]] posts]
+      (doseq [headers [{"origin" "https://evil.example"} {"sec-fetch-site" "cross-site"}]]
+        (clojure.test/is (= 403 (:status (post uri headers))) (str uri " refused: " (pr-str headers)))
+        (clojure.test/is (nil? (a/poll! ch)) (str uri " and nothing sent: " (pr-str headers))))
+      (doseq [headers [{} {"origin" own} {"sec-fetch-site" "same-origin"}]]
+        (clojure.test/is (= 204 (:status (post uri headers))) (str uri " served: " (pr-str headers)))
+        (clojure.test/is (= op (:op (a/poll! ch))) (str uri " reached the proc: " (pr-str headers)))))))
 
 ;; In-flight output (docs/render.md#in-flight-output-streams; docs/render.md#in-flight-output-streams): an effect's
 ;; text held while its stream is open and appended by id in the tabs of its agent's chat that have its in-flight element,

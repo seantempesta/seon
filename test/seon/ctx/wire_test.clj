@@ -282,14 +282,14 @@
     (is (clojure.string/includes? (str (shown "docs/flow.md#stop")) "Then the graph is gone.") "code depth: the section whole")))
 
 ;; docs/references.md#an-entity-cites: a cite of a schema key joins its entry, of a namespace its entity, of a file its
-;; entity, each drawn from what the cite holds
+;; entity, each drawn by the cite's render from the db by what the cite names
 (deftest a-cited-schema-key-and-namespace-show-what-they-are
   (let [db (d/db-with (db-with-program) [{:ns/name 'demo.calc :ns/doc "Adds. More."} {:schema/key :x.s/block :schema/form "[:map [:x.s/from :int]]"}
                                          {:file/path "bin/env" :file/text "#!/bin/sh"}])
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "n"
                                                :seon.task/plan "Read `demo.calc`, `:x.s/block` and `bin/env`."}]))
         t (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.task/id "demo/n") :b))
-        m (into {} (for [c (vals (:seon.cite/_of t))] [(task/cited-name c) (seon.render/part-text [(quote seon.render.ui/cite) {} (seon.render.ui/cite-hiccup db c)])]))]
+        m (into {} (for [c (vals (:seon.cite/_of t))] [(task/cited-name c) (seon.render/part-text [(quote seon.render.ui/cite) {} (seon.render.ui/cite {:seon.db/db db :seon.render/index (seon.db/index)} c)])]))]
     (is (str/includes? (m 'demo.calc) "Adds.") "a namespace: the first sentence of its doc")
     (is (str/includes? (m 'demo.calc) "(doc 'demo.calc)") "and the form that reads it")
     (is (str/includes? (m :x.s/block) ":int") "a schema key: what it holds")
@@ -499,7 +499,8 @@
             text (str/join "\n\n" (map render/part-text (vals page)))
             times (fn [s] (count (re-seq (re-pattern (java.util.regex.Pattern/quote s)) text)))]
         (is (some #(= % "status") (keys page)) "how the work stands is on the page")
-        (is (= 1 (times "Make ```demo/g``` exact.")) "the plan, once, in the task")
+        (is (= 1 (count (re-seq #"Make .{0,40}?demo/g.{0,40}? exact\." text))) "the plan, once, in the task")
+        (is (zero? (times "```demo/g```")) "its code span an element, never its delimiters (docs/render.md#a-value-draws-itself)")
         (is (= 1 (times "(defn g \"Halves.\"")) "a cited source once, as code: its quotes as written")
         (is (= 1 (count (re-seq #"\[:code \"demo-test/f-test\"\]" text))) "the proofs' statuses once, in the status")))))
 
@@ -686,7 +687,7 @@
         shown (into {} (map (juxt :seon.ref/address identity)) (:sections block))
         ;; the page's part: the cite's target is the task, drawn by its plan
         cite (some #(when (= "demo.other/g" (get-in % [:seon.cite/target :seon.task/id])) %) (vals (:seon.cite/_of (:tree (ctx/build (seon.db/index) db (pdb/eid db :seon.task/id "demo/f") :b)))))
-        part (seon.render/part-text [(quote seon.render.ui/cite) {} (seon.render.ui/cite-hiccup db cite)])]
+        part (seon.render/part-text [(quote seon.render.ui/cite) {} (seon.render.ui/cite {:seon.db/db db :seon.render/index (seon.db/index)} cite)])]
     (is (= "G is defined first. Then f calls it." (:seon.ref/lead (shown "demo.other/g"))) "doc depth: the task's plan")
     (is (= [] (:write-set block)) "and not a var of the write set, nor an unresolved name")
     (is (= "demo.other/g" (get-in cite [:seon.cite/target :seon.task/id])) "the cite's target is the task")
@@ -1178,7 +1179,7 @@
         html #(:html (some (fn [u] (when (str/starts-with? (:id u) %) u)) units))
         task (html "task-view")
         cites (apply str (map :html (filter #(str/starts-with? (:id %) "cite-") units)))]
-    (is (str/includes? task "Make ```demo/g``` say one thing") "D4: the whole plan")
+    (is (re-find #"Make <code[^>]*>demo/g</code> say one thing" task) "D4: the whole plan, its code span an element (docs/render.md#a-value-draws-itself)")
     (is (not (str/includes? task "(deftest g-test")) "D1: the proof's source is the status's, the task's part does not repeat it")
     (is (str/includes? (html "status") "demo-test/g-test") "D1: the proof written is the status's, by name")
 

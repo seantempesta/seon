@@ -525,7 +525,7 @@
       (if (or (empty? (:seon.print/path node)) (flat? node))
         g
         (with-meta [:details {:class (str "seon-print-node " (css-class :seon.print/map)) :open true :data-seon-path (literal (:seon.print/path node))}
-                    [:summary {:class "seon-print-summary"} (summary node (:seon.print/path node))] g]
+                    [:summary {:class "seon-print-summary" :title (summary node (:seon.print/path node))}] g]
           (meta g))))
     :else (or (table node children) (close-frame-inline node children))))
 
@@ -587,7 +587,7 @@
       ;; open: a closed <details> hides its content however it is styled
       [:details {:class (str "seon-print-node " (css-class face)) :open true
                  :data-seon-path (literal (:seon.print/path node))}
-       [:summary {:class "seon-print-summary"} (summary node (:seon.print/path node))]
+       [:summary {:class "seon-print-summary" :title (summary node (:seon.print/path node))}]
        shown])))
 
 ;; A span's attributes for each class a text op carries, made once (hiccup is immutable data,
