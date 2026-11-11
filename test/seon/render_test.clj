@@ -4336,3 +4336,19 @@
     (is (every? #(not= ::none (get-in v (:path %) ::none)) es) "every entry's path reads back by get-in")
     (is (not-any? :schema es) "a plain value has no schema")
     (is (= [{:path [:a] :holds 1}] (render/describe (seon.db/index) v [:a] 2)) "a path to a scalar describes it alone")))
+
+(deftest an-answer-says-what-it-is-and-what-reads-more
+  ;; docs/render.md#a-render-is-a-value-printed-once (Point's ruling 2026-11-11, one way for every tool's answer): a value whose schema
+  ;; says what brings more (:seon.render/more) prints as what it is (its description's first sentence), the value, and the forms that
+  ;; act on it, each naming the answer by its handle; a plain value prints as itself: (+ 1 1) answers 2
+  (let [ix (seon.db/index)
+        render #(r/model ix %)
+        es (with-meta [{:path [:a] :holds 1}] {:seon.render/schema :my.agent/described})
+        text (seon.print/response-text {:handle 'result/e1 :value es} render)
+        plain (seon.print/response-text {:handle 'result/e2 :value 2} render)]
+    (is (str/includes? text "What a value holds, by path") (str "what it is, from its schema: " text))
+    (is (not (str/includes? text "See docs/")) "the first sentence only")
+    (is (str/includes? text "[:a]") "the value")
+    (is (str/includes? text "(get-in result/e1 path)") "a form that reads more, naming the answer by its handle")
+    (is (not (str/includes? text "(get-in v path)")) "never by a placeholder")
+    (is (and (str/includes? plain ":value 2") (not (str/includes? plain ":is"))) (str "a plain value is itself: " plain))))

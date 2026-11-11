@@ -66,6 +66,8 @@
   (when (and (map? v) (<= 1 (count v) 2) (every? #(or (= :db/id %) (contains? (:identity-schemas ix) %)) (keys v)))
     (some (fn [[k x]] (when (not= :db/id k) x)) v)))
 
+(declare more-of answer)
+
 (defn model
   "What the printer shows in place of value v (seon.print/print-value's :render): {:value m} when v's schema (its metadata
   :seon.render/schema) declares a model render (`model-declared`), which makes a value
@@ -75,13 +77,27 @@
   {:malli/schema [:function [:=> [:cat :map :any] [:maybe [:map [:value :any]]]] [:=> [:cat :map :any :map] [:maybe [:map [:value :any]]]]]}
   ([ix v] (model ix v {}))
   ([ix v opts]
-   (let [k (:seon.render/schema (meta v)) sym (model-declared ix k) full? (full-declared? k)]
+   (let [k (:seon.render/schema (meta v)) sym (model-declared ix k) full? (full-declared? k) more (when k (more-of ix k))]
      (if-some [r (when (and (nil? k) (map? v) (<= (count v) 2)) (reference-value ix v))]
        ;; a reference prints as its identity value (`reference-value`)
        {:value r}
-     (when (or sym full?)
+     (when (or sym full? (seq more))
        ;; a schema that declares no render shows the value itself, no longer named by it (the printer would draw it by this again)
-       (cond-> {:value (if sym ((requiring-resolve sym) opts v) (vary-meta v dissoc :seon.render/schema))} full? (assoc :full true)))))))
+       (let [shown (if sym ((requiring-resolve sym) opts v) (vary-meta v dissoc :seon.render/schema))]
+         (cond-> {:value (if (seq more) (answer ix k shown more (:handle opts)) shown)} full? (assoc :full true))))))))
+
+(defn answer
+  "A tool's answer v, shown (its model render's value or itself), as every answer whose schema k says what brings more
+  (:seon.render/more) reads: what it is (the first sentence of k's :description), the value, then the [words form] pairs that act on
+  it, `v` in each form being the answer: its handle when one is given (seon.print/at-handle). The one shape for every tool's answer,
+  so no tool formats its own (docs/render.md#a-render-is-a-value-printed-once)."
+  {:malli/schema [:=> [:cat :map :qualified-keyword :any [:sequential [:tuple :string :any]] :any] :map]}
+  [ix k shown more handle]
+  (let [d (schema-property ix k :description)
+        is (when (string? d) (first (str/split d #"(?<=\.)\s" 2)))]
+    (cond-> (with-meta (cond-> (array-map) is (assoc :is is) true (assoc :value shown) true (assoc :to-use (vec more)))
+              {:seon.print/answer true})
+      handle (->> (print/at-handle handle)))))
 
 (defn stored-model
   "`model` of a stored value, an eval's record: nil when it no longer fits the schema it kept, so an old record prints as the data it is. See docs/render.md#the-page."

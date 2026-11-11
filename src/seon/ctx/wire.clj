@@ -489,7 +489,7 @@
                                                 es (with-meta (render/describe ix0 (ctx-at db a p1) [] (cfg/value :seon.config.agent/describe-depth))
                                                      {:seon.render/schema :my.agent/described})]
                                             ;; printed as an eval of it prints, through its schema's model render (seon.render/model)
-                                            (:value (render/model ix0 es {:ix ix0}) es)))
+                                            (:value (render/model ix0 es {:ix ix0 :handle (symbol "@ctx")}) es)))
                             (page-message id 'my.render/page [q1] h1))))))
 
 (defn model-call-msgs

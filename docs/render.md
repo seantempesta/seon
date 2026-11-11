@@ -28,6 +28,8 @@ A view that chooses what to show makes a value, never text: an array map of what
 
 A value too large or too host-bound to print whole declares a model render on its schema (`{:seon.render/model sym}`, ```seon.render/model```): a function of opts and the value, `(f {} v)`, answering the value to show in its place, which the printer prints like any other (its cuts, its budget). The agent's process state is one (`:seon.agent/state`, ```seon.agent/state-summary```): a bare `(swap! seon.agent/state ...)` answered 42,000 characters, and answers each key with a scalar's value, a collection's count or a host object's type, and the form that reads it whole.
 
+A tool's answer says what it is and what reads more, one way for every tool (Point's ruling, 2026-11-11): its schema says what brings more, `:seon.render/more`, [words form] pairs written once as data with `v` standing for the answer, and ```seon.render/answer``` prints it as `{:is <the first sentence of the schema's :description> :value <the value, or its model render's> :to-use [[words form] ...]}`, each form naming the answer by its handle (```seon.print/at-handle```: `(get-in result/e3 path)`, the first point's `(get-in @ctx path)`), so a form is copied as it stands. No tool formats its own text, and a plain value prints as itself: `(+ 1 1)` answers 2 (`seon.render-test/an-answer-says-what-it-is-and-what-reads-more`). `my.agent/describe` is the first (`:my.agent/described`).
+
 A render's budget, when its env names none, is config too: `:seon.config.render/value-budget` for a value and `:seon.config.render/root-context-budget` for root's context (root's page's hiccup, printed by the render proc).
 
 ## The page

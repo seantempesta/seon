@@ -11,9 +11,9 @@
  ;; the rows of my.agent/lines, shown as one block of numbered lines (my.agent/lines-text)
  :my.agent/lines [:vector {:seon.render/model my.agent/lines-text} :map]
  ;; my.agent/grep's [] for a string holding a regex's operators, shown with its regex form (my.agent/grep-none-text)
- ;; what my.agent/describe answers: a value's paths and what each holds, shown with the forms that act on them (my.agent/described-text)
+ ;; what my.agent/describe answers: a value's paths and what each holds, shown as every tool's answer is, with the forms that act on it
+ ;; (seon.render/answer)
  :my.agent/described [:vector {:description "What a value holds, by path, without showing it: what (describe v) answers. See docs/agent.md#looking-at-what-you-pulled."
-                               :seon.render/model my.agent/described-text
                                :seon.render/more [["read one" (get-in v path)] ["change one in your record" (swap! ctx assoc-in path x)]
                                                   ["go one level in" (describe v path)] ["what a key means" (doc :the/key)]]} :map]
  :my.agent/grep-none [:vector {:seon.render/model my.agent/grep-none-text} :map]

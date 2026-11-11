@@ -526,13 +526,6 @@
   ([v path] (describe v path (cfg/value :seon.config.agent/describe-depth)))
   ([v path depth] (with-meta (render/describe (agent/branch-index) v path depth) {:seon.render/schema :my.agent/described})))
 
-(defn described-text
-  "Entries es of `describe` as the eval shows them (seon.render/model, the schema :my.agent/described): first the forms that act on
-  them, from the schema's own :seon.render/more (seon.render/more-of), then the entries. See docs/agent.md#looking-at-what-you-pulled."
-  {:malli/schema [:=> [:cat :any [:sequential :map]] :map]}
-  [opts es]
-  {:to-use (vec (for [[w f] (render/more-of (or (:ix opts) (agent/branch-index)) :my.agent/described)] (str w ": " (pr-str f)))) :entries (vec es)})
-
 (defn- file-source
   "The text of the form at var v's :file and :line on the classpath (Clojure's clojure.repl/source-fn
   reads it the same way: a library's vars carry both), or nil."
