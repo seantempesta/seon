@@ -67,6 +67,9 @@ IDLE_WEB_PORT=$((20000 + $$ % 20000))
 # bin/check vectors alone): none other searches, and each would load the 0.9 GB model (docs/vector.md)
 [[ ${1:-} == vectors ]] || export SEON_EMBED_TEXTS=${SEON_EMBED_TEXTS:-0}
 # --steps DIR: a full run of the steps DIR/steps names, its greens written to DIR/green
+# and DIR/config.edn, when there, a config layer every ./seon of the run is given (--config): what seon.fx/run-item writes
+# for a step item, the program store of that item alone (:seon.config.proofs/program-store, a clone), so steps at once
+# share no store they write
 SEL=
 [[ ${1:-} == --steps ]] && { SEL=$2; shift 2; set -- 100 }
 S=$ROOT/target/seon
@@ -115,7 +118,8 @@ export SEON_TASKS=$ROOT/target/check/tasks; mkdir -p "$SEON_TASKS"
 # seon.check/a-selection-derives-what-it-needs-from-its-steps)
 run() {
   (( NEEDS )) || { echo "check: $1 runs target/seon on the seeded store, but this selection's steps-binary ($SEL/steps-binary) says none of its steps needs them: no store was seeded; select by bin/prove's plan, or name $1 in steps-binary"; return 70 }
-  (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" --profile scripted 2>&1 7>&- 3>&-)
+  local layer=(); [[ -n $SEL && -f $SEL/config.edn ]] && layer=(--config "$SEL/config.edn")
+  (cd "$ROOT/target" && "$ROOT/bin/held" ./seon "$@" $layer --profile scripted 2>&1 7>&- 3>&-)
 }
 run-embedding() { SEON_EMBED_TEXTS=64 run "$@" }
 # a single mode: on its own branch check-<mode> of the given store, deleted when it is green

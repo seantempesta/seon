@@ -1184,6 +1184,27 @@
     (:build :seed) nil)
   nil)
 
+(defn- clone-program-store!
+  "The checkout's plan program store (its own :seon.config.proofs/program-store, each base-<digest> under it, as kept-store!
+  keys them) cloned under base, an item's own (cp -c, APFS copy-on-write, as each check step clones the seeded store): items
+  running at once share no mutable store, and a clone's writes are cache, dropped with it. Answers base. See
+  docs/merging.md#a-session-proves-through-root."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [checkout base]
+  (let [v (cfg/value :seon.config.proofs/program-store)
+        root (str (cfg/checkout) "/")
+        ;; the key resolves against this root's checkout; the item's store is the same path in the item's checkout
+        src (if (str/starts-with? v root) (str checkout "/" (subs v (count root))) v)
+        from (java.io.File. ^String src)
+        stem (.getName from)]
+    (doseq [^java.io.File d (some-> (.getParentFile from) .listFiles seq)
+            :when (and (.isDirectory d) (re-matches (re-pattern (str "\\Q" stem "\\E-[0-9a-f]{8}")) (.getName d)))
+            :let [to (str base (subs (.getName d) (count stem)))]]
+      (lib/sh "mkdir" "-p" to)
+      (doseq [n ["data.mdb" "reach-graph.fasl"] :when (.isFile (java.io.File. d ^String n))]
+        (lib/sh "cp" "-c" (str (.getPath d) "/" n) (str to "/" n))))
+    base))
+
 (defn run-item
   "The :item effect: one item of a session's prove that the test service (seon.prove) granted, run on the session's
   checkout at tree, niced: :build is bin/build seon there; :seed seeds the checkout's check store fresh, once a tree (each binary
@@ -1212,6 +1233,10 @@
             _ (lib/remove-tree! dir)
             _ (.mkdirs (java.io.File. ^String dir))
             _ (item-files! dir req)
+            ;; a store of its own for each item that runs tests (clone-program-store!): a step reads it through DIR/config.edn
+            ;; (bin/check --steps passes it to every ./seon it runs), a shard through --set
+            pstore (when (#{:process :step} kind) (clone-program-store! checkout (str dir "/program-store")))
+            _ (when (= :step kind) (spit (str dir "/config.edn") (sedn/encode {:seon.config.proofs/program-store pstore})))
             ;; the children write the cache this reads: the one this process names (a test's run names its own)
             ;; and the steps' one seeded store is the checkout's own, never a store this process was handed
             store (str checkout "/target/check-store")
@@ -1230,10 +1255,13 @@
                           (sh "zsh" "-c" (str "ROOT=$PWD; . bin/env; (cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-)"
                                               " && HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test"
                                               " -e \"(require 'seon.test-store) (seon.test-store/make-process-store! \\\"$PWD\\\")\"")))
-                :process (sh "bin/test" "--shard" (str dir "/shard-0.edn"))
+                :process (sh "bin/test" "--shard" (str dir "/shard-0.edn") "--set" (str ":seon.config.proofs/program-store=" (sedn/encode pstore)))
                 :step (let [c (sh "bin/check" "--steps" dir)] (sh "bin/test" "--store-steps" dir) c))
             ms (profile/ms-since t0)
             stored (when-not (#{:build :seed} kind) (stored-results {name digest}))
+            _ (when pstore (doseq [^java.io.File d (some-> (java.io.File. ^String dir) .listFiles seq)
+                                   :when (str/starts-with? (.getName d) "program-store")]
+                             (lib/remove-tree! (.getPath d))))
             v (when (map? stored) (get stored digest))
             ;; bin/check's own judgement of the step's bound, a signal it writes (DIR/overran): this measures nothing itself
             overran? (when (= :step kind)
