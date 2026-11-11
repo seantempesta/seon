@@ -157,7 +157,7 @@
  ;; its id a digest (seon.repl/eval-id: a model's eval, of its call and its place in the reply; any other, of a fresh UUID); who evaluated it (the agent's id, "user", "outside", "context")
  :seon.eval/id [:and {:seon.db/identity true :description "The eval's identity: a digest for a model's eval, a fresh UUID for any other."} :string]
  :seon.eval/agent [:and {:seon.db/to [:seon.db/agent-fact] :description "The agent whose record holds this eval."} :seon.db/ref]
- :seon.eval/by [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact] :description "Who evaluated it: an agent or the root."} :seon.db/ref]
+ :seon.eval/by [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact] :description "Who evaluated it: an agent, a user or the system."} :seon.db/ref]
  ;; opened by a reader of the agent's page: true once, never retracted; root writes it on main as the
  ;; agent's :seon.agent/opened (an eval's id names it only within its agent), its turn on its branch
  :seon.eval/opened [:boolean {:description "True once a reader of the agent's page has opened this eval; never retracted."}]
@@ -258,7 +258,7 @@
  :seon.agent/main-commit [:uuid {:description "Main's head as the agent last heard it, the commit that its page's branch views read."}]
  ;; of those mains, the newest whose content (seon.merge/content-datoms) moved: what seon.ctx.status/status reads, as a commit that moved
  ;; none of it, root's note of an agent's status on each eval, changes no answer it gives (docs/render.md#how-the-work-stands)
- :seon.agent/main-program [:uuid {:description "The newest of those main commits whose content moved, which the agent's status reads. See docs/render.md#how-the-work-stands."}]
+ :seon.agent/main-program [:uuid {:description "The newest commit of main whose program changed, as the agent last heard it; its status reads it. See docs/render.md#how-the-work-stands."}]
  :seon.agent/base-commit [:uuid {:description "The agent branch's merge base as it last heard it."}]
  ;; the namespace its REPL is in, as its newest eval left it (seon.repl/record-tx: a datom when it moved), so a cold
  ;; build draws what the live page does; before any, where the REPL starts (seon.ctx/current-ns)
@@ -336,7 +336,7 @@
  ;; identity (seon.ref/target), which resolves against what the same write made before it; a lookup to nothing is refused,
  ;; :seon.db/no-target (docs/references.md#an-entity-cites)
  :seon.cite/target [:and {:seon.db/to [:seon.doc/fact :seon.db/var-fact :seon.task/task-fact :seon.db/schema-fact :seon.db/ns-fact :seon.db/file-fact] :description "What it cites: a section, a var, a task, a schema entry, a namespace or a file. See docs/references.md#an-entity-cites."} :seon.db/ref]
- :seon.cite/depth [:and {:description "How deep the cited target is pulled."} :seon.ref/depth]
+ :seon.cite/depth [:and {:description "How much of the cited target the cite shows."} :seon.ref/depth]
  ;; its first mention's place in the citing text (an agent's: the order its cites were written)
  :seon.cite/order [:int {:description "The place of the cite's first mention in the citing text."}]
  ;; the cite as ctx holds it: what it names joined (a section with its sections below; a var with its
@@ -373,7 +373,7 @@
  ;; ---- tasks, runs, proof results, root's boot, turns and ends (session D1's proto.agents.facts.edn) ----
 ;; ---- the task ----
  :seon.task/id [:and {:seon.db/identity true :description "The task's identity."} :string]
- :seon.task/ns [:symbol {:description "The namespace that owns the task."}]
+ :seon.task/ns [:symbol {:description "The namespace the task's code lives in; its agent's REPL starts there."}]
  :seon.task/name [:string {:description "The task's name within its namespace."}]
  :seon.task/plan [:string]
  :seon.task/instructions [:string]
@@ -462,7 +462,7 @@
  ;; merge; :gate, a merge whose process tests are to run first; :merged, in main; :behind, a merge main moved under; :dead, its
  ;; agent died; :lost, its process was gone; :killed, stopped for a cancel, a hold or a changed environment; :refused, root refused
  ;; the spawn; :closed, judged when its task was no longer running, or held for root
- :seon.task/outcome [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ready :gate} :seon.status/failed #{:dead :lost} :description "The state of the task's work, which the compare-and-swap guards."}
+ :seon.task/outcome [:and {:seon.db/index true :seon.status/finished #{:done :merged} :seon.status/judged #{:ready :gate} :seon.status/failed #{:dead :lost} :description "How the task's work stands or ended."}
                      [:enum :running :parked :told :cap :done :ready :gate :merged :behind :dead :lost :killed :refused :closed]]
  ;; why it stands so: the agent's own words, or root's (the death, a refused start)
  ;; the branch of the agent that launched this task (my.task/launch!), told how it ends (seon.reconcile/tell-tx)
@@ -592,7 +592,7 @@
  ;; key, "root" or "owner"; to names its recipients by agent entity, a ref each, and a recipient's branch holds its own ref
  ;; only: removing the message from a ctx retracts that ref (the entity stays, so it is not delivered again)
  :seon.message/id [:and {:seon.db/identity true :seon.db/content-id true :description "The message's identity."} :string]
- :seon.message/from [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact] :seon.db/index true :description "Who sent the message: an agent, or root or the owner."} :seon.db/ref]
+ :seon.message/from [:and {:seon.db/to [:seon.db/agent-fact :seon.root/root-fact] :seon.db/index true :description "Who sent the message: an agent, a user or the system."} :seon.db/ref]
  :seon.message/to [:set {:seon.db/to [:seon.db/agent-fact] :seon.db/index true :description "The agents that receive the message, a ref each."} :seon.db/ref]
  ;; when root's writer recorded it (ms): it orders and decides nothing (docs/clocks.md)
  :seon.message/sent-ms [:int {:description "When root's writer recorded the message, in ms; it orders and decides nothing. See docs/clocks.md."}]
