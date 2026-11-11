@@ -29,7 +29,7 @@
   ours and theirs as data, until the branch's content for its key changes or it is
   resolved (`resolve-tx`). Every function here is pure over db values."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.datom :as dd] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg]))
+  (:require [seon.contract :as contract :refer [defn defn-]] [datahike.api :as d] [datahike.datom :as dd] [datahike.writer :as dw] [clojure.string :as str] [seon.db :as pdb] [seon.program :as program] [seon.edn :as sedn] [seon.config :as cfg]))
 
 (def carried-platform-attrs
   "The platform attributes (seon.*) a branch carries: the task content an agent may improve
@@ -668,3 +668,23 @@
     (cond (seq cs) {:conflicts cs}
           (seq (:unidentified theirs)) {:unidentified (:unidentified theirs)}
           :else {:groups (replay base src)})))
+
+(defn apply-groups!
+  "Groups (plan's, replay's) applied on conn after what is pending, each its own transaction through the connection's checked
+  'transact! (datahike.writer/apply!), not committed: its tx-meta meta0 with the source transaction's own :seon.tx/branch,
+  :seon.tx/eval and :seon.tx/merged (who made it; never its runtime or its time). A group that writes nothing on db as it
+  stands (each assertion's datom held already, each retraction's held by nothing: a branch's own transaction come back to it
+  through main) is not applied, so it leaves no empty transaction. The one write of a merge: the writer's merge up and an
+  agent's merge down both make it. Answers {:db the value after them (db when none) :reps their reports :applied [source tx]},
+  with :refused {:tx source-tx :exception e} at the first the write check refuses. See docs/decisions.md, 'A merge replays the
+  source's transactions on the branch that receives it'."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :map [:sequential :map]] [:map [:reps [:vector :map]] [:applied [:vector :int]]]]}
+  [conn db meta0 groups]
+  (reduce (fn [acc g]
+            (if (every? (fn [[op e a v]] (= (= :db/add op) (boolean (seq (d/datoms (:db acc) :eavt e a v))))) (:ops g))
+              acc
+              (let [rep (dw/apply! conn {:tx-data (:ops g) :tx-meta (merge meta0 (select-keys (:meta g) [:seon.tx/branch :seon.tx/eval :seon.tx/merged]))})]
+                (if (map? rep)
+                  (-> acc (assoc :db (:db-after rep)) (update :reps conj rep) (update :applied conj (:tx g)))
+                  (reduced (assoc acc :refused {:tx (:tx g) :exception rep}))))))
+          {:db db :reps [] :applied []} groups))

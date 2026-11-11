@@ -653,3 +653,25 @@
         reach (fn [k] (tree-seq (constantly true) #(#'pdb/parents-in forms %) k))]
     (is (= #{:seon.tx/meta :seon.merge/entry-fact :seon.db/note-fact :seon.config/config :seon.config/sources-fact :seon.script/fact}
            (into #{} (for [k (keys forms) :when (entity? k) :when (not (some #(seq (filter ids (own %))) (reach k)))] k))))))
+
+;; docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it': a branch merged up, then main
+;; merged down: main's history since the base holds the branch's own transactions replayed; each comes back writing nothing, and
+;; leaves no transaction on the branch (seon.merge/apply-groups!); main's own transaction is written
+(deftest a-branchs-own-transactions-come-back-writing-nothing
+  (branched
+   (fn [conn bc br]
+     (dotimes [i 5] (apply! bc :branch [{:task/name (keyword "gen" (str "own" i)) :task/plan "p" :task/status :held}]))
+     (is (seq (:groups (replay-up! conn br))))
+     (apply! conn :main [{:task/name :gen/mains :task/plan "main's" :task/status :held}])
+     (let [main-b (:branch (:config @conn)) base (pdb/branch-base conn main-b br) head @bc
+           p (pm/plan base head @conn)
+           cost (volatile! nil)
+           a (seon.profile/measure! #(pm/apply-groups! bc head (pdb/tx-meta br {:seon.tx/merged main-b}) (:groups p)) #(vreset! cost %))
+           _ (dw/commit-pending! bc)
+           txs (fn [db] (count (d/datoms db :aevt :db/txInstant)))]
+       (spit "/tmp/mergeop/replay-back.edn" (pr-str {:groups (count (:groups p)) :ops (reduce + (map (comp count :ops) (:groups p)))
+                                                      :applied (count (:applied a)) :ops-written (reduce + (map (comp count pdb/report->tx) (:reps a)))
+                                                      :ticks (:ticks @cost) :bytes (:bytes @cost)}))
+       (is (= 1 (count (:applied a))) "only main's own transaction is written")
+       (is (= (inc (txs head)) (txs @bc)) "the branch's own, come back, leave no transaction")
+       (is (some? (pdb/eid @bc :task/name :gen/mains)) "and main's change is on the branch")))))

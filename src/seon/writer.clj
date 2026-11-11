@@ -176,24 +176,19 @@
                         {:tx (:max-tx main) :unidentified (:unidentified p)})))
 
 (defn- applied!
-  "Groups (a plan's) applied on main's connection after what is pending (datahike.writer/apply!, through the write check),
-  each its own transaction, not committed: its tx-meta main's with the source transaction's own :seon.tx/branch,
-  :seon.tx/eval and :seon.tx/merged (who made it; never its runtime or its time). Answers {:db the value after them (db
-  when there are none) :reps their reports}, or {:refused :seon.merge/replay-refused :reps} at the first one the write check
+  "Groups (a plan's) applied on main's connection after what is pending, not committed (seon.merge/apply-groups!, under
+  main's tx-meta). Answers {:db :reps :applied}, or with :refused :seon.merge/replay-refused at the first one the write check
   refuses. See docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :seon.host/db [:sequential :map]] [:map [:reps [:vector :map]]]]}
   [conn main db groups]
-  (let [meta0 (pdb/tx-meta (pdb/conn-main conn))]
-    (reduce (fn [acc g]
-              (let [rep (dw/apply! conn {:tx-data (:ops g) :tx-meta (merge meta0 (select-keys (:meta g) [:seon.tx/branch :seon.tx/eval :seon.tx/merged]))})]
-                (if (map? rep)
-                  {:db (:db-after rep) :reps (conj (:reps acc) rep)}
-                  (let [err (or (when (:seon.error/type (ex-data rep)) (ex-data rep)) (refused (step/error-msg rep) (or (ex-data rep) {})))]
-                    (reduced (assoc acc :refused (contract/error :seon.merge/replay-refused #'seon.writer/applied!
-                                                                 (str "main's write check refuses the branch's transaction " (:tx g) ": " (:seon.error/message err)
-                                                                      ": main moved since the base; merge main into the branch and merge again")
-                                                                 {:tx (:max-tx main) :refused {:tx (:tx g) :error err}})))))))
-            {:db db :reps []} groups)))
+  (let [a (pm/apply-groups! conn db (pdb/tx-meta (pdb/conn-main conn)) groups)]
+    (if-let [{:keys [tx exception]} (:refused a)]
+      (let [err (or (when (:seon.error/type (ex-data exception)) (ex-data exception)) (refused (step/error-msg exception) (or (ex-data exception) {})))]
+        (assoc a :refused (contract/error :seon.merge/replay-refused #'seon.writer/applied!
+                                          (str "main's write check refuses the branch's transaction " tx ": " (:seon.error/message err)
+                                               ": main moved since the base; merge main into the branch and merge again")
+                                          {:tx (:max-tx main) :refused {:tx tx :error err}})))
+      a)))
 
 (defn- member-applied!
   "Branch head (from base) merged onto db, main with what is pending on main's connection, as the merge writes it: its plan
