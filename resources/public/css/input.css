@@ -224,6 +224,8 @@ pre.seon-print-code { margin: 0; padding: 0.4rem 0.6rem; border-radius: 6px; bac
 .seon-handle { font-size: 0.7rem; color: var(--color-eval); }
 .seon-turn .seon-eval { border: 0; background: transparent; }
 .seon-md-inline > div, .seon-md-inline p { display: inline; margin: 0; }
+/* prose a model or a person wrote, as Markdown: the text face (--font-text), its code spans and blocks mono */
+.seon-md { font-family: var(--font-text); }
 .seon-md p code, .seon-md li code { color: var(--color-text-100); background: var(--color-base-850); padding: 0 0.2rem; border-radius: 3px; }
 .seon-md a { text-decoration: underline; }
 /* a step's buttons run in the agent's REPL, so they show only where its input does */

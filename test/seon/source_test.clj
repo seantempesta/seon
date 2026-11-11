@@ -364,23 +364,23 @@
 ;; one a fresh index of the same tree holds. A scratch repository of two files, two stores of the test's own, removed
 (deftest the-code-that-indexes-is-keyed-by-its-reach
   ;; docs/source.md#the-binary-records-its-program: a kept index is a cache of what the indexing code made of the files,
-  ;; so its key holds that code (seon.root/index-code: the reach digest of its roots), and a change the code does not reach
+  ;; so its key holds that code (seon.program/index-code: the reach digest of its roots), and a change the code does not reach
   ;; keeps it. On the world: roots app.ix/make, which calls app.ix/rule; app.other is reached by nothing
   (let [db (my.test/with (my.test/world)
                          (my.test/code 'app.ix "(ns app.ix)\n\n(defn rule [x] (str x))\n\n(defn make [x] (rule x))\n")
                          (my.test/code 'app.other "(ns app.other)\n\n(defn other [] 1)\n"))
         in {:env "e" :tree "t" :code "c" :config {}}
-        code #(root/index-code % in '[app.ix/make])
+        code #(program/index-code % in '[app.ix/make])
         k (code db)]
     (is (string? k))
     (is (= k (code (my.test/with db (my.test/code 'app.other "(ns app.other)\n\n(defn other [] 2)\n")))) "a change it does not reach keeps it")
-    (is (= k (root/index-code db (assoc in :tree "t2" :code "c2") '[app.ix/make])) "the tree and the source it reads are the files', not its key")
+    (is (= k (program/index-code db (assoc in :tree "t2" :code "c2") '[app.ix/make])) "the tree and the source it reads are the files', not its key")
     (is (not= k (code (my.test/with db (my.test/code 'app.ix "(ns app.ix)\n\n(defn rule [x] (str x :v2))\n\n(defn make [x] (rule x))\n")))) "a change to a form it reaches moves it")
-    (is (not= k (root/index-code db (assoc in :env "e2") '[app.ix/make])) "and so does the runtime it runs on")
-    (is (nil? (root/index-code db in '[app.none/x])) "roots the program does not define: no key, made again")))
+    (is (not= k (program/index-code db (assoc in :env "e2") '[app.ix/make])) "and so does the runtime it runs on")
+    (is (nil? (program/index-code db in '[app.none/x])) "roots the program does not define: no key, made again")))
 
 (deftest a-builds-kept-index-holds-the-program-a-fresh-index-holds
-  ;; and it is made again from nothing when a change reaches the code that indexes (seon.root/index-code; here
+  ;; and it is made again from nothing when a change reaches the code that indexes (seon.program/index-code; here
   ;; the roots app.bp/make, which calls app.bp/rule), and only then
   (let [dir (scratch-dir "built")
         tree (str dir "/tree")
@@ -742,9 +742,11 @@
         ;; the entry's line as the file has it (a property added to the entry moves with it), and
         ;; its form with :paused added, as an edit would write it
         status-line (some #(when (str/starts-with? % " :seon.task/reason ") %) (str/split-lines text))
-        paused (str/trim (subs (str/replace status-line ":string" "[:string {:min 1}]") (count " :seon.task/reason ")))
+        paused "[:string {:min 1}]"
+        ;; another entry's whole line, whatever its form holds (a description rides the entry)
+        merged-line (some #(when (str/starts-with? % " :seon.task/merged-t ") %) (str/split-lines text))
         edit (fn [tx] (get (source/files (d/db-with db tx) [facts-path]) facts-path))]
-    (is (str/ends-with? status-line " :string") "the entry's line is its plain value, as the edit expects")
+    (is (and status-line merged-line) "the two entries the edits name are lines of the file")
     (testing "every schema resource imported and written back unchanged is the same text"
       (let [dir (java.io.File. (str here "/resources/seon/schemas"))
             files (into {} (for [f (.listFiles dir) :when (str/ends-with? (.getName f) ".edn")]
@@ -754,11 +756,11 @@
         (is (seq files) "the schemas directory holds resources")
         (is (= files (source/files db (source/source-files db))))))
     (testing "a replaced value: only its changed part"
-      (is (= (str/replace text status-line (str/replace status-line ":string" "[:string {:min 1}]"))
+      (is (= (str/replace text status-line (str " :seon.task/reason " paused))
              (edit [{:schema/key :seon.task/reason
                      :schema/form paused}]))))
     (testing "a removed entry takes its line"
-      (is (= (str/replace text "\n :seon.task/merged-t :int" "")
+      (is (= (str/replace text (str "\n" merged-line) "")
              (edit [[:db/retractEntity [:schema/key :seon.task/merged-t]]]))))
     (testing "a new key after the last entry, read back as written"
       (let [out (edit [{:schema/key :seon.task/invalid :schema/form "[:map [:seon.error/message :string]]" :schema/file facts-path}])]

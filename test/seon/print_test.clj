@@ -193,6 +193,24 @@
 
 ;; ---- text: text read as itself, cut the printer's way -----------------------------------
 
+(deftest a-window-says-what-it-left-out
+  ;; a join with :limit holds the newest n of the members it has in the db, and says how many it has as its value's
+  ;; :seon.ctx/count (docs/ctx.md#the-pattern): the printer's one cut of that map says what it left out, beside what it held and did not show
+  (let [window (fn [held joined] (with-meta (into {} (for [i (range held)] [(- 1000 i) {:seon.eval/id (str "e" i)}])) {:seon.ctx/count joined}))
+        printed (fn [v budget] (:text (seon/print-value v {:handle 'result/h1 :budget budget})))]
+    (testing "every member held is shown: the cut is the members left out, and no form reads them"
+      (let [text (printed (window 20 112) 4000)]
+        (is (str/includes? text "…92 not pulled") text)
+        (is (= [{:n 92 :chars? false :name? false :form nil}] (cuts-of text)) text)))
+    (testing "a full window of all its members, and a value no window made, say nothing left out"
+      (is (empty? (cuts-of (printed (window 20 20) 4000))))
+      (is (empty? (cuts-of (printed (with-meta (window 20 20) nil) 4000)))))
+    (testing "held members cut too: the cut's count and form are the held rest's, then what the window left out"
+      (let [text (printed (window 20 112) 120)
+            [{:keys [n form]}] (cuts-of text)]
+        (is (= 'drop (first form)) text)
+        (is (str/includes? text (str "…" n " " (emit/form-text form) ", 92 not pulled")) text)))))
+
 (deftest plain-says-what-it-omitted
   (let [msg (str/join "\n" (for [i (range 40)] (str "line " i " of a long message that says what went wrong")))
         {:keys [text shown truncated? omitted lines offset continuation]} (seon/plain msg 60 {:source '(:message e)})]
@@ -541,3 +559,15 @@
   (let [text (:text (seon/print-value (assoc breadth-rows 3 :odd) {:handle 'result/e1 :budget 1000}))]
     (clojure.test/is (= 0 (count (re-seq #"\{…" text))))
     (clojure.test/is (= 1 (count (re-seq #"…\d+ \(drop" text))) "one cut past the rows shown")))
+
+(deftest an-entity-prints-its-keys-in-one-order-and-a-view-in-its-own
+  ;; docs/render.md#one-printer (Point's ruling, after render.md#a-render-is-a-value-printed-once): an entity's attributes have no order,
+  ;; so an entity (a map holding :db/id) prints its keys sorted, the same bytes however it was made (a cold build, a patch that joined a key
+  ;; to a node it held); a view's array map is what matters in its author's order and keeps it
+  (let [built (array-map :db/id 1 :seon.eval/id "e1" :seon.eval/code "(f)" :at {:db/id 9})
+        patched (array-map :db/id 1 :at {:db/id 9} :seon.eval/code "(f)" :seon.eval/id "e1")
+        view (array-map :refused [] :proofs [] :plan "p")]
+    (is (= built patched) "one value")
+    (is (= (seon.print/text built) (seon.print/text patched)) "an entity made two ways: the same bytes")
+    (is (< (str/index-of (seon.print/text view) ":refused") (str/index-of (seon.print/text view) ":proofs")) "a view keeps its author's order")))
+
