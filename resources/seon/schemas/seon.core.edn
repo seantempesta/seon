@@ -136,7 +136,9 @@
                                      [:key {:optional true} :string]
                                      ;; evals run on its REPL queue before anything else, intent and code each, recorded as evals any
                                      ;; reader reads (docs/turn.md#an-eval-can-be-inserted)
-                                     [:evals {:optional true} [:vector [:tuple :string :string]]]]]
+                                     [:evals {:optional true} [:vector [:tuple :string :string]]]
+                                     ;; restore the session at this commit of its branch, onto the new :branch (docs/storage.md#compiled-code)
+                                     [:commit {:optional true} :uuid]]]
  ;; contracts (seon.contract, from G1)
  :seon.contract/arm-result [:enum :armed :unchanged :off :uncontracted]
  :seon.contract/invalid [:and :seon.error/base [:map [:seon.error/type [:enum :seon.contract/invalid]] [:seon.contract/var :qualified-symbol]]]

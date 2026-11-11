@@ -2939,3 +2939,45 @@
     (is (= 1 (:index-builds moved)) "a schema entry's write builds one")
     (is (some? (:index (:schema-registry moved))) "into the slot")
     (is (= 1 (:index-builds (seon.agent/schema-moved moved #{:seon.eval/id}))) "and a later write of another attribute builds no other")))
+
+(deftest a-session-restored-at-an-older-commit-runs-that-commits-definitions
+  ;; docs/storage.md#compiled-code: a spawn with {:branch b :commit C}
+  ;; makes b from the session's commit C and forks it from main's image with the program at C loaded over it, the way a resumed
+  ;; agent loads its tip. Red before: a spawn took no commit, so the new agent held main's program and f was unbound. The answer says what
+  ;; is not restored.
+  (let [[r] (in-agent (fn [{:keys [agent ns]}]
+                        (let [b (str ":task-" ns "-restored") n (str "demo." ns ".restored")]
+                          [{:op :eval :agent "root"
+                            :code (str "(let [sub (fn [a code] (:value @(c/submit! sys a code {:origin :outside})))"
+                                       "      a :" agent
+                                       "      _ (sub a \"(ns " n ") (defn f [] :first)\")"
+                                       "      cid (sub a \"(datahike.api/commit-id (seon.agent/db))\")"
+                                       "      _ (sub a \"(ns " n ") (defn f [] :second)\")"
+                                       "      now (sub a \"(" n "/f)\")"
+                                       "      r @(seon.root/call! sys {:op :spawn :opts {:branch " b " :commit cid}})"
+                                       "      then (when (:id r) (sub (:id r) \"(" n "/f)\"))]"
+                                       "  (when (:id r) (c/kill! sys (:id r)))"
+                                       "  {:now now :then then :not-restored (:not-restored r) :answer (when-not (:id r) r)})")}])))
+        v (:value r)]
+    (is (= :second (:now v)) (pr-str v))
+    (is (= :first (:then v)) (str "the restored agent runs the first commit's body: " (pr-str v)))
+    (is (= 3 (count (:not-restored v))) (pr-str v))))
+
+(deftest a-restore-at-a-commit-the-store-no-longer-holds-is-refused
+  ;; docs/failure-points.md (the :spawn edge in seon.writer), docs/storage.md#compiled-code: a commit
+  ;; the store holds no more (collected) is answered as a typed error naming it, no branch made and nothing crashed. Red before: the
+  ;; commit was ignored and an agent on a branch from main's head answered a success.
+  (let [[r] (in-agent (fn [{:keys [ns]}]
+                        (let [b (str ":task-" ns "-gone")]
+                          [{:op :eval :agent "root"
+                            :code (str "(let [cid (random-uuid)"
+                                       "      r @(seon.root/call! sys {:op :spawn :opts {:branch " b " :commit cid}})]"
+                                       "  (when (:id r) (c/kill! sys (:id r)))"
+                                       "  {:type (:seon.error/type r) :message (:seon.error/message r) :cause (:seon.error/type (:cause r))"
+                                       "   :cid (str cid) :made (contains? (set (datahike.api/branches (:conn sys))) (seon.db/on-main (seon.db/conn-main (:conn sys)) " b "))"
+                                       "   })")}])))
+        v (:value r)]
+    (is (= :seon.agent/failed (:type v)) (pr-str v))
+    (is (= :seon.writer/refused (:cause v)) (pr-str v))
+    (is (str/includes? (str (:message v)) "gone") (pr-str v))
+    (is (false? (:made v)) "no branch made")))
