@@ -1306,11 +1306,15 @@
                 ;; max-bytes, the one caller that may remove it), so the items that clone it import nothing
                 :seed (let [prog (str "(require 'seon.test-store 'test-runner) (test-runner/program-db \\\"$PWD\\\" (seon.test-store/kept-program-store)"
                                       " (seon.fx/tree-id \\\"$PWD\\\") (seon.config/value :seon.config.proofs/program-store-max-bytes))"
-                                      (when (:binary? req) " (seon.test-store/make-process-store! \\\"$PWD\\\")"))]
+                                      (when (:binary? req) " (spit \\\"target/process-store.path\\\" (seon.test-store/make-process-store! \\\"$PWD\\\"))"))]
                         (when (:binary? req) (lib/remove-tree! store))
                         (sh "zsh" "-c" (str "ROOT=$PWD; . bin/env; "
                                             (when (:binary? req) "(cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-) && ")
-                                            "HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test -e \"" prog "\"")))
+                                            "HOME=$PWD/target/home JOLT_PWD=$PWD target/jolt/jolt -A:test -e \"" prog "\""
+                                            ;; and the process tests' store gets this tree's program on :db, as bin/test seeds it before its
+                                            ;; shards (bin/root seed): a process item's root clones it, and one seeded at an earlier tree was a
+                                            ;; binary built from this tree over a store of that one, every spawn refused (Tests' trial, step 2b)
+                                            (when (:binary? req) " && bin/root seed \"$(<target/process-store.path)\""))))
                 ;; with a :bound (seon.prove's plan-items, from its measured ms) it runs through bin/bounded: past the bound its
                 ;; evidence is kept and its whole process group ended, never left to hold a worker
                 :process (apply sh (concat (when bound ["bin/bounded" (str bound) (str dir "/evidence")])
