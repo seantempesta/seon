@@ -357,6 +357,40 @@
       ;; it died before listening: its log says why, kept with it for the test's error (ask)
       (nil? port) (assoc :log (output (str runs "/root.log"))))))
 
+(def ^:private readers
+  "This process's one read connection per store path (reader), made at its first read."
+  (atom {}))
+
+(defn reader
+  "A read connection of this process to the store at path, one per path, kept for the process: a test reads a root's
+  branches itself (read-branch), as a forked agent reads through an env of its own, never through the root. LMDB's readers
+  see what any process committed. See docs/testing.md#a-test-reads-the-store-itself."
+  {:malli/schema [:=> [:cat :string] :seon.host/conn]}
+  [path]
+  (let [d (or (get @readers path) (get (swap! readers #(cond-> % (not (contains? % path)) (assoc path (delay (pdb/connect (pdb/store-cfg :lmdb path)))))) path))]
+    @d))
+
+(defn read-branch
+  "The committed head of branch b of root (the map start-root! or shared-root! answers: its :store and :main), read from
+  the store in this process: b as the root names it (:db is its main; another, a branch on that main, seon.db/on-main).
+  What an agent or root's writer committed before it answered is here: an agent commits before it replies
+  (seon.repl/agent-step), and the writer before it answers a write. No request to root, no eval record on its main.
+  See docs/testing.md#a-test-reads-the-store-itself."
+  {:malli/schema [:=> [:cat :map :keyword] :seon.host/db]}
+  [root b]
+  (pdb/head (reader (:store root)) (pdb/on-main (keyword (:main root)) b)))
+
+(defn read-task-branch
+  "The committed head of the branch task id works on (its :seon.task/branch on root's main), read in this process
+  (read-branch). See docs/testing.md#a-test-reads-the-store-itself."
+  {:malli/schema [:=> [:cat :map :string] :seon.host/db]}
+  [root id] (read-branch root (:seon.task/branch (task/task (read-branch root :db) id))))
+
+(defn read-main
+  "root's main as the store holds it now (read-branch of :db). See docs/testing.md#a-test-reads-the-store-itself."
+  {:malli/schema [:=> [:cat :map] :seon.host/db]}
+  [root] (read-branch root :db))
+
 (defn kill-root!
   "SIGKILL the root (bin/root kill), answered once the root and every process it started are
   gone (bin/held --drain). Answers {:drained boolean}: false when bin/root did not say so."

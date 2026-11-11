@@ -28,7 +28,8 @@
 (defn in-agent
   "One agent on a task of its own in this test process's shared root on the checkout's src (its
   source root; seon.test-store/shared-root!, booted once per shard and root arguments), each of
-  forms evaluated in that agent (a string) or sent to the server as it is (a map): every reply's
+  forms evaluated in that agent (a string), sent to the server as it is (a map), or run in this process with
+  {:root :names} (a function: a read of the store, seon.test-store/read-branch, which asks root nothing): every reply's
   response with its value read back (:value, value-of), or the answer that holds no response, in
   order. forms is a vector, or a function of the test's names {:ns :task :agent} (its task's
   namespace, a fresh one per test, its task \"<ns>/t\", and the agent the attach
@@ -49,12 +50,14 @@
   ([forms] (in-agent forms {}))
   ([forms opts]
    (mapv #(if (contains? % :response) (let [r (:response %)] (assoc r :value (value-of r))) %)
-         (with-agent opts (fn [{:keys [names ask]}]
-                            ;; a string: a form on the agent's REPL, by root's submit!, no reply and no turn of anyone's
-                            (mapv #(if (map? %)
-                                     (ask %)
-                                     (let [a (ask {:op :eval :agent "root" :code (str "@(c/submit! sys :" (:agent names) " " (pr-str %) " {:origin :outside})")})]
-                                       (if-let [r (get-in a [:response :value])] {:response r} a)))
+         (with-agent opts (fn [{:keys [names ask root]}]
+                            ;; a string: a form on the agent's REPL, by root's submit!, no reply and no turn of anyone's;
+                            ;; a function: run here, with the test's root and names, its value as :value (a read of the store,
+                            ;; seon.test-store/read-branch, asks root nothing)
+                            (mapv #(cond (fn? %) {:value (% {:root root :names names})}
+                                         (map? %) (ask %)
+                                         :else (let [a (ask {:op :eval :agent "root" :code (str "@(c/submit! sys :" (:agent names) " " (pr-str %) " {:origin :outside})")})]
+                                                 (if-let [r (get-in a [:response :value])] {:response r} a)))
                                   (if (fn? forms) (forms names) forms)))))))
 
 (deftest a-branchs-config-key-moves-the-tests-reading-it-and-no-other
