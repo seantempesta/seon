@@ -3,7 +3,7 @@
   opens it by default, holds the schema and nothing else; root's warm-up needs no seed."
   (:require [seon.lib] [clojure.test :refer [deftest is testing]]
             [clojure.java.shell] [datahike.api :as d]
-            [seon.db :as pdb] [seon.program] [seon.root :as root] [seon.test-store :as ts] [test-runner :as runner]))
+            [seon.db :as pdb] [seon.program] [seon.root :as root] [seon.main] [seon.test-store :as ts] [test-runner :as runner]))
 
 (defn- program-datoms [db]
   (vec (mapcat #(d/datoms db :aevt %) [:ns/name :form/id :var/name :task/name])))
@@ -291,3 +291,12 @@
     (is (names-sh? 'seon.lib '(defn x [] (clojure.java.shell/sh "true"))) "a call naming it is seen")
     (is (not (names-sh? 'seon.lib '(def x '{clojure.java.shell/sh :bin}))) "a quoted name is not")
     (is (= #{'seon.lib/sh} callers))))
+
+;; docs/merging.md#a-session-proves-through-root: bin/prove --root prints every kind of item as it lands, a step past its bound as
+;; a signal, never red, and the tree's build and seed by their kind
+(deftest bin-prove-root-prints-each-kind-of-verdict
+  (let [line @#'seon.main/verdict-line]
+    (is (= "PASS a.b-test/t 315 ms" (line {:test 'a.b-test/t :digest "d" :status :pass :ms 315.4})))
+    (is (= "PASS build of tree T 46650 ms" (line {:test [:build "T"] :digest "T" :kind :build :status :pass :ms 46650.48})))
+    (is (= "SIGNAL laws: overran 150 ms" (line {:test "laws" :digest "dl" :kind :step :status :signal :signal :overran :ms 150})))
+    (is (clojure.string/starts-with? (line {:test "laws" :digest "dl" :kind :step :status :fail :failures [{:type :fail :message "m"}]}) "RED laws (fail)"))))

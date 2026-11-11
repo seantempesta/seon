@@ -86,6 +86,11 @@
 (deftest seon-checkout-is-derived-at-load
   (is (= (str (config/checkout) "/resources/seon/system.edn") (:checkout (tags)))))
 
+;; docs/config.md#the-file: #seon/cores is the machine's core count, read when the config is read
+(deftest seon-cores-reads-a-positive-count
+  (is (pos-int? (:cores (tags))))
+  (is (= (:cores (tags)) (config/value :seon.config.machine/cores))))
+
 ;; ---- no #env without a setter ------------------------------------------------------------
 
 (defn- env-tags
@@ -146,11 +151,12 @@
 (deftest the-shipped-file-validates-under-every-profile
   ;; the scripted model's script is stated only under :scripted (checks and tests); :seon.config.source/root
   ;; is `#env SEON_SOURCE_ROOT` (bin/root exports it, bin/test does not): present or absent by the process's
-  ;; environment, so it is left out of both sides
+  ;; environment, so it is left out of both sides; max-cores and max-load are optional bounds shipped unset
+  ;; (docs/merging.md#the-test-service)
   (doseq [p [:default :scripted :deepseek]]
     (let [c (dissoc (shipped p) :seon.config.source/root)]
       ;; every declared key is shipped; a key no schema declares is already refused by reading it (a branch's own key is declared by its schema: seon.config/of-entries)
-      (is (= [] (remove (set (keys c)) (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile} (not= :scripted p) (conj :seon.config.ai/script))
+      (is (= [] (remove (set (keys c)) (remove (cond-> #{:seon.config.ai/reasoning-effort :seon.config.ai/temperature :seon.config.source/root :seon.config.source/gate-checkout :seon.config.root/profile :seon.config.proofs/max-cores :seon.config.proofs/max-load} (not= :scripted p) (conj :seon.config.ai/script))
                                                (config/keys-declared)))) p)))
   (is (= {:kind :none} (config/provider (shipped :default))) "no profile: no provider, never the scripted model")
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))

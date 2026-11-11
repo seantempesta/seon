@@ -227,6 +227,12 @@
   (bin/test --health, over the program store's kept trees)."
   #{"laws" "lmdb-kill" "lmdb-lock" "lmdb-crash" "forks" "health"})
 
+(def machine-steps
+  "The steps whose claim is about the machine itself, so nothing may run beside them: scale (what root and its agents
+  cost the machine's memory, seon.check/scale). bin/check runs scale last, alone; the test service grants one only with
+  nothing running and grants nothing beside it (seon.prove/grant). See docs/merging.md#the-test-service."
+  #{"scale"})
+
 (defn step-needs-binary?
   "Does bin/check's step run a seon.check mode on target/seon (and a store branch)? Every step
   does but binary-free's, so a run of only those builds nothing and seeds nothing."

@@ -30,8 +30,8 @@
 # verdict prints as it lands (PASS ns/test N ms; RED ns/test and its failures; NO-VERDICT ns/test: why); the run ends on PROVE
 # OK (exit 0), or PROVE FAILED (exit 1) after the reds or the typed error that ended it (no root on PORT, the connection's
 # end before the answer: the socket's EOF, never a timer). The client is target/seon's prove mode (seon.main/prove-client).
-# Only the in-process tests are proved there at this step: the process tests and the check steps are left to the plain
-# bin/prove above (Flow step 4 moves them), and no marker is written.
+# The process tests, the check steps, the build and the seed are items of the same run (docs/merging.md#the-test-service),
+# run on this checkout by root's effect owner; no marker is written.
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 # a run is a process group of its own, and a stop (TERM, INT, HUP: a timeout, a ^C, bin/land stopped) ends the
 # whole group, so nothing it started outlives it (2026-11-08: a stopped landing left its prove, shards and check

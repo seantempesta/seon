@@ -59,6 +59,12 @@
   [opts _tag value]
   (str (::checkout opts) "/" value))
 
+(defmethod aero/reader 'seon/cores
+  ;; #seon/cores nil: the machine's core count (Runtime's availableProcessors), read once when the config is read; the
+  ;; value given is not read. What :seon.config.proofs/max-cores, a share, is a share of (docs/config.md#the-file)
+  [_opts _tag _value]
+  (.availableProcessors (Runtime/getRuntime)))
+
 (defmethod aero/reader 'seon/own-branch
   ;; #seon/own-branch "jolt/seon-merges": the branch as named in the main tree, and in a git
   ;; worktree (its .git a file, not a directory) the branch with -<worktree> appended: worktrees
@@ -98,7 +104,8 @@
   every other key the shipped file states is required as a config is read (`closed`). Each key's own schema carries this
   once the config map is dissolved (seon.db/one-definition-of-each-entity, step 2). See docs/config.md#a-process-holds-its-branchs-config."
   #{:seon.config.agent/wake-turns :seon.config.ai/reasoning-effort :seon.config.ai/script :seon.config.ai/temperature
-    :seon.config.ai/thinking :seon.config.root/profile :seon.config.source/gate-checkout :seon.config.source/root})
+    :seon.config.ai/thinking :seon.config.root/profile :seon.config.source/gate-checkout :seon.config.source/root
+    :seon.config.proofs/max-workers :seon.config.proofs/max-cores :seon.config.proofs/max-load})
 
 (defn- closed
   "The compiled config map s as a config is read: closed at its top (an unknown key refuses it) and every key but those it

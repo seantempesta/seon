@@ -66,9 +66,14 @@
   :deps {:perform seon.fx/resolve-deps :workers 1}
   ;; the next generation (my.root/build!): bin/build seon of the last merges commit, niced, ~25-45 s
   :build {:perform seon.fx/build :workers 1}
-  ;; a merge's deferred process tests, run only when root asks (owner, 2026-10-23): prove's entry
-  ;; (bin/prove --tests) on a worktree of the merge candidate, niced; one at a time
-  :tests {:perform seon.fx/run-tests :workers 1}
+  ;; a merge's deferred process tests, run only when root asks (owner, 2026-10-23): a worktree of the merge candidate, proved
+  ;; by the system (seon.root/prove-tree!, bound here as :prove-tree); one at a time. Its one worker waits on items the :item
+  ;; owner runs, another owner, so it never waits on itself; the wait ends with the run's answer or its typed error (the
+  ;; service answers every waiter once, and a tree agent that ends answers :seon.root/ended)
+  :tests {:perform seon.fx/run-tests :workers 1 :ctx {:prove-tree :bind/prove-tree}}
+  ;; a session's prove items (seon.prove grants them, at most its admission's workers at once): a build, one process test, one check
+  ;; step, on the session's own checkout (docs/merging.md#a-session-proves-through-root)
+  :item {:perform seon.fx/run-item :workers :bind/item-workers}
   ;; the wiki's history from git: what each section was last written against (seon.doc/baseline-plan)
   :history {:perform seon.fx/wiki-history :workers 1}
   ;; a stalled agent's evidence (sample, lsof, ps, its fiber dump), captured as the stall is recorded
