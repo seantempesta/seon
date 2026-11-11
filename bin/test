@@ -126,7 +126,7 @@ S=(); for (( i = 1; i <= ${#F}; i++ )); do S+=("${F[$i]%.edn}.log:$P[$i]"); done
 for (( i = 1; i <= ${#F}; i++ )); do
   f=$F[$i] log=${F[$i]%.edn}.log
   wait $P[$i]; s=$?
-  grep -E "^RED|^SHARD|^OVERRAN" "$log"
+  grep -E "^RED|^SHARD" "$log"
   if grep -q "^OVERRAN " "$log"; then
     st=1
     runner --overran "$f" 2>&1 | tee -a "$log" | grep -E "^RED|^UNRECORDED|^the tree"
