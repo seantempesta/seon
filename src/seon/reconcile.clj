@@ -474,7 +474,8 @@
                      :let [t (get-in idx [:tasks id])]]
                  (cond
                    (not= :running (:seon.task/execution t)) {:op :close :task id}
-                   (= :gate (:seon.task/outcome t)) {:op :gate :task id :tests (vec (sort-by str (remove #(= (get-in idx [:root :started-by]) (str %)) (:seon.task/deferred t))))}
+                   (= :gate (:seon.task/outcome t)) (let [base (into {} (remove (fn [[k]] (= (get-in idx [:root :started-by]) (str k)))) (:seon.task/deferred t))]
+                                                      {:op :gate :task id :tests (vec (sort-by str (keys base))) :base base})
                    :else {:op :ready-to-merge :task id}))
         ;; the octopus merge (bors, GitHub's merge queue): ready merge tasks merge together in
         ;; one commit once no merge task is still working, so every member merged the same
@@ -815,7 +816,7 @@
                                      {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
       ;; the merge gate (a change reaching process tests): root's one :gate request, the candidate's files read from its
       ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
-      :gate (one (request st id :gated {:op :gate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :tests (:tests act)}))
+      :gate (one (request st id :gated {:op :gate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :tests (:tests act) :base (:base act)}))
       ;; an action the reconciler cannot start keeps no flight
       (throw (ex-info "no such action" {:op op})))))
 
@@ -870,7 +871,7 @@
   for root (seon.task/carry-tx); and a failure the agent marked (my.task/fail!) carried with the task held.
   Answers {:tx :outcome :kept?}: kept? when the agent's process is to stay."
   {:malli/schema [:=> [:cat :seon.reconcile/state :map :seon.proof/results [:map [:db :seon.host/db] [:base :seon.host/db] [:ours [:sequential :any]] [:unmerged [:sequential :any]] [:uncontracted [:sequential :qualified-symbol]]]] [:map [:tx [:vector :any]] [:outcome :seon.task/outcome]]]}
-  [st {:keys [act run-problems worked-error deferred main-red]} results {:keys [db base base-t] :as diff}]
+  [st {:keys [act run-problems worked-error deferred deferred-digests main-red]} results {:keys [db base base-t] :as diff}]
   (let [main (:db st) idx (:idx st)
         id (:task act)
         t (get-in idx [:tasks id])
@@ -892,7 +893,13 @@
                             :plan-before (when (= :design kind) (some-> (task/task base id) :seon.task/accumulated :plan))
                             :behinds (behinds main id) :told (:seon.task/reasons t)})
         conflicts (mapv #(dissoc % :main-t :resolved?) (pm/entries db))
-        reason (or (:reason end) (when-not end (if worked-error (str "seon.turn/work! threw: " (:seon.error/message worked-error)) "the agent wrote no end")))
+        ;; the agent's words are the task's reason as they are, unless its end was not green and the done rule found nothing open:
+        ;; then they are named as its agent's, beside what root found, so a reader never takes them for the judgment (Context's loop
+        ;; D3: "proof-unknown ..." stood beside :gate, written by an agent whose last prove answer was a gate build's failure)
+        reason (cond
+                 (and (:reason end) (not= :green (:outcome end)) (empty? (:reasons j)) (not (:hold j)))
+                 (str "its agent ended " (some-> (:outcome end) name) " saying \"" (:reason end) "\"; the done rule found nothing open")
+                 :else (or (:reason end) (when-not end (if worked-error (str "seon.turn/work! threw: " (:seon.error/message worked-error)) "the agent wrote no end"))))
         error (or (:error end) worked-error)
         now (System/currentTimeMillis)
         ;; what this end measured, each only when there is one to say (and what an earlier end set that this did not, retracted)
@@ -901,7 +908,8 @@
                (seq conflicts) (assoc :seon.task/conflicts conflicts)
                (seq unmerged) (assoc :seon.task/unmerged (set unmerged))
                (seq (:ours diff)) (assoc :seon.task/changed (into #{} (map sedn/encode) (:ours diff)))
-               (seq deferred) (assoc :seon.task/deferred (set deferred))
+               ;; each with its digest as main held it at the task's base (nil: new on the branch), an observation the gate reads by
+               (seq deferred) (assoc :seon.task/deferred (into {} (for [t deferred] [t (get deferred-digests t)])))
                (seq (:failures run-problems)) (assoc :seon.task/failures (:failures run-problems))
                (seq (:costs run-problems)) (assoc :seon.task/costs (:costs run-problems))
                error (assoc :seon.task/error error)
@@ -951,12 +959,13 @@
 (defn- gated
   "Task id's gate answered: rs, each deferred test's status (the gate's run of them, or :error for each when it
   could not run: unread, or err the effect's error), written on the task with the decision `judgment` leaves to it: all
-  passing, the merge is ready; else the task is held for root with the tests not green and why they could not run. A failed
+  passing, the merge is ready; else the task is held for root with the tests not green and why they could not run. mains, the
+  tests red on main at the task's base (seon.proofs/main-red), are recorded with the rest and decide nothing. A failed
   :tests effect is recorded here, with the results, in one transaction."
-  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map [:vector :map] [:maybe :map]] [:vector :any]]}
-  [st id rs unread err]
+  {:malli/schema [:=> [:cat :seon.reconcile/state :seon.task/id :map [:vector :map] [:maybe :map] [:set :qualified-symbol]] [:vector :any]]}
+  [st id rs unread err mains]
   (let [main (:db st)
-        red (for [[tt s] (sort-by (comp str key) rs) :when (not= :pass s)] [tt s])
+        red (for [[tt s] (sort-by (comp str key) rs) :when (and (not= :pass s) (not (mains tt)))] [tt s])
         why (concat (some-> err :seon.error/message vector) (for [u unread] (str (:ns u) ": " (:reason u))))
         want (cond-> {:seon.task/deferred-results rs}
                (seq unread) (assoc :seon.task/gate-unread unread)
@@ -1052,6 +1061,7 @@
                 (one (request (-> st (assoc-in [:flights id :results] (proofs/results r))
                                   (assoc-in [:flights id :main-red] (:main-red r))
                                   (assoc-in [:flights id :deferred] (:deferred r))
+                                  (assoc-in [:flights id :deferred-digests] (:deferred-digests r))
                                   (assoc-in [:flights id :run-problems] {:failures (proofs/failures r) :costs (proofs/costs r)}))
                               ;; the branch read once: its head, its merge base, and what it changed
                               ;; since (three-way's :ours, measured for the octopus merge)
@@ -1103,9 +1113,20 @@
       ;; (seon.writer's :merge-candidate), forms', tests' and schema resources' alike (a :seon.ref/block change left out would
       ;; meet its new seon.ref/scan in the checkout, and the seed would throw on scan's contract). A refused candidate (an
       ;; error), or one over a tree missing a changed namespace (:unread), vouches for none: each :error, and no test ran
+      ;; a test red on main at the task's base digest (the effect's :main-red, seon.proofs/main-red) is main's, not the
+      ;; task's: it is left out of the gate's decision and told as the system's problem, one per test (docs/tasks.md#the-done-rule)
       :gated (let [unread (:unread r)
-                   rs (if (or (contract/error? r) (seq unread)) (zipmap (:tests act) (repeat :error)) (get-in r [:value :results]))]
-               (one (write st id :done (gated st id rs (vec unread) (when (contract/error? r) r)))))
+                   ok? (not (or (contract/error? r) (seq unread)))
+                   ;; a test the run answered nothing of is :none, never left out: a gate that judged 78 of its 242 tests
+                   ;; read as if it had judged them all (the standing store, 2026-11-11), and with main's reds left out of the
+                   ;; decision a missing one would have merged untested
+                   rs (if ok? (merge (zipmap (:tests act) (repeat :none)) (get-in r [:value :results])) (zipmap (:tests act) (repeat :error)))
+                   mains (if ok? (set (get-in r [:value :main-red])) #{})
+                   [st o] (write st id :done (gated st id rs (vec unread) (when (contract/error? r) r) mains))]
+               [st (into [o] (for [t (sort-by str mains)]
+                               {:op :problem :class :platform
+                                :error (contract/error :seon.prove/full-run-red #'seon.reconcile/gated
+                                                       (str t " is red on main without this change (at the gate of " id ")") {:tests [t]})}))])
       :write-back (one (request st id :main-read {:op :write :req {:op :branch-db :branch :db}}))
       :main-read (let [{:keys [members] paths :files} (:writeback f)
                        files (doc/files (:db r) paths)]
