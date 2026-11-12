@@ -987,8 +987,9 @@
                ;; the 7 more contracted calls, each instrumented (its output checked), are the ticks and bytes the fixed part grew by (measured: the
                ;; seek and text of a var cost ~8k ticks of it)
                ;; and 4: the test law's two classes (unestimated-tests, undeclared-tests), one reader each on base and head (tests,
-               ;; 2026-11-12: measured 69 -> 73)
-               :fixed {:ticks 460000 :bytes 1800000 :calls 73}
+               ;; 2026-11-12: measured 69 -> 73); and 4 for data's two caused classes (unschemed-key, refused-value), one reader
+               ;; each on base and head, the same shape (measured 73 -> 77 once both met in one tree)
+               :fixed {:ticks 460000 :bytes 1800000 :calls 77}
                :sizes [10 30 100]}))
 
 ;; ---- the wiki kept true: stale sections, orphan pages, issues with no page ----------------------
