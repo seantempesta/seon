@@ -1081,6 +1081,12 @@
                        [p0 (nth vs 2)] [3 4 3 1 5 0 4 4 2])
         again (r/walk p (assoc (at db) :tree (:tree p) :moved []))]
     (is (not-any? #(str/includes? (str (:content %)) ":render-threw") (msgs p)) "no render threw")
+    (testing "asked :resolve, the page as hiccup, what a cold draw at that db resolves, warm as cold"
+      (let [cold (let [o (at db) w (draw (:tree o) seon.ctx/changes db (:root o) {:model-only true :index ix :outputs (:outputs o)})]
+                   (try (r/resolved w @(:out w) false) (finally (r/dispose-walk! w))))
+            p0' (r/walk nil (assoc (at (nth vs 3)) :resolve true))
+            p1' (r/walk p0' (assoc (at db) :resolve true :moved (seon.ctx/moved (nth vs 3) db nil)))]
+        (is (= cold (:hiccup p1')))))
     (is (= {} (:ran again)) "the same value again runs nothing")
     (is (identical? (:answers p) (:answers again)) "and answers what it answered")))
 
