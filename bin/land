@@ -116,10 +116,11 @@ DOCS=$(print -r -- "$CHANGED" | grep -vE '^(docs/|resources/seon/tasks/)|^[^/]+\
 if [[ -n $CHANGED && -z $DOCS ]]; then
   { nice -n 15 "$HERE/bin/test" seon.doc-test && print "MERGE OK"; } > "$LOG" 2>&1 & PJ=$!
 else
-  # by the local path (this checkout's own runner, its shards and steps in processes started here), not the standing
-  # system's service: a landing's items there are forks of an agent started in the main tree, so they carry its loaded
-  # config and libraries (root's land of jolt/runtime, 2026-11-12: the main tree's target/lib and source root in its tests).
-  # Until a bin/prove --root PORT --merge proof passes end to end on a real branch, the service proves no landing.
+  # by the owner's fallback (2026-11-11: a run forks main and loads the branch's whole program in order in one eval, from the
+  # branch in the store, as replay does; the fallback a binary built from the branch's source, its tests forked from it):
+  # this checkout's own build and runner. The standing system's items are forks of an agent started in the main tree and
+  # carry its loaded config and libraries (jolt/runtime's land, 2026-11-12), so it proves no landing until its run loads the
+  # branch whole as ruled.
   nice -n 15 "$HERE/bin/prove" --out "$MAIN/target/land/$STAMP-run" --merge > "$LOG" 2>&1 & PJ=$!
 fi
 trap 'kill -TERM -$PJ 2>/dev/null || kill -TERM $PJ 2>/dev/null; fail "stopped: its proof was ended with it"' TERM INT HUP
