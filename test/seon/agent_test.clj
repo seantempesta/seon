@@ -2754,8 +2754,10 @@
     (is (not= :merged state) "not merged")
     (is (= [:proof-red] reasons) "the status carries why, as data: the proof is red")))
 
-;; Estimate: 1 agent setup (5 requests and files ~200k each) + 2 requests at ~30k = ~300000.
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 300000 :asks 2}} a-requests-implement-continues-its-designs-request
+;; Estimate: in-agent's own setup and teardown (~6 asks and their replies, ~1.5M: measured on its neighbours) + a request through the
+;; stages pipeline and one await-db, their answers the implement's first turn and the design's last request whole (~1.5M) = ~3M:
+;; 5,000,000 ticks (it was 300k from 30k an ask; it spent 3.0M, at its budget's edge)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 5000000 :asks 8}} a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
   ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! with the
   ;; staged choice (seon.template/stages, an experiment's: the default request is design-build and merge) and
@@ -3344,8 +3346,9 @@
                           {})]
     (is (= ["By a string." "By its name."] (:value r)) (pr-str r))))
 
-;; Estimate: 1 agent setup (5 requests and files ~200k each) + 3 requests at ~30k = ~300000.
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 300000 :asks 3}} an-eval-that-registers-a-schema-seons-answer-names-answers-what-it-did
+;; Estimate: in-agent's own setup and teardown (~6 asks and their replies, ~1.5M) + three evals and their recorded answers (~0.7M) = ~2.2M:
+;; 3,000,000 ticks (it was 300k from 30k an ask; it spent 2.2M)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 9}} an-eval-that-registers-a-schema-seons-answer-names-answers-what-it-did
   ;; the lab, 2026-11-04: an eval registered :seon.eval/response narrower, for its own use, and its later eval's answer failed
   ;; seon.repl/response's own contract: told an error, though its forms took effect
   (let [[reg made ran] (in-agent (fn [_]
