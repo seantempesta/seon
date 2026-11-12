@@ -166,14 +166,28 @@
         post (fn [uri headers]
                (handle {:request-method :post :uri uri :query-string (first (posts uri))
                         :headers headers :body (java.io.StringReader. "")}))
-        own (str "http://127.0.0.1:" (seon.config/value :seon.config.web/port))]
+        own "http://127.0.0.1:7777"]
     (doseq [[uri [_ op]] posts]
       (doseq [headers [{"origin" "https://evil.example"} {"sec-fetch-site" "cross-site"}]]
         (clojure.test/is (= 403 (:status (post uri headers))) (str uri " refused: " (pr-str headers)))
         (clojure.test/is (nil? (a/poll! ch)) (str uri " and nothing sent: " (pr-str headers))))
-      (doseq [headers [{} {"origin" own} {"sec-fetch-site" "same-origin"}]]
+      (doseq [headers [{} {"origin" own "host" "127.0.0.1:7777"} {"sec-fetch-site" "same-origin"}]]
         (clojure.test/is (= 204 (:status (post uri headers))) (str uri " served: " (pr-str headers)))
         (clojure.test/is (= op (:op (a/poll! ch))) (str uri " reached the proc: " (pr-str headers)))))))
+
+;; See docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data
+(clojure.test/deftest ^{:seon.test/estimate {:ticks 20000}} an-own-page-is-the-port-the-request-reached
+  ;; estimate: five calls of a header comparison on maps of two keys, ~3k ticks each
+  ;; seon.web/same-origin?: the dashboard's own page is the origin its request was sent to (its Host), on 127.0.0.1, whatever port
+  ;; the listener bound (one the kernel picked included), never a port read from config; a page of another host, or a Host
+  ;; that is not 127.0.0.1 (a rebound name), is refused
+  (let [same? @#'seon.web/same-origin?
+        req (fn [host origin] {:headers (cond-> {"host" host} origin (assoc "origin" origin))})]
+    (clojure.test/is (same? (req "127.0.0.1:53117" "http://127.0.0.1:53117")) "a port the kernel picked: its own page")
+    (clojure.test/is (not (same? (req "127.0.0.1:53117" "http://127.0.0.1:7777"))) "another port's page")
+    (clojure.test/is (not (same? (req "127.0.0.1:53117" "https://evil.example"))) "another host's page")
+    (clojure.test/is (not (same? (req "evil.example:53117" "http://evil.example:53117"))) "a name rebound to 127.0.0.1")
+    (clojure.test/is (same? (req "127.0.0.1:53117" nil)) "a client naming no origin")))
 
 ;; In-flight output (docs/render.md#in-flight-output-streams; docs/render.md#in-flight-output-streams): an effect's
 ;; text held while its stream is open and appended by id in the tabs of its agent's chat that have its in-flight element,

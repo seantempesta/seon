@@ -537,41 +537,9 @@
             kept (volatile! nil)
             ;; its render and the drawing of its output in one: a lazy part of the hiccup reads (and
             ;; throws) only when it is drawn, and a db render's reads are all of what it drew
-            one #(try (let [env' (assoc env :children kids :self k)
-                            ;; an entity's component reads its identity tracked, so it runs again when the entity first appears (a walk made
-                            ;; before its agent's entity is on the branch) and its model render is looked up then
-                            _ (when (ratom/view? ev) (get ev :db/id))
-                            ;; a call an output placed answers that output (and what it places), kept as this component's answer to it
-                            as (:seon.render/as opts)
-                            out (cond (::for env) nil
-                                      as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil)
-                                      :else (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') (cond-> {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))} (var? f) (assoc :render (symbol f)))))]
-                        ;; an entity's own render for each other output, where no call answers that output for it
-                        ;; each in a run of its own at this edge (docs/failure-points.md, a component's render): a model render that throws
-                        ;; is that output's defect, never the page's, which the person still reads; its error is data both see: a problem
-                        ;; (health, take-defects!) and, in its place in the output, what the error schema's own render for that output answers
-                        (doseq [[op of] fs :when (not= op as)]
-                          (vswap! outs assoc op
-                                  (try (place op env' (of {:seon.db/db ((:db w)) :seon.render/index ix} (or (first args) ev)))
-                                       (catch Throwable e
-                                         (when (:interrupted (ex-data e)) (throw e))
-                                         (let [defect (contract/error :seon.render/component-defect #'render!
-                                                                      (thrown-line (symbol of) e)
-                                                                      (cond-> {:seon.error/in (symbol of)} (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
-                                           (vswap! (:defects w) conj defect)
-                                           ;; the error answers this output by the render its schema names for it (a model render of an error, as
-                                           ;; every model render is a schema's), else nothing beside the problem
-                                           (if-let [ef (some-> (render-for ix :seon.render/component-defect op) requiring-resolve)]
-                                             (place op env' (ef {:seon.db/db ((:db w)) :seon.render/index ix} defect))
-                                             []))))))
-                        out)
-                      ;; a component that throws draws its error in its place: a call of the error's render on the error as data (what
-                      ;; threw, and the thrown error's own data: a contract's problems), so the page writes that render and the model
-                      ;; reads the call, the error in it, in the conversation a user message at its place; every other component draws
-                      (catch Throwable e
-                        ;; an interrupt is no defect of this render: it passes
-                        (when (:interrupted (ex-data e)) (throw e))
-                        (let [defect (contract/error :seon.render/component-defect #'render!
+            ;; what a component that throws draws in its place: a call of the error's render on the error as data (what threw, and the
+            ;; thrown error's own data), recorded for health (`take-defects!`)
+            drawn-defect (fn [e] (let [defect (contract/error :seon.render/component-defect #'render!
                                                      (thrown-line (symbol f) e)
                                                      (cond-> {:seon.error/in (symbol f)}
                                                        (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
@@ -588,7 +556,41 @@
                           ;; its line first, as text (what threw and where), then the error as data
                           (with-id [:section [:p (:seon.error/message defect)]
                                     [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index @(:index w)} defect]]
-                                   {:id id :class "err" :wire/role "user"}))))
+                                   {:id id :class "err" :wire/role "user"})))
+            one #(try (let [env' (assoc env :children kids :self k)
+                            ;; an entity's component reads its identity tracked, so it runs again when the entity first appears (a walk made
+                            ;; before its agent's entity is on the branch) and its model render is looked up then
+                            _ (when (ratom/view? ev) (get ev :db/id))
+                            ;; a call an output placed answers that output (and what it places), kept as this component's answer to it
+                            as (:seon.render/as opts)
+                            out (cond (::for env) nil
+                                      as (do (vswap! outs assoc as (place as env' (apply f (dissoc o :seon.render/as) args))) nil)
+                                      :else (with-id (emit w (let [raw (apply f o args)] (vreset! kept (:seon.render/kept (meta raw))) raw) env') (cond-> {:id (or (when (var? f) (:seon.render/list (meta f))) id) :class (name (first k))} (var? f) (assoc :render (symbol f)))))]
+                        ;; an entity's own render for each other output, where no call answers that output for it
+                        ;; each in a run of its own at this edge (docs/failure-points.md, a component's render): a model render that throws
+                        ;; is that output's defect, never the page's, which the person still reads; its error is data both see: a problem
+                        ;; (health, take-defects!) and, in its place in the output, what the error schema's own render for that output answers
+                        (doseq [[op of] fs :when (not= op as)]
+                          (vswap! outs assoc op
+                                  (let [model-defect (fn [e] (let [defect (contract/error :seon.render/component-defect #'render!
+                                                                      (thrown-line (symbol of) e)
+                                                                      (cond-> {:seon.error/in (symbol of)} (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
+                                           (vswap! (:defects w) conj defect)
+                                           ;; the error answers this output by the render its schema names for it (a model render of an error, as
+                                           ;; every model render is a schema's), else nothing beside the problem
+                                           (if-let [ef (some-> (render-for ix :seon.render/component-defect op) requiring-resolve)]
+                                             (place op env' (ef {:seon.db/db ((:db w)) :seon.render/index ix} defect))
+                                             [])))]
+                                    (try (place op env' (of {:seon.db/db ((:db w)) :seon.render/index ix} (or (first args) ev)))
+                                       (catch Exception e (model-defect e))
+                                       (catch StackOverflowError e (model-defect e))))))
+                        out)
+                      ;; a component that throws draws its error in its place: a call of the error's render on the error as data (what
+                      ;; threw, and the thrown error's own data: a contract's problems), so the page writes that render and the model
+                      ;; reads the call, the error in it, in the conversation a user message at its place; every other component draws
+                      ;; an Exception, or a stack overflow by name: root's interrupt (a ThreadDeath, seon.intr) passes, as any other Error
+                      (catch Exception e (drawn-defect e))
+                      (catch StackOverflowError e (drawn-defect e)))
             draw #(if (and db? (not (:once w))) (let [[out rs] (d/with-reads one)] (vreset! reads rs) out) (one))
             a0 (profile/alloc-bytes)
             [out rx] (cond
@@ -899,6 +901,21 @@
                    [] hc)]
     [hc' ids]))
 
+(defn- thrown-in
+  "What walk w's writer draws where a plain call [f & args] (one the walk keeps as written, so the model reads the call) threw e: the
+  error as a component's defect, recorded with the walk's own (take-defects!) and drawn by its render, as `render!` draws a component that
+  throws: one boundary for a render that throws. See docs/failure-points.md."
+  {:malli/schema [:=> [:cat :map] :seon.host/fn]}
+  [w]
+  (fn [f e]
+    ;; a var names where it threw; a fn value has no name to give (:seon.error/in is a var's qualified symbol)
+    (let [sym (when (var? f) (symbol f))
+          defect (contract/error :seon.render/component-defect #'render! (thrown-line (or sym 'a-render) e)
+                                 (cond-> {} sym (assoc :seon.error/in sym) (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
+      (vswap! (:defects w) conj defect)
+      [:section {:class "err"} [:p (:seon.error/message defect)]
+       [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index @(:index w)} defect]])))
+
 (defn- page-unit
   "Walk w's root unit, its component rk's output as the page writes it (`placed-units`' first), written and kept on its cache entry
   with at, the revisions it was written at: each list drawn-list? says the root places is that list's own output, every element
@@ -917,7 +934,7 @@
                       (seq? x) (doall (map shell x))
                       :else x))
         [hc ids] (regions (shell (styled (:out rc) (:f rc))))
-        html (h/html hc)
+        html (h/html hc (thrown-in w))
         u {:id (:id rc) :container root-container :parent nil :rev (hash html) :html html :regions ids}]
     (vswap! (:cache w) update rk assoc :page-at at :page u)
     u))
@@ -958,7 +975,7 @@
                                                                 (seq? x) (doall (map go x))
                                                                 :else x))
                                                (styled (:out c) (:f c)))
-                                      h (h/html slotted)]
+                                      h (h/html slotted (thrown-in w))]
                                   (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
                    {:id (:id c) :container sel :parent (when parent (:id (get @(:cache w) parent))) :rev r :html html})))
           pl)))
