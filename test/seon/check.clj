@@ -425,6 +425,10 @@
   See docs/machine.md#builds-and-checks."
   [db] (seon.problems/stalled-agents db (seon.problems/answers db)))
 
+(defn- provoked?
+  "await-provoked's test of main db: its quiescence report is at or after t. It reads one fact, never main's problems report."
+  [t] #(some-> (seon.reconcile/quiescent %) :t (>= t)))
+
 (defn- await-provoked
   "Main at the reconciler's first quiet after main's t (p1 and p2 released at t, so judged by then: their red proof and
   cost verdict; the platform defect and the death came before): its quiescence report at or after t, or the quiet
@@ -433,8 +437,7 @@
   main's whole problems report ran it in main's writer at every commit while p1 and p2's proofs committed (batches 32
   and 38 overran on it). See docs/machine.md#builds-and-checks."
   [sys t]
-  (seon.system/await-db sys (str "the reconciler's quiet at or after t " t ", p1 and p2 judged")
-                      #(some-> (seon.reconcile/quiescent %) :t (>= t))))
+  (seon.system/await-db sys (str "the reconciler's quiet at or after t " t ", p1 and p2 judged") (provoked? t)))
 
 (defn problems-check
   "Provoke every class of problem through the paths agents and root use (:stall-ms 1000

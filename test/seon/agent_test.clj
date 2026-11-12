@@ -2105,6 +2105,19 @@
     (is (string? started-by) "and who to tell how it ends")
     (is (re-find #"no template" (str (:seon.error/message (:value b)))) "a template that isn't one says so")))
 
+(deftest a-redefinition-in-an-agent-reaches-a-caller-compiled-into-the-binary
+  ;; docs/source.md#the-binary-records-its-program: an agent runs main's program compiled into the binary, and a form it
+  ;; evaluates is its branch's program, so a redefinition reaches the code main's binary compiled, its direct-linked calls
+  ;; included (Jolt writes a redefinition through to its direct-linked sites). Written green: the property holds on the
+  ;; release build today (an agent's redefinition of seon.lib/r2 reached the compiled seon.agent/mem-mb, 2026-11-12); this
+  ;; keeps it from regressing if Jolt's build changes. seon.fx/unreadable, compiled, compares its path with
+  ;; seon.config/shipped-file: redefined, the same call takes the config's branch
+  (let [[before _ after] (in-agent ["(seon.fx/unreadable \"zz.edn\" \"{:a 1}\")"
+                                    "(in-ns 'seon.config) (def shipped-file \"zz.edn\")"
+                                    "(seon.fx/unreadable \"zz.edn\" \"{:a 1}\")"])]
+    (is (nil? (:value before)) (str "before: the EDN reads " (pr-str before)))
+    (is (re-find #"the config does not satisfy" (str (:value after))) (str "after: the compiled caller took the redefined value " (pr-str after)))))
+
 (deftest a-wait-on-main-whose-test-throws-answers-the-throw-and-the-write-stands
   ;; docs/flow.md#the-step-fn-contract-every-proc-follows: a wait on main (seon.system/await-db) is the api's state, checked on each
   ;; commit as of that commit, never a watch run inside the writer's commit. A watch's pred that threw went into the writer's

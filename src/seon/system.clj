@@ -960,7 +960,8 @@
       (reduce (fn [st aid] (let [[st rid] (step/pend st nil)] (to-agent st o aid {:op :drain :rid rid}))) st (keys (:agents st))))
     (= in :ext) (ext-op st o m)
     (nil? m) st
-    (= in :main) (check-waits st (d/commit-as-db (:store @(:conn st)) (:commit m)))
+    ;; a commit makes a db only for the waits open on it: with none, a commit costs the api nothing
+    (= in :main) (if (seq (::waits st)) (check-waits st (d/commit-as-db (:store @(:conn st)) (:commit m))) st)
     :else (back-op st o m)))
 
 (defn api-proc
