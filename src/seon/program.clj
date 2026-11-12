@@ -2106,6 +2106,12 @@
                                       (when (and roots? (or src? (some #(:reads (flags %)) cs))) code)
                                       (concat (sort (map cd cs)) (map line (sort ks)))))
          :process? (boolean (some #(:proc (flags %)) cs)) :binary? (boolean (some #(:bin (flags %)) cs))
+         ;; what this digest takes besides code, as read keys (seon.proofs/reads-key): until a run records its config, schema
+         ;; and file reads, its verdict's :reads holds these, so a reuse by reads is never wider than this digest's
+         :reads (cond-> (into #{} (map #(vector :config %)) ks)
+                  (some #(:scans (flags %)) cs) (conj [:tree])
+                  (and (not roots?) (some #(let [f (flags %)] (or (:proc f) (:bin f))) cs)) (conj [:root])
+                  (and (not roots?) (some #(:bin (flags %)) cs)) (conj [:binary]))
          ;; a test namespace's own call of a branch reader (test-class-of): an agent mixes its branch's point into this
          ;; digest (seon.agent/test-plan), as the inputs hold no branch
          :data? (boolean (some #(contains? (:config (flags %)) :seon.env/data) cs))}))))
@@ -2203,6 +2209,9 @@
   {:malli/schema [:=> [:cat :map :seon.program/inputs [:map-of :string :string]] :map]}
   [{:keys [defs schemas own] :as g} inputs blobs]
   (merge (var-digests g (vec (keys defs)))
+         ;; the whole tree, and what the system and the binary run (root-digest), for a test whose digest takes them
+         (let [roots (first (roots-of g (:index g)))]
+           {[:tree] (:tree inputs) [:root] (root-digest g roots) [:binary] (root-digest g (conj roots 'seon.check/-main))})
          (into {} (for [k (keys schemas) :let [d (get own (str "schema " k))] :when d] [[:schema k] d]))
          (into {} (for [[k v] (:config inputs)] [[:config k] v]))
          (into {} (for [[p b] blobs] [[:file p] b]))
