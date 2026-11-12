@@ -426,7 +426,7 @@
 (defn- span-candidate
   "A code span or text word read as a based path (its first segment one of the checkout's
   top-level entries), a line citation, a name (exactly one qualified symbol or keyword, as
-  written, not ending in *), a namespace (one dotted simple symbol, resolve-only: a reference
+  written, not a glob: a name ending in * that does not open with one, so a dynamic var's earmuffs are its name), a namespace (one dotted simple symbol, resolve-only: a reference
   only when it names a namespace, v1's rule), or nil: text or code."
   {:malli/schema [:=> [:cat :string] [:maybe :map]]}
   [span]
@@ -440,7 +440,9 @@
       ;; space: only such a span is read
       (if-not (str/index-of span "/")
         (when (namespace-name? span) {:seon.ref/name (symbol span) :seon.ref/resolve-only true})
-        (when (and (not (str/index-of span " ")) (not (str/index-of span "\t")) (not (str/ends-with? span "*")))
+        (when (and (not (str/index-of span " ")) (not (str/index-of span "\t"))
+                   (let [nm (subs span (inc (str/last-index-of span "/")))]
+                     (not (and (str/ends-with? nm "*") (not (and (str/starts-with? nm "*") (> (count nm) 2)))))))
           (when-let [x (qualified-name span)] {:seon.ref/name x}))))))
 
 (defn- link-candidate
@@ -467,17 +469,23 @@
           (assoc c :seon.ref/path (str (when (str/starts-with? joined "/") "/") (str/join "/" parts))))))))
 
 (defn- trim-word
-  "A text word without the punctuation around it (a var's #' before it), or nil when nothing is left. A qualified name's own
-  trailing ! or ? stays (seon.repl/edit!, my.task/done?): Clojure names end in them, and a text word cites only what it names."
+  "A text word without the punctuation around it (a var's #' before it), or nil when nothing is left: the name in it as the reader
+  reads one. What no name ends in is taken off its end (. , ; : and closing brackets and quotes, and a possessive 's); a mark a name
+  may hold (* _ >) only when the word opens with its pair (an emphasis, <name>), so earmuffs stay; and ! and ? never, which end a
+  mutating function's and a predicate's names (a question ending in a name reads the ? as its own and resolves to nothing: a cite
+  missed, never a wrong one). See docs/references.md#one-parse."
   {:malli/schema [:=> [:cat :string] [:maybe :string]]}
   [^String word]
   (let [n (count word)
+        word (if (and (> n 2) (str/ends-with? word "'s")) (subs word 0 (- n 2)) word)
+        n (count word)
         from (loop [i 0] (cond (and (< (inc i) n) (= \# (.charAt word i)) (= \' (.charAt word (inc i)))) (recur (+ i 2))
                                (and (< i n) (str/index-of "([{\"'`*_<" (str (.charAt word i)))) (recur (inc i))
                                :else i))
-        ;; past a qualified name's / a ! or ? is the name's (a run of them ends in its own)
-        tail (if (str/index-of word "/") ".,;:)]}\"'`*_>" ".,;:!?)]}\"'`*_>")
-        to (loop [j n] (if (and (> j from) (str/index-of tail (str (.charAt word (dec j))))) (recur (dec j)) j))]
+        opened (set (subs word 0 from))
+        pair {\* \* \_ \_ \> \<}
+        to (loop [j n] (let [c (when (> j from) (.charAt word (dec j)))]
+                         (if (and c (or (str/index-of ".,;:)]}\"'`" (str c)) (some-> (pair c) opened))) (recur (dec j)) j)))]
     (when (< from to) (subs word from to))))
 
 (defn- candidate

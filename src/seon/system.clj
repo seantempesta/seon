@@ -260,7 +260,9 @@
   the graph, with :answered, every proc that answered it. The ping's bound is :seon.config.check/ping-ms: a proc
   mid-step that long answers nothing and is missing from :answered (an agent in ::busy and not there is mid-step), never
   read as nil. See docs/clocks.md#time-decides-the-owners-exceptions."
-  {:malli/schema [:=> [:cat :seon.system/sys] :map]}
+  {:malli/schema [:=> [:cat :seon.system/sys] [:map [:root [:map [:seon.system/stall-armed {:optional true}] [:seon.system/busy {:optional true}]
+                                                               [:seon.system/lost {:optional true}]]]
+                                                   [:agents :map] [:answered [:vector :keyword]]]]}
   [sys]
   (let [states (flow/ping (:graph sys) :timeout-ms (cfg/value :seon.config.check/ping-ms))
         state #(::flow/state (get states %))]
