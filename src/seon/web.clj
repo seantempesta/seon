@@ -111,12 +111,14 @@
 (defn- open-form
   "The form a toggled unit names after its row's id (\"row/(drop 1 (get-in result/a3f9c1d2 [:value]))\",
   a cut the page opened, seon.print.emit/elided-hiccup): that form; nil for a unit with none (a
-  row itself); ::unread when the text after the slash does not read as EDN (the edge: the
-  browser's text)."
+  row itself); a :seon.web/unread-form error when the text after the slash does not read as EDN (the edge: the
+  browser's text; docs/errors.md#unknown-is-never-a-default)."
   {:malli/schema [:=> [:cat :string] :any]}
   [unit]
   (when-let [p (second (str/split unit #"/" 2))]
-    (try (sedn/decode p) (catch Exception _ ::unread))))
+    (try (sedn/decode p)
+         (catch Exception e
+           (contract/error :seon.web/unread-form #'open-form (str "a cut's form reads as EDN: " unit " (" (ex-message e) ")") {:seon.web/unit unit})))))
 
 (defn- ask!
   "m asked of the web proc on its :http in-port (seon.step/ask-edge), and its one answer waited
@@ -224,10 +226,11 @@
           ;; a row's <details> toggled (the debug page): its unit renders its whole content while open
           ;; a cut opened (unit "row/form"): its form must read as EDN, or the render proc never sees it
           (and (= m :post) (= uri "/open"))
-          (if (= ::unread (open-form (get q "unit" "")))
-            {:status 400 :headers {"Content-Type" "text/plain"} :body (str "a cut's form reads as EDN: " (get q "unit"))}
-            (do (a/>!! ch {:op :toggle :view (view-of (get q "view")) :unit (get q "unit") :open (= "true" (get q "open"))})
-                {:status 204 :headers {}}))
+          (let [f (open-form (get q "unit" ""))]
+            (if (contract/error? f)
+              {:status 400 :headers {"Content-Type" "text/plain"} :body (:seon.error/message f)}
+              (do (a/>!! ch {:op :toggle :view (view-of (get q "view")) :unit (get q "unit") :open (= "true" (get q "open"))})
+                  {:status 204 :headers {}})))
           ;; a step of the debug timeline: the request to show, a model call's eid or latest
           (and (= m :post) (= uri "/at"))
           (let [t (get q "turn" "")]
