@@ -642,11 +642,19 @@
 
 ;; ---- the reader ------------------------------------------------------------------
 
+(def ^:private stated-attributes
+  "The task attributes a declaration states (its members, config flattened), as stored."
+  [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
+   :seon.task/kind :seon.task/evidence :seon.task/examples
+   :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
+
 (def ^:private task-pull
-  "What a reader of a task pulls: the task schema's own attributes as the binary's entity index names them, but the declaration its
-  file stated (:seon.task/declared, which only load-tx compares), and its needs and agent by their identities. A named pull, as every
-  pattern is: the shape the reader needs and nothing more. See docs/ctx.md#the-pattern."
-  (into (vec (remove #{:seon.task/declared :seon.task/needs :seon.task/agent} (pdb/attributes-of (pdb/index) :seon.task/task-fact)))
+  "What a reader of a task pulls: the task schema's own attributes as the binary's entity index names them and the config keys a
+  declaration states on the task (`stated-attributes`: its max-turns, which a raised budget writes, belongs to the config's schema),
+  but the declaration its file stated (:seon.task/declared, which only load-tx compares), and its needs and agent by their identities.
+  A named pull, as every pattern is: the shape the reader needs and nothing more. See docs/ctx.md#the-pattern."
+  (into (vec (remove #{:seon.task/declared :seon.task/needs :seon.task/agent}
+                     (distinct (concat (pdb/attributes-of (pdb/index) :seon.task/task-fact) stated-attributes))))
         [{:seon.task/needs [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}]))
 
 (defn- task-value
@@ -851,12 +859,6 @@
 ;; retracts what it dropped; an entry no file declares any more is cancelled and forgets its
 ;; declaration, so declaring it again revives it. Execution is root's (my.root/run!), except
 ;; that revival.
-
-(def ^:private stated-attributes
-  "The task attributes a declaration states (its members, config flattened), as stored."
-  [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence :seon.task/examples
-   :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (defn- file-refused
   {:malli/schema [:=> [:cat :symbol :string] :map]}

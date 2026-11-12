@@ -416,3 +416,14 @@
     (is (:db/index (get schema :seon.agent/boot)) "the boot is indexed: a boot's sessions are read by it")
     (is (= "b9" (:seon.agent/boot (first (task/agent-tx :c0ffee00c0ffee00 {:boot "b9" :status :spawning}))))
         "every agent root starts records its boot (its view's :boot), a bare spawn! too, so the agents list holds it")))
+
+;; docs/reconcile.md#the-reconcilers-index: a task's reader takes what the task holds, its config keys among them: a raised budget
+;; (seon.task/env-tx's :seon.config.agent/max-turns, an attribute of the config's schema a task holds) is in the task the
+;; reconciler reads, so a release continues with it (bin/check's e2e-held caught a named pull that left it out)
+(deftest a-tasks-raised-budget-is-read-with-the-task
+  (let [db0 (ts/test-db)
+        db1 (:db-after (d/with db0 (task/create-tx db0 [{:seon.task/ns 'demo :seon.task/name "t" :seon.task/plan "Make it."}])))
+        db2 (:db-after (d/with db1 (task/env-tx "demo/t" {:max-turns 7})))
+        e (pdb/eid db2 :seon.task/id "demo/t")]
+    (is (= 7 (:seon.config.agent/max-turns (task/task db2 "demo/t"))) "task reads it")
+    (is (= 7 (:seon.config.agent/max-turns (second (task/entity-value db2 e)))) "and so does the reconciler's index")))
