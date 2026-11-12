@@ -30,7 +30,7 @@
     (profile/reads-begin!)
     (profile/begin!)
     (before)
-    (profile/measure! inside (fn [_] nil))
+    (profile/measure! inside)
     (is (= #{'seon.profile-test/inside-the-nested} (into #{} (map :var) (profile/touched))) "an epoch holds only what ran since it opened")
     (is (every? (profile/reads) ['seon.profile-test/before-the-nested 'seon.profile-test/inside-the-nested]) "the reads hold both")
     (let [by (into {} (map (juxt :var :calls)) (profile/with-reads (profile/touched)))]
@@ -99,7 +99,7 @@
   ;; measured 2026-10-27: a call of bare-leaf 10 ticks; counted (calls, ticks, bytes) 15
   (let [counted (profile/counted 'seon.profile-test/bare-leaf bare-leaf)
         n 10000
-        cost (fn [f] (let [r (volatile! nil)] (profile/measure! #(dotimes [i n] (f i)) #(vreset! r %)) @r))
+        cost (fn [f] (dissoc (profile/measure! #(dotimes [i n] (f i))) :value))
         plain (cost bare-leaf) wrapped (cost counted)]
     (is (<= (- (:bytes wrapped) (:bytes plain)) 1024) (str n " counted calls allocated " (:bytes wrapped) " bytes, plain " (:bytes plain)))
     (is (<= (- (:ticks wrapped) (:ticks plain)) (* 8 n)) (str n " counted calls " (:ticks wrapped) " ticks, plain " (:ticks plain)))))
@@ -268,13 +268,14 @@
 (deftest ^{:seon.test/estimate {:ticks 300000}} a-call-is-measured-one-way
   ;; task seon.profile/a-call-is-measured-one-way: one measurement of a call, which the REPL's
   ;; per-form cost and the cost proof both read
-  (let [m (volatile! nil)]
-    (testing "the call's value is answered; what it measured goes to the callback"
-      (is (= 328350 (profile/measure! #(branch 100) #(vreset! m %))))
-      (is (= #{:ticks :bytes :wall-ns :cpu-ns :calls} (set (keys @m))))
-      (is (pos? (:ticks @m)) "its work, in engine ticks")
-      (is (= 101 (:calls @m)) "branch and its 100 leaf calls, the epoch's contracted calls"))
-    (testing "a call that throws is measured too, and its exception goes on"
-      (vreset! m nil)
-      (is (thrown-with-msg? Exception #"boom" (profile/measure! #(do (branch 10) (throw (ex-info "boom" {}))) #(vreset! m %))))
-      (is (= 11 (:calls @m))))))
+  (testing "the call's value is answered with what it measured, one value"
+    (let [m (profile/measure! #(branch 100))]
+      (is (= 328350 (:value m)))
+      (is (= #{:value :ticks :bytes :wall-ns :cpu-ns :calls} (set (keys m))))
+      (is (pos? (:ticks m)) "its work, in engine ticks")
+      (is (= 101 (:calls m)) "branch and its 100 leaf calls, the epoch's contracted calls")))
+  (testing "a call that throws is measured too, its exception answered for the caller to throw"
+    (let [m (profile/measure! #(do (branch 10) (throw (ex-info "boom" {}))))]
+      (is (= "boom" (ex-message (:thrown m))))
+      (is (not (contains? m :value)))
+      (is (= 11 (:calls m))))))

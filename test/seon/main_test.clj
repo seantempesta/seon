@@ -15,7 +15,7 @@
   (let [path (str (seon.config/checkout) "/target/main-test-" (random-uuid))]
     [path (pdb/open! :lmdb path 0 :db)]))
 
-(deftest a-fresh-root-holds-no-program-it-was-not-given
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-fresh-root-holds-no-program-it-was-not-given
   (let [[path {:keys [conn seeded?]}] (fresh-store)]
     (try
       (is seeded?)
@@ -24,7 +24,7 @@
       (is (contains? (d/schema @conn) :var/name) "the schema is there")
       (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
-(deftest warm-needs-no-seed
+(deftest ^{:seon.test/estimate {:ticks 30000000}} warm-needs-no-seed
   (let [[path {:keys [conn]}] (fresh-store)
         t (:max-tx @conn)]
     (try
@@ -35,7 +35,7 @@
       (is (nil? (find-ns 'seon.warm)) "its scratch namespace is gone")
       (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
-(deftest root-boots-without-test-fixtures
+(deftest ^{:seon.test/estimate {:ticks 10000000}} root-boots-without-test-fixtures
   ;; the compiler's facts of the checkout (src and test imported as program facts): the
   ;; release binary compiles what src requires, so no src namespace requires one whose file is
   ;; in test/ (the check driver, the e2e runner, the scripted model's fixtures); a scripted root loads its fixture from the checkout by name
@@ -48,7 +48,7 @@
     (is (= #{} (set (for [[n r] reqs :when (and (in? "src/" n) (in? "test/" r))] [n r])))
         "no src namespace requires a test/ one")))
 
-(deftest only-measure-reads-the-tick-counter
+(deftest ^{:seon.test/estimate {:ticks 5000000}} only-measure-reads-the-tick-counter
   ;; task seon.profile/a-call-is-measured-one-way: a call is measured one way, so no src form but
   ;; seon.profile/measure! reads the engine's tick counter (jolt.host/ticks-of or jolt.host/ticks):
   ;; a measurement built beside it is red here. Read from the compiler's facts
@@ -58,7 +58,7 @@
                      db ['jolt.host/ticks-of 'jolt.host/ticks])]
     (is (= ['seon.profile/measure!] (vec callers)))))
 
-(deftest a-task-is-never-written-gate-true
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-task-is-never-written-gate-true
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a merge's gate runs the process tests its change reaches before
   ;; it merges, nobody asking (seon.reconcile's :gate), so :seon.task/gate? asks for nothing: no src form names it
   ;; and no schema declares it (the forms seon.config/schema-forms holds are the schemas' own text). Read from the
@@ -69,7 +69,7 @@
                    db :seon.task/gate?)]
     (is (= [] (vec (sort named))))))
 
-(deftest a-tasks-outcomes-are-read-once
+(deftest ^{:seon.test/estimate {:ticks 100000000}} a-tasks-outcomes-are-read-once
   ;; task seon.task/a-runs-lifecycle-is-read-once: a task's outcome sets are declared once, on
   ;; :seon.task/outcome's schema, and read once, by seon.task (finished, judged, failed), which every
   ;; view and judge requires; a second reader is red here. Each src form's recorded source read as
@@ -87,7 +87,7 @@
                                              (read-string {:read-cond :allow :features #{:clj}} src)))))]
     (is (= #{'seon.task} (into #{} (keep (fn [[nsn src]] (when (reads? nsn src) nsn))) forms)))))
 
-(deftest a-key-read-at-load-says-so
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-key-read-at-load-says-so
   ;; docs/config.md#what-waits-for-a-rebuild: a top-level def of src that reads a config key keeps the value it loaded with whatever a branch states, so its key carries :seon.config/at-load, and seon.config/waiting can say so
   (let [db (runner/program)
         forms (d/q '[:find ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/file ?file]
@@ -101,7 +101,7 @@
     (is (seq read-at-load))
     (is (= [] (vec (remove #(get-in seon.config/schema-forms [% 1 :seon.config/at-load]) read-at-load))))))
 
-(deftest a-bound-is-a-config-key
+(deftest ^{:seon.test/estimate {:ticks 100000000}} a-bound-is-a-config-key
   ;; task seon.config/a-bound-is-a-config-key (docs/config.md#constants, only documented config): every limit,
   ;; bound or default is a config key. Read from the compiler's facts (each src form's recorded
   ;; source, as data): a top-level def of a number, and a literal count over 2 given to take,
@@ -136,7 +136,7 @@
     (is (= #{} (apply disj named sites)) "and every name there is still such a site")))
 
 ;; docs/resolution.md: Jolt compiles a qualified name with no var and fails only when the line runs, so a path no test runs ships it
-(deftest every-name-a-form-uses-is-a-var
+(deftest ^{:seon.test/estimate {:ticks 100000000}} every-name-a-form-uses-is-a-var
   (let [db (runner/program)
         ;; the program's own: a test names what's gone to say it's gone
         ;; one scan of each attribute's index, joined by set membership (a d/q join over the 113k :form/refs
@@ -147,7 +147,7 @@
     (run! #(require (symbol %)) (into #{} (comp (keep namespace) (filter #(re-find #"^(seon|my)\." %))) (:refs acct)))
     (is (= [] (seon.program/unknown-refs acct)))))
 
-(deftest an-edge-asks-one-way
+(deftest ^{:seon.test/estimate {:ticks 100000000}} an-edge-asks-one-way
   ;; task seon.step/an-edge-asks-one-way: an edge asks a proc one way, seon.step/ask-edge, which
   ;; answers a closed channel at once; no src form outside seon.step puts a request carrying its
   ;; promise (:p) on a channel itself. src's forms read as data from the compiler's facts
@@ -167,7 +167,7 @@
                      nsn))]
     (is (= #{'seon.step} puts))))
 
-(deftest an-errors-message-is-read-one-way
+(deftest ^{:seon.test/estimate {:ticks 20000000}} an-errors-message-is-read-one-way
   ;; task seon.step/an-errors-message-is-read-one-way: an exception's message, or its class, is
   ;; seon.step/error-msg; no src form outside seon.step writes (or (ex-message e) (str (type e)))
   ;; again. src's forms read as data from the compiler's facts. Not covered: the same read written
@@ -202,7 +202,7 @@
                                  (map? x) (quoted (get x :seon.error/operation)))))
           (tree-seq coll? seq f))))
 
-(deftest an-error-names-its-raiser-by-its-var
+(deftest ^{:seon.test/estimate {:ticks 100000000}} an-error-names-its-raiser-by-its-var
   ;; root, 2026-10-25 (the a-map design, 0 green in 9 runs): the error a model reproduced first named
   ;; 'seon.render.value/show, a namespace renamed away, and the runs searched for it. An error names
   ;; its raiser by its var (#'ns/f, the function it is built in), so the compile refuses one that is
@@ -275,7 +275,7 @@
 
 ;; docs/merging.md#a-session-proves-through-root: bin/prove --root prints every kind of item as it lands, the tree's build and
 ;; seed by their kind
-(deftest bin-prove-root-prints-each-kind-of-verdict
+(deftest ^{:seon.test/estimate {:ticks 1000000}} bin-prove-root-prints-each-kind-of-verdict
   (let [line @#'seon.main/verdict-line]
     (is (= "PASS a.b-test/t 315 ms" (line {:test 'a.b-test/t :digest "d" :status :pass :ms 315.4})))
     (is (= "PASS build of tree T 46650 ms" (line {:test [:build "T"] :digest "T" :kind :build :status :pass :ms 46650.48})))

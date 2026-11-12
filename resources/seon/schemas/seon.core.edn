@@ -104,6 +104,9 @@
                            [:seon.repl/held-by {:optional true} :seon.repl/held-by]]]
  :seon.repl/held-by [:vector {:description "The definitions of a namespace whose recorded source holds an edit's old text, which its ns form, the namespace's place, does not (seon.repl/ns-not-found)."} :qualified-symbol]
  :seon.repl/said [:string {:description "The sentence an edit's refusal ends with when its namespace's ns form lacks the old text: the edit on the definition that holds it, or how a new definition is made (seon.repl/ns-not-found)."}]
+ :seon.repl/as-agent [:boolean {:description "In the agent's state, true when a test fork (:mode :test) records and notes its REPL's forms as the agent does, on its db value: what my.test/eval-in asks for a world, so a REPL finding is proved in this process. Absent: an ordinary test fork records nothing."}]
+ :seon.repl/cost [:map {:description "On an eval fn's answer, the form's cost as seon.repl/wrap-cost measured it (:ms :alloc-bytes :ticks :fns), which the form's reply carries: seon.profile/measure!'s value, never a cell."}]
+ :seon.repl/record [:map {:description "On an eval fn's answer, the form's compiler account (seon.program/tap's units, the vars it set before), which wrap-record reads on the form's reply to record it."}]
  :seon.repl/program-def [:vector {:description "The vars an eval made new in a program namespace: said beside its answer as program on the branch (seon.repl's :program-def finding)."} :symbol]
  ;; where a text is and what it holds, plain data any function working on text takes (docs/agent.md#changing-a-file): at, a var or a path or a doc's address
  :seon.text/at [:or :qualified-symbol :string]

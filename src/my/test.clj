@@ -6,7 +6,8 @@
   it needs with them. See docs/testing.md#testing-in-the-world."
   (:refer-clojure :exclude [defn defn-])
   (:require [seon.contract :refer [defn defn-]] [datahike.core] [datahike.api :as d] [seon.db :as pdb]
-            [seon.source :as source] [seon.doc :as doc] [seon.task :as task] [seon.profile :as profile]))
+            [seon.source :as source] [seon.doc :as doc] [seon.task :as task] [seon.profile :as profile]
+            [seon.agent :as agent] [seon.repl :as repl]))
 
 (defn with
   "db with each fixture applied, in order: a fixture is tx-data, or a function of the db answering
@@ -89,12 +90,32 @@
   ([] (world {}))
   ([{:keys [history?]}] @(the-worlds (boolean history?))))
 
+(defn eval-in
+  "The response of code asked of the REPL in this process, as clojure's REPL answers it, in namespace nsym
+  (seon.repl-test.scratch by default). Given a world db (opts :db), as an agent's test fork on it: its forms
+  are recorded and noted as an agent's are (seon.repl's records-as-agent?), their writes on the world's
+  value (nothing stored), so a REPL finding (a :not-program note, a recorded definition) is proved in this
+  process, never as an in-agent process test the agent's fork can't run. Without one, a scratch session:
+  nothing recorded. The agent's state is put back after. Example:
+  (my.test/eval-in \"(require '[clojure.set :as s])\" 'app.rq {:db (my.test/with (my.test/world) (my.test/code 'app.rq \"(ns app.rq)\"))})
+  See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :symbol] :map]
+                  [:=> [:cat :string :symbol [:map [:db {:optional true} :seon.host/db]]] :map]]}
+  ([code] (eval-in code 'seon.repl-test.scratch {}))
+  ([code nsym] (eval-in code nsym {}))
+  ([code nsym {:keys [db]}]
+   (let [old @agent/state]
+     (try (reset! agent/state (cond-> {:n 0 :ns (create-ns nsym)}
+                                db (assoc :mode :test :db db :key "test-agent" :seon.repl/as-agent true)))
+          (repl/eval-string code {})
+          (finally (reset! agent/state old))))))
+
 (defn cost
   "The work (thunk) does: {:ticks :bytes :ms :value}, the engine ticks and bytes the test thread
   spent (seon.profile/measure!), what every test is judged by (its ceiling is
   :seon.config.agent/test-ticks). Example: (:ticks (my.test/cost #(app.calc/total (range 100)))) See docs/testing.md#testing-in-the-world."
   {:malli/schema [:=> [:cat :seon.host/fn] :map]}
   [thunk]
-  (let [v (volatile! nil) r (volatile! nil)]
-    (profile/measure! #(vreset! r (thunk)) (fn [d] (vreset! v d)))
-    {:ticks (:ticks @v) :bytes (:bytes @v) :ms (:ms @v) :value @r}))
+  (let [m (profile/measure! thunk)]
+    (when-let [e (:thrown m)] (throw e))
+    {:ticks (:ticks m) :bytes (:bytes m) :ms (:ms m) :value (:value m)}))
