@@ -37,7 +37,11 @@ export HOME=$ROOT/target/home
 # exec path names, goes first on PATH for everything this environment starts. Where git is already the binary, nothing moves.
 GIT_REAL=$(cd "$(git --exec-path)" 2>/dev/null && cd "$(dirname "$(readlink git 2>/dev/null || echo git)")" 2>/dev/null && pwd)/git
 if [[ -x $GIT_REAL && $(command -v git) != $GIT_REAL ]]; then
-  mkdir -p "$ROOT/target/git-bin" && ln -sf "$GIT_REAL" "$ROOT/target/git-bin/git"
+  # made only when it is not already right, and then by rename (atomic): ln -sf unlinks first, and a git spawn that
+  # resolved this path in that gap failed with ENOENT (a test red inside full runs only, 2026-11-12)
+  if [[ $(readlink "$ROOT/target/git-bin/git" 2>/dev/null) != $GIT_REAL ]]; then
+    mkdir -p "$ROOT/target/git-bin" && ln -s "$GIT_REAL" "$ROOT/target/git-bin/git.$$" && mv -f "$ROOT/target/git-bin/git.$$" "$ROOT/target/git-bin/git"
+  fi
   [[ :$PATH: == *:$ROOT/target/git-bin:* ]] || export PATH=$ROOT/target/git-bin:$PATH
 fi
 MAIN_TREE=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)

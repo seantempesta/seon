@@ -759,8 +759,11 @@
                                            st)
                                        :else st))
         (:rid dest) (deliver-rid st o (:rid dest) r)
-        (:agent-facts dest) (cond-> st
-                              (contract/error? r) (problem (err/occurrence r :agent {:agent (:agent-facts dest)} (System/currentTimeMillis))))
+        ;; a refused write of agents' facts is a problem against each of them: :agent-facts is a vector of ids, and one passed
+        ;; whole as :agent broke err/occurrence's contract, a throw in this step that its :error answer re-ran (answer-taken)
+        (:agent-facts dest) (if (contract/error? r)
+                              (reduce (fn [st id] (problem st (err/occurrence r :agent {:agent id} (System/currentTimeMillis)))) st (:agent-facts dest))
+                              st)
         (:agent dest) (to-agent st o (:agent dest) {:op :write :msg (cond (:op r) r
                                                                           (= :branched (:op dest)) (cond-> {:op :branched :k (:k dest) :cfg (:cfg r)} (contract/error? r) (assoc :error r))
                                                                           :else (assoc r :op (:op dest) :k (:k dest)))})
@@ -904,14 +907,16 @@
   (`seon.system/back-op`), its promise or reply route when it came in at the api or as a
   proc's request, the request pending under its :rid, or, for an answer the proc took
   ({:tag :r}), that answer again on the proc's :answers route; a fork it lost ends its agent's spawn as a refused fork
-  does. An answer that was already an
-  error is not answered again: the proc had its one answer, and a step that throws on an
-  error would throw on the next."
+  does. An answer that was already an error, through its :dest or its route, is not answered again: the proc had its one
+  answer, and a step that throws on an error would throw on the next."
   {:malli/schema [:=> [:cat :seon.system/api-state :seon.host/volatile :keyword :any :seon.error/base] :seon.system/api-state]}
   [st o pid x e]
   (cond
     (not (map? x)) st
-    (:dest x) (back-op st o {:dest (:dest x) :r e})
+    ;; an answer that was already an error is not taken back through its :dest again: back-op threw on it once, and would on the
+    ;; next (a loop of :error messages each wrapping the last, 345 MB and two carriers spinning, 2026-11-12)
+    (and (:dest x) (not (contract/error? (:r x)))) (back-op st o {:dest (:dest x) :r e})
+    (:dest x) st
     (:p x) (reply! st o (:p x) e)
     (= :request (:op x)) (reply! st o {:route (:route x) :tag (:tag x)} e)
     (int? (:rid x)) (deliver-rid st o (:rid x) e)
