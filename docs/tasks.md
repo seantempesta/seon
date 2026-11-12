@@ -37,21 +37,16 @@ An example is an ended agent holding a copy of the session it was made from: ```
 
 ## A refine curates its own task
 
-A refine is a task on the same branch that cites the task you just finished, worked by you, continued: your conversation goes on, and the cited task is shown inside the new one. It needs nothing, so it runs whatever that task's outcome.
+A refine is an ordinary task: every end writes one (```seon.task/refine-tx```), done, red, held, dead or out of turns, `:seon.task/after` the task it refines, so it starts once that task has ended, on a branch of its own with a new agent (`seon.reconcile-test/every-end-gets-a-refine-after-it-and-its-review`). Its plan cites the task and this section (what makes it a refine); its proofs are the task's own and the check that task files and pages still load. One refine per task; a refine and a merge step get none.
 
-- Every end that leaves a task not done gets one (```seon.task/refine-tx```), except a task continuing another's branch (a merge task). After red, closed or dead it runs at once. A task at its cap is waiting, not ended, so it gets none until asked.
-- After a finished task, `:seon.config.agent/refine-finished` decides (`:none` by default), since each refine is one more paid run.
-- One refine per task, so a refine and the rerun it starts never loop.
+It reads the run that worked the task on that task's branch (``(my.db/at {:branch b})``), then changes only:
 
-It asks one thing: make the task better for whoever works it next. Read back through your turns for where one was spent that the task could have saved (a search, a failed form, a section you did not need), then change only:
+- **Its plan:** first what blocked the run, then what it learned and did not use, with the forms that mattered: one `swap!` at the cited task's path ([an agent edits a task its pull holds](#an-agent-edits-a-task-its-pull-holds)).
+- **What it cites:** name the section or function the run had to find; remove names it never used.
+- **The wiki sections it pulled,** where one was wrong or lacking ([changing a doc](agent.md#changing-a-doc)).
+- **The run as an example:** ```seon.ctx.session/session-tx``` of the run's agent, less the turns that taught nothing, written with ``my.db/transact!`` and named on the task's `:seon.task/examples`.
 
-- **Its plan:** what to do, in the order that worked, with the forms that mattered: one `swap!` at `[:seon.agent/task :seon.cite/_of e :seon.cite/target :seon.task/plan]`, `e` the cite whose target is a task ([an agent edits a task its pull holds](#an-agent-edits-a-task-its-pull-holds)).
-- **What it cites:** name the section or function you had to find; remove names you never used.
-- **The wiki sections you pulled,** where one was wrong or lacking ([changing a doc](agent.md#changing-a-doc)).
-
-Do not change the work, its tests or its proofs. End with a reply naming each change and the turn it would have saved, or saying you found nothing.
-
-How it is judged: when the refined task did not merge, a changed plan releases it again fresh from main, with a new branch and agent, its turns set beside yours (```seon.task/again-tx```, `seon.reconcile-test/a-refined-plan-starts-one-fresh-run-from-main`). An unchanged plan starts nothing; a merged task is not rerun.
+It changes no code, and ends with a reply naming each change and the turn it would have saved, or saying it found nothing. Its review is its merge step, a `:merge` task needing it, written held: a session attaches, reads the change and ends it with `seon_done`, which merges it or sends it back.
 
 ## An agent edits a task its pull holds
 
