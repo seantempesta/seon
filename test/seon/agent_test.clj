@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.reconcile :as r] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -2379,6 +2379,107 @@
         write "(do (in-ns 'seon.problems-test) (clojure.test/deftest a-test-that-waits-for-good (let [p (promise)] (clojure.test/is (= 1 @p)))) (in-ns 'user) :ok)"
         [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r)})"]) {:proofs #{t}})]
     (is (= {t :error} (:proofs (:value proved))) (pr-str proved))))
+
+;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test run's fold (seon.agent/test-run-step) answers once each child's two ends
+;; are held, its link's end and its reaped exit, whichever comes first. Run here through the real plumbing but the fork: a
+;; core.async.flow graph holding the fold proc, its resume forking each shard's child by fork-test-child, whose
+;; jolt.async.remote.flow/fork! makes a remote-pair whose other end (the child's) is opened in this process, the child's proc
+;; (jolt.async.remote.flow/proc) and its :conns added by one update!; its exit watch (jolt.io-poller/exit-chan) a channel this
+;; test closes, its reap (seon.lib/wait-status) {:exit 0}. Each value the fold takes is told on seen once its step returned,
+;; so the test waits for no clock: it knows each end was taken before it delivers the next.
+;; Estimate, this test's thread only (the fold, the children's procs and the link's pumps run on other carriers, and their
+;; ticks are not its): 5 runs, each one update! of a one-proc plan (~10k ticks); 7 children, each a socketpair opened (~3k) and
+;; an answer put on its end (~2k); some 20 channel takes and puts: ~100k ticks. (First estimated at 1M, as if the pumps', the
+;; codec's and the fold's work were this thread's; measured 94k.)
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-test-runs-fold-answers-whichever-end-of-a-child-comes-first
+  (let [saved @agent/state
+        {:keys [error-chan]} (let [g (flow/create-flow {:procs {} :conns []})] (swap! agent/state assoc :flow g) (flow/start g))
+        g (:flow @agent/state)
+        seen (a/chan 64)
+        ends (atom nil)
+        ;; the fold, its every step test-run-step's: its ends kept, each value it took told on seen
+        fold (fn ([] (agent/test-run-step))
+               ([args] (let [st (agent/test-run-step args)] (reset! ends (:ends st)) st))
+               ([st t] (agent/test-run-step st t))
+               ([st in v] (let [r (agent/test-run-step st in v)] (a/>!! seen in) r)))
+        ;; the run's children, in fork order: {:os :end (the child's end) :exit (its exit watch)}; a pid past any macOS pid
+        kids (atom []) next-os (atom 99999000)
+        exit-at-fork? (atom false)
+        fork (fn [g pid _child {:keys [in out conns] :as opts}]
+               (let [ropts (dissoc opts :in :out :conns :keep)
+                     [end fd] (remote/remote-pair ropts)
+                     kid {:os (swap! next-os inc) :end (remote/open fd ropts) :exit (a/promise-chan)}]
+                 (swap! kids conj kid)
+                 ;; the classic fork race: the child exits before the parent holds its pid
+                 (when @exit-at-fork? (a/close! (:exit kid)))
+                 (flow/update! g (fn [cfg] (-> cfg (assoc-in [:procs pid] (rflow/proc {:ins {in (:out end)} :outs {out (:in end)}}))
+                                               (update :conns (fnil into []) conns))))
+                 {:pid (:os kid)}))
+        kid-of (fn [os] (first (filter #(= os (:os %)) @kids)))
+        ;; fork-test-child tells the pid (:forked) after its exit watch started and before its state holds the pid (:by-os):
+        ;; with exit-at-fork?, it waits here until the reaped exit is on the fold's ends (taken and put back), so the fold's
+        ;; resume returns a state whose ends already hold that exit; each pid told goes on forked-c
+        forked-c (a/chan 8)
+        forked (fn [os] (when @exit-at-fork? (let [v (a/<!! @ends)] (a/>!! @ends v))) (a/>!! forked-c os))
+        run (fn [n shards]
+              (let [answer (a/promise-chan) pid (keyword "seon.test" (str "fold-" n))]
+                (reset! kids [])
+                (flow/update! g #(assoc-in % [:procs pid] {:proc (flow/process fold)
+                                                           :args {:answer answer :plan {} :ticks 0 :budgets nil :shards shards :forked forked :say (fn [_])}}))
+                ;; the fold forks in its resume, on its own thread: the run is the test's once every shard's child is told
+                (dotimes [_ (count shards)] (a/<!! forked-c))
+                {:pid pid :answer answer}))
+        exit! (fn [k] (a/close! (:exit k)) (a/<!! seen))
+        ;; the child's run: its answer, then its end closed as fork!'s child closes it (:out, then :sent awaited), then its socket
+        close! (fn [k] (let [{:keys [out sent] :as e} (:end k)]
+                         (a/>!! out {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var (str "#'app.fold/t" (:os k))}]})
+                         (a/close! out) (a/<!! sent) (remote/close! e)
+                         [(a/<!! seen) (a/<!! seen)]))
+        done (fn [{:keys [pid answer]}] (let [ans (a/poll! answer)] (flow/update! g #(update % :procs dissoc pid)) ans))
+        ;; the run's answer: n tests passed, its children's exit status held
+        answered (fn [r n] (let [ans (done r)] (is (and (= n (:pass ans) (:test ans)) (zero? (:error ans)) (= {:exit 0} (:exit ans))) (pr-str ans))))]
+    (try
+      (swap! agent/state assoc :fixtures-warm true :dirty? false)
+      (flow/resume g)
+      (with-redefs [rflow/fork! fork poller/exit-chan (let [real poller/exit-chan] (fn [os & more] (if-let [k (kid-of os)] (:exit k) (apply real os more)))) lib/wait-status (fn [_] {:exit 0})]
+        (testing "the child's exit is reaped before the fold's state holds its pid"
+          (reset! exit-at-fork? true)
+          (let [r (run 0 [['app.fold/t]]) [k] @kids]
+            (reset! exit-at-fork? false)
+            (is (= :seon.process/end (a/<!! seen)) "the exit, on ends during the fold's resume, is taken once the resume returned")
+            (is (nil? (a/poll! (:answer r))) "an exit alone is no answer")
+            (is (= [:seon.link/up :seon.link/up] (close! k)))
+            (answered r 1)))
+        (testing "the exit first, then the link's end"
+          (let [r (run 1 [['app.fold/t]]) [k] @kids]
+            (is (= :seon.process/end (exit! k)))
+            (is (nil? (a/poll! (:answer r))) "an exit alone is no answer")
+            (close! k)
+            (answered r 1)))
+        (testing "the link's end first, then the exit"
+          (let [r (run 2 [['app.fold/t]]) [k] @kids]
+            (close! k)
+            (is (nil? (a/poll! (:answer r))) "a closed link alone is no answer: the exit status is the run's")
+            (exit! k)
+            (answered r 1)))
+        (testing "two children, their ends interleaved: one's closed arrives while child-ended's update! for the other applies"
+          (let [r (run 3 [['app.fold/t] ['app.fold/u]]) [k1 k2] @kids]
+            (a/close! (:exit k1)) (a/close! (:exit k2))
+            ;; both links end at once, no wait between: k2's values reach the fold while it removes k1's proc
+            (doseq [k [k1 k2]] (let [{:keys [out]} (:end k)] (a/>!! out {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var (str "#'app.fold/t" (:os k))}]}) (a/close! out)))
+            (doseq [k [k1 k2]] (a/<!! (:sent (:end k))) (remote/close! (:end k)))
+            (dotimes [_ 6] (a/<!! seen))
+            (answered r 2)))
+        (testing "the second child's exit before the first's link end, the first's exit last"
+          (let [r (run 4 [['app.fold/t] ['app.fold/u]]) [k1 k2] @kids]
+            (close! k2) (exit! k2) (close! k1)
+            (is (nil? (a/poll! (:answer r))) "a child still running: no answer")
+            (exit! k1)
+            (answered r 2))))
+      (is (nil? (a/poll! error-chan)) "no proc threw")
+      (finally
+        (flow/stop g)
+        (reset! agent/state saved)))))
 
 (deftest a-gate-that-cant-read-its-candidate-answers
   ;; docs/errors.md#nothing-crashes-and-nothing-hangs "every wait ends": a :gate's writer refusal comes back to whoever asked, no test run (seon.system/ext-op)
