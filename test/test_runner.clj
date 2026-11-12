@@ -603,26 +603,28 @@
 (defn- store-steps!
   "bin/prove's last part: each step of out/steps.edn that bin/check named green in out/green
   (check-<step>, space separated) cached green at its digest (seon.fx/write-verdicts!),
-  unless the step ran on a binary (seon.proofs/step-needs-binary?) built from another tree
-  than the plan's (target/seon.tree, bin/build's): an edit between the plan and the build. A red one is not
-  stored, so it runs again. Answers the exit status: 1 when a step ran red or was not stored."
+  unless the step ran on a binary (seon.proofs/step-needs-binary?) not current for the plan's tree (seon.system/binary-current,
+  the rule the plan's build asked: an edit between the plan and the build). A red one is not
+  stored, so it runs again. Answers the exit status: 1 when a step ran red or was not stored.
+  See docs/source.md#the-binary-records-its-program."
   [out]
   (let [{:keys [tree digests]} (edn/read-string (slurp (str out "/steps.edn")))
         f (io/file out "green")
         green (set (when (.isFile f) (map #(str/replace % #"^check-" "") (str/split (str/trim (slurp f)) #"\s+"))))
         ;; a step bin/check ended past its bound is one of its reds (STEP-OVERRAN, the owner, 2026-11-12), as any step it failed
         red (sort (remove green (keys digests)))
-        built (let [b (io/file (config/checkout) "target/seon.tree")] (when (.isFile b) (str/trim (slurp b))))
-        ;; a step that runs a seon.check mode ran on target/seon: kept only if built from the plan's tree;
-        ;; laws and the lmdb steps ran no mode, so no binary's tree is theirs to compare
-        keep? (fn [k] (and (green k) (or (= tree built) (not (proofs/step-needs-binary? k)))))
+        ;; a step that runs a seon.check mode ran on target/seon: kept only if that binary is current for the plan's tree, the
+        ;; one rule the build asked (an empty out/build: current; the plan kept its answer beside the builds, so this reads it);
+        ;; laws and the lmdb steps ran no mode, so no binary is theirs to judge
+        current? (delay (nil? (seon.system/binary-current (program) (seon.program/binary-program) tree)))
+        keep? (fn [k] (and (green k) (or (not (proofs/step-needs-binary? k)) @current?)))
         ;; each step's wall ms as bin/check measured it (out/step-ms, "<step> <ms>" a line; a kill/reopen pair's two phases
         ;; summed under their step), kept on its verdict: its bound's measure (out/step-bounds) and the deal's
         step-ms (let [f (io/file out "step-ms")]
                   (reduce (fn [m [nm ms]] (update m (str/replace nm #"-(write|read)$" "") (fnil + 0) (parse-long ms))) {}
                           (when (.isFile f) (keep #(next (re-matches #"(\S+) (\d+)" %)) (str/split-lines (slurp f))))))
-        unstored (do (when (and (not= tree built) (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)))
-                       (println "prove: the binary was built from another tree than the plan's: no step that ran on it stored"))
+        unstored (do (when (and (some #(and (green %) (proofs/step-needs-binary? %)) (keys digests)) (not @current?))
+                       (println "prove: the binary is not current for the plan's tree (seon.system/binary-current): no step that ran on it stored"))
                      (record-run! {:id (str "bin/prove steps " tree " " (random-uuid)) :tree tree}
                                   (into {} (for [[k dg] digests :when (keep? k)] [k (cond-> {:step k :digest dg :pass 1 :fail 0 :error 0} (step-ms k) (assoc :ms (step-ms k)))])) {}))]
     (doseq [u unstored] (println "UNRECORDED" (:key u) (:message u)))

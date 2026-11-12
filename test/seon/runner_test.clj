@@ -1,7 +1,7 @@
 (ns seon.runner-test
   "bin/test's and bin/prove's plan (test-runner) refuses a selection that cannot select: `bin/test
   --reach` once took --reach for a namespace, ran nothing and passed (a check that could not fail)."
-  (:require [clojure.test :refer [deftest is]] [test-runner] [clojure.edn] [seon.config] [seon.lib] [seon.fx]))
+  (:require [clojure.test :refer [deftest is]] [test-runner] [clojure.edn] [seon.config] [seon.lib] [seon.fx] [seon.edn] [seon.program] [seon.system] [seon.proofs]))
 
 (deftest a-selection-that-cannot-select-is-refused
   (is (re-find #"no flag --reach" (str (#'test-runner/refused-names ["--reach"]))) "a flag it does not know")
@@ -35,3 +35,33 @@
         (is (= '[a.over-test/never] (:tests rest)) "the test that never ended runs again; the overran one is not among them")
         (is (= {'a.over-test/never "d3"} (:digests rest))))
       (finally (seon.lib/remove-tree! dir) (.delete red)))))
+
+(deftest a-step-on-a-binary-current-for-the-plan-is-stored-and-reused
+  ;; docs/source.md#the-binary-records-its-program: whether the steps ran on this plan's binary is seon.system/binary-current's
+  ;; answer, the rule the build asked, never a compare of tree ids. A landing that built nothing (a merge whose change reaches
+  ;; nothing the binary bakes) ran its 37 steps green and stored none: target/seon.tree named the older tree (tests' land,
+  ;; 2026-11-12 12:44), so every next prove ran 35 of them again. Red before: the green step not stored
+  (let [built (get-in (seon.program/binary-program) [:inputs :tree])
+        pn (str "probe-" (random-uuid))
+        out (str (seon.config/checkout) "/target/tmp/store-steps-" pn)
+        judged (fn [tree] (#'seon.system/judged-path built tree))
+        stored? (fn [dg] (contains? (test-runner/read-results {"config" dg}) dg))
+        run (fn [tree dg answer]
+              (seon.fx/write-file {:req {:path (judged tree) :text (seon.edn/encode {:answer answer})}})
+              (seon.fx/write-file {:req {:path (str out "/steps.edn") :text (pr-str {:tree tree :digests {"config" dg}})}})
+              (seon.fx/write-file {:req {:path (str out "/green") :text "check-config\n"}})
+              (#'test-runner/store-steps! out))
+        files (atom [])]
+    (is (some? built) "the checkout's binary recorded its tree")
+    (try
+      (let [tree (str pn "-current") dg (str pn "-a")]
+        (swap! files conj (judged tree) (str (seon.config/value :seon.config.proofs/results-dir) "/steps/config/" dg ".pass.edn"))
+        (is (= 0 (run tree dg nil)))
+        (is (stored? dg) "the binary is current for the plan's tree (another tree, nothing it bakes differs): its green step is stored")
+        (is (= [[] ["config"]] ((juxt :run (comp vec keys :reused)) (seon.proofs/plan nil {"config" dg} (test-runner/read-results {"config" dg}) #{})))
+            "and the next plan reuses it"))
+      (let [tree (str pn "-stale") dg (str pn "-b")]
+        (swap! files conj (judged tree))
+        (run tree dg {:binary built :tree tree :reaches ['seon.main/-main]})
+        (is (not (stored? dg)) "a binary not current for the plan's tree: the step that ran on it is not stored"))
+      (finally (seon.lib/remove-tree! out) (doseq [f @files] (.delete (java.io.File. ^String f)))))))
