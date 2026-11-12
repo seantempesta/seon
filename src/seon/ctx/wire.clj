@@ -275,12 +275,6 @@
                                        (if (and (vector? x) (keyword? (first x))) (into [(first x)] (children (next x))) x)))
                              h)))
 
-(defonce ^:private kept-walk
-  ;; the walk page-parts-through drew last, held at the point it reached, to advance from rather than draw again: nil, or
-  ;; {:id [store branch agent] :t :commit :at :c :r :w :first}, :first the point its last chain began at with that point's page
-  ;; ({:point [commit t] :hiccup}), which goes with the walk. One a process (an agent's process draws one agent's pages); derived, never relied on
-  (atom nil))
-
 (defn- descends?
   "Whether commit c, on db's store, is commit k or reaches it within :seon.config.ctx/kept-walk-steps parents (Datahike's commit
   graph records, d/commit-graph-record: a read a step, nil where the store holds none): a value the kept walk can be advanced to
@@ -332,31 +326,30 @@
   (let [d0 (db-at db p)] (ctx/agent-ctx (program/index-of-db d0) d0 a)))
 
 (defn- parts-walk
-  "Agent a's page-parts walk drawn at db d0 (its branch's own, at t), cold: {:id :t :at :c :r :w}, the walk the model reads (:model-only:
-  what is the page's alone is not drawn) over the agent pulled by what the parts read (`page-ctx`)."
+  "Agent a's page-parts walk drawn at db d0 (its branch's own, at t), cold, as a value (seon.render/walk): {:id :t :db :c :v :drawn},
+  the walk the model reads (:model-only: what is the page's alone is not drawn) over the agent pulled by what the parts read
+  (`page-ctx`), :v the walk, with the page as hiccup (:resolve), :drawn the point it was drawn cold at, which an advance keeps."
   {:malli/schema [:=> [:cat :seon.host/db :int :int [:tuple :any :any :int]] :map]}
   [d0 t a id]
-  (let [parts #'model-parts
-        c0 (page-ctx d0 a (nth id 1))
-        at (volatile! d0) r (ratom/atom (:tree c0))
-        w (assoc (render/walker {:ref r :changes ctx/changes} (fn [] @at) [parts {} (ratom/ref-view r ctx/changes)] (:index (:ix c0)))
-                 :outputs #{:seon.render/hiccup} :model-only true)]
-    (render/flush! w nil)
-    {:id id :t t :at at :c c0 :r r :w w}))
+  (let [c0 (page-ctx d0 a (nth id 1))]
+    {:id id :t t :db d0 :c c0 :drawn [(d/commit-id d0) t]
+     :v (render/walk nil {:db d0 :tree (:tree c0) :root #'model-parts :index (:index (:ix c0)) :outputs #{:seon.render/hiccup}
+                          :changes ctx/changes :model-only true :resolve true})}))
 
 (defn- advance
   "Parts walk k advanced to db d1, a later value of its branch at t1: the datoms between its value and d1 (seon.ctx/moved), its ctx
-  patched by them and the components they reach flushed (docs/render.md#a-page-is-a-kept-walk). k with its :t and :c moved on."
+  patched by them and its walk moved by them (seon.render/walk with :moved: the components they reach run again;
+  docs/render.md#a-page-is-a-kept-walk). k with its :t, :db, :c and :v moved on."
   {:malli/schema [:=> [:cat :map :seon.host/db :int] :map]}
-  [{:keys [at c r w id] :as k} d1 t1]
+  [{:keys [db c v id] :as k} d1 t1]
   ;; the same commit at the same t is the same value: nothing moved, and no diff is asked of the store (one in memory walks its index whole)
-  (let [moved (if (and (some? (d/commit-id d1)) (= (d/commit-id @at) (d/commit-id d1)) (= (:max-tx @at) (:max-tx d1))) [] (ctx/moved @at d1 nil))]
+  (let [moved (if (and (some? (d/commit-id d1)) (= (d/commit-id db) (d/commit-id d1)) (= (:max-tx db) (:max-tx d1))) [] (ctx/moved db d1 nil))]
     (if (empty? moved)
       (assoc k :t t1)
       (let [c1 (ctx/patch c d1 moved (nth id 1))]
-        (vreset! at d1) (reset! r (:tree c1))
-        (render/flush! w moved (:index (:ix c1)))
-        (assoc k :c c1 :t t1)))))
+        (assoc k :db d1 :c c1 :t t1
+               :v (render/walk v {:db d1 :tree (:tree c1) :root #'model-parts :index (:index (:ix c1)) :outputs #{:seon.render/hiccup}
+                                  :changes ctx/changes :moved moved :model-only true :resolve true}))))))
 
 (defn page-parts-through
   "Agent a's page parts at each point of chain, a vector of points ({:commit :t}, in order on one branch; a first of nil: nothing
@@ -364,23 +357,19 @@
   entity's own render, else its schema's, that hold no messages and are not for the page alone) over the agent pulled by what the
   parts read (`parts-walk`), advanced from point to point as a kept walk moves (`advance`: docs/render.md#a-page-is-a-kept-walk),
   each point's hiccup stripped of presentation (`presentation-free`). The walk is kept after the call at the chain's last point
-  (`kept-walk`), so a later chain of the same agent on the same branch starting at or after it advances from it: a request at a
+  (seon.agent/state's ::parts-walk), so a later chain of the same agent on the same branch starting at or after it advances from it: a request at a
   new point (a turn's, a context read's) costs what moved since the last, never a draw of the page (a test's context read drew it
   cold each time, about 17M ticks of 25M). An earlier point, or another agent's, draws cold, and the walk drawn is the one kept.
   The branch is the db's own (Datahike's config). See docs/render.md#a-change-is-edits-by-name."
   {:malli/schema [:=> [:cat :seon.host/db :int [:vector [:maybe :map]]] [:vector :any]]}
   [db a chain]
   (if-let [p (some identity chain)]
-    ;; a walk of its own, read by no reaction of the caller's: a render calling this (`turn-entities`) runs in its component's
-    ;; reaction, which the walk's own atom and reactions would otherwise join, running it again for each
-    (binding [ratom/*ratom-context* nil]
-      (locking kept-walk
-        (let [d0 (db-at db p)
+    ;; the walk kept in this process's state (seon.agent/state, the process's one state: an agent's, root's), a value: read, moved on,
+    ;; put back; two readers at once each move their own copy, and the last one put back is kept (derived, never relied on)
+    (let [d0 (db-at db p)
               id [(get-in (or (:origin-db d0) d0) [:config :store :id]) (get-in (or (:origin-db d0) d0) [:config :branch]) a]
-              k @kept-walk
-              hiccup #(presentation-free (render/resolved (:w %) @(:out (:w %)) false))
-              ;; the slot is empty while the walk moves: a walk left part-way (a render that threw past its own edge) is never advanced from
-              _ (reset! kept-walk nil)
+              k (::parts-walk @agent/state)
+              hiccup #(presentation-free (:hiccup (:v %)))
               ;; a point's t: its own, else its commit's (a db as of a t, a commit collection took, has no :max-tx of its own)
               t-of (fn [q d1] (or (:t q) (:max-tx d1)))
               t0 (t-of p d0)
@@ -397,14 +386,14 @@
               ;; the kept walk is advanced when this point is its own or a later commit of its lineage, else drawn again
               k0 (cond held k
                        (and mine? (reaches? k p d0)) (assoc (advance k d0 t0) :commit (:commit p))
-                       :else (do (some-> k :w render/dispose-walk!) (assoc (parts-walk d0 t0 a id) :commit (:commit p))))
+                       :else (assoc (parts-walk d0 t0 a id) :commit (:commit p)))
               h0 (or held (hiccup k0))
               ;; the first point, then each later one the walk advanced to
               [kn hs] (reduce (fn [[k hs] q] (let [d1 (db-at db q) k1 (assoc (advance k d1 (t-of q d1)) :commit (:commit q))] [k1 (conj hs (hiccup k1))]))
                               [k0 [h0]] later)]
           ;; kept with the walk, in its one slot: the page at this chain's first point, so a next chain that starts there again finds it
-          (reset! kept-walk (assoc kn :first {:point [(:commit p) t0] :hiccup h0}))
-          (into (mapv (constantly nil) (take-while nil? chain)) hs))))
+          (swap! agent/state assoc ::parts-walk (assoc kn :first {:point [(:commit p) t0] :hiccup h0}))
+          (into (mapv (constantly nil) (take-while nil? chain)) hs))
     (mapv (constantly nil) chain)))
 
 (defn page-parts-at

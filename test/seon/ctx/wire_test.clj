@@ -1571,7 +1571,8 @@
             _ (ask! 0)
             a (pdb/eid @conn :seon.agent/key "a1")
             point (fn [] (let [db @conn] {:commit (d/commit-id db) :t (:max-tx db)}))
-            kept #(:w @@#'seon.ctx.wire/kept-walk)
+            ;; the walk kept in the process's state (seon.agent/state), a value: the point it was drawn cold at, which an advance keeps
+            kept #(:drawn (:seon.ctx.wire/parts-walk @seon.agent/state))
             p1 (point)
             h1 (wire/page-parts-at @conn a p1)
             w1 (kept)
@@ -1580,11 +1581,12 @@
             p2 (point)
             h2 (wire/page-parts-at @conn a p2)]
         (is (some? w1) "the walk is kept after a draw")
-        (is (identical? w1 (kept)) "a later point of its branch advanced the same walk")
+        (is (nil? (resolve 'seon.ctx.wire/kept-walk)) "in the process's state, no cell of its own")
+        (is (= w1 (kept)) "a later point of its branch advanced the same walk")
         (is (str/includes? (pr-str h2) "Make f, then g.") "and it shows what moved")
-        (reset! @#'seon.ctx.wire/kept-walk nil)
+        (swap! seon.agent/state dissoc :seon.ctx.wire/parts-walk)
         (is (= h2 (wire/page-parts-at @conn a p2)) "what a cold draw at that point answers")
-        (is (not (identical? w1 (kept))) "a point with no kept walk to advance is drawn")
+        (is (not= w1 (kept)) "a point with no kept walk to advance is drawn")
         (is (not= h1 h2))))))
 
 (deftest a-flush-between-turns-leaves-the-next-turns-pair-to-advance
@@ -1598,7 +1600,8 @@
             _ (ask! 0)
             a (pdb/eid @conn :seon.agent/key "a1")
             point (fn [] (let [db @conn] {:commit (d/commit-id db) :t (:max-tx db)}))
-            kept #(:w @@#'seon.ctx.wire/kept-walk)
+            ;; the walk kept in the process's state (seon.agent/state), a value: the point it was drawn cold at, which an advance keeps
+            kept #(:drawn (:seon.ctx.wire/parts-walk @seon.agent/state))
             pb (point)
             _ (wire/page-parts-through @conn a [nil pb])
             _ (ev! "e1")
@@ -1611,9 +1614,9 @@
             pn (point)
             [h0 h1] (wire/page-parts-through @conn a [pb pn])]
         (is (some? w))
-        (is (identical? w (kept)) "the next turn's pair advanced the walk the flush left, not a page drawn again")
+        (is (= w (kept)) "the next turn's pair advanced the walk the flush left, not a page drawn again")
         (is (str/includes? (pr-str h1) "Make f, then g.") "it shows what moved")
-        (reset! @#'seon.ctx.wire/kept-walk nil)
+        (swap! seon.agent/state dissoc :seon.ctx.wire/parts-walk)
         (is (= [h0 h1] (wire/page-parts-through @conn a [pb pn])) "what a cold draw of the pair answers")))))
 
 (deftest a-write-reruns-the-placing-render-and-no-earlier-page-pair
