@@ -812,15 +812,16 @@
   [:task own-value] (no accumulation), [:agent agent-value], [:root (root db)], or nil
   when e is none of them (retracted, another kind, an agent root never started, or root
   before its first boot: (root db) is nil then, as on a store an earlier build left with
-  a quiescent fact and no boot). One pull of e."
+  a quiescent fact and no boot). One seek of e's identity per kind, then one pull (a probe pull first pulled twice: 56.8 MB
+  and 12.8M ticks over 539 tasks, against 42.8 MB and 8.9M, measured 2026-11-12)."
   {:malli/schema [:=> [:cat :seon.host/db :int]
                   [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :agent] :seon.reconcile/agent] [:tuple [:= :root] :map]]]]}
   [db e]
-  (let [k (d/pull db [:seon.task/id :seon.agent/boot :seon.system/id] e)]
-    (cond (:seon.task/id k) [:task (task-value (d/pull db task-pull e))]
+  (let [has? (fn [a] (some? (first (d/datoms db :eavt e a))))]
+    (cond (has? :seon.task/id) [:task (task-value (d/pull db task-pull e))]
           ;; an agent its start recorded: a branch's record of its own agent, with no boot, is none
-          (:seon.agent/boot k) [:agent (indexed-agent db e)]
-          (:seon.system/id k) (some->> (root db) (vector :root)))))
+          (has? :seon.agent/boot) [:agent (indexed-agent db e)]
+          (has? :seon.system/id) (some->> (root db) (vector :root)))))
 
 (defn tasks-of-agent
   "The task entities db names agent entity e as their agent (:seon.task/agent): the tasks whose state an agent's boot moves.
