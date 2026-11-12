@@ -80,7 +80,7 @@ The words the owner has ruled out, each with what to say instead; a name that st
 - **page**, **walk**, **view** as loose nouns: say the library's thing (a ratom of the pulled data, a Reaction per component, hiccup, html, a Datastar patch, an SSE connection), and name our var only as a citation. A wiki page is a page (owner, 2026-11-08).
 - **table**, **row**: say entity, attribute, ref, schema; write a comparison as a list of entities (owner, 2026-11-07).
 - **run** (of an agent's work): say process, verdict, transaction, commit, experiment, `bin/prove`'s plan (owner, 2026-11-07).
-- **root**, for the system: root is the agent env at the top of the hierarchy; say "the system" for the Flow procs and code that write on main, and say relations as the stored refs do (`:seon.agent/agents`, `:seon.task/started-by`) (owner, 2026-11-11).
+- **root**, for the system: root is the agent env at the top of the hierarchy; say "the system" for the Flow procs and code that write on main, and say relations as the stored refs do (`:seon.agent/parent`, `:seon.task/started-by`) (owner, 2026-11-11).
 - **kind**: say **type** (a test type, an effect type), or what its schema says it is; choosing among templates is a merge (owner, 2026-11-07; "I hate the word kind btw. Type?", 2026-11-12).
 - **cursor**, **offset**: say what is held, such as an attribute holding a `t` (owner, 2026-11-07).
 - **part**: it is a component (owner, 2026-11-06).

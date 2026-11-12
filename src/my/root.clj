@@ -49,7 +49,7 @@
   on past a turn cap, raise the agent's :seon.agent/max-turns first (docs/turn.md#the-cap). Answers the writer's answer (or
   {:ok true :changed 0} when none is held) with :not-held when any. Who released it is its starter (:seon.task/started-by): root's REPL
   evaluates as the user (seon.server's root eval records its evals by the user), so the user, and its agent is in the user's tree
-  (:seon.agent/agents, seon.task/start-tx). See docs/users.md#who-started-whom."
+  (:seon.agent/_parent, seon.task/start-tx). See docs/users.md#who-started-whom."
   {:malli/schema [:=> [:cat :seon.system/sys [:sequential :seon.task/id]] :map]}
   [sys ids]
   (let [db @(:conn sys)
@@ -490,21 +490,6 @@
                        :error (contract/error :seon.judge/cost-unknown #'my.root/first-moves!
                                               (str "the reply's usage cannot be priced (model " (:model req) "): the pass stops") {:task id :usage usage})}))))))))))
 
-(defn findings-tx
-  "The held tasks the :long-form findings over db's program ask for (seon.problems/long-forms over every
-  var, src and test alike), each from its template (seon.template/finding) with the tests reaching its var
-  in reach graph g (seon.program/reach-indexed) as its proofs (a test, itself), and none for a var whose task db holds:
-  tx-data, [] when there is nothing to file. See docs/health.md#a-form-too-long."
-  {:malli/schema [:=> [:cat :seon.host/db :map] [:sequential :any]]}
-  [db g]
-  (let [decls (vec (for [r (problems/long-forms db {} (into #{} (map :v) (d/datoms db :aevt :var/name)))
-                         :let [v (:var r)
-                               ;; a long test is its own proof: no test reaches a test
-                               decl (tpl/finding r (if (contains? (:tests g) v) #{v} (set (program/tests-reaching g v))))]
-                         :when (not (pdb/eid db :seon.task/id (task/task-id (:seon.task/ns decl) (:seon.task/name decl))))]
-                     decl))]
-    (if (seq decls) (task/create-tx db decls) [])))
-
 (defn slow-tests-tx
   "The held tasks the slow tests of slow ({test ms}: seon.fx/slow-tests) ask for, each from its template
   (seon.template/slow-test), none for a test whose task db holds: tx-data, [] when there is nothing to file.
@@ -529,14 +514,3 @@
     (when (seq tx) @(root/transact-main! sys tx))
     (vec (keep :seon.task/id tx))))
 
-(defn file-findings!
-  "Write main's :long-form findings as held tasks (findings-tx over main and its reach graph), for root or
-  the owner to release (my.root/run!): the system's long parts become its work. Answers the task ids filed, [] when every finding has its task."
-  {:malli/schema [:=> [:cat :seon.system/sys] [:vector :string]]}
-  [sys]
-  (let [db @(:conn sys)
-        g (program/reach-indexed (program/reach-graph db (fx/declared-refs seon.graph/built-text))
-                                 (second (seon.agent/test-inputs db)))
-        tx (findings-tx db g)]
-    (when (seq tx) @(root/transact-main! sys tx))
-    (vec (keep :seon.task/id tx))))
