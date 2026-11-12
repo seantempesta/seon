@@ -1903,6 +1903,9 @@
         cancelled (d/db-with db1 [{:seon.task/id "demo/a-refine" :seon.task/execution :cancelled} {:seon.task/id "demo/a-refine-review" :seon.task/execution :cancelled}])
         capped (d/db-with db1 [{:seon.task/id "demo/a-refine" :seon.task/execution :held :seon.task/outcome :cap}])]
     (is (nil? (task/refine-tx db1 "demo/a")) "a refine in flight is not superseded")
+    (is (nil? (task/refine-tx (d/db-with db1 [{:seon.task/id "demo/a-refine" :seon.task/execution :held :seon.task/outcome :gate}]) "demo/a"))
+        "nor one waiting on its gate: it never ended (the outcome schema's sets: ended less finished)")
+    (is (= (task/refine-tx capped "demo/a") (task/refine-tx capped "demo/a")) "one end names one fresh branch: a replay writes the same")
     (doseq [[how db2] [["cancelled" cancelled] ["ended at its cap" capped]]]
       (let [tx (task/refine-tx db2 "demo/a")
             db3 (when (seq tx) (d/db-with db2 tx))

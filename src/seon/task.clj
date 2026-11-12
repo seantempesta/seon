@@ -1052,13 +1052,14 @@
                    (:seon.task/needs (d/pull db [{:seon.task/needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id]))))))
 
 (defn- unacted?
-  "Whether refine rid is one nobody acted on, read from its own facts: cancelled, or ended with no change (held with an outcome that
-  is no :done or :merged: its cap, its death, a refusal). A refine in flight, or one done with a change its review may merge, is
-  acted on. See docs/tasks.md#a-refine-curates-its-own-task."
+  "Whether refine rid is one nobody acted on, read from its own facts: cancelled, or held at an outcome that ended its run without
+  finishing it (the outcome schema's own sets: ended less finished, its cap, its death, a closing). A refine in flight, waiting on
+  its gate or its review, or parked, never ended; one finished has a change its review may merge. See
+  docs/tasks.md#a-refine-curates-its-own-task."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
   [db rid]
   (let [e (d/entity db [:seon.task/id rid]) x (:seon.task/execution e) o (:seon.task/outcome e)]
-    (boolean (or (= :cancelled x) (and (= :held x) (some? o) (not (#{:done :merged} o)))))))
+    (boolean (or (= :cancelled x) (and (= :held x) (contains? ended o) (not (contains? finished o)))))))
 
 (defn refine-tx
   "Task id's refine and its review (`refine-decls`), written on db when id has just ended: the refine released, the review held
@@ -1073,14 +1074,18 @@
     (when (and t (:seon.task/ns t) (not (refine? db id)) (or (nil? prior) (unacted? db prior)) (not (continues-branch? db id)))
       (let [rid (task-id (:seon.task/ns t) (str (:seon.task/name t) "-refine"))
             vid (str rid "-review")
-            ;; one nobody acted on is declared again on a fresh branch, its end's facts gone: a new agent, none of the old one's records
-            fresh (when prior (keyword (str (name (default-branch rid)) "-r" (lib/unique-id))))
+            ;; one nobody acted on is declared again on a fresh branch, named by the ending that supersedes it (the t of the task's
+            ;; outcome), so a replay of the same end names the same branch; its end's facts go: a new agent, none of the old one's
+            ;; records. The old branch is kept, as every task's is (its commits stay)
+            fresh (when prior (keyword (str (name (default-branch rid)) "-r"
+                                            (or (some-> (first (d/datoms db :eavt (pdb/eid db :seon.task/id id) :seon.task/outcome)) :tx) (:max-tx db)))))
             decls (cond->> (refine-decls t) fresh (mapv #(assoc % :seon.task/branch fresh)))
             tx (create-tx db decls)]
         (when (vector? tx)
           ;; started by the agent whose run it refines: its agent is that one's child (:seon.agent/parent, start-tx)
           (cond-> (-> tx
-                      (into (when prior (for [x [rid vid] a [:seon.task/outcome :seon.task/reason :seon.task/reasons :seon.task/agent]]
+                      ;; the end's facts: what a judging sets (judged-attrs), and beside them its outcome, its reasons and its agent
+                      (into (when prior (for [x [rid vid] a (concat judged-attrs [:seon.task/outcome :seon.task/reasons :seon.task/agent])]
                                           [:db.fn/retractAttribute [:seon.task/id x] a])))
                       (into (execution-tx [rid] :running))
                       (into (when prior (execution-tx [vid] :held))))
