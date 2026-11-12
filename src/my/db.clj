@@ -44,9 +44,12 @@
   "The db at a named point, for d/q, d/pull, d/entity and my.agent/history ({:db it}): no opts is (db);
   {:t t} this branch as of t (a t it never had is refused, a t from history is read as it was);
   {:commit uuid} that commit; {:branch b} branch b's last committed value, so an uncommitted write on b is
-  not seen; {:branch b :t t} b as of t. :commit with :branch or :t, and any other opt, is refused; an
-  unknown commit, branch or t answers :seon.db/unresolved. See docs/storage.md#history (seon.db/at)."
+  not seen; {:branch b :t t} b as of t. b is named as a task names its branch or as the store does
+  (:task-x or :main/task-x: seon.db/on-main under this agent's main, which a store name passes unchanged).
+  :commit with :branch or :t, and any other opt, is refused; an unknown commit, branch or t answers
+  :seon.db/unresolved. See docs/storage.md#history (seon.db/at)."
   {:malli/schema [:function [:=> [:cat] :seon.host/db]
                   [:=> [:cat :seon.db/at-opts] [:or :seon.host/db :seon.db/unresolved :seon.db/no-history]]]}
   ([] (agent/db))
-  ([opts] (pdb/at (:store-conn @agent/state) (agent/db) opts)))
+  ([opts] (pdb/at (:store-conn @agent/state) (agent/db)
+                 (cond-> opts (:branch opts) (update :branch #(pdb/on-main (pdb/main-branch (:cfg @agent/state)) %))))))
