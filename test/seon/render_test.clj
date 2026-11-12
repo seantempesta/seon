@@ -593,6 +593,18 @@
       (is (= (:classes (seon.problems/health main2)) (:classes (:health @(get-in st2 [:root-walk :a])))) "the held health is health of the new main")
       (r/dispose-walk! (get-in st2 [:root-walk :w])))))))
 
+(deftest a-move-of-main-is-diffed-once-for-every-walk
+  ;; docs/render.md#a-page-is-a-kept-walk: the index, root's walk, each user's and the views it touched read the datoms main moved by,
+  ;; one diff of the two mains (5.4 ms on 10.8k datoms in a :memory store); each walk diffed main again, one diff more a walk
+  (let [[main branch] (paged-dbs)
+        st (-> (proc-state main branch) (assoc :watch #{}) (root-state main))
+        main2 (d/db-with (:main-db st) [{:seon.task/id "zz/one" :seon.task/ns 'zz :seon.task/name "one" :seon.task/plan "p" :seon.task/execution :running :seon.task/branch :b :seon.task/kind :work}])
+        n (atom 0) diff d/datoms-diff
+        st2 (with-redefs [d/datoms-diff (fn [& args] (swap! n inc) (apply diff args))] (#'p/advance-main st main2))]
+    (is (= 1 @n) (str "one diff a move of main, " @n " made"))
+    (is (identical? main2 @(get-in st2 [:root-walk :at])) "root's walk is at the new main")
+    (r/dispose-walk! (get-in st2 [:root-walk :w]))))
+
 (deftest the-problems-tile-counts-what-still-holds
   ;; Optimization, 2026-11-08: 7888's tile said "effect 4" for a :seon.vector/helper-died row whose cause had passed (:open? false,
   ;; seon.problems/closed?), as health does not: the tile draws and counts a class's open rows, and a class with none is not drawn
