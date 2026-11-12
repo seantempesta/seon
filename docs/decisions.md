@@ -6,6 +6,10 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings of this day, each with his words and where it is now stated.
 
+### One unit: everything stateful that runs is a Flow agent
+
+"If it's stateful and it's like a running process that we need to keep track of it should be a separate flow properly wired up to the system for communication, repl for debugging, errors, topology, etc." And: "It's the docker rule. If you make everything the same and make that unit (the container for docker, the flow agent for us) fast and finely tuned and extensible we have a building block we can standardize on." A test child and a clone are agents: "Tests should have the agent env too." A difference is an option of the one unit, never a second path. The only processes that are not agents are the fork server, which makes them, and exec'd programs, which are effects through their owner. Stated in [flow](flow.md#the-step-fn-contract-every-proc-follows) and [processes](processes.md#the-agent-process).
+
 ### Reasoning is on at low effort for work tasks
 
 Asked whether reasoning `:low` should be the default for work tasks: "Sure". It replaces thinking off (2026-10-21). Stated in [model](model.md#thinking-is-on-at-low-effort).
