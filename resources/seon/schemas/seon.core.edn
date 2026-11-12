@@ -130,6 +130,10 @@
  :seon.program/meaning-change [:map [:var :qualified-symbol] [:was [:map-of :keyword :string]] [:now [:map-of :keyword :string]]
                                [:cited-by [:vector [:map [:section :string] [:read :any]]]]]
  :seon.test/result [:map [:pass nat-int?] [:fail nat-int?] [:error nat-int?]]
+ ;; what a test should cost, stated on its deftest (^{:seon.test/estimate {:ticks n}}) from what it must do, never from its last
+ ;; run: its budget is ten times it (seon.proofs/run-tests!, docs/merging.md#a-tests-tick-budget)
+ :seon.test/estimate [:map {:description "What a test should cost, worked from first principles: :ticks, the engine ticks of its own work; its budget is ten times it. See docs/merging.md#a-tests-tick-budget."}
+                      [:ticks pos-int?]]
  ;; root's API
  :seon.system/sys [:map [:graph :any] [:ext :seon.host/chan] [:conn :seon.host/conn]]
  :seon.system/api-state [:map [:agents :map] [:pending :map] [:rid :int] [:boot :string]]

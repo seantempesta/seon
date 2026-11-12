@@ -73,8 +73,6 @@
   [:seon.config.agent/form-top-fns {:optional true} :seon.config.agent/form-top-fns]
   [:seon.config.agent/edit-context-lines {:optional true} :seon.config.agent/edit-context-lines]
   [:seon.config.agent/test-ticks {:optional true} :seon.config.agent/test-ticks]
-  [:seon.config.agent/test-ticks-floor {:optional true} :seon.config.agent/test-ticks-floor]
-  [:seon.config.agent/test-ticks-factor {:optional true} :seon.config.agent/test-ticks-factor]
   [:seon.config.agent/stall-fibers-bytes {:optional true} :seon.config.agent/stall-fibers-bytes]
   [:seon.config.agent/stall-ms {:optional true} :seon.config.agent/stall-ms]
   ;; merges

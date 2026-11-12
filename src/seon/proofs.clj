@@ -637,20 +637,20 @@
   Each measure opens its own epoch of contracted calls (seon.profile/begin!), so a caller's epoch
   open around an in-process run counts from the last test on (bin/test's shards open none). A var for which (skip? v) holds,
   asked just before it would start, is not run: another run has its verdict now (run-tests!'s reused)."
-  {:malli/schema [:=> [:cat :symbol [:sequential :any] [:maybe pos-int?] [:maybe [:map-of :qualified-symbol pos-int?]] :seon.host/fn :seon.host/fn] :nil]}
-  [n vars ticks budgets done skip?]
+  {:malli/schema [:=> [:cat :symbol [:sequential :any] [:maybe pos-int?] :seon.host/fn :seon.host/fn] :nil]}
+  [n vars ticks done skip?]
   (let [each (t/join-fixtures (get @t/each-fixtures n []))
-        ;; a test's own budget: its history's (budgets, seon.fx/test-budgets), raised to the
-        ;; ^{:seon.test/ticks n} on its deftest (in its digest, being its source), never past ticks
-        budget (fn [v] (when ticks (min ticks (max (get budgets (test-symbol (str v)) ticks) (or (:seon.test/ticks (meta v)) 0)))))
+        ;; a test's budget: ten times the ticks its deftest states (^{:seon.test/estimate {:ticks n}}, in its digest, being its
+        ;; source), never past ticks; a test that states none runs under ticks (docs/merging.md#a-tests-tick-budget)
+        budget (fn [v] (when ticks (if-let [e (:ticks (:seon.test/estimate (meta v)))] (min ticks (* 10 e)) ticks)))
         one (fn [v]
               (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v))
                    (catch Throwable e
                      (if-let [spent (:jolt/ticks-spent (ex-data e))]
                        (t/do-report {:type :error :var v :seon.error/type :seon.test/ticks-spent :ticks spent :budget (budget v)
-                                     :message (str "the test spent its budget of " (budget v) " engine ticks (work done, not time): max(floor, factor x its median green ticks) capped by the config's test-ticks "
-                                                   "(docs/merging.md#a-tests-tick-budget). A test that never ends, or more work than one test may do: fix the loop, or, for work it needs, "
-                                                   "mark the deftest ^{:seon.test/ticks N}")})
+                                     :message (str "the test spent its budget of " (budget v) " engine ticks (work done, not time): ten times the ticks its estimate states, or the config's test-ticks "
+                                                   "(docs/merging.md#a-tests-tick-budget). Ten times over its estimate is the finding: fix the work, or, when the estimate was "
+                                                   "wrong, state on the deftest what it must do, ^{:seon.test/estimate {:ticks N}}, worked from first principles")})
                        (throw e)))))
         ;; a test whose run threw past its budget is not done: it stays unreported (run-tests!)
         ;; read before the next test's measure opens its epoch: the test's own contracted calls
@@ -677,8 +677,8 @@
   since this run's plan) is this test's result, :reused true, and the test is not run. Answers {test result}; a test that never reported, because its namespace's
   run threw (a fixture), is an :error result (:unreported true: no verdict of its own, never
   stored) and an :error report carrying that throw's message and data. Each test runs within its budget of engine ticks of work of its own (Jolt's
-  run-interruptible): the one from budgets ({test ticks}, seon.fx/test-budgets: from the test's own
-  green history, docs/merging.md#a-tests-tick-budget) else ticks, and never more than ticks (nil or 0:
+  run-interruptible): ten times the ticks its deftest's ^{:seon.test/estimate {:ticks n}} states, else ticks, and never more
+  than ticks (docs/merging.md#a-tests-tick-budget; nil or 0:
   unbounded). The budget used is on the result (:budget). A test's verdict is a function of the test
   alone, never of what ran before it in the run: one bound wherever it runs (bin/test, an agent's turn,
   the judge). A test past it is an :error report of the typed :seon.test/ticks-spent naming it,
@@ -691,14 +691,11 @@
                              [:map-of :qualified-symbol :map]]
                   [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?]]
                    [:map-of :qualified-symbol :map]]
-                  [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?] [:maybe [:map-of :qualified-symbol pos-int?]]]
-                   [:map-of :qualified-symbol :map]]
-                  [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?] [:maybe [:map-of :qualified-symbol pos-int?]] [:maybe :seon.host/fn]]
+                  [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?] [:maybe :seon.host/fn]]
                    [:map-of :qualified-symbol :map]]]}
-  ([tests digests note!] (run-tests! tests digests note! nil nil nil))
-  ([tests digests note! ticks] (run-tests! tests digests note! ticks nil nil))
-  ([tests digests note! ticks budgets] (run-tests! tests digests note! ticks budgets nil))
-  ([tests digests note! ticks budgets reused]
+  ([tests digests note!] (run-tests! tests digests note! nil nil))
+  ([tests digests note! ticks] (run-tests! tests digests note! ticks nil))
+  ([tests digests note! ticks reused]
   (let [tset (set tests) ticks (when (and ticks (pos? ticks)) ticks)]
     (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
                    :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.)
@@ -720,7 +717,7 @@
                                                                                   (note! {:seon.test/report m :test v}))
                                                          nil))
                                                      (binding [t/*test-out* out] (report m)))]
-                                  (try (test-vars n (keep #(ns-resolve n (symbol (name %))) ts) ticks budgets done!
+                                  (try (test-vars n (keep #(ns-resolve n (symbol (name %))) ts) ticks done!
                                                   ;; a green another run stored since this run's plan, looked up just before the test would
                                                   ;; start: reused, never run again (its result names the run that wrote it)
                                                   (fn [tv] (let [v (test-symbol (str tv))]
