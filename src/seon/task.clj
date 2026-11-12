@@ -966,14 +966,15 @@
   (boolean (some #(= refine-section (get-in % [:seon.cite/target :seon.doc/address])) (cites-of db (pdb/eid db :seon.task/id id)))))
 
 (def ^:private refine-proofs
-  "What every refine proves, beside the refined task's own proofs: the task files and the wiki's pages still load with no refusal,
+  "What every refine proves: the task files and the wiki's pages still load with no refusal,
   which is what a refine edits (the checks of a docs-and-tasks change, AGENTS.md section 3)."
   #{'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal})
 
 (defn refine-decls
   "The refine of task t (a task map as db holds it: its id, ns, name, branch, proofs and agent) and its review, as declarations: a
   :work task on a branch of its own, :seon.task/after t (it starts when t has ended, whatever came of it), its plan citing t and
-  `refine-section` (what makes it a refine), its proofs t's own and `refine-proofs`; and the review, its merge step (a :merge task
+  `refine-section` (what makes it a refine), its proofs `refine-proofs` alone (it changes no code, so t's red proofs could never
+  pass on its branch), done once it changes something (seon.reconcile/done-explain's :no-change); and the review, its merge step (a :merge task
   that needs it on its branch), written held so that no model works it: a session attaches, reads the change and ends it with
   seon_done, which merges the refine or sends it back with why. See docs/tasks.md#a-refine-curates-its-own-task."
   {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id] [:seon.task/ns :symbol] [:seon.task/name :string]]] [:vector :seon.task/declaration]]}
@@ -983,7 +984,7 @@
         br (or (:seon.task/branch t) (default-branch (:seon.task/id t)))]
     [{:seon.task/ns (:seon.task/ns t) :seon.task/name nm :seon.task/kind :work
       :seon.task/after #{(:seon.task/id t)}
-      :seon.task/proofs (into refine-proofs (:seon.task/proofs t))
+      :seon.task/proofs refine-proofs
       :seon.task/plan (str "Refine the task `" (:seon.task/id t) "`, which has just ended, as " refine-section " says: read the run that "
                            "worked it (its agent " (:seon.task/agent t) " on branch " br ", read with (my.db/at {:branch " br "})), then make the task "
                            "better for whoever works it next: its plan (first what blocked the run, then what it learned and did not use), what it cites, "
