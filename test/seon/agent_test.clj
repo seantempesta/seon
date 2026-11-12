@@ -2280,14 +2280,17 @@
 ;; docs/merging.md#the-test-service: a tree proved as a merge (mode :main: every key with no green at its digest, as the shell's
 ;; bin/prove --merge plans it, seon.proofs/plan-of :merge) carries its generative-contract keys too, as items, where the run
 ;; dropped them (seon.agent/process-plan's (remove mg-key? ...)): a landing through the system proved less than the shell's
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 4}} a-merge-plan-carries-the-contract-keys
-  (let [_ '[seon.agent/handle! seon.agent/process-plan seon.proofs/plan-of seon.proofs/mg-key?]
-        k "mg/seon.ref/lead-sentence"
-        plan "(set (keys (:mg (:result (first (seon.agent/handle! {:op :tests :id :x :plan? true :process? true :mode :main}))))))"
-        [_ mg] (in-agent (fn [_] [(str "(do (in-ns 'seon.ref) (clojure.core/defn lead-sentence \"The first sentence of a section's lead paragraph, on one line.\""
-                                        " {:malli/schema [:=> [:cat :string] :string]} [lead] (identity (first-sentence (str/join \" \" (map str/trim (str/split-lines lead)))))) (in-ns 'user) :ok)")
-                                   plan]))]
-    (is (contains? (set (:value mg)) k) (str "a contract key with no green at its digest is an item of the merge: " (pr-str mg)))))
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-merge-plan-carries-the-contract-keys
+  ;; T1, in process on the world: seon.agent/process-plan of a plan of the world with one contracted function of a pure namespace added (a test
+  ;; plan, a few thousand forms' digests: ~5 M ticks; the check-step plan over it, ~5 M; stored-results reads of every candidate)
+  (let [db (mt/with (mt/world)
+             (mt/code 'seon.ref (str "(ns seon.ref (:require [clojure.string :as str]))\n"
+                                     "(defn first-sentence [s] s)\n"
+                                     "(defn lead-sentence \"The first sentence of a section's lead paragraph, on one line.\""
+                                     " {:malli/schema [:=> [:cat :string] :string]} [lead] (identity (first-sentence (str/join \" \" (map str/trim (str/split-lines lead))))))\n")))
+        plan (agent/test-plan db db #{})
+        mg (:mg (#'agent/process-plan {:plan plan :deferred []} nil))]
+    (is (contains? (set (keys mg)) "mg/seon.ref/lead-sentence") (str "a contract key with no green at its digest is an item of the merge: " (pr-str mg)))))
 
 ;; docs/merging.md#verdicts-are-a-cache: base and branch are digested by the same inputs, so a branch that changed nothing selects
 ;; nothing as changed. Red before: the inputs design added the private checks, the index class and a process test's config
