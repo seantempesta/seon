@@ -176,7 +176,8 @@
         (clojure.test/is (= op (:op (a/poll! ch))) (str uri " reached the proc: " (pr-str headers)))))))
 
 ;; See docs/failure-points.md#failure-points-met-without-a-catch-the-edge-answers-data
-(clojure.test/deftest an-own-page-is-the-port-the-request-reached
+(clojure.test/deftest ^{:seon.test/estimate {:ticks 20000}} an-own-page-is-the-port-the-request-reached
+  ;; estimate: five calls of a header comparison on maps of two keys, ~3k ticks each
   ;; seon.web/same-origin?: the dashboard's own page is the origin its request was sent to (its Host), on 127.0.0.1, whatever port
   ;; the listener bound (one the kernel picked included), never a port read from config; a page of another host, or a Host
   ;; that is not 127.0.0.1 (a rebound name), is refused

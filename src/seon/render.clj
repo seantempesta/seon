@@ -899,6 +899,20 @@
                    [] hc)]
     [hc' ids]))
 
+(defn- thrown-in
+  "What walk w's writer draws where a plain call [f & args] (one the walk keeps as written, so the model reads the call) threw e: the
+  error as a component's defect, recorded with the walk's own (take-defects!) and drawn by its render, as `render!` draws a component that
+  throws: one boundary for a render that throws. See docs/failure-points.md."
+  {:malli/schema [:=> [:cat :map] :seon.host/fn]}
+  [w]
+  (fn [f e]
+    (let [sym (if (var? f) (symbol f) 'fn)
+          defect (contract/error :seon.render/component-defect #'render! (thrown-line sym e)
+                                 (cond-> {:seon.error/in sym} (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
+      (vswap! (:defects w) conj defect)
+      [:section {:class "err"} [:p (:seon.error/message defect)]
+       [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index @(:index w)} defect]])))
+
 (defn- page-unit
   "Walk w's root unit, its component rk's output as the page writes it (`placed-units`' first), written and kept on its cache entry
   with at, the revisions it was written at: each list drawn-list? says the root places is that list's own output, every element
@@ -917,7 +931,7 @@
                       (seq? x) (doall (map shell x))
                       :else x))
         [hc ids] (regions (shell (styled (:out rc) (:f rc))))
-        html (h/html hc)
+        html (h/html hc (thrown-in w))
         u {:id (:id rc) :container root-container :parent nil :rev (hash html) :html html :regions ids}]
     (vswap! (:cache w) update rk assoc :page-at at :page u)
     u))
@@ -958,7 +972,7 @@
                                                                 (seq? x) (doall (map go x))
                                                                 :else x))
                                                (styled (:out c) (:f c)))
-                                      h (h/html slotted)]
+                                      h (h/html slotted (thrown-in w))]
                                   (vswap! (:cache w) update k assoc :unit-rev r :unit-html h) h))]
                    {:id (:id c) :container sel :parent (when parent (:id (get @(:cache w) parent))) :rev r :html html})))
           pl)))
