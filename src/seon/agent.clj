@@ -841,6 +841,16 @@
       (seq files) (update :tree mix (vec files))
       (seq files) (update :config (fn [c] (reduce-kv (fn [c p text] (if-let [k (fx/env-class p)] (update c k mix [p text]) c)) c files))))))
 
+(defn base-at-reads
+  "Base's digests (base, {test digest} by reach) as a branch's selection compares them with the branch's: a test whose reach digest
+  is the branch's own (static) takes the digest its recorded reads gave it on the branch (reads, seon.proofs/read-digests), so a
+  branch changes only what its reach changed, never a test because some run recorded what it read. Without it, once a shard's
+  root moved its main past the tree a green recorded its reads at, every later judge selected those tests as the branch's. See
+  docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat [:map-of :any :string] [:map-of :any :string] [:map-of :any :string]] [:map-of :any :string]]}
+  [base static reads]
+  (into {} (for [[t d] base] [t (if (= d (static t)) (get reads t d) d)])))
+
 (defn test-plan
   "What judges branch db, as this process holds it: seon.proofs/plan of its tests' reach digests
   (seon.program/graph-index) against base's (main at its merge base), the greens stored at
@@ -914,12 +924,8 @@
              cd)
         ;; base's digests take the same point for those tests, so selection still asks what the code changed: a proof over the
         ;; data is selected by its reach, and its verdict is kept and found at the data it read
-        ;; a test whose reach did not move from base's keeps the digest its recorded reads gave it on both sides: a branch changes
-        ;; only what its reach changed, never a test because some run recorded what it read (a judge selected main's newest
-        ;; tests as the branch's once any run had recorded their reads, 2026-11-12)
-        bd (some-> b :index (as-> ix (into {} (for [[t {:keys [digest]}] ix
-                                                     :let [d (cond-> digest (:data? (idx t)) mix)]]
-                                                 [t (if (= d (static t)) (cd t) d)]))))
+        bd (some-> b :index (as-> ix (base-at-reads (into {} (for [[t {:keys [digest]}] ix] [t (cond-> digest (:data? (idx t)) mix)]))
+                                                    static cd)))
         ;; main's tests the branch removed: each judges from base's definition, loaded in the test
         ;; child, its namespace's ns form first when the branch removed the namespace too; one
         ;; that reaches a process of its own (base's index says) stays a process test

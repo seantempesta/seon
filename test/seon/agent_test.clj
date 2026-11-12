@@ -3199,3 +3199,18 @@
         green {:test 'app.x-test/u :status :pass :source "(deftest u (is true))" :calls ['app.x/g] :shape {:n 1}}]
     (is (= (dissoc red :shape) (read red)) "a failing proof keeps its source and what it calls")
     (is (= {:test 'app.x-test/u :status :pass} (read green)) "a passing one is its name and status")))
+
+;; docs/source.md#tests-run-by-reach: a branch changes only what its reach changed. A test whose newest green recorded its reads
+;; sits at that green's digest on the branch (seon.proofs/read-digests); base's side takes the same where the reach did not move,
+;; so the plan's selection (seon.proofs/plan, base against branch) leaves it out. Red before: two judges selected main's four
+;; newest tests as the branch's, once a shard's root moved its main past the tree their greens recorded reads at (2026-11-12).
+;; T1, in process: three maps of three tests, one plan; a few thousand ticks.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-test-whose-reach-did-not-move-is-not-the-branchs-change
+  (let [static {'a/unchanged "d-now" 'a/moved "d-branch" 'a/plain "p"}
+        reads {'a/unchanged "d-green" 'a/moved "d-branch" 'a/plain "p"}
+        base-raw {'a/unchanged "d-now" 'a/moved "d-base" 'a/plain "p"}
+        base (agent/base-at-reads base-raw static reads)
+        sel (:selected (proofs/plan base reads {} #{}))]
+    (is (= "d-green" (base 'a/unchanged)) "a test whose reach is base's takes its recorded-reads digest on base's side too")
+    (is (= "d-base" (base 'a/moved)) "a test whose reach moved keeps base's own digest")
+    (is (= '[a/moved] sel) "so the branch's change is the test its reach moved, never one some run recorded reads for")))
