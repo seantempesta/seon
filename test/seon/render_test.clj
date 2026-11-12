@@ -1216,15 +1216,11 @@
         ws (concat [(get-in st2 [:root-walk :w])] (keep #(some-> (:walk (val %)) :w) (:branch-reads st2)) (map :w (vals (:user-walks st2))))
         seen (apply merge-with #(merge-with + %1 %2) (map r/misfits-by-render ws))
         ;; root's session is in this world, so root's page draws the user's tree (the person, a3 under it): more agent renders, and root's nested sessions render, deleted, 3 classes fewer
-        ;; measured 2026-11-11, the walk's own class on each component's root (its render's name) among them: it goes when data-render replaces it
-        pinned '{seon.render.ui/agent {:wire 3 :class 17} seon.render.ui/agent-parts {:class 2} seon.render.ui/agent-state {:wire 2 :class 2}
-                 seon.render.ui/agents-list {:class 1} seon.render.ui/conversation-list {:class 2} seon.render.ui/eval-output {:class 7}
-                 seon.render.ui/evaluation {:class 5} seon.render.ui/page-rules {:class 2} seon.render.ui/problems-tile {:class 1}
-                 seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 1} seon.render.ui/root-evals {:class 3}
-                 seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 3}
-                 seon.render.ui/status {:class 1} seon.render.ui/task-view {:class 5} seon.render.ui/turn {:class 1}
-                 ;; the tree fixture's root session names no own render, so it is drawn by agent here, not by its stage
-                 seon.render.ui/system-message {:class 6 :wire 3}}]
+        ;; measured 2026-11-11, the walk's own class on each component's root (its render's name) among them: it goes when data-render replaces it.
+        ;; 2026-11-12: more drawn, no render's own count up: a3's page (every branch read keeps its walk now) and root's own task (root's
+        ;; session names request/root, through which it reaches the person it works for)
+        pinned '{seon.render.ui/agent {:class 23 :wire 4} seon.render.ui/agent-parts {:class 3} seon.render.ui/agent-state {:class 3 :wire 3} seon.render.ui/agents-list {:class 1} seon.render.ui/chat-ask {:class 6} seon.render.ui/chat-end {:class 1} seon.render.ui/cite {:class 2} seon.render.ui/conversation-list {:class 3} seon.render.ui/conversation-turn {:class 5} seon.render.ui/eval-output {:class 75 :qualified 36} seon.render.ui/evaluation {:class 21 :qualified 9} seon.render.ui/message {:class 2} seon.render.ui/model-call-view {:class 2} seon.render.ui/page-rules {:class 3} seon.render.ui/problems-tile {:class 1} seon.render.ui/process-tile {:class 4} seon.render.ui/root {:class 1} seon.render.ui/root-evals {:class 3} seon.render.ui/root-head {:class 2} seon.render.ui/root-side {:class 6} seon.render.ui/rules-list {:class 3} seon.render.ui/status {:class 2} seon.render.ui/system-message {:class 6 :wire 3} seon.render.ui/task-view {:class 10} seon.render.ui/turn {:class 2}}]
+
     (try (is (= pinned seen) (str "a count moved: write the new one here when it went down, never when it went up\n"
                                   (pr-str (into (sorted-map) seen))))
          (finally (doseq [w ws] (r/dispose-walk! w))))))
@@ -3261,6 +3257,8 @@
                               ["b1/a1" :a1 :dead "seon.x/old" :cap :task-old]
                               ["b1/a2" :a2 :ended "seon.x/older" :merged :task-older]
                               ["b0/a1" :a1 :dead "seon.x/oldest" :cap :task-oldest]])
+        ;; a person's request: its entry says what was asked, its plan's first line
+        db (d/db-with db [{:seon.task/id "seon.x/older" :seon.task/plan "Older work, merged.\nThe rest."}])
         html (root-page-html db)]
     (testing "an agent with no status and no task reads nothing, and draws"
       (is (= :status/none (:state (ui/standing {:seon.agent/id :user} nil))))
@@ -3271,7 +3269,7 @@
       (is (and (str/includes? html "href=\"/agent/b1/a1\"") (str/includes? html "href=\"/agent/b1/a2\"") (str/includes? html "href=\"/agent/b0/a1\"")))
       (is (str/includes? html "stopped at its cap") "each with its standing, no process needed")
       (is (str/includes? html "merged"))
-      (is (str/includes? html "Older") "and its task"))))
+      (is (str/includes? html "Older work, merged.") "and what its person asked"))))
 
 (deftest an-address-names-a-session-however-a-person-holds-it
   ;; coordinator, 2026-11-05: after a root restarts no past session opened (an id names one of this boot's). The session's
