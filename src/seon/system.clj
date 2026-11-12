@@ -1648,13 +1648,6 @@
                  {:db db :agents-dir agents-dir :open-ms open-ms :compacted compacted :retained retained :dropped-trees dropped-trees
                   :seeded seeded :caught-up caught :seed-ms seed-ms :config-errors config-errors :digest digest :digest-ms digest-ms :contracts contracts :main-inputs main-inputs}))))))
 
-(defn- thrown-in
-  "The fn throwable ex was thrown in: clojure.main's triage of its top frame (as seon.repl/located reads an eval's), a
-  qualified symbol, or nil when the triage names none."
-  {:malli/schema [:=> [:cat :any] [:maybe :symbol]]}
-  [ex] (let [in (:clojure.error/symbol (clojure.main/ex-triage (assoc (Throwable->map ex) :clojure.error/phase :execution)))]
-         (when (qualified-symbol? in) in)))
-
 (defn- flow-error
   "Flow's error-channel value e as the api's :error message: the proc, the throw's message and
   data, the message its step took (:msg), and the fn it was thrown in (:in, clojure.main's triage
@@ -1663,7 +1656,7 @@
   {:malli/schema [:=> [:cat :map] :map]}
   [e]
   (let [ex (::flow/ex e)
-        in (when ex (thrown-in ex))]
+        in (when ex (err/thrown-in ex))]
     (cond-> {:op :error :pid (::flow/pid e) :message (or (some-> ex ex-message) (str e)) :data (some-> ex ex-data contract/bounded) :msg (::flow/msg e)}
       (qualified-symbol? in) (assoc :in in))))
 
@@ -1678,7 +1671,7 @@
   lands on main as any proc's defect does, named, never only on stderr. See docs/errors.md#nothing-crashes-and-nothing-hangs."
   {:malli/schema [:=> [:cat :any :any] :map]}
   [thread ex]
-  (let [in (thrown-in ex)
+  (let [in (err/thrown-in ex)
         where (if thread (str "thread " (.getName ^Thread thread)) "a go or fiber body")
         msg (str "uncaught in " where ": " (or (ex-message ex) (str ex)))]
     (cond-> {:op :error :pid :uncaught :message msg
