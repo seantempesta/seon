@@ -1820,9 +1820,13 @@
      :work (str "a canonical form of the schema meta (its maps and sets sorted by key), its fasl bytes (~30 KB for Seon's "
                 "schema) and one SHA-256 of them: linear in the entries, one pass each")
      :growth :linear
-     ;; estimate: ~900 entries at ~400 ticks each (a sort step, an encode, the hash's share) and ~1 KB of garbage each
-     :per-n {:ticks 400 :bytes 1000}
-     :fixed {:ticks 400000 :bytes 1000000}
+     ;; estimate: ~950 entries at ~400 ticks each (a sort step, an encode, the hash's share); bytes ~1.4 KB an entry: the
+     ;; canonical form ~1.1 KB (an attribute map as a sorted vector: its pair vectors and the sort's seqs), its fasl ~0.2 KB,
+     ;; the digest's copy. Measured 342k ticks / 1.31 MB at 10 (hasch: 5.5M / 19 MB)
+     ;; an added attribute is more than one entry: its schema map, its rschema memberships and both ident maps' entries,
+     ;; ~700 ticks and ~2.6 KB each (measured from 10 to 1,000 added: 685 ticks, 2.56 KB)
+     :per-n {:ticks 700 :bytes 2600}
+     :fixed {:ticks 400000 :bytes 1400000}
      :sizes [10 100 1000]}))
 
 (deftest ^{:seon.test/estimate {:ticks 2000000}} equal-schemas-key-the-same-whatever-order-built-them
