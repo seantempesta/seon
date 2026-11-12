@@ -1257,7 +1257,7 @@
     :step (do (spit (str dir "/steps") (str name "\n"))
               (spit (str dir "/steps.edn") (sedn/encode {:tree tree :digests {name digest}}))
               (when (false? binary?) (spit (str dir "/steps-binary") ""))
-              (when bound (spit (str dir "/step-bounds") (str name " " bound "\n"))))
+              (spit (str dir "/step-bounds") (str name " " bound "\n")))
     (:build :seed) nil)
   nil)
 

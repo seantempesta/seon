@@ -238,6 +238,18 @@
   (bin/test --health, over the program store's kept trees)."
   #{"laws" "lmdb-kill" "lmdb-lock" "lmdb-crash" "forks" "health"})
 
+(defn step-bounds
+  "{step bound-ms} for every one of steps: past it bin/check captures the step's evidence and ends it red (STEP-OVERRAN). The
+  step-end factor (:seon.config.check/step-end-factor) times the step's median measured ms (ms: every check step's, seon.fx/
+  typical-ms), floored at the stall bound (:seon.config.agent/stall-ms); a step never measured takes the largest median of
+  those measured, so no step is ever without one: two unmeasured steps (orphan, resume) hung a landing for 58 min. See
+  docs/clocks.md#time-decides-the-owners-exceptions."
+  {:malli/schema [:=> [:cat [:sequential :string] [:map-of :string number?]] [:map-of :string number?]]}
+  [steps ms]
+  (let [k (cfg/value :seon.config.check/step-end-factor) floor (cfg/value :seon.config.agent/stall-ms)
+        unknown (reduce max 0 (vals ms))]
+    (into {} (for [s steps] [s (max floor (* k (get ms s unknown)))]))))
+
 (def machine-steps
   "The steps whose claim is about the machine itself, so nothing may run beside them: scale (what root and its agents
   cost the machine's memory, seon.check/scale). bin/check runs scale last, alone; the test service grants one only with

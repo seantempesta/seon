@@ -623,12 +623,11 @@
     (when checks?
       (write! (str out "/steps") (str (str/join " " run-steps) (when (seq run-steps) "\n")))
       (write! (str out "/steps.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys steps run-steps)}))
-      ;; each measured step's bound, past which bin/check captures its evidence and ends it red (STEP-OVERRAN): the step-end
-      ;; factor times its median measured run, floored at the stall bound; a step never measured has none (the owner's fourth
-      ;; clock exception, docs/clocks.md#time-decides-the-owners-exceptions)
-      (let [k (config/value :seon.config.check/step-end-factor) floor (config/value :seon.config.agent/stall-ms)]
-        (write! (str out "/step-bounds") (apply str (for [[st m] (sort-by key (measured-ms (remove proofs/mg-key? run-steps)))]
-                                                      (str st " " (max floor (* k m)) "\n")))))
+      ;; every step's bound, past which bin/check captures its evidence and ends it red (STEP-OVERRAN): seon.proofs/step-bounds,
+      ;; the one rule (a step never measured takes the largest measured median; docs/clocks.md#time-decides-the-owners-exceptions)
+      (let [steps (vec (remove proofs/mg-key? run-steps))]
+        (write! (str out "/step-bounds") (apply str (for [[st b] (sort-by key (proofs/step-bounds steps (measured-ms (keys proofs/check-steps))))]
+                                                      (str st " " b "\n")))))
       (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)
                                      ))
       (when (seq missing)

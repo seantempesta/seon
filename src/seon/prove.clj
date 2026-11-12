@@ -551,7 +551,7 @@
                   (concat (for [[t d] (:process r)]
                             [[t d] (cond-> (assoc on :kind :test :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t])) seed? (assoc :needs #{sk}))])
                           (for [[s {:keys [digest binary? bound alone?]}] (:steps r)]
-                            [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?)) bound (assoc :bound bound) alone? (assoc :alone? true)
+                            [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?) :bound bound) alone? (assoc :alone? true)
                                           seed? (assoc :needs #{sk}))])))
       build? (assoc bk (assoc on :kind :build))
       seed? (assoc sk (cond-> (assoc on :kind :seed :binary? stores?) build? (assoc :needs #{bk}))))))

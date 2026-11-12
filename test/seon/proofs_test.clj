@@ -763,3 +763,12 @@
         [f] (get (proofs/failures {:reports [rep]}) 'demo-test/t)]
     (is (some #(str/includes? % "throws_here") (:at f)) (str "the stored failure names the function that threw: " (pr-str (:at f))))
     (is (<= 1 (count (:at f)) (seon.config/value :seon.config.proofs/error-frames)) "its first frames, at most the config's")))
+
+(deftest ^{:seon.test/estimate {:ticks 200000}} every-check-step-has-a-bound-a-never-measured-one-too
+  ;; docs/clocks.md#time-decides-the-owners-exceptions: runtime's landing hung 58 min in the orphan and resume steps, which had no
+  ;; measured run and so no bound; every wait ends (AGENTS §4). A step never measured takes the largest measured median
+  (let [k (seon.config/value :seon.config.check/step-end-factor) floor (seon.config/value :seon.config.agent/stall-ms)
+        b (proofs/step-bounds ["config" "orphan" "resume"] {"config" 4000 "e2e-loop" 90000})]
+    (is (= #{"config" "orphan" "resume"} (set (keys b))) "every step has one")
+    (is (= (max floor (* k 4000)) (b "config")) "a measured step: the factor times its median, floored")
+    (is (= (max floor (* k 90000)) (b "orphan") (b "resume")) "a never-measured step: the largest measured median's")))

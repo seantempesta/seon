@@ -1660,8 +1660,7 @@
   (docs/merging.md#the-test-service): :process {test digest}, the process tests it left (:deferred) that have one; :steps
   {step {:digest :binary? :bound :alone?}}, the bin/check steps with no green at their digest as bin/prove plans them
   (:alone?, a step of seon.proofs/machine-steps, runs with nothing beside it; seon.proofs/plan-of over this branch's reach graph and inputs, every step that reaches a process kept, the generative
-  check's keys left to the shards), :bound the step-end factor times the step's median measured ms floored at the stall
-  bound (a step never measured has none, as under bin/prove: it ends by its own waits' bounds, and that run measures it), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
+  check's keys left to the shards), :bound seon.proofs/step-bounds' (every step has one), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
   steps it names among them (bin/prove --root PORT seon.config-test config), as the plain bin/prove NS runs none; :missing, the steps with no digest here (one naming a
   function the program lacks; health, keyed by a base tree no branch holds); :build {:tree :needed?}, needed when a process
   test or a binary step is among them; :deferred, what it left that is no process item. Or {:unread error}: the cache
@@ -1677,11 +1676,10 @@
         ;; the generative contract keys with no green at their digest: items of the run too, as the shell's shards run them
         ;; (a merge's verification proves them; leaving them out, a tree proved through the system proved less than the shell's)
         mg (into {} (for [k (filter proofs/mg-key? (:run-steps p)) :when (not (seq names))] [k (get (:steps p) k)]))
-        ms (if (or (seq run) (seq process)) (fx/typical-ms (into run (keys process))) {})
-        k (cfg/value :seon.config.check/step-end-factor) floor (cfg/value :seon.config.agent/stall-ms)
-        ;; a process test's bound, as a step's: the factor times its median measured ms, floored; none when never measured
-        steps (into {} (for [s run] [s (cond-> {:digest (get (:steps p) s) :binary? (proofs/step-needs-binary? s) :bound nil}
-                                         (ms s) (assoc :bound (max floor (* k (ms s))))
+        ;; every step's bound (seon.proofs/step-bounds: one never measured takes the largest measured median), from every check
+        ;; step's median, read once when a step runs
+        bounds (if (seq run) (proofs/step-bounds run (fx/typical-ms (vec (keys proofs/check-steps)))) {})
+        steps (into {} (for [s run] [s (cond-> {:digest (get (:steps p) s) :binary? (proofs/step-needs-binary? s) :bound (bounds s)}
                                          (proofs/machine-steps s) (assoc :alone? true))]))]
     (if-let [u @unread]
       {:unread u}
