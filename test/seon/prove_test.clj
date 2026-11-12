@@ -393,15 +393,14 @@
   (let [p (fn [n] [(symbol "app.p-test" n) (str "d" n)])
         items (into {(p "x") {:agent :a1 :ms 10}} (for [n ["one" "two" "three"]] [(p n) {:agent :a1 :ms 10}]))
         [st o] (prove/ask-items (items-st 1) 1 :batch items '#{app.p-test/one app.p-test/two app.p-test/three})
-        verdict (fn [ok? t] (if ok? {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var (str "#'" t)}]}
-                              {:pass 0 :fail 1 :error 0 :reports [{:type :fail :var (str "#'" t) :message "no"}]}))
-        ;; end each granted batch in turn: red for one and three, green for two and x
+        report (fn [t] (if (#{"two" "x"} (name t)) {:type :pass :var (str "#'" t)} {:type :fail :var (str "#'" t) :message "no"}))
+        ;; end each granted batch in turn, a verdict for each of its tests: red for one and three, green for two and x
         run (fn [st o]
               (loop [st st o o all []]
                 (if-let [b (first (batches o))]
                   (let [[st v] (step/answered st (:tag b))
-                        t (first (get-in b [:req :names]))
-                        [st o2] (prove/batch-ended st (parse-long (second v)) (verdict (#{"two" "x"} (name t)) t))]
+                        reps (mapv report (sort-by str (get-in b [:req :names])))
+                        [st o2] (prove/batch-ended st (parse-long (second v)) {:pass (count (filter #(= :pass (:type %)) reps)) :fail (count (remove #(= :pass (:type %)) reps)) :error 0 :reports reps})]
                     (recur st o2 (into all o2)))
                   [st all])))
         [st all] (run st o)
@@ -415,13 +414,13 @@
 ;; still runs every item and names every red; an agent's turn with no proofs named is answered at its first red, as before
 (deftest a-whole-runs-asker-hears-every-red-and-a-turns-its-first
   (let [one 'a.x-test/one two 'a.x-test/two
-        red (fn [t] {:pass 0 :fail 1 :error 0 :reports [{:type :fail :var (str "#'" t) :message "no"}]})
+        red (fn [ts] {:pass 0 :fail (count ts) :error 0 :reports (mapv #(hash-map :type :fail :var (str "#'" %) :message "no") ts)})
         run (fn [mode]
               (let [[st0 o0] (feed (assoc (proc0) :workers 1) [[:req {:rid 1 :branch :b :t 5 :digest "d5" :agent :a1 :mode mode}]])]
                 (loop [st st0 all o0 seen 0]
                   (if-let [m (first (filter :req (drop seen all)))]
                     (let [r (if (get-in m [:req :plan?]) {:items {one "d1" two "d2"} :selected [one two]}
-                              (red (first (or (seq (get-in m [:req :names])) (keys (get-in m [:req :items]))))))
+                              (red (sort-by str (or (seq (get-in m [:req :names])) (keys (get-in m [:req :items]))))))
                           [st o] (feed st [(answer-of m r)])]
                       (recur st (into all o) (inc (.indexOf all m))))
                     (:r (first (filter #(= :prove-answer (:op %)) all)))))))
@@ -440,7 +439,7 @@
     (is (= 2.0 (prove/item-value (get-in st [:items ['app.cheap-test/t "dc"]]) (:bid st))) "and the batch's item passed over aged a grant: its one waiter plus one, over its 1 ms")))
 
 ;; every wait ends: a batch whose run errored (a test child that died) answers each of its askers with that error, never silence
-;; no shards: a worker pulls one item, so two items of one namespace are two grants, and a second worker takes the second
+;; docs/merging.md#the-test-service: a share of the queue over the free workers: two items on two free workers are two grants
 (deftest a-worker-pulls-one-item-at-a-time
   (let [[_ outs] (prove/ask-items (items-st 2) 1 :batch {['app.x-test/a "da"] {:agent :a1 :ms 5} ['app.x-test/b "db"] {:agent :a1 :ms 5}})]
     (is (= [1 1] (mapv #(count (get-in % [:req :names])) (batches outs))) "two workers, one item each, though both are app.x-test's")))
@@ -493,11 +492,13 @@
   (seon.cost/proof
     {:of 'seon.prove/grant :input 'seon.prove-test/queue-of
      :n "items queued, one worker free"
-     :work "one pass over the queued items for the most valuable (item-value, its age read from the grant it was queued at, and its waiters read only when an asker is a turn's), and the one item granted written: nothing of the others (linear in reads, constant in writes)"
+     :work "one pass over the queued items for the most valuable (item-value, its age read from the grant it was queued at, and its waiters read only when an asker is a turn's), and its batch (batch-of): one worker free, its share is every queued item, so two passes more (count, take) and each item's status, its place in the batch and in the request written (linear in reads and writes)"
      :growth :linear
-     ;; measured 2026-11-11 at 100 queued: 6,261 ticks and 19.0 KB a grant, where aging every item it passed over, by a lazy
-     ;; filter and apply max-key, took 43.2k ticks and 355.9 KB
-     :per-n {:ticks 100 :bytes 250}
+     ;; measured 2026-11-11 at 100 queued: 6,261 ticks and 19.0 KB a grant of one item, where aging every item it passed over, by
+     ;; a lazy filter and apply max-key, took 43.2k ticks and 355.9 KB. A grant of a batch (2026-11-12) writes each item it takes
+     ;; (its status, its place in the batch and the request: ~1.5 KB) and walks the queue twice more (a filter's seq, then a
+     ;; destructured seq of entries: ~1.5 KB); measured 465 ticks and 3.2 KB an item at 100
+     :per-n {:ticks 400 :bytes 3000}
      :fixed {:ticks 2000 :bytes 2000}
      :sizes [100 300 1000]}))
 
@@ -534,12 +535,14 @@
           [sd] (fx-asks o1)
           _ (is (= :seed (get-in sd [:req :req :kind])) "the build green: the seed next, which makes the process tests' store")
           [st o2] (feed st [(answer-of sd {:value {:pass 1 :fail 0 :error 0 :ms 2000}})])
-          [p] (fx-asks o2)]
-      (is (= {:kind :process :name 'a.p-test/t :digest "dp" :checkout "/ck"} (select-keys (get-in p [:req :req]) [:kind :name :digest :checkout])) "the seed green: its process test is granted")
-      (let [[_ o3] (feed st [(answer-of p {:value {:pass 1 :fail 0 :error 0 :ms 40}})])
+          [p] (asks o2 :tests)]
+      (is (empty? (fx-asks o2)) "no cold process of its own: nothing goes to root's effect owner")
+      (is (= {:id :a1 :items {'a.p-test/t "dp"} :checkout "/ck"} (select-keys (:req p) [:id :items :checkout]))
+          "the seed green: its process test is granted to the agent holding the branch, run in its fork on the checkout")
+      (let [[_ o3] (feed st [(answer-of p {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.p-test/t"}] :ms 40})])
             [r] (run-answers o3)]
         (is (= [1 0 0 []] ((juxt :pass :fail :error :deferred) r)) "counted as a test, nothing deferred")
-        (is (= [:process] (mapv :kind (filter #(= 'a.p-test/t (:test %)) (filter #(= :prove-verdict (:op %)) o3)))) "its verdict streams with its kind")))))
+        (is (= [:test] (mapv :kind (filter #(= 'a.p-test/t (:test %)) (filter #(= :prove-verdict (:op %)) o3)))) "its verdict streams as a test's")))))
 
 (deftest a-trees-green-build-and-seed-are-made-once-for-its-checkout
   ;; Web's read of step 4: a second run of one tree (another key: names or mode) queued the seed again, which removes
@@ -547,10 +550,12 @@
   (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :build {:tree "T" :needed? true}})
         [st o1] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 900}})])
         [st o2] (feed st [(answer-of (first (fx-asks o1)) {:value {:pass 1 :fail 0 :error 0 :ms 2000}})])
-        [st _] (feed st [(answer-of (first (fx-asks o2)) {:value {:pass 1 :fail 0 :error 0 :ms 40}})])
+        [st _] (feed st [(answer-of (first (asks o2 :tests)) {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.p-test/t"}] :ms 40})])
         [st o3] (feed st [[:req {:rid 2 :branch :tree-T :digest "dT" :agent :a1 :checkout "/ck" :tree "T" :names '#{a.p-test}}]])
         [_ o4] (feed st [(answer-of (first (asks o3 :tests)) {:items {} :process {'a.p-test/u "du"} :build {:tree "T" :needed? true}})])]
-    (is (= [:process] (mapv #(get-in % [:req :req :kind]) (fx-asks o4))) "the second run's process item is granted at once: no build, no seed")))
+    (is (empty? (fx-asks o4)) "no build, no seed again")
+    (is (= [{'a.p-test/u "du"}] (mapv #(get-in % [:req :items]) (remove #(get-in % [:req :plan?]) (asks o4 :tests))))
+        "the second run's process test is granted at once")))
 
 (deftest a-seed-that-kept-the-tree-only-is-not-a-seed-of-the-stores
   ;; a run of a laws step seeds the tree only (no check store, no process tests' store); a later run of that tree with a
@@ -600,13 +605,15 @@
           [_ o2] (feed st [(answer-of first-ask r)])]
       (is (= 1 (granted o2)) "it ended: the next one alone"))))
 
-;; docs/merging.md#the-test-service: a process test's item carries its bound as a step's does (f1), so its runner ends one that
-;; hangs (seon.fx/run-item); one never measured has none. Before, only steps had a bound: a hung process test held a worker
-(deftest a-process-tests-item-carries-its-bound
-  (let [[_ o] (seeded-run 4 {:items {} :process {'a.p-test/t "dp" 'a.p-test/u "du"} :bounds {'a.p-test/t 5000} :build {:tree "T" :needed? false}})
-        reqs (into {} (for [a (fx-asks o) :let [q (get-in a [:req :req])] :when (= :process (:kind q))] [(:name q) q]))]
-    (is (= 5000 (:bound (reqs 'a.p-test/t))) (pr-str reqs))
-    (is (nil? (:bound (reqs 'a.p-test/u))) "never measured: no bound")))
+;; docs/merging.md#the-test-service: a fork's start and what its first test makes (a process test's root) are paid once a
+;; batch: the queue goes to the free workers in shares, never one test a fork (measured 2026-11-12: one system test 20 s in a
+;; fresh fork, each after it 0.5 s)
+(deftest a-grant-is-a-share-of-the-queue-for-one-fork
+  (let [items (into {} (for [i (range 8)] [(symbol "a.b-test" (str "t" i)) (str "d" i)]))
+        [_ o] (tree-run 4 {:items items :build {:tree "T" :needed? false}})
+        grants (mapv #(get-in % [:req :items]) (remove #(get-in % [:req :plan?]) (asks o :tests)))]
+    (is (= [2 2 2 2] (mapv count grants)) (str "8 tests on 4 workers: 4 forks of 2: " (pr-str grants)))
+    (is (= items (apply merge grants)) "every test granted once")))
 
 ;; a step past its bound is a signal (docs/clocks.md#time-decides-the-owners-exceptions), never a verdict: its asker is answered
 ;; on the rest, and the answer names it

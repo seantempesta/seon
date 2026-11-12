@@ -107,12 +107,11 @@
         end! (fn []
                (let [agent @made]
                  (seon.lib/remove-tree! tasks)
-                 (cond (:port root) (eval-root (str "(let [ev (c/events sys) a " (when agent (str ":" agent)) "]"
+                 ;; its end awaited as the fact kill! answers once it is recorded (at once for one already ended), never an end
+                 ;; event, which a teardown could miss and wait on forever (Context's 300 s shard, 2026-11-12)
+                 (cond (:port root) (eval-root (str "(let [a " (when agent (str ":" agent)) "]"
                                                     " (when-let [v (resolve 'ready-ev)] (clojure.core.async/untap (:events-mult sys) @v))"
-                                                    " (when (and a (not (:ended-ms (get (:agents (c/state sys)) a))))"
-                                                    "   (c/kill! sys a)"
-                                                    "   (loop [] (let [e (clojure.core.async/<!! ev)] (when-not (and (#{:ended :dead :killed} (:type e)) (= a (:agent e))) (recur)))))"
-                                                    " (clojure.core.async/untap (:events-mult sys) ev)"
+                                                    " (when a @(c/kill! sys a))"
                                                     ;; its tasks cancelled: a run left :running keeps the reconciler from
                                                     ;; ever being quiet, and a later test's await-quiet waits on it
                                                     " (my.root/cancel! sys (filterv #(clojure.string/starts-with? % \"" tns "/\")"
@@ -197,7 +196,7 @@
        "                          (#{:dead :ended :killed} (:type e)) (:type e)"
        "                          :else (recur))))]"
        "   (clojure.core.async/untap (:events-mult sys) ev)"
-       "   (when-not (:ended-ms (get (:agents (c/state sys)) ag)) (c/kill! sys ag))"
+       "   @(c/kill! sys ag)"
        "   r))"))
 
 (defn- root-ended
@@ -2134,7 +2133,7 @@
   (str "(let [bid (keyword (:seon.agent/key " (agent-code w) "))"
        "      bkey " (str "(:seon.agent/key " (agent-code w) ")")
        "      body (str \"msg-\" (random-uuid))"
-       "      end! (fn [] (c/kill! sys bid) (loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ended :dead :killed} (:type e)) (= bid (:agent e))) :gone (recur)))))"
+       "      end! (fn [] @(c/kill! sys bid) :gone)"
        "      send! (fn [] @(c/submit! sys :" a " (str \"(my.agent/send-message [\" (pr-str bid) \"] \" (pr-str body) \")\") {:origin :outside}))]"
        "  (if " before-send? " (do (end!) (send!)) (do (send!) (end!)))"
        "  {:body body :b bid :bkey bkey :sender " (pr-str a)
