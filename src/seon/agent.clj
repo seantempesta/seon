@@ -540,15 +540,6 @@
 
 ;; ---- merging main into this branch (seon.merge; session M1) -------------------------------
 
-(defn- resolution-tx
-  "The branch's own write of resolutions {key value}. See docs/agent.md#merging."
-  {:malli/schema [:=> [:cat :map] [:vector :any]]}
-  [resolutions]
-  (vec (for [[[e a :as k] v] resolutions]
-         (cond (= 3 (count k)) [(if (= :seon.merge/gone v) :db/retract :db/add) e a (nth k 2)]
-               (= :seon.merge/gone v) [:db.fn/retractAttribute e a]
-               :else [:db/add e a v]))))
-
 (defn merge-main!
   "Merge main into this agent's branch as git rebases it: the branch's own transactions since the base and the resolutions
   replayed onto main's commit, the branch's head then moved once to that value. See docs/agent.md#merging."
@@ -567,22 +558,11 @@
         {:ok true :applied [] :t (:max-tx head)}
         (let [base (pdb/branch-base (:store-conn @state) main-b b)
               resolutions (into {} (for [[[e & more] v] resolutions] [(into [(if (vector? e) (:db/id (d/entity head e)) e)] more) v]))
-              p (pm/plan base head main resolutions)
-              a (when-not (pm/refusal p) (pm/apply-groups! mconn main (pdb/tx-meta b) (pm/replay base head main-b)))
-              own (fn [tx-data] (dw/apply! mconn {:tx-data tx-data :tx-meta (pdb/tx-meta b)}))
-              resolved (when (and a (not (:refused a)) (seq resolutions)) (own (resolution-tx resolutions)))
-              final (when (and a (not (:refused a)) (or (nil? resolved) (map? resolved)))
-                      (own [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}]))
-              own-refused (fn [e] (or (when (:seon.error/type (ex-data e)) (ex-data e))
-                                      (contract/error :seon.writer/refused #'seon.agent/merge-main! (or (ex-message e) (str e)) (or (ex-data e) {}))))
-              why (cond (pm/refusal p) (pm/refusal p)
-                        (:refused a) (pm/refusal (:tx (:refused a)) (:exception (:refused a)))
-                        (and resolved (not (map? resolved))) (own-refused resolved)
-                        (and final (not (map? final))) (own-refused final))]
-          (if why
-            (assoc why :ok false :applied [] :t (:max-tx head))
+              r (pm/rebase mconn base head main b resolutions [{:seon.agent/key (:key @state) :seon.agent/base-commit (d/commit-id main)}])]
+          (if (:seon.error/type r)
+            (assoc r :ok false :applied [] :t (:max-tx head))
             ;; the rebased value becomes the branch's head in one move, refused when the head moved since it was read
-            (let [cid (try (d/force-branch! (:db-after final) b #{(d/commit-id main)} {:expected-current-commit (d/commit-id head)})
+            (let [cid (try (d/force-branch! (:db r) b #{(d/commit-id main)} {:expected-current-commit (d/commit-id head)})
                            (catch Throwable e
                              (if (= :stale-branch-head (:type (ex-data e)))
                                (contract/error :seon.writer/refused #'seon.agent/merge-main! "The branch moved during the merge: merge again." (ex-data e))
@@ -599,7 +579,7 @@
                   (doc/carry-index! head db (map (fn [op] [(nth op 1) (nth op 2)]) ops))
                   (swap! state #(-> % (assoc :store-conn conn :db db :base main :merged-t (:max-tx db)) (schema-moved (into #{} (map (fn [op] (nth op 2 nil))) ops))))
                   (send! {:op :committed :t (:max-tx db) :txs 1 :commit cid})
-                  (cond-> {:ok true :applied (:applied a) :resolved (vec (keys resolutions)) :t (:max-tx db) :datoms (count ops)}
+                  (cond-> {:ok true :applied (:applied r) :resolved (vec (keys resolutions)) :t (:max-tx db) :datoms (count ops)}
                     (seq errs) (assoc :load-errors errs))))))))
       (finally (dw/abandon-pending! mconn) (d/release mconn)))))
 

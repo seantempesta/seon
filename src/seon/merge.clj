@@ -400,3 +400,35 @@
                 (-> acc (assoc :db (:db-after rep)) (update :reps conj rep) (update :applied conj (:tx g)))
                 (reduced (assoc acc :refused {:tx (:tx g) :exception rep})))))
           {:db db :reps [] :applied []} groups))
+
+(defn- resolution-tx
+  "The branch's own write of resolutions {key value}. See docs/agent.md#merging."
+  {:malli/schema [:=> [:cat :map] [:vector :any]]}
+  [resolutions]
+  (vec (for [[[e a :as k] v] resolutions]
+         (cond (= 3 (count k)) [(if (= :seon.merge/gone v) :db/retract :db/add) e a (nth k 2)]
+               (= :seon.merge/gone v) [:db.fn/retractAttribute e a]
+               :else [:db/add e a v]))))
+
+(defn rebase
+  "Branch b's head rebased onto main as git rebases: b's own transactions since base, then the resolutions and the tail,
+  each through the checked write on mconn (main's connection, never committed here), the tail marked as the merge of
+  main. Answers {:db :applied}, :applied main's transactions since base, or the typed refusal. See docs/agent.md#merging."
+  {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :seon.host/db :seon.host/db :seon.db/branch :map [:vector :any]]
+                  [:or [:map [:db :seon.host/db] [:applied [:vector :int]]] :seon.error/base]]}
+  [mconn base head main b resolutions tail]
+  (let [main-b (pdb/main-branch (:config main))
+        p (plan base head main resolutions)
+        refused (fn [r] (or (when (:seon.error/type (ex-data r)) (ex-data r))
+                            (contract/error :seon.writer/refused #'seon.merge/rebase (or (ex-message r) (str r)) (or (ex-data r) {}))))]
+    (or (refusal p)
+        (let [a (apply-groups! mconn main (pdb/tx-meta b) (replay base head main-b))]
+          (if (:refused a)
+            (refusal (:tx (:refused a)) (:exception (:refused a)))
+            (let [own (fn [db tx-data meta] (if (seq tx-data) (dw/apply! mconn {:tx-data tx-data :tx-meta meta}) {:db-after db}))
+                  r (own (:db a) (resolution-tx resolutions) (pdb/tx-meta b))
+                  t (if (map? r) (own (:db-after r) tail (pdb/tx-meta b {:seon.tx/merged main-b})) r)]
+              (cond (not (map? r)) (refused r)
+                    (not (map? t)) (refused t)
+                    :else {:db (:db-after t) :applied (mapv :tx (replay base main nil))})))))))
+

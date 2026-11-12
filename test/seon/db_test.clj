@@ -1640,27 +1640,33 @@
         {cfg :cfg main :conn} (pdb/open! :lmdb path 1000 :db)]
       (let [b (keyword (str "test-" (random-uuid)))
             _ (d/branch! main :db b)
-            br (pdb/connect (assoc cfg :branch b))
+            br (atom (pdb/connect (assoc cfg :branch b)))
             addrs (fn [db] (let [v (volatile! #{})] (org.replikativ.persistent-sorted-set/walk-addresses (:eavt db) (fn [a] (when a (vswap! v conj a)) true)) @v))
+            ;; the merge an agent runs (seon.agent/merge-main!): the branch rebased onto main's commit, its head moved once
             merge! (fn []
-                     (let [base (d/commit-as-db br (d/merge-base br b :db))]
-                       (d/merge-db br #{:db} (vec (mapcat :ops (:groups (seon.merge/plan base @br @main)))))))
-            private (fn [] (let [m (addrs @main) o (addrs @br)] [(count (remove m o)) (count o)]))]
+                     (let [mconn (pdb/connect (assoc cfg :branch :db))
+                           base (d/commit-as-db @br (d/merge-base @br b :db))
+                           r (seon.merge/rebase mconn base @@br @mconn b {} [])]
+                       (try (d/force-branch! (:db r) b #{(d/commit-id @mconn)} {:expected-current-commit (d/commit-id @@br)})
+                            (finally (dw/abandon-pending! mconn) (d/release mconn)))
+                       (d/release @br)
+                       (reset! br (pdb/connect (assoc cfg :branch b)))))
+            private (fn [] (let [m (addrs @main) o (addrs @@br)] [(count (remove m o)) (count o)]))]
         (try
           ;; main grows by a namespace a round, and the branch takes each by merge; then the branch writes one note
           (doseq [i (range 20)]
             (let [nsym (symbol (str "app.c" i))]
               (d/transact main (vec ((mt/code nsym (str "(ns " nsym ")\n(defn f [] " i ")\n")) @main)))
               (merge!)))
-          (d/transact br [{:note/agent :t :note/text "the branch's own"}])
+          (d/transact @br [{:note/agent :t :note/text "the branch's own"}])
           (let [[own total] (private)]
-            (is (:crypto-hash? (:config @br)) "the store's nodes are addressed by their content")
+            (is (:crypto-hash? (:config @@br)) "the store's nodes are addressed by their content")
             ;; the branch's own nodes are its one write's path and a few leaves, under a tenth of the tree (Sean, 2026-11-10; measured 9 of
             ;; 156 on a seed of 2000, 5 of 85 on this one): persistent-sorted-set is a plain B-tree whose leaf cut depends on insertion order, and a merge inserts
             ;; main's datoms in another order than main did, so a branch can own leaves holding only main's datoms (the literal 8 passed
             ;; by luck). Random addresses kept 76 of 157 (48%) after the same 20 merges, red here; docs/sharing.md#what-a-branchs-nodes-are
             (is (<= own (quot total 10)) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))
-          (finally (d/release br) (d/release main) (seon.lib/remove-tree! path))))))
+          (finally (d/release @br) (d/release main) (seon.lib/remove-tree! path))))))
 
 (deftest a-branchs-own-entity-schema-is-the-one-its-writes-are-held-to
   ;; docs/storage.md#the-write-checks-every-entity-it-touches: the per-datom check read a branch's own schemas and the
