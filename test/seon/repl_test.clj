@@ -308,11 +308,12 @@
 (deftest a-namespace-edit-names-the-var-that-holds-the-text
   ;; docs/agent.md#changing-a-definition: loop PU (2026-11-12) spent e17-34 changing one function's tail: (lines 'the.ns 380 470) was empty
   ;; (a namespace's text was its ns form alone) and (edit! 'the.ns old new) was :not-found, the text being in a var; loop D0 lost t35-44 so
+;; the calls are made of #'repl/edit! itself, so this test reaches what it tests (code in a string reaches nothing)
   (let [[_ in-var nowhere ls] (at/in-agent (fn [{:keys [ns]}]
                                              (let [n (str ns ".held")]
                                                [(str "(ns " n ") (defn f [a] (+ a 1)) (defn g [] (* 2 3))")
-                                                (str "(seon.repl/edit! '" n " \"(+ a 1)\" \"(+ a 2)\")")
-                                                (str "(:edited (seon.repl/edit! '" n " \"(defn h\" \"(defn- h\"))")
+                                                (str "(" (symbol #'repl/edit!) " '" n " \"(+ a 1)\" \"(+ a 2)\")")
+                                                (str "(:edited (" (symbol #'repl/edit!) " '" n " \"(defn h\" \"(defn- h\"))")
                                                 (str "(mapv :text (my.agent/lines '" n "))")])))
         n (fn [s] (re-find #"\S+\.held" s))]
     (is (= :not-found (get-in in-var [:ex :seon.repl/refused-because])) (pr-str in-var))
