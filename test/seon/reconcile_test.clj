@@ -57,10 +57,12 @@
   "Root judges task nm's end on main db (`#'r/judge-tx`): end is what its agent wrote on its branch (nil: none), results root's
   own proof results, diff the writer's branch read (members over empty ones). The branch is main (or :branch) with :on-branch
   (tx-data) and the end written on it; the flight's other members are options. A run that worked by default: its diff changed one key
-  (:ours, else the done rule's :no-change) and it ended at its turn (:ended-turn, else it gets no refine). Answers {:db main after the judging :outcome :tx}."
+  (:ours, written on the branch as a var; else the done rule's :no-change) and it ended at its turn (:ended-turn, else it gets no refine). Answers {:db main after the judging :outcome :tx}."
   [db nm end & {:keys [results diff deferred run-problems worked-error turn ended-turn branch on-branch] :or {turn 1}}]
   (let [id (str "demo/" nm)
-        branch (cond-> (or branch db) on-branch (d/db-with on-branch) end (ended nm end :turn turn :ended-turn ended-turn))
+        ;; the work the writer's :ours names, on the branch as content, which root's judging measures (seon.merge/changed?); none when :ours is []
+        branch (cond-> (or branch db) on-branch (d/db-with on-branch) (not= [] (:ours diff)) (d/db-with [{:var/name 'demo/worked}])
+                 end (ended nm end :turn turn :ended-turn ended-turn))
         {:keys [tx outcome]} (#'r/judge-tx (st-of db) {:act {:op :spawn :task id :env {:branch (task/default-branch id)}} :deferred deferred
                                                     :run-problems run-problems :worked-error worked-error}
                                         (or results {})
