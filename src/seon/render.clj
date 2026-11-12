@@ -1288,14 +1288,14 @@
   "Tree (seon.ctx/build's :tree) drawn by root render var root on db, kept as a value: prev is what the last call answered (nil, or
   opts :moved nil: drawn cold), :moved the datoms since prev's db. A component is reused when its arguments are the same (a view by
   its path), its render the same fn, and nothing it read moved (`queue-what-moved!`). No reaction, watch or lock: its owner holds
-  the value. opts :index, :outputs, :changes (the tree's diff, seon.ctx/changes), :model-only. Answers the next prev: :answers
+  the value. opts :index, :outputs, :changes (the tree's diff, seon.ctx/changes), :model-only, :resolve (the page as hiccup too, :hiccup, `resolved`). Answers the next prev: :answers
   {output [[value source] ...]} for each output but the hiccup, :ran, :defects, :ledger and the parts it keeps. See
   docs/render.md#a-page-is-a-kept-walk."
   {:malli/schema [:=> [:cat [:maybe :map] [:map [:db :seon.host/db] [:tree :any] [:root :any] [:index :map] [:outputs [:set :keyword]]
                                             [:changes :seon.host/fn] [:moved {:optional true} [:maybe [:sequential :any]]]
-                                            [:model-only {:optional true} :boolean]]]
+                                            [:model-only {:optional true} :boolean] [:resolve {:optional true} :boolean]]]
                   [:map [:answers :map] [:ran :map] [:defects [:vector :map]] [:tree :any] [:index :map] [:root :any]]]}
-  [prev {:keys [db tree root index outputs changes moved model-only]}]
+  [prev {:keys [db tree root index outputs changes moved model-only resolve]}]
   (let [r (ratom/atom tree)
         warm? (and (some? prev) (some? moved) (identical? index (:index prev)) (= root (:root prev)))
         w (assoc (walker {:ref r :changes changes} (constantly db) [root {} (ratom/ref-view r changes)] index)
@@ -1310,11 +1310,13 @@
       (doseq [c @(:gone w) :when (empty? (:parents (get @(:cache w) c)))] (unmount! w c))
       (vreset! (:gone w) #{}))
     (let [ran @(:ran env)]
-      (into {:tree tree :index index :root root :ran ran :defects @(:defects w) :ledger @(:ledger w)
+      (into (cond-> {:tree tree :index index :root root :ran ran :defects @(:defects w) :ledger @(:ledger w)
              ;; nothing ran: every answer is last time's
              :answers (if (and warm? (empty? ran))
                         (:answers prev)
                         (into {} (for [o outputs :when (not= o :seon.render/hiccup)] [o (answer-sources w o)])))}
+             ;; the page as hiccup, each placed component's output in its place (`resolved`), when the hiccup is asked; last time's when nothing ran
+             resolve (assoc :hiccup (if (and warm? (empty? ran) (contains? prev :hiccup)) (:hiccup prev) (resolved w @(:out w) false))))
             (map (fn [p] [p @(get w p)]))
             kept-parts))))
 
