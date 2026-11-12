@@ -415,6 +415,14 @@
       head
       (str head "+" (tree-id dir [])))))
 
+(defn blob-ids
+  "{path blob} of every file of tree in the repository at root (git ls-tree -r: a submodule by its commit), the content id a
+  recorded file read is keyed by (seon.program/reads-index). One git call."
+  {:malli/schema [:=> [:cat :string :string] [:map-of :string :string]]}
+  [root tree]
+  (into {} (for [l (str/split-lines (git! {} root ["ls-tree" "-r" tree] nil)) :let [[m p] (str/split l #"\t" 2)] :when p]
+             [p (nth (str/split m #" ") 2)])))
+
 (defn inputs
   "The one producer of the checkout at root's inputs that have no program facts, for bin/test
   and for the binary's build record (seon.system/built-program, which a boot hands its agents):
@@ -714,6 +722,17 @@
        (catch java.io.FileNotFoundException _ nil)
        (catch Throwable e (error #'seon.fx/read-verdict :seon.fx/io-error (str "reading " path ": " (step/error-msg e)) {:path path}))))
 
+(defn held-reads
+  "{test [{:digest :reads}]} of tests: each one's newest green whose run recorded what it read (write-verdicts!'s reads.edn
+  beside its verdicts; seon.proofs/read-digests reuses it while every read still has its digest); a test with none is
+  absent. One small file a test. dir: the cache's (:seon.config.proofs/results-dir unless given)."
+  {:malli/schema [:function [:=> [:cat [:sequential :any]] [:or :map :seon.error/base]] [:=> [:cat :string [:sequential :any]] [:or :map :seon.error/base]]]}
+  ([tests] (held-reads (cfg/value :seon.config.proofs/results-dir) tests))
+  ([dir tests]
+   (reduce (fn [acc t] (let [r (read-verdict (str (key-dir dir t) "/reads.edn"))]
+                         (cond (contract/error? r) (reduced r) (map? r) (assoc acc t [r]) :else acc)))
+           {} tests)))
+
 (defn stored-results
   "{digest result} of the verdicts cached for cand ({key digest}): two file checks a key, and a red's file read. A green is
   {:digest :pass 1 :fail 0 :error 0}; a red its status counted once, with its failures and, for a cost
@@ -888,7 +907,12 @@
                                          :text (sedn/encode v)}})]
                 (if (contract/error? w)
                   (reduced w)
-                  (-> (do (when (= :pass st) (history-add! dir k (some-> (:ms r) long) (:ticks r))) acc) (update :recorded inc) (update :bytes + (:bytes (:value w))) (update :kept conj (:path (:value w)))))))
+                  (let [;; a green whose run recorded what it read (seon.proofs/reads-key): the test's newest, beside its verdicts
+                        rw (when (and (= :pass st) (seq (:reads r)))
+                             (write-file {:req {:path (str (key-dir dir k) "/reads.edn") :text (sedn/encode {:digest (:digest r) :reads (:reads r)})}}))]
+                    (if (contract/error? rw)
+                      (reduced rw)
+                      (-> (do (when (= :pass st) (history-add! dir k (some-> (:ms r) long) (:ticks r))) acc) (update :recorded inc) (update :bytes + (:bytes (:value w))) (update :kept conj (:path (:value w)))))))))
             {:recorded 0 :bytes 0 :kept #{}}
             (filter (fn [[_ r]] (and (:digest r) (not (:flaky r)) (not (:unreported r)))) ran))]
     (when-not (contract/error? done) (when (pos? (:recorded done)) (evict! dir (:bytes done) (:kept done) max-bytes)))

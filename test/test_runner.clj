@@ -222,6 +222,20 @@
         (java.nio.file.Files/move (.toPath tmp) (.toPath f) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE java.nio.file.StandardCopyOption/REPLACE_EXISTING]))))
     g))
 
+(defn- reads-index-of
+  "The reads index of the checkout at root on tree (seon.program/reads-index over graph g and inputs in), kept in the program
+  store at store beside the reach graph (reads-index.fasl, by tree): a plan on a tree already indexed reads it, never makes
+  it again (Tests: plans remade every digest on each ask, 1.4-12.6 s). Regenerable output of the kept store."
+  [root store tree g in]
+  (let [f (io/file store "reads-index.fasl")
+        kept (when (.isFile f) (let [{t :tree rd :rd} (fasl/deserialize {} (java.nio.file.Files/readAllBytes (.toPath f)))] (when (= t tree) rd)))]
+    (or kept
+        (let [rd (seon.program/reads-index g in (fx/blob-ids root tree))
+              tmp (io/file store (str "reads-index.fasl." (random-uuid)))]
+          (java.nio.file.Files/write (.toPath tmp) ^bytes (fasl/serialize {:tree tree :rd rd}) (make-array java.nio.file.OpenOption 0))
+          (java.nio.file.Files/move (.toPath tmp) (.toPath f) (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+          rd))))
+
 (defn- tests-of
   "{test digest} of the named test namespaces (or every one) on the checkout at root, the
   ones among them that reach a process of their own (:process, seon.program/graph-index), its
@@ -246,12 +260,16 @@
         whole (if (seq names) (set (keep #(when-not (str/includes? % "/") (symbol %)) names)) nss)
         idx (into {} (filter #(or (whole (symbol (namespace (key %)))) (vars (key %)))) all)]
     {:graph g :inputs in
+     :rd (delay (reads-index-of root store tree g in))
      ;; whether the binary target/seon is (its build record, target/seon.program) runs this tree's program as a build of it would:
      ;; nil, or what differs that it bakes (seon.system/binary-current, the one rule; docs/source.md#the-binary-records-its-program)
      :binary-current (seon.system/binary-current db (seon.program/binary-program) tree g)
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
+     ;; recorded reads (seon.proofs/read-digests): the tests' newest greens that recorded what they read, and, when any did,
+     ;; the digest of everything a run can read on this tree; an unreadable record only makes its test run
+     :held (let [h (fx/held-reads (vec (keys idx)))] (if (:seon.error/type h) {} h))
      ;; the proofs of this tree that pass by a waiver (an :overrun in the form), counted on the db the plan reads
      :waived (count (problems/waived-proofs db {}))
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))

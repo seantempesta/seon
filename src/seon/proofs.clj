@@ -507,6 +507,36 @@
         {starts true others false} (group-by #(contains? process %) greens)]
     (vec (sort-by str (concat (by-tree starts) (by-tree others))))))
 
+;; ---- recorded reads (docs/source.md#tests-run-by-reach) -----------------------------------
+
+(defn reads-key
+  "What a test's run read (raw: {:fns #{var} :entities #{schema key} :config #{key} :files #{path}}, its run's record) with
+  each read's digest in rd ({var digest, [:schema k] digest, [:config k] digest, [:file path] digest}: seon.program/read-digests
+  of the program it ran): its verdict's :reads. A read rd holds nothing for is kept as nil, a miss: it moves when the thing
+  appears."
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [rd {:keys [fns entities config files]}]
+  (into {} (for [k (concat fns (map #(vector :schema %) entities) (map #(vector :config %) config) (map #(vector :file %) files))]
+             [k (get rd k)])))
+
+(defn- covered?
+  "Does rd (a reads index) hold every input of read key k's kind (a var, [:schema k], [:config k], [:file p]; rd's
+  :seon.proofs/covers), so that k missing from it is a miss, not an input it cannot see?"
+  {:malli/schema [:=> [:cat :map :any] :boolean]}
+  [rd k] (contains? (:seon.proofs/covers rd) (if (vector? k) (first k) :var)))
+
+(defn read-digests
+  "Each test of static ({test digest}, its reach digest) at the digest of its newest verdict in held ({test [verdict]}) whose
+  :reads (reads-key) all still have their digest in rd, the program now: so a run looks it up there and reuses it while
+  nothing it read moved, whatever else did; a test with no such verdict keeps its static digest and runs unless a verdict is
+  held there. Cost: one compare a recorded read, of the verdicts held. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat [:map-of :any :string] :map [:map-of :any [:sequential :map]]] [:map-of :any :string]]}
+  [static rd held]
+  (into {} (for [[t d] static]
+             [t (or (some (fn [v] (when (and (seq (:reads v)) (every? (fn [[k dg]] (and (= dg (get rd k)) (or (some? dg) (covered? rd k)))) (:reads v))) (:digest v)))
+                          (get held t))
+                    d)])))
+
 (defn plan-of
   "What bin/prove and bin/test run on a program: the tests of names (or all) and the bin/check
   steps with no green at their digest (plan), less, when nothing is named, the ones that reach a
@@ -521,8 +551,10 @@
   would run to leave out, unless the run names keys or is the full run. Answers {:run-tests :run-steps :reused :cand :process :binary
   :no-test :flaky :left :slow :digests :steps :missing :inputs}."
   {:malli/schema [:=> [:cat :map [:enum "tests" "checks" "both"] [:or :boolean [:= :merge]] [:maybe [:sequential :any]] [:maybe :string] :seon.host/fn] :map]}
-  [{:keys [graph inputs digests process binary no-test slow-of]} what all? names base results-at]
+  [{:keys [graph inputs digests process binary no-test slow-of rd held]} what all? names base results-at]
   (let [tests? (not= what "checks") checks? (not= what "tests")
+        ;; recorded reads: each test looked up at its newest green's digest while all it read is unchanged (read-digests)
+        digests (if (seq held) (read-digests digests (force rd) held) digests)
         ;; the steps' functions read from the tests' graph: their digests and which boot a root or a process
         ;; each pure contracted function is a key of its own (mg-roots), indexed beside the steps
         mg (when checks? (mg-roots graph))

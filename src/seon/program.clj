@@ -2163,6 +2163,52 @@
         (assoc g :index (keep-root {:in inputs :answers answers :rooted rooted}) :stale #{}
                :tests-by-ns (or (:tests-by-ns g) (group-by (comp symbol namespace) tests)))))))
 
+;; ---- recorded reads: a test keyed by the vars its run called (docs/source.md#tests-run-by-reach) ----
+
+(defn- called-closure
+  "The rows a call of var v depends on in reach graph g: v's forms, its methods and impls, the schema entries they and its
+  contract name, and, followed, every var they reference that no contract counts (a data def, a macro, a test's helper):
+  a contracted var they reference is in a run's call record only if it ran, so it is no dependency of a call that did not
+  call it. With each row's namespace's plain forms (its ns form, a top-level form defining nothing); a host schema
+  (seon.contract/host-schemas) is that var's form."
+  {:malli/schema [:=> [:cat :map :qualified-symbol] [:set :string]]}
+  [{:keys [rows defs methods impls contract plain]} v]
+  (loop [todo (vec (concat (get defs v) (get methods v) (get impls v) (get contract v))) seen #{}]
+    (if-let [id (peek todo)]
+      (if (seen id)
+        (recur (pop todo) seen)
+        (let [r (rows id)
+              next-ids (if r
+                         (concat (:sedges r) (get plain (:ns r))
+                                 (mapcat #(concat (get defs %) (get methods %) (get impls %)) (remove contract (:refs r))))
+                         ;; a schema the program's code defines (seon.contract/host-schemas: :seon.host/db and its kind) has no entry
+                         (get defs 'seon.contract/host-schemas))]
+          (recur (into (pop todo) (remove seen) next-ids) (conj seen id))))
+      seen)))
+
+(defn var-digests
+  "{var digest} over reach graph g for each var of vars: the digest of what a call of it depends on (called-closure's rows'
+  own digests), so a test keyed by the vars its run called (its verdict's :reads) moves exactly when one of them, or what
+  they use without calling, changed. Cost: one walk a var, stopping at contracted vars. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map [:sequential :qualified-symbol]] [:map-of :qualified-symbol :string]]}
+  [{:keys [own] :as g} vars]
+  (into {} (for [v vars :let [ids (called-closure g v)] :when (seq ids)]
+             [v (lib/digest (str/join " " (sort (keep own ids))))])))
+
+(defn reads-index
+  "The digest of every input a test's run can read, keyed as seon.proofs/reads-key keys its record: each var by var-digests,
+  [:schema k] each schema entry's own digest, [:config k] each config value inputs' :config holds, [:file path] each
+  file's git blob id (blobs, {path blob}: seon.fx/blob-ids of the tree). One map a program and tree, read by every test's
+  reuse check. See docs/source.md#tests-run-by-reach."
+  {:malli/schema [:=> [:cat :map :seon.program/inputs [:map-of :string :string]] :map]}
+  [{:keys [defs schemas own] :as g} inputs blobs]
+  (merge (var-digests g (vec (keys defs)))
+         (into {} (for [k (keys schemas) :let [d (get own (str "schema " k))] :when d] [[:schema k] d]))
+         (into {} (for [[k v] (:config inputs)] [[:config k] v]))
+         (into {} (for [[p b] blobs] [[:file p] b]))
+         ;; the kinds it holds whole: a read of a file it has no blobs for is never a miss (seon.proofs/read-digests)
+         {:seon.proofs/covers (cond-> #{:var :schema :config} (seq blobs) (conj :file))}))
+
 (defn index-of
   "{test {:digest :process? :binary?}} the graph g holds (reach-indexed): graph-index's of its tests, or {} when it holds none. See docs/source.md#tests-run-by-reach."
   {:malli/schema [:=> [:cat :map] :map]}

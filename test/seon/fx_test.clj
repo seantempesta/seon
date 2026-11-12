@@ -657,3 +657,14 @@
     (is (= "<file>/2188ac.gguf" (get (fx/config-input cfg "/home/m/main") :seon.config.vector/model)))
     (is (= "[\"docs\" \".\"]" (get (fx/config-input cfg "/x") :seon.config.root/wiki-dirs)) "a value that names no file is its text")))
 
+
+;; docs/source.md#tests-run-by-reach: a green whose run recorded what it read keeps that record beside its verdicts, the
+;; newest only, and a red keeps none: what a plan's reuse check reads, one small file a test
+(deftest a-green-keeps-what-its-run-read-beside-its-verdicts
+  (let [dir (str (cfg/checkout) "/target/reads-" (random-uuid)) t 'a.r-test/t]
+    (try
+      (fx/write-verdicts! dir {:id "r"} {t {:digest "d1" :pass 1 :fail 0 :error 0 :reads {'a/f "f1"}}} {})
+      (fx/write-verdicts! dir {:id "r"} {t {:digest "d2" :pass 1 :fail 0 :error 0 :reads {'a/f "f2"}}} {})
+      (fx/write-verdicts! dir {:id "r"} {t {:digest "d3" :pass 0 :fail 1 :error 0 :reads {'a/f "f3"}}} {})
+      (is (= {t [{:digest "d2" :reads {'a/f "f2"}}]} (fx/held-reads dir [t 'a.r-test/none])) "the newest green's, and none for a test with none")
+      (finally (seon.lib/sh "rm" "-rf" dir)))))

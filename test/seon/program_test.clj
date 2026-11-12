@@ -1606,3 +1606,19 @@
         b (dg (mt/with db (form 'seon.check "fork-cases" :fn '#{} "(def fork-cases {:line-parks 2})")))]
     (is (not= (a 'app.rb-test/runs-the-binary) (b 'app.rb-test/runs-the-binary)) "a change to a check mode's code moves the test running the binary")
     (is (= (a 'app.rb-test/starts-a-process) (b 'app.rb-test/starts-a-process)) "and not a test that only starts a process (root runs no check mode)")))
+
+;; docs/source.md#tests-run-by-reach: what a call depends on is its own form and what it uses without calling; a contracted
+;; var it references is in a run's call record only when it ran, so editing one it did not call moves nothing of it
+(deftest a-vars-read-digest-moves-with-what-a-call-of-it-uses
+  (let [w (fn [g-body h-body] (program/reach-graph (mt/with (mt/world)
+                                                            (mt/code 'app.rd (str "(ns app.rd (:require [seon.contract :refer [defn]]))\n"
+                                                                                  "(def limit " h-body ")\n"
+                                                                                  "(defn g {:malli/schema [:=> [:cat :int] :int]} [x] (+ x " g-body "))\n"
+                                                                                  "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] (if (< x limit) x (g x)))\n")))
+                                                   nil))
+        rd (fn [g] (program/reads-index g {:env "e" :tree "t" :config {:a/k "1"}} {"docs/x.md" "b1"}))
+        a (rd (w "1" "10")) b (rd (w "2" "10")) c (rd (w "1" "11"))]
+    (is (and (get a 'app.rd/f) (= "1" (get a [:config :a/k])) (= "b1" (get a [:file "docs/x.md"]))) "vars, config values and files, each by its digest")
+    (is (= (get a 'app.rd/f) (get b 'app.rd/f)) "g edited: f, which calls it, does not move: a run that called g records g")
+    (is (not= (get a 'app.rd/g) (get b 'app.rd/g)) "and g moves")
+    (is (not= (get a 'app.rd/f) (get c 'app.rd/f)) "the data def f reads without calling moves f")))
