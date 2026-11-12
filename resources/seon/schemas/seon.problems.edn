@@ -249,6 +249,7 @@
  :seon.task/costs [:map-of :qualified-symbol :seon.cost/report]
  ;; waste charged to the producer of what the agent was shown (R4, v1 survey idea 14)
  :seon.learn/waste [:map-of :any [:map [:forms :int] [:turns :int]]]
+ :seon.learn/reads [:map {:description "What one evaluated form reads, by its shape (seon.learn/form-reads): read once a form by seon.learn/run, for the turn's reads and the waste alike."} [:explore? :boolean] [:targets [:set :symbol]] [:head [:maybe :symbol]]]
  :seon.task/waste :seon.learn/waste
  :seon.agent/waste :seon.learn/waste
  :seon.agent/error :seon.error/base

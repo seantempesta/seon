@@ -513,3 +513,17 @@
       (is (= 1 (count (get-in r [:value :vectors]))) (pr-str (select-keys r [:seon.error/type :seon.error/message])))
       (is (not= (:pid h) (:pid @(:facts handle))) "another helper answered it"))
     (vector/close handle)))
+
+;; docs/vector.md#the-pyramid: the coarse rows a search ranks are read once a db value, kept by its value as the text index is,
+;; and the filter of an :of attribute with them: a page's search asks near three times on one value (one attribute each), and
+;; each call scanned every coarse row and built the set of every form again (main, 2026-11-12: 9,127 vectors, 2.5M ticks a scan,
+;; 15M with :of :form/id). A call on a kept value is the coarse kernel and the fine shortlist: the first's cost less its scan
+(deftest ^{:seon.test/estimate {:ticks 20000000}} near-reads-the-coarse-rows-once-a-db-value
+  (let [vs (vectors 11 600 12 768)
+        db (db-with-vectors vs)
+        q (nth vs 3)
+        ticks (fn [] (:ticks (seon.profile/measure! #(vector/near db q 10 {:of :form/id}))))
+        scan (:ticks (seon.profile/measure! #(#'seon.vector/coarse-rows db (into #{} (map :e) (d/datoms db :aevt :form/id)) nil)))
+        first-ticks (ticks) again (ticks)]
+    (is (= (vector/near db q 10 {:of :form/id}) (vector/near db q 10 {:of :form/id})) "the same answer")
+    (is (< again (- first-ticks (* 0.8 scan))) (str "the second call on the value pays no scan (" scan " ticks): " first-ticks " then " again))))

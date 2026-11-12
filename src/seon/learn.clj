@@ -17,8 +17,9 @@
      grep lines search callers callees slurp})
 
 (defn turns-of
-  "Agent k's run on db (its branch) as waste folds it: each model call's turn in order, {:n :shown :items [{:form :error :value :out}]},
-  each eval of that call (:seon.eval/call) with its code and its result's error, value and printed output (:seon.eval/result), and shown, what its
+  "Agent k's run on db (its branch) as waste folds it: each model call's turn in order, {:n :shown :items [{:form :error :value :out :wrote}]},
+  each eval of that call (:seon.eval/call) with its code and its result's error, value and printed output (:seon.eval/result), the vars
+  its answer says it wrote (:wrote: :recorded, a method as its multi, and :edited's var, :seon.eval/response), and shown, what its
   context showed by producer ({producer #{symbol}}). Read from the evals the REPL recorded, so a run cut by a restart is read
   whole. O(the run's evals): one pull an eval."
   {:malli/schema [:=> [:cat :any :string [:map-of :any [:set :any]]] [:vector [:map [:n :int] [:items [:vector :map]]]]]}
@@ -28,9 +29,12 @@
     (vec (for [c calls]
            {:n (:seon.model-call/n c) :shown shown
             :items (vec (for [e (sort (d/q '[:find [?e ...] :in $ ?m :where [?e :seon.eval/call ?m]] db (:db/id c)))
-                              :let [{code :seon.eval/code {:seon.result/keys [ex value out]} :seon.eval/result}
-                                    (d/pull db [:seon.eval/code {:seon.eval/result [:seon.result/ex :seon.result/value :seon.result/out]}] e)]]
-                          (cond-> {:form code :error ex :value value} (seq (:seon.print/code out)) (assoc :out (:seon.print/code out)))))}))))
+                              :let [{code :seon.eval/code resp :seon.eval/response {:seon.result/keys [ex value out]} :seon.eval/result}
+                                    (d/pull db [:seon.eval/code :seon.eval/response {:seon.eval/result [:seon.result/ex :seon.result/value :seon.result/out]}] e)
+                                    wrote (cond-> (mapv #(if (vector? %) (first %) %) (:recorded resp)) (:edited resp) (conj (:var (:edited resp))))]]
+                          (cond-> {:form code :error ex :value value}
+                            (seq (:seon.print/code out)) (assoc :out (:seon.print/code out))
+                            (seq wrote) (assoc :wrote wrote))))}))))
 
 (defn aliases
   "The aliases the forms of a run set up with (require '[ns :as a]): a -> ns."
@@ -66,15 +70,16 @@
   anything else :search (both charged to :template)."
   {:malli/schema [:=> [:cat [:sequential :map] [:set :symbol]] [:vector [:map [:turn :int] [:rule :keyword] [:producer :any] [:form :string]]]]}
   [turns final]
-  (let [as (aliases (for [t turns it (:items t)] (:form it)))
+  (let [;; read only for a form whose reads its caller did not give (`run` reads each form once)
+        as (delay (aliases (for [t turns it (:items t)] (:form it))))
         final-ns (into #{} (keep #(some-> (namespace %) symbol)) final)]
     (loop [[t & more] turns seen #{} acc []]
       (if-not t
         acc
         (let [shown-by (into {} (for [[p syms] (:shown t) s syms] [s p]))
               sig #(some-> % err/signature)
-              charged (for [{:keys [form error value out]} (:items t)
-                            :let [{:keys [explore? targets head]} (form-reads (or form "") as)]
+              charged (for [{:keys [form error value out] :as it} (:items t)
+                            :let [{:keys [explore? targets head]} (or (::reads it) (form-reads (or form "") @as))]
                             r [(cond
                                  (and error (seen (sig error))) {:rule :repeats-error :producer 'seon.ctx.status/status}
                                  error {:rule :error :producer (or (:seon.error/operation error) :template)}
@@ -96,9 +101,27 @@
   (into {} (for [[p xs] (group-by :producer ws)] [p {:forms (count xs) :turns (count (distinct (map :turn xs)))}])))
 
 (defn final-symbols
-  "The qualified symbols the error-free definitions of turns use (what the run kept)."
-  {:malli/schema [:=> [:cat [:sequential :map]] [:set :symbol]]}
-  [turns]
-  (let [items (for [t turns it (:items t) :when (and (nil? (:error it)) (str/starts-with? (str/triml (or (:form it) "")) "(def"))] it)
-        as (aliases (map :form items))]
-    (into #{} (mapcat #(:targets (form-reads (:form %) as))) items)))
+  "The change site of turns, read on db (the run's branch) from what its evals wrote, never from their text: the vars each error-free
+  eval's answer says it wrote (:wrote), and the program vars their forms use (:form/refs). See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :any [:sequential :map]] [:set :symbol]]}
+  [db turns]
+  (let [wrote (into #{} (comp (mapcat :items) (remove :error) (mapcat :wrote)) turns)
+        var-e #(some-> (first (d/datoms db :avet :var/name %)) :e)]
+    (into wrote (for [s wrote :let [e (var-e s)] :when e r (some-> (d/entity db e) :var/form :form/refs) :when (var-e r)] r))))
+
+(defn run
+  "Agent k's run on db (its branch), folded for a reader that improves its task: each turn with what its forms read (form-reads'
+  qualified symbols), the vars its final definitions used (final-symbols: the change site), and the waste rows and their summary
+  (waste, summary). The one read a refine and root's report take (my.task/run, my.root/run-losses). O(the run's evals), as turns-of.
+  See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :any :string] [:map [:turns [:vector [:map [:n :int] [:reads [:set :symbol]]]]] [:final [:set :symbol]]
+                                         [:waste [:vector :map]] [:summary :map]]]}
+  [db k]
+  (let [turns (turns-of db k {})
+        as (aliases (for [t turns it (:items t)] (:form it)))
+        ;; each form read once, for the turn's reads and the waste alike
+        turns (mapv (fn [t] (update t :items (partial mapv #(assoc % ::reads (form-reads (or (:form %) "") as))))) turns)
+        final (final-symbols db turns)
+        rows (waste turns final)]
+    {:turns (mapv (fn [{:keys [n items]}] {:n n :reads (into #{} (mapcat #(:targets (::reads %))) items)}) turns)
+     :final final :waste rows :summary (summary rows)}))
