@@ -41,7 +41,7 @@ Run, then right, then fast. If you can't show it running, it isn't done.
 
 **The method:**
 1. **Learn.** List what exists before designing. Ask what the ordinary Clojure (or library) way is, and why ours is it or is not.
-2. **Estimate before you build.** Work out from what has to be done what the work should cost: n, its big-O, the ticks, bytes and seconds expected. Write the estimate into the plan, and into every new test as its budget. Never take the estimate from the last run. **Measured over 10 times the estimate stops the work:** the gap is the finding, and its cause is found before anything else. Raising an estimate to fit what was measured is refused. A slow test is a bug.
+2. **Estimate before you build** (§3a). Work out from what has to be done what the work should cost: n, its big-O, the ticks, bytes and seconds expected. Write the estimate into the plan, and into every new test as its budget. Never take the estimate from the last run. **Measured over 10 times the estimate stops the work:** the gap is the finding, and its cause is found before anything else. An estimate found wrong is corrected, with the reason it was wrong said in the change (the work it missed, not just the number), and the cost behind the gap is filed for its owner when it is waste. A good change is never held back by an estimate (owner, 2026-11-12: "if our estimate is found to be wrong we adjust it and don't hold back good solutions"). A slow test is a bug.
 3. **Prove first,** at the REPL as an agent would, on real data and at n ≤ 100. A data shape others will read is tried at a REPL with the forms its readers will write, and its name is settled once before any code. A proof is seen red first.
 4. **Act:** the simplest code that passes, at the cause, in the owner of the bad value. **A bug is a class:** find what allowed it, change that so the class cannot recur, and sweep for its siblings. No special case, retry, guard or hand-kept list. **Fences, guards, locks, waits and timers are likely bugs:** a stateful process is a Flow proc, coordination is channels, shared state is one atom, and everything else is an immutable value ([flow](docs/flow.md#the-step-fn-contract-every-proc-follows)).
 5. **Work it as a Seon agent would,** through the server (§6). A change to what the owner sees is checked in a browser.
@@ -62,6 +62,20 @@ Run, then right, then fast. If you can't show it running, it isn't done.
 - **Before a compaction,** a session sends its parent a few lines: what it finished, what cost it time, and what change to a script, check or this file would have saved that time. It then makes each fact it learned true where that fact lives (the wiki section, the task, the docstring), and removes the entries it completed.
 
 **The gate, before any new format, key, layer, namespace, proc or rule:** (1) which existing mechanism does this, whether ours, v1's or a dependency's? (2) what did v1 do? (3) what is the field's best known way? (4) why can't the existing one do it? A new key is fully namespace-qualified and has a schema entry.
+
+## 3a. Design to the lower bound
+
+The owner, 2026-11-12: "We are never to design systems that are so inefficient again." Every slow design found that day broke one of these rules: a suite rerun 52 times a day, a docs edit rerunning 280 tests, a fresh system booted for every test, a store reseeded in every fork, a file re-analyzed whole for one changed form, a schema registry recompiled whole, a pull of every attribute, a 4e9-tick floor. Each is checked before a design is built, and again when its cost is measured.
+
+1. **Work the lower bound out first, as arithmetic.** It is the least work the job can be done in: n, the work per item, and the constants in [cost](docs/cost.md#what-things-cost-here) (a fork, a seek, a test, a boot). The design's estimate is held to it, and 10x over stops the work (§3).
+2. **Proportional to what changed, never to the whole.** A change of size d costs O(d), not O(N): tests rerun by what they read, a catch-up analyzes the changed forms, a registry recompiles the changed schemas and their dependents, a diff skips shared structure, a plan touches only the keys whose inputs moved.
+3. **Done once, kept with its source.** A derived value is computed once, from immutable inputs, and kept with them or reused by their digest. Nothing is recomputed per call, per fork or per process: not a store seed, a compiled pattern, a config read or a file parse.
+4. **Warm, not cold.** Never start a process or boot a system to do what a fork of a running one does in milliseconds; never rebuild what a cache keyed by content holds.
+5. **Take exactly what is needed, in the shape it is needed.** A pull names the attributes and joins its reader uses: the pattern is the shape of the data, and every agent's context is made by one, so a pattern is never replaced by `*`. Seek an index, never scan it; read a file once; fetch the part, never the whole. Where a library makes the named read cost more than it should (a Datahike named pull seeks once per attribute), the library is fixed and measured.
+6. **Waiting is not working.** Wall time far above CPU time means something waits. Find the waiter: a bound, a lock, a lost reply or a queue. Never raise the bound.
+7. **The machine is scheduled by the system.** Work is admitted from the cores and the memory, and the critical path goes first. A person never picks shard counts, caps or holds; work in flight stays near the core count.
+8. **Nothing is switched off, sampled or waived** to get around a bug or a cost; the cause is fixed (§9).
+9. **Measure the result in work done** (ticks, bytes, calls) beside the estimate, before and after, and say which mattered. A claim of "faster" without both numbers is not taken.
 
 ## 4. The principles: everything is data flowing through the system
 
