@@ -901,6 +901,8 @@
         point (let [[c t] (pdb/point db)] (str c " " t))
         mix #(-> (str % "\ndata " point) lib/digest)
         cd (update-vals idx #(cond-> (:digest %) (:data? %) mix))
+        ;; the digests by reach alone: what selection compares with base's, which take no recorded reads
+        static cd
         ;; recorded reads (seon.proofs/read-digests): a test at its newest green's digest while all it read is unchanged; the
         ;; reads index made once a commit of this branch and kept in the agent's state, never per ask
         held (let [h (fx/held-reads (vec (keys cd)))] (if (contract/error? h) {} h))
@@ -912,7 +914,12 @@
              cd)
         ;; base's digests take the same point for those tests, so selection still asks what the code changed: a proof over the
         ;; data is selected by its reach, and its verdict is kept and found at the data it read
-        bd (some-> b :index (as-> ix (into {} (for [[t {:keys [digest]}] ix] [t (cond-> digest (:data? (idx t)) mix)]))))
+        ;; a test whose reach did not move from base's keeps the digest its recorded reads gave it on both sides: a branch changes
+        ;; only what its reach changed, never a test because some run recorded what it read (a judge selected main's newest
+        ;; tests as the branch's once any run had recorded their reads, 2026-11-12)
+        bd (some-> b :index (as-> ix (into {} (for [[t {:keys [digest]}] ix
+                                                     :let [d (cond-> digest (:data? (idx t)) mix)]]
+                                                 [t (if (= d (static t)) (cd t) d)]))))
         ;; main's tests the branch removed: each judges from base's definition, loaded in the test
         ;; child, its namespace's ns form first when the branch removed the namespace too; one
         ;; that reaches a process of its own (base's index says) stays a process test
