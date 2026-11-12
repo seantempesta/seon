@@ -1456,3 +1456,17 @@
         (is (= 1 (count said)) (pr-str said)))
       (is (some #(= (str own ":1") (:at %)) (rows-in {}))
           "an asker that works no task loses nothing")))
+
+;; docs/flow.md#the-step-fn-contract-every-proc-follows (AGENTS.md section 3 step 4): a value made by one eval is threaded
+;; through the calls that make it, never a cell: code's forms and a top-level form's own read each other by letfn. A form's
+;; cost and compiler account still cross its throw in a cell (wrap-cost's, wrap-record's last): on Jolt a trace is the
+;; catcher's, so only the entrant boundary (eval-code's try) may catch, until Jolt keeps a trace from its throw
+(deftest the-eval-path-threads-its-values
+  (is (= 0 (count (re-seq #"\(volatile! " (clojure.repl/source-fn 'seon.repl/eval-code)))) "code's forms by letfn")
+  (let [rs (let [got (volatile! []) old @agent/state]
+             (try (reset! agent/state {:n 0 :ns (create-ns 'seon.repl-test.scratch)})
+                  ((repl/handler) {"code" "(+ 1 2) (do (load-string \"(def x 1)\") (/ 1 0))" :reply #(vswap! got conj %)})
+                  @got
+                  (finally (reset! agent/state old))))]
+    (is (= [true true true false] (mapv #(contains? % :ticks) rs)) (str "each form's reply its own cost (a do's forms each their own), the done none: " (pr-str rs)))
+    (is (= 3 (:repl/value (first rs))))))

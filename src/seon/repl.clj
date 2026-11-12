@@ -180,8 +180,9 @@
         ;; one top-level form from ns: [ns' :ok], or [ns' how] when it ended the request (:err); a form
         ;; written as (do ...) is its inner forms, each one as a top-level form (do-parts), the comments
         ;; before the do leading the first of them
-        forms-ref (volatile! nil)
-        exec! (fn exec! [form src lead ns top]
+        ]
+    ;; code's forms and a top-level form's own (a load-file's, a do's) read each other: one letfn
+    (letfn [(exec! [form src lead ns top]
                 (cond
                   ;; a top-level (load-file "path") of a file that exists is the file's forms, each a top-level
                   ;; form of this request (recorded, its text its var's :source); else clojure.core's, which
@@ -189,7 +190,7 @@
                   (and (seq? form) (= 'load-file (first form)) (= 2 (count form)) (string? (second form))
                        (.isFile (java.io.File. ^String (second form))))
                   ;; the file's end is this form's: the request's next form runs after it
-                  (let [[ns' how] (@forms-ref (slurp (second form)) ns top)] [ns' (if (= :eof how) :ok how)])
+                  (let [[ns' how] (forms! (slurp (second form)) ns top)] [ns' (if (= :eof how) :ok how)])
 
                   (do-parts form src ns)
                   (let [parts (do-parts form src ns)]
@@ -230,7 +231,7 @@
                          [ns :err])))))
         ;; code's forms in order, from ns: [ns' how], how :eof, :read (a read error) or :err; each
         ;; answer names its top-level form (:top, its place in the code; a top-level do's forms its own)
-        forms! (fn forms! [code ns top]
+        (forms! [code ns top]
                  (let [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. code))
                        starts (delay (reader/line-starts code))]
                    (loop [ns ns prev 0 k 0]
@@ -252,13 +253,13 @@
                          :else
                          (let [[ns' how] (exec! form src lead ns (or top k))]
                            (if (= :ok how) (recur ns' end (inc k)) [ns' how])))))))
-        _ (vreset! forms-ref forms!)
-        start (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state))
-        [ns how] (forms! (get req "code") start nil)]
+]
+      (let [start (or (some-> (get req "ns") symbol find-ns) (:ns @agent/state))
+            [ns how] (forms! (get req "code") start nil)]
     ;; a read error leaves the agent's namespace as it was, and so does an eval that did not move it: one run inside it may have (an outside agent's reply)
     (when (and (not= :read how) (or (not= ns start) (and (get req "ns") (not (:within req)))))
       (swap! agent/state assoc :ns ns))
-    (reply {"status" ["done"]})))
+    (reply {"status" ["done"]})))))
 
 ;; ---- middleware -------------------------------------------------------------------
 
