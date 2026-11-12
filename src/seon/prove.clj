@@ -413,6 +413,12 @@
              :red (vec (sort-by str (distinct (concat (keys (proofs/failures {:reports (vec (:reused-reports base))}))
                                                       (keep (fn [[t r]] (when (or (contract/error? r) (not (proofs/green? r))) t)) results)))))}
       (seq (:why base)) (assoc :why (:why base))
+<<<<<<< HEAD
+=======
+      ;; each deferred test's digest at the base, as the agent's plan gave it: what the merge check reads main's verdict at
+      (seq (:deferred-digests base)) (assoc :deferred-digests (:deferred-digests base))
+      (seq signals) (assoc :signals signals)
+>>>>>>> jolt/basedigest
       (seq (:missing base)) (assoc :missing (:missing base))
       ;; a verdict the cache would not take, named as its run named it
       (some (comp :unstored :answer) (vals results)) (assoc :unstored (vec (mapcat (comp :unstored :answer) (vals results)))))))
