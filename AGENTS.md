@@ -131,7 +131,7 @@ Name things with Clojure's, its libraries', Jolt's and git's words: entity, attr
 
 ## 8. The machine
 
-- **Seon's target is a 16 GB MacBook M1** (`bin/check scale`). The machine the sessions build on has 18 cores and 128 GB.
+- **Seon's target is a 16 GB MacBook M1** (`bin/check scale-work`). The machine the sessions build on has 18 cores and 128 GB.
 - **Heavy runs** (`bin/build`, `bin/prove`) run under `nice -n 15`; the test system sets its workers from the cores (§3).
 - **Never flood it:** anything that makes threads or processes starts at n ≤ 100; one experiment at a time; never make load to reproduce something, and no test makes load (owner, 2026-11-12: "No tests that simulate load by loading my machine ... test 95% of what you're testing and have it be the most important 95%"): a claim is proved by a fast test of its one path, and a race is fixed by design, never sought by load ([machine](docs/machine.md#processes)).
 - **Kill only verified PIDs:** read the full command and its cwd first; never `pkill`, `killall` or a `pgrep -f` pattern. A system's processes end with it.

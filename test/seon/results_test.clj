@@ -88,32 +88,38 @@
   (.setLastModified (file-of dir k dg st) (- 1700000000000 (* 1000 age-s))))
 
 (defn- bytes-in
-  "Bytes of the verdict files under dir."
-  [dir] (reduce + (map #(.length ^java.io.File %) (filter #(and (.isFile ^java.io.File %) (.endsWith (.getName ^java.io.File %) ".edn")) (file-seq (java.io.File. ^String dir))))))
+  "Bytes of the verdict files under dir (a test's green or red: <ns>/<name>/<digest>.pass.edn or .red.edn)."
+  [dir] (reduce + (map #(.length ^java.io.File %) (filter #(and (.isFile ^java.io.File %) (re-find #"\.(pass|red)\.edn$" (.getName ^java.io.File %))) (file-seq (java.io.File. ^String dir))))))
 
 (defn- size-of [dir k dg st] (.length (file-of dir k dg st)))
 
 (defn- present [dir ks dgs]
   (set (for [k ks dg dgs :when (or (.exists (file-of dir k dg :pass)) (.exists (file-of dir k dg :red)))] dg)))
 
-;; See docs/merging.md#verdicts-are-a-cache
+;; See docs/merging.md#verdicts-are-a-cache: past the bound the least recently used verdict goes, green or red (an LRU cache), and a
+;; file beside the verdicts (full-run.edn, the last full run's record) is no verdict and stays. Red before: every .edn was counted
+;; and the oldest went, the full run's record among them, and every landing since batch 87 said "full run: none recorded"
 (deftest past-capacity-the-least-recently-used-goes
   (with-dir
    (fn [dir]
      (let [red {'a/r {:test 'a/r :digest "old-red" :pass 0 :fail 1 :error 0}}
+           full-run (java.io.File. (str dir "/full-run.edn"))
            one (fn [dg] (rec! dir {'a/t {:test 'a/t :digest dg :pass 1 :fail 0 :error 0}}))
            _ (rec! dir red {'a/r [{:type :fail :message "red"}]})
            _ (doseq [dg ["g1" "g2" "g3"]] (one dg))
            [r g1 g2 g3] [(size-of dir 'a/r "old-red" :red) (size-of dir 'a/t "g1" :pass) (size-of dir 'a/t "g2" :pass) (size-of dir 'a/t "g3" :pass)]
            _ (doseq [[k dg st s] [['a/r "old-red" :red 400] ['a/t "g1" :pass 300] ['a/t "g2" :pass 100] ['a/t "g3" :pass 200]]] (age! dir k dg st s))
-           ;; a bound whose low water (results-evict-percent under it) the new green (about g3's size) fits under only once two are
-           ;; evicted: the red (oldest), then g1
+           _ (spit full-run "{:tree \"t\" :exit 0}")
+           _ (.setLastModified full-run (- 1700000000000 (* 1000 500)))
+           ;; a bound whose low water (results-evict-percent under it) the new green (about g3's size) fits under only once two
+           ;; are evicted: the red (oldest), then g1
            cap (inc (quot (* 100 (+ g2 g3 g3 4)) (- 100 (cfg/value :seon.config.proofs/results-evict-percent))))
-           _ (is (= (+ r g1 g2 g3) (bytes-in dir)) "the four files are all the cache holds")
+           _ (is (= (+ r g1 g2 g3) (bytes-in dir)) "the four verdicts are all the cache holds")
            w (fx/write-verdicts! dir {:id "w" :tree "t"} {'a/t {:test 'a/t :digest "new" :pass 1 :fail 0 :error 0}} {} cap)
            held (present dir ['a/t 'a/r] ["old-red" "g1" "g2" "g3" "new"])]
        (is (= {:recorded 1} w))
-       (is (= #{"g2" "g3" "new"} held) "the oldest, a red among them, went first; the one just written stays")
+       (is (= #{"g2" "g3" "new"} held) "the oldest went first, a red among them; the one just written stays")
+       (is (.exists full-run) "the full run's record, the oldest file of all, is no verdict and stays")
        (is (<= (bytes-in dir) cap) "and the cache is under its bound")))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
@@ -222,7 +228,7 @@
 
 ;; See docs/merging.md#verdicts-are-a-cache
 ;; See docs/merging.md#verdicts-are-a-cache
-(deftest a-test-history-is-read-from-its-newest-verdicts
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-test-history-is-read-from-its-newest-verdicts
   (with-dir
    (fn [dir]
      (let [keep-n (cfg/value :seon.config.proofs/recent-verdicts)
@@ -232,8 +238,7 @@
        ;; older verdicts of a slower test: read, they would move the median
        (doseq [i (range (inc keep-n))] (rec-at (str "old-" i) 9000 9000000 (+ 1000 i)))
        (doseq [i (range keep-n)] (rec-at (str "new-" i) 40 2000000 (inc i)))
-       (is (= '{a/t 40} (fx/typical-ms dir '[a/t])) "its typical ms is its newest verdicts'")
-       (is (= '{a/t 6000000} (fx/test-budgets dir '[a/t] 100000000 1 3)) "and so is its tick budget")))))
+       (is (= '{a/t 40} (fx/typical-ms dir '[a/t])) "its typical ms is its newest verdicts'")))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
 (deftest a-test-history-costs-one-file-and-is-made-again-when-gone
@@ -269,18 +274,6 @@
                 'a/u {:test 'a/u :digest "ms-3" :pass 1 :fail 0 :error 0 :ms 7}})
      (rec! dir {'a/t {:test 'a/t :digest "ms-4" :pass 1 :fail 0 :error 0 :ms 50}})
      (is (= '{a/t 50 a/u 7} (fx/typical-ms dir '[a/t a/u a/none])) "by test, the median not the largest; a test never run is left out"))))
-
-;; See docs/merging.md#a-tests-tick-budget
-(deftest a-tests-tick-budget-is-its-median-green-ticks-between-the-floor-and-the-cap
-  (with-dir
-   (fn [dir]
-     (doseq [[i tk] (map-indexed vector [10 20 30])]
-       (rec! dir {'a/t {:test 'a/t :digest (str "b-" i) :pass 1 :fail 0 :error 0 :ticks tk}}))
-     (rec! dir {'a/r {:test 'a/r :digest "r-1" :pass 0 :fail 1 :error 0 :ticks 1000000}})
-     (rec! dir {'a/big {:test 'a/big :digest "g-1" :pass 1 :fail 0 :error 0 :ticks 1000}})
-     (is (= '{a/t 200 a/r 100 a/none 100 a/big 10000} (fx/test-budgets dir '[a/t a/r a/none a/big] 100000 100 10)) "factor x the median green, never under the floor; a red's ticks count for nothing; none: the floor")
-     (is (= '{a/t 50 a/big 50} (fx/test-budgets dir '[a/t a/big] 50 100 10)) "and never over the cap")
-     (is (nil? (fx/test-budgets dir '[a/t] 0 100 10)) "a cap of 0: no budget"))))
 
 (def ^:private red-cost
   "A red cost proof's report, as seon.cost/proof's :actual carries it."

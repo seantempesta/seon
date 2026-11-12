@@ -357,6 +357,25 @@
         (disj :ns :name :file :line :column :end-line :end-column :doc)
         (#(apply disj % contract/instrument-keys)))))
 
+(defn- var-attributes
+  "Of keys, the attributes a schema extending a var's (:seon.db/var-fact) owns, as the entity index says (`seon.db/owners`):
+  the metadata that makes a var a more specific thing (a test). See docs/testing.md#test-types."
+  {:malli/schema [:=> [:cat [:sequential :any]] [:sequential :qualified-keyword]]}
+  [ks]
+  (let [ix (pdb/index)]
+    (for [[a s] (pdb/owners ix (filter qualified-keyword? ks)) :when (and (not= s :seon.db/var-fact) (pdb/extends? ix s :seon.db/var-fact))] a)))
+
+(defn- def-facts
+  "A defined var's metadata keys that are `var-attributes`, each with its value (the live var's when it is plain data, else
+  as written): its facts on the var entity. See docs/testing.md#test-types."
+  {:malli/schema [:=> [:cat [:maybe :seon.host/var] :map] [:map-of :qualified-keyword :any]]}
+  [v d]
+  (let [m (merge (:meta d) (some-> v meta))]
+    (into {} (for [a (var-attributes (keys m))
+                   :let [x (let [live (some-> v meta (get a))] (if (and (some? live) (edn-value? live)) live (unquote-form (get (:meta d) a))))]
+                   :when (some? x)]
+               [a x]))))
+
 (defn- macro-uses
   "The macros form (as read) calls in namespace nsx: each list in it whose head resolves
   there to a macro var. The IR is the expansion, which names no macro, and a
@@ -464,8 +483,10 @@
         defs (vec (for [d (:defs a)
                         :let [v (find-var (:var d))
                               multi? (contains? (:multis a) (:var d))]
-                        :when (and (not (and (:declare? d) (not multi?))) (set? d))]
+                        :when (and (not (and (:declare? d) (not multi?))) (set? d))
+                        :let [facts (def-facts v d)]]
                     (cond-> {:var (:var d) :meta (def-meta v d)}
+                      (seq facts) (assoc :facts facts)
                       (contract-text v d) (assoc :contract (contract-text v d))
                       ;; the form's own docstring first: a file read without running (another tree's) holds its
                       ;; text's, whatever the image's var says (seon.program-test/a-file-analyzed-keeps-its-own-docstring)
@@ -583,15 +604,18 @@
         (for [[a k] form-sets :let [v (get row k)] :when (seq v)] [a (vec v)])))
 
 (defn def-tx
-  "tx-data making definition k point at the form content names (content {:form :meta
+  "tx-data making definition k point at the form content names (content {:form :meta :facts
   :contract :doc :file}), retracting what it held that content does not, or, for nil
-  content, retracting what it held. e: its entity on db (def-eid), or nil."
+  content, retracting what it held. e: its entity on db (def-eid), or nil. A var's :facts are its metadata
+  that are attributes, asserted as they are (docs/testing.md#test-types)."
   {:malli/schema [:=> [:cat :seon.host/db :any [:maybe :int] [:maybe :map]] :seon.db/tx-data]}
   [db k e content]
   (let [x (when e (d/entity db e))
-        attrs (case (first k) :var [:var/form :var/contract :var/doc] :ns [:ns/form :ns/file :ns/doc] [(pointer (first k))])
+        ;; the attributes its metadata asserted before: its kept keys an entity schema owns
+        facts (when (= :var (first k)) (var-attributes (vec (:var/meta x))))
+        attrs (case (first k) :var (into [:var/form :var/contract :var/doc] facts) :ns [:ns/form :ns/file :ns/doc] [(pointer (first k))])
         now (when content
-              (cond-> {(pointer (first k)) (form-tid (:form content))}
+              (cond-> (merge {(pointer (first k)) (form-tid (:form content))} (:facts content))
                 (seq (:meta content)) (assoc :var/meta (set (:meta content)))
                 (:contract content) (assoc :var/contract (:contract content))
                 (:doc content) (assoc (if (= :ns (first k)) :ns/doc :var/doc) (:doc content))
@@ -671,7 +695,7 @@
            (for [n (into #{ns} (map #(symbol (namespace (:var %)))) defs)] {:db/id (ns-tid n) :ns/name n})
            [(form-tx id (assoc acct :order order :lead lead :defines dkeys) eids)]
            (map #(def-ref [:var %] (eids [:var %])) declares)
-           (mapcat (fn [{v :var :keys [meta contract doc]}] (def-tx db [:var v] (eids [:var v]) {:form id :meta meta :contract contract :doc doc})) defs)
+           (mapcat (fn [{v :var :keys [meta facts contract doc]}] (def-tx db [:var v] (eids [:var v]) {:form id :meta meta :facts facts :contract contract :doc doc})) defs)
            (mapcat #(def-tx db % (eids %) {:form id}) (filter (comp #{:method :impl} first) dkeys))
            (when ns-form? [(cond-> {:db/id (ns-tid ns) :ns/form (form-tid id)} (:ns-doc acct) (assoc :ns/doc (:ns-doc acct)))])
            ;; an ns form that no longer holds one: the docstring goes with it
@@ -1044,23 +1068,49 @@
                k (names (sedn/decode c))]
            [:db/add fe :form/keywords k]))))
 
+(declare file-readers)
+
+(defn file-reading-macros
+  "The names of db's macros whose defining form refers to one of seon.program/file-readers (slurp, file-seq, io/resource): a form
+  expanding one holds the analysis of what the macro read. One query of the program's facts, never a seek a reference. See
+  docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :qualified-symbol]]}
+  [db]
+  (set (d/q '[:find [?mn ...] :in $ [?r ...]
+              :where [?mf :form/refs ?r] [?mf :form/defines ?m] [?m :var/meta :macro] [?m :var/name ?mn]]
+            db (vec file-readers))))
+
 (defn schema-dependents
-  "The live forms of db defining a contracted var whose form names one of keys (its contract
-  or its code, :form/keywords: one AVET seek a key), or a schema that names one, and on (the
-  binary's schema forms with db's changes): the forms that re-arm against the changed schemas
-  (a form whose code alone names one re-arms too, unchanged). Nothing when keys is empty."
+  "The live forms of db whose form names one of keys (its contract or its code, :form/keywords: one AVET seek a key), or a
+  schema that names one, and on (the binary's schema forms with db's changes): the forms to evaluate again against the changed
+  schemas, unchanged in text: a contract re-arms, and a value computed from a schema at load (a value def or a top-level call
+  of contract/properties) takes the moved entry; a function's body reads the registry when called, so a defn, defmethod or
+  macro is not taken, nor a form expanding a file-reading macro (file-reading-macros: it would read this process's checkout,
+  and the registry layers the branch's changes over the binary's value). A form's inputs include the schema entries it
+  names. Nothing when keys is empty."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:vector :map]]}
   [db keys]
   (if (empty? keys)
     []
     (let [naming (reduce (fn [m [k f]] (reduce #(update %1 %2 (fnil conj []) k) m (names f)))
                          {} (merge contract/forms (schema-changes db)))
-          reached (into keys (closure keys naming))]
+          reached (into keys (closure keys naming))
+          reading (delay (file-reading-macros db))]
       (mapv #(form-row db %)
             (distinct (for [k reached
                             dt (d/datoms db :avet :form/keywords k)
                             :let [fe (:e dt)]
-                            :when (and (live? db fe) (some :var/contract (:form/defines (d/entity db fe))))]
+                            :let [x (d/entity db fe) ds (:form/defines x)]
+                            ;; a form that took the schema at load: a contract (re-armed), a value def or a top-level call
+                            ;; (contract/properties of it); a function's body reads the registry when called, so a defn,
+                            ;; a defmethod or a macro is not evaluated again for it
+                            :when (and (live? db fe)
+                                       (or (some :var/contract ds)
+                                           (every? #(and (:var/name %) (not (contains? (set (:var/meta %)) :arglists))) ds))
+                                       ;; nor one expanding a file-reading macro (seon.config/schema-forms): it would read this
+                                       ;; process's checkout; its value is the binary's, and the registry layers the branch's
+                                       ;; changes over it (schema-registry)
+                                       (not-any? @reading (:form/refs x)))]
                         fe))))))
 
 (defn ensure-ns!
@@ -1212,7 +1262,7 @@
                        {} (merge contract/forms (schema-changes db)))
         reached (into (set keys) (closure keys naming))]
     (binding [mr/*registry* (schema-registry (schema-changes db))]
-      (vec (for [n (all-ns) v (vals (ns-interns n))
+      (into (vec (for [n (all-ns) v (vals (ns-interns n))
                  :let [c (contract/contract v)]
                  :when (and c (some reached (names c)))
                  :let [sym (symbol v)
@@ -1225,7 +1275,11 @@
                                 (catch Throwable e {:var sym :message (or (ex-message e) (str e))}))
                            (let [r (contract/rearm! v)] (when (contract/error? r) r)))]
                  :when r]
-             r)))))
+             r))
+            ;; and the forms that define no contracted var but name a reached key (a def computed from the schema at load):
+            ;; evaluated again, as a load does, so they take the registered entry (schema-dependents)
+            (load-forms! db (filterv (fn [f] (not-any? :var/contract (:form/defines (d/entity db [:form/id (:id f)]))))
+                                     (schema-dependents db keys)))))))
 
 (defn- required!
   "Of form rows forms, the test namespaces whose every live form is its file's as imported
@@ -1255,7 +1309,13 @@
         whole? (fn [n] (when-let [^java.io.File file (and (tnss n) (nil? (find-ns n)) (file-of n))]
                          (and (.isFile file)
                               (every? #(:form/source (d/entity db (:e %))) (live n))
-                              (let [text (slurp file)] (every? #(str/includes? text (:src %)) (live n))))))]
+                              (let [text (slurp file)]
+                                (and (every? #(str/includes? text (:src %)) (live n))
+                                     ;; and nothing else: the file's text, each live form taken out, is only space and comments. A form
+                                     ;; the branch removed is still in main's file; required whole, it brought main's forms back over the
+                                     ;; branch's (a test child naming a var its branch deleted, 2026-11-12)
+                                     (str/blank? (str/replace (reduce (fn [t f] (str/replace-first t (:src f) "")) text (live n))
+                                                              #"(?m);.*$" "")))))))]
     (binding [mr/*registry* (schema-registry (schema-changes db))]
       (reduce (fn [[ok errs] n]
                 (if-let [e (try (require n) nil (catch Throwable e e))]

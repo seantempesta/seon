@@ -421,7 +421,9 @@
                                 :stderr (some-> (agent/stderr-path (get-in st [:view :store :agents-dir]) agent) (lib/tail-bytes (cfg/value :seon.config.root/death-stderr-bytes)))
                                 :last-op (some-> (:running v) (select-keys [:form :since-ms]) (assoc :kind :eval))}))
         e (or died (ended agent (str "agent " (name agent) " ended")))]
-    (step/out! o :events (step/event {:type (or stop :dead) :agent agent}))
+    ;; a death names itself: its error (exit status when reaped, its stderr's tail, the eval it was in) goes with the event,
+    ;; so whoever waits on it (a test's with-agent before its hello) says why, never {:end :dead}
+    (step/out! o :events (step/event (cond-> {:type (or stop :dead) :agent agent} died (assoc :error died))))
     (let [st (cond
                (nil? died) (reduce (fn [st r] (deliver-rid st o r e)) (answer-spawn st o agent e) inflight)
                ;; the exit status is known (reaped first), or never will be (a clone, an

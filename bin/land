@@ -3,8 +3,11 @@
 # Seon's, merges (docs/merging.md#a-branch-lands-with-binland). Run in the branch's worktree
 # (bin/worktree NAME), never the main tree, which stays on main and clean.
 #   1. merge main into the branch (a conflict stops it: resolve, commit, run it again);
-#   2. bin/laws and bin/check health first (seconds; a red stops it before the proof), then bin/prove --merge on that tip, niced, beside any other run (results are shared by digest across
-#      every checkout, and each run writes under its own target/prove/<id>: no run waits on another);
+#   1b. bin/check health and bin/laws, seconds: a red stops the landing before any prove;
+#   2. bin/prove --merge on that tip, niced, beside any other run (results are shared by digest across
+#      every checkout, and each run writes under its own target/prove/<id>: no run waits on another); a diff of
+#      docs/, resources/seon/tasks/ and top-level *.md only runs bin/check health and seon.doc-test instead (AGENTS.md §3).
+#      The log and the run's directory are kept in the main tree's target/land/, past the worktree's removal;
 #   3. main moves to a merge commit whose tree is the proved tip's (git commit-tree, then
 #      git update-ref with main's old value: no checkout of main is needed); a main that moved during
 #      the proof is merged in and landed without proving again (what it gained was proved when it
@@ -95,20 +98,34 @@ done
 # and the reverse: an entry this landing drops lands only with a Completes line naming it (`dropped`)
 gone=$(dropped "$OLD" HEAD "${MSG:-/dev/null}")
 [[ -z $gone ]] || fail "it drops these task entries with no Completes: line naming them (completed work says so; an accident restores them): ${gone//$'\n'/, }"
-LOG=$HERE/target/land-$(date +%Y%m%dT%H%M%S).log
-# the checks that take seconds run first and stop the landing on a red before the proof, which takes minutes: a law or
-# a health red found 10-20 minutes into a prove was a large share of the failed landings of 2026-11-12 (the owner:
-# "I want whatever gains we can get")
-"$HERE/bin/laws" > "$LOG.laws" 2>&1 || { tail -5 "$LOG.laws" >&2; fail "bin/laws is red ($LOG.laws): fix it before the proof" }
-"$HERE/bin/check" health > "$LOG.health" 2>&1 || { tail -5 "$LOG.health" >&2; fail "health is red ($LOG.health): fix it before the proof" }
+# the land's log and its prove's run directory live in the main tree's target/land/, which outlives this worktree (a
+# landed worktree is removed, and a docs landing's 7.5 min prove left no evidence of what it ran, 2026-11-12)
+mkdir -p "$MAIN/target/land"
+STAMP=$(date +%Y%m%dT%H%M%S)-${B//\//-}
+LOG=$MAIN/target/land/$STAMP.log
+# a change of docs and tasks only is never proved (AGENTS.md §3): the wiki's health and seon.doc-test read what it
+# changed, and no test's reach is a page or a task entry's text (docs/merging.md#a-branch-lands-with-binland)
+CHANGED=$(git diff --name-only main...HEAD)
+DOCS=$(print -r -- "$CHANGED" | grep -vE '^(docs/|resources/seon/tasks/)|^[^/]+\.md$' | head -1)
+# health and the laws first, in seconds: a red there stops the landing before the prove (about 35 landing attempts gave 12
+# landings on 2026-11-12, many failing on a health or laws red found 10-20 minutes into a prove)
+{ nice -n 15 "$HERE/bin/check" health && nice -n 15 "$HERE/bin/laws"; } > "$LOG.first" 2>&1 || {
+  grep -vE '^\s*$' "$LOG.first" | tail -15; fail "health or the laws are red before any prove: $LOG.first"; }
 # the proof is a job, its own process group (bin/prove): a stop of the landing ends all of it, never leaving its
 # shards and check steps running (2026-11-08); waited as a job so the trap runs at once
-nice -n 15 "$HERE/bin/prove" --merge > "$LOG" 2>&1 & PJ=$!
+if [[ -n $CHANGED && -z $DOCS ]]; then
+  { nice -n 15 "$HERE/bin/test" seon.doc-test && print "MERGE OK"; } > "$LOG" 2>&1 & PJ=$!
+else
+  nice -n 15 "$HERE/bin/prove" --merge > "$LOG" 2>&1 & PJ=$!
+fi
 trap 'kill -TERM -$PJ 2>/dev/null || kill -TERM $PJ 2>/dev/null; fail "stopped: its proof was ended with it"' TERM INT HUP
 wait $PJ; st=$?; trap - TERM INT HUP
+RUN=$(sed -nE 's/^(prove|test): run [^,]*, logs in (.*)$/\2/p' "$LOG" | tail -1)
+[[ -n $RUN && -d $RUN ]] && cp -cR "$RUN" "$MAIN/target/land/$STAMP-run" 2>/dev/null
 grep -q "proved green already" "$LOG" && print "proved by an earlier prove of this very tree: merging, nothing run"
 grep -E '^RED |^FAILED ' "$LOG" | cut -c1-200 | head -12
-LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1)
+if [[ -n $CHANGED && -z $DOCS ]]; then LINE="bin/land: docs and tasks only: bin/check health, bin/laws and seon.doc-test green"
+else LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1); fi
 (( st == 0 )) && [[ $(tail -1 "$LOG") == "MERGE OK" ]] || fail "the proof is red: $LOG"
 [[ $(git rev-parse HEAD) == $(git rev-parse "$B") ]] && git merge-base --is-ancestor "$OLD" HEAD || fail "the branch moved during its proof"
 { if [[ -n $MSG ]]; then cat "$MSG"; else print "Merge $B"; fi; print; print "$LINE"; } > "$HERE/target/land-msg"

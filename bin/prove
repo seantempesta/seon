@@ -1,4 +1,9 @@
 #!/bin/zsh
+# bin/prove [NS ...] | bin/prove --merge [NS ...] — asks the standing system (the main tree's, runs/root.port) to prove this
+# checkout through its test service (docs/merging.md#the-test-service): one queue for the machine, process tests in forks,
+# every verdict reused by digest by every asker; each verdict prints as it lands; PROVE OK / PROVE FAILED, and with --merge
+# the merge line and MERGE OK / MERGE FAILED that bin/land reads. No standing system answering is PROVE FAILED.
+# The local shard path below (bin/prove --out DIR | --tests | --checks) is the old way, kept until it is deleted:
 # bin/prove [--out DIR] [--tests | --checks] [NS ...] — run exactly what the change reaches (docs/merging.md): every test (of the named
 # namespaces) and every bin/check step (seon.proofs/check-steps) whose reach digest has no green
 # result in the results directory every checkout shares runs; the rest are reused. An unchanged
@@ -70,6 +75,38 @@ if [[ ${1:-} == --root ]]; then
   # the binary's environment and its libraries (bin/env exports them), and its home, as bin/system runs it
   . "$ROOT/bin/env"
   cd "$ROOT/target" && SEON_CHECKOUT=$ROOT HOME=$ROOT/target/home exec ./seon prove "$PORT" "$ROOT" "$@"
+fi
+# every other run (bare, named tests, --merge) asks the standing system's test service (docs/merging.md#the-test-service): the main
+# tree's system, one queue for the machine, its process tests in forks and its verdicts reused by every asker. No standing
+# system answering is the run's failure, never a fallback to cold shards
+if [[ ${1:-} != --out && ${1:-} != --tests && ${1:-} != --checks ]]; then
+  SMERGE=0; [[ ${1:-} == --merge ]] && { SMERGE=1; shift }
+  MAIN=$(cd "$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir)/.." && pwd)
+  SPORT=$(tr -d ' \n' < "$MAIN/runs/root.port" 2>/dev/null)
+  if [[ -z $SPORT ]]; then
+    echo "prove: no standing system answers (no $MAIN/runs/root.port): start it in $MAIN with bin/system start"; echo "PROVE FAILED"
+    (( SMERGE )) && echo "MERGE FAILED"; exit 1
+  fi
+  # a tree proved green already (its marker, which a whole run of either path writes) asks nobody: answered at once
+  . "$ROOT/bin/env"
+  STREE=$( (( $# )) || "$ROOT/bin/tree" "$ROOT") || STREE=
+  SMARK=$SEON_RESULTS_DIR/proved/both-$STREE
+  if [[ -n $STREE && -f $SMARK ]]; then
+    echo "prove: tree $STREE proved green already ($(cat "$SMARK")): nothing to run"
+    if (( SMERGE )); then
+      echo "$(git -C "$ROOT" rev-parse --short HEAD) bin/prove --merge $(date '+%Y-%m-%d %H:%M'): MERGE OK; tree $STREE proved green already ($(cat "$SMARK"))"
+      echo "MERGE OK"
+    else echo "PROVE OK"; fi
+    exit 0
+  fi
+  OUT=$ROOT/target/prove/$(date +%Y%m%dT%H%M%S)-$$; mkdir -p "$OUT"
+  echo "prove: run ${OUT:t}, through the standing system on port $SPORT"
+  "$0" --root "$SPORT" "$@" 2>&1 | tee "$OUT/prove.log"; st=${pipestatus[1]}
+  if (( st == 0 )) && [[ -n $STREE && $("$ROOT/bin/tree" "$ROOT") == $STREE ]]; then
+    mkdir -p "${SMARK:h}" && print -r -- "$(date '+%Y-%m-%d %H:%M') ${OUT:t}" > "$SMARK.$$" && mv "$SMARK.$$" "$SMARK"
+  fi
+  if (( ! SMERGE )); then (( st == 0 )) && "$ROOT/bin/remove-tree" "$OUT"; exit $st; fi
+  merge_verdict "$OUT" $st; exit $?
 fi
 OUT=
 [[ ${1:-} == --out ]] && { OUT=$2; shift 2 }

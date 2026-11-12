@@ -4,7 +4,7 @@
   reaches it (through macros, schemas and the inputs with no program facts), a bin/check step
   is keyed like a test by what its functions reach, and the run is shards whose greens are
   stored."
-  (:require [seon.lib] [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
+  (:require [seon.lib] [seon.agent] [clojure.test :refer [deftest is testing]] [clojure.string :as str] [datahike.api :as d] [clojure.java.shell]
             [seon.test-store :as ts] [seon.db :as pdb] [seon.program :as program] [seon.proofs :as proofs] [seon.cost :as cost]
             [seon.program-test :refer [record]] [seon.source :as source] [seon.fx :as fx] [seon.config] [seon.contract :as contract] [seon.profile :as profile] [test-runner :as runner] [konserve.jolt.lmdb :as klmdb]))
 
@@ -122,7 +122,7 @@
             (is (= (before step) ((at {:seon.pin/jolt "j1" :seon.pin/lmdb "l1" :seon.config.agent/max-turns "41"}) step)) (str step ": a config key is no pin"))))))
     (testing "a step runs a seon.check mode (the binary, a store branch) exactly when check-steps names functions for it"
       (is (= #{"laws" "lmdb-kill" "lmdb-lock" "lmdb-crash" "forks" "health"} (set (remove proofs/step-needs-binary? (keys proofs/check-steps)))) "laws reads the tree, the lmdb steps have binaries of their own, forks runs Jolt, health reads the program store's kept trees")
-      (is (every? proofs/step-needs-binary? ["smoke" "fx" "durable" "e2e-loop" "mg-check"])))
+      (is (every? proofs/step-needs-binary? ["smoke" "fx" "e2e-loop" "mg-check"])))
     (testing "a step whose function the program does not define (renamed) has no digest and is named missing"
       (is (= {} (ts/reach-digests db {:env "e" :tree "t" :config {}} {"gone" '[app.pv-check/renamed]})))
       (is (= ["smoke"] (:missing (proofs/step-digests (fn [roots] (dissoc (zipmap (keys roots) (map str (keys roots))) "smoke")) {:env "e" :tree "t" :config {} :base "b"})))))))
@@ -252,7 +252,7 @@
 ;; docs/merging.md#verdicts-are-a-cache: a run asks the cache for a test's green just before the test would start, so a green
 ;; another run stored since this run's plan is reused, never run again (owner, 2026-11-10: ten agents asking for the whole
 ;; suite "just want to know if the tests have passed"); a step toward the test service owning each (test, digest) item
-(deftest a-green-stored-since-the-plan-is-reused-not-run
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-green-stored-since-the-plan-is-reused-not-run
   (prog)
   (let [tests '[app.pv-calc-test/add-test app.pv-calc-test/twice-test]
         dg '{app.pv-calc-test/add-test "d-add" app.pv-calc-test/twice-test "d-twice"}
@@ -260,7 +260,7 @@
         asked (atom [])
         ;; another run stored twice-test's green at its digest after this run was planned
         reused (fn [t d] (swap! asked conj [t d]) (when (= t 'app.pv-calc-test/twice-test) {:digest d :pass 1 :fail 0 :error 0}))
-        ran (proofs/run-tests! tests dg #(swap! notes conj %) nil nil reused)
+        ran (proofs/run-tests! tests dg #(swap! notes conj %) nil reused)
         started (set (keep :seon.test/started @notes))]
     (is (= '[[app.pv-calc-test/add-test "d-add"] [app.pv-calc-test/twice-test "d-twice"]] (sort-by str @asked)) "each test asked for at its digest")
     (is (started 'app.pv-calc-test/add-test) "a test with no stored green runs")
@@ -315,22 +315,24 @@
     (is (pos-int? (:ticks (unbounded 'app.pv-budget-test/after))) "an unbounded run (bin/test with 0) counts ticks too")
     (is (pos-int? (:ticks (ran 'app.pv-budget-test/after))) "each result carries the ticks it did")))
 
-(deftest a-tests-budget-is-its-own-and-its-mark-raises-it
-  ;; 2026-10-29: a runaway test ends within its own history's budget, typed and naming it; a test marked
-  ;; ^{:seon.test/ticks n} may run n (never over the cap); the budget used is on its result
+;; docs/merging.md#a-tests-tick-budget: a test's budget is ten times the ticks its deftest states it should cost (the owner,
+;; 2026-11-12: measured over ten times the estimate stops the work), never past the cap; a test that states none runs under the
+;; cap, and no history is read. Red before: the budget was max(4e9 floor, 10 x the median of its greens), whatever it stated
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-tests-budget-is-ten-times-its-stated-estimate
   (record (ts/test-db) 'user "(ns app.pv-own-budget-test (:require [clojure.test :refer [deftest is]]))"
-          'app.pv-own-budget-test "(deftest spins (loop [] (recur)))"
-          'app.pv-own-budget-test "(deftest ^{:seon.test/ticks 3000000} marked (loop [i 0] (when (< i 1000000) (recur (inc i)))) (is true))"
-          'app.pv-own-budget-test "(deftest ^{:seon.test/ticks 999999999999} marked-over-the-cap (loop [] (recur)))")
-  (let [notes (atom [])
-        ts '[app.pv-own-budget-test/spins app.pv-own-budget-test/marked app.pv-own-budget-test/marked-over-the-cap]
-        ran (proofs/run-tests! ts {} #(swap! notes conj %) 50000000 (zipmap ts (repeat 200000)))]
-    (is (= 200000 (:budget (ran 'app.pv-own-budget-test/spins))) "the budget it ran under, from its history")
-    (is (= 1 (:error (ran 'app.pv-own-budget-test/spins))) "past it: red, named")
-    (is (< (:ticks (ran 'app.pv-own-budget-test/spins)) 2000000) "after about its budget's work, not the cap's")
-    (is (proofs/green? (ran 'app.pv-own-budget-test/marked)) "a marked test runs past its history's budget")
-    (is (= 3000000 (:budget (ran 'app.pv-own-budget-test/marked))))
-    (is (= 50000000 (:budget (ran 'app.pv-own-budget-test/marked-over-the-cap))) "and never past the cap")))
+          'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 100000}} estimated-spins (loop [] (recur)))"
+          'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 3000000}} within (loop [i 0] (when (< i 1000000) (recur (inc i)))) (is true))"
+          'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 999999999999}} estimated-over-the-cap (loop [] (recur)))"
+          'app.pv-own-budget-test "(deftest stated-none (is true))")
+  (let [ts '[app.pv-own-budget-test/estimated-spins app.pv-own-budget-test/within app.pv-own-budget-test/estimated-over-the-cap app.pv-own-budget-test/stated-none]
+        ran (proofs/run-tests! ts {} (fn [_]) 50000000)]
+    (is (= 1000000 (:budget (ran 'app.pv-own-budget-test/estimated-spins))) "ten times its estimate")
+    (is (= 1 (:error (ran 'app.pv-own-budget-test/estimated-spins))) "past it: red, named")
+    (is (< (:ticks (ran 'app.pv-own-budget-test/estimated-spins)) 5000000) "after about its budget's work, not the cap's")
+    (is (proofs/green? (ran 'app.pv-own-budget-test/within)) "a test inside ten times its estimate is green")
+    (is (= 30000000 (:budget (ran 'app.pv-own-budget-test/within))))
+    (is (= 50000000 (:budget (ran 'app.pv-own-budget-test/estimated-over-the-cap))) "and never past the cap")
+    (is (= 50000000 (:budget (ran 'app.pv-own-budget-test/stated-none))) "a test that states none runs under the cap")))
 
 (deftest shards-are-dealt-by-measured-work
   ;; pure-tests 2026-10-23: dealt by count, the full run's shards ended 437, 397, 110 and 68 s
@@ -658,28 +660,6 @@
     (is (= :red (:seon.test/status (first (proofs/result-tx {} {'a/t (assoc red :ms 1 :ticks 1 :bytes 1)} {} {} {'a/t "d"})))))
     (is (:flaky (proofs/verdict "d" green (assoc red :failures []))) "green and red at one digest are flaky in the cache")))
 
-;; docs/checks.md#modes: an edit that reaches no test the agent-tests step runs boots nothing, so its key moves with them and with its own code only
-(deftest the-agent-tests-step-is-keyed-by-what-it-runs
-  (let [t (fn [d] {:digest d :process? false}) p (fn [d] {:digest d :process? true})
-        base (proofs/agent-tests-digest "step" 2 {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p1")})]
-    (is (= base (proofs/agent-tests-digest "step" 2 {'a/u (t "d2") 'a/t (t "d1") 'a/process (p "p1")})) "in any order, the same key")
-    (is (= base (proofs/agent-tests-digest "step" 2 {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p2")})) "a process test it does not run does not move it")
-    (is (not= base (proofs/agent-tests-digest "step" 2 {'a/t (t "d9") 'a/u (t "d2") 'a/process (p "p1")})) "a test it runs does")
-    (is (not= base (proofs/agent-tests-digest "step" 2 {'a/t (t "d1") 'a/process (p "p1")})) "so does one removed")
-    (is (not= base (proofs/agent-tests-digest "other" 2 {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p1")})) "and so does the step's own code")
-    (let [one (proofs/agent-tests-digest "step" 1 {'a/t (t "d1") 'a/u (t "d2")})]
-      (is (= one (proofs/agent-tests-digest "step" 1 {'a/t (t "d1") 'a/u (t "d3")})) "a test outside the sample does not move it")
-      (is (not= one (proofs/agent-tests-digest "step" 1 {'a/t (t "d1") 'a/u (t "d0")})) "and one that moves into the sample does"))))
-
-;; docs/checks.md#modes: the same tests choose the same sample, of the size asked, and a moved digest moves it
-(deftest the-agent-tests-sample-is-the-lowest-digests
-  (let [ds {'a/t "d3" 'a/u "d1" 'a/v "d2" 'a/w "d4"}]
-    (is (= '#{a/u a/v} (proofs/agent-tests-sample 2 ds)))
-    (is (= (proofs/agent-tests-sample 2 ds) (proofs/agent-tests-sample 2 (into (sorted-map-by #(compare (str %2) (str %1))) ds))) "in any order")
-    (is (= '#{a/w a/u} (proofs/agent-tests-sample 2 (assoc ds 'a/w "d0"))) "a digest that moves moves the choice")
-    (is (= (set (keys ds)) (proofs/agent-tests-sample 100 ds)) "fewer tests than the sample: all of them")))
-
-;; docs/merging.md#a-merge-runs-what-the-change-reaches: a few seconds stay one process; a gate's 751 s splits
 (deftest a-run-has-the-shards-its-work-is-worth
   (let [ts '[a/t a/u a/v a/w]]
     (is (= 1 (proofs/worth-shards ts 4 '{a/t 1000 a/u 1000 a/v 1000 a/w 1000} 30000)) "seconds of work: one")
@@ -755,7 +735,7 @@
 
 ;; docs/source.md#tests-run-by-reach: a test is keyed by what its run read (recorded reads, ninja's depfiles): its verdict
 ;; holds each read's digest, and it is reused while every one still has it, whatever else moved
-(deftest a-verdict-is-reused-while-everything-its-run-read-is-unchanged
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-verdict-is-reused-while-everything-its-run-read-is-unchanged
   (let [rd {'a/f "f1" 'a/g "g1" 'a/h "h1" [:schema :a/e] "e1" :seon.proofs/covers #{:var :schema :config}}
         raw {:fns #{'a/f 'a/g} :entities #{:a/e :a/missing}}
         k (seon.proofs/reads-key rd raw)
@@ -771,3 +751,24 @@
         "a verdict with no record of its reads is never reused by them")
     (is (= "static" (get (seon.proofs/read-digests static rd {'a.b-test/t [{:digest "old" :reads {'a/f "f1" [:file "x.md"] nil}}]}) 'a.b-test/t))
         "a read of a kind the index does not hold whole (files, in an agent's plan) is never taken for a miss")))
+
+(defn- throws-here [] (throw (ex-info "thrown here" {})))
+
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-errors-verdict-names-where-it-was-thrown
+  ;; docs/machine.md#reading-a-red. Found 2026-11-12 (tests): a test's verdict kept "posix_spawn failed (errno 2)" and no
+  ;; place, since an #error prints its type and message only; finding the spawn took a trace of every call. Cost: one throw
+  ;; and its print (~3M ticks).
+  (let [e (try (throws-here) nil (catch Throwable e e))
+        rep (seon.agent/test-report {:type :error :message "Uncaught exception, not in assertion." :expected nil :actual e} "#'demo-test/t")
+        [f] (get (proofs/failures {:reports [rep]}) 'demo-test/t)]
+    (is (some #(str/includes? % "throws_here") (:at f)) (str "the stored failure names the function that threw: " (pr-str (:at f))))
+    (is (<= 1 (count (:at f)) (seon.config/value :seon.config.proofs/error-frames)) "its first frames, at most the config's")))
+
+(deftest ^{:seon.test/estimate {:ticks 200000}} every-check-step-has-a-bound-a-never-measured-one-too
+  ;; docs/clocks.md#time-decides-the-owners-exceptions: runtime's landing hung 58 min in the orphan and resume steps, which had no
+  ;; measured run and so no bound; every wait ends (AGENTS §4). A step never measured takes the largest measured median
+  (let [k (seon.config/value :seon.config.check/step-end-factor) floor (seon.config/value :seon.config.agent/stall-ms)
+        b (proofs/step-bounds ["config" "orphan" "resume"] {"config" 4000 "e2e-loop" 90000})]
+    (is (= #{"config" "orphan" "resume"} (set (keys b))) "every step has one")
+    (is (= (max floor (* k 4000)) (b "config")) "a measured step: the factor times its median, floored")
+    (is (= (max floor (* k 90000)) (b "orphan") (b "resume")) "a never-measured step: the largest measured median's")))

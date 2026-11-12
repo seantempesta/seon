@@ -400,16 +400,6 @@
           (when-let [e (d/entity db [:var/name (symbol vns vname)])]
             (if (contains? (set (:var/meta e)) :private) :private :public)))))))
 
-(defn file-reading-macros
-  "The names of db's macros whose defining form refers to one of seon.program/file-readers (slurp, file-seq, io/resource): a form
-  expanding one holds the analysis of what the macro read. One query of the program's facts, never a seek a reference. See
-  docs/source.md#indexing-a-tree."
-  {:malli/schema [:=> [:cat :seon.host/db] [:set :qualified-symbol]]}
-  [db]
-  (set (d/q '[:find [?mn ...] :in $ [?r ...]
-              :where [?mf :form/refs ?r] [?mf :form/defines ?m] [?m :var/meta :macro] [?m :var/name ?mn]]
-            db (vec program/file-readers))))
-
 (defn- held-form
   "For namespace nsym on db, the answer accounts takes for a form it holds whole: (fn [n src k ns-src form]) gives the account
   of the live form db holds at that namespace, text and occurrence (its id), built from db's facts (what read-interface and
@@ -424,7 +414,7 @@
         ;; {form id, its entity} of the namespace's forms: one scan, never a seek a form
         by-id (delay (into {} (for [dt (when ne (d/datoms db :avet :form/ns ne)) :let [x (d/entity db (:e dt))]] [(:form/id x) (:e dt)])))
         ;; the macros whose expansion reads files (file-reading-expansions' rule): one query, asked once, a held form's refs looked up in it
-        reading (delay (file-reading-macros db))]
+        reading (delay (program/file-reading-macros db))]
     (fn [n src k ns-src form]
       (when (and db-ns-src (= ns-src db-ns-src) (not= src ns-src)
                  ;; a macro (a later form's analysis expands it) and a form that defines a class are always analyzed
@@ -645,7 +635,7 @@
   [db]
   (into {} (d/q '[:find ?file ?nsn :in $ [?mn ...]
                   :where [?f :form/refs ?mn] [?f :form/ns ?ns] [?ns :ns/file ?file] [?ns :ns/name ?nsn]]
-                db (vec (file-reading-macros db)))))
+                db (vec (program/file-reading-macros db)))))
 
 (defn refresh-tx
   "The facts that bring db's program up to date with the files that changed ({relative path

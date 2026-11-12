@@ -138,8 +138,9 @@
                (nil? agent) {::attach-made-no-agent attach}
                ;; its hello, or its end (refused, died) first: an agent that ended answers the test with that end, never a wait
                ;; for a hello that cannot come until the test's bound (Optimization's reading of batch 90, 2026-11-12)
-               :else (let [came (value-of (:response (eval-root (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ready :ended :dead :killed} (:type e)) (= :" agent " (:agent e))) (:type e) (recur))))"))))]
-                       (if (= :ready came)
+               :else (let [came (value-of (:response (eval-root (str "(loop [] (let [e (clojure.core.async/<!! ready-ev)] (if (and (#{:ready :ended :dead :killed} (:type e)) (= :" agent " (:agent e))) (select-keys e [:type :error]) (recur))))"))))]
+                       ;; the end whole, its died error with it (exit, stderr's tail): a death before the hello is named
+                       (if (= :ready (:type came))
                          (f {:names names :ask ask :eval-root eval-root :root root})
                          {::agent-ended-before-ready {:agent agent :end came}}))))
           (finally (vreset! stopped (end!))))]
@@ -444,6 +445,14 @@
            (some-> v (update-vals #(update % :reports (partial mapv (fn [x] (select-keys x [:type :var])))))))
         (pr-str two))))
 
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-run-error-that-names-no-test-is-said-in-the-proves-line
+  ;; 2026-11-12: agent-checks' first prove read {:error 1} and printed no reason: a run's report naming no test (a child that
+  ;; died before a test began, a held pipe) is no test's failure, and the line said "red: 0 of 2 failed" with nothing under it
+  (let [run {:pass 2 :fail 0 :error 1 :reports [{:type :pass :var "#'a-test/t"} {:type :pass :var "#'a-test/u"}
+                                               {:type :error :exit {:signal 9} :message "test process died: {:signal 9}"}]}]
+    (is (str/includes? (:seon.print/code (my.agent/prove-summary {} run)) "✗ the run: test process died")
+        "the run's error is said")))
+
 (deftest a-test-childs-read-lets-the-agents-other-fibers-run
   ;; the recipe hang of 2026-10-28 (the scratch paper hang-2026-10-28-a1-prove (git history)): agent a1's test child
   ;; asked a1 something mid-run, and a1, reading the child's pipe, was blocked in a native kevent on
@@ -524,21 +533,23 @@
   other test it holds a digest of was green."
   [x] (str "(let [r " x "] (into {} (for [t (keys (:digests r))] [t (get (seon.proofs/results r) t :pass)])))"))
 
-(deftest an-agents-test-run-is-its-proofs-and-what-its-change-reaches
-  ;; the agent holds main's whole suite, and its
-  ;; test run (root's :tests request, the one the judge sends) selects what the done rule
-  ;; reads: the task's proofs and the tests reaching what its branch changed since the main
-  ;; it forked from. One redefined function (same behaviour, another form) reaches one test; its namespace's other tests
-  ;; and every other namespace's do not run
-  (let [proof 'seon.reader-test/text-without-a-fence-is-a-comment
-        reached 'seon.config-test/the-command-line-s-overrides-are-taken-out-of-a-mode-s-args
-        ;; the other test that reaches without-overrides (it reads the profile from the command line, 4a34eb9227)
-        also 'seon.config-test/the-profile-is-read-from-the-command-line
-        [_ run] (in-agent #(vector (str "(in-ns 'seon.config) (defn without-overrides \"args with --config and --set (and their arguments) taken out: what a mode reads.\" {:malli/schema [:=> [:cat [:maybe [:sequential :string]]] [:vector :string]]} [args] (vec (:rest (overrides args)))) (in-ns 'agent." (:agent %) ")")
-                           {:op :eval :agent "root" :code (statuses (str "@(seon.system/run-tests! sys :" (:agent %) ")"))})
-                          {:proofs #{proof}})]
-    (is (= {proof :pass reached :pass also :pass} (:value run))
-        "the proof and the tests reaching the change ran, green; nothing else ran")))
+(deftest ^{:seon.test/estimate {:ticks 20000000}} an-agents-test-run-is-its-proofs-and-what-its-change-reaches
+  ;; T1, in process on the world: seon.agent/test-plan of main and of a branch of it (two test plans of ~12 forms, ~5 M ticks each, the
+  ;; world's schema and index most of it). The selection a run reads is the task's proofs and the tests reaching what its
+  ;; branch changed since the main it forked from. One redefined function (same behaviour, another form) reaches the tests
+  ;; that call it; its namespace's other tests and every other namespace's do not. The tests are vars of this process too
+  ;; (seon.agent/judges? asks the process), loaded here as the agent loads its program
+  (let [proof 'pt.rc-other-test/other-is-one
+        calc "(ns pt.rc)\n(defn add [x y] (+ x y))\n(defn other [] 1)\n"
+        calc-test "(ns pt.rc-test (:require [clojure.test :refer [deftest is]] [pt.rc :as c]))\n(deftest adds (is (= 3 (c/add 1 2))))\n(deftest others (is (= 1 (c/other))))\n"
+        other-test "(ns pt.rc-other-test (:require [clojure.test :refer [deftest is]]))\n(deftest other-is-one (is (= 1 1)))\n(deftest other-too (is (= 1 1)))\n"
+        main (mt/with (mt/world) (mt/code 'pt.rc calc) (mt/code 'pt.rc-test calc-test) (mt/code 'pt.rc-other-test other-test))
+        branch (mt/with main (mt/code 'pt.rc "(ns pt.rc)\n(defn add [x y] (+ y x))\n(defn other [] 1)\n"))]
+    (try (doseq [t [calc-test other-test]] (binding [*ns* (create-ns 'user)] (load-string t)))
+         (let [plan (agent/test-plan branch main #{proof})]
+           (is (= '#{pt.rc-other-test/other-is-one pt.rc-test/adds} (set (:selected plan)))
+               "the proof and the test reaching the change; nothing else (not its namespace's other test, not another namespace's)"))
+         (finally (run! remove-ns '[pt.rc pt.rc-test pt.rc-other-test])))))
 
 (deftest a-plan-with-no-base-costs-what-a-plan-with-one-does
   ;; a plan that selects with no base (mode :main: the test service's run of main, and the tests that run as it
@@ -668,6 +679,17 @@
         (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))
     (is (= [:pass 1] (:value other)) (str "another's red runs, and is green: " (pr-str other)))))
 
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 3}} an-agents-green-records-what-it-read
+  ;; docs/source.md#tests-run-by-reach: a green an agent's run stores is keyed by what it read (seon.proofs/reads-key): the
+  ;; functions it called and itself, at the digests of the agent's reads index, beside its verdict as reads.edn, so a later plan
+  ;; reuses it while none of those moved (seon.proofs/read-digests). Red before: an agent's run wrote no reads
+  (let [[_ green reads] (in-agent ["(ns reads-test (:require [clojure.test :refer [deftest is]])) (defn f [x] (inc x)) (deftest r (is (= 2 (f 1))))"
+                                   "(select-keys (my.agent/prove 'reads-test/r) [:results])"
+                                   "(some-> (get (seon.fx/held-reads ['reads-test/r]) 'reads-test/r) first :reads keys set)"]
+                                  {:proofs #{'reads-test/r}})]
+    (is (= {:results '{reads-test/r :pass}} (:value green)) (pr-str green))
+    (is (contains? (set (:value reads)) 'reads-test/r) (str "its green names what it read, itself among them: " (pr-str reads)))))
+
 (deftest a-test-run-writes-its-results-on-the-branch
   ;; task seon.proofs/test-results-are-a-few-facts (R2a): an agent's run of its proofs records each
   ;; result as facts on the test's var entity on its branch (seon.proofs/result-tx, beside the cache):
@@ -695,20 +717,29 @@
       (is (nil? (:seon.test/failures branch)) "no failures while green"))
     (is (true? (:value again)) "a run that changes nothing writes no datoms")))
 
-(deftest a-green-that-is-no-proof-writes-no-fact
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-green-that-is-no-proof-writes-no-fact
   ;; docs/sharing.md#what-a-branchs-nodes-are: a green that is no proof of the task is read by nothing
   ;; on this branch (seon.reconcile/done-explain reads proofs and reds), and its facts on its var rewrite a leaf
-  ;; among the program's. A red is held, and stays held when it goes green, so it never reads as still red. The red is asked by
-  ;; name: a run is answered at its first red (docs/merging.md#the-test-service), so which other test ended before it is no claim
-  (let [facts "(into {} (for [t '[green-test/proof green-test/other green-test/turned]] [t (:seon.test/status (datahike.api/pull (seon.agent/db) [:seon.test/status] [:var/name t]))]))"
-        [_ _ first-facts _ _ second-facts]
-        (in-agent ["(ns green-test (:require [clojure.test :refer [deftest is]])) (deftest proof (is (= 1 1))) (deftest other (is (= 1 1))) (deftest turned (is (= 1 2)))"
-                   "(select-keys (my.agent/prove 'green-test/turned) [:results])" facts
-                   "(deftest turned (is (= 1 1)))"
-                   "(select-keys (my.agent/prove) [:results])" facts]
-                  {:proofs #{'green-test/proof}})]
-    (is (= '{green-test/proof nil green-test/other nil green-test/turned :red} (:value first-facts)) (pr-str first-facts))
-    (is (= '{green-test/proof :green green-test/other nil green-test/turned :green} (:value second-facts)) (pr-str second-facts))))
+  ;; among the program's. A red is held, and stays held when it goes green, so it never reads as still red.
+  ;; T1: the agent's record-results! is seon.proofs/facts-worth-keeping then seon.proofs/result-tx, both pure on the
+  ;; entities the branch holds; two runs of three tests (a proof, another, one that turns red then green), a few calls each
+  (let [digests '{green-test/proof "p" green-test/other "o" green-test/turned "t2"}
+        green {:digest "x" :pass 1 :fail 0 :error 0}
+        red {:digest "t" :pass 0 :fail 1 :error 0}
+        proofs '#{green-test/proof}
+        record (fn [held ran failures]
+                 ;; what the branch then holds: {test status}, record-results!'s steps on held ({test entity})
+                 (let [kept (proofs/facts-worth-keeping held proofs ran)
+                       tx (proofs/result-tx held kept failures {} digests)]
+                   (into {} (for [m tx :when (map? m)] [(:var/name m) (:seon.test/status m)]))))
+        ;; the run that asks the red by name: the proof and the other are not run
+        first-facts (record {} {'green-test/turned red} {'green-test/turned [{:type :fail :message "no"}]})
+        ;; the branch holds the red; the deftest redefined (a new digest), the run of everything turns it green
+        second-facts (record {'green-test/turned {:seon.test/digest "t" :seon.test/status :red}}
+                             {'green-test/proof (assoc green :digest "p") 'green-test/other (assoc green :digest "o") 'green-test/turned (assoc green :digest "t2")}
+                             {})]
+    (is (= '{green-test/turned :red} first-facts) (pr-str first-facts))
+    (is (= '{green-test/proof :green green-test/turned :green} second-facts) (pr-str second-facts))))
 
 (deftest a-proof-over-the-branchs-data-is-keyed-by-its-data-too
   ;; Context's trial finding 14: an agent's proof over its branch's data (lab.proofs/the-tasks-i-cite-differ-from-my-base) ran
@@ -1031,7 +1062,7 @@
         results (try (remove-ns 'app.calc-test) (remove-ns 'app.calc)
                      ;; the branch's program, then main's removed test as the test child defines it
                      (binding [*ns* (create-ns 'app.calc)] (refer-clojure) (load-string "(defn add [x y] (- x y))"))
-                     (#'agent/load-removed! (:removed plan))
+                     (#'agent/load-removed! (:removed plan) [main-test])
                      (proofs/run-tests! [main-test] {main-test nil}
                                         (fn [x] (when-let [m (:seon.test/report x)] (swap! ran conj {:type (:type m) :var (str "#'" (:test x))}))))
                      (proofs/results {:reports @ran})
@@ -2308,6 +2339,21 @@
     (is (= #{} (:value by-ns)) (str "a run naming only a namespace runs no step: " (pr-str by-ns)))
     (is (= #{"ids"} (:value by-step)) (str "and one naming a step runs it alone: " (pr-str by-step)))))
 
+;; docs/merging.md#the-test-service: a tree proved as a merge (mode :main: every key with no green at its digest, as the shell's
+;; bin/prove --merge plans it, seon.proofs/plan-of :merge) carries its generative-contract keys too, as items, where the run
+;; dropped them (seon.agent/process-plan's (remove mg-key? ...)): a landing through the system proved less than the shell's
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-merge-plan-carries-the-contract-keys
+  ;; T1, in process on the world: seon.agent/process-plan of a plan of the world with one contracted function of a pure namespace added (a test
+  ;; plan, a few thousand forms' digests: ~5 M ticks; the check-step plan over it, ~5 M; stored-results reads of every candidate)
+  (let [db (mt/with (mt/world)
+             (mt/code 'seon.ref (str "(ns seon.ref (:require [clojure.string :as str]))\n"
+                                     "(defn first-sentence [s] s)\n"
+                                     "(defn lead-sentence \"The first sentence of a section's lead paragraph, on one line.\""
+                                     " {:malli/schema [:=> [:cat :string] :string]} [lead] (identity (first-sentence (str/join \" \" (map str/trim (str/split-lines lead))))))\n")))
+        plan (agent/test-plan db db #{})
+        mg (:mg (#'agent/process-plan {:plan plan :deferred []} nil))]
+    (is (contains? (set (keys mg)) "mg/seon.ref/lead-sentence") (str "a contract key with no green at its digest is an item of the merge: " (pr-str mg)))))
+
 ;; docs/merging.md#verdicts-are-a-cache: base and branch are digested by the same inputs, so a branch that changed nothing selects
 ;; nothing as changed. Red before: the inputs design added the private checks, the index class and a process test's config
 ;; to the branch's inputs only, and an unchanged agent of the standing system selected 1,765 of 1,835 tests as changed
@@ -3157,3 +3203,18 @@
         green {:test 'app.x-test/u :status :pass :source "(deftest u (is true))" :calls ['app.x/g] :shape {:n 1}}]
     (is (= (dissoc red :shape) (read red)) "a failing proof keeps its source and what it calls")
     (is (= {:test 'app.x-test/u :status :pass} (read green)) "a passing one is its name and status")))
+
+;; docs/source.md#tests-run-by-reach: a branch changes only what its reach changed. A test whose newest green recorded its reads
+;; sits at that green's digest on the branch (seon.proofs/read-digests); base's side takes the same where the reach did not move,
+;; so the plan's selection (seon.proofs/plan, base against branch) leaves it out. Red before: two judges selected main's four
+;; newest tests as the branch's, once a shard's root moved its main past the tree their greens recorded reads at (2026-11-12).
+;; T1, in process: three maps of three tests, one plan; a few thousand ticks.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-test-whose-reach-did-not-move-is-not-the-branchs-change
+  (let [static {'a/unchanged "d-now" 'a/moved "d-branch" 'a/plain "p"}
+        reads {'a/unchanged "d-green" 'a/moved "d-branch" 'a/plain "p"}
+        base-raw {'a/unchanged "d-now" 'a/moved "d-base" 'a/plain "p"}
+        base (agent/base-at-reads base-raw static reads)
+        sel (:selected (proofs/plan base reads {} #{}))]
+    (is (= "d-green" (base 'a/unchanged)) "a test whose reach is base's takes its recorded-reads digest on base's side too")
+    (is (= "d-base" (base 'a/moved)) "a test whose reach moved keeps base's own digest")
+    (is (= '[a/moved] sel) "so the branch's change is the test its reach moved, never one some run recorded reads for")))

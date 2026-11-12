@@ -238,14 +238,9 @@
  ;; at load 30-40 before proves took slots; past 10 is a hang more often than a slow machine.
  :seon.config.check/step-end-factor 10
  ;; Unit: ms over which a check measures that something does not happen: a paused agent's
- ;; request unanswered (lifecycle), a paused proc's flood not taken and a paused writer's
- ;; commits held (backpressure). Provenance: the windows it replaced were 300, 400 and 500 ms.
+ ;; request unanswered (lifecycle). Provenance: the windows it replaced were 300, 400 and 500 ms.
  ;; Load only makes what it measures likelier. At the bound: the measurement is read.
  :seon.config.check/hold-ms 500
- ;; Unit: ms after scale's agents are killed over which it measures the memory the kernel
- ;; returns (:system-available-returned-mb-per-agent, reported, not checked). Provenance: the
- ;; window it replaced. At the bound: the available memory is read.
- :seon.config.check/pages-ms 500
  ;; Unit: ms between the readings scale-work takes of the machine's available memory and of each process
  ;; under root's fork server while its agents work (seon.check/scale-work). Provenance: a footprint
  ;; reading of ~25 processes takes ~100-300 ms; the window is what the test children's peaks are caught
@@ -345,19 +340,6 @@
  ;; test run ~30 min; the costliest green in-process test recorded 8.3 G ticks (p99 1.9 G, median
  ;; 2 M; 1,186 tests' newest verdicts), so 10 G ends a loop in about a minute and fails none today.
  :seon.config.agent/test-ticks 10000000000
- ;; Unit: engine ticks. The least one test may run: its budget is min(test-ticks, max(this,
- ;; test-ticks-factor x the median ticks its green verdicts measured)), so a test with no green history
- ;; gets this. Provenance: the 45,333 verdicts of 1,194 tests in the results cache (2026-10-29; commit
- ;; message): newest-green ticks median 1.7 M, p90 153 M, p99 1.7 G, max 8.3 G; 4 G is about 1-5 s of work
- ;; (a tight loop ~4e9 ticks/s, an allocating one ~7.5e8) and no test but one runaway (seon.db-test/a-create-that-fails-leaves-no-store,
- ;; 3 greens of 81-147 G) spent more than max(4 G, 10 x its median) at any digest. At the bound that test
- ;; is an :error of :seon.test/ticks-spent naming the budget used. The budget is in every test's digest
- ;; through these three keys and never through the history (docs/merging.md#a-tests-tick-budget).
- :seon.config.agent/test-ticks-floor 4000000000
- ;; Unit: a factor (times). How many times its median green ticks a test may run, at any digest
- ;; (see test-ticks-floor): the same test's greens vary 1.0-1.07 x the median at p50-p90 and 3.3 x at p99
- ;; (44,368 verdicts); 10 is past every test but one runaway above the floor.
- :seon.config.agent/test-ticks-factor 10
  ;; The silence, ms, after which an agent with a request in flight is observed stalled, once per
  ;; quiet spell (seon.agent-proc's stall check), and a test bin/test runs is named STALLED: a
  ;; recorded fact (:seon.agent/stall, an open :stalled problem), never an end. Provenance: the
@@ -601,34 +583,41 @@
  ;; change reused 226 of 233 process tests' greens; five were red): 10 a class, ~12 s CPU a run. At the bound: the
  ;; other reused greens are not run again this run.
  :seon.config.proofs/reuse-audit 10
- ;; Unit: tests. How many tests the agent-tests check runs through an agent, the lowest digests (seon.proofs/agent-tests-sample). A fault that
- ;; hits 3 percent of tests shows in 100 with 95 percent odds. Provenance: all 1,154 cost 136 to 166 s of each wide prove and ran again what
- ;; bin/test had just run; the owner chose a sample, 2026-11-06. At the bound: the other tests are not run this way in that run.
- :seon.config.proofs/agent-tests-sample 100
  ;; Unit: verdicts. How many of a test's newest greens its history holds (seon.fx/history), which its typical
  ;; ms, tick budget and slow-test read take: a median of few keeps out one hung run, and a test's cost stops
  ;; growing with the digests it has had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
  ;; tests got a time (2026-11-06, commit message). At the bound: older verdicts are not read.
  :seon.config.proofs/recent-verdicts 5
- ;; Unit: processes. A proof run's selected tests (bin/prove, bin/test) are dealt, a namespace (with
- ;; its fixtures) at a time, into this many shards, each a runner process of its own that bin/test
- ;; starts at once (seon.proofs/shards), its greens stored by digest when it has run. Provenance:
- ;; worktree session PROVE 2026-10-22 on the 16 GB M1 target (docs/machine.md#the-target-a-16-gb-macbook-m1): 4 keeps the machine
- ;; responsive beside a standing root and other worktree sessions (measured in docs/merging.md#a-merge-runs-what-the-change-reaches).
- ;; At the bound: a run never has more shards; fewer when fewer namespaces are selected. bin/check
- ;; runs this many steps at once too, and mg-check in this many shards (pure-tests 2026-10-23).
- ;; bin/test sets SEON_PROOF_JOBS: one shard, two when 12 cores are free (owner, 2026-11-08: "Why are we doing so
- ;; much sharding?"): each shard loads every test namespace and boots a shared root per test group, so three sessions'
- ;; four-shard runs at once took load to 40 on 18 cores.
+ ;; What each set of tests may state and reach (docs/testing.md#test-types; seon.problems/undeclared-tests judges the tests a
+ ;; branch changed). Unit: engine ticks. The most a test's :seon.test/estimate may state as :ticks: its budget is ten times
+ ;; it, so a test past 1e9 ticks is split or moved to a system test's root. At the bound: an :undeclared-test row naming it.
+ :seon.config.proofs/test-ticks-cap 100000000
+ ;; Unit: asks (requests to its root). The most a system test's estimate may state as :asks. At the bound: an :undeclared-test row.
+ :seon.config.proofs/system-test-asks-cap 20
+ ;; Unit: commands. The most a binary test's estimate may state as :execs. At the bound: an :undeclared-test row.
+ :seon.config.proofs/binary-test-execs-cap 3
+ ;; Unit: vars. Reaching one, through the test namespaces' own code, makes a test a system test, which names its root
+ ;; (:seon.test/root). At the bound (one reached, none named): an :undeclared-test row.
+ :seon.config.proofs/system-vars #{seon.test-store/start-root! seon.agent-test/in-agent seon.agent-test/with-agent}
+ ;; Unit: vars. Reaching one makes a test a binary test, which names the commands it runs (:seon.test/execs). At the
+ ;; bound (one reached, none named): an :undeclared-test row.
+ :seon.config.proofs/exec-vars #{seon.test-store/binary-sh clojure.java.shell/sh}
+ ;; Unit: vars. A test's own namespace calling one makes a store of its own instead of the shared world (my.test/world,
+ ;; seon.test-store/test-db, test-branch!). At the bound (one called): an :undeclared-test row.
+ :seon.config.proofs/own-store-vars #{datahike.api/create-database seon.db/seed!}
+ ;; Unit: shards. How many runner processes bin/test starts at once (seon.proofs/shards), and how many steps bin/check runs
+ ;; at once. 4, not the cores: each shard boots a test root of its own (its fork server warms ~1e9 ticks before its first agent),
+ ;; and 18 at once under other proves ran the system tests' roots past their bound (measured 2026-11-12: CPU 0.0 s, waiting on
+ ;; their roots). The service's workers follow the cores (max-workers); this shard path goes with one-root and the service.
+ ;; SEON_PROOF_JOBS is bin/test's own hand-off to its child steps. At the bound: a run never has more shards.
  :seon.config.proofs/jobs #long #or [#env SEON_PROOF_JOBS 4]
  ;; The test service's admission (seon.prove/admission, docs/merging.md#the-test-service): three optional bounds, any
  ;; combination (the owner: "a fixed max number and a load max and core max ... any combination has a solution"). An unset
  ;; key binds nothing; with neither count set, the machine's cores (:seon.config.machine/cores) bound the items at once.
- ;; Unit: items. The most items (a test child, a process test, a check step, a build or seed) running at once on this
- ;; machine. Provenance: 2026-11-11, a forked test child is 16-35 MB of its own and about a core while it runs (fork + one
- ;; test + exit: ~10 ms); 18 cores, half kept for the roots and agents the tests drive: 8. At the bound: an item waits in
- ;; the queue for a running one to end. Set it to the machine (config/local.edn), as the owner asked: configurable.
- :seon.config.proofs/max-workers 8
+ ;; Unit: items. The most items (a batch of tests in one fork, a check step, a build or seed) running at once on this
+ ;; machine: its cores (#seon/cores; a forked test child is 16-35 MB of its own and about a core while it runs). At the
+ ;; bound: an item waits in the queue for a running one to end.
+ :seon.config.proofs/max-workers #seon/cores nil
  ;; Unit: a share of :seon.config.machine/cores in (0,1] (rounded down, at least 1); a count of items is max-workers. Unset:
  ;; no core bound. At the bound: as max-workers; the least of the two set holds.
  ;; :seon.config.proofs/max-cores 0.5
@@ -668,13 +657,6 @@
  ;; the verdict cache's process tests, 2026-11-10: 1,220 over 228 of 228 (mean 3,027). A gate of 234 unmeasured process tests is
  ;; still worth every shard (234 x 1,220 / 30,000 = 9.5).
  :seon.config.proofs/unmeasured-process-ms 1220
- ;; Unit: boolean. Whether each commit that moves main's program starts a run of main's tests
- ;; (seon.prove: a prove agent forked from main, results as facts every agent forked after reuses).
- ;; Provenance: task seon.proofs/main-is-proved-in-a-fork. Off: the run of all of main's
- ;; in-process tests (344 in one child) dies at a varying test with exit 1 and no stderr, losing
- ;; every result, about 200 s of CPU per commit for nothing; named runs (seon_prove, a turn's)
- ;; are unaffected. On again when task seon.agent/a-test-run-streams-its-reports and the child's
- ;; death are fixed. At the bound: a program commit starts no run.
  ;; Unit: hh:mm UTC. The cron proc's daily full run of main (bin/test --all, which runs every test,
  ;; process tests included, green or not): the net under the narrow digests (a test takes only what
  ;; its reach names, owner 2026-10-27), so what a reach cannot show is found within a day. "" is
@@ -700,6 +682,9 @@
  ;; Provenance: owner, 2026-11-06. Over the verdict cache that day, 5 s left out 70 of 1,466 tests and
  ;; kept about 96 s of work on 4 shards; 2 s left out 123 for 55 s, 15 s left out 31 for 189 s.
  :seon.config.proofs/slow-test-ms 5000
+ ;; Unit: frames. How many frames of where a test's error was thrown its report keeps (seon.proofs/error-at).
+ ;; Provenance: tests, 2026-11-12: the posix_spawn ENOENT's caller was three frames in; 8 is ~0.5 KB a red.
+ :seon.config.proofs/error-frames 8
  ;; Unit: path. The plan's store of kept program dbs (test-runner/program-db): one LMDB store
  ;; per checkout, a branch per git tree id holding that tree's program as facts. A tree never
  ;; seen is branched from the kept tree with the fewest changed files and brought current by

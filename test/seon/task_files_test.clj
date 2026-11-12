@@ -215,26 +215,45 @@
       (is (thrown? Exception (d/db-with db0 gone)) "the same removal against a db that lacks the tasks is refused")
       (is (empty? (ghosts db0))))))
 
-(deftest loading-an-example-twice-changes-nothing-and-a-missing-file-is-an-error
-  ;; my.root/load-example!: an example session's file (seon.ctx.session/session-tx's transactions, written with pr-str)
-  ;; is transacted once; a second load of it writes nothing (main's t does not move); a file that is not there,
-  ;; does not read or is not that vector is the :seon.system/example-refused error and writes nothing
-  ;; (on the process's shared root, with keys of its own: a root's boot was most of this test's time)
+;; T1 for the refusals (they are decided before any write, so no root is asked: sys is never read) and T2 for the idempotent
+;; load (it transacts on main, through the shared root). Estimate: 3 small file reads and 3 EDN reads, ~1 M ticks; the load is
+;; one agent on the shared root, 2 loads and 2 counts in one eval.
+(defn- example-files
+  "Make a directory under target/runs holding the example session's file and three that are no example session's: {:runs :file :key :id :missing :unreadable :bad}."
+  []
   (let [checkout (seon.config/checkout)
         id (seon.lib/unique-id)
         runs (str checkout "/target/runs/load-example-" id)
         _ (.mkdirs (java.io.File. runs))
         file (str runs "/records.edn")
-        key (str "example/" id)
-        _ (spit file (pr-str [[{:seon.agent/key key :seon.agent/status :ended :seon.agent/description "Make h."}]
-                              [{:seon.eval/id (str key "/s1") :seon.eval/by {:seon.agent/key "src"} :seon.eval/agent [:seon.agent/key key]
-                                :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol (str "result/example-" id "-s1")) :value 3} :seon.eval/call-id (str "example-" id "-call_1")}]]))
-        _ (spit (str runs "/bad.edn") "[[{:seon.agent/key \"someone\"}]]")
-        _ (spit (str runs "/unreadable.edn") "[[{:seon.agent/key")
-        missing (str runs "/nothing-here.edn")
-        refused (fn [f] {:op :eval :agent "root" :code (str "(let [r (my.root/load-example! sys " (pr-str f) ")] [(:seon.error/type r) (:path r) (:seon.error/message r)])")})]
+        key (str "example/" id)]
+    (spit file (pr-str [[{:seon.agent/key key :seon.agent/status :ended :seon.agent/description "Make h."}]
+                        [{:seon.eval/id (str key "/s1") :seon.eval/by {:seon.agent/key "src"} :seon.eval/agent [:seon.agent/key key]
+                          :seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol (str "result/example-" id "-s1")) :value 3} :seon.eval/call-id (str "example-" id "-call_1")}]]))
+    (spit (str runs "/bad.edn") "[[{:seon.agent/key \"someone\"}]]")
+    (spit (str runs "/unreadable.edn") "[[{:seon.agent/key")
+    {:runs runs :file file :key key :id id :missing (str runs "/nothing-here.edn") :unreadable (str runs "/unreadable.edn") :bad (str runs "/bad.edn")}))
+
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-missing-unreadable-or-misshapen-example-file-is-an-error-and-writes-nothing
+  ;; my.root/load-example!: a file that is not there, does not read or is not a vector of transactions whose first writes
+  ;; an example agent is the :seon.system/example-refused error, answered by my.root/example-txs, the edge load-example! reads first, before root is asked for anything (T1: no root)
+  (let [{:keys [runs missing unreadable bad]} (example-files)]
     (try
-      (let [[twice [type p message] unreadable bad]
+      (let [refused (fn [f] (let [r (my.root/example-txs f)] [(:seon.error/type r) (:path r) (:seon.error/message r)]))
+            [type p message] (refused missing)]
+        (is (= [:seon.system/example-refused missing] [type p]))
+        (is (str/includes? message "not found"))
+        (is (str/includes? (nth (refused unreadable) 2) "not readable EDN"))
+        (is (str/includes? (nth (refused bad) 2) "not a non-empty vector of transactions")))
+      (finally (seon.lib/remove-tree! runs)))))
+
+(deftest ^{:seon.test/root [] :seon.test/asks 1 :seon.test/estimate {:ticks 20000000}} loading-an-example-twice-changes-nothing
+  ;; my.root/load-example!: an example session's file (seon.ctx.session/session-tx's transactions, written with pr-str)
+  ;; is transacted once; a second load of it writes nothing (main's t does not move)
+  ;; (T2, on the process's shared root, with keys of its own: a root's boot was most of this test's time)
+  (let [{:keys [runs file key]} (example-files)]
+    (try
+      (let [[twice]
             (map :value
                  (at/in-agent [{:op :eval :agent "root"
                                 :code (str "(let [f " (pr-str file) " a (my.root/load-example! sys f)
@@ -242,14 +261,9 @@
                               b (my.root/load-example! sys f)]
                           {:first (:batches a) :second (select-keys b [:ok :changed :batches]) :moved (not= t1 (:max-tx @(:conn sys)))
                            :evals (count (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/id " (pr-str (str key "/s1")) "]] @(:conn sys)))
-                           :agents (count (datahike.api/q '[:find [?e ...] :where [?e :seon.agent/key " (pr-str key) "]] @(:conn sys)))})")}
-                               (refused missing) (refused (str runs "/unreadable.edn")) (refused (str runs "/bad.edn"))]))]
+                           :agents (count (datahike.api/q '[:find [?e ...] :where [?e :seon.agent/key " (pr-str key) "]] @(:conn sys)))})")}]))]
         (is (= {:first 2 :second {:ok true :changed 0 :batches 0} :moved false :evals 1 :agents 1} twice)
-            "the first load writes its two transactions; the second writes nothing")
-        (is (= [:seon.system/example-refused missing] [type p]))
-        (is (str/includes? message "not found"))
-        (is (str/includes? (nth unreadable 2) "not readable EDN"))
-        (is (str/includes? (nth bad 2) "not a non-empty vector of transactions")))
+            "the first load writes its two transactions; the second writes nothing"))
       (finally (seon.lib/remove-tree! runs)))))
 
 ;; See docs/tasks.md#a-request-is-one-transaction

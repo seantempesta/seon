@@ -1299,3 +1299,58 @@
     (is (= :up (get-in st2 [:view :fork-server :status])) "the server itself still serves")
     (is (= true (get-in (first (step #'root/api-proc st2 :back {:ev :standby :gen 4 :pid 9})) [:view :fork-server :standby]))
         "the next standby made: the view shows it has one again")))
+
+(defn- note-texts
+  "The texts of the notes the test wrote (prefix p) on the connection's head."
+  [conn p] (set (filter #(.startsWith ^String % p) (d/q '[:find [?t ...] :where [?e :note/text ?t]] @conn))))
+
+;; docs/flow.md#the-step-fn-contract-every-proc-follows (paused, a proc reads only control; its in-port keeps what is sent).
+;; Replaces the backpressure check step's claim. Pausing is Flow's, not the writer's: the writer's transition arity is
+;; identity, so "held" is what the step-fn never being called leaves: the writes sit on :in, uncommitted and unanswered.
+;; Resumed, the first step takes one and drains the rest of the batch from :in (seon.writer/drain), FIFO.
+;; Estimate: 1 test branch (~2 ms) + 5 one-note transacts in ONE group commit + 1 query ~ 80,000,000 ticks: test-branch! (the seed's ~2,000 datoms through the schema check) is ~99% of it, measured 70.8M, the steps themselves under 1M
+;; Red if: drain's `(conj acc y)` becomes `(conj (list) ...)`-style reversal, i.e. answers reverse the order sent.
+(deftest ^{:seon.test/estimate {:ticks 80000000}} a-paused-writer-holds-every-write-and-resumed-answers-them-in-order
+  (ts/test-branch! (fn [cfg conn]
+    (let [in (a/chan 16)
+          st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
+          req (fn [i] {:op :tx :branch :db :tx-data [{:note/text (str "held-" i) :note/agent :t}] :dest {:rid i}})]
+      (is (= st (#'writer/writer-proc st ::flow/pause)) "the pause transition leaves the state as it is")
+      (doseq [i (range 5)] (a/>!! in (req i)))
+      (testing "paused: no step runs, so nothing is committed and nothing answered"
+        (is (= #{} (note-texts conn "held-")))
+        (is (= 0 (:commits st))))
+      (testing "resumed: the first send starts the step, which takes the rest, and every one is answered in the order sent"
+        (let [m (a/poll! in)
+              [st2 outs] (step #'writer/writer-proc st :in m)
+              answers (filter :dest (:to-api outs))]
+          (is (nil? (a/poll! in)) "the step drained :in")
+          (is (= [{:rid 0} {:rid 1} {:rid 2} {:rid 3} {:rid 4}] (mapv :dest answers)))
+          (is (every? #(true? (:ok (:r %))) answers))
+          (is (= 5 (:tx-count st2)))
+          (is (= (set (map #(str "held-" %) (range 5))) (note-texts conn "held-")))))))))
+
+;; docs/flow.md (a closed :in is the end of the flow: everything taken is committed and flushed, then :drained goes out) and
+;; docs/storage.md#durability-is-continuous-group-commit. Replaces the drain check step's claim. NOT as stated: the writer's
+;; ::flow/stop transition arity does nothing (returns st); the flush at the end is the closed-:in step (message nil).
+;; Each write is committed and answered in its own step; the end step flushes (a dirty durable writer) and says :drained.
+;; Estimate: 1 test branch + 3 transacts + 1 sync! (no-op unless lmdb) + a fresh connect and query ~ 80,000,000 ticks: test-branch! ~99% of it (measured 71.0M); the steps, one sync! and the fresh connect are under 1M
+;; Red if: the nil-message arity returns without sync!/`:drained`, or commit-batch skips `(pdb/transact-checked ...)` so :ok answers lie.
+(deftest ^{:seon.test/estimate {:ticks 80000000}} at-its-end-every-write-the-writer-answered-ok-is-in-the-store-opened-again
+  (ts/test-branch! (fn [cfg conn]
+    (let [in (a/chan 16)
+          st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? true :to-writer in :events (a/chan 16)})
+          st (reduce (fn [st i]
+                       (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [{:note/text (str "end-" i) :note/agent :t}] :dest {:rid i}})]
+                         (is (true? (:ok (:r (first (filter :dest (:to-api outs)))))) (str "answered ok: " i))
+                         st))
+                     st (range 3))]
+      (is (= st (#'writer/writer-proc st ::flow/stop)) "the stop transition is the identity: the writer's end is the closed :in")
+      (is (true? (:dirty st)) "committed, not yet flushed")
+      (let [[st2 outs] (step #'writer/writer-proc st :in nil)]
+        (is (false? (:dirty st2)) "the end flushed what was taken")
+        (is (= [{:op :drained :tx-count 3}] (:to-api outs))))
+      (testing "a fresh connection reads every write answered :ok"
+        (let [c2 (pdb/connect cfg)]
+          (try (is (= #{"end-0" "end-1" "end-2"} (note-texts c2 "end-")))
+               (finally (d/release c2)))))))))
