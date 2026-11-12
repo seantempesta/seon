@@ -772,3 +772,11 @@
     (is (= #{"config" "orphan" "resume"} (set (keys b))) "every step has one")
     (is (= (max floor (* k 4000)) (b "config")) "a measured step: the factor times its median, floored")
     (is (= (max floor (* k 90000)) (b "orphan") (b "resume")) "a never-measured step: the largest measured median's")))
+
+;; docs/source.md#tests-run-by-reach: a test that drives an agent or a root records only what its own process called, so its
+;; green is reused at its digest only, never by recorded reads (context's finding, 2026-11-12: a change to seon.repl/edit!, which
+;; only an agent's eval called, left seon.repl-test/a-namespace-edit-names-the-var-that-holds-the-text at its recorded reads).
+;; T1, in process: one index of three tests.
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-process-tests-green-is-never-reused-by-what-it-recorded
+  (is (= '[a/pure b/also-pure] (proofs/reads-reusable {'a/pure {:process? false} 'c/drives-an-agent {:process? true} 'b/also-pure {}}))
+      "every test but the one that reaches a process of its own"))

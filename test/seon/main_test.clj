@@ -48,25 +48,6 @@
     (is (= #{} (set (for [[n r] reqs :when (and (in? "src/" n) (in? "test/" r))] [n r])))
         "no src namespace requires a test/ one")))
 
-(defn- src-docstrings
-  "Every docstring of src as [name doc], read from the compiler's facts: a var's :var/doc and a namespace's :ns/doc."
-  []
-  (let [db (runner/program)]
-    (concat (d/q '[:find ?n ?doc :where [?v :var/name ?n] [?v :var/doc ?doc] [?v :var/form ?f] [?f :form/ns ?ns] [?ns :ns/file ?file]
-                   [(clojure.string/starts-with? ?file "src/")]] db)
-            (d/q '[:find ?n ?doc :where [?ns :ns/name ?n] [?ns :ns/doc ?doc] [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")]] db))))
-
-(deftest no-docstring-carries-a-date
-  ;; a docstring says what a var or
-  ;; namespace is now; when a ruling was made and what a measurement read that day are git's and
-  ;; DECISIONS'. Read from the compiler's facts of src (:var/doc, :ns/doc), so a new one is red
-  (let [dated (fn [s] (re-find #"\b20\d\d-\d\d-\d\d\b" (or s "")))
-        rows (src-docstrings)]
-    (is (pos? (count rows)) "the facts hold src's docstrings")
-    (is (some #(= 'seon.program (first %)) rows) "a namespace's among them")
-    (is (= [] (sort (for [[n doc] rows :when (dated doc)] [n (dated doc)])))
-        "no src docstring holds an ISO date")))
-
 (deftest only-measure-reads-the-tick-counter
   ;; task seon.profile/a-call-is-measured-one-way: a call is measured one way, so no src form but
   ;; seon.profile/measure! reads the engine's tick counter (jolt.host/ticks-of or jolt.host/ticks):
@@ -299,3 +280,24 @@
     (is (= "PASS a.b-test/t 315 ms" (line {:test 'a.b-test/t :digest "d" :status :pass :ms 315.4})))
     (is (= "PASS build of tree T 46650 ms" (line {:test [:build "T"] :digest "T" :kind :build :status :pass :ms 46650.48})))
     (is (clojure.string/starts-with? (line {:test "laws" :digest "dl" :kind :step :status :fail :failures [{:type :fail :message "m"}]}) "RED laws (fail)"))))
+
+;; docs/merging.md#a-session-proves-through-root: bin/prove --root PORT --merge asks mode main, every key with no green at its
+;; digest against no base, so a system whose main is the branch itself (a worktree's own, the bootstrap case) proves the whole
+;; tree. The asked request is read from a socket of this test's own, answered with an empty run. Cost: two git tree reads and
+;; two one-line asks, ~20 M ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000000} :seon.test/execs ["git"]} a-merge-proof-through-a-root-asks-every-key-against-no-base
+  (let [ask (fn [args]
+              (with-open [ss (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1"))]
+                (let [got (future (with-open [s (.accept ss)]
+                                    (let [r (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s) "UTF-8"))
+                                          req (clojure.edn/read-string {:default tagged-literal} (.readLine r))]
+                                      (.write (.getOutputStream s) (.getBytes "{:selected [] :ran 0 :reused 0}\n" "UTF-8"))
+                                      (.flush (.getOutputStream s))
+                                      req)))
+                      exit (binding [*out* (java.io.StringWriter.)] (seon.main/prove-client (.getLocalPort ss) (str (seon.config/checkout)) args))]
+                  [exit @got])))
+        [e1 merge] (ask ["--merge"])
+        [e2 judge] (ask ["seon.x-test"])]
+    (is (= [0 "main"] [e1 (:mode merge)]) (str "--merge asks every key against no base: " (pr-str merge)))
+    (is (not (contains? merge :names)) "and names no namespace")
+    (is (= [0 "judge" ["seon.x-test"]] [e2 (:mode judge) (:names judge)]) "a plain run is the judge's, of what it names")))

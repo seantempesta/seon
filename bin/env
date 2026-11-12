@@ -65,6 +65,8 @@ export JOLT_COMPILER_OPTIONS
 # checkout (:seon.config.proofs/results-dir, seon.fx/write-verdicts!), published by temp+rename as the
 # build caches above are
 export SEON_RESULTS_DIR=${SEON_RESULTS_DIR:-$MAIN_TREE/target/results}
+# and the kept program store, one for the repository: a tree analyzed by any checkout is every checkout's (:seon.config.proofs/program-store)
+export SEON_PROGRAM_STORE=${SEON_PROGRAM_STORE:-$MAIN_TREE/target/program-store}
 # The embedding model (bin/build embed, seon.vector): EmbeddingGemma-2 as ggml-org's Q8_0 GGUF, one copy
 # in the main tree's target/cache for every checkout, named by its sha256 (bin/build checks it).
 # :seon.config.vector/model reads SEON_EMBED_MODEL; its file name is the model's id on every vector.
