@@ -343,7 +343,7 @@
 ;; docs/testing.md#testing-in-the-world: a REPL finding is proved in this process, on a world, by my.test/eval-in as an agent's test fork
 ;; (it records and notes as the agent does, its writes on the world's value): the loop's agents wrote this note's proof as an in-agent
 ;; process test, which their fork can't run, and spent about ten turns on it in 2 runs of 3 (2026-11-12)
-(deftest a-require-at-the-repl-is-no-program-in-this-process
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-require-at-the-repl-is-no-program-in-this-process
   (let [db (my.test/with (my.test/world) (my.test/code 'app.rq "(ns app.rq)"))
         r (my.test/eval-in "(require '[clojure.set :as s])" 'app.rq {:db db})]
     (is (= [:not-program] (mapv :seon.repl/finding (:warnings r))) (pr-str (dissoc r :text)))))
@@ -1485,7 +1485,7 @@
     (is (= 3 (:repl/value (first rs))))
     (is (some :repl/ex rs) "the error is a reply, its form's")))
 
-(deftest a-multimethods-source-holds-its-methods
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-multimethods-source-holds-its-methods
   (let [text "(ns app.mm)\n(defmulti kind (fn [x] (:k x)))\n\n(defmethod kind :a\n  [x] :was-a)\n\n(defmethod kind :b\n  [x] :was-b)\n"
         db (my.test/with (my.test/world) (my.test/code 'app.mm text))
         old @agent/state]

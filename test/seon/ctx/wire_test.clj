@@ -2518,7 +2518,7 @@
 ;; docs/render.md#how-the-work-stands: an unwritten proof's example is the shortest test that calls what its task cites, where its
 ;; namespace has one (the T3 rerun drew whole components where its task needed one tile; the 2026-11-12 loop spent twelve turns
 ;; finding how a REPL test evals in-process, which the tests calling the cited seon.repl/edit! show), else the shortest as before
-(deftest a-proofs-example-calls-what-its-task-cites
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-proofs-example-calls-what-its-task-cites
   (let [db (t/with (t/world)
                    (t/code 'app.ex "(ns app.ex)\n(defn tile [] 1)\n(defn other [] 2)")
                    (t/code 'app.ex-test (str "(ns app.ex-test (:require [clojure.test :refer [deftest is]] [app.ex :as ex]))\n"
