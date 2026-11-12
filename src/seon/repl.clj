@@ -267,6 +267,13 @@
 
 ;; ---- middleware -------------------------------------------------------------------
 
+(defn- records-as-agent?
+  "Whether this REPL records and notes its forms as an agent does (wrap-record, record!): an agent's own, or its test fork
+  (:mode :test, its writes on the fork's db value) when its caller asked for it (:seon.repl/as-agent, my.test/eval-in), so a
+  REPL finding is proved in-process; an ordinary test fork records nothing, as before. See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:=> [:cat] :boolean]}
+  [] (let [s @agent/state] (boolean (or (= :agent (:mode s)) (and (= :test (:mode s)) (:seon.repl/as-agent s))))))
+
 (defn- around-reply {:malli/schema [:=> [:cat :seon.wire/msg :seon.host/fn] :seon.wire/msg]}
   [req f] (assoc req :reply (let [r (:reply req identity)] (fn [m] (r (f m))))))
 
@@ -463,16 +470,16 @@
                        md (when (:ns-form? l) (not-empty (dissoc (meta (second (:repl/form m))) :line :column)))
                        _ (when md (alter-meta! (the-ns (:ns-after l)) merge md))
                        ;; a REPL's ns form adds to the namespace, as Clojure's does, so the record stays what this process holds; one that adds nothing records nothing
-                       held-ns (when (and (:ns-form? l) (= :agent (:mode @agent/state)) (:repl/src m))
+                       held-ns (when (and (:ns-form? l) (records-as-agent?) (:repl/src m))
                                  (some-> (d/entity (agent/db) [:ns/name (:ns-after l)]) :ns/form :form/src))
                        ns-src (when (and held-ns (not (:ns-stated req))) (source/ns-text-adding held-ns (:repl/form m)))
-                       acct (when (and l (= :agent (:mode @agent/state)) (:repl/src m) (or (not held-ns) (not= ns-src held-ns)))
+                       acct (when (and l (records-as-agent?) (:repl/src m) (or (not held-ns) (not= ns-src held-ns)))
                               (program/account (assoc l :src (or ns-src (:repl/src m)) :lead (:lead m) :form (if ns-src (read-string ns-src) (:repl/form m)) :ns-meta md :repl? true :ran? (contains? m :repl/value))))
                        ;; a def beside calls stays this eval (seon.program/definition-form?), and says so
                        nested? (and acct (not (program/definition-form? (:repl/form m) (the-ns (:ns l)))))
                        acct (when-not nested? acct)]
                    ;; a var the form unmapped is no longer program on this branch: its definition retracted
-                   (let [gone (when (and l (= :agent (:mode @agent/state)) contract/record? (contains? m :repl/value))
+                   (let [gone (when (and l (records-as-agent?) contract/record? (contains? m :repl/value))
                                 (not-empty (unmapped (agent/db) (:repl/form m) (the-ns (:ns l)))))
                          _ (when gone (agent/transact! (mapv (fn [[_ e f]] [:db/retract e :var/form f]) gone)))
                          m (cond-> m gone (assoc :unmapped (mapv first gone)))]
@@ -506,9 +513,9 @@
                          (seq (program/unknown-refs acct)) (assoc :unknown-vars (program/unknown-refs acct))))))
                      (cond-> m
                        l (assoc :repl/defined (program/set-vars l))
-                       (or nested? (and l (= :agent (:mode @agent/state)) (program/calls-eval? l)))
+                       (or nested? (and l (records-as-agent?) (program/calls-eval? l)))
                        (assoc :not-program "A definition inside a let or through eval runs in this process and is not program, so it will not merge: define it at a form's top level (seon.program/definition-form?).")
-                       (and l (= :agent (:mode @agent/state)) (not (program/scratch-ns? (the-ns (:ns l)))) (program/repl-act? l (:repl/form m)))
+                       (and l (records-as-agent?) (not (program/scratch-ns? (the-ns (:ns l)))) (program/repl-act? l (:repl/form m)))
                        (assoc :not-program "This holds for your REPL and is not program: what a definition uses here it won't have on a checkout, so what it needs goes in its namespace's ns form."))))))))))))
 
 (defn- branch-registry
@@ -592,11 +599,12 @@
   (if-let [{:keys [call k i]} (:stream req)] (lib/id (lib/digest (str call "/" k "/" i))) (lib/unique-id)))
 
 (defn- issued
-  "Req with the id a new eval goes by (`eval-id`): :issued, the eid its record will have, from the store its branch is on; in a process with no branch, nothing records it and a gensym names it. A run again (:id) has its own. See docs/users.md#what-each-thing-is."
+  "Req with the id a new eval goes by (`eval-id`): :issued, the eid its record will have, from the store its branch is on; in a process with no branch, or on a db whose store keeps no id page (a test's world), a gensym names it (and its record, if any, takes a tempid). A run again (:id) has its own. See docs/users.md#what-each-thing-is."
   {:malli/schema [:=> [:cat :map] :map]}
   [req]
   (cond (:id req) (assoc req :eval-id (:id req))
-        (:db @agent/state) (let [n (pdb/take-eid (:db @agent/state))] (assoc req :issued n :eval-id (eval-id req n)))
+        ;; a db whose store keeps no id page (a value made in memory, d/db-with: a test's world) issues none ahead: its record takes a tempid
+        (some-> (:db @agent/state) datahike.writing/ids) (let [n (pdb/take-eid (:db @agent/state))] (assoc req :issued n :eval-id (eval-id req n)))
         :else (assoc req :eval-id (str (gensym "e")))))
 
 (defn response
@@ -778,7 +786,7 @@
     ;; an eval within another (seon.repl/edit!'s) is that eval's: its definitions are program, its record the outer one; a read of
     ;; the agent's context (origin :context with no eval of its own to run again, the server's :context op) records nothing
     ;; (owner, 2026-11-10: "A read never writes")
-    (if (and contract/record? (= :agent (:mode @agent/state)) (not (:within req)) (not (and (= :context (:origin req)) (nil? (:id req)))))
+    (if (and contract/record? (records-as-agent?) (not (:within req)) (not (and (= :context (:origin req)) (nil? (:id req)))))
       ;; the write is the edge: a branch that refuses it answers the eval :unrecorded with the writer's message, so the
       ;; turn that asked goes on (a refused write thrown from here ended the whole turn: its reply and evals lost, the turn run again)
       (try (agent/transact! (into defs (record-tx {:seon.agent/key (:key @agent/state)} id (by req)

@@ -340,6 +340,14 @@
     (is (= 1 (count (:value held))) (pr-str held))
     (is (clojure.string/starts-with? (first (:value held)) "(ns ") "the ns form, and no require")))
 
+;; docs/testing.md#testing-in-the-world: a REPL finding is proved in this process, on a world, by my.test/eval-in as an agent's test fork
+;; (it records and notes as the agent does, its writes on the world's value): the loop's agents wrote this note's proof as an in-agent
+;; process test, which their fork can't run, and spent about ten turns on it in 2 runs of 3 (2026-11-12)
+(deftest a-require-at-the-repl-is-no-program-in-this-process
+  (let [db (my.test/with (my.test/world) (my.test/code 'app.rq "(ns app.rq)"))
+        r (my.test/eval-in "(require '[clojure.set :as s])" 'app.rq {:db db})]
+    (is (= [:not-program] (mapv :seon.repl/finding (:warnings r))) (pr-str (dissoc r :text)))))
+
 (deftest an-agents-namespace-is-recorded-where-its-eval-left-it
   ;; owner, 2026-10-29: "we have to be able to expose this we own all the machinery": the namespace the
   ;; REPL is in lived only in the agent's memory; each eval's record keeps it (seon.ctx/current-ns). The agent
@@ -978,21 +986,10 @@
     (is (= "boom" (:seon.error/message (:ex r))) (pr-str (dissoc r :value)))
     (is (string? (:text r)) "and still a text every reader reads")))
 
-(defn- eval-in
-  "The response of `code` asked of the REPL in this process, as a scratch session in namespace
-  nsym (seon.repl-test.scratch by default; not agent mode: nothing is transacted)."
-  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :symbol] :map]]}
-  ([code] (eval-in code 'seon.repl-test.scratch))
-  ([code nsym]
-   (let [old @agent/state]
-     (try (reset! agent/state {:n 0 :ns (create-ns nsym)})
-          (repl/eval-string code {})
-          (finally (reset! agent/state old))))))
-
 (deftest an-eval-errors-data-is-printed-once
   ;; a compile error's Jolt diagnostics (:jolt.error/*, ex-data) are keys of the error map, the
   ;; suggestions its fix, and the response prints each once
-  (let [r (eval-in "(prinltn 1)")
+  (let [r (my.test/eval-in "(prinltn 1)")
         em (:ex r)]
     (is (= :seon.agent/eval-error (:seon.error/type em)))
     (is (= 1 (:jolt.error/line em)))
@@ -1047,14 +1044,14 @@
     (is (some #(clojure.string/includes? (str %) "unknown vars") (:value recorded)) (str "the eval is recorded with its error: " (pr-str recorded)))))
 
 (deftest an-ordinary-exception-is-its-error-map
-  (let [r (eval-in "(+ 1 :a)")
+  (let [r (my.test/eval-in "(+ 1 :a)")
         em (:ex r)]
     (is (str/includes? (:seon.error/message em) "cannot be cast") (pr-str em))
     (is (= "class java.lang.ClassCastException" (:class em)))
     (is (str/includes? (:text r) (:seon.error/message em)))
     (is (nil? (:seon.error/fix em)))
     ;; on main :data was the printed string "{:k 1}": the map assertion below is the one that fails there
-    (let [r (eval-in "(throw (ex-info \"boom\" {:k 1}))")]
+    (let [r (my.test/eval-in "(throw (ex-info \"boom\" {:k 1}))")]
       (is (= 1 (count (re-seq #"boom" (:text r)))) (:text r))
       (is (= {:k 1} (:data (:ex r))) "an ordinary ex-data stays data"))
     (let [em (agent/error-map (ex-info "x" {:my/id 1 :seon.error/message "shadow" :jolt.error/line 7}))]
@@ -1067,8 +1064,8 @@
   ;; 2-4 of a request whose line 4 fails is line 3 of it, and a fn defined on lines 1-3 of a
   ;; request that fails at its line 3 when called is line 3 of it. The first error stops a
   ;; request, so each error is its own request
-  (let [compile-err (:ex (eval-in "(def ok 1)\n(defn f [x]\n  (+ x\n     (prinltn 2)))" 'seon.repl-test.where))
-        run-err (:ex (eval-in "(defn g [x]\n  (inc x)\n  (+ 1 (first :k)))\n(g 1)" 'seon.repl-test.where))]
+  (let [compile-err (:ex (my.test/eval-in "(def ok 1)\n(defn f [x]\n  (+ x\n     (prinltn 2)))" 'seon.repl-test.where))
+        run-err (:ex (my.test/eval-in "(defn g [x]\n  (inc x)\n  (+ 1 (first :k)))\n(g 1)" 'seon.repl-test.where))]
     (is (= {:line 3 :column 6} (:seon.error/at compile-err)) (pr-str compile-err))
     (is (nil? (:seon.error/in compile-err)))
     (is (= 'seon.repl-test.where/g (:seon.error/in run-err)) (pr-str run-err))
@@ -1078,16 +1075,16 @@
   ;; docs/errors.md#an-eval-errors-diagnostics: a throw inside an anonymous fn that a core fn calls (map-indexed
   ;; under into, in a contracted defn- as seon.ref's are) is framed ns/var$fn with no line; it is in that var, at the line its own frame has (md-scan
   ;; bench-b18 spent 13 turns on such a cast in its own list-items: the error named no fn)
-  (let [r (:ex (eval-in "(ns seon.repl-test.hof (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))\n(defn- k\n  \"Sums.\"\n  {:malli/schema [:=> [:cat :any] :any]}\n  [xs]\n  (into []\n        (map-indexed (fn [i [a b]] (+ i b)))\n        xs))\n(k [[1 [2]]])" 'seon.repl-test.hof))]
+  (let [r (:ex (my.test/eval-in "(ns seon.repl-test.hof (:refer-clojure :exclude [defn defn-]) (:require [seon.contract :refer [defn defn-]]))\n(defn- k\n  \"Sums.\"\n  {:malli/schema [:=> [:cat :any] :any]}\n  [xs]\n  (into []\n        (map-indexed (fn [i [a b]] (+ i b)))\n        xs))\n(k [[1 [2]]])" 'seon.repl-test.hof))]
     (is (= 'seon.repl-test.hof/k (:seon.error/in r)) (pr-str r))
     (is (pos-int? (get-in r [:seon.error/at :line])) (pr-str r))))
 
 (deftest an-error-in-an-anonymous-fn-is-in-the-fn-around-it
   ;; what Jolt names for a frame inside an anonymous fn: the var that holds it when the call is
   ;; inside that var, nothing when the fn runs from the top of a request (never a core var)
-  (let [in-fn (:ex (eval-in "(defn h [x]\n  ((fn [y]\n     (inc y))\n   x))\n(h \"a\")" 'seon.repl-test.anon))
-        lazy (eval-in "(doall (map (fn [y] (inc y)) [\"a\"]))" 'seon.repl-test.anon)
-        top (eval-in "(first :k)" 'seon.repl-test.anon)]
+  (let [in-fn (:ex (my.test/eval-in "(defn h [x]\n  ((fn [y]\n     (inc y))\n   x))\n(h \"a\")" 'seon.repl-test.anon))
+        lazy (my.test/eval-in "(doall (map (fn [y] (inc y)) [\"a\"]))" 'seon.repl-test.anon)
+        top (my.test/eval-in "(first :k)" 'seon.repl-test.anon)]
     (is (= 'seon.repl-test.anon/h (:seon.error/in in-fn)) (pr-str in-fn))
     (is (= 2 (:line (:seon.error/at in-fn))) "the line in h that runs the anonymous fn, as Jolt frames it")
     (doseq [r [lazy top]]
@@ -1109,9 +1106,9 @@
   ;; cost, stable across turns): the work a call's forms did is taken once, when they ran
   ;; (jolt.host/ticks-of, bytes), summed into its response, which its record stores
   ;; (seon.repl/record-tx: the response without its live value), so nothing is measured again
-  (let [small (eval-in "(reduce + (range 100))")
-        big (eval-in "(reduce + (range 1000000))")
-        bad (eval-in "(/ 1 0)")]
+  (let [small (my.test/eval-in "(reduce + (range 100))")
+        big (my.test/eval-in "(reduce + (range 1000000))")
+        bad (my.test/eval-in "(/ 1 0)")]
     (is (pos? (:ticks small)) (pr-str small))
     (is (> (:ticks big) (* 10 (:ticks small))) "ticks are the work done: 10,000x the loop is >10x the ticks (the form's compile is a constant)")
     (is (pos? (:ticks bad)) "a form that threw still did work")
@@ -1300,7 +1297,7 @@
     (clojure.test/is (empty? (said-outside ran "zero")) (pr-str ran))
     (clojure.test/is (some :repl/ex unread) (pr-str unread))
     (clojure.test/is (empty? (said-outside unread (str (:seon.error/message (some :repl/ex unread))))) (pr-str unread))
-    (clojure.test/is (= "to err\n" (:seon.print/code (:err (eval-in "(binding [*out* *err*] (println \"to err\"))\n(/ 1 0)")))) "the form's *err* output is the error stream")))
+    (clojure.test/is (= "to err\n" (:seon.print/code (:err (my.test/eval-in "(binding [*out* *err*] (println \"to err\"))\n(/ 1 0)")))) "the form's *err* output is the error stream")))
 
 (defn- evals-held
   "A read of the task's branch, run in the test (seon.test-store/read-task-branch): each eval whose code is among codes, its id,

@@ -89,6 +89,28 @@
   ([] (world {}))
   ([{:keys [history?]}] @(the-worlds (boolean history?))))
 
+(defn eval-in
+  "The response of code asked of the REPL in this process, as clojure's REPL answers it, in namespace nsym
+  (seon.repl-test.scratch by default). Given a world db (opts :db), as an agent's test fork on it: its forms
+  are recorded and noted as an agent's are (seon.repl's records-as-agent?), their writes on the world's
+  value (nothing stored), so a REPL finding (a :not-program note, a recorded definition) is proved in this
+  process, never as an in-agent process test the agent's fork can't run. Without one, a scratch session:
+  nothing recorded. The agent's state is put back after. Example:
+  (my.test/eval-in \"(require '[clojure.set :as s])\" 'app.rq {:db (my.test/with (my.test/world) (my.test/code 'app.rq \"(ns app.rq)\"))})
+  See docs/testing.md#testing-in-the-world."
+  {:malli/schema [:function [:=> [:cat :string] :map] [:=> [:cat :string :symbol] :map]
+                  [:=> [:cat :string :symbol [:map [:db {:optional true} :seon.host/db]]] :map]]}
+  ([code] (eval-in code 'seon.repl-test.scratch {}))
+  ([code nsym] (eval-in code nsym {}))
+  ([code nsym {:keys [db]}]
+   (let [state @(requiring-resolve 'seon.agent/state)
+         eval-string (requiring-resolve 'seon.repl/eval-string)
+         old @state]
+     (try (reset! state (cond-> {:n 0 :ns (create-ns nsym)}
+                          db (assoc :mode :test :db db :key "test-agent" :seon.repl/as-agent true)))
+          (eval-string code {})
+          (finally (reset! state old))))))
+
 (defn cost
   "The work (thunk) does: {:ticks :bytes :ms :value}, the engine ticks and bytes the test thread
   spent (seon.profile/measure!), what every test is judged by (its ceiling is
