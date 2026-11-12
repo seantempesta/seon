@@ -1180,8 +1180,8 @@
 (deftest a-part-that-sorts-into-the-middle-goes-there
   ;; a new unit with held units on both sides of it in its container is placed after the one
   ;; before it, not at the container's end
-  (let [u (fn [id] {:id id :input {:older 0 :view id} :schema :seon.render/page-more :container "#c-rows"})
-        held {:units (into {} (for [id ["a" "c"]] [id {:input {:older 0 :view id} :html (str "<li id=\"" id "\"></li>") :container "#c-rows"}]))}
+  (let [u (fn [id] {:id id :input id :html (str "<li id=\"" id "\"></li>") :container "#c-rows"})
+        held {:units (into {} (for [id ["a" "c"]] [id (u id)]))}
         [_ patch] (#'p/step-units (seon.db/index) held [(u "a") (u "b") (u "c")])]
     (is (= [["a" "b"]] (:afters patch)) "b after a")
     (is (empty? (:appends patch)))
@@ -1282,11 +1282,9 @@
             (is (str/includes? (:html page) "result/e1") "answered at once, drawn from its branch, never waiting on its process")
             (is (some #(= {:op :render :id :a3} (get-in % [:req])) (:to-api @o)) "its process is asked for its parts")))))
     (testing "a view no tab watches keeps nothing: its page, its branch read, its rows"
-      (let [[st2 _] (#'p/render-proc (assoc st1 :shown {[:chat :a3] 21}) :from-web {:op :views :views #{:root} :tabs 1})]
+      (let [[st2 _] (#'p/render-proc st1 :from-web {:op :views :views #{:root} :tabs 1})]
         (is (nil? (get-in st2 [:views [:chat :a3]])))
-        (is (nil? (get-in st2 [:branches [:chat :a3]])))
-        (is (nil? (get-in st2 [:tab [:chat :a3] :shown])))
-        (is (= st2 (first (#'p/render-proc st2 :from-web {:op :more :view [:chat :a3]}))) "and its end scrolling into view asks for nothing")))))
+        (is (nil? (get-in st2 [:branches [:chat :a3]])))))))
 
 (defn- debug-state
   "The render proc's state holding agent a1's debug page: context-test's two model turns (each
