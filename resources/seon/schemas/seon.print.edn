@@ -26,4 +26,10 @@
  :seon.print/context [:map [:budget number?] [:max-depth number?]]
  ;; a print node (a face and its members), and one fipp operation
  :seon.print/node :map
+ ;; the keys a node and a text op hold that mean one thing each (a face is a value, never a key: :seon.print/class,
+ ;; :seon.print/val and :seon.print/code name faces as values of :seon.print/face)
+ :seon.print/face [:keyword {:description "The face a print node or text op is shown with: its kind of value (:seon.print/string, :seon.print/code, :seon.print/class for a java.lang.Class) or its part of a structure (:seon.print/key, :seon.print/val, :seon.print/separator); the page's CSS class is seon-print-<name>."}]
+ :seon.print/code [:string {:description "A code value's text (seon.print/code), shown verbatim at its place: what a record stores of what a form printed."}]
+ :seon.print/class-name [:string {:description "An object's class, demunged, as #object[class-name rep] prints it."}]
+ :seon.print/entry-value [:any {:description "A map entry row's value, kept in the row's metadata, which a table reads as its cell."}]
  :seon.print/op [:map [:op :keyword]]}
