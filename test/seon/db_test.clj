@@ -156,6 +156,33 @@
      :fixed {:ticks 30000 :bytes 150000}
      :sizes [100 300 1000]}))
 
+(defn schema-of
+  "d/with's arguments for a schema transaction of n attributes as (hash-map ...) builds them (data-of's way: a hash map
+  iterates its keys in hash order, so :db/ident is not first): a db of the test store's schema, and the attributes."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :map]]}
+  [n]
+  [(ts/test-db)
+   {:tx-data (mapv #(hash-map :db/ident (keyword "app.order" (str "a" %)) :db/valueType :db.type/long
+                              :db/cardinality :db.cardinality/one :db/doc "d")
+                   (range n))}])
+
+(deftest ^{:seon.test/estimate {:ticks 15000000}} a-schema-transaction-costs-its-attributes-in-any-key-order
+  ;; notes plans/deps-schema-key-order.md: a schema datom of an entity whose :db/ident had not come yet rebuilt the
+  ;; whole reverse schema (~1,000 entries); 100 attributes as hash maps cost 27.2M ticks / 183 MB against 2.4M /
+  ;; 6.6 MB with :db/ident first. Now each datom updates its own entry, so key order costs nothing. The test: the
+  ;; fixtures read (ts/test-db) and the measured calls, ~2.5M at 100 x a few calls: 15M.
+  (cost/proof
+    {:of 'datahike.api/with :input 'seon.db-test/schema-of
+     :n "attributes declared, each a hash map of four keys"
+     :work (str "each attribute's four datoms: inserted in three indexes, its schema entry built and its reverse "
+                "schema entries updated (never the whole), and the tx's entity resolution")
+     :growth :linear
+     ;; per attribute (ident-first, measured 2.4M / 6.6 MB at 100, including ~0.3M fixed): four datoms at ~5k ticks
+     ;; and ~15 KB each through the transaction, its schema and reverse-schema update ~2k: ~22k ticks / 62 KB
+     :per-n {:ticks 22000 :bytes 62000}
+     :fixed {:ticks 300000 :bytes 600000}
+     :sizes [10 30 100]}))
+
 (defn- heads-read
   "[f's value, how many times f folded a store's roster]: the roster fold (konserve's reduce-log) is
   how datahike.writing/set-ids! reaches every branch's head, and an open makes no other."
