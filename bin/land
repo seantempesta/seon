@@ -12,33 +12,18 @@
 #   4. the landed change enters the standing root's main as data (bridge, below: a temporary bridge), then the main
 #      tree's files follow main (bin/update does it first) and bin/update rebuilds the binary and restarts the
 #      standing root on main;
-#   5. the worktree, once landed, is removed with its merged branch (bin/worktree --remove; owner,
-#      2026-11-08: "Why are we always having to do cleanup?"), unless something in it is uncommitted
-#      or untracked, or a process other than this landing's own works there: then it is kept, and
-#      the line says why. The next change starts in a new worktree (bin/worktree NAME).
-#   6. bin/worktree --prune removes every other finished worktree (landed, clean, unused; docs/machine.md#disk-stays-bounded).
+#   5. the session's one worktree and branch are kept, the branch fast-forwarded to the landed main: the next change starts
+#      there (owner, 2026-11-12: one worktree per agent, never a branch per change).
 # MSGFILE is the merge message (what it completes, its numbers: AGENTS §3); bin/prove's line is added.
 # SEON_UPDATE_ARGS: bin/update's arguments, the standing root's (default --profile deepseek).
 # The last line is LANDED or LAND FAILED, and the exit status says the same.
 setopt pipefail
 fail() { print -u2 "land: $*"; print "LAND FAILED"; exit 1 }
-# tidy: remove the landed worktree $HERE and its branch $B, or say what keeps it. A process works there when its
-# working directory is in it; this landing's own are not counted: its ancestors (the shell that ran it) and the
-# members of its prove's process group ($PJ is that group's id), whose last processes (test roots, a sleep) can
-# still be ending when the wait returns.
+# tidy: the landed worktree $HERE and its branch $B stay, the branch moved to the landed main $NEW.
 tidy() {
-  cd "$MAIN"  # out of $HERE first, so the scan's own children are not counted as working there
-  local d=$(git -C "$HERE" status --porcelain --ignore-submodules | head -3) p q mine=" $$ " others=()
-  q=$$; while (( q > 1 )); do q=$(ps -o ppid= -p $q | tr -d ' '); [[ -n $q ]] || break; mine+="$q "; done
-  [[ -n ${PJ:-} ]] && mine+="$(ps -axo pid=,pgid= | awk -v g=$PJ '$2 == g {printf "%s ", $1}')"
-  lsof -d cwd -Fpn 2>/dev/null | while read -r l; do
-    case $l in p*) p=${l#p} ;; n$HERE|n$HERE/*) [[ $mine == *" $p "* ]] || others+=$p ;; esac; done
-  if [[ $HERE != $MAIN/.worktrees/* ]]; then print "worktree kept: $HERE is not one bin/worktree made"
-  elif [[ -n $d ]]; then print "worktree kept: uncommitted or untracked in $HERE: ${d//$'\n'/, }"
-  elif (( $#others )); then print "worktree kept: processes work in $HERE: ${others[1,5]}"
-  else "$MAIN/bin/worktree" --remove "${HERE:t}" >/dev/null && git branch -q -d "$B" &&
-    print "removed worktree $HERE and its branch $B" || print "worktree kept: removing $HERE failed"
-  fi
+  # the session's one worktree and branch are kept, at the main it landed (owner, 2026-11-12: one worktree per agent, never
+  # one per change): its branch fast-forwards to the merge, so its next change starts from main with nothing to merge
+  git -C "$HERE" merge --ff-only -q "$NEW" && print "kept worktree $HERE on $B at main" || print "kept worktree $HERE on $B (not moved to main: merge main there)"
 }
 # bridge REPO OLD NEW PORT: what git landed (OLD..NEW in REPO) enters the main of the root serving PORT as data (owner,
 # 2026-11-09: "We have to accommodate you and your agents who primarily write the updates in files, but this is a
@@ -130,10 +115,6 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
     # the net under every landing (docs/merging.md#the-full-run-is-the-net)
     "$MAIN/bin/full-run" "$NEW"
     tidy
-    # every other finished worktree goes too (bin/worktree --prune: landed, clean, unused). Cleanup only: a failure of it never
-    # fails the landing, which is done; its error line is printed. Run from the landed worktree when it was kept, so it is not pruned.
-    ( cd "$HERE" 2>/dev/null || cd "$MAIN"; "$MAIN/bin/worktree" --prune 2>&1 | grep -E '^(removed |would remove )|^removed [0-9]+ worktrees' ) ||
-      print "land: bin/worktree --prune failed (cleanup only; the landing stands): run it by hand"
     print LANDED; exit 0
   fi
 done
