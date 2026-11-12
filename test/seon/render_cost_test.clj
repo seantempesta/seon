@@ -571,6 +571,72 @@
                        :overrun {:task "seon.render/a-model-render-draws-each-turns-diff" :n 80 :measured {:calls 66300.0 :bytes 127170000.0}}
                        :sizes [10 40 80]}))))))
 
+(defn- session-eval
+  "Eval id of agent a1's turn n, as its REPL records it (seon.repl/record-tx), its call that turn's."
+  {:malli/schema [:=> [:cat :string pos-int?] [:vector :any]]}
+  [id n]
+  (seon.repl/record-tx {:seon.agent/key "a1"} id (seon.task/sender "a1")
+                       {:seon.eval/code "(+ 1 2)" :seon.eval/response {:handle (symbol "result" id) :value 3}
+                        :seon.eval/call (seon.task/call-ref "a1" n) :seon.eval/call-id (str "c-" id)}))
+
+(defn- session-of
+  "Agent a1 on db0 (the system prompt, a task) with n turns, each one eval of the model's: the db, its entity index, a1's eid and a
+  function from db to seon.render/walk's opts for a1's request there (its tree pulled as a request pulls it, seon.ctx/agent-ctx)."
+  {:malli/schema [:=> [:cat nat-int?] [:tuple :seon.host/db :map pos-int? :seon.host/fn]]}
+  [n]
+  (let [k "a1"
+        db0 (reduce d/db-with (ts/test-db) [[{:seon.system/id :root :seon.system/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :task-x})])
+        db (reduce d/db-with db0
+                   [(seon.doc/load-tx db0 "docs" {seon.doc/system-page "# You are a Seon agent\n\nThe help page."})
+                    (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
+                    (into [] (mapcat #(session-eval (str "e" %) (inc %))) (range n))
+                    [{:seon.agent/key k :seon.agent/turn n}]])
+        ix (seon.program/index-of-db db)
+        a (:db/id (d/entity db [:seon.agent/key k]))]
+    [db ix a (fn [db] (let [t (seon.ctx/agent-ctx ix db a)]
+                        {:db db :tree t :root (seon.render/render-var-of ix (merge {:seon.agent/key k} t)) :index ix :changes seon.ctx/changes
+                         :outputs #{:seon.render/hiccup :seon.render/openai-compat} :model-only true}))]))
+
+(defn walk-plus-one-of
+  "The input at n: seon.render/walk's arguments for agent a1's request after one eval more (turn n+1), its walk at n turns kept from
+  the request before, and the datoms between (seon.ctx/moved)."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
+  [n]
+  (let [[db _ _ at] (session-of n)
+        db1 (d/db-with db (session-eval (str "e" n) (inc n)))]
+    [(seon.render/walk nil (at db)) (assoc (at db1) :moved (seon.ctx/moved db db1 nil))]))
+
+(defn walk-same-of
+  "The input at n: seon.render/walk's arguments for agent a1's request at n turns made again on the same db and tree, the walk the
+  first made kept."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :map :map]]}
+  [n]
+  (let [[db _ _ at] (session-of n) o (at db) p (seon.render/walk nil o)]
+    [p (assoc o :moved [])]))
+
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest a-request-made-again-costs-what-moved
+  ;; seon.render/walk, the request's walk kept as a value by its owner: one eval more draws that eval's component, its call's and the
+  ;; components that read what moved, every other component reused; the same request again draws nothing
+  (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-plus-one-of
+               :n "turns of the agent, an eval each"
+               :work (str "the new eval's and its call's components, the root's page and model render again (the tree's key set it reads moved), "
+                          "and the messages put together. Linear: the agent's model render (seon.ctx.wire/agent-msgs) lists every turn again, "
+                          "each a reused component; the turn's own component would make it constant (task seon.ctx.wire/a-turn-is-a-component-of-the-request)")
+               :growth :linear
+               ;; measured 2026-11-12 on jolt/web at 10 / 20 / 40: 874 / 1,274 / 2,074 calls, 2.75 / 3.47 / 4.95 MB, 591k / 762k / 1.11M ticks
+               ;; (the request drawn cold, seon.ctx.wire/render, 2.4M at 40)
+               :per-n {:calls 40 :bytes 75000}
+               :fixed {:calls 480 :bytes 2050000}
+               :sizes [10 20 40]})
+  (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
+               :n "turns of the agent, an eval each"
+               :work "nothing moved: the root reused, the last answers answered"
+               :growth :constant
+               ;; measured 2026-11-12 on jolt/web: 11 calls, 16.7 KB, 3.3k ticks at every size
+               :fixed {:calls 12 :bytes 18000}
+               :sizes [10 20 40]}))
+
 (defn newest-pair-of
   "The input at n: the arguments of seon.ctx.wire/page-edits-between for agent b/t<n>'s newest turn, on a branch where it holds a
   task and has worked n turns, each a commit with an eval and the turn number moved: the db, its index, the agent, and the bases of

@@ -1042,6 +1042,27 @@
                    kw0 [3 4 3 1 5 0 4 4 2])]
     (r/dispose-walk! (:w kw))))
 
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest a-walk-kept-as-a-value-answers-what-a-cold-request-does
+  ;; seon.render/walk moved to any value of the branch, forward, back and across several turns, by the datoms between, answers the
+  ;; model's messages the request drawn cold there answers (seon.ctx.wire/render); the same value again runs nothing and answers the same
+  (let [vs (step-dbs 5) k "a3" ix (seon.db/index)
+        at (fn [db] (let [t (seon.ctx/agent-ctx ix db (seon.db/eid db :seon.agent/key k))]
+                      {:db db :tree t :root (r/render-var-of ix (merge {:seon.agent/key k} t)) :index ix :changes seon.ctx/changes
+                       :outputs #{:seon.render/hiccup :seon.render/openai-compat} :model-only true}))
+        basis (fn [db] {:commit (d/commit-id db) :t (:max-tx db) :task "demo/f" :turn 1 :max-turns 9 :origin :model :agent k})
+        msgs (fn [p] (mapv first (:seon.render/openai-compat (:answers p))))
+        p0 (r/walk nil (at (nth vs 2)))
+        [p db] (reduce (fn [[p db0] i]
+                         (let [db (nth vs i)
+                               p' (r/walk p (assoc (at db) :moved (seon.ctx/moved db0 db nil)))]
+                           (is (= (:messages (seon.ctx.wire/render db (basis db) {:index ix})) (msgs p')) (str "its messages at " i))
+                           [p' db]))
+                       [p0 (nth vs 2)] [3 4 3 1 5 0 4 4 2])
+        again (r/walk p (assoc (at db) :tree (:tree p) :moved []))]
+    (is (= {} (:ran again)) "the same value again runs nothing")
+    (is (identical? (:answers p) (:answers again)) "and answers what it answered")))
+
 (deftest a-record-of-another-turn-reads-nothing-this-turn-read
   ;; docs/render.md#the-page: an agent's page is a component for each turn number, each reading its records through the index by
   ;; that number: a new eval at turn n draws turn n's component and its eval, and no other turn's, nor the list's
