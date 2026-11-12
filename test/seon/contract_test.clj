@@ -252,3 +252,16 @@
     (is (identical? (malli.registry/schema contract/registry :seon.render/hiccup) (malli.registry/schema reg :seon.render/hiccup))
         "a form that names nothing changed is the built registry's own, never compiled again")
     (is (thrown? clojure.lang.ExceptionInfo (contract/registry-with {:seon.task/kind [:enum-no-such :a]})) "a changed form that does not compile throws, as registry-of does")))
+
+(deftest every-error-type-a-raise-site-names-is-registered
+  ;; docs/errors.md#an-error-keeps-data: seon.contract/error checks the map against its type's schema, so a type with no
+  ;; entry throws a malli error in place of the typed one (:seon.db/compact-failed, :seon.system/catch-up-skipped and
+  ;; :seon.ctx/no-validator did). Every literal type at a call site in src, read from the files as they are
+  (let [root (seon.config/checkout)
+        types (into (sorted-set)
+                    (comp (filter #(and (.isFile ^java.io.File %) (clojure.string/ends-with? (.getName ^java.io.File %) ".clj")))
+                          (mapcat #(re-seq #"\(contract/error\s+:([\w.\-]+/[\w\-]+)" (slurp %)))
+                          (map (comp keyword second)))
+                    (file-seq (java.io.File. (str root "/src"))))]
+    (is (< 50 (count types)) "the reader finds the raise sites")
+    (is (= [] (vec (remove contract/held types))) "each type a raise site names has its schema entry")))

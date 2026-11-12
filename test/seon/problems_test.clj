@@ -611,7 +611,9 @@
                                                               1    ; seon.problems/task-reads: the tasks' readiness and cites, once
                                                               1    ; seon.problems/stale-plans' own contract
                                                               1    ; and its seon.db/eid of the var the world's ready task cites
-                                                              1)}  ; seon.problems/unsynced-tasks' own contract (Optimization, 2026-11-10: a seek a declared task, no call)
+                                                              1    ; seon.problems/unsynced-tasks' own contract (Optimization, 2026-11-10: a seek a declared task, no call)
+                                                              6)}  ; caused-split's content-class readers on base and head, for the move's candidates only
+                                                                   ; (Data model, 2026-11-12: nothing switched off; measured 58 -> 64)
                :sizes [10 30 100]}))
 
 (deftest problems-cost-nothing-for-a-clean-program
@@ -906,6 +908,11 @@
 
 ;; ---- caused reads what changed (diff by value), and agrees with the full reading ---------------
 
+(defn- caused-sites
+  "The :unnamed-site messages caused-split answers for head over base: what caused-full reads in full."
+  [base head]
+  (into (sorted-set) (comp (filter #(= :unnamed-site (:class %))) (map :message)) (:rows (problems/caused-split base head))))
+
 (defn- caused-full
   "The old `caused`: both derived classes read in full over base and over head."
   [base head]
@@ -934,7 +941,7 @@
                                                               (d/db-with b2 [[:db/retractEntity (e b2 'app.cost/v1)]]))}]
     (doseq [[label head] scenarios]
       (testing label
-        (is (= (caused-full base head) (problems/caused base head)))
+        (is (= (caused-full base head) (caused-sites base head)))
         (is (= (problems/caused base head)
                (problems/caused base head (seon.merge/delta-changes base head #{}) (diff base head)))
             "given the whole diff, the same rows: the datoms it holds beyond caused-datoms' are not read")))
@@ -1454,20 +1461,53 @@
     (is (contains? (:seon.problems/derived (contract/properties :seon.problems/class)) :waived-proof))))
 
 ;; See docs/health.md#a-proof-that-passes-by-waiver
-(deftest a-branch-that-adds-an-overrun-is-not-caused-the-waived-proof
-  ;; measured, 2026-11-10: seon.problems/caused-split reads only `caused-classes` (:unnamed-site :stale-section :uncited-var
-  ;; :long-form), so a branch that adds an :overrun to a proof is shown no :waived-proof row, as caused or as attention, and
-  ;; one that deletes one closes nothing: the class is listed by `health`, never judged on a branch
+(deftest a-branch-that-adds-an-overrun-is-caused-the-waived-proof
+  ;; the owner, 2026-11-12: nothing switched off, sampled or waived. A waiver is a branch's content, so a branch that adds an
+  ;; :overrun to a proof is caused the :waived-proof row (it was listed by health and never judged on a branch until then),
+  ;; and one that deletes it closes it
   (let [proof (fn [overrun] (str "(deftest p [] (cost/proof {:of 'a/b :input 'a/c :n \"x\" :work (str \"w\") :growth :linear"
                                  " :per-n {:ticks 1000 :bytes 100} :sizes [10 30 100]" overrun "}))"))
         world-of (fn [overrun] (var-forms (world) 1 (fn [_] {:src (proof overrun) :meta #{:test} :refs #{'seon.cost/proof}})))
         waiver " :overrun {:task \"a/task\" :n 100 :measured {:ticks 300000.0 :bytes 20000.0}}"
         without (world-of "") with (world-of waiver)
-        waived? (fn [db] (boolean (seq (get-in (problems/health db) [:classes :waived-proof :rows]))))
-        mentions? (fn [split] (some #(re-find #"waiver" (str %)) (concat (:caused split) (:attention split) (map :message (:rows split)) (map :message (:closed split)))))]
-    (is (and (waived? with) (not (waived? without))) "the world has the row exactly when the proof carries the :overrun")
-    (testing "adding an :overrun"
-      (is (not (mentions? (problems/caused-split without with))) "is neither caused nor attention"))
-    (testing "deleting one"
-      (is (not (mentions? (problems/caused-split with without))) "causes nothing and closes nothing"))
-    (is (not (contains? seon.problems/caused-classes :waived-proof)))))
+        waived (fn [split k] (filterv #(= :waived-proof (:class %)) (k split)))]
+    (is (seq (waived (problems/caused-split without with) :rows)) "adding an :overrun is caused")
+    (is (seq (waived (problems/caused-split with without) :closed)) "deleting it closes the row")
+    (is (contains? seon.problems/caused-classes :waived-proof))))
+
+;; docs/health.md#two-kinds-of-problem: a branch is judged on the content it makes, every class of it (the owner, 2026-11-12:
+;; nothing switched off). For each content class a branch can make, the rows caused-split answers from what the branch moved are
+;; the rows health reads in full on head and not on base
+(deftest a-branch-is-caused-each-content-class-it-makes
+  (let [made (fn [base head c]
+               (let [msgs (fn [db] (into #{} (map :message) (get-in (problems/health db) [:classes c :rows])))]
+                 [(into #{} (comp (filter #(= c (:class %))) (map :message)) (:rows (problems/caused-split base head)))
+                  (into #{} (remove (msgs base)) (msgs head))]))
+        db0 (world)
+        mapped (d/db-with db0 (seon.doc/load-tx db0 "docs" {"docs/README.md" "# Map\n\nThe map.\n\n- [a](a.md)\n" "docs/a.md" "# A\n\nThe page A.\n"}))
+        paged (d/db-with mapped (seon.doc/load-tx mapped "docs" {"docs/b.md" "# B\n\nThe page B.\n\n## Listed\n\n- one\n"}))
+        tasked (d/db-with db0 (seon.task/create-tx db0 [{:seon.task/ns 'app :seon.task/name "tile" :seon.task/kind :whole :seon.task/proofs #{'app-test/real}
+                                                        :seon.task/plan "The root tile shows what boot loaded."}]))
+        v 'app.calc/inc2
+        planned (d/db-with db0 (seon.task/create-tx db0 [{:seon.task/ns 'app :seon.task/name "plan" :seon.task/kind :whole :seon.task/proofs #{'app-test/real}
+                                                         :seon.task/plan (str "It changes `" v "`.")}]))
+        moved (d/db-with planned [{:var/name v :var/form -1} {:db/id -1 :form/id "f-inc2-new" :form/src "(defn inc2 [x] (+ x 2))"}])]
+    (doseq [[c base head] [[:leadless-section mapped paged] [:orphan-page mapped paged] [:uncited-task db0 tasked] [:stale-plan planned moved]]
+            :let [[caused full] (made base head c)]]
+      (is (seq full) (str (name c) ": the branch made a row"))
+      (is (= full caused) (str (name c) ": caused-split answers it, as the full reading does")))
+    (is (= (set (keys {:unnamed-site 1 :stale-section 1 :uncited-var 1 :long-form 1 :leadless-section 1 :orphan-page 1 :waived-proof 1 :uncited-task 1 :stale-plan 1}))
+           seon.problems/caused-classes)
+        "the classes a branch is judged on are the content classes, as :seon.problems/class declares them")))
+
+(deftest a-branch-that-changes-what-its-plan-cites-is-shown-the-stale-plan-never-refused
+  ;; docs/health.md#a-plan-that-went-stale: changing the code a plan cites is the work (an agent's own task cites what it
+  ;; changes), so a stale plan is attention, as a stale section is; the e2e loop and swarm held every task at its cap when it refused
+  (let [db0 (world)
+        v 'app.calc/inc2
+        planned (d/db-with db0 (seon.task/create-tx db0 [{:seon.task/ns 'app :seon.task/name "plan" :seon.task/kind :whole :seon.task/proofs #{'app-test/real}
+                                                         :seon.task/plan (str "It changes `" v "`.")}]))
+        moved (d/db-with planned [{:var/name v :var/form -1} {:db/id -1 :form/id "f-inc2-new" :form/src "(defn inc2 [x] (+ x 2))"}])
+        split (problems/caused-split planned moved)]
+    (is (= #{} (problems/caused planned moved)) "nothing refuses the branch's done")
+    (is (some #(str/starts-with? % "app/plan cites app.calc/inc2") (:attention split)) "the agent is shown the plan its change made stale")))
