@@ -908,9 +908,10 @@
   {:malli/schema [:=> [:cat :map] :seon.host/fn]}
   [w]
   (fn [f e]
-    (let [sym (if (var? f) (symbol f) 'fn)
-          defect (contract/error :seon.render/component-defect #'render! (thrown-line sym e)
-                                 (cond-> {:seon.error/in sym} (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
+    ;; a var names where it threw; a fn value has no name to give (:seon.error/in is a var's qualified symbol)
+    (let [sym (when (var? f) (symbol f))
+          defect (contract/error :seon.render/component-defect #'render! (thrown-line (or sym 'a-render) e)
+                                 (cond-> {} sym (assoc :seon.error/in sym) (map? (ex-data e)) (assoc :seon.render/threw (ex-data e))))]
       (vswap! (:defects w) conj defect)
       [:section {:class "err"} [:p (:seon.error/message defect)]
        [#'hiccup {:schema :seon.render/component-defect :as :block :seon.render/index @(:index w)} defect]])))
