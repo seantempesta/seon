@@ -350,7 +350,10 @@
 ;; :tests effect reads main's verdict at that digest from the cache (reds-at) and names the reds that are main's (:main-red):
 ;; red at the base digest, or at a digest the change did not move; a red at a base digest main holds green, or a test new on
 ;; the branch (no base digest), is the change's. Its probe verdicts are under a namespace of this run's, removed after
-(deftest a-gate-names-the-reds-that-are-mains
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["git"]} a-gate-names-the-reds-that-are-mains
+  ;; T1 (2026-11-12): run-on-checkout (a detached worktree, bin/worktree, the checkout's files) is not this test's subject: it is
+  ;; answered as it answers, gate-answer of the proved tree, so the claim reads run-tests' :main-red alone. Work: one git init and
+  ;; commit (branch-head reads it), two run-tests, three verdict writes, one reds-at read: ~10 git calls, ~1 M ticks
   (let [repo (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-gate-main-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))
         pn (str "gate-probe-" (random-uuid))
@@ -367,13 +370,14 @@
     (try
       (git "init" "-q" "-b" "main")
       (spit (str repo "/.gitignore") "/target/\n/runs/\n") (spit (str repo "/f") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
-      (let [run (fn [base] (fx/run-tests {:req (cond-> {:repo repo :branch "main" :files {"src/a.clj" (str "(ns a) ; " (random-uuid))} :tests [mains own fresh]}
+      (with-redefs [seon.fx/run-on-checkout (fn [prove _sha req] {:value (assoc (fx/gate-answer (prove req) (:tests req)) :ms 0)})]
+       (let [run (fn [base] (fx/run-tests {:req (cond-> {:repo repo :branch "main" :files {"src/a.clj" (str "(ns a) ; " (random-uuid))} :tests [mains own fresh]}
                                                  base (assoc :base base))
                                           :ctx {:prove-tree prove}}))
             r (run {mains (str pn "-b1") own (str pn "-b2") fresh nil})]
         (is (= {mains :fail own :fail fresh :fail} (get-in r [:value :results])) (pr-str r))
         (is (= #{mains} (get-in r [:value :main-red])) "red on main at its base digest: main's; green there, or new on the branch: the change's")
-        (is (nil? (get-in (run nil) [:value :main-red])) "no base, no :main-red: every red the change's"))
+        (is (nil? (get-in (run nil) [:value :main-red])) "no base, no :main-red: every red the change's")))
       (finally (seon.lib/remove-tree! repo) (seon.lib/remove-tree! (str cache "/" pn))))))
 
 (deftest a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
