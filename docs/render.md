@@ -40,7 +40,7 @@ A view that chooses what to show makes a value, never text: an array map of what
 
 A value too large or too host-bound to print whole declares a model render on its schema (`{:seon.render/model sym}`, ```seon.render/model```): `(f {} v)` answers the value to print in its place. The agent's process state is one (```seon.agent/state-summary```): each key as a scalar, a count or a host type, with the form that reads it whole.
 
-A tool's answer says what it is and what reads more, one way for every tool: its schema's `:seon.render/more` holds [words form] pairs, and ```seon.render/answer``` prints `{:is <the schema description's first sentence> :value <the value> :to-use [[words form] ...]}`, each form naming the answer by its handle (```seon.print/at-handle```). A form may name `v` (the answer), `path` (a part's path) and `id` (an entity); a reader that cannot fill one shows no pair naming it. A plain value prints as itself (`seon.render-test/an-answer-says-what-it-is-and-what-reads-more`).
+A tool's answer says what it is and what reads more, one way for every tool: its schema's `:seon.render/more` holds [words form] pairs, and ```seon.render/answer``` prints `{:seon.print/is <the schema description's first sentence> :value <the value> :seon.print/to-use [[words form] ...]}`, each form naming the answer by its handle (```seon.print/at-handle```). A form may name `v` (the answer), `path` (a part's path) and `id` (an entity); a reader that cannot fill one shows no pair naming it. A plain value prints as itself (`seon.render-test/an-answer-says-what-it-is-and-what-reads-more`).
 
 A render's default budget is config: `:seon.config.render/value-budget` for a value, `:seon.config.render/root-context-budget` for root's context.
 
