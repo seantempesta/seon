@@ -487,11 +487,9 @@
 
 (defn unreadable
   "Why text can't be read as the file at relative path is read, or nil: the shipped config validates (its refusal names each key), and any other file reads (unread-text). See docs/source.md#a-program-file."
-  {:malli/schema [:function [:=> [:cat :string :string] [:maybe :string]] [:=> [:cat :string :string [:maybe :map]] [:maybe :string]]]}
-  ([path text] (unreadable path text nil))
-  ;; schema-changes: the schema entries the same change states (seon.config/text-refusal's changes)
-  ([path text schema-changes]
-   (if (= path cfg/shipped-file) (cfg/text-refusal text schema-changes) (unread-text path text))))
+  {:malli/schema [:=> [:cat :string :string] [:maybe :string]]}
+  [path text]
+  (if (= path cfg/shipped-file) (cfg/text-refusal text) (unread-text path text)))
 
 (declare git-commit)
 

@@ -33,7 +33,6 @@
  :seon.vector/helper-died [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/helper-died]] [:exit :int] [:stderr :string]]]
  :seon.vector/encode-failed [:and :seon.error/base [:map [:seon.error/type [:= :seon.vector/encode-failed]] [:code :int]]]
  :seon.system/no-agent [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/no-agent]] [:agent {:optional true} [:maybe :keyword]]]]
- :seon.system/catch-up-skipped [:and {:description "A session's files the system could not all read, so none is proved (seon.system/prove-tree!): each skipped path with why. See docs/merging.md#a-session-proves-through-root."} :seon.error/base [:map [:seon.error/type [:= :seon.system/catch-up-skipped]] [:skipped [:vector :map]]]]
  ;; a wait on main (seon.system/await-db) whose pred was false when the reconciler went quiet at
  ;; t: nothing in flight will make it true (an outside commit still may)
  :seon.system/quiet-before-true [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/quiet-before-true]] [:t :int] [:waits-on :string]]]

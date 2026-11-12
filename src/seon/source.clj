@@ -114,32 +114,24 @@
   program's (a comment block, a top-level call) as a text form, so the file is whole. private?, the tree's
   (`tree-private`), answers a named var's privacy to the analysis. Answers {:accounts [...] :tail}."
   {:malli/schema [:function [:=> [:cat :symbol :string] [:map [:accounts [:vector :map]] [:tail :string]]]
-                  [:=> [:cat :symbol :string [:maybe :seon.host/fn]] [:map [:accounts [:vector :map]] [:tail :string]]]
-                  [:=> [:cat :symbol :string [:maybe :seon.host/fn] [:maybe :seon.host/fn]] [:map [:accounts [:vector :map]] [:tail :string]]]]}
-  ([nsym text] (accounts nsym text nil nil))
-  ([nsym text private?] (accounts nsym text private? nil))
-  ;; held, given (read-nss's, from the store): (held ns src k ns-src form) answers the account of a form the store holds whole,
-  ;; so it is not analyzed again (an edit of one form analyzes that form, not its file: docs/source.md#main-s-program-follows-the-tree)
-  ([nsym text private? held]
-  (let [ns-form (volatile! nil) ns-src (volatile! nil) kseen (volatile! {})
+                  [:=> [:cat :symbol :string [:maybe :seon.host/fn]] [:map [:accounts [:vector :map]] [:tail :string]]]]}
+  ([nsym text] (accounts nsym text nil))
+  ([nsym text private?]
+  (let [ns-form (volatile! nil)
         {:keys [forms tail]} (read-forms nsym text
-                                         (fn [{:keys [form ns src] :as f}]
-                                           (let [n (if (and (seq? form) (= 'ns (first form))) nsym ns)
-                                                 k (get (vswap! kseen update [ns src] (fnil inc -1)) [ns src])]
-                                             (when (and (seq? form) (= 'ns (first form))) (vreset! ns-form form) (vreset! ns-src src))
+                                         (fn [{:keys [form ns] :as f}]
+                                           (let [n (if (and (seq? form) (= 'ns (first form))) nsym ns)]
+                                             (when (and (seq? form) (= 'ns (first form))) (vreset! ns-form form))
                                              (when-let [a (and @ns-form (find-ns n) (alias-held-not-declared (find-ns n) @ns-form form))]
                                                (throw (ex-info (str "the form names alias " a " and this file's ns form doesn't require it: it resolves only in a process that already holds it") {:ns n :alias a})))
-                                             (if-let [h (and held (held n src k @ns-src form))]
-                                               (assoc f :held h)
-                                               (merge f (analyze-form n form private?))))))
+                                             (merge f (analyze-form n form private?)))))
         seen (volatile! {})]
     {:tail tail
      :accounts (vec (map-indexed
-                      (fn [i {:keys [form src lead ns units ns-form? held]}]
+                      (fn [i {:keys [form src lead ns units ns-form?]}]
                         (let [k (get (vswap! seen update [ns src] (fnil inc -1)) [ns src])
                               base {:units units :src src :form form :ns ns :ns-after ns :ns-form? ns-form? :ns-meta (when ns-form? (meta (second form))) :before nil :lead lead :order i :k k}]
-                          (or (when held (assoc held :src src :ns ns :lead lead :order i :k k))
-                              (program/account base)
+                          (or (program/account base)
                               {:id (str ns "/text-" i) :src src :ns ns :lead lead :order i})))
                       forms))})))
 
@@ -396,31 +388,6 @@
           (when-let [e (d/entity db [:var/name (symbol vns vname)])]
             (if (contains? (set (:var/meta e)) :private) :private :public)))))))
 
-(defn- held-form
-  "For namespace nsym on db, the answer accounts takes for a form it holds whole: (fn [n src k ns-src form]) gives the account
-  of the live form db holds at that namespace, text and occurrence (its id), built from db's facts (what read-interface and
-  made read of it: its definitions with their meta, its inline definitions, the identities it makes), or nil, so it is
-  analyzed: while the file's ns form is the one db holds (its aliases and requires unchanged), never the ns form itself or a
-  macro's definition (a later form's analysis expands it), nor a form expanding a macro that reads files (its facts are what
-  the macro read: file-reading-expansions). See docs/source.md#main-s-program-follows-the-tree."
-  {:malli/schema [:=> [:cat :seon.host/db :symbol] :seon.host/fn]}
-  [db nsym]
-  (let [db-ns-src (some-> (pdb/eid db :ns/name nsym) (->> (d/entity db)) :ns/form :form/src)
-        ;; is var v a macro whose expansion reads files (file-reading-expansions' rule): a few seeks, asked only of a held form's refs
-        reading (fn [v] (let [m (some->> (pdb/eid db :var/name v) (d/entity db))]
-                          (and m (contains? (set (:var/meta m)) :macro) (some program/file-readers (:form/refs (:var/form m))))))]
-    (fn [n src k ns-src form]
-      (when (and db-ns-src (= ns-src db-ns-src) (not= src ns-src)
-                 (not (and (seq? form) (#{'defmacro 'ns} (first form)))))
-        (when-let [fe (pdb/eid db :form/id (program/form-id n src k))]
-          (when (and (program/live? db fe) (not-any? reading (:form/refs (d/entity db fe))))
-            (let [x (d/entity db fe)]
-              {:id (:form/id x) :seon.source/held? true :inline-defs (vec (:form/inline-defs x))
-               :defs (vec (for [d (:form/defines x) :when (and (:var/name d) (= fe (:db/id (:var/form d))))]
-                            {:var (:var/name d) :meta (vec (:var/meta d))}))
-               :seon.source/made (vec (for [d (concat (:form/defines x) (:form/declares x))
-                                           :let [kv (some #(when-some [v (get d %)] [% v]) identities)] :when kv] kv))})))))))
-
 (defn- read-nss
   "Each namespace of files ({relative path text}) read and analyzed in load order: {nsym
   {:accounts :tail :file}} (accounts, with its file's relative path). A namespace the files define
@@ -433,7 +400,7 @@
   [db files tree]
   (let [private? (tree-private db tree)]
     (reduce (fn [m [nsym path text]]
-              (let [a (assoc (accounts nsym text private? (held-form db nsym)) :file path)]
+              (let [a (assoc (accounts nsym text private?) :file path)]
                 (when-not (in-checkout? nsym path) (@mark-loaded! (str nsym)))
                 (assoc m nsym a)))
             {} (load-order files))))
@@ -461,8 +428,8 @@
   it defines and declares, and its methods and extensions."
   {:malli/schema [:=> [:cat [:sequential :map]] [:set :any]]}
   [accts]
-  (into #{} (mapcat (fn [{:keys [id ns defs declares methods impls] held :seon.source/made}]
-                      (concat [[:form/id id] [:ns/name ns]] held
+  (into #{} (mapcat (fn [{:keys [id ns defs declares methods impls]}]
+                      (concat [[:form/id id] [:ns/name ns]]
                               (for [{v :var} defs] [:var/name v])
                               (for [v declares] [:var/name v])
                               (for [{:keys [multi dispatch]} methods] [:method/key (program/method-key multi dispatch)])

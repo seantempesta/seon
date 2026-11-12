@@ -857,10 +857,6 @@
   the file (task seon.source/an-import-reads-only-changed-files)."
   {:malli/schema [:=> [:cat :seon.host/db :map] :seon.db/tx-data]}
   [db {:keys [id order lead defs declares] :as acct}]
-  (if (:seon.source/held? acct)
-    ;; a form db holds whole (seon.source's held-form, not analyzed again): only its place may have moved
-    (let [fe (pdb/eid db :form/id id) x (d/entity db fe)]
-      (if (and (= order (:form/order x)) (= lead (:form/lead x))) [] [(cond-> {:db/id fe :form/order order} lead (assoc :form/lead lead))]))
   (let [fe (pdb/eid db :form/id id)
         dkeys (def-keys acct)
         now (into {:id id :src (:src acct) :ns (:ns acct) :defines (set dkeys) :declares (set declares)}
@@ -884,7 +880,7 @@
                   (when row
                     (concat (for [[a k] form-sets v (get row k) :when (not (contains? (get now k) v))] [:db/retract fe a v])
                             (for [k (:defines row) :when (not (contains? (:defines now) k))] [:db/retract fe :form/defines (def-eid db k)])
-                            (for [v (:declares row) :when (not (contains? (:declares now) v))] [:db/retract fe :form/declares (def-eid db [:var v])]))))))))
+                            (for [v (:declares row) :when (not (contains? (:declares now) v))] [:db/retract fe :form/declares (def-eid db [:var v])])))))))
 
 ;; ---- load order ----------------------------------------------------------------------
 
