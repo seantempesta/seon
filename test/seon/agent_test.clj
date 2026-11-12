@@ -1429,18 +1429,26 @@
   ;; the agent redefines, at its REPL as an agent changes the platform, a function its REPL proc calls
   ;; after each eval: seon.agent/on-the-wire, which makes the reply) answers that request with the one error
   ;; map, and the agent goes on: it repairs the function at its REPL and works on, the same process
-  (let [[_ pid broken repaired after pid'] (in-agent (fn [_]
+  (let [[_ pid broken repaired after pid' on-main] (in-agent (fn [_]
                                                ["(def p0 (seon.lib/c-getpid))"
                                                 "p0"
                                                 "(in-ns 'seon.agent) (clojure.core/defn on-the-wire [_] (throw (ex-info \"boom: the loop's own function\" {:x 1})))"
                                                 "(in-ns 'seon.agent) (clojure.core/defn on-the-wire [r] (dissoc r :value))"
                                                 "(+ 20 22)"
-                                                "(seon.lib/c-getpid)"]))]
+                                                "(seon.lib/c-getpid)"
+                                                ;; the defect reaches root as data (its :platform problem on main), never only as text on
+                                                ;; the agent's stderr: named, so it ends at root's quiet if it never comes
+                                                {:op :eval :agent "root"
+                                                 :code (str "(let [db (seon.system/await-db sys \"the agent's defect on main\""
+                                                            " #(seq (datahike.api/q '[:find ?e :where [?e :seon.error/class :platform] [?e :seon.error/message ?m]"
+                                                            " [(clojure.string/includes? ?m \"boom: the loop\")]] %)))]"
+                                                            " (if (seon.contract/error? db) (:seon.error/type db) :on-main))")}]))]
     (is (= "boom: the loop's own function" (get-in broken [:ex :seon.error/message])) (str "the request is answered with its error: " (pr-str broken)))
     (is (= 'seon.repl/serve! (get-in broken [:ex :seon.error/operation])) "named by the boundary it reached")
     (is (some? repaired) (str "the repair is answered: " (pr-str repaired)))
     (is (= 42 (:value after)) (str "and the agent works on: " (pr-str after)))
-    (is (= (:value pid) (:value pid')) "in the same process")))
+    (is (= (:value pid) (:value pid')) "in the same process")
+    (is (re-find #":on-main" (pr-str on-main)) (str "and the defect is on main as a :platform problem: " (pr-str on-main)))))
 
 (defn- started "The line the child writes as test var v starts." {:malli/schema [:=> [:cat :string] :string]}
   [v] (pr-str {:seon.test/started v}))
