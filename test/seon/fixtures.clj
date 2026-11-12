@@ -156,7 +156,7 @@
                                  "(def syms '[a b])"
                                  "(def ^:dynamic *depth* 0)"
                                  "(ns app.newns-test\n  (:require [clojure.test :refer [deftest is]]\n            [app.newns :refer [triple]]))"
-                                 "(deftest triple-test (is (= 9 (triple 3))))"
+                                 "(deftest ^{:seon.test/estimate {:ticks 100000}} triple-test (is (= 9 (triple 3))))"
                                  "(in-ns 'user)"
                                  "(def scratch-x 41)")]}}
    :loop {:specs [{:name "gen" :ns 'seon.generation :proofs #{'app.proofs/gen-test} :proof "(deftest gen-test (is (= 2 (seon.generation/generation))))"
