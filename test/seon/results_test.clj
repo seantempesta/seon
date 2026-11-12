@@ -232,8 +232,7 @@
        ;; older verdicts of a slower test: read, they would move the median
        (doseq [i (range (inc keep-n))] (rec-at (str "old-" i) 9000 9000000 (+ 1000 i)))
        (doseq [i (range keep-n)] (rec-at (str "new-" i) 40 2000000 (inc i)))
-       (is (= '{a/t 40} (fx/typical-ms dir '[a/t])) "its typical ms is its newest verdicts'")
-       (is (= '{a/t 6000000} (fx/test-budgets dir '[a/t] 100000000 1 3)) "and so is its tick budget")))))
+       (is (= '{a/t 40} (fx/typical-ms dir '[a/t])) "its typical ms is its newest verdicts'")))))
 
 ;; See docs/merging.md#verdicts-are-a-cache
 (deftest a-test-history-costs-one-file-and-is-made-again-when-gone
@@ -269,18 +268,6 @@
                 'a/u {:test 'a/u :digest "ms-3" :pass 1 :fail 0 :error 0 :ms 7}})
      (rec! dir {'a/t {:test 'a/t :digest "ms-4" :pass 1 :fail 0 :error 0 :ms 50}})
      (is (= '{a/t 50 a/u 7} (fx/typical-ms dir '[a/t a/u a/none])) "by test, the median not the largest; a test never run is left out"))))
-
-;; See docs/merging.md#a-tests-tick-budget
-(deftest a-tests-tick-budget-is-its-median-green-ticks-between-the-floor-and-the-cap
-  (with-dir
-   (fn [dir]
-     (doseq [[i tk] (map-indexed vector [10 20 30])]
-       (rec! dir {'a/t {:test 'a/t :digest (str "b-" i) :pass 1 :fail 0 :error 0 :ticks tk}}))
-     (rec! dir {'a/r {:test 'a/r :digest "r-1" :pass 0 :fail 1 :error 0 :ticks 1000000}})
-     (rec! dir {'a/big {:test 'a/big :digest "g-1" :pass 1 :fail 0 :error 0 :ticks 1000}})
-     (is (= '{a/t 200 a/r 100 a/none 100 a/big 10000} (fx/test-budgets dir '[a/t a/r a/none a/big] 100000 100 10)) "factor x the median green, never under the floor; a red's ticks count for nothing; none: the floor")
-     (is (= '{a/t 50 a/big 50} (fx/test-budgets dir '[a/t a/big] 50 100 10)) "and never over the cap")
-     (is (nil? (fx/test-budgets dir '[a/t] 0 100 10)) "a cap of 0: no budget"))))
 
 (def ^:private red-cost
   "A red cost proof's report, as seon.cost/proof's :actual carries it."

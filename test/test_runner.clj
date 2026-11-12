@@ -385,7 +385,6 @@
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
                                  (config/value :seon.config.agent/test-ticks)
-                                 (fx/test-budgets tests)
                                  ;; a green another run stored since the plan, looked up just before the test would start
                                  ;; (not one the plan says runs whatever the cache holds: a full run's, the reuse audit's)
                                  (fn [t dg] (when-not (contains? rerun t)

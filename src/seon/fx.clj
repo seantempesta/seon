@@ -445,7 +445,7 @@
          by-class (group-by first entries)]
      {:tree tree
       :code (lib/digest (str/join "\n" (filter #(let [p (second (str/split % #"\t" 2))] (or (str/starts-with? p "src/") (str/starts-with? p "resources/seon/config/"))) lines)))
-      :env (lib/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg) " " (:seon.config.agent/test-ticks-floor cfg) " " (:seon.config.agent/test-ticks-factor cfg))])))
+      :env (lib/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg))])))
       ;; the config in force, and each class of files a test may read (env-class): named inputs
       ;; a test's digest takes by what its reach reads
       :config (into (config-input cfg checkout)
@@ -923,24 +923,6 @@
                         ms (cond-> (keep first (history dir t)) own (conj own))]
                   :when (and (seq ms) (>= (apply min ms) bound))]
               [t (apply min ms)]))))
-
-(defn test-budgets
-  "{test ticks} of tests: the engine ticks each may run, min(cap, max(floor, factor x the median of the
-  ticks its green verdicts measured, at any digest)); a test with no green gets the floor. cap
-  (:seon.config.agent/test-ticks), floor (:seon.config.agent/test-ticks-floor) and factor
-  (:seon.config.agent/test-ticks-factor) are config; 0 cap: none (nil). The history is read once, here, by a run before it
-  runs anything. Work done, never time; derived data, so a missing or evicted history gives the floor.
-  docs/merging.md#a-tests-tick-budget."
-  {:malli/schema [:function [:=> [:cat [:sequential :qualified-symbol]] [:maybe [:map-of :qualified-symbol pos-int?]]]
-                  [:=> [:cat :string [:sequential :qualified-symbol] nat-int? pos-int? pos-int?] [:maybe [:map-of :qualified-symbol pos-int?]]]]}
-  ([tests] (test-budgets (cfg/value :seon.config.proofs/results-dir) tests (cfg/value :seon.config.agent/test-ticks)
-                         (cfg/value :seon.config.agent/test-ticks-floor) (cfg/value :seon.config.agent/test-ticks-factor)))
-  ([dir tests cap floor factor]
-   (when (pos? cap)
-     (into {} (for [t (distinct tests)
-                    :let [g (sort (keep second (history dir t)))
-                          med (if (seq g) (nth g (quot (count g) 2)) 0)]]
-                [t (min cap (max floor (* factor med)))])))))
 
 (defn details
   "What each test of cand ({test digest}, a tree's) spent in each contracted function, as its cached
