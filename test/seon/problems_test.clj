@@ -636,10 +636,11 @@
          (model/request-body deepseek req)) "thinking absent: the provider's default; max-tokens the provider's; the model chooses whether to call; streamed with its usage")
   (is (= {:type "disabled"} (:thinking (model/request-body (assoc deepseek :thinking :disabled) req))))
   (is (= ["high" 512] ((juxt :reasoning_effort :max_tokens) (model/request-body (assoc deepseek :reasoning-effort :high :max-tokens 512) req))))
+  (is (not (contains? (model/request-body (assoc deepseek :thinking :disabled :reasoning-effort :low) req) :reasoning_effort)) "thinking off: no effort sent")
   (is (contract/valid? :seon.model/provider (assoc deepseek :thinking :enabled :reasoning-effort :low))))
 
 (deftest thinking-on-every-assistant-message-says-its-reasoning
-  ;; docs/model.md#thinking-is-off-by-default: DeepSeek answers 400 at the first request otherwise, whose first
+  ;; docs/model.md#thinking-is-on-at-low-effort: DeepSeek answers 400 at the first request otherwise, whose first
   ;; message after the system's is an eval Seon inserted, which no reasoning made
   (let [inserted {:role "assistant" :content "Seon ran this." :tool-calls [{:id "eval-e1" :code "(+ 1 2)"}]}
         answered {:role "tool" :tool-call-id "eval-e1" :content "{}"}

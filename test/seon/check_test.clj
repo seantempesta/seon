@@ -48,10 +48,10 @@
     (is (re-find #"durable-write runs target/seon on the seeded store, but this selection's steps-binary" (:out unseeded))
         "a step that needs the seeded store is refused by name, never run on none")))
 
-;; docs/clocks.md#time-decides-the-owners-exceptions: a step past its bound is ended after its evidence, and the bound is a
-;; signal (the owner, 2026-11-11: "The step bounds are signals not hard constraints"): said with its CPU seconds and the load,
-;; no verdict (no green stored, it runs again), and nothing failed: a red is a step's own exit
-(deftest a-step-past-its-bound-is-ended-with-its-evidence-a-signal-not-a-red
+;; docs/clocks.md#time-decides-the-owners-exceptions: a step past its bound is ended after its evidence and FAILS, as a test past
+;; its bound is an error (the owner, 2026-11-12: "A test killed for running too long is a bug and it should be recorded as an
+;; error and fixed"): named with its CPU seconds and the load, no green stored. Red before: it was a signal and nothing failed
+(deftest a-step-past-its-bound-is-ended-with-its-evidence-and-fails
   (let [sel (str (System/getProperty "java.io.tmpdir") "/step-bound-" (random-uuid))
         _ (clojure.java.shell/sh "mkdir" "-p" sel)
         _ (doseq [[f t] {"steps" "laws\n" "steps-binary" "" "step-bounds" "laws 1\n"}] (spit (str sel "/" f) t))
@@ -61,10 +61,9 @@
         ms (slurp (str sel "/step-ms"))
         green (let [f (java.io.File. (str sel "/green"))] (if (.isFile f) (slurp f) ""))]
     (clojure.java.shell/sh "rm" "-rf" sel)
-    (is (= 0 (:exit r)) (pr-str r))
-    (is (re-find #"SIGNAL laws: STEP-OVERRAN, ran past its bound of 1 ms" (:out r)) (:out r))
-    (is (re-find #"(?m)^STEP SIGNALS .*\n  laws past its bound of 1 ms \(CPU [\d.?]+ s, load [\d.]+\)" (:out r)) "the summary says it, with its CPU seconds and the load")
-    (is (not (re-find #"(?m)^CHECK FAILED" (:out r))) "and nothing failed")
+    (is (= 1 (:exit r)) (pr-str r))
+    (is (re-find #"(?m)^FAILED laws: STEP-OVERRAN, ran past its bound of 1 ms \(.*CPU [\d.?]+ s, load [\d.]+\)" (:out r)) (:out r))
+    (is (re-find #"(?m)^CHECK FAILED: 1 step" (:out r)) "the run failed, naming it")
     (is (not (re-find #"check-laws" green)) "it stored no green: it runs again")
     (is (and ev (.isFile (java.io.File. (str ev "/ps.txt")))) "its process tree was captured before it was ended")
     (is (not (re-find #"(?m)^laws OK" (:out r))) "and it did not run on to its own end")

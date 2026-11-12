@@ -7,7 +7,7 @@
             [clojure.string :as str] [clojure.core.async :as a]
             [seon.render :as r] [seon.fixtures :refer [flush! draw]] [seon.render.ui :as ui] [seon.render.proc :as p]
             [seon.web.html :as h] [clojure.walk] [clojure.set] [seon.print.select] [seon.config] [seon.doc] [seon.print] [seon.db] [seon.reconcile] [seon.task] [seon.edn] [seon.ctx] [seon.contract] [seon.repl] [datahike.api :as d]
-            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.system] [seon.error] [my.agent] [my.test] [seon.ctx] [malli.registry]))
+            [seon.fx] [seon.source] [seon.reader] [seon.program] [seon.web] [seon.template] [seon.ctx.wire-test] [seon.render-cost-test] [seon.turn] [seon.model] [seon.problems] [seon.system] [seon.error] [my.agent] [my.test] [seon.ctx] [malli.registry] [seon.ctx.status] [seon.cost]))
 
 (def ^:private task
   {:seon.task/id "calc/add" :seon.task/ns 'calc :seon.task/name "add" :seon.task/plan "Make `app.calc/add` pass"
@@ -4716,3 +4716,21 @@
     (is (str/includes? msgs "(+ 200 2)") "the system's eval with an intent reaches the request")
     (is (not (str/includes? msgs "(+ 100 1)")) "the system's work with no intent does not")
     (is (not (str/includes? msgs "(+ 300 3)")) "nor another agent's")))
+
+(deftest a-proof-to-write-is-described-with-its-namespace
+  ;; task seon.render/a-proof-to-write-is-described-with-its-namespace (loop D3, 2026-11-12: twelve turns finding a test
+  ;; namespace's aliases and how it sets up a world): an unwritten proof's shape holds its namespace's whole :require and its
+  ;; use-fixtures, read from the namespace's forms, and the status says both (docs/render.md#how-the-work-stands)
+  (let [db (my.test/with (my.test/world)
+                         (my.test/code 'app.calc-test (str "(ns app.calc-test (:require [clojure.test :refer [deftest is use-fixtures]] [app.calc :as calc] [clojure.string :as str]))\n"
+                                                           "(def ^:dynamic *k* 1)\n(use-fixtures :each (fn [f] (binding [*k* 2] (f))))\n(deftest a-test (is (= 2 *k*)))\n")))
+        shape (seon.ctx.status/test-shape db 'app.calc-test/new-proof)
+        h (h/html (ui/status-hiccup {} {:proofs [{:test 'app.calc-test/new-proof :status :undefined :shape shape}]}))
+        ;; estimate: the old shape's 56k ticks (one index read, each var once) and one query over the namespace's four forms
+        {:keys [ticks]} (seon.cost/measure (fn [] (seon.ctx.status/test-shape db 'app.calc-test/new-proof)) [])]
+    (is (= "(:require [clojure.test :refer [deftest is use-fixtures]] [app.calc :as calc] [clojure.string :as str])" (:requires shape))
+        "the whole :require, the alias no example calls too")
+    (is (= ["(use-fixtures :each (fn [f] (binding [*k* 2] (f))))"] (:fixtures shape)) "its fixtures as written")
+    (is (str/includes? h "[clojure.string :as str]") "the status shows the :require")
+    (is (str/includes? h "use-fixtures :each") "and the fixtures")
+    (is (< ticks 1e6) (str "test-shape on a four-form namespace: estimate 100k ticks, measured " ticks))))
