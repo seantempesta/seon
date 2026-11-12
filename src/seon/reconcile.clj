@@ -199,7 +199,7 @@
                   (not (judged-outcomes o))
                   ;; parked, told or at its cap: ready again only when woken, a wake being a message that reached its agent (`wake`);
                   ;; the task's agent is its key (task-pull), so an agent no root has started yet (root's session at boot) wakes too
-                  ;; and is spawned under that key (docs/users.md#roots-session)
+                  ;; and is spawned under that key (docs/users.md#roots-agent)
                   (or (not (#{:parked :told :cap} o))
                       (and (contains? (:woken idx) (:seon.task/agent t))
                            ;; a task at its cap whose agent took up another task (a refine continuing it) ended its wait: the agent's
@@ -814,7 +814,7 @@
               (one (request (assoc-in st [:flights id :agent] ag) id :started
                             {:op :write :req {:op :tx :branch :db :flush? true
                                               :tx-data (task/start-tx db id (:boot st) ag (:env act) now raise)}})))
-      :spawn (let [k (task/session-key db id)]
+      :spawn (let [k (task/agent-key db id)]
                ;; the session's agent continues (docs/turn.md#parked); kept on the flight for its start
                (one (request (cond-> st k (assoc-in [:flights id :key] k)) id :spawned
                              {:op :spawn :opts (cond-> {:branch (get-in act [:env :branch]) :task id} k (assoc :key k))})))

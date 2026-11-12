@@ -30,13 +30,13 @@
 (defn request-sentence
   "A person's request text as its first sentence, as written: up to a . ! or ? before a space or the end (a dot inside a name,
   demo.math/half, is part of it), else the first line. What a request task is named by (`request-words`) and titled by. See
-  docs/users.md#roots-session."
+  docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :string] :string]}
   [text] (str/trim (re-find #"(?:[^.!?\n]|[.!?](?=[^\s.!?]))*" (str/triml text))))
 
 (defn request-words
   "The name a request's text gives its task: its first sentence's words (`request-sentence`), lower case, joined by -; \"work\" for none.
-  seon.system/request-name numbers it when the name is taken. See docs/users.md#roots-session."
+  seon.system/request-name numbers it when the name is taken. See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :string] :string]}
   [text] (str/join "-" (or (seq (re-seq #"[a-z0-9]+" (str/lower-case (request-sentence text)))) ["work"])))
 
@@ -342,7 +342,7 @@
   {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:maybe :any]]}
   [ps] (some->> (seq (filter :seon.process/forked-ms ps)) (apply max-key :seon.process/forked-ms)))
 
-(defn session-key
+(defn agent-key
   "The agent key of task id's session on db, or nil when none of its chain has had an agent: the
   session is id and the tasks on its branch it needs, transitively (a request's stages, a work
   task and its merge: design agent-loop section 1a), and its agent is the newest started among
@@ -510,7 +510,7 @@
 
 (defn start-tx
   "Agent `agent` (its id; nil: root refused the spawn, and no agent exists) begins task id in root's boot, its turn budget raised by raise (a wake's allowance) turns: the task's
-  outcome :running from what it was, naming the agent (its id's name is its key, so a session's agent that continues keeps it, seon.task/session-key), the judged attributes cleared; the agent's entity (key, task, branch and the rest of its environment,
+  outcome :running from what it was, naming the agent (its id's name is its key, so a session's agent that continues keeps it, seon.task/agent-key), the judged attributes cleared; the agent's entity (key, task, branch and the rest of its environment,
   its boot and when it started, and who started the task now holding it, :seon.agent/agents), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
   A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :any]]

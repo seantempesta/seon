@@ -58,12 +58,12 @@
 ;; :last-frame-ms), and which procs answered the ping, so a proc mid-step is seen missing, never read as nil
 (deftest roots-session-and-what-root-releases-are-the-users
   ;; docs/users.md#who-started-whom (owner, 2026-11-11: one open graph of agents): the agents are one tree rooted at the user.
-  ;; Root's session is started by the user (seon.system/root-session-tx), and a task released at root's REPL is started by its
+  ;; Root's session is started by the user (seon.system/root-agent-tx), and a task released at root's REPL is started by its
   ;; evaluator, the user (my.root/run!), so its agent joins the user's :seon.agent/agents at its start. Red before: neither
   ;; wrote a starter, and those agents were reached only through :seon.agent/root
   (let [user (seon.config/value :seon.config.root/user-name)
         db0 (d/db-with (ts/test-db) [{:seon.system/id :root}])
-        db (d/db-with db0 (root/root-session-tx db0))]
+        db (d/db-with db0 (root/root-agent-tx db0))]
     (is (= user (get-in (d/entity db [:seon.task/id "request/root"]) [:seon.task/started-by :seon.agent/key])) "root's session's task was started by the user")
     (is (some #{"root"} (map :seon.agent/key (:seon.agent/agents (d/entity db [:seon.agent/key user])))) "and the user's tree holds root's session"))
   (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
@@ -219,9 +219,9 @@
         held (ev "[(count (seon.task/tasks @(:conn sys))) (set (keys (seon.task/agents @(:conn sys))))]")
         tree-b (keyword (str "tree-" (apply str (repeat 40 "a"))))
         by (ev "(:started-by (seon.task/root @(:conn sys)))")
-        ;; every name the interfaces give an agent: root's view and the page's address (its key, seon.render.ui/session-address)
+        ;; every name the interfaces give an agent: root's view and the page's address (its key, seon.render.ui/agent-address)
         view (ev "(vec (sort (keys (:agents (seon.system/state sys)))))")
-        addresses (ev "(mapv #(seon.render.ui/session-address (d/pull @(:conn sys) '[:seon.agent/key] [:seon.agent/key %])) (keys (seon.task/agents @(:conn sys))))")
+        addresses (ev "(mapv #(seon.render.ui/agent-address (d/pull @(:conn sys) '[:seon.agent/key] [:seon.agent/key %])) (keys (seon.task/agents @(:conn sys))))")
         first-boot (str/split-lines (root-answers path "main" [main (ev (str "(my.root/load-tasks! sys " (pr-str tasks) ")"))
                                                            {:op :attach :task "demo/t"} held (ev "(:boot sys)") by
                                                            {:op :agents} view addresses
@@ -242,7 +242,7 @@
       (is (= "main" (printed (first second-boot))) "the second boot resumes the same main")
       (let [[tasks-1 agents-1] (printed (nth first-boot 3))
             [tasks-2 agents-2] (printed (second second-boot))]
-        ;; two tasks: the one it loaded (a file task is one whole task) and root's session's, made at its boot (seon.system/root-session-boot-tx)
+        ;; two tasks: the one it loaded (a file task is one whole task) and root's session's, made at its boot (seon.system/root-agent-boot-tx)
         (is (= [2 1] [tasks-1 (count agents-1)]) "the first boot holds the task it loaded, root's session's, and the agent it started")
         (is (= 2 tasks-2) "the second boot still holds both, its boot making no second session")
         (is (every? agents-2 agents-1) "and the first boot's agent (its task is reaped, and started again by the next agent of the session)"))
@@ -261,7 +261,7 @@
       (is (= {:ok true :exists false} (printed (nth first-boot 9))) "the first boot made the tree's branch")
       (is (= [[tree-b] []] (printed (nth second-boot 10))) "the second boot dropped it, and says so in its :boot view")
       ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: an agent's id is the keyword of its :seon.agent/key,
-      ;; minted once (seon.system/start-agent) and kept by the session's next agent (seon.task/session-key), so the restart leaves every
+      ;; minted once (seon.system/start-agent) and kept by the session's next agent (seon.task/agent-key), so the restart leaves every
       ;; interface naming the task's agent as before: the attach, the task's agent, the server's agents list, root's view and the page's address
       (let [[attached agents-1 view-1 addresses-1] [(:agent (raw (nth first-boot 2))) (raw (nth first-boot 6)) (printed (nth first-boot 7)) (printed (nth first-boot 8))]
             [again agents-2 view-2 addresses-2] [(:agent (raw (nth second-boot 6))) (raw (nth second-boot 7)) (printed (nth second-boot 8)) (printed (nth second-boot 9))]
@@ -489,7 +489,7 @@
     (is (= (:seed-t two) (:program-t two)) "nothing of the tree was written: main's program is the seed's")
     (is (= (config/value :seon.config.web/streams-buf) (:streams-buf two)) "main's entries as they were")))
 
-;; docs/users.md#roots-session: a request's name is its first sentence's words, a dot inside a name kept, the same words asked again
+;; docs/users.md#roots-agent: a request's name is its first sentence's words, a dot inside a name kept, the same words asked again
 ;; numbered 2, 3 (it read "add-a-function-demo" from "demo.math/double", and a repeat took the transaction's number)
 (deftest a-requests-name-is-its-first-sentence
   (let [db (ts/test-db)

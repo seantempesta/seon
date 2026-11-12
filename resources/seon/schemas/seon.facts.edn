@@ -396,7 +396,7 @@
  :seon.task/needs [:set {:seon.db/to [:seon.task/task-fact] :description "The tasks that this task needs."} :seon.db/ref]
  ;; the example sessions its agent reads before its own (seon.ctx.wire/request): agents keyed "example/<id>"
  ;; (seon.ctx.session/session-tx), drawn by the renders that draw its own session
- :seon.task/examples [:set {:seon.db/to [:seon.db/agent-fact] :description "The example sessions its agent reads before its own: refs to agents keyed \"example/<id>\", finished sessions of other tasks, which the model reads as messages (seon.ctx.wire/request) and the page draws with seon.render.ui/examples. See docs/tasks.md#a-task-names-example-sessions."} :seon.db/ref]
+ :seon.task/examples [:set {:seon.db/to [:seon.db/agent-fact] :description "The example sessions its agent reads before its own: refs to agents keyed \"example/<id>\", finished sessions of other tasks, which the model reads as messages (seon.ctx.wire/request) and the page draws with seon.render.ui/examples. See docs/tasks.md#a-task-names-examples."} :seon.db/ref]
  :seon.task/branch [:keyword {:description "The branch the task's work is on."}]
  :seon.task/model [:string {:description "The model that works the task."}]
  :seon.task/execution [:and {:seon.db/index true :description "Whether the task is held, running or cancelled."} [:enum :held :running :cancelled]]

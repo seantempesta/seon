@@ -83,7 +83,7 @@
  ;; a cancel (my.root/cancel-tx) of an id that names no task: answered, never upserted as a task
  :seon.system/unknown-task [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/unknown-task]] [:task :string]]]
  ;; seon.ctx.session/session-tx of a key no agent holds, of a session with no request to show or with a record of a kind an
- ;; example does not hold: docs/tasks.md#a-task-names-example-sessions
+ ;; example does not hold: docs/tasks.md#a-task-names-examples
  ;; a request whose tree drew no system message (seon.ctx.wire/request): refused, what stood first in its place named
  ;; a definition that broke Seon's recording of it, undone (seon.repl/undo-definition!)
  :seon.repl/definition-undone [:and :seon.error/base [:map [:seon.error/type [:= :seon.repl/definition-undone]] [:vars [:vector :any]]]]

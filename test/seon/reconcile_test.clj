@@ -535,14 +535,14 @@
     (is (not-any? #(contains? tk %) (keys stale)) "and gone after a judging that set none of them")))
 
 (deftest a-woken-task-whose-agent-never-started-is-spawned-under-its-key
-  ;; docs/users.md#roots-session: a parked task names an agent no root has started (a key and no boot, as root's session is at boot); a
-  ;; message to that key makes the task ready, and its action is a spawn, which takes the session's key (seon.task/session-key). The
+  ;; docs/users.md#roots-agent: a parked task names an agent no root has started (a key and no boot, as root's session is at boot); a
+  ;; message to that key makes the task ready, and its action is a spawn, which takes the session's key (seon.task/agent-key). The
   ;; woken check reads the task's agent key itself, so what an agent is in the index does not change (Optimization, 2026-11-08)
   (let [db (db-of [(decl "a")] :extra [{:db/id "ag" :seon.agent/key "never-started"}
                                         {:seon.task/id "demo/a" :seon.task/agent "ag" :seon.task/outcome :parked}])]
     (is (= [] (actions-for db)) "parked, it waits")
     (is (= [(spawn "a")] (actions-for db :woken ["never-started"])) "woken, it is spawned")
-    (is (= "never-started" (task/session-key db "demo/a")) "under its own key")))
+    (is (= "never-started" (task/agent-key db "demo/a")) "under its own key")))
 
 (deftest a-wake-whose-parked-process-is-gone-is-lost-and-the-next-start-a-spawn
   ;; flow-lab's hazard 6 (design agent-loop section 4): the parked process died before the wake's
@@ -1815,10 +1815,10 @@
         (is (nil? (:seon.task/reasons a)) "root's last reasons are no news to the fresh run")
         (is (= 1 (count (filter #(and (= :spawn (:op %)) (= "demo/a" (:task %))) (actions-for db3)))) "one fresh run")
         (is (= [(:seon.task/branch a)] (keep #(when (= "demo/a" (:task %)) (get-in % [:env :branch])) (actions-for db3))) "from its new branch")
-        (is (nil? (task/session-key db3 "demo/a")) "by a new agent: the old one's conversation is on the old branch")
+        (is (nil? (task/agent-key db3 "demo/a")) "by a new agent: the old one's conversation is on the old branch")
         (is (contains? (get-in (r/index db3) [:by-branch (:seon.task/branch a)]) "demo/a") "the index holds it under its new branch")
         (is (not (contains? (get-in (r/index db3) [:by-branch old]) "demo/a")) "and no longer under its old one")
-        (is (= (akey "a") (task/session-key db0 "demo/a")) "while the first run's agent is its session's on its own branch")))
+        (is (= (akey "a") (task/agent-key db0 "demo/a")) "while the first run's agent is its session's on its own branch")))
     (testing "a refine that changed nothing"
       (let [{db3 :db} (judge! db2 "a-refine" {:outcome :green})]
         (is (= :held (:seon.task/execution (task/task db3 "demo/a"))) "starts no run")))))

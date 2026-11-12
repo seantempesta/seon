@@ -325,7 +325,7 @@
     (is (= :spawning (:seon.agent/status (pull db3))) "a later fact of the same agent")))
 
 (deftest a-new-boot-keeps-the-earlier-boots-agents
-  ;; docs/users.md#roots-session: a boot keeps each earlier boot's agent linked to root (root's page holds every boot's
+  ;; docs/users.md#roots-agent: a boot keeps each earlier boot's agent linked to root (root's page holds every boot's
   ;; sessions), marking one still shown live :dead; red before: a boot retracted every link but the user's and root's session's
   (let [db (d/db-with (ts/test-db) (into [{:seon.system/id :root :seon.system/boot "b1"}] (task/agent-tx :a1 {:status :idle})))
         db2 (d/db-with db (into (task/boot-tx "b2" "sean") (task/earlier-agents-tx db)))
