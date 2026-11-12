@@ -374,7 +374,8 @@
 (deftest a-class-the-health-step-does-not-read-is-refused
   (let [[base] (catch-db (ts/test-db) 1)
         [head] (catch-db base 2)]
-    (doseq [c [:orphan-page :stalled :stale-pin :leadless-section :uncited-task :problem-unlinked]]
+    ;; the running system's state is no branch's content: no verdict of caused-split judges it
+    (doseq [c [:stalled :stale-pin :stale-binary :unsynced :problem-unlinked]]
       (is (thrown? Exception (test-runner/branch-health base head [c])) (str (name c) " is no verdict of caused-split")))))
 
 (deftest the-health-steps-checks-are-the-classes-caused-reads

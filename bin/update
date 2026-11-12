@@ -17,6 +17,9 @@
 # Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED (UPDATE FAILED: ROOT STALE BINARY ... when the
 # restarted root's binary is another program than its store's main: it runs, forks no agent, and the line names the acts).
 setopt pipefail
+# the restart's background job keeps this run's nice: zsh's BG_NICE renices it by 5 more, which a run already niced to 15
+# (bin/land runs it so) may not do ("nice(5) failed: operation not permitted"), as bin/test and bin/check say
+setopt NO_BG_NICE
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 fail() { print -u2 "update: $*"; print "UPDATE FAILED"; exit 1 }
 # main brought into the write-back tree $1. Its index and files must agree with its HEAD before the merge: a change staged
@@ -82,7 +85,19 @@ if bin/system status >/dev/null 2>&1; then
     print "restart: the tree or the inputs of main's files could not be read"
   fi
 fi
-nice -n 15 bin/build > target/update-build.log 2>&1 || { tail -5 target/update-build.log >&2; fail "build (target/update-build.log)" }
+# the tree this update brings the system to: main's, as the main tree holds it now. Two landings' updates can run at once
+# (bin/land runs each after it moves main); each compares main's tree after its build with this one, so they converge on
+# main's head with no lock between them
+want=$(bin/tree "$MAIN") || fail "the main tree's tree could not be named (bin/tree)"
+while true; do
+  nice -n 15 bin/build > target/update-build.log 2>&1 || { tail -5 target/update-build.log >&2; fail "build (target/update-build.log)" }
+  # a later landing moved main while this built: its update builds and restarts on main's head, and this one stops here
+  if [[ $(bin/tree "$MAIN") != $want ]]; then print "UPDATE SUPERSEDED: main moved while this built; the update of main's head restarts the system"; exit 0; fi
+  # main is this update's tree, so every later build is superseded: one built before it can still have moved its binary in
+  # over this one's (between its check and its move), and the build again moves this tree's in, once
+  [[ $(<target/seon.tree) == $want ]] && break
+  print "rebuild: an older build moved target/seon in over tree $want"
+done
 print "built $(ls -l target/seon | awk '{print $6, $7, $8}')"
 # the stop and the start are one act in a session of its own (setsid, as bin/held --detach): this process can end
 # between them (its caller's session gone, which ends its process group), and a stop with no start leaves the
