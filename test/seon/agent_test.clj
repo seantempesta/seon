@@ -3173,7 +3173,8 @@
   ;; main retracted the task whole, the branch changed its plan: a conflict whose main end is :seon.merge/gone. A resolution
   ;; cannot settle it: main's retraction, replayed whole, retracts the values main held and leaves the branch's own plan on a
   ;; task with no name, which the branch's write check refuses (:seon.merge/replay-refused), whichever value the resolution
-  ;; keeps, and nothing is written. The branch retracting the task itself first is what merges
+  ;; keeps, and nothing is written. The branch retracting the task itself after does not settle it either: a rebase replays the
+  ;; branch's own transactions whole and in order, and its plan write onto main's retracted task is refused before its retraction
   (down-agent
    (fn [{:keys [conn store-conn t]}]
      (d/transact conn [[:db/retractEntity t]])
@@ -3189,9 +3190,10 @@
            (is (= c0 (d/commit-id @store-conn)) "nothing written")))
        (agent/transact! [[:db/retractEntity t]])
        (agent/commit!)
-       (let [r (agent/merge-main! {})]
-         (is (:ok r) (pr-str r))
-         (is (empty? (d/datoms @store-conn :eavt t)) "the task is gone on the branch as on main"))))))
+       (let [c1 (d/commit-id @store-conn) r (agent/merge-main! {})]
+         (is (= :seon.merge/replay-refused (:seon.error/type r)) (pr-str r))
+         (is (= :seon.db/invalid-entity (get-in r [:seon.merge/refused :seon.error/type])) "the plan write, replayed onto main's retraction")
+         (is (= c1 (d/commit-id @store-conn)) "nothing written"))))))
 
 (deftest an-agents-conflicts-with-main-are-held-by-three-commits
   ;; seon.agent/main-conflicts (docs/agent.md#merging): the status reads the branch's conflicts with main every turn, so they
