@@ -64,6 +64,7 @@ A session starts no other session unless the owner asks. It uses as many helpers
 
 ## Asking the owner
 
+The owner makes the rulings, and a session brings him one decision at a time with its evidence.
 - Ask with the question tool, in one round, each question with its background and your pick first.
 - A well-scoped task or a clear defect needs no asking.
 - A report separates what was verified from what was inferred.

@@ -4,6 +4,8 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 ## 2026-11-12 rulings
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### Dead history-on-scroll page code is deleted
 
 Asked whether to delete `seon.render.ui/more`, the web's /more route and the `:more` ops, which no page used: "Yes". A list holds a window and says how many it left out ([ctx](ctx.md#the-pattern)).
@@ -13,6 +15,8 @@ Asked whether to delete `seon.render.ui/more`, the web's /more route and the `:m
 "I do not want a long append log of instructions that won't be evergreen." Stated in [sessions](sessions.md#the-way-improves).
 
 ## 2026-11-11 rulings
+
+The owner's rulings of this day, each with his words and where it is now stated.
 
 ### The system goal: the codebase improves itself, by refinement
 
@@ -248,6 +252,8 @@ Of 11 ticks an element instead of 8: "Pay it". "You can use this to find the iss
 
 ## 2026-11-10 rulings
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### The store may lose its last commits, never corrupt or exhaust the machine
 
 "Losing data is fine, but semaphore exhaustion and corrupt storage is not okay." Fixed in our LMDB fork. Stated in [failure points](failure-points.md#lmdb-locks), [failure points](failure-points.md#lmdb-crash-safety), [storage](storage.md#durability-is-continuous-group-commit) and [forks](forks.md#lmdb).
@@ -426,6 +432,8 @@ A fixed tree gets a new digest; a red stuck at a digest that cannot move is a ga
 
 ## 2026-11-08 rulings
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### A session knows its whole area; review is never delegated
 
 "Well spec'ed tasks can be handed to sonnet, but the opus agents are responsible for reviewing the code". Stated in AGENTS.md §2.
@@ -479,6 +487,8 @@ A fixed tree gets a new digest; a red stuck at a digest that cannot move is a ga
 "I want us to run every eval. Turns are precious and one fuckup shouldn't punish the other evals." "Still run the evals sequentially but execute all of them." Stated in ```seon.repl/run-calls``` and [the prompt](prompt.md).
 
 ## 2026-11-07 rulings
+
+The owner's rulings of this day, each with his words and where it is now stated.
 
 ### The db is the source of truth; a disk edit imports only when asked
 
@@ -566,6 +576,8 @@ A fixed tree gets a new digest; a red stuck at a digest that cannot move is a ga
 
 ## 2026-11-06 rulings
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### A well-scoped task is done without asking
 
 "If you have a well scoped task please do it without asking". Stated in AGENTS.md §2 and [sessions](sessions.md#asking-the-owner).
@@ -636,6 +648,8 @@ Superseded on the message by 2026-11-08, a reply is its text and its calls; the 
 
 ## 2026-11-05 rulings
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### Look around before building; no page of doctrine
 
 "There is no ONE WAY, just fucking look around and don't rebuild shit that we've already built." "Don't just act think and plan". Stated in AGENTS.md §1.
@@ -665,6 +679,8 @@ Superseded on the message by 2026-11-08, a reply is its text and its calls; the 
 "Nothing should require N^2 because we are progressively building things if we aren't then again it's the wrong design." Stated in [data modeling](data-modeling.md).
 
 ## 2026-11-04 rulings
+
+The owner's rulings of this day, each with his words and where it is now stated.
 
 ### No parallel systems (owner, 2026-11-04)
 
@@ -716,6 +732,8 @@ Replaced on 2026-11-05: the render is an eval, and what changed is another.
 
 ## 2026-11-03 rulings
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### A bug is a class: remove what allowed it (owner, 2026-11-03)
 
 "Always be suspicious about bugs. Usually fixing them directly is the wrong solution. Root cause and see if we should be doing something that eliminates the bug class." Stated in AGENTS.md §3, the method, step 4.
@@ -725,6 +743,8 @@ Replaced on 2026-11-05: the render is an eval, and what changed is another.
 "Oh yeah contracts don't count against anything as long as you do it through the optimal interface and we aren't checking it multiple times for no reason."
 
 ## 2026-11-01 rulings
+
+The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Benefits are general; nothing leads an agent to its answer
 
@@ -740,6 +760,8 @@ Replaced on 2026-11-05: the render is an eval, and what changed is another.
 
 ## 2026-10-31 rulings
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### A test shows its claim, not a smaller copy of its old input
 
 "question what is being tested rather than how fast can we make it. Algoirthmic improvements often can be found by rethinking the problem."
@@ -749,6 +771,8 @@ Replaced on 2026-11-05: the render is an eval, and what changed is another.
 "merge and file".
 
 ## 2026-10-30 rulings
+
+The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Limits fail loudly
 
@@ -791,6 +815,8 @@ Approved: a changed part sends `clojure.data/diff` of its value; a cited var at 
 "I'm okay with adding constraints to the system to simplify the solutions"; "I want all correctness issues solved with our test suite. We need to trust it as much as possible." Stated in [the plan](plan.md#now).
 
 ## 2026-10-29 rulings
+
+The owner's rulings of this day, each with his words and where it is now stated.
 
 ### A link the owner is given survives a restart
 
@@ -906,6 +932,8 @@ He chose V2b: about -210 MB a root, every eval error unchanged. Task seon.main/t
 
 ## 2026-10-28 rulings
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### An eval's result is data with Clojure's value
 
 "Okay match clojure for the eval output (4)". One form per call is superseded by 2026-10-29.
@@ -959,6 +987,8 @@ He chose V2b: about -210 MB a root, every eval error unchanged. Task seon.main/t
 "Yes, erase it outright with no archive copy."
 
 ## 2026-10-27 day rulings
+
+The owner's rulings of this day, each with his words and where it is now stated.
 
 ### An inventory before a plan
 
@@ -1022,6 +1052,8 @@ Stated in AGENTS.md §3 and [merging](merging.md#a-branch-proves-its-in-process-
 
 ## 2026-10-26 night rulings
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### A request is one whole task by default (owner, 2026-10-26 night)
 
 He chose one whole task over design-build and merge; design-build and stages stay experiment choices. Stated in [the plan](plan.md).
@@ -1063,6 +1095,8 @@ He chose one whole task over design-build and merge; design-build and stages sta
 Each old branch is read for anything not carried forward, which is filed; then it is deleted.
 
 ## 2026-10-25 rulings
+
+The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Message delivery: compare, then the better design or the simple one
 
@@ -1169,6 +1203,8 @@ The provider's roles stay: system, user, assistant, tool.
 "The agents context and the users context are always live." Its replay is superseded (2026-11-06).
 
 ### Owner answers, 2026-10-26
+
+The owner's answers to that day's questions.
 
 1. The joint ctx/UI design is built when it follows the rulings ("yes").
 2. The $30 paid budget continues ("yes").
@@ -1279,6 +1315,8 @@ Root is an agent on main, the dead merge path is deleted, root's work is tasks o
 
 ## 2026-10-24 rulings
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### A failed model call keeps what it sent and its typed error
 
 "Approve :seon.turn/error." Now `:seon.model-call/error`. Stated in [turn](turn.md#the-turn-is-a-number).
@@ -1316,6 +1354,8 @@ Root is an agent on main, the dead merge path is deleted, root's work is tasks o
 "Yes in terms of content, but I would like it styled and clear to read." Stated in [the debug page](render.md#the-debug-page-is-the-wire-request).
 
 ## Tonight's rulings (2026-10-23, with the 2026-10-21/22 rulings they rest on)
+
+The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Learn from earlier work, then write it clean; remove a worktree once it holds nothing unsaved
 
@@ -1467,6 +1507,8 @@ Quote not recorded.
 
 ## 2026-10-22
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### Root runs autonomously while there is good work
 
 "I am authorizing you to run autonomously as long as you have good work to work on". Stated in AGENTS.md §2.
@@ -1536,6 +1578,8 @@ Quote not recorded. Stated in [source](source.md#an-agent-changes-code-at-its-re
 "Don't run agents if we know that we have serious problems with our context or the task instructions or its functionality with auto running the tests." Stated in AGENTS.md §8.
 
 ## 2026-10-21
+
+The owner's rulings of this day, each with his words and where it is now stated.
 
 ### No locks, no cap on worktree sessions, no waiting
 
@@ -1635,6 +1679,8 @@ Root's ruling, not the owner's; replaced by his of 2026-11-11, a sync merges eve
 
 ## 2026-10-20
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### Estimates are proofs on tasks
 
 "How long should something really take." Stated in AGENTS.md §5 and [cost](cost.md).
@@ -1693,11 +1739,15 @@ Quote not recorded. Stated in AGENTS.md §4 and [tasks](tasks.md).
 
 ## Open: does this still stand?
 
+The owner's rulings of this day, each with his words and where it is now stated.
+
 ### Each agent is a proc in its own Flow graph, or agents are procs of the one root graph
 
 "the agent is its own process so having the flow controls be directly hooked up seems like it's ideal." Left to measurement; which stands?
 
 ## Open owner questions (pending rulings; the plan's blockers are also in plan.md)
+
+Questions still waiting on the owner; THE PLAN's blockers are in [plan](plan.md).
 
 - D6 names for the merge model: `:seon.task/carry`, `:seon.task/source`, `:seon.task/target`, `:seon.merge/kept`, `:seon.tx/changed`.
 - D7 task config: keep the config keys as top-level task attributes or a real `:seon.task/config` attribute.
