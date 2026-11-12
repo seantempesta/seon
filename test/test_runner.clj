@@ -787,6 +787,22 @@
         (contract/error :seon.fx/io-error #'test-runner/base-program
                         (str "the base's program store " path " keeps no branch " b ": the base's program schema or importer is not this code's") {:path path}))))
 
+(defn unestimated
+  "The tests of program db that state no estimate (a test var with no :seon.test/estimate fact), each {:test :ns :ticks}, its
+  ticks the median its newest greens spent (seon.fx/typical-ticks; nil when it has none), costliest first: the list each area
+  states estimates from, worked from what each test must do (plans: tests-spent-ticks). A report, never a gate or a budget.
+  See docs/merging.md#a-tests-tick-budget."
+  {:malli/schema [:=> [:cat :seon.host/db] [:vector [:map [:test :qualified-symbol] [:ns :symbol] [:ticks [:maybe :int]]]]]}
+  [db]
+  (let [ts (vec (sort (d/q '[:find [?n ...] :where [?v :var/meta :test] [?v :var/name ?n] (not [?v :seon.test/estimate _])] db)))
+        ;; the repository's verdict cache (the main tree's target/results, bin/env's SEON_RESULTS_DIR), never the one this
+        ;; process was given: bin/check gives each of its runs a fresh private cache, and health as a prove's check step read
+        ;; no green there and wrote every tick nil (2026-11-13)
+        main (str/trim (:out (lib/sh "git" "-C" (str (config/checkout)) "rev-parse" "--path-format=absolute" "--git-common-dir")))
+        ticks (fx/typical-ticks (str (.getParent (io/file main)) "/target/results") ts)]
+    (vec (sort-by (juxt #(- (or (:ticks %) -1)) (comp str :test))
+                  (for [t ts] {:test t :ns (symbol (namespace t)) :ticks (get ticks t)})))))
+
 (defn- health!
   "The health step (docs/health.md#checks-are-callers-of-seon): what this checkout caused since its
   base (seon.fx/base-commit), branch-health of classes. The head is the working tree's program db, kept in the
@@ -818,6 +834,13 @@
             open (reduce + 0 (for [c (or (seq classes) (sort problems/caused-classes))] (get-in h [:classes c :n] 0)))]
         (doseq [r caused] (println (name (:class r)) (:message r)))
         (doseq [r attention] (println "attention" (name (:class r)) (:message r)))
+        ;; every test that states no estimate, costliest first: its count and top ten here, the whole list in
+        ;; target/unestimated-tests.edn for each area to state its estimates from (a report, no gate)
+        (when-not refused
+          (let [u (unestimated head)]
+            (write! (str root "/target/unestimated-tests.edn") (str "[" (apply str (map #(str (sedn/encode %) "\n") u)) "]\n"))
+            (println (str "unestimated " (count u) " tests state no estimate (target/unestimated-tests.edn); the costliest:"))
+            (doseq [{:keys [test ticks]} (take 10 u)] (println "  " test (or ticks "no green")))))
         (println (pr-str {:base base :caused (count caused) :attention (count attention) :open-in-head open :checks checks}))
         (let [ok (and (not refused) (every? val checks))]
           (println (if ok "HEALTH OK" "HEALTH FAILED"))
