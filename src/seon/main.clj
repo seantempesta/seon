@@ -116,12 +116,16 @@
   "bin/prove --root PORT's client: asks the root on port to prove checkout's files (the server's :prove with :checkout, its tree
   id and :stream), prints each test's verdict as it lands (verdict-line), and ends on PROVE OK (0) when the answer names no red,
   else PROVE FAILED (1) after the reds or the typed error that ended it (seon.server/ask-streamed). Answers the exit status.
-  See docs/merging.md#a-session-proves-through-root."
+  With --merge first, mode main: every key with no green at its digest, judged against no base, as bin/prove --merge plans a
+  tree; so a system whose main is not the repository's (a worktree's own, proving a branch that changes the prover) proves the
+  whole tree, not what differs from its own main. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :int :string [:sequential :string]] :int]}
-  [port checkout names]
-  (let [tree (seon.fx/tree-id checkout)
-        _ (out! "prove: asking root on port " port " for tree " tree)
-        r (seon.server/ask-streamed port (cond-> {:op :prove :checkout checkout :tree tree :mode "judge" :stream true}
+  [port checkout args]
+  (let [merge? (= "--merge" (first args))
+        names (if merge? (rest args) args)
+        tree (seon.fx/tree-id checkout)
+        _ (out! "prove: asking root on port " port " for tree " tree (when merge? ", every key with no green at its digest"))
+        r (seon.server/ask-streamed port (cond-> {:op :prove :checkout checkout :tree tree :mode (if merge? "main" "judge") :stream true}
                                            (seq names) (assoc :names (vec names)))
                                     #(case (:type %)
                                        :prove-verdict (out! (verdict-line %))

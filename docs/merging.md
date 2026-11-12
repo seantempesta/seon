@@ -115,6 +115,8 @@ The process tests, check steps, build and seed are items of the same run (```seo
 
 The client prints each verdict as it lands (`PASS`, `RED` with failures, `NO-VERDICT` with why) and ends on `PROVE OK` or `PROVE FAILED`, or the typed error that ended it (no root on the port; `:seon.server/unanswered` at the connection's end). The answer carries every verdict (```seon.server-test/a-streamed-prove-writes-every-verdict-its-answer-names```). In-process verdicts run the tree's code loaded over the system's binary (```seon.program/load-diff!```), so a tree that changes a baked file (a schema resource, the shipped config) is named in the answer's `:baked` (```seon.system/baked-paths```) and those verdicts read main's bake.
 
+A branch that changes the prover itself cannot be proved by the standing system, which runs main's prover: it is proved through a system running its own code (`bin/system start` in its worktree) with `bin/prove --root PORT --merge` (```seon.main/prove-client```): mode `:main`, every key with no green at its digest, against no base, since that system's main is the branch. Green, it writes the tree's marker, and `bin/land` lands on it.
+
 ## A branch proves its in-process tests, main's batch runs the process tests once
 
 A branch proves everything its change reaches, process tests included, with one bare `bin/prove` at its tip. A tip that holds main and proved green lands with nothing run on main; a tip one merge behind merges main and proves again, reusing every green at its digest. Main is never re-verified for work a branch already proved.
