@@ -650,6 +650,8 @@
         budget (fn [v] (when ticks (if-let [e (:ticks (:seon.test/estimate (meta v)))] (min ticks (* 10 e)) ticks)))
         one (fn [v]
               (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v))
+                   ;; root's interrupt (a ThreadDeath, seon.intr) stops the run that holds this test: it passes
+                   (catch ThreadDeath e (throw e))
                    (catch Throwable e
                      (if-let [spent (:jolt/ticks-spent (ex-data e))]
                        (t/do-report {:type :error :var v :seon.error/type :seon.test/ticks-spent :ticks spent :budget (budget v)
@@ -730,6 +732,7 @@
                                                                (let [r (assoc r :test v :digest (digests v) :reused true)]
                                                                  (vswap! ran assoc v r) (note! r) true)))))
                                        nil
+                                       (catch ThreadDeath e (throw e))
                                        (catch Throwable e e)))
                          unreported (for [tst ts :when (not (@ran tst))]
                                       (let [msg (if thrown (str n "'s run threw before this test reported: " (ex-message thrown))

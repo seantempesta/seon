@@ -3488,7 +3488,7 @@
 (defn interrupted-view
   "A component whose run is interrupted."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db]]]] :any]}
-  [_] (throw (ex-info "interrupted" {:interrupted true})))
+  [_] (throw (ThreadDeath.)))
 
 (defn interrupted-layout
   "A layout whose only component is interrupted while it draws."
@@ -3552,7 +3552,7 @@
          (is (= [] (r/take-defects! w)) "taken once")
          (finally (r/dispose-walk! w))))
   (let [w (r/walker {:ref (seon.ratom/atom {}) :changes seon.ctx/changes} (constantly (ts/test-db)) [#'interrupted-layout {}])]
-    (try (is (:interrupted (try (r/flush! w nil) nil (catch Throwable e (ex-data e)))))
+    (try (is (instance? ThreadDeath (try (r/flush! w nil) nil (catch Throwable e e))) "an interrupt passes the render's edge, as root's interrupt is raised (seon.intr)")
          (is (= [] (r/take-defects! w)))
          (finally (r/dispose-walk! w)))))
 

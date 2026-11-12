@@ -108,9 +108,9 @@
     ;; it (a walk's: the error drawn by its render and recorded as a component's defect, seon.render/placed-units), and the page around it drawn
     (and (vector? node) (not (keyword? (first node))) (not (symbol? (first node))) (or (fn? (first node)) (var? (first node))))
     (write! sb (try (apply (first node) (rest node))
-                    (catch Throwable e
-                      (when (:interrupted (ex-data e)) (throw e))
-                      (on-throw (first node) e)))
+                    ;; root's interrupt (a ThreadDeath, seon.intr) passes, as any other Error but a stack overflow
+                    (catch Exception e (on-throw (first node) e))
+                    (catch StackOverflowError e (on-throw (first node) e)))
             on-throw)
     ;; an element for the model alone (docs/render.md#a-part-prints-as-its-render) is no part of the page
     (and (vector? node) (map? (second node)) (= "model" (:wire/for (second node)))) nil
