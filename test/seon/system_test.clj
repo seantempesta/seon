@@ -91,6 +91,17 @@
     (is (and (seq (:agents r)) (every? #(and (contains? % :stall-seen) (contains? % :last-frame-ms)) (vals (:agents r)))) "with what its stall check reads")
     (is (some #{:api} (:answered r)) "and the procs that answered, root's api among them")))
 
+(deftest a-kill-is-answered-once-the-agents-end-is-recorded
+  ;; docs/processes.md#the-agent-process: kill! answers the agent's view entry when its end is recorded, so a wait on it ends;
+  ;; a wait on an end event read after a tap could miss it and never end (with-agent's teardown, 300 s, Context 2026-11-12).
+  ;; Red before: kill! answered nil at once, the agent still :killed with no :ended-ms
+  (let [root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str (config/checkout)))])
+        r (ts/value-of (:response (ts/ask root {:op :eval :agent "root"
+                                                :code (str "(let [ag (seon.system/spawn! sys {}) a @(seon.system/kill! sys ag) b @(seon.system/kill! sys ag)]"
+                                                           " [(select-keys a [:status]) (some? (:ended-ms a)) (= a b)"
+                                                           "  (:seon.error/type @(seon.system/kill! sys :no-such-agent))])")})))]
+    (is (= [{:status :killed} true true :seon.system/no-agent] r) (pr-str r))))
+
 (deftest the-sweeper-pool-is-fixed-before-anything-collects
   ;; task seon.system/the-sweeper-pool-is-fixed-before-anything-collects: six threads allocate through 30
   ;; collections in a fresh binary; Chez starts a sweeper per waiting thread and never stops one, so a
