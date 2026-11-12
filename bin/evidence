@@ -3,9 +3,13 @@
 # bound otherwise takes its evidence with it (docs/clocks.md#time-decides-the-owners-exceptions). First, with PORT, the Seon state
 # of the root serving there (seon.system/stall-state, asked of its server: root's stall check and each agent proc's, read-only), in
 # DIR/seon-state.edn; then the tree (ps), each process's sample, its files, and last a fiber dump asked of each Jolt process (kill
-# -INFO, on its stderr, as docs/machine.md#reading-a-hang asks), since that signal can free a hang. Reads only; ends in about 2 s a
+# -INFO, on its stderr, as docs/machine.md#reading-a-hang asks, copied to DIR/dump-PID.txt where that stderr is a file), since
+# that signal can free a hang. Reads only; ends in about 2 s a
 # process (the state's ping waits at most :seon.config.check/ping-ms for a proc mid-step).
 D=$1 ROOTP=$2 PORT=${3:-}
+# PID is a process its caller started: from PID 1 (an orphan's parent) the tree is every process on the machine, each
+# signalled for a dump (it was, once, 2026-11-12)
+[[ $ROOTP == <2-> ]] || { print -u2 "bin/evidence: PID must be a process its caller started, not ${ROOTP:-none}"; exit 2 }
 mkdir -p "$D"
 [[ -n $PORT ]] && print -r -- '{:op :eval :agent "root" :code "(seon.system/stall-state sys)"}' | "${0:h}/ask" "$PORT" > "$D/seon-state.edn" 2>&1
 ps -axo pid,ppid,pgid,etime,%cpu,rss,stat,command > "$D/ps.txt"
@@ -17,10 +21,17 @@ for k in $KIDS; do
   command -v sample >/dev/null && sample $k 1 -file "$D/sample-$k.txt" >/dev/null 2>&1
   lsof -p $k > "$D/lsof-$k.txt" 2>/dev/null
 done
+# the dump goes to each process's own stderr (a step's log, an agent's .err under its runs directory, a test child's pipe):
+# where a regular file holds it, what the dump added is copied to DIR/dump-PID.txt, so the evidence holds every process's
+# fibers whatever its stderr is (data's overran problems step kept samples but no dump, 2026-11-12)
+typeset -A ERR AT
 for k in $KIDS; do
   c=$(ps -o command= -p $k 2>/dev/null)
   [[ $c == *seon* || $c == *jolt* ]] || continue
   [[ $c == *bin/* || $c == *held* || $c == *zsh* || $c == *perl* ]] && continue
+  f=$(lsof -a -p $k -d 2 -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+  [[ -f $f ]] && { ERR[$k]=$f; AT[$k]=$(stat -f %z "$f") }
   kill -INFO $k 2>/dev/null
 done
 sleep 1
+for k in ${(k)ERR}; do tail -c +$(( AT[$k] + 1 )) "${ERR[$k]}" > "$D/dump-$k.txt" 2>/dev/null; done

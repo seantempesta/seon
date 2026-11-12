@@ -690,10 +690,13 @@
  ;; seen is branched from the kept tree with the fewest changed files and brought current by
  ;; seon.source/refresh-tx, so a plan imports the whole program only into an empty store.
  ;; Provenance: owner via root, 2026-10-23 (option B of docs/source.md).
- ;; Every text is read from the tree's git objects, never the working tree. One writer at a time
- ;; (two runs never share a checkout: docs/merging.md#a-worktree-session-works-in-a-checkout-of-its-own). Derived data: deleting it costs one
- ;; import. At the bound: see program-store-max-bytes.
- :seon.config.proofs/program-store #seon/checkout "target/program-store"
+ ;; Every text is read from the tree's git objects, never the working tree. bin/env sets SEON_PROGRAM_STORE to the main
+ ;; tree's target/program-store (git's common dir), so every worktree, the merge gate's checkout and health's base read and
+ ;; write one store: a tree is analyzed once for the repository, its branch keyed by its git tree id (a landing's tree is the
+ ;; next merge's base, and health read it cold in a new checkout, ~58 s, 2026-11-12). LMDB's lock takes the writers; two
+ ;; importers of one tree keep the first (test-runner/keep-tree!). Unset: this checkout's own. Derived data: deleting it costs
+ ;; one import. At the bound: see program-store-max-bytes.
+ :seon.config.proofs/program-store #or [#env SEON_PROGRAM_STORE #seon/checkout "target/program-store"]
  ;; Unit: bytes. The kept program dbs' store on disk (its data.mdb). Measured 2026-10-23: 12 MB
  ;; for the whole program (118 files), about 2 MB more a kept tree that changed a file. At the
  ;; bound: the store is removed before it is opened and starts again from the run's tree (one

@@ -160,6 +160,16 @@
         (is (not (clojure.string/ends-with? a "/nonexistent/git")) (str "a wrong link is replaced: " a))
         (is (= a b) "a right link is left as it is: the same inode, never unlinked under a running spawn")))))
 
+;; docs/source.md#tests-run-by-reach: the kept program store is the repository's, as the verdict cache is: a tree any checkout
+;; analyzed is every checkout's, so health's base after a merge (the landing's tree) is read, not imported again in a new
+;; checkout (~58 s cold, 2026-11-12). bin/env names it in the main tree's target/ from any worktree. Cost: one zsh start, ~0.05 s.
+(deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["git" "zsh"]} the-kept-program-store-is-the-main-trees-for-every-checkout
+  (let [env (str (cfg/checkout) "/bin/env")
+        main (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" (str (cfg/checkout)) "rev-parse" "--path-format=absolute" "--git-common-dir")))
+        main-tree (.getCanonicalPath (.getParentFile (java.io.File. main)))
+        got (clojure.string/trim (:out (clojure.java.shell/sh "env" "-u" "SEON_PROGRAM_STORE" "zsh" "-c" "ROOT=$1 . $2 >/dev/null 2>&1; print -r -- $SEON_PROGRAM_STORE" "x" (str (cfg/checkout)) env)))]
+    (is (= (str main-tree "/target/program-store") got) (str "bin/env names the main tree's store, whatever checkout sources it: " got))))
+
 (deftest a-file-the-program-loads-reads
   ;; docs/source.md#a-program-file: seen 2026-11-07, edamame refused three files Jolt loads (a #() inside a #(), a symbol with two slashes in EDN), so a write-back naming them was refused; the check reads as the loader does
   (is (nil? (fx/unread-text "src/x.clj" "(ns x)\n(def f #(do (g #(h %)) %))\n")) "a fn literal inside one reads, as Jolt's reader loads it")

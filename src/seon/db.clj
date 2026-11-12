@@ -741,13 +741,18 @@
   to :db (datahike.api/delete-branch!; a branch's connections are released first): what a
   check step or a test made for itself, deleted by the run that made it. Real agent runs are
   never deleted this way (DECISIONS, Runs are kept, history and all). Answers the deleted branches;
-  a main the store lacks deletes nothing."
+  a main the store lacks deletes nothing, and a branch another process deleted between the listing and its delete (two test
+  processes reclaiming one dead process's main at once, seon.test-store/reclaim!) is gone already: not this call's, never its error."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] [:vector :seon.db/branch]]}
   [conn main]
   (let [under (mapv #(on-main main %) (of-main main (d/branches conn)))
         bs (cond-> under (branch? conn main) (conj main))]
-    (doseq [b bs] (d/delete-branch! conn b))
-    bs))
+    (into [] (filter (fn [b]
+                       ;; the edge where a branch deleted under this call is answered as gone (docs/failure-points.md)
+                       (try (d/delete-branch! conn b) true
+                            (catch clojure.lang.ExceptionInfo e
+                              (if (= :branch-does-not-exist (:type (ex-data e))) false (throw e))))))
+          bs)))
 
 (defn tree-branch?
   "Whether b names a checkout's proving branch, tree-<its 40-hex tree id> (seon.system/tree-branch): the only branch the system
