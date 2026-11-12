@@ -522,7 +522,7 @@ A fixed tree gets a new digest; a red stuck at a digest that cannot move is a ga
 
 ### Lazy, and dead branches cost nothing
 
-"In general I want hte system to run lazily and only realize and do work that needs to be done at the time it is needed." Stated in [users](users.md#lazy).
+"In general I want hte system to run lazily and only realize and do work that needs to be done at the time it is needed." Stated in [users](users.md#the-merges).
 
 ### Git's words
 

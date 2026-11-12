@@ -26,7 +26,6 @@ The page that says where each capability of v1 Seon stands here.
 
 The pages on the processes that run: root, each agent's fork and the server that answers them.
 
-- [the pull and its renders: the design being built](pull-and-render-design.md): what a page and a request are made of, the renders declared today against the components placed by hand (counted), the data moves that remove them, and the order they ship in.
 - [root](root.md): the control process: the root graph's procs, boot, judging, holders and refused spawns, root causes at quiescence.
 - [reconcile](reconcile.md): how a task holds how its work stands and ended, decided once by root when an agent ends, and the reconciler's index.
 - [processes](processes.md): the fork server and each agent's process: single-threaded, forked from main's db value, one socket to root.
@@ -63,7 +62,7 @@ The pages on how agents change Seon's own program and how a text's references an
 The pages on how work is tasks, how it is checked and how it merges.
 
 - [tasks](tasks.md): all work is tasks linked by `:needs`; a request becomes one task one agent designs, builds and merges (design-build then merge, or design → implement → merge, for experiments), in one transaction, before any agent forks.
-- [Users](users.md): a user is an agent and a session is a branch of its branch; the design, not built yet.
+- [Users](users.md): a user is an agent and a session is a branch of its branch; the entities, messages, root's session and the stages that land the rest.
 - [checks](checks.md): the end-to-end proofs `bin/check` runs, and the task entries `seon.e2e` works.
 - [merging](merging.md): how a branch merges into main: what it runs, how batches are proven, how conflicts are resolved.
 - [machine](machine.md): the machine Seon is built on and for, and the rules that keep builds, disk and processes bounded.
