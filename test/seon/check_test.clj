@@ -156,7 +156,7 @@
     (is (= [[{:type :probe :tag "one" :got 1}] [{:type :probe :tag "one" :got 2}]]
            (map #(mapv (fn [e] (dissoc e :at-ms)) (:events %)) [o1 o2])))))
 
-(deftest ^{:seon.test/estimate {:ticks 5000000}} every-test-root-starts-through-start-root!
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["git"]} every-test-root-starts-through-start-root!
   ;; read from the program of test/ (the
   ;; compiler's references, not a text search over files), no test var but the helper's one
   ;; launcher runs bin/system or `./seon root` through binary-sh, so every test root names its
