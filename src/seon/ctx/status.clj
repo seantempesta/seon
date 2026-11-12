@@ -251,8 +251,8 @@
         results (into {} (keep (fn [[t {st :status}]] (when (not= :deferred st) [t st]))) vs)
         ;; what the branch did since its merge base is a diff of two commits' trees, and a db as of a t (a past turn past the store's keep, docs/storage.md#collection) has none: it leaves that out
         base (when (:store db) (some->> (:seon.agent/base-commit ag) (d/commit-as-db (:store db))))
-        moved (when base (pm/content-datoms base db #{}))
-        ch (if base (pm/delta-changes base db #{} moved) {})
+        moved (when base (pm/content-datoms base db))
+        ch (if base (pm/delta-changes base db moved) {})
         ;; what caused-split reads differs from the content (sections, names, plans, catches): its own
         ;; attributes' diff, one descent each (seon.problems/caused-datoms), never a scan of the wiki
         split (when base (problems/caused-split base db ch (problems/caused-datoms base db)))

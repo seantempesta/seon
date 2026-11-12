@@ -125,7 +125,7 @@
           ;; main's content mark is base's: only records moved main (docs/storage.md#mains-content-mark)
           (pm/same-content? base main) {}
           (= k held) after
-          :else (let [after (into {} (map (fn [[pk [_ b]]] [pk (hash b)])) (pm/delta-changes base main #{}))]
+          :else (let [after (into {} (map (fn [[pk [_ b]]] [pk (hash b)])) (pm/delta-changes base main))]
                   (swap! state assoc :main-changes {:key k :after after})
                   after))))
 
@@ -137,8 +137,8 @@
   [k] (list 'my.branch/merge-main! {k 'value}))
 
 (defn main-conflicts
-  "The conflicts of branch db with main since their merge base base, as a merge of main would answer them (seon.merge/conflicts
-  of the two net changes, ours the branch's), each with the form that settles it (:seon.merge/resolve, resolving-form): a judgment run on the db state, never stored. Held keyed by the three points it is a function of, as
+  "The conflicts of branch db with main since their merge base base, as a merge of main would answer them (seon.merge/plan's,
+  ours the branch's), each with the form that settles it (:seon.merge/resolve, resolving-form): a judgment run on the db state, never stored. Held keyed by the three points it is a function of, as
   main-changes is, the newest on the state (:main-conflicts), so a reader that finds them current reads it with no diff; a db
   with no commit (a run-ahead value) is never held. [] when main is at base. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db [:maybe :seon.host/db]] [:vector :seon.merge/data-conflict]]}
@@ -149,7 +149,7 @@
           {held :key cs :conflicts} (:main-conflicts @state)]
       (if (= k held)
         cs
-        (let [cs (mapv #(assoc % :seon.merge/resolve (resolving-form (pm/conflict-key %))) (pm/conflicts (pm/net-change base db) (pm/net-change base main)))]
+        (let [cs (mapv #(assoc % :seon.merge/resolve (resolving-form (pm/conflict-key %))) (:conflicts (pm/plan base db main)))]
           (when (every? (comp some? first) k) (swap! state assoc :main-conflicts {:key k :conflicts cs}))
           cs)))))
 
@@ -557,17 +557,12 @@
                :else [:db/add e a v]))))
 
 (defn merge-main!
-  "git merge main into this agent's branch, in this process (it owns the branch's writes), as the one merge does
-  (seon.merge/plan from their merge base, onto this branch, from main): main's transactions since the base, each replayed
-  whole as its own transaction of the branch naming who wrote it (seon.merge/apply-groups!), then one transaction of the
-  branch's own writing resolutions ({key value}, the conflicts' keys: resolution-tx), then the merge's own transaction
-  (main's commit its merge parent, :seon.tx/merged main, the agent's :seon.agent/base-commit), one commit or none; the
-  changed definitions load here. After it the merge base is that main commit and the branch holds everything it holds.
-  A conflict no resolution settles, or a transaction the branch's write check refuses, writes nothing and is the answer: the
-  typed refusal the writer's merge gives (seon.merge/refusal: :seon.merge/conflict-refused, :seon.merge/replay-refused), or
-  the write check's own error for the branch's own write, with :ok false. A resolution's entity is its id or a lookup ref.
-  Answers {:ok :applied [main's transactions written] :resolved :t}. See docs/decisions.md, 'A
-  merge replays the source's transactions on the branch that receives it'."
+  "git merge main into this agent's branch, in this process (it owns the branch's writes), by the one merge (seon.merge/plan,
+  seon.merge/apply-groups!): main's transactions since the base, then one of the branch's own writing resolutions ({key value},
+  resolution-tx; an entity by its id or a lookup ref), then the merge's own (main's commit its parent, :seon.tx/merged main, the
+  agent's :seon.agent/base-commit), one commit or none; the changed definitions load here. A refusal writes nothing and is the
+  answer with :ok false (seon.merge/refusal, or the write check's own error for the branch's own write). Answers {:ok :applied
+  :resolved :t}. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat :map] [:map [:ok :boolean]]]}
   [resolutions]
   (commit!)
@@ -854,7 +849,7 @@
   (let [{w-base :base w-at :point ch :changes} (:branch-changes @state)]
     (cond (nil? base) {}
           (and ch (d/commit-id db) (d/commit-id base) (= [(d/commit-id base) (:max-tx base)] w-base) (= [(d/commit-id db) (:max-tx db)] w-at)) ch
-          :else (let [ch (pm/delta-changes base db #{})]
+          :else (let [ch (pm/delta-changes base db)]
                   (swap! state assoc :branch-changes {:base (pdb/point base) :point (pdb/point db) :changes ch})
                   ch))))
 

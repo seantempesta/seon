@@ -337,7 +337,7 @@
                gate (first (:results (ask {:op :octopus-merge :branches [ab]})))
                db (db-of [(decl "a")] :extra (work "a" :running))
                judged (judgment-of db "a" {:end {:outcome :green} :results {(t "a") :pass} :uncontracted (set (:uncontracted diff))})]
-           (is (= #{'app.gaps/u} (set (pm/uncontracted (pm/delta-changes base @bc #{})))) "the agent's done check")
+           (is (= #{'app.gaps/u} (set (pm/uncontracted (pm/delta-changes base @bc)))) "the agent's done check")
            (is (= '[app.gaps/u] (:uncontracted diff)) "the writer's diff")
            (is (= [{:reason :contract-gap :symbol 'app.gaps/u}] (:reasons judged)) "root's judge: g is main's gap, fixed on main")
            (is (= :seon.merge/behind (:seon.error/type gate)) "the gate: behind first, its gaps judged once main merges in"))
@@ -1591,7 +1591,7 @@
     (is (= [(assoc conflict :from "demo/a")] (map :evidence (get-in (problems/report judged) [:classes :task-conflict :rows])))
         "root sees it among the problems")
     (testing "main's task plans never put a merge behind: merging merges the program, no task data"
-      (is (empty? (:theirs (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program main #{}))))))))
+      (is (empty? (:theirs (pm/three-way (pm/program base) (pm/program branch) (pm/program main))))))))
 
 (deftest a-waiting-agent-parks-its-task-and-a-message-wakes-it
   ;; design agent-loop sections 1-2 (owner, 2026-10-25: "Always park"): an agent that ends waiting

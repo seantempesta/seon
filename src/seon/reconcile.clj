@@ -847,7 +847,7 @@
       ;; is answered alone
       :octopus-merge (let [bs (mapv #(:branch (:seon.agent/env (task-agent (:idx st) (:task %)))) (:members act))]
                        (one (request (assoc-in st [:flights id :branches] bs) id :octopus-merged
-                                     {:op :write :req {:op :octopus-merge :branches bs :data-attrs #{}}})))
+                                     {:op :write :req {:op :octopus-merge :branches bs}})))
       ;; the merge gate (a change reaching process tests): root's one :gate request, the candidate's files read from its
       ;; branch, then its deferred tests run on a checkout of the merges head with them (seon.fx/run-tests)
       :gate (one (request st id :gated {:op :gate :branch (:branch (:seon.agent/env (task-agent (:idx st) id))) :tests (:tests act)}))

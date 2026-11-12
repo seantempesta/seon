@@ -2302,7 +2302,7 @@
             a (seon.db/eid ours :seon.agent/key "b1/a3")
             st (seon.ctx.status/status ours (:tree (seon.ctx/build (seon.db/index) ours a :b)) {})
             b (d/commit-as-db (:store ours) base)
-            ch (seon.merge/delta-changes b ours #{})]
+            ch (seon.merge/delta-changes b ours)]
         (is (not (contains? st :caused)) "nothing caused")
         (is (= (seon.merge/readiness b ours (d/commit-as-db (:store ours) main)) (:merge st))
             "the merge's readiness, as its own function answers it")

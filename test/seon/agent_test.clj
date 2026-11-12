@@ -1795,7 +1795,7 @@
          (is (< (dec (count before)) (at after)) "and it comes after the turn's reply and evals")
          (as ka remove-held!)
          (let [base (pdb/branch-base conn (:branch cfg) (pdb/on-main (:branch cfg) :msg-a)) head (heads ka) main @conn
-               r (pm/delta-three-way base head main #{})]
+               r (pm/delta-three-way base head main)]
            (is (empty? (:ours r)) "merged up, the branch has no change of its own from the message")
            (d/merge-db conn #{(pdb/on-main (:branch cfg) :msg-a)} [] (pdb/tx-meta (:branch cfg))))
          (as ka #(do (is (= [] (agent/undelivered)) "after the merge, held anew: not delivered again")
@@ -3115,8 +3115,8 @@
   ;; merge down, is no conflict at the merge up
   (down-agent
    (fn [{:keys [conn store-conn t k main-b ab]}]
-     ;; main moves a fact only it writes; the agent writes its own
-     (d/transact conn [[:db/add t :task/status :ready]])
+     ;; main moves a fact only it writes, as the writer writes it (naming main); the agent writes its own
+     (d/transact conn {:tx-data [[:db/add t :task/status :ready]] :tx-meta (pdb/tx-meta main-b)})
      (agent/transact! [{:task/name :gen/agents :task/plan "the agent's" :task/status :held}])
      (let [m1 @conn r (agent/merge-main! {})]
        (is (:ok r) (pr-str r))
@@ -3180,16 +3180,16 @@
      (d/transact conn [[:db/add t :task/plan "main's"]])
      (agent/transact! [[:db/add t :task/plan "the branch's"]])
      (agent/commit!)
-     (let [calls (fn [f] (profile/begin!) (let [r (f)] [r (get (into {} (map (juxt :var :calls)) (profile/touched)) 'seon.merge/net-change 0)]))
+     (let [calls (fn [f] (profile/begin!) (let [r (f)] [r (get (into {} (map (juxt :var :calls)) (profile/touched)) 'seon.merge/plan 0)]))
            base (:base @agent/state)
            [cs n1] (calls #(agent/main-conflicts base @store-conn @conn))
            [cs2 n2] (calls #(agent/main-conflicts base @store-conn @conn))
            k [t :task/plan]]
        (is (= [[k "p" "the branch's" "main's"]] (mapv (juxt pm/conflict-key :seon.merge/base :seon.merge/ours :seon.merge/theirs) cs)) (pr-str cs))
        (is (= (list 'my.branch/merge-main! {k 'value}) (:seon.merge/resolve (first cs))) "with the form that settles it")
-       (is (= 2 n1) "the first read diffs each side once")
-       (is (= [cs 0] [cs2 n2]) "a second read with the same three commits diffs nothing")
+       (is (= 1 n1) "the first read plans once")
+       (is (= [cs 0] [cs2 n2]) "a second read with the same three commits plans nothing")
        (d/transact conn [[:db/add t :task/status :ready]])
        (let [[cs3 n3] (calls #(agent/main-conflicts base @store-conn @conn))]
-         (is (= 2 n3) "main moved: read again")
+         (is (= 1 n3) "main moved: read again")
          (is (= (mapv pm/conflict-key cs) (mapv pm/conflict-key cs3))))))))

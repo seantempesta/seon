@@ -417,7 +417,7 @@
           healed (d/db-with older (mapcat #(program/account-diff-tx older %) accounts))]
       (is (= "The file's words." (doc healed 'app.pt-ni)) "a store made before this gains it, on an unchanged file"))
     (let [base (empty-db)
-          r (pm/three-way (pm/program base #{}) (pm/program db1 #{}) (pm/program base #{}))
+          r (pm/three-way (pm/program base) (pm/program db1) (pm/program base))
           main db1]
       (is (= "First words." (doc main 'app.pt-nd)) "merged, with its form"))))
 
@@ -431,7 +431,7 @@
                        'app.pt-mm "(extend-type String Named (label [x] (str \"s:\" x)))"
                        'app.pt-mm "(defrecord Circle [r] Named (label [_] (str \"circle \" r)))"
                        'app.pt-mm "(defmethod area :circle [{:keys [r]}] (* 3 r r))")
-        r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))
+        r (pm/three-way (pm/program base) (pm/program branch) (pm/program base))
         main branch]
     (is (= '#{[:ns app.pt-mm] [:var app.pt-mm/area] [:method app.pt-mm/area ":square"] [:method app.pt-mm/area ":circle"]
               [:var app.pt-mm/Named] [:var app.pt-mm/label] [:impl app.pt-mm/Named "String"]
@@ -447,7 +447,7 @@
   (let [base (empty-db)
         branch (record base 'app.pt-mut "(defn fine [m] (assoc m :intern 1))"
                        'app.pt-mut "(defn sneaky [] (alter-var-root #'app.pt-mut/fine (constantly 3)))")
-        r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))]
+        r (pm/three-way (pm/program base) (pm/program branch) (pm/program base))]
     (is (= [{:ns 'app.pt-mut :defines '[[:var app.pt-mut/sneaky]] :call 'clojure.core/alter-var-root}]
            (mapv #(dissoc % :form) (pm/mutations base (:ours r))))
         "one finding: the definition and the call, from the compiler's resolved reference")
@@ -458,12 +458,12 @@
 (deftest a-def-inside-a-fn-body-is-refused
   (let [base (empty-db)
         branch (record base 'app.pt-inl "(defn setup! [] (def config {:a 1}))")
-        r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))]
+        r (pm/three-way (pm/program base) (pm/program branch) (pm/program base))]
     (is (= [{:ns 'app.pt-inl :defines '[[:var app.pt-inl/setup!]] :inline-def 'app.pt-inl/config}]
            (mapv #(dissoc % :form) (pm/mutations base (:ours r)))))
-    (is (empty? (pm/mutations base (:ours (pm/three-way (pm/program base #{})
-                                                        (pm/program (record base 'app.pt-inl "(when true (def top-level-ok 1))") #{})
-                                                        (pm/program base #{})))))
+    (is (empty? (pm/mutations base (:ours (pm/three-way (pm/program base)
+                                                        (pm/program (record base 'app.pt-inl "(when true (def top-level-ok 1))"))
+                                                        (pm/program base)))))
         "a definition nested anywhere at a form's top is fine")))
 
 ;; ---- tests run by reach ---------------------------

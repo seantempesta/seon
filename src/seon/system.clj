@@ -650,7 +650,7 @@
               (if-not (and checkout (:branch (:source st)))
                 (reply! st o p (contract/error :seon.system/no-gate-checkout #'seon.system/ext-op "this root has no checkout to run process tests on (:seon.config.source/gate-checkout, or a source root)"))
                 (let [[st rid] (pend st p :gate nil)]
-                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :data-attrs #{} :dest {:gate rid :tests (:tests m) :repo checkout :prio (:prio m 0)}})
+                  (step/out! o :to-writer {:op :merge-candidate :branch (:branch m) :dest {:gate rid :tests (:tests m) :repo checkout :prio (:prio m 0)}})
                   st)))
       ;; the test service (seon.prove): the request goes to its proc, the caller (a session, or an
       ;; agent's turn through its proc) is answered when the run it joined ends

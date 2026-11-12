@@ -129,9 +129,9 @@
 
 (defn on-disk-changes-of
   "seon.merge/delta-changes' arguments on on-disk-diverged-of's stores: main holding n forms, its
-  branch redefining one, no declared data."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:set :keyword]]]}
-  [n] (conj (on-disk-diverged-of n) #{}))
+  branch redefining one."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db]]}
+  [n] (vec (on-disk-diverged-of n)))
 
 (deftest a-turns-diff-reads-what-the-branch-changed
   ;; one diff a turn (root's audit, 2026-10-27: a turn read its base-to-head diff 4-6 times,
@@ -163,10 +163,10 @@
     (finally (release-stores!))))
 
 (defn on-disk-content-of
-  "seon.merge/content-datoms' arguments given a diff, on on-disk-diverged-of's stores: [base head no data
-  attributes, the whole :eavt diff between them], read here, before the measured call."
-  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:set :keyword] [:sequential :seon.host/datom]]]}
-  [n] (let [[base head] (on-disk-diverged-of n)] [base head #{} (apply concat (d/datoms-diff base head :eavt []))]))
+  "seon.merge/content-datoms' arguments given a diff, on on-disk-diverged-of's stores: [base head, the whole :eavt diff
+  between them], read here, before the measured call."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:sequential :seon.host/datom]]]}
+  [n] (let [[base head] (on-disk-diverged-of n)] [base head (apply concat (d/datoms-diff base head :eavt []))]))
 
 (deftest content-datoms-given-a-diff-are-a-filter
   ;; docs/cost.md#a-diff-per-attribute-costs-a-descent-each: given the diff a caller read, no descent is made
@@ -177,7 +177,6 @@
        :work "one filter over the datoms that differ, by attribute; no datoms-diff, so no descent from the roots"
        :growth :constant
        :per-n {}
-       ;; 4 calls since 2026-10-30: seon.merge/content-attr builds the filter's predicate, one contracted call
        :fixed {:ticks 6000.0 :bytes 8000.0 :calls 4}
        :sizes divergence-sizes})
     (finally (release-stores!))))

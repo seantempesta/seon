@@ -1,7 +1,6 @@
 ;; The program merge's named schemas (session M1's proto.merge.edn).
-{:seon.merge/data-attrs [:or [:= :all] [:set :keyword]]
- ;; a definition (var, multimethod method, protocol extension, namespace), a form (the
- ;; unit main evaluates), or a datum of declared data
+{;; a definition (var, multimethod method, protocol extension, namespace), a form (the
+ ;; unit main evaluates), or a stated entity (a section, a schema entry, a config entry, a script)
  :seon.merge/program-key [:or [:tuple [:= :var] :qualified-symbol]
                    [:tuple [:= :method] :qualified-symbol :any]
                    [:tuple [:= :impl] :qualified-symbol :string]
@@ -10,9 +9,7 @@
                    [:tuple [:= :schema] :qualified-keyword]
                    [:tuple [:= :section] :string]
                    [:tuple [:= :config] :qualified-keyword]
-                   [:tuple [:= :script] :string]
-                   [:tuple [:= :datum] :int :keyword]
-                   [:tuple [:= :datum] :int :keyword :any]]
+                   [:tuple [:= :script] :string]]
  ;; a definition's key: what a form defines
  :seon.merge/def-key [:or [:tuple [:= :var] :qualified-symbol]
                       [:tuple [:= :method] :qualified-symbol :string]

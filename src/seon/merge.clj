@@ -18,10 +18,6 @@
   - `[:config k]` -> an entry of the config file ({:form text :file path}, its value's exact text; seon.source);
   - `[:script path]` -> a script, a file of the program with one entry, its whole text
     ({:file path :text text :mode mode}; seon.source);
-  - `[:datum e a]` (cardinality one) / `[:datum e a v]` (many) -> a value of a data
-    attribute the caller declares (`data-attrs`: a set, or :all for every attribute that
-    is neither program, observation nor merge bookkeeping). Entity ids are store-wide
-    unique, so a data entity keeps its id across branches.
 
   `three-way` compares base, ours and theirs by program key: what a branch's work changed, whether
   main moved under it (the writer's behind), and the dashboard. What a merge writes is the one merge
@@ -40,14 +36,13 @@
 
 (def ^:private stated-keys
   "The program keys one entity's stated attributes hold, by key kind, as data: :id the identity naming the entity, :stated each attribute its content
-  reads and the content key it takes, :needs a content key without which the entity is no program (a scratch schema entry has no file), :carries the attribute
-  namespace outside the program's that rides with it. A section's stated attributes are what a page's text states; the rest (lead, references, names,
+  reads and the content key it takes, :needs a content key without which the entity is no program (a scratch schema entry has no file). A section's stated attributes are what a page's text states; the rest (lead, references, names,
   what it read) the load derives from these, so a change shows in these and a merge reads only them (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
-  {:section {:id :seon.doc/address :carries "seon.doc"
+  {:section {:id :seon.doc/address
              :stated {:seon.doc/address :seon.doc/address :seon.doc/heading :seon.doc/heading :seon.doc/text :seon.doc/text :seon.doc/parent :seon.doc/parent}}
    :schema {:id :schema/key :stated {:schema/form :form :schema/file :file} :needs :file}
-   :config {:id :config/key :carries "config" :stated {:config/form :form :config/file :file} :needs :file}
-   :script {:id :file/path :kind-of #'cfg/file-kind :carries "seon.script" :stated {:file/path :file :file/text :text :file/mode :mode}}})
+   :config {:id :config/key :stated {:config/form :form :config/file :file} :needs :file}
+   :script {:id :file/path :kind-of #'cfg/file-kind :stated {:file/path :file :file/text :text :file/mode :mode}}})
 
 (defn- bears?
   "Whether the entity named v bears key kind, under its row of stated-keys: an identity several kinds share (a file's path) names the kind by the row's :kind-of. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
@@ -57,37 +52,6 @@
 (def ^:private stated-attr?
   "The attributes stated-keys' contents read (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
   (into #{} (mapcat (comp keys :stated)) (vals stated-keys)))
-
-(def ^:private carried-namespace?
-  "The attribute namespaces outside the program's that stated-keys carry (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
-  (into #{} (keep :carries) (vals stated-keys)))
-
-(defn- platform-record? {:malli/schema [:=> [:cat :keyword] :boolean]} [k]
-  (let [n (namespace k)]
-    (and (some? n) (or (= "seon" n) (str/starts-with? n "seon.")) (not (carried-platform-attrs k)))))
-
-(defn- data-attr?
-  "Whether an attribute of db is data that data-attrs (a set, or :all) names, as a predicate:
-  the set itself, or for :all one that asks of an attribute alone whether db's own schema entry
-  gives it a value type, outside the program's namespaces and the platform's records. A merge
-  asks it of the attributes of the datoms that differ, so it costs those, never the schema:
-  d/schema rebuilt the whole schema map on every call, once per db per read."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/data-attrs] ifn?]}
-  [db data-attrs]
-  (if (= :all data-attrs)
-    (let [schema (:schema db)]
-      (fn [a] (boolean (and (keyword? a) (:db/valueType (get schema a))
-                            (not (or (program/attr-namespaces (namespace a)) (stated-attr? a))) (not (platform-record? a))))))
-    data-attrs))
-
-(defn- data-attr-set
-  "The data attributes of db that data-attrs names, as a set: the db's attributes (its attribute
-  index, rschema's :db/ident) that data-attr? holds, for a read of the whole program."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/data-attrs] [:set :keyword]]}
-  [db data-attrs]
-  (if (= :all data-attrs)
-    (into #{} (filter (data-attr? db :all)) (get-in db [:rschema :db/ident]))
-    data-attrs))
 
 (defn- def-content
   "Definition k's content on db, when it points to form row f: the form's id, and its text
@@ -117,23 +81,17 @@
     (when (or (nil? needs) (contains? c needs)) c)))
 
 (defn program
-  "The program of db as {key content}: its live forms, the definitions pointing to them,
-  and the declared data. Cost: the program's forms and definitions, read once."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/data-attrs] :seon.merge/program]}
-  [db data-attrs]
-  (let [schema (d/schema db)
-        forms (program/live-forms db)
+  "The program of db as {key content}: its live forms, the definitions pointing to them and
+  the stated entities. Cost: the program's forms and definitions, read once."
+  {:malli/schema [:=> [:cat :seon.host/db] :seon.merge/program]}
+  [db]
+  (let [forms (program/live-forms db)
         defs (for [f forms k (:defines f)
                    :let [e (program/def-eid db k)]
                    :when (and e (some #(= (:e f) (:db/id (get (d/entity db e) %))) (vals program/pointer)))]
                [k (def-content db k e f)])
-        data (for [a (sort (data-attr-set db data-attrs))
-                   dt (d/datoms db :aevt a)]
-               (if (= :db.cardinality/many (get-in schema [a :db/cardinality]))
-                 [[:datum (:e dt) a (:v dt)] true]
-                 [[:datum (:e dt) a] (:v dt)]))
         stated (for [[kind row] stated-keys dt (d/datoms db :aevt (:id row)) :when (bears? kind row (:v dt)) :let [c (stated-content db row (:e dt))] :when c] [[kind (:v dt)] c])]
-    (into {} (concat (for [f forms] [[:form (:id f)] (dissoc f :e :id)]) defs stated data))))
+    (into {} (concat (for [f forms] [[:form (:id f)] (dissoc f :e :id)]) defs stated))))
 
 (defn- same?
   "Is content a the same as b for key k: a form's place does not make it another form."
@@ -184,9 +142,9 @@
 (defn- entity-keys
   "The program keys entity e bears on db: a form's own and those of the definitions it
   makes (their content holds its text), a definition's own and that of the form it points
-  to (whose liveness it decides), a schema entry's, and e's declared data."
-  {:malli/schema [:=> [:cat :seon.host/db [:set :keyword] :int ifn?] [:set :seon.merge/program-key]]}
-  [db many e data-attrs]
+  to (whose liveness it decides), and a stated entity's (a schema entry's)."
+  {:malli/schema [:=> [:cat :seon.host/db [:set :keyword] :int] [:set :seon.merge/program-key]]}
+  [db many e]
   ;; one seek reads the entity's datoms; an entity that bears no key (a turn's facts, a
   ;; transaction) costs only that seek
   (let [ds (d/datoms db :eavt e)
@@ -201,18 +159,14 @@
     (into #{}
           (concat (when-let [k (form-key x)] (cons k def-key))
                   (when own-def (remove nil? [own-def (pointed (program/pointer (first own-def)))]))
-                  (for [[kind {:keys [id] :as row}] stated-keys :let [v (get x id)] :when (and (some? v) (bears? kind row v))] [kind v])
-                  (for [dt (when-not (= #{} data-attrs) ds) :when (data-attrs (:a dt))]
-                    (if (many (:a dt))
-                      [:datum e (:a dt) (:v dt)]
-                      [:datum e (:a dt)]))))))
+                  (for [[kind {:keys [id] :as row}] stated-keys :let [v (get x id)] :when (and (some? v) (bears? kind row v))] [kind v])))))
 
 (defn- key-content
   "Key k's content on db, as `program` holds it, or nil when db's program lacks k. A form's
   content is its row less where it was read (:source: one form id can be imported on one
   branch and recorded at a REPL on another, the same text)."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key ifn?] :any]}
-  [db [kind a b c :as k] data-attrs]
+  {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] :any]}
+  [db [kind a :as k]]
   (if-let [stated (stated-keys kind)]
     (some->> (pdb/eid db (:id stated) a) (stated-content db stated))
     (case kind
@@ -222,82 +176,54 @@
       (when-let [e (program/def-eid db k)]
         (when-let [f (:db/id (get (d/entity db e) (program/pointer kind)))]
           (let [row (program/form-row db f)]
-            (when (and (program/live? db f) (contains? (:defines row) k)) (def-content db k e row)))))
-      :datum (when (data-attrs b)
-               (if (= 4 (count k))
-                 (when (seq (d/datoms db :eavt a b c)) true)
-                 (:v (first (d/datoms db :eavt a b))))))))
+            (when (and (program/live? db f) (contains? (:defines row) k)) (def-content db k e row))))))))
 
 (defn program-of
   "The part of db's program at keys ks: `program` restricted to them, read key by key."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.merge/program-key] :seon.merge/data-attrs] :seon.merge/program]}
-  [db ks data-attrs]
-  (let [das (data-attr? db data-attrs)]
-    (into {} (for [k ks :let [c (key-content db k das)] :when (some? c)] [k c]))))
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.merge/program-key]] :seon.merge/program]}
+  [db ks]
+  (into {} (for [k ks :let [c (key-content db k)] :when (some? c)] [k c])))
 
-(defn- content-attr
-  "The predicate of an attribute a key's content reads on base or db: the program's (program/attr-namespaces) or declared
-  data (das-b, das-d), never :db/txInstant unless declared data, which every transaction asserts and no key's content reads (a
-  transaction's entity bears no key: reading it cost a descent and two seeks a transaction, 87 of them for
-  a branch of 18 evals). One contracted call a merge; the predicate is asked of each attribute (1,771 of them when main
-  only embedded) with no contract of its own."
-  {:malli/schema [:=> [:cat ifn? ifn?] :seon.host/fn]}
-  [das-b das-d]
-  (fn [a] (and (keyword? a) (boolean (or (and (not= :db/txInstant a) (or (program/attr-namespaces (namespace a)) (stated-attr? a))) (das-b a) (das-d a))))))
+(def ^:private content-attr?
+  "Is a an attribute a key's content reads: the program's (program/attr-namespaces) or a stated one, never :db/txInstant,
+  which every transaction asserts and no key's content reads (a transaction's entity bears no key: reading it cost a descent
+  and two seeks a transaction, 87 of them for a branch of 18 evals). A predicate asked of each attribute (1,771 of them when main
+  only embedded), so no contracted call of its own (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
+  (fn [a] (boolean (and (keyword? a) (not= :db/txInstant a) (or (program/attr-namespaces (namespace a)) (stated-attr? a))))))
 
 (defn touched-by
   "The program keys whose content may differ between base and db, given moved, the datoms that differ
   between them (what datahike.api/datoms-diff answers, joined; a caller that holds them reads
   nothing again): the keys borne, on base or on db, by each entity of a moved datom whose attribute is one a
-  key's content reads (the program's, program/attr-namespaces, or declared data, data-attr?), never a platform
-  record such as an embedding."
-  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs :seon.merge/moved] [:set :seon.merge/program-key]]}
-  [base db data-attrs moved]
-  (let [read (fn [db] (let [das (data-attr? db data-attrs)]
-                        [db (get-in db [:rschema :db.cardinality/many] #{}) das
-                         (fn [a] (or (program/attr-namespaces (namespace a)) (stated-attr? a) (das a)))]))
-        b (read base) d (read db)
-        content-attr? (content-attr (nth b 2) (nth d 2))
-        content? (fn [{:keys [a]}] (content-attr? a))]
-    (into #{} (for [e (into #{} (comp (filter content?) (map :e)) moved)
-                    [side many das] [b d]
-                    k (entity-keys side many e das)]
-                k))))
+  key's content reads (content-attr?), never a platform record such as an embedding."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/moved] [:set :seon.merge/program-key]]}
+  [base db moved]
+  (into #{} (for [e (into #{} (comp (filter (comp content-attr? :a)) (map :e)) moved)
+                  side [base db]
+                  k (entity-keys side (get-in side [:rschema :db.cardinality/many] #{}) e)]
+              k)))
 
 (defn content-datoms
-  "The datoms that differ between base and db in the attributes a key's content reads (the
-  program's, program/attr-namespaces, or declared data, data-attr?), what `touched-by` takes as
-  moved: for data-attrs a set, one datahike.api/datoms-diff :aevt range per such attribute, so the
-  platform's records are never walked (a whole :eavt diff read every datom that differs, the
-  22,000 embedding datoms of a main that embedded after an agent forked: 313M ticks and 640 MB for
-  no key); for :all (every attribute the store declares) the one :eavt diff. Cost: a set, one
-  descent per content attribute and the datoms of those that differ; :all, the datoms that differ.
-  Given diff, the datoms that differ in any attributes that a caller read already (one :eavt diff),
-  none is read: the content ones among them, one filter. Read once, a vector, so every reader it
-  is passed to reads the same datoms
+  "The datoms that differ between base and db in the attributes a key's content reads (content-attr?), what `touched-by` takes
+  as moved: one datahike.api/datoms-diff :aevt range per such attribute, so the platform's records are never walked (a whole
+  :eavt diff read every datom that differs, the 22,000 embedding datoms of a main that embedded after an agent forked: 313M
+  ticks and 640 MB for no key). Given diff, the datoms that differ that a caller read already, none is read: the content ones
+  among them, one filter. Read once, a vector, so every reader it is passed to reads the same datoms
   (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program, docs/cost.md#a-diff-per-attribute-costs-a-descent-each)."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] [:vector :seon.host/datom]]
-                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs [:sequential :seon.host/datom]] [:vector :seon.host/datom]]]}
-  ([base db data-attrs]
-   (if (= :all data-attrs)
-     (into [] cat (d/datoms-diff base db :eavt []))
-     (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)]
-       (into [] (mapcat (fn [a] (apply concat (d/datoms-diff base db :aevt [a]))))
-             (filter (content-attr das-b das-d) (set (concat (keys (:schema base)) (keys (:schema db)))))))))
-  ([base db data-attrs diff]
-   (if (= :all data-attrs)
-     (vec diff)
-     (let [das-b (data-attr? base data-attrs) das-d (data-attr? db data-attrs)]
-       (into [] (filter (comp (content-attr das-b das-d) :a)) diff)))))
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.host/datom]]
+                  [:=> [:cat :seon.host/db :seon.host/db [:sequential :seon.host/datom]] [:vector :seon.host/datom]]]}
+  ([base db]
+   (into [] (mapcat (fn [a] (apply concat (d/datoms-diff base db :aevt [a]))))
+         (filter content-attr? (set (concat (keys (:schema base)) (keys (:schema db)))))))
+  ([base db diff] (into [] (filter (comp content-attr? :a)) diff)))
 
 (defn moves-content?
   "Whether a commit's resolved ops move main's content: a datom of an attribute a program key's content reads with no
-  declared data (`content-attr`), or of task content a branch carries (carried-platform-attrs). What the writer marks
+  (`content-attr?`), or of task content a branch carries (carried-platform-attrs). What the writer marks
   main's commits by (docs/storage.md#mains-content-mark). Cost: the ops, one predicate each."
   {:malli/schema [:=> [:cat :seon.db/resolved-tx] :boolean]}
   [ops]
-  (let [content? (content-attr #{} #{})]
-    (boolean (some (fn [[_ _ a]] (or (content? a) (contains? carried-platform-attrs a))) ops))))
+  (boolean (some (fn [[_ _ a]] (or (content-attr? a) (contains? carried-platform-attrs a))) ops)))
 
 (defn same-content?
   "Whether a and b, two dbs of main, hold the same content, read from main's content mark (:seon.system/content-t on its root
@@ -316,26 +242,26 @@
   two entity reads when the mark answers; else one descent per content attribute, shared subtrees skipped."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db] :uuid]}
   [held main]
-  (d/commit-id (if (and held (or (same-content? held main) (empty? (content-datoms held main #{})))) held main)))
+  (d/commit-id (if (and held (or (same-content? held main) (empty? (content-datoms held main)))) held main)))
 
 (defn touched-keys
   "Every program key whose content may differ between base and any of dbs (`touched-by`, over
   the datoms that differ in the attributes a key's content reads: `content-datoms`). Cost: those
   datoms and one descent per such attribute, not the program and not what else main wrote."
-  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db] :seon.merge/data-attrs] [:set :seon.merge/program-key]]}
-  [base dbs data-attrs]
-  (into #{} (mapcat (fn [db] (touched-by base db data-attrs (content-datoms base db data-attrs)))) dbs))
+  {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db]] [:set :seon.merge/program-key]]}
+  [base dbs]
+  (into #{} (mapcat (fn [db] (touched-by base db (content-datoms base db)))) dbs))
 
 (defn delta-three-way
   "`three-way` of base, ours and theirs read only where they differ (touched-keys): the
   same answer, at the cost of what changed on each side since base, not of the program. With ours-moved, the datoms that differ
   between base and ours (`content-datoms`, which a caller already read), ours is not diffed again."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/result]
-                  [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/data-attrs :seon.merge/moved] :seon.merge/result]]}
-  ([base ours theirs data-attrs] (delta-three-way base ours theirs data-attrs (content-datoms base ours data-attrs)))
-  ([base ours theirs data-attrs ours-moved]
-   (let [ks (vec (into (touched-by base ours data-attrs ours-moved) (touched-keys base [theirs] data-attrs)))]
-     (three-way (program-of base ks data-attrs) (program-of ours ks data-attrs) (program-of theirs ks data-attrs)))))
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :seon.merge/result]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/moved] :seon.merge/result]]}
+  ([base ours theirs] (delta-three-way base ours theirs (content-datoms base ours)))
+  ([base ours theirs ours-moved]
+   (let [ks (vec (into (touched-by base ours ours-moved) (touched-keys base [theirs])))]
+     (three-way (program-of base ks) (program-of ours ks) (program-of theirs ks)))))
 
 (defn readiness
   "Whether branch db ours can merge into main theirs now, as a merge of main would find it, read
@@ -345,20 +271,20 @@
   With ours-moved, the datoms that differ between base and ours (`content-datoms`), ours is not diffed again."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :seon.merge/readiness]
                   [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/moved] :seon.merge/readiness]]}
-  ([base ours theirs] (readiness base ours theirs (content-datoms base ours #{})))
+  ([base ours theirs] (readiness base ours theirs (content-datoms base ours)))
   ([base ours theirs ours-moved]
-   (let [r (delta-three-way base ours theirs #{} ours-moved)]
+   (let [r (delta-three-way base ours theirs ours-moved)]
      {:main-moved (vec (sort-by str (keys (:theirs r)))) :conflicts (vec (sort-by str (map :key (:conflicts r))))})))
 
 (defn delta-changes
   "`changes` from db from to db to, read only where they differ (touched-keys); with moved, the datoms that
   differ (which a caller already read), nothing is diffed again."
-  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs] :seon.merge/changes]
-                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/data-attrs :seon.merge/moved] :seon.merge/changes]]}
-  ([from to data-attrs] (delta-changes from to data-attrs (content-datoms from to data-attrs)))
-  ([from to data-attrs moved]
-   (let [ks (vec (touched-by from to data-attrs moved))]
-     (changes (program-of from ks data-attrs) (program-of to ks data-attrs)))))
+  {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] :seon.merge/changes]
+                  [:=> [:cat :seon.host/db :seon.host/db :seon.merge/moved] :seon.merge/changes]]}
+  ([from to] (delta-changes from to (content-datoms from to)))
+  ([from to moved]
+   (let [ks (vec (touched-by from to moved))]
+     (changes (program-of from ks) (program-of to ks)))))
 
 (defn divergence
   "What a branch's changes ch (delta-changes from its merge base, read once a turn:
