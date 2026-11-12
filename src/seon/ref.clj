@@ -467,14 +467,17 @@
           (assoc c :seon.ref/path (str (when (str/starts-with? joined "/") "/") (str/join "/" parts))))))))
 
 (defn- trim-word
-  "A text word without the punctuation around it (a var's #' before it), or nil when nothing is left."
+  "A text word without the punctuation around it (a var's #' before it), or nil when nothing is left. A qualified name's own
+  trailing ! or ? stays (seon.repl/edit!, my.task/done?): Clojure names end in them, and a text word cites only what it names."
   {:malli/schema [:=> [:cat :string] [:maybe :string]]}
   [^String word]
   (let [n (count word)
         from (loop [i 0] (cond (and (< (inc i) n) (= \# (.charAt word i)) (= \' (.charAt word (inc i)))) (recur (+ i 2))
                                (and (< i n) (str/index-of "([{\"'`*_<" (str (.charAt word i)))) (recur (inc i))
                                :else i))
-        to (loop [j n] (if (and (> j from) (str/index-of ".,;:!?)]}\"'`*_>" (str (.charAt word (dec j))))) (recur (dec j)) j))]
+        ;; past a qualified name's / a ! or ? is the name's (a run of them ends in its own)
+        tail (if (str/index-of word "/") ".,;:)]}\"'`*_>" ".,;:!?)]}\"'`*_>")
+        to (loop [j n] (if (and (> j from) (str/index-of tail (str (.charAt word (dec j))))) (recur (dec j)) j))]
     (when (< from to) (subs word from to))))
 
 (defn- candidate

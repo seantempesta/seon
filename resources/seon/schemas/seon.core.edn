@@ -91,6 +91,8 @@
                            [:seon.repl/held-by {:optional true} :seon.repl/held-by]]]
  :seon.repl/held-by [:vector {:description "The definitions of a namespace whose recorded source holds an edit's old text, which its ns form, the namespace's place, does not (seon.repl/ns-not-found)."} :qualified-symbol]
  :seon.repl/said [:string {:description "The sentence an edit's refusal ends with when its namespace's ns form lacks the old text: the edit on the definition that holds it, or how a new definition is made (seon.repl/ns-not-found)."}]
+ :seon.repl/finding [:keyword {:description "What one warning of an eval's answer (:seon.repl/answer's :warnings) is about: :uncontracted-definition, :invalid-contract, :not-program, :program-def, :unknown-var. seon.repl/response makes each from what the eval's middleware noted on its forms' replies (seon.repl/wrap-record: :not-program, :seon.repl/program-def, :unknown-vars; seon.repl/wrap-instrument: :instrumented), with its fix."}]
+ :seon.repl/fix [:string {:description "How to fix a finding, beside it in its warning (:seon.repl/finding): a sentence, or the form that does it, ready to evaluate. The model reads it in the eval's printed answer (seon.render/result-text). Made by seon.repl/response; a finding's text is the middleware's note it reads (seon.repl/wrap-record's :not-program)."}]
  :seon.repl/program-def [:vector {:description "The vars an eval made new in a program namespace: said beside its answer as program on the branch (seon.repl's :program-def finding)."} :symbol]
  ;; where a text is and what it holds, plain data any function working on text takes (docs/agent.md#changing-a-file): at, a var or a path or a doc's address
  :seon.text/at [:or :qualified-symbol :string]
