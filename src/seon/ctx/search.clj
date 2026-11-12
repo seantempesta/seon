@@ -315,14 +315,16 @@
         minimum (or minimum (cfg/value :seon.config.render/relevance-summary))
         text (str q)
         in-ns? (fn [[kind n]] (or (not (#{:var :test} kind)) (nil? prefix) (doc/named-under? (str n) prefix)))
-        toks (if (by :text) (filterv #(in-ns? [(:kind %) (:name %)]) (doc/tokens db text kinds (cfg/value :seon.config.render/search-token-z))) [])
-        known (into {} (map (fn [h] [[(:kind h) (:name h)] (select-keys h [:in :z])])) toks)
         n (* k (cfg/value :seon.config.render/related-near))
+        ;; the rows each ranking reads, text and meaning alike: the larger of the n this ranking reads and the pool relevance
+        ;; reads; ranks past it add nothing a fused ranking shows, so the text search names no more (seon.doc/tokens' limit)
+        reads (max n (cfg/value :seon.config.render/relevance-pool))
+        toks (if (by :text) (filterv #(in-ns? [(:kind %) (:name %)]) (doc/tokens db text kinds (cfg/value :seon.config.render/search-token-z) reads)) [])
+        known (into {} (map (fn [h] [[(:kind h) (:name h)] (select-keys h [:in :z])])) toks)
         ;; each kind's nearest, scanned once (near takes one attribute) to the larger of the n this ranking reads and
         ;; the pool relevance reads, which it is handed
         nears (when (and (by :meaning) qv)
-                (let [m (max n (cfg/value :seon.config.render/relevance-pool))]
-                  (into {} (for [attr (sort (distinct (map kind-attr kinds)))] [attr (vector/near db qv m {:of attr})]))))
+                (into {} (for [attr (sort (distinct (map kind-attr kinds)))] [attr (vector/near db qv reads {:of attr})])))
         ;; one ranking by meaning: each kind's first n nearest, merged by cosine, which one query's scores share
         meaning (if nears
                   (into [] (comp (mapcat (fn [[e _]] (hit-of db e kinds))) (filter in-ns?) (distinct))
