@@ -618,12 +618,6 @@
  ;; machine: its cores (#seon/cores; a forked test child is 16-35 MB of its own and about a core while it runs). At the
  ;; bound: an item waits in the queue for a running one to end.
  :seon.config.proofs/max-workers #seon/cores nil
- ;; Unit: workers. What an item that boots a root takes of max-workers while it runs (seon.prove/root-item?: a process test's
- ;; batch, its test root with its fork server and agents; a check step on the binary; a build or a seed), so the processes in
- ;; flight stay near the cores (AGENTS.md §3a.7). Measured 2026-11-12: 18 such items at once were 51 roots at load 46 on 18
- ;; cores, about 3 processes an item. At the bound: such an item waits for its workers to be free (one is granted with
- ;; nothing running).
- :seon.config.proofs/root-item-workers 3
  ;; Unit: a share of :seon.config.machine/cores in (0,1] (rounded down, at least 1); a count of items is max-workers. Unset:
  ;; no core bound. At the bound: as max-workers; the least of the two set holds.
  ;; :seon.config.proofs/max-cores 0.5
