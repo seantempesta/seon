@@ -2105,6 +2105,23 @@
     (is (string? started-by) "and who to tell how it ends")
     (is (re-find #"no template" (str (:seon.error/message (:value b)))) "a template that isn't one says so")))
 
+(deftest a-wait-on-main-whose-test-throws-answers-the-throw-and-the-write-stands
+  ;; docs/flow.md#the-step-fn-contract-every-proc-follows: a wait on main (seon.system/await-db) is the api's state, checked on each
+  ;; commit as of that commit, never a watch run inside the writer's commit. A watch's pred that threw went into the writer's
+  ;; reset! inside commit-batch: the stored commit was taken for a failed one (refused, then retried), and the wait was never
+  ;; answered (bin/check problems overran at its wait on the stall, web's land and runtime's, 2026-11-12). Red before: the
+  ;; write answered refused (and the wait never ends: a hang is this test's red)
+  (with-agent {}
+    (fn [{:keys [eval-root]}]
+      (let [ev (comp root-value eval-root)
+            text (str "await-throws-" (random-uuid))
+            r (ev (str "(let [p (future (seon.system/await-db sys (fn [db] (when (datahike.api/q '[:find ?e . :in $ ?t :where [?e :note/text ?t]] db " (pr-str text) ")"
+                       "                                                  (throw (ex-info \"the wait's test threw\" {}))))))"
+                       "      w @(seon.system/transact-main! sys [{:note/text " (pr-str text) " :note/agent :t}])]"
+                       "  (if (:ok w) [:written (:seon.error/message @p)] [:refused w]))"))]
+        (is (= [:written] (take 1 r)) (str "the write stands: " (pr-str r)))
+        (is (re-find #"the wait's test threw" (str (second r))) (str "and the wait answers the throw: " (pr-str r)))))))
+
 (def ^:private not-running
   "Root-REPL code: a function true of the outcomes a task's work stands at once its agent's end is judged and it waits on nothing of
   root's (not nil, :running, :ready or :gate: a merge follows those)."

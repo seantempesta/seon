@@ -13,7 +13,9 @@
 {:procs
  {:api {:proc seon.system/api-proc
         ;; room for every answer the writer can owe while the api is not reading
-        :chan-opts {:from-writer {:buf-or-n :bind/api-from-writer-buf}}
+        :chan-opts {:from-writer {:buf-or-n :bind/api-from-writer-buf}
+                    ;; every commit, in order: each wait on main (seon.system/await-db) is checked as of it
+                    :main {:buf-or-n :bind/reconciler-buf}}
         :args {:view :bind/view :ext :bind/ext :back :bind/back :graph :bind/graph
                :system :bind/system :conn :bind/conn :stall-ms :bind/stall-ms
                :to-writer :bind/to-writer :events :bind/events :boot :bind/boot :source :bind/source}}
@@ -91,6 +93,7 @@
   [[:reconciler :to-api] [:api :from-writer]]
   [[:api :to-reconciler] [:reconciler :wake]]
   [[:writer :main] [:reconciler :main]]
+  [[:writer :main] [:api :main]]
   [[:writer :main] [:prove :main]]
   [[:writer :main] [:vectors :main]]
   [[:writer :main] [:render :main]]
