@@ -270,10 +270,9 @@
   {:malli/schema [:=> [:cat :seon.host/fn [:sequential :any]] :seon.cost/dims]}
   [f args]
   (let [g0 (:count (lib/gc-stats))
-        m (volatile! nil)
-        _ (profile/measure! #(apply f args) #(vreset! m %))
-        gcs (- (:count (lib/gc-stats)) g0)
-        {:keys [ticks bytes cpu-ns calls]} @m]
+        {:keys [ticks bytes cpu-ns calls thrown]} (profile/measure! #(apply f args))
+        _ (when thrown (throw thrown))
+        gcs (- (:count (lib/gc-stats)) g0)]
     (cond-> {:ticks (double (max 0 (- ticks (* tick-allowance gcs)))) :ns (double cpu-ns) :bytes (double bytes)}
       contract/on? (assoc :calls (double calls)))))
 

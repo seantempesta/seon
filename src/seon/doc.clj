@@ -386,16 +386,18 @@
   point: an old file that does not read."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] :map] :map]}
   [db plan {:keys [sections files errors]}]
-  (let [cache (volatile! {})
-        ids-at (fn [sha file nsym]
-                 (or (@cache [sha file])
-                     (let [text (get files [sha file])
-                           r (cond (get errors [sha file]) {:error (str file " at " (subs sha 0 8) " could not be read from git: " (get errors [sha file]))}
-                                   (nil? text) {:ids {}}
-                                   :else (try {:ids (source/defining-ids nsym text) :meanings (source/defining-meanings nsym text) :text text :ns nsym}
-                                              (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (step/error-msg e))})))]
-                       (vswap! cache assoc [sha file] r)
-                       r)))
+  (let [read-file (fn [sha file nsym]
+                    (let [text (get files [sha file])]
+                      (cond (get errors [sha file]) {:error (str file " at " (subs sha 0 8) " could not be read from git: " (get errors [sha file]))}
+                            (nil? text) {:ids {}}
+                            :else (try {:ids (source/defining-ids nsym text) :meanings (source/defining-meanings nsym text) :text text :ns nsym}
+                                       (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (step/error-msg e))})))))
+        ;; each old file the plan reads, read once: a map built before the walk, so no cell is filled on the way
+        reads (reduce (fn [m [k args]] (if (contains? m k) m (assoc m k (apply read-file args)))) {}
+                      (for [{:keys [address] :as r} plan :let [sha (:commit (get sections address))] :when sha
+                            [_ {:keys [file ns]}] (:files r)]
+                        [[sha file] [sha file ns]]))
+        ids-at (fn [sha file _] (get reads [sha file]))
         ;; what a var's form today says of it, read as the old file is (the same reader, both sides as written)
         meaning-now (fn [n] (when-let [f (some->> (pdb/eid db :var/name n) (d/entity db) :var/form)]
                               (get (source/defining-meanings (:ns/name (:form/ns f)) (:form/src f)) n)))]
@@ -755,32 +757,31 @@
   word scoring 0). Only the texts with z >= z-min are answered, each with :in, where its text is, from which `line-of`
   reads its line for a hit that is shown. Cost: the index (built once a change of the store, not a query), one FTS5
   query, and per hit its names; the one text ranking of
-  my.agent/search (relevance's pool is `bm25`). See docs/vector.md#search."
-  {:malli/schema [:=> [:cat :seon.host/db :string [:set :keyword] :double] [:vector :map]]}
-  [db s kinds z-min]
+  my.agent/search (relevance's pool is `bm25`). Given limit, the best limit texts: a caller that reads k asks k, and the
+  rest are never named. See docs/vector.md#search."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string [:set :keyword] :double] [:vector :map]]
+                  [:=> [:cat :seon.host/db :string [:set :keyword] :double [:maybe pos-int?]] [:vector :map]]]}
+  ([db s kinds z-min] (tokens db s kinds z-min nil))
+  ([db s kinds z-min limit]
   (let [ws (words s)
         numbers (attr-numbers kinds)
-        [n rows] (when (and (seq ws) (seq numbers))
-                   (with-index db (fn [ix] [(reduce + (map #(get (sqlite/counts ix) % 0) numbers))
-                                            (sqlite/fts-match ix (match-query ws) numbers)])))]
-    (if (or (empty? ws) (zero? (or n 0)))
+        ;; the moments, the z filter and the order are SQLite's (seon.sqlite/fts-ranked): only the hits cross
+        rows (when (and (seq ws) (seq numbers))
+               (with-index db (fn [ix] (let [n (reduce + (map #(get (sqlite/counts ix) % 0) numbers))]
+                                         (when (pos? n) (sqlite/fts-ranked ix (match-query ws) numbers n (double z-min) limit))))))
+        [_ _ _ mu m2] (first rows)
+        sd (when mu (Math/sqrt (max 0.0 (- m2 (* mu mu)))))]
+    (if (or (empty? rows) (zero? sd))
       []
-      (let [scored (for [[e a score] rows] {:e e :a (index-attrs a) :score score})
-            sum (reduce + (map :score scored))
-            sumsq (reduce + (map #(* (:score %) (:score %)) scored))
-            mean (/ sum n)
-            sd (Math/sqrt (max 0.0 (- (/ sumsq n) (* mean mean))))]
-        (if (zero? sd)
-          []
-          (let [hits (for [d scored :let [z (/ (- (:score d) mean) sd)] :when (>= z z-min)
-                           h (named-hits db (:e d) (:a d) kinds)]
-                       ;; where its text is, [e a]: its line is read for the hits a caller shows (`line-of`), never for every hit
-                       (assoc h :z z :bm25 (:score d) :in [(:e d) (:a d)]))]
-            ;; each sort key made once, never in the comparator
-            (->> (vec hits) (map-indexed (fn [i h] [(- (:z h)) (str (:name h)) i h])) (sort-by pop) (map peek)
-                 (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out h)])))
-                         [#{} []])
-                 second)))))))
+      (let [hits (for [[e a score] rows :let [a (index-attrs a) z (/ (- score mu) sd)]
+                       h (named-hits db e a kinds)]
+                   ;; where its text is, [e a]: its line is read for the hits a caller shows (`line-of`), never for every hit
+                   (assoc h :z z :bm25 score :in [e a]))]
+        ;; each sort key made once, never in the comparator
+        (->> (vec hits) (map-indexed (fn [i h] [(- (:z h)) (str (:name h)) i h])) (sort-by pop) (map peek)
+             (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out h)])))
+                     [#{} []])
+             second))))))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#resolving-and-showing):

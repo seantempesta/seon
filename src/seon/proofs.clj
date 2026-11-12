@@ -527,6 +527,20 @@
   {:malli/schema [:=> [:cat :map :any] :boolean]}
   [rd k] (contains? (:seon.proofs/covers rd) (if (vector? k) (first k) :var)))
 
+(defn warm-fixtures!
+  "Force every loaded var marked ^:seon.test/fixture (a delay a test realizes on first use: the test store, ~65M ticks to seed),
+  so no test pays it inside its own budget: an agent before its first test fork (its forks inherit it made), a bin/test shard
+  before its first test when one of its tests reaches a fixture (test-runner/shard!). Answers how many it forced. See
+  docs/merging.md#a-test-child-is-a-fork-of-a-live-agent."
+  {:malli/schema [:function [:=> [:cat] nat-int?] [:=> [:cat [:set :keyword]] nat-int?]]}
+  ([] (warm-fixtures! #{:seon.test/fixture}))
+  ([types]
+   ;; types: the fixture types to force: an agent the store's (:seon.test/fixture), a shard also its shared root's
+   ;; (:seon.test/shard-fixture), never booted inside an agent
+   (let [vs (for [n (all-ns) [_ v] (ns-interns n) :when (some #(get (meta v) %) types)] v)]
+     (doseq [v vs] (force @v))
+     (count vs))))
+
 (defn reads-reusable
   "The tests of index (graph-index's: {test {:process? ...}}) whose green may be reused by what it recorded it read: every one
   but those that reach a process of their own. Such a test's run records what its own process called, never what the agent or
@@ -661,10 +675,10 @@
                        (throw e)))))
         ;; a test whose run threw past its budget is not done: it stays unreported (run-tests!)
         ;; read before the next test's measure opens its epoch: the test's own contracted calls
-        measured (fn [v] (let [m (volatile! nil)]
-                           (profile/reads-begin!)
-                           (profile/measure! #(one v) #(vreset! m %))
-                           (done v (assoc @m :fns (profile/with-reads (profile/touched)) :budget (budget v)))))
+        measured (fn [v] (let [_ (profile/reads-begin!)
+                               m (profile/measure! #(one v))]
+                           (done v (assoc (dissoc m :value :thrown) :fns (profile/with-reads (profile/touched)) :budget (budget v)))
+                           (when-let [e (:thrown m)] (throw e))))
         body #((t/join-fixtures (get @t/once-fixtures n []))
                (fn [] (doseq [v vars :when (and (:test (meta v)) (not (skip? v)))] (each (fn [] (measured v))))))]
     (if ticks

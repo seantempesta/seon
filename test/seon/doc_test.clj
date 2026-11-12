@@ -574,3 +574,29 @@
         other (doto (Thread. ^Runnable (fn [] (dotimes [_ 200] (read db-a)) (deliver p :done))) (.start))
         mine (do (dotimes [_ 200] (read db-b)) :done)]
     (is (= [:done :done] [mine @p]) "each reader's reads all answered")))
+
+;; docs/vector.md#search: a ranked text search costs its hits, never the texts it matches: the mean and spread of the scores, the
+;; z filter and the order are SQLite's, so only the texts at z-min or above cross into the process. Measured 2026-11-12 on main:
+;; the plan of one task matched 8,181 of 8,538 texts, every row read into the process, 75M ticks a search. Estimate: one FTS5
+;; query (native) and per hit its names, about 20k ticks a hit; a world whose every text matches costs the same at 40 texts and 320
+(deftest ^{:seon.test/estimate {:ticks 25000000}} a-ranked-search-costs-its-hits
+  (let [world (fn [n] (mt/with (mt/world)
+                               (mt/code 'app.hits (apply str "(ns app.hits)\n" "(defn rare \"needle needle needle needle haystack\" [] 0)\n"
+                                                         (for [i (range n)] (str "(defn f" i " \"haystack " i "\" [] " i ")\n"))))))
+        cost (fn [n] (let [db (world n)] (doc/tokens db "needle haystack" #{:var} 2.0)
+                       (:ticks (mt/cost #(doc/tokens db "needle haystack" #{:var} 2.0)))))
+        small (cost 40) big (cost 320)]
+    (is (= ['app.hits/rare] (mapv :name (filter #(= "app.hits" (namespace (:name %))) (doc/tokens (world 40) "needle haystack" #{:var} 2.0))))
+        "the text far above the rest is the hit")
+    (is (< big (* 2 small)) (str "eight times the matching texts, not twice the work: " small " at 40, " big " at 320"))))
+
+;; docs/vector.md#search: a ranked search asked for its best k answers them, the k a caller reads (seon.ctx.search/search: the
+;; larger of the rows its meaning ranking reads and its relevance pool), and they are the first k of every hit: ranks past k
+;; add nothing a fused ranking shows. A plan of 48 words kept 328 hits at z 2.0, each named and sorted (main, 2026-11-12)
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-ranked-search-answers-its-best-k
+  (let [db (mt/with (mt/world)
+                    (mt/code 'app.k (apply str "(ns app.k)\n" (for [i (range 30)] (str "(defn f" i " \"" (apply str (repeat (inc (mod i 7)) "needle ")) "haystack\" [] " i ")\n")))))
+        all (doc/tokens db "needle haystack" #{:var} 0.5)
+        best (doc/tokens db "needle haystack" #{:var} 0.5 5)]
+    (is (< 5 (count all)) "more hits than asked for")
+    (is (= (take 5 (map :name all)) (map :name best)) "the best five, in order")))

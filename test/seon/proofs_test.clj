@@ -55,7 +55,7 @@
     (store! dir ran)
     (assoc p :cand cand :ran ran)))
 
-(deftest an-unchanged-tree-runs-nothing-and-reuses-everything
+(deftest ^{:seon.test/estimate {:ticks 10000000}} an-unchanged-tree-runs-nothing-and-reuses-everything
   (with-dir (fn [dir]
   (let [db (schema (prog) :app.pv-calc/n "int?")
         first-run (prove! nil db "e" dir)
@@ -67,7 +67,7 @@
     (is (= (:cand first-run) (:cand second-run)) "the digests are the tree's, not the run's")
     (is (= {} (stored dir {})) "a branch holding no test reads no greens (an agent died on (vals {}), nil)")))))
 
-(deftest a-one-defn-change-runs-only-what-reaches-it
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-one-defn-change-runs-only-what-reaches-it
   (with-dir (fn [dir]
   (let [db (schema (prog) :app.pv-calc/n "int?")
         base (:cand (prove! nil db "e" dir))
@@ -81,7 +81,7 @@
         (is (= '[app.pv-calc-test/add-test app.pv-neg-test/neg-test] (:selected p)))
         (is (= [] (:run p)) "both are green at their digests now")))))))
 
-(deftest a-macro-schema-or-config-change-widens-the-selection
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-macro-schema-or-config-change-widens-the-selection
   (with-dir (fn [dir]
   (let [db (schema (prog) :app.pv-calc/n "int?")
         base (:cand (prove! nil db "e" dir))
@@ -93,7 +93,7 @@
     (is (= (sort-by str ts) (run-of db "e2"))
         "deps or a pin changed (:env, the inputs with no program facts): every test runs")))))
 
-(deftest a-check-step-is-keyed-by-what-its-function-reaches
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-check-step-is-keyed-by-what-its-function-reaches
   (let [db (record (prog) 'user "(ns app.pv-check (:require [app.pv-calc :as c]))"
                    'app.pv-check "(defn smoke [] (c/add 1 2))" 'app.pv-check "(defn idle [] (c/neg 1))")
         roots {"smoke" '[app.pv-check/smoke] "idle" '[app.pv-check/idle]}
@@ -127,7 +127,7 @@
       (is (= {} (ts/reach-digests db {:env "e" :tree "t" :config {}} {"gone" '[app.pv-check/renamed]})))
       (is (= ["smoke"] (:missing (proofs/step-digests (fn [roots] (dissoc (zipmap (keys roots) (map str (keys roots))) "smoke")) {:env "e" :tree "t" :config {} :base "b"})))))))
 
-(deftest each-pure-contract-is-a-key-of-the-generative-check
+(deftest ^{:seon.test/estimate {:ticks 20000000}} each-pure-contract-is-a-key-of-the-generative-check
   ;; owner, 2026-10-29: the contract check is per function, keyed by digest like a test. A pure
   ;; contracted function's key is its reach (its form, what it calls, the schemas its contract
   ;; names); a change re-checks only the contracts it reaches (docs/checks.md#the-generative-check-is-per-function)
@@ -182,7 +182,7 @@
           (is (= 3 (count (mapcat (comp keys second) dealt))))
           (is (= #{"mg/a" "mg/b" "mg/c"} (set (keys (second (second dealt))))) "the lighter shard takes them: t3's has 1 ms of tests"))))))
 
-(deftest a-run-that-names-nothing-leaves-out-what-reaches-a-process
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-run-that-names-nothing-leaves-out-what-reaches-a-process
   ;; owner, 2026-10-23: tests shouldn't be running agent turns, not automatically at least. A
   ;; step (or test) whose function reaches a process var (a fork, an agent, a root booted for it:
   ;; seon.program/process-vars) is classified by the one walk and left out of a run that names
@@ -221,7 +221,7 @@
           (is (= 0 (calls 'seon.program/reach-graph)) "the plan built no reach graph: the two before it stored one in the program store")
           (is (= 1 (calls 'seon.program/reach-update)) "and brought the stored one to the tree once: one graph serves both indexes"))))))
 
-(deftest shards-split-by-namespace-and-each-result-is-stored
+(deftest ^{:seon.test/estimate {:ticks 10000000}} shards-split-by-namespace-and-each-result-is-stored
   (record (ts/test-db) 'user "(ns app.pv-red-test (:require [clojure.test :refer [deftest is use-fixtures]]))"
           'app.pv-red-test "(def ^:dynamic *fx* nil)"
           'app.pv-red-test "(use-fixtures :each (fn [f] (binding [*fx* :on] (f))))"
@@ -269,7 +269,7 @@
     (is (some #(and (:reused %) (= 'app.pv-calc-test/twice-test (:test %))) @notes) "and told as it is reused, as a run's result is as it ends")
     (is (proofs/green? (ran 'app.pv-calc-test/add-test)))))
 
-(deftest a-refused-commit-or-a-throwing-fixture-is-recorded-red
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-refused-commit-or-a-throwing-fixture-is-recorded-red
   ;; review 2026-10-22: a write's declared error was dropped (read as stored), and a fixture's
   ;; throw went only to printed output with a guessed message; the store's refused write is
   ;; :seon.proofs/unrecorded, never read as recorded
@@ -294,7 +294,7 @@
     (is (re-find #"the fixture's store is gone" (:message t)) "the throw's own message, not a guess")
     (is (= "{:store :gone}" (:data t)) "and its data")))
 
-(deftest each-test-has-its-own-budget
+(deftest ^{:seon.test/estimate {:ticks 10000000}} each-test-has-its-own-budget
   ;; task seon.proofs/one-prove-path: the bound is per test, so a test that never ends is red,
   ;; named, as the typed :seon.test/ticks-spent, and the run goes on: the next test is green,
   ;; and each result says the ticks it did
@@ -334,7 +334,7 @@
     (is (= 50000000 (:budget (ran 'app.pv-own-budget-test/estimated-over-the-cap))) "and never past the cap")
     (is (= 50000000 (:budget (ran 'app.pv-own-budget-test/stated-none))) "a test that states none runs under the cap")))
 
-(deftest shards-are-dealt-by-measured-work
+(deftest ^{:seon.test/estimate {:ticks 100000}} shards-are-dealt-by-measured-work
   ;; pure-tests 2026-10-23: dealt by count, the full run's shards ended 437, 397, 110 and 68 s
   ;; into it; by each test's last measured ms they end together
   (is (= '#{[x/a] [y/b y/c z/d]} (set (proofs/shards '[x/a y/b y/c z/d] 2 '{x/a 10 y/b 3 y/c 3 z/d 3})))
@@ -343,7 +343,7 @@
       "a namespace over half a shard's share is split into parts of at most that")
   (is (= 2 (count (proofs/shards '[x/a y/b y/c] 2 '{x/a 10}))) "a test never measured counts as the mean of those measured"))
 
-(deftest a-test-s-weight-in-the-deal-is-its-median-ms-not-its-largest
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-test-s-weight-in-the-deal-is-its-median-ms-not-its-largest
   ;; 2026-10-29: a merge's 217 tests were dealt by the largest ms any verdict measured; one 17 s test
   ;; once measured 625 s in a hung run, so a shard ended at 62 s beside three at 640-746 s
   ;; (docs/merging.md#a-merge-runs-what-the-change-reaches)
@@ -364,7 +364,7 @@
         cand' (into cand (for [k moved] [k (str (cand k) "'")]))]
     [cand cand' (into {} (for [[_ dg] cand] [dg {:pass 1 :fail 0 :error 0}])) #{}]))
 
-(deftest selection-is-proportional-to-what-changed
+(deftest ^{:seon.test/estimate {:ticks 1000000}} selection-is-proportional-to-what-changed
   (let [[base cand found] (plan-input 1000)]
     (is (= 10 (count (:run (proofs/plan base cand found #{})))) "1000 keys, 10 moved: 10 run"))
   (cost/proof
@@ -398,7 +398,7 @@
   "[{var calls} of the contracted functions thunk called, and thunk's answer]."
   [thunk] (profile/begin!) (let [r (thunk)] [(into {} (map (juxt :var :calls)) (profile/touched)) r]))
 
-(deftest a-failed-import-leaves-no-branch
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-failed-import-leaves-no-branch
   ;; task seon.proofs/a-failed-import-leaves-no-branch: an import that threw left its tree's branch
   ;; behind, and every later plan of that tree read the partial program: 0 tests, and TEST OK
   ;; (a merge's conflict markers, 2026-10-25). Now the branch exists only once the import committed
@@ -426,7 +426,7 @@
       (is (= '[app.fi-empty-test] (:no-test p)) "a test namespace the program db holds no test of is named, never left as an empty OK"))
     (finally (close-stores! store)))))
 
-(deftest two-runs-share-a-new-trees-branch
+(deftest ^{:seon.test/estimate {:ticks 25000000}} two-runs-share-a-new-trees-branch
   ;; docs/source.md: two prove processes on a tree neither had seen both
   ;; found its branch absent and both made it; Datahike refused the second ("Branch already exists",
   ;; 2026-10-29). The second run's step is run here after the first's, with the absence it had
@@ -447,19 +447,19 @@
     (is (contains? (:digests (runner/plan-of d "tests" false nil store)) 'app.tr-calc-test/adds) "a plan reads it")
     (finally (d/release conn) (close-stores! store)))))
 
-(deftest a-process-plans-on-more-scratch-stores-than-its-undo-entries
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-process-plans-on-more-scratch-stores-than-its-undo-entries
   ;; docs/failure-points.md#lmdb-crash-safety: a test's own store ends with the test (program-db keeps its
   ;; branch's connection, so close-stores! closes it), and a process plans on any number of stores in turn.
   ;; No system-wide limit stands behind the count any more (docs/failure-points.md#lmdb-locks: no semaphore),
-  ;; so eleven passes with or without the close: task seon.proofs/the-scratch-stores-proof-has-a-mutation
-  ;; (each store made costs ~20 M ticks, its seed)
+  ;; so two stores in turn show the claim at the smallest n (eleven was the old semaphore's count: 220M ticks of the same
+  ;; proof); each store made costs ~20 M ticks, its seed. Its mutation is still owed: task seon.proofs/the-scratch-stores-proof-has-a-mutation
   (let [d (checkout! {"deps.edn" "{}" "src/app/ps_calc.clj" "(ns app.ps-calc)\n(defn add [a b] (+ a b))\n"
                       "test/app/ps_calc_test.clj" "(ns app.ps-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest adds (is true))\n"})
-        planned (vec (for [_ (range 11)
+        planned (vec (for [_ (range 2)
                            :let [store (str (scratch-dir) "/store")]]
                        (try (contains? (:digests (runner/plan-of d "tests" false nil store)) 'app.ps-calc-test/adds)
                             (finally (close-stores! store)))))]
-    (is (= (repeat 11 true) planned) "eleven stores in turn, each planned")))
+    (is (= (repeat 2 true) planned) "two stores in turn, each planned")))
 
 (deftest a-plan-reads-the-kept-program-db-of-its-tree
   ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: the program db is a function of the
@@ -529,7 +529,7 @@
            (finally (d/release conn))))
     [d store]))
 
-(deftest a-kept-tree-costs-its-lookup-not-its-program
+(deftest ^{:seon.test/estimate {:ticks 80000000}} a-kept-tree-costs-its-lookup-not-its-program
   ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: an unchanged tree's program db is its kept branch, never its
   ;; program; a one-file change costs that file (seon.source/refresh-tx's proofs in seon.source-test). What grows is the
   ;; branches the store holds: Deep fixes measured 35.4k ticks, 102 KB and 3 konserve reads a branch (2026-11-10, notes
@@ -550,7 +550,7 @@
 
 ;; ---- every verdict is kept: a digest green and red is flaky (red, never reused as green, never run)
 
-(deftest a-digest-green-and-red-is-flaky-red-and-never-runs
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-digest-green-and-red-is-flaky-red-and-never-runs
   ;; the merge-cost proof was red once and green on its next run at one digest: with one verdict
   ;; kept per digest the red was gone, and the green reused
   (with-dir
@@ -580,7 +580,7 @@
          (is (= {:recorded 0} (store! dir {'app.f-test/u (assoc red :digest "d-unreported" :unreported true)}))
              "a test that never reported (its namespace's run threw first) has no verdict to keep"))))))
 
-(deftest a-test-whose-child-died-has-no-verdict
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-test-whose-child-died-has-no-verdict
   ;; root, 2026-10-27 (THE PLAN 0.7, the blind agent's run): a test the run's child died in
   ;; (seon.agent/test-run-answer's report with its :exit) was an :error result, so the judge held
   ;; a task whose change never reached it as a stray red. A death is no verdict: the test has no
@@ -593,7 +593,7 @@
     (is (= '{a.b-test/ok :pass a.b-test/red :fail} (proofs/results run)))))
 
 
-(deftest a-gates-verdict-is-a-fact-at-the-digest-it-deferred
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-gates-verdict-is-a-fact-at-the-digest-it-deferred
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a process test the gate judged holds that verdict at its digest; a later run that defers it
   ;; there leaves it, one whose digest moved defers it again; one the run never reached is no pass
   (let [t 'app.f-test/t u 'app.f-test/u
@@ -614,7 +614,7 @@
         (is (= [] (proofs/result-tx held {} {} {} {t "d1"} #{t})) "at the same digest its verdict stands")
         (is (= :deferred (:seon.test/status (first (proofs/result-tx held {} {} {} {t "d2"} #{t})))) "a moved digest is unjudged")))))
 
-(deftest a-run-records-a-few-facts-and-a-run-that-changes-nothing-records-none
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-run-records-a-few-facts-and-a-run-that-changes-nothing-records-none
   ;; task seon.proofs/test-results-are-a-few-facts (R2a): seon.proofs/result-tx, what an agent's run
   ;; writes on its branch beside the cache: the digest, status, failing assertions (as data) and running
   ;; sums of each test that ran, and the digest and status of one reused; only what differs; and a test whose
@@ -648,7 +648,7 @@
       (is (= [] (proofs/result-tx {'app.f-test/t held1} {} {} {} at)) "not judged, its digest unchanged: its verdict stands"))))
 
 ;; docs/sharing.md#what-a-branchs-nodes-are: a branch keeps a test's facts only where something reads them
-(deftest a-test-worth-a-fact-is-a-proof-a-red-or-one-held
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-test-worth-a-fact-is-a-proof-a-red-or-one-held
   (let [green {:digest "d" :pass 1 :fail 0 :error 0} red {:digest "d" :pass 0 :fail 1 :error 0}]
     (is (= '{a/proof {:digest "d" :pass 1 :fail 0 :error 0}}
            (proofs/facts-worth-keeping {} '#{a/proof} '{a/proof {:digest "d" :pass 1 :fail 0 :error 0} a/other {:digest "d" :pass 1 :fail 0 :error 0}}))
@@ -660,7 +660,7 @@
     (is (= :red (:seon.test/status (first (proofs/result-tx {} {'a/t (assoc red :ms 1 :ticks 1 :bytes 1)} {} {} {'a/t "d"})))))
     (is (:flaky (proofs/verdict "d" green (assoc red :failures []))) "green and red at one digest are flaky in the cache")))
 
-(deftest a-run-has-the-shards-its-work-is-worth
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-run-has-the-shards-its-work-is-worth
   (let [ts '[a/t a/u a/v a/w]]
     (is (= 1 (proofs/worth-shards ts 4 '{a/t 1000 a/u 1000 a/v 1000 a/w 1000} 30000)) "seconds of work: one")
     (is (= 2 (proofs/worth-shards ts 4 '{a/t 15000 a/u 15000 a/v 15000 a/w 15000} 30000)) "one for each min-ms")
@@ -677,13 +677,13 @@
 
 ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a run takes as many shards as free memory holds, at most the configured
 ;; jobs, never fewer for the load average (bin/test: load counts other sessions' niced work)
-(deftest a-run-takes-the-shards-free-memory-holds
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-run-takes-the-shards-free-memory-holds
   (is (= 4 (proofs/memory-jobs 4 40000 2000 8000)) "memory for many: the configured ceiling")
   (is (= 2 (proofs/memory-jobs 4 12500 2000 8000)) "memory for two above the floor: two")
   (is (= 1 (proofs/memory-jobs 4 7000 2000 8000)) "below the floor: one, never none"))
 
 ;; docs/merging.md#a-slow-test-runs-last: asked only of what would run, out of a plain and a merge's run, in a named or full one
-(deftest a-slow-test-runs-last-unless-named-or-the-full-run
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-slow-test-runs-last-unless-named-or-the-full-run
   (let [asked (atom nil)
         reach {:digests '{a/slow "d1" a/quick "d2" a/green "d3"} :process #{}
                :slow-of (fn [ds] (reset! asked ds) (select-keys '{a/slow 9000 a/green 9000} (keys ds)))}
@@ -696,7 +696,7 @@
     (is (some #{'a/slow} (:run-tests (plan false ["a/slow"]))) "named, it runs")
     (is (some #{'a/slow} (:run-tests (plan true nil))) "and the full run runs it")))
 
-(deftest the-program-a-test-judges-is-its-processs-branch
+(deftest ^{:seon.test/estimate {:ticks 1000000}} the-program-a-test-judges-is-its-processs-branch
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a test that walks the program reads test-runner/program. In a process
   ;; that holds a branch (an agent's test child) that is the branch's db itself: nothing is imported, and the test judges
   ;; the agent's change. Red before: such a test composed program-db of the checkout's tree, so in an agent's prove, where
@@ -707,7 +707,7 @@
          (is (identical? w (test-runner/program)) "the branch's db, as held: no import, and the branch's own program")
          (finally (reset! seon.agent/state before)))))
 
-(deftest a-red-at-bases-digest-or-red-at-base-is-mains
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-red-at-bases-digest-or-red-at-base-is-mains
   ;; docs/tasks.md#the-done-rule: of the reds of a run, those the branch's change did not make
   (let [results {'t/same :error 't/based :fail 't/mine :error 't/new :error 't/ok :pass}
         cand {'t/same "d1" 't/based "d2x" 't/mine "d3x" 't/new "d4" 't/ok "d5x"}
@@ -717,7 +717,7 @@
         "its digest is base's, or base's verdict at it is red; green at base, new on the branch, or passing: the branch's")
     (is (= #{} (proofs/main-red results cand nil {})) "with no base nothing is main's")))
 
-(deftest a-run-runs-a-sample-of-its-reused-greens-again
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-run-runs-a-sample-of-its-reused-greens-again
   ;; the owner's plan, 2026-11-10: a writer change reused 226 of 233 process tests' greens and five were red. Whatever the
   ;; next missed input is, a run runs n reused greens of each class again, chosen by the tree (seon.proofs/reuse-audit)
   (let [green {:pass 1 :fail 0 :error 0}

@@ -98,7 +98,8 @@
         args (into (cond-> ["--set" (str ":seon.config.source/root=" (pr-str checkout))]
                      dirs (into ["--set" (str ":seon.config.source/dirs=" (pr-str dirs))]))
                    (mapcat (fn [x] ["--set" x])) sets)
-        root (ts/shared-root! args)
+        ;; the shard's shared root for the default arguments is a shard fixture, started before the shard's first test
+        root (if (= args (ts/default-root-args)) @ts/shared-root-default (ts/shared-root! args))
         ask (fn [m] (ts/ask root m))
         eval-root (fn [code] (ask {:op :eval :agent "root" :code code}))
         made (volatile! nil)
@@ -2852,10 +2853,9 @@
   ;; process-footprint-bytes, one call). The megabytes it answers move with the machine (a collection
   ;; between two calls lowers them), so the test counts the calls, exactly (seon.profile's counted
   ;; calls)
-  (let [reads (volatile! nil)
-        [a b] (profile/measure! #(vector (agent/mem-mb) (agent/mem-mb))
-                                (fn [_] (vreset! reads (into {} (map (juxt :var :calls)) (profile/touched)))))]
-    (is (= 2 (get @reads 'seon.lib/real-mb)) "two calls, two readings: none kept between them")
+  (let [{[a b] :value} (profile/measure! #(vector (agent/mem-mb) (agent/mem-mb)))
+        reads (into {} (map (juxt :var :calls)) (profile/touched))]
+    (is (= 2 (get reads 'seon.lib/real-mb)) "two calls, two readings: none kept between them")
     (is (and (pos? a) (pos? b)) "a reading in MB")))
 
 (deftest a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once

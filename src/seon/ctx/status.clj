@@ -182,11 +182,14 @@
   "Where an unwritten proof p goes, as the agent needs it to write one: its test namespace's whole `:require` (every alias a
   new test there may call; a filtered one cost an agent twelve turns finding the rest,
   seon.render-test/a-proof-to-write-is-described-with-its-namespace), its `use-fixtures` forms as written, the helpers the example
-  calls (the rest are `(dir ns)`), and one test of it to copy: the shortest that uses a helper or `my.test`, else the shortest.
+  calls (the rest are `(dir ns)`), and one test of it to copy: of the tests that call a var or name a key its task cites (cited,
+  by each test form's recorded references and text), else of all, the shortest that uses a helper or `my.test`, else the shortest.
   Nil when the branch has no such namespace yet (the agent makes it first). One index read, and each var and each form that
   defines nothing of the namespace read once. See docs/render.md#how-the-work-stands."
-  {:malli/schema [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]}
-  [db p]
+  {:malli/schema [:function [:=> [:cat :seon.host/db :qualified-symbol] [:maybe :map]]
+                  [:=> [:cat :seon.host/db :qualified-symbol [:set :any]] [:maybe :map]]]}
+  ([db p] (test-shape db p #{}))
+  ([db p cited]
   (when-let [n (d/entity db [:ns/name (symbol (namespace p))])]
     (let [vs (map #(d/entity db %) (d/q '[:find [?e ...] :in $ ?n :where [?e :var/ns ?n]] db (:db/id n)))
           {tests true others false} (group-by #(contains? (set (:var/meta %)) :test) vs)
@@ -195,7 +198,12 @@
           ;; what a source calls: each head after an open paren, read once (a regex per test and helper was O(tests x helpers))
           heads (fn [s] (into #{} (map second) (re-seq #"\(([^\s()\[\]{}\"]+)" s)))
           uses? (fn [s] (or (str/includes? s "my.test/") (some named (heads s))))
-          srcs (sort-by count (keep #(get-in % [:var/form :form/src]) tests))
+          ;; the tests that call a cited var (the form's references) or name a cited key (its text), when any does
+          calls-cited? (fn [v] (let [f (:var/form v)]
+                                 (or (some (set (:form/refs f)) cited)
+                                     (some #(and (keyword? %) (str/includes? (str (:form/src f)) (str %))) cited))))
+          pool (or (not-empty (filter calls-cited? tests)) tests)
+          srcs (sort-by count (keep #(get-in % [:var/form :form/src]) pool))
           ;; the shortest that uses a helper or my.test, found from the shortest up, else the shortest
           src (or (first (filter uses? srcs)) (first srcs))
           ns-src (get-in n [:ns/form :form/src])
@@ -208,7 +216,7 @@
         requires (assoc :requires requires)
         (seq fixtures) (assoc :fixtures fixtures)
         (and src (seq others)) (assoc :helpers (vec (sort (map symbol (filter named (heads src))))))
-        src (assoc :example src)))))
+        src (assoc :example src))))))
 
 (defn status
   "How the agent of record rec (its ctx: its :db/id and its task) works on its task stands on its branch db, as data (task
@@ -237,6 +245,8 @@
         {t :task proved :proved} (task-of rec)
         tid (:seon.task/id t)
         {:keys [proofs plan]} (when tid (task/pulled-accumulated t))
+        ;; what the task cites, which an unwritten proof's example is chosen to call (test-shape)
+        cited (if tid (set (keep task/cited-name (task/task-cites db tid))) #{})
         kind (:seon.task/kind t :work)
         ;; main at its last move of content, read only when the task merges itself: readiness reads main's content, so a commit that moved
         ;; none of it, as root's note of an agent's status does, reaches no reader of this
@@ -300,7 +310,7 @@
                                       fs (when-not test-error (:seon.test/failures v))
                                       calls (when (and src (not= :pass st)) (ctx/callees db p))
                                       ;; its example from the merge base, so it doesn't move with what the agent writes, nor quote its own test back
-                                      shape (when (= :undefined st) (or (some-> (:seon.agent/base-commit ag) (->> (d/commit-as-db (pdb/store-of db))) (test-shape p)) (test-shape db p)))]]
+                                      shape (when (= :undefined st) (or (some-> (:seon.agent/base-commit ag) (->> (d/commit-as-db (pdb/store-of db))) (#(test-shape % p cited))) (test-shape db p cited)))]]
                             (cond-> {:test p :status st}
                               (and src (not= :pass st)) (assoc :source (print/code src))
                               shape (assoc :shape shape)
