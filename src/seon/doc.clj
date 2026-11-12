@@ -386,16 +386,18 @@
   point: an old file that does not read."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :map] :map] :map]}
   [db plan {:keys [sections files errors]}]
-  (let [cache (volatile! {})
-        ids-at (fn [sha file nsym]
-                 (or (@cache [sha file])
-                     (let [text (get files [sha file])
-                           r (cond (get errors [sha file]) {:error (str file " at " (subs sha 0 8) " could not be read from git: " (get errors [sha file]))}
-                                   (nil? text) {:ids {}}
-                                   :else (try {:ids (source/defining-ids nsym text) :meanings (source/defining-meanings nsym text) :text text :ns nsym}
-                                              (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (step/error-msg e))})))]
-                       (vswap! cache assoc [sha file] r)
-                       r)))
+  (let [read-file (fn [sha file nsym]
+                    (let [text (get files [sha file])]
+                      (cond (get errors [sha file]) {:error (str file " at " (subs sha 0 8) " could not be read from git: " (get errors [sha file]))}
+                            (nil? text) {:ids {}}
+                            :else (try {:ids (source/defining-ids nsym text) :meanings (source/defining-meanings nsym text) :text text :ns nsym}
+                                       (catch Throwable e {:error (str file " at " (subs sha 0 8) " does not read: " (step/error-msg e))})))))
+        ;; each old file the plan reads, read once: a map built before the walk, so no cell is filled on the way
+        reads (reduce (fn [m [k args]] (if (contains? m k) m (assoc m k (apply read-file args)))) {}
+                      (for [{:keys [address] :as r} plan :let [sha (:commit (get sections address))] :when sha
+                            [_ {:keys [file ns]}] (:files r)]
+                        [[sha file] [sha file ns]]))
+        ids-at (fn [sha file _] (get reads [sha file]))
         ;; what a var's form today says of it, read as the old file is (the same reader, both sides as written)
         meaning-now (fn [n] (when-let [f (some->> (pdb/eid db :var/name n) (d/entity db) :var/form)]
                               (get (source/defining-meanings (:ns/name (:form/ns f)) (:form/src f)) n)))]

@@ -72,6 +72,7 @@ An eval's record is plain data: a value in it that is not (a library's record in
 
 | boundary | edge | what it records |
 |---|---|---|
+| measuring a call (a form's cost, a cost proof's, a test's) | `seon.profile/measure!` | the call's throw answered as `:thrown` beside what it measured, for its caller to throw or record (`seon.repl/wrap-cost`: the form's `:repl/thrown`, which `seon.repl/eval-code` records as its `:err`); an interrupt (`ThreadDeath`) passes |
 | reading and evaluating an agent's form | `seon.repl/eval-code` | an `:err` reply item; reading goes on after an error, the request ends after an interrupt |
 | a component's render on any page, and a render called inside hiccup | `seon.render/render!`; `seon.web.html/write!` | `:seon.render/component-defect` (the render, the throw, its data under `:seon.render/threw`) as the component's part; every other component draws. A model render runs in its own try at the same edge, so it never blanks the person's page. A call the walk keeps as written (the model reads the call) throws when the writer makes it: `write!` answers what its caller's on-throw makes of it, a walk's (```seon.render/placed-units```) the same defect recorded with the walk's own and drawn by its render (`seon.render-test/a-plain-call-that-throws-is-drawn-and-recorded-as-a-component-defect`) |
 | a reaction's run (agents write renders) | `seon.ratom/Reaction` (`seon.ratom/->Reaction`) | the throw kept as the reaction's state and rethrown at its next deref; `flush!` goes on (`seon.ratom-test/catching`) |

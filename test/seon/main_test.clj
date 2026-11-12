@@ -15,7 +15,7 @@
   (let [path (str (seon.config/checkout) "/target/main-test-" (random-uuid))]
     [path (pdb/open! :lmdb path 0 :db)]))
 
-(deftest a-fresh-root-holds-no-program-it-was-not-given
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-fresh-root-holds-no-program-it-was-not-given
   (let [[path {:keys [conn seeded?]}] (fresh-store)]
     (try
       (is seeded?)
@@ -24,7 +24,7 @@
       (is (contains? (d/schema @conn) :var/name) "the schema is there")
       (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
-(deftest warm-needs-no-seed
+(deftest ^{:seon.test/estimate {:ticks 30000000}} warm-needs-no-seed
   (let [[path {:keys [conn]}] (fresh-store)
         t (:max-tx @conn)]
     (try
@@ -35,7 +35,7 @@
       (is (nil? (find-ns 'seon.warm)) "its scratch namespace is gone")
       (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
-(deftest root-boots-without-test-fixtures
+(deftest ^{:seon.test/estimate {:ticks 10000000}} root-boots-without-test-fixtures
   ;; the compiler's facts of the checkout (src and test imported as program facts): the
   ;; release binary compiles what src requires, so no src namespace requires one whose file is
   ;; in test/ (the check driver, the e2e runner, the scripted model's fixtures); a scripted root loads its fixture from the checkout by name
@@ -48,7 +48,7 @@
     (is (= #{} (set (for [[n r] reqs :when (and (in? "src/" n) (in? "test/" r))] [n r])))
         "no src namespace requires a test/ one")))
 
-(deftest only-measure-reads-the-tick-counter
+(deftest ^{:seon.test/estimate {:ticks 5000000}} only-measure-reads-the-tick-counter
   ;; task seon.profile/a-call-is-measured-one-way: a call is measured one way, so no src form but
   ;; seon.profile/measure! reads the engine's tick counter (jolt.host/ticks-of or jolt.host/ticks):
   ;; a measurement built beside it is red here. Read from the compiler's facts
@@ -58,7 +58,7 @@
                      db ['jolt.host/ticks-of 'jolt.host/ticks])]
     (is (= ['seon.profile/measure!] (vec callers)))))
 
-(deftest a-task-is-never-written-gate-true
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-task-is-never-written-gate-true
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a merge's gate runs the process tests its change reaches before
   ;; it merges, nobody asking (seon.reconcile's :gate), so :seon.task/gate? asks for nothing: no src form names it
   ;; and no schema declares it (the forms seon.config/schema-forms holds are the schemas' own text). Read from the
@@ -69,7 +69,7 @@
                    db :seon.task/gate?)]
     (is (= [] (vec (sort named))))))
 
-(deftest a-tasks-outcomes-are-read-once
+(deftest ^{:seon.test/estimate {:ticks 100000000}} a-tasks-outcomes-are-read-once
   ;; task seon.task/a-runs-lifecycle-is-read-once: a task's outcome sets are declared once, on
   ;; :seon.task/outcome's schema, and read once, by seon.task (finished, judged, failed), which every
   ;; view and judge requires; a second reader is red here. Each src form's recorded source read as
@@ -87,7 +87,7 @@
                                              (read-string {:read-cond :allow :features #{:clj}} src)))))]
     (is (= #{'seon.task} (into #{} (keep (fn [[nsn src]] (when (reads? nsn src) nsn))) forms)))))
 
-(deftest a-key-read-at-load-says-so
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-key-read-at-load-says-so
   ;; docs/config.md#what-waits-for-a-rebuild: a top-level def of src that reads a config key keeps the value it loaded with whatever a branch states, so its key carries :seon.config/at-load, and seon.config/waiting can say so
   (let [db (runner/program)
         forms (d/q '[:find ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/file ?file]
@@ -101,7 +101,7 @@
     (is (seq read-at-load))
     (is (= [] (vec (remove #(get-in seon.config/schema-forms [% 1 :seon.config/at-load]) read-at-load))))))
 
-(deftest a-bound-is-a-config-key
+(deftest ^{:seon.test/estimate {:ticks 100000000}} a-bound-is-a-config-key
   ;; task seon.config/a-bound-is-a-config-key (docs/config.md#constants, only documented config): every limit,
   ;; bound or default is a config key. Read from the compiler's facts (each src form's recorded
   ;; source, as data): a top-level def of a number, and a literal count over 2 given to take,
@@ -136,7 +136,7 @@
     (is (= #{} (apply disj named sites)) "and every name there is still such a site")))
 
 ;; docs/resolution.md: Jolt compiles a qualified name with no var and fails only when the line runs, so a path no test runs ships it
-(deftest every-name-a-form-uses-is-a-var
+(deftest ^{:seon.test/estimate {:ticks 100000000}} every-name-a-form-uses-is-a-var
   (let [db (runner/program)
         ;; the program's own: a test names what's gone to say it's gone
         ;; one scan of each attribute's index, joined by set membership (a d/q join over the 113k :form/refs
@@ -147,7 +147,7 @@
     (run! #(require (symbol %)) (into #{} (comp (keep namespace) (filter #(re-find #"^(seon|my)\." %))) (:refs acct)))
     (is (= [] (seon.program/unknown-refs acct)))))
 
-(deftest an-edge-asks-one-way
+(deftest ^{:seon.test/estimate {:ticks 100000000}} an-edge-asks-one-way
   ;; task seon.step/an-edge-asks-one-way: an edge asks a proc one way, seon.step/ask-edge, which
   ;; answers a closed channel at once; no src form outside seon.step puts a request carrying its
   ;; promise (:p) on a channel itself. src's forms read as data from the compiler's facts
@@ -167,7 +167,7 @@
                      nsn))]
     (is (= #{'seon.step} puts))))
 
-(deftest an-errors-message-is-read-one-way
+(deftest ^{:seon.test/estimate {:ticks 20000000}} an-errors-message-is-read-one-way
   ;; task seon.step/an-errors-message-is-read-one-way: an exception's message, or its class, is
   ;; seon.step/error-msg; no src form outside seon.step writes (or (ex-message e) (str (type e)))
   ;; again. src's forms read as data from the compiler's facts. Not covered: the same read written
@@ -202,7 +202,7 @@
                                  (map? x) (quoted (get x :seon.error/operation)))))
           (tree-seq coll? seq f))))
 
-(deftest an-error-names-its-raiser-by-its-var
+(deftest ^{:seon.test/estimate {:ticks 100000000}} an-error-names-its-raiser-by-its-var
   ;; root, 2026-10-25 (the a-map design, 0 green in 9 runs): the error a model reproduced first named
   ;; 'seon.render.value/show, a namespace renamed away, and the runs searched for it. An error names
   ;; its raiser by its var (#'ns/f, the function it is built in), so the compile refuses one that is
@@ -219,14 +219,17 @@
     (is (= [] (vec (for [[nsn src] forms op (quoted-operations nsn (read-in nsn src))] [nsn op])))
         "no src error names its operation as a quoted symbol")))
 
-(deftest git-is-read-through-fx
+;; its work: one substring search over every src form's text (~70M: the text is most of it), then reading the few that hold "git"
+(deftest ^{:seon.test/estimate {:ticks 80000000}} git-is-read-through-fx
   ;; task seon.fx/git-is-read-through-fx: git runs in one place, seon.fx/git-run (read two ways, git!:
   ;; a failure throws its words, and git-try: git's no is nil), and a checkout is told by its .git
   ;; through checked-out?; no other src form names the git command or a repository's own files (".git").
   ;; src's forms read as data from the compiler's facts
   (let [db (runner/program)
-        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
-                     [(clojure.string/starts-with? ?file "src/")]] db)
+        ;; only forms whose text holds "git" can name it (each way names-git? matches needs that text), so only those are read
+        ;; as data: reading every src form was ~260M ticks of the test's own
+        forms (d/q '[:find ?nsn ?src :where [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")] [?ns :ns/name ?nsn]
+                     [?f :form/ns ?ns] [?f :form/src ?src] [(clojure.string/includes? ?src "git")]] db)
         read-in (fn [nsn src] (require nsn)
                   (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
         ;; a form names git when it holds the literal "git" or ".git", or is a call naming a shell
@@ -253,29 +256,25 @@
     ;; test at load, before any proc runs, not a read of git
     (is (= #{'seon.fx/git-run 'seon.fx/checked-out? 'seon.config/reader} readers))))
 
-(deftest every-shell-runs-through-lib-sh
+(deftest ^{:seon.test/estimate {:ticks 10000000}} every-shell-runs-through-lib-sh
   ;; task seon.system/a-boot-runs-no-shell-of-its-own: clojure.java.shell/sh called off a fiber copies a child's pipes on
   ;; futures, threads of Clojure's send-off pool that root does not declare (seon.server-test/a-done-shells-on-no-thread-of-roots);
-  ;; seon.lib/sh runs it on a fiber, and no other src form names it (docs/machine.md#processes). src's forms read as data
-  ;; from the compiler's facts
-  (let [db (runner/program)
-        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
-                     [(clojure.string/starts-with? ?file "src/")]] db)
-        read-in (fn [nsn src] (require nsn)
-                  (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
-        ;; a quoted name is data (seon.program/env-class-readers' key), not a call
-        names-sh? (fn [nsn f] (some #(and (symbol? %) (= #'clojure.java.shell/sh (ns-resolve (the-ns nsn) %)))
-                                    (tree-seq #(and (coll? %) (not (and (seq? %) (= 'quote (first %))))) seq f)))
-        callers (into (sorted-set)
-                      (for [[nsn src] forms :let [f (read-in nsn src)] :when (names-sh? nsn f)]
-                        (if (and (seq? f) (symbol? (second f))) (symbol (str nsn) (name (second f))) nsn)))]
-    (is (names-sh? 'seon.lib '(defn x [] (clojure.java.shell/sh "true"))) "a call naming it is seen")
-    (is (not (names-sh? 'seon.lib '(def x '{clojure.java.shell/sh :bin}))) "a quoted name is not")
-    (is (= #{'seon.lib/sh} callers))))
+  ;; seon.lib/sh runs it on a fiber, and no other src form names it (docs/machine.md#processes). Read from the compiler's facts
+  ;; (:form/refs: what a form names, a quoted name being data and no reference), an index seek: reading every src form as data
+  ;; was ~150M ticks of the test's own
+  (let [callers-in (fn [db] (set (d/q '[:find [?v ...] :where [?f :form/refs clojure.java.shell/sh] [?f :form/ns ?ns] [?ns :ns/file ?file]
+                                         [(clojure.string/starts-with? ?file "src/")] [?f :form/defines ?d] [?d :var/name ?v]] db)))
+        probe (my.test/with (my.test/world)
+                (my.test/code 'app.shq (str "(ns app.shq (:require [clojure.java.shell]))\n"
+                                            "(def quoted '{clojure.java.shell/sh :bin})\n"
+                                            "(defn calls [] (clojure.java.shell/sh \"true\"))\n")))]
+    (is (= #{'app.shq/calls} (set (d/q '[:find [?v ...] :where [?f :form/refs clojure.java.shell/sh] [?f :form/defines ?d] [?d :var/name ?v]] probe)))
+        "a call naming it is a reference; a quoted name is not")
+    (is (= #{'seon.lib/sh} (callers-in (runner/program))))))
 
 ;; docs/merging.md#a-session-proves-through-root: bin/prove --root prints every kind of item as it lands, the tree's build and
 ;; seed by their kind
-(deftest bin-prove-root-prints-each-kind-of-verdict
+(deftest ^{:seon.test/estimate {:ticks 1000000}} bin-prove-root-prints-each-kind-of-verdict
   (let [line @#'seon.main/verdict-line]
     (is (= "PASS a.b-test/t 315 ms" (line {:test 'a.b-test/t :digest "d" :status :pass :ms 315.4})))
     (is (= "PASS build of tree T 46650 ms" (line {:test [:build "T"] :digest "T" :kind :build :status :pass :ms 46650.48})))
