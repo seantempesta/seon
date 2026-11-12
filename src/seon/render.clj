@@ -404,22 +404,22 @@
   fits. See docs/render.md#the-hiccup-is-checked."
   {:malli/schema [:=> [:cat :any] :seon.render/misfits]}
   [out]
-  (let [n (volatile! {})
-        kind (fn [k v] (cond (= :class k) :class (= :style k) :style
+  (let [kind (fn [k v] (cond (= :class k) :class (= :style k) :style
                              (and (keyword? k) (= "wire" (namespace k))) :wire
                              (and (keyword? k) (namespace k)) :qualified
                              (not (or (string? v) (number? v) (boolean? v) (nil? v) (keyword? v) (symbol? v) (uuid? v))) :value))]
-    ((fn walk [x]
-       (cond (and (vector? x) (= ::child (first x))) nil
+    ;; the counts so far threaded through the walk, a value
+    ((fn walk [n x]
+       (cond (and (vector? x) (= ::child (first x))) n
              (and (vector? x) (keyword? (first x)))
-             (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))]
-               (when (and attrs (not (contract/fits? :seon.render/hiccup-attrs attrs)))
-                 (doseq [[k v] attrs :let [c (kind k v)] :when c] (vswap! n update c (fnil inc 0))))
-               (doseq [y (if attrs (drop 2 x) (rest x))] (walk y)))
-             (sequential? x) (doseq [y x] (walk y))
-             :else nil))
-     out)
-    @n))
+             (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))
+                   n (if (and attrs (not (contract/fits? :seon.render/hiccup-attrs attrs)))
+                       (reduce (fn [n [k v]] (if-let [c (kind k v)] (update n c (fnil inc 0)) n)) n attrs)
+                       n)]
+               (reduce walk n (if attrs (drop 2 x) (rest x))))
+             (sequential? x) (reduce walk n x)
+             :else n))
+     {} out)))
 
 (defn misfits-by-render
   "Walk w's misfits (`misfits`) by the render that drew them, each component's own output as it last ran, summed: {render-sym
@@ -435,17 +435,16 @@
   entry by its revision (made at the first read after its output moved), so a placement reads the components and never the page's hiccup. See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :any] [:vector [:tuple [:maybe :string] [:vector :any]]]]}
   [out]
-  (let [found (volatile! [])]
-    ((fn walk [x sel]
-       (cond (and (vector? x) (= ::child (first x))) (vswap! found conj [sel (second x)])
-             (and (vector? x) (keyword? (first x)))
-             (let [attrs (when (map? (second x)) (second x))
-                   sel (if-let [id (:id attrs)] (str "#" id) sel)]
-               (doseq [y (if attrs (drop 2 x) (rest x))] (walk y sel)))
-             (sequential? x) (doseq [y x] (walk y sel))
-             :else nil))
-     out nil)
-    @found))
+  ;; the placements so far threaded through the walk, a value
+  ((fn walk [found x sel]
+     (cond (and (vector? x) (= ::child (first x))) (conj found [sel (second x)])
+           (and (vector? x) (keyword? (first x)))
+           (let [attrs (when (map? (second x)) (second x))
+                 sel (if-let [id (:id attrs)] (str "#" id) sel)]
+             (reduce #(walk %1 %2 sel) found (if attrs (drop 2 x) (rest x))))
+           (sequential? x) (reduce #(walk %1 %2 sel) found x)
+           :else found))
+   [] out nil))
 
 (defn- thrown-line
   "Render r's throw e said in one line a reader takes as text: the render, what was thrown, and the fn it was thrown in when that is
@@ -833,10 +832,9 @@
   "Walk w's components placed directly in a container of the root's output (an element with an id:
   its list), in order, [[sel k]]: its container's selector and its key; a list component (its var's
   :seon.render/list) is no
-  part: its output is its list, the components in it placed there; a component that drew nothing (with-id) is
-  placed nowhere. With sels, the element ids of some lists, those lists' alone, in sels' order. Read from what each component
-  places (`places`, kept by its revision), from the root down: the components, never their hiccup, so a flush that ran one leaf
-  pays the placed components, not the page (seon.render-cost-test/a-flush-places-what-moved). nested? true: each placed component's own components too, each in the element of
+  part: its output is its list, the components in it placed there; one that drew nothing (with-id) is placed nowhere. With sels,
+  those lists' alone, in sels' order. Read from what each component places (`places`, kept by its revision), from the root down,
+  never the hiccup (seon.render-cost-test/a-flush-places-what-moved). nested? true: each placed component's own components too, each in the element of
   its parent that holds it, at any depth (the page's units), each [sel k parent-k] (parent-k nil in a root list); false: the lists' own
   components (the model's parts, which nest their children themselves). See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:function [:=> [:cat :map] [:vector [:tuple :string [:vector :any]]]]
@@ -845,8 +843,7 @@
   ([w] (placed w nil false))
   ([w sels] (placed w sels false))
   ([w sels nested?]
-  (let [found (volatile! [])
-        want (some-> sels set)
+  (let [want (some-> sels set)
         cache @(:cache w)
         list (fn [k] (let [f (:f (get cache k))] (when (var? f) (:seon.render/list (meta f)))))
         ;; what k places, kept by its revision: made again only for a component whose output moved since it was last read
@@ -855,17 +852,21 @@
                                 (let [ps (places (:out c))] (vswap! (:cache w) update k assoc :places ps :places-rev (:rev c)) ps))))
         ;; component k's placements, sel the selector above them where k's own output gives none; parent, the placed component
         ;; whose output they are in (nil in the root's): a list component is no part, its placements are its parent's
-        go (fn go [k sel parent]
-             (doseq [[s ck] (places-of k) :let [s (or s sel)] :when (some? (:out (get cache ck)))]
-               (if-let [l (list ck)]
-                 ;; a list a reader of some lists did not ask for is not walked
-                 (when (or (nil? want) (want (str "#" l))) (go ck s parent))
-                 (when s
-                   (vswap! found conj (if nested? [s ck parent] [s ck]))
-                   ;; nested?: the components inside it, each in the element of its own that holds it, at any depth
-                   (when nested? (go ck nil ck))))))]
-    (go @(:out w) nil nil)
-    (if sels (vec (mapcat (group-by first @found) sels)) @found))))
+        ;; the placements so far threaded through, a value
+        go (fn go [found k sel parent]
+             (loop [found found ps (seq (places-of k))]
+               (if-let [[s ck] (first ps)]
+                 (let [s (or s sel)]
+                   (recur (cond (nil? (:out (get cache ck))) found
+                                (list ck) ;; a list a reader of some lists did not ask for is not walked
+                                (if (or (nil? want) (want (str "#" (list ck)))) (go found ck s parent) found)
+                                (nil? s) found
+                                ;; nested?: the components inside it, each in the element of its own that holds it, at any depth
+                                :else (cond-> (conj found (if nested? [s ck parent] [s ck])) nested? (go ck nil ck)))
+                          (next ps)))
+                 found)))
+        found (go [] @(:out w) nil nil)]
+    (if sels (vec (mapcat (group-by first found) sels)) found))))
 
 (def root-container
   "The container the frame places a walk's root unit in (`placed-units`' first: the root render's own output, the page), the one
@@ -884,19 +885,19 @@
   layout gives the units placed in it. A local fn walks it: no contracted call a node. See docs/render.md#a-layout-places-its-lists."
   {:malli/schema [:=> [:cat :any] [:tuple :any [:vector :string]]]}
   [hc]
-  (let [ids (volatile! [])]
-    [((fn go [x]
-        (cond (h/raw? x) x
-              (and (vector? x) (keyword? (first x)))
-              (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))
-                    id (:id attrs)
-                    _ (when id (vswap! ids conj (str id)))
-                    kids (mapv go (if attrs (drop 2 x) (rest x)))]
-                (cond-> (into (if attrs [(first x) attrs] [(first x)]) kids) id (conj (region (str id)))))
-              (seq? x) (doall (map go x))
-              :else x))
-      hc)
-     @ids]))
+  ;; [ids x'] threaded through the walk, in document order: an element's id before its children's
+  (let [kids (fn [go ids xs] (reduce (fn [[ids out] y] (let [[ids y'] (go ids y)] [ids (conj out y')])) [ids []] xs))
+        [ids hc'] ((fn go [ids x]
+                     (cond (h/raw? x) [ids x]
+                           (and (vector? x) (keyword? (first x)))
+                           (let [attrs (when (and (map? (second x)) (not (h/raw? (second x)))) (second x))
+                                 id (:id attrs)
+                                 [ids ks] (kids go (cond-> ids id (conj (str id))) (if attrs (drop 2 x) (rest x)))]
+                             [ids (cond-> (into (if attrs [(first x) attrs] [(first x)]) ks) id (conj (region (str id))))])
+                           (seq? x) (let [[ids ks] (kids go ids x)] [ids (or (seq ks) ())])
+                           :else [ids x]))
+                   [] hc)]
+    [hc' ids]))
 
 (defn- page-unit
   "Walk w's root unit, its component rk's output as the page writes it (`placed-units`' first), written and kept on its cache entry
@@ -1377,7 +1378,7 @@
 (defn expanded
   "Raw pattern p with each top-level clause that names an entity schema (in the entity index ix) spliced in its place by the pattern
   that schema declares (`schema-property`), itself expanded, and a clause the splice repeats once: [:seon.db/agent-fact
-  {:seon.agent/parent :seon.db/user-fact}] is the agent schema's pattern and that join. A join asked more than once by the same key
+  {:seon.agent/parent :seon.db/agent-fact}] is the agent schema's pattern and that join. A join asked more than once by the same key
   (its :seon.ctx/below aside) is one join at the first clause that asked it, whose sub-pattern is all of theirs (a schema's name read as its
   declared pattern), expanded. What every reader of a raw pattern reads; the stored :seon.ctx/pattern stays raw. Throws
   :seon.ctx/invalid-pattern naming the clause when a schema it names declares no pattern, its pattern reaches itself (seen: the

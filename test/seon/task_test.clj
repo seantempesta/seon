@@ -386,24 +386,26 @@
     (is (= [] (task/undelivered main main "a")) "inherited at the fork: delivered")
     (is (= [] (task/undelivered main removed "a")) "removed after, it stays delivered")))
 
-(deftest a-started-agent-names-who-started-it-its-parent
-  ;; docs/users.md#what-each-thing-is: a task names who started it; its agent, when it starts, names that one its :seon.agent/parent,
-  ;; a user or an agent alike, in the write that makes it; the agents one started are its :seon.agent/_parent
-  (let [db (d/db-with (ts/test-db) (into [{:seon.system/id :root :seon.system/boot "b1"} {:seon.agent/key "sean" :seon.user/name "sean"} {:seon.agent/key "lead"}]
+(deftest a-started-agent-names-the-agent-it-is-forked-from-its-parent
+  ;; docs/users.md#who-started-whom: an agent names the agent it is forked from, :seon.agent/parent, in the write that makes it: the agent
+  ;; that started its task (a launch, a refine), or root's agent when a person did (a person forks nothing); who asked stays the task's
+  (let [db (d/db-with (ts/test-db) (into [{:seon.system/id :root :seon.system/boot "b1"} {:seon.agent/key "sean" :seon.user/name "sean"}
+                                          {:seon.agent/key "root"} {:seon.agent/key "lead"}]
                                          (task/create-tx (ts/test-db) [{:seon.task/ns 'demo :seon.task/name "a" :seon.task/plan "A." :seon.task/kind :work}])))
         db (d/db-with db [{:seon.task/id "demo/a" :seon.task/started-by [:seon.agent/key "sean"]}])
         env {:branch :task-demo-a :model nil :max-turns 40}
         started (d/db-with db (task/start-tx db "demo/a" "b1" :a1 env 1000))
-        agents (fn [db] (set (map :seon.agent/key (:seon.agent/_parent (d/entity db [:seon.user/name "sean"])))))
         parent (fn [db k] (:seon.agent/key (:seon.agent/parent (d/entity db [:seon.agent/key k]))))]
-    (is (= #{} (agents db)) "no agent yet")
-    (is (= #{"a1"} (agents started)) "its agent, once it starts")
-    (is (= "sean" (parent started "a1")) "the child names its parent")
+    (is (= "root" (parent started "a1")) "a person's request: its agent is root's child")
+    (is (= #{"a1"} (set (map :seon.agent/key (:seon.agent/_parent (d/entity started [:seon.agent/key "root"]))))) "root's children hold it")
     (is (nil? (refusal db (task/start-tx db "demo/a" "b1" :a1 env 1000))) "and the write that makes it passes the one path")
+    (let [launched (d/db-with db [{:seon.task/id "demo/a" :seon.task/started-by [:seon.agent/key "lead"]}])]
+      (is (= "lead" (parent (d/db-with launched (task/start-tx launched "demo/a" "b1" :a1 env 1000)) "a1")) "an agent's launch: its launcher's child"))
     (let [again (d/db-with started [{:seon.task/id "demo/a" :seon.task/started-by [:seon.agent/key "lead"]}])]
-      (is (= "sean" (parent (d/db-with again (task/start-tx again "demo/a" "b1" :a1 env 2000)) "a1")) "an agent that continues keeps the parent it was made with"))
+      (is (= "root" (parent (d/db-with again (task/start-tx again "demo/a" "b1" :a1 env 2000)) "a1")) "an agent that continues keeps the parent it was made with"))
     (let [none (d/db-with db [[:db/retract [:seon.task/id "demo/a"] :seon.task/started-by [:seon.agent/key "sean"]]])]
       (is (nil? (parent (d/db-with none (task/start-tx none "demo/a" "b1" :a1 env 1000)) "a1")) "a task nobody started gives its agent no parent, never an invented one"))
+    (is (nil? (task/forked-from db "demo/a" "root")) "and an agent is never its own parent: root's own task names none")
     (testing "a refine is started by the agent whose run it refines: its agent is that one's child"
       (let [ended (d/db-with started [{:seon.task/id "demo/a" :seon.task/outcome :merged}])
             r (d/db-with ended (task/refine-tx ended "demo/a"))]
