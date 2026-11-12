@@ -124,7 +124,7 @@ The owner's rulings of this day, each with his words and where it is now stated.
 
 ### Check-step bounds are signals, not hard constraints
 
-"The step bounds are signals not hard constraints." Stated in [merging](merging.md#a-merge-runs-what-the-change-reaches).
+"The step bounds are signals not hard constraints." Stated in [merging](merging.md#a-merge-runs-what-the-change-reaches). For a test or step ENDED past its bound, overturned on 2026-11-12: "A test killed for running too long is a bug and it should be recorded as an error and fixed. It shouldn't take down the system and we shoudln't do nothing and not record anything." Stated in [clocks](clocks.md#time-decides-the-owners-exceptions). A bound still never decides when an item starts or waits ([config](config.md)).
 
 ### `bin/root` becomes `bin/system`
 

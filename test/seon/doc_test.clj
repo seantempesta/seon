@@ -536,3 +536,16 @@
         "a schema key is under its namespace too, read without its colon")
     (is (= ["docs/gr.md#gr" "docs/gr.md#where-the-needle-is"] (map :at (doc/outline db "docs/gr.md"))) "outline: the page's sections in order")
     (is (nil? (doc/outline db "docs/none.md")) "a page db holds none of is nil")))
+
+;; docs/vector.md#search: two readers of the text index on two db values (an agent's and main's) each get their answer.
+;; text-index keeps one index; a reader on another db value builds its own and retires the other's, and with-index retried
+;; while its index was retired under it: two readers could retire each other's for good (Deep fixes' reading of the 03:04
+;; spin, 2026-11-12). This test's own thread is one reader, so a livelock spends its ticks and ends it red, never a hang
+(deftest two-readers-on-two-db-values-each-get-their-answer
+  (let [db-a (mt/world)
+        db-b (:db-after (d/with db-a [{:seon.system/id :root :seon.system/boot "another-boot"}]))
+        read (fn [db] (#'seon.doc/with-index db (fn [ix] (sqlite/size ix))))
+        p (promise)
+        other (doto (Thread. ^Runnable (fn [] (dotimes [_ 200] (read db-a)) (deliver p :done))) (.start))
+        mine (do (dotimes [_ 200] (read db-b)) :done)]
+    (is (= [:done :done] [mine @p]) "each reader's reads all answered")))

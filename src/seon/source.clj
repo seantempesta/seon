@@ -96,7 +96,7 @@
     {:units [(program/unit-account (analyze nsym form private?))] :ns-form? ns-form?})))
 
 (defn- alias-held-not-declared
-  "An alias form names that namespace nsx holds and its file's ns form, ns-form, doesn't declare, or nil: what only this process would resolve. A full name, a class's static and quoted data are no alias. See docs/source.md#main-s-program-follows-the-tree."
+  "An alias form names that namespace nsx holds and its file's ns form, ns-form, doesn't declare, or nil: what only this process would resolve. A full name, a class's static and quoted data are no alias. See docs/source.md#a-boot-catches-up-with-its-checkout."
   {:malli/schema [:=> [:cat :any :any :any] [:maybe :symbol]]}
   [nsx ns-form form]
   (let [declared (into #{} (for [c (filter seq? ns-form) :when (= :require (first c)) spec (rest c) :when (vector? spec)
@@ -114,24 +114,36 @@
   program's (a comment block, a top-level call) as a text form, so the file is whole. private?, the tree's
   (`tree-private`), answers a named var's privacy to the analysis. Answers {:accounts [...] :tail}."
   {:malli/schema [:function [:=> [:cat :symbol :string] [:map [:accounts [:vector :map]] [:tail :string]]]
-                  [:=> [:cat :symbol :string [:maybe :seon.host/fn]] [:map [:accounts [:vector :map]] [:tail :string]]]]}
-  ([nsym text] (accounts nsym text nil))
-  ([nsym text private?]
-  (let [ns-form (volatile! nil)
+                  [:=> [:cat :symbol :string [:maybe :seon.host/fn]] [:map [:accounts [:vector :map]] [:tail :string]]]
+                  [:=> [:cat :symbol :string [:maybe :seon.host/fn] [:maybe :seon.host/fn]] [:map [:accounts [:vector :map]] [:tail :string]]]]}
+  ([nsym text] (accounts nsym text nil nil))
+  ([nsym text private?] (accounts nsym text private? nil))
+  ;; held, given (read-nss's, from the store): (held ns src k ns-src form) answers the account of a form the store holds whole,
+  ;; so it is not analyzed again (an edit of one form analyzes that form, not its file: docs/source.md#a-boot-catches-up-with-its-checkout)
+  ([nsym text private? held]
+  (let [ns-form (volatile! nil) ns-src (volatile! nil) kseen (volatile! {})
         {:keys [forms tail]} (read-forms nsym text
-                                         (fn [{:keys [form ns] :as f}]
-                                           (let [n (if (and (seq? form) (= 'ns (first form))) nsym ns)]
-                                             (when (and (seq? form) (= 'ns (first form))) (vreset! ns-form form))
+                                         (fn [{:keys [form ns src] :as f}]
+                                           (let [n (if (and (seq? form) (= 'ns (first form))) nsym ns)
+                                                 k (get (vswap! kseen update [ns src] (fnil inc -1)) [ns src])]
+                                             (when (and (seq? form) (= 'ns (first form))) (vreset! ns-form form) (vreset! ns-src src))
                                              (when-let [a (and @ns-form (find-ns n) (alias-held-not-declared (find-ns n) @ns-form form))]
                                                (throw (ex-info (str "the form names alias " a " and this file's ns form doesn't require it: it resolves only in a process that already holds it") {:ns n :alias a})))
-                                             (merge f (analyze-form n form private?)))))
+                                             (if-let [h (and held (held n src k @ns-src form))]
+                                               ;; its vars declared here, as its analysis would have: a later form calling one is
+                                               ;; analyzed in a process that may never have loaded the namespace
+                                               (do (doseq [v (concat (map :var (:defs h)) (:declares h)) :when (and (find-ns n) (= (namespace v) (str n)))]
+                                                     (intern (find-ns n) (symbol (name v))))
+                                                   (assoc f :held h))
+                                               (merge f (analyze-form n form private?))))))
         seen (volatile! {})]
     {:tail tail
      :accounts (vec (map-indexed
-                      (fn [i {:keys [form src lead ns units ns-form?]}]
+                      (fn [i {:keys [form src lead ns units ns-form? held]}]
                         (let [k (get (vswap! seen update [ns src] (fnil inc -1)) [ns src])
                               base {:units units :src src :form form :ns ns :ns-after ns :ns-form? ns-form? :ns-meta (when ns-form? (meta (second form))) :before nil :lead lead :order i :k k}]
-                          (or (program/account base)
+                          (or (when held (assoc held :src src :ns ns :lead lead :order i :k k))
+                              (program/account base)
                               {:id (str ns "/text-" i) :src src :ns ns :lead lead :order i})))
                       forms))})))
 
@@ -388,6 +400,46 @@
           (when-let [e (d/entity db [:var/name (symbol vns vname)])]
             (if (contains? (set (:var/meta e)) :private) :private :public)))))))
 
+(defn file-reading-macros
+  "The names of db's macros whose defining form refers to one of seon.program/file-readers (slurp, file-seq, io/resource): a form
+  expanding one holds the analysis of what the macro read. One query of the program's facts, never a seek a reference. See
+  docs/source.md#indexing-a-tree."
+  {:malli/schema [:=> [:cat :seon.host/db] [:set :qualified-symbol]]}
+  [db]
+  (set (d/q '[:find [?mn ...] :in $ [?r ...]
+              :where [?mf :form/refs ?r] [?mf :form/defines ?m] [?m :var/meta :macro] [?m :var/name ?mn]]
+            db (vec program/file-readers))))
+
+(defn- held-form
+  "For namespace nsym on db, the answer accounts takes for a form it holds whole: (fn [n src k ns-src form]) gives the account
+  of the live form db holds at that namespace, text and occurrence (its id), built from db's facts (what read-interface and
+  made read of it: its definitions with their meta, its inline definitions, the identities it makes), or nil, so it is
+  analyzed: while the file's ns form is the one db holds (its aliases and requires unchanged), never the ns form itself or a
+  macro's definition (a later form's analysis expands it), nor a form expanding a macro that reads files (its facts are what
+  the macro read: file-reading-expansions). See docs/source.md#a-boot-catches-up-with-its-checkout."
+  {:malli/schema [:=> [:cat :seon.host/db :symbol] :seon.host/fn]}
+  [db nsym]
+  (let [ne (pdb/eid db :ns/name nsym)
+        db-ns-src (some-> ne (->> (d/entity db)) :ns/form :form/src)
+        ;; {form id, its entity} of the namespace's forms: one scan, never a seek a form
+        by-id (delay (into {} (for [dt (when ne (d/datoms db :avet :form/ns ne)) :let [x (d/entity db (:e dt))]] [(:form/id x) (:e dt)])))
+        ;; the macros whose expansion reads files (file-reading-expansions' rule): one query, asked once, a held form's refs looked up in it
+        reading (delay (file-reading-macros db))]
+    (fn [n src k ns-src form]
+      (when (and db-ns-src (= ns-src db-ns-src) (not= src ns-src)
+                 ;; a macro (a later form's analysis expands it) and a form that defines a class are always analyzed
+                 (not (and (seq? form) (#{'defmacro 'ns 'defrecord 'deftype 'defprotocol 'definterface} (first form)))))
+        (when-let [fe (and (= n nsym) (get @by-id (program/form-id n src k)))]
+          (when (and (program/live? db fe) (not-any? @reading (:form/refs (d/entity db fe))))
+            (let [x (d/entity db fe)]
+              {:id (:form/id x) :seon.source/held? true :inline-defs (vec (:form/inline-defs x))
+               :defs (vec (for [d (:form/defines x) :when (and (:var/name d) (= fe (:db/id (:var/form d))))]
+                            {:var (:var/name d) :meta (vec (:var/meta d))}))
+               ;; the vars it declares ((declare f ...)), so a later form naming one resolves as when it was analyzed
+               :declares (vec (keep :var/name (:form/declares x)))
+               :seon.source/made (vec (for [d (concat (:form/defines x) (:form/declares x))
+                                           :let [kv (some #(when-some [v (get d %)] [% v]) identities)] :when kv] kv))})))))))
+
 (defn- read-nss
   "Each namespace of files ({relative path text}) read and analyzed in load order: {nsym
   {:accounts :tail :file}} (accounts, with its file's relative path). A namespace the files define
@@ -395,12 +447,12 @@
   once analyzed, so a later file's require of it answers from the analysis, never a load from disk that
   cannot find it; one whose file the checkout has is never marked (a real require must still load it). tree, every file
   the same import has read (files among them, refresh-tx's earlier rounds too), is what a named var's privacy is asked of
-  (`tree-private`), never only this round's files. See docs/source.md#main-s-program-follows-the-tree."
+  (`tree-private`), never only this round's files. See docs/source.md#a-boot-catches-up-with-its-checkout."
   {:malli/schema [:=> [:cat :seon.host/db [:map-of :string :string] [:map-of :string :string]] [:map-of :symbol :map]]}
   [db files tree]
   (let [private? (tree-private db tree)]
     (reduce (fn [m [nsym path text]]
-              (let [a (assoc (accounts nsym text private?) :file path)]
+              (let [a (assoc (accounts nsym text private? (held-form db nsym)) :file path)]
                 (when-not (in-checkout? nsym path) (@mark-loaded! (str nsym)))
                 (assoc m nsym a)))
             {} (load-order files))))
@@ -428,8 +480,8 @@
   it defines and declares, and its methods and extensions."
   {:malli/schema [:=> [:cat [:sequential :map]] [:set :any]]}
   [accts]
-  (into #{} (mapcat (fn [{:keys [id ns defs declares methods impls]}]
-                      (concat [[:form/id id] [:ns/name ns]]
+  (into #{} (mapcat (fn [{:keys [id ns defs declares methods impls] held :seon.source/made}]
+                      (concat [[:form/id id] [:ns/name ns]] held
                               (for [{v :var} defs] [:var/name v])
                               (for [v declares] [:var/name v])
                               (for [{:keys [multi dispatch]} methods] [:method/key (program/method-key multi dispatch)])
@@ -591,10 +643,9 @@
   Derived from the program's facts, never listed. See docs/source.md#indexing-a-tree."
   {:malli/schema [:=> [:cat :seon.host/db] [:map-of :string :symbol]]}
   [db]
-  (into {} (d/q '[:find ?file ?nsn :in $ [?r ...]
-                  :where [?mf :form/refs ?r] [?mf :form/defines ?m] [?m :var/meta :macro] [?m :var/name ?mn]
-                  [?f :form/refs ?mn] [?f :form/ns ?ns] [?ns :ns/file ?file] [?ns :ns/name ?nsn]]
-                db (vec program/file-readers))))
+  (into {} (d/q '[:find ?file ?nsn :in $ [?mn ...]
+                  :where [?f :form/refs ?mn] [?f :form/ns ?ns] [?ns :ns/file ?file] [?ns :ns/name ?nsn]]
+                db (vec (file-reading-macros db)))))
 
 (defn refresh-tx
   "The facts that bring db's program up to date with the files that changed ({relative path

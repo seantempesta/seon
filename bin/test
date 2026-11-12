@@ -14,9 +14,9 @@
 # health step; --overran is this script's, for a shard bin/stalls ended).
 # A test running far past its measured time (its end bound: :seon.config.check/step-end-factor times its last run, floored at the
 # factor times :seon.config.agent/stall-ms) is ended by bin/stalls after its evidence (the owner's fourth clock exception,
-# docs/clocks.md#time-decides-the-owners-exceptions): it is OVERRAN-NO-VERDICT with its evidence directory, a signal about the run
-# and never a verdict at its digest (it runs again at the next prove), the run ends red, and its shard's tests that never
-# ended run in a new shard, so the run ends.
+# docs/clocks.md#time-decides-the-owners-exceptions): it is a bug, stored at its digest as an error naming its bound and its
+# evidence directory (the owner, 2026-11-12), the run ends red, and its shard's tests that never ended run in a new shard, so
+# the run ends.
 # On the runtime bin/build made (target/jolt/jolt), with dependencies cached in target/home.
 # background jobs (shards, the check steps) keep the run's own nice: zsh's BG_NICE renices each, which a niced run
 # may not do ("nice(5) failed: operation not permitted" on every job)
@@ -71,9 +71,6 @@ jobs=$(<$OUT/jobs)
 # which its digest does not cover: that binary is built from this tree first (a no-op build costs
 # ~30-45 s) unless it is current for this tree, what differs reaching nothing root runs from its binary
 # (seon.system/binary-current, the plan's out/build). The plan names what it selected that reaches one (out/binary); nothing, no build
-# the plan's answer on the binary (out/build, empty when it is current for this tree by reach): a check a test of this run
-# starts itself reads it (bin/check), as the run's own steps do
-export SEON_PLAN_BUILD=$OUT/build
 F=($OUT/shard-*.edn(N))
 # laws and health read the tree and answer in seconds, before any build: a run of their own beside the rest, whose red ends the run, shards and
 # steps, as no later result can make that tree mergeable and a red is reported as it stands (docs/merging.md#a-merge-runs-what-the-change-reaches)

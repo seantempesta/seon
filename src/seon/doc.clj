@@ -541,8 +541,9 @@
 
 (defonce ^:private indexes
   ;; [the db's [:hash :max-tx] it was built at, its text-index, the term counts of its rows (`text-terms`, an atom of
-  ;; {[e a] [counts length]})]; one slot, replaced by the next build
-  (volatile! nil))
+  ;; {[e a] [counts length]}), {index readers-using-it}]: one atom, so a reader takes an index and counts itself in one swap
+  ;; (`with-index`), and an index another replaced is closed by its last reader, never under one
+  (atom nil))
 
 (def ^:private index-attrs
   "The text attributes in the order the index numbers them (its rows' attribute column)."
@@ -555,29 +556,52 @@
   [db]
   (sqlite/fts-open (for [[i a] (map-indexed vector index-attrs) {:keys [e v]} (d/datoms db :aevt a)] [e i (str v)])))
 
+(defn- release!
+  "Reader done with index ix: its count in the slot goes down, and an index no longer the slot's with no reader left is closed."
+  {:malli/schema [:=> [:cat :map] :nil]}
+  [ix]
+  (let [[_ [_ cur _ uses]] (swap-vals! indexes (fn [[at cur counted uses]] [at cur counted (update uses ix (fnil dec 1))]))]
+    (when (and (not (identical? ix cur)) (<= (get uses ix 0) 0))
+      (swap! indexes (fn [[at cur counted uses]] [at cur counted (dissoc uses ix)]))
+      (sqlite/retire! ix))
+    nil))
+
+(defn- acquire!
+  "The text index of db, counted as used by this reader (release! uncounts it): the slot's when it was built at db's value,
+  taken and counted in one swap; else one built now and installed as the slot's, counted as this reader's in the same swap,
+  the one it replaces closed by its last reader. A reader keeps the index it took until it is done, so none is closed under
+  it and no reader asks twice: two readers on two db values each finish, building in turn."
+  {:malli/schema [:=> [:cat :seon.host/db] :map]}
+  [db]
+  (let [at [(:hash db) (:max-tx db)]
+        ;; the slot's index, counted in the same swap that read it, when it was built at db's value
+        [old] (swap-vals! indexes (fn [[a cur counted uses :as slot]] (if (= a at) [a cur counted (update uses cur (fnil inc 0))] slot)))]
+    (if (= at (first old))
+      (second old)
+      (let [new (build-index db)
+            ;; the last builder's is the slot's, counted as this reader's in the swap that installs it
+            [old [_ cur _ uses]] (swap-vals! indexes (fn [[_ _ _ uses]] [at new (atom {}) (assoc (or uses {}) new 1)]))]
+        (when (and (second old) (<= (get uses (second old) 0) 0))
+          (swap! indexes (fn [[a c counted uses]] [a c counted (dissoc uses (second old))]))
+          (sqlite/retire! (second old)))
+        new))))
+
 (defn text-index
   "The index (seon.sqlite/fts-open) of every text attribute's texts on db (`text-attrs`), {:h :state}: a
   Porter-stemmed table for bm25 and a trigram table for substrings, so \"watching\" finds `watch!` and \"it\" is no
   part of \"edit\". Derived data (docs/data-modeling.md#derived-data-is-a-cache-never-relied-on): built once for a db value (its :hash and :max-tx say it is
   the same value: a db value is read again at every deref, so its identity says nothing), reused until a move
-  writes a text, regenerated from db whenever it is gone, never relied on. The index it replaces is retired
-  (closed once no reader uses it: `with-index`). A race of two readers only builds one twice. See docs/vector.md#search."
+  writes a text, regenerated from db whenever it is gone, never relied on. A caller that reads it holds it through
+  `with-index`. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db] :map]}
-  [db]
-  (let [at [(:hash db) (:max-tx db)] [was ix] @indexes]
-    (if (= at was)
-      ix
-      (let [new (build-index db)]
-        (vreset! indexes [at new (atom {})])
-        (when ix (sqlite/retire! ix))
-        new))))
+  [db] (let [ix (acquire! db)] (release! ix) ix))
 
 (defn- with-index
-  "f applied to the current text index of db while it is held open (seon.sqlite/using); a reader that meets an index
-  retired since it asked for it asks again."
+  "f applied to the text index of db while this reader holds it (acquire!, release!): no index it holds is closed under it,
+  so no reader asks twice. See docs/vector.md#search."
   {:malli/schema [:=> [:cat :seon.host/db ifn?] :any]}
   [db f]
-  (loop [] (if-let [r (sqlite/using (text-index db) f)] (:value r) (recur))))
+  (let [ix (acquire! db)] (try (f ix) (finally (release! ix)))))
 
 (defn carry-index!
   "The text index held for db before (`text-index`) as the index of db after: the move's writes brought into it.
@@ -598,7 +622,7 @@
                               (for [[e a] texts :let [dt (first (d/datoms after :eavt e a))] :when dt] [e (number a) (str (:v dt))])))
           ;; and the counts of those rows go, counted again when next read: a move re-counts the texts it wrote alone
           (swap! counted #(apply dissoc % texts)))
-        (vreset! indexes [at1 ix counted])))
+        (swap! indexes (fn [[a c cnt uses :as slot]] (if (identical? c ix) [at1 c cnt uses] slot)))))
     nil))
 
 (defn text-terms
