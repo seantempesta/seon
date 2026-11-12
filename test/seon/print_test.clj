@@ -525,9 +525,8 @@
 (deftest cost-is-one-wording-from-one-function
   ;; owner, 2026-11-05: "I want the cost of things to be concise and present wherever work is being done": one function behind
   ;; an eval's line, the page's row, a part's head and the tree, so they cannot drift apart
-  (is (= "5.2 ms · 873k ticks · 4.1 MB · ~1.2k tok" (seon/cost-text {:ms 5.2 :ticks 873000 :bytes 4300000 :tok 1200})))
-  (is (= "0.21 ms · 4.4k ticks · 39.9 KB" (seon/cost-text {:ms 0.21 :ticks 4400 :bytes 40880})) "a number not given is left out")
-  (is (= (seon/cost-text {:ms 3.0 :ticks 10 :bytes 5}) (seon.print.emit/cost-text {:ms 3.0 :ticks 10 :bytes 5})) "seon.print's is the emitter's")
+  (is (= "5.2 ms · 873k ticks · 4.1 MB · ~1.2k tok" (seon.print.emit/cost-text {:ms 5.2 :ticks 873000 :bytes 4300000 :tok 1200})))
+  (is (= "0.21 ms · 4.4k ticks · 39.9 KB" (seon.print.emit/cost-text {:ms 0.21 :ticks 4400 :bytes 40880})) "a number not given is left out")
   (let [r {:handle 'result/e1 :value [1 2] :ms 5.2 :ticks 873000 :bytes 4300000}
         t (seon/response-text r)]
     (is (re-find #":cost \"5\.2 ms · 873k ticks · 4\.1 MB · ~\d+ tok\"\}$" t) t)

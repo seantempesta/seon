@@ -344,15 +344,13 @@
   its page says so, never a wait. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :map [:tuple [:= :debug] :any]] [:maybe :map]]}
   [st view]
+  (let [;; root's session is an agent with model turns as any agent's; its page also shows what the system reads (:context)
+        context (when-let [ctx (and (= :root (second view)) (:context st))] {:id "d-context" :input ctx :schema :seon.render/root-context})]
   (cond
-    (= :root (second view))
-    ;; root has no model turn: what it reads is the system's value printed, held each pass (:context)
-    (when-let [ctx (:context st)]
-      (ui/debug :root nil nil {:id "d-context" :input ctx :schema :seon.render/root-context}))
     (nil? (get-in st [:branches view :db]))
     (let [db (:main-db st) eid (when db (location db view))]
-      (when (or (get-in st [:branches view :error]) (and eid (nil? (:seon.agent/branch (d/entity db eid)))))
-        (ui/debug (focus (:main-db st) view) nil nil nil)))
+      (when (or context (get-in st [:branches view :error]) (and eid (nil? (:seon.agent/branch (d/entity db eid)))))
+        (ui/debug (if (= :root (second view)) :root (focus (:main-db st) view)) nil nil context)))
     :else
     (let [bdb (get-in st [:branches view :db])
           ;; in the order written: entity ids are issued so
@@ -366,14 +364,14 @@
           raw? (contains? opened "d-turn-raw")
           lb (peek bases)
           to-come? (ui/to-come? bdb lb)]
-      (ui/debug (focus (:main-db st) view)
+      (ui/debug (if (= :root (second view)) :root (focus (:main-db st) view))
                 (cond-> {:turns (mapv (fn [e {:seon.model-call/keys [basis tokens cache-hit-tokens]}]
                                                   (cond-> {:e e :turn (:turn basis) :origin (:origin basis)} tokens (assoc :tokens tokens) cache-hit-tokens (assoc :cached cache-hit-tokens)))
                                                 calls pulled) :at at :to-come? to-come?} gone (assoc :gone gone))
                 (when (seq calls)
                   {:id "d-turn" :input [at (when (= :latest at) (:max-tx bdb)) opened]
                    :draw (fn [_] [(ui/debug-turn {:unit "d-turn" :seon.render/index (program/index-of-db bdb)} (-> (ui/debug-input bdb at calls raw?) (assoc :view (ui/view-param view) :opened opened))) nil])})
-                nil))))
+                context)))))
 
 (def ^:private gone "The agent statuses of an ended process (:seon.agent/status)." (:seon.status/gone (contract/properties :seon.agent/status)))
 
@@ -406,12 +404,15 @@
   "Kept walk kw (`kept-walk`) as of db, a later value of its branch: its ctx patched by what moved
   (seon.ctx/advance), its atom reset to the tree mark makes of it and the moved datoms flushed, so the
   components their change reached are drawn and nothing else; at the db it holds, only what mark changed.
-  Answers kw with its ctx. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:=> [:cat :map :seon.host/db :any :seon.host/fn] :map]}
-  [{:keys [w a c at] :as kw} db branch mark]
+  Answers kw with its ctx. Given known, {:from :moved}: the datoms db moved by from :from, read once for every walk that
+  holds it (advance-main), so no walk diffs main again. See docs/render.md#a-page-is-a-kept-walk."
+  {:malli/schema [:function [:=> [:cat :map :seon.host/db :any :seon.host/fn] :map]
+                  [:=> [:cat :map :seon.host/db :any :seon.host/fn [:maybe [:map [:from :seon.host/db] [:moved [:sequential :any]]]]] :map]]}
+  ([kw db branch mark] (advance-walk! kw db branch mark nil))
+  ([{:keys [w a c at] :as kw} db branch mark known]
   (let [held @at
         same? (identical? held db)
-        moved (if same? [] (ctx/moved held db nil))
+        moved (cond same? [] (identical? held (:from known)) (:moved known) :else (ctx/moved held db nil))
         c' (if same? c (ctx/patch c db moved branch))]
     (vreset! at db)
     (reset! a (mark (:tree c')))
@@ -423,7 +424,7 @@
                       (select-keys w [:id-prefix]))]
         (render/dispose-walk! w)
         (render/flush! w' nil)
-        (assoc kw :w w' :c c')))))
+        (assoc kw :w w' :c c'))))))
 
 (defn- branch-walk!
   "The kept walk of agent e's page (e on main) on its branch, as of bdb, the evals main records it opened
@@ -491,20 +492,21 @@
 
 (defn- user-walks
   "St with each user's kept walk advanced to main db, and the views that show one dirty, as root's own is (`root-walk`): the components the move reached are drawn, nothing else. See docs/render.md#a-page-is-a-kept-walk."
-  {:malli/schema [:=> [:cat :map :seon.host/db] :map]}
-  [st db]
+  {:malli/schema [:function [:=> [:cat :map :seon.host/db] :map] [:=> [:cat :map :seon.host/db [:maybe :map]] :map]]}
+  ([st db] (user-walks st db nil))
+  ([st db known]
   (let [cell (or (:user-walks st) (volatile! {}))
         ;; the signed-in user's agents list is every page's (`user-sides`): its change redraws every view
         signed (some-> db (d/entity [:seon.system/id :root]) :seon.system/signed-in :seon.user/name)
         side (fn [] (when-let [kw (get @cell signed)] (into {} (for [u (list-units (render/placed-units (:w kw)) "#c-side")] [(:id u) (:rev u)]))))
         before (side)]
-    (doseq [[n kw] @cell] (vswap! cell assoc n (advance-walk! kw db :main identity)))
+    (doseq [[n kw] @cell] (vswap! cell assoc n (advance-walk! kw db :main identity known)))
     (cond-> st
       (not= before (side)) (update :dirty (fnil into #{}) (keys (:views st)))
       (seq @cell) (update :dirty (fnil into #{})
                           ;; the views of the agents these walks draw (each branchless: a user, root's session): their pages moved with main
                           (filter (fn [v] (let [x (if (vector? v) (second v) v)]
-                                            (when (keyword? x) (some->> (location db x) (d/entity db) :seon.agent/key (contains? @cell))))) (keys (:views st)))))))
+                                            (when (keyword? x) (some->> (location db x) (d/entity db) :seon.agent/key (contains? @cell))))) (keys (:views st))))))))
 
 (defn- user-sides
   "The agents list every page shows: the signed-in user's (root's :seon.system/signed-in), as that user's kept walk drew it (seon.render.ui/agents-list,
@@ -632,8 +634,8 @@
   first read, then advanced by what each move of main changed (seon.ctx/advance, its datoms
   flushed): the walk draws the components their change reached, nothing else. Root's page is dirty when it moves; the agents
   list every page shows is the signed-in user's (`user-sides`), not root's."
-  {:malli/schema [:=> [:cat :map :seon.host/db [:maybe :seon.host/db]] :map]}
-  [st db held]
+  {:malli/schema [:=> [:cat :map :seon.host/db [:maybe :seon.host/db] [:maybe [:sequential :any]]] :map]}
+  [st db held moved]
   (let [root (:db/id (d/entity db [:seon.system/id :root]))
         rw (:root-walk st)]
     (cond
@@ -646,7 +648,7 @@
       (let [{:keys [a]} rw
             ;; root's process (process!) is root's own data beside the pull: kept across a move of main
             p (:process @a) h (:health @a)
-            rw (advance-walk! rw db :main #(cond-> % p (assoc :process p) h (assoc :health h)))]
+            rw (advance-walk! rw db :main #(cond-> % p (assoc :process p) h (assoc :health h)) {:from held :moved moved})]
         (update (assoc st :root-walk rw) :dirty (fnil conj #{}) :root)))))
 
 (defn- process!
@@ -814,8 +816,9 @@
   (let [held (:main-db st)]
     (if (and held (<= (:max-tx db) (:max-tx held)))
       st
-      (let [moved (when held (apply concat (d/datoms-diff held db :eavt [])))]
-        (cond-> (user-walks (root-walk (main-info st db moved) db held) db)
+      ;; one diff a move of main: the index, every kept walk and the views it touched read the same datoms
+      (let [moved (when held (ctx/moved held db nil))]
+        (cond-> (user-walks (root-walk (main-info st db moved) db held moved) db (when held {:from held :moved moved}))
           (seq moved) (update :dirty (fnil into #{}) (touched st moved)))))))
 
 (defn- error-page
