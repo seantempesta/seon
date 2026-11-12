@@ -49,3 +49,21 @@
     (doseq [part (partition-all 200 (range n))]
       (d/transact conn {:tx-data (vec (mapcat #(runs-tx % 1000) part))}))
     (f conn)))))
+
+(defn world
+  "load!'s main as a value: n work tasks and their merges on an empty db with the schema (seon.db/empty-db), how their work
+  stands (runs-tx), in memory. No store branch: the test store's seed is ~70M ticks a branch and nothing here reads it."
+  [n max-running]
+  (let [ds (decls n)
+        with (fn [db tx] (d/db-with db (vec tx)))
+        db (with (pdb/empty-db false) (into (task/boot-tx boot "sean") (seon.task/config-tx {:seon.config.agent/max-running max-running} {})))
+        tasks (task/create-tx db ds)
+        ;; the entities the tasks name by their identity (a merge step's var, the sections their plans cite), which the test
+        ;; store's seed held: stated here, each once, so the world holds exactly what its tasks reach
+        named (distinct (for [x (tree-seq coll? seq tasks)
+                              :when (and (vector? x) (= 2 (count x)) (#{:var/name :seon.doc/address} (first x)))]
+                          {(first x) (second x)}))
+        db (with db named)
+        db (with db tasks)
+        db (with db (task/execution-tx (mapv #(task/task-id 'r3 (:seon.task/name %)) ds) :running))]
+    (with db (mapcat #(runs-tx % 1000) (range n)))))

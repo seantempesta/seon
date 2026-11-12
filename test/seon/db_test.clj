@@ -5,7 +5,7 @@
             [clojure.java.shell] [clojure.java.io] [clojure.walk] [datahike.api :as d] [datahike.writer :as dw] [datahike.writing] [datahike.db.transaction :as dbt]
             [seon.db :as pdb] [seon.schema.datahike] [malli.core] [malli.registry] [seon.config :as cfg] [seon.contract :as contract] [seon.edn] [seon.repl] [seon.print] [datahike.schema]
             [konserve.jolt.lmdb :as klmdb] [konserve.jolt.lmdb-ffi :as lmdb] [konserve.jolt.lz4] [konserve.jolt.zstd] [clojure.string :as str] [konserve.core :as k] [hasch.core] [datahike.gc] [seon.cost :as cost] [seon.lib :as lib] [seon.intr :as intr]
-            [datahike.datom :as dd] [datahike.index.persistent-set :as psi] [seon.merge] [org.replikativ.persistent-sorted-set]
+            [datahike.datom :as dd] [datahike.db] [datahike.index.persistent-set :as psi] [seon.merge] [org.replikativ.persistent-sorted-set]
             [jolt.scheme :as scm] [superv.async :as sv] [konserve.metrics :as km] [jolt.ffi :as ffi]))
 
 (defn- notes [db] (set (d/q '[:find [?t ...] :where [_ :note/text ?t]] db)))
@@ -123,6 +123,38 @@
        :fixed {:ticks 400000 :bytes 2000000}
        :sizes [1 10 100]})
     (finally (run! seon.lib/remove-tree! @stores-made) (reset! stores-made []))))
+
+(defn vars-and-forms-of
+  "datahike.api/q's arguments for the program's var-first query: a db of n vars, each naming its form through
+  :var/form (a ref with no index, as the program's schema has it), one form in a hundred naming the target in
+  :form/refs (indexed), and the query written with the clause that binds every var first."
+  {:malli/schema [:=> [:cat pos-int?] [:tuple :any :any]]}
+  [n]
+  [(quote [:find ?v :where [?e :var/name ?v] [?e :var/form ?f] [?f :form/refs seon.db-test/target]])
+   (d/db-with (datahike.db/empty-db {:var/name {:db/unique :db.unique/identity}
+                                    :var/form {:db/valueType :db.type/ref}
+                                    :form/refs {:db/index true :db/cardinality :db.cardinality/many}})
+              (vec (mapcat (fn [i] [{:db/id (- (inc i)) :form/refs (if (zero? (mod i 100)) ['seon.db-test/target 'other] ['other])}
+                                    {:var/name (symbol "app" (str "v" i)) :var/form (- (inc i))}])
+                           (range n))))])
+
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-query-costs-the-same-in-either-clause-order
+  ;; notes plans/deps-query-planner.md: seon.check-test's launcher query, var-first, was 17.2M ticks on the program
+  ;; (5,733 vars) against 0.1M with its selective clause written first; the planner chose a two-pattern group's scan
+  ;; by written order. Planned in execution order, the var-first query costs the seek-first one (measured at 1,000 vars:
+  ;; 53.8k ticks either way). The test: the three fixtures (1,400 vars, ~4.2k datoms) in memory, d/db-with writing no
+  ;; store (~1.2k ticks a datom: ~5M), the measured queries ~1M: 10M (measured 7.2M).
+  (cost/proof
+    {:of 'datahike.api/q :input 'seon.db-test/vars-and-forms-of
+     :n "vars in the db (one form in a hundred names the target)"
+     :work (str "the :form/refs seek (n/100 forms), one :var/form datom read and probed against them per var, a :var/name "
+                "lookup and a result row for each of the n/100 that match; the plan (parse, estimate, order) once")
+     :growth :linear
+     ;; per var: an AEVT datom visited and a probe (~15 ticks, nothing made); per match (n/100) a lookup and a row,
+     ;; ~2k ticks and ~2 KB: ~35 ticks and ~25 B a var. The plan: ~30k ticks, ~150 KB. Var-first is ~3k ticks a var.
+     :per-n {:ticks 35 :bytes 25}
+     :fixed {:ticks 30000 :bytes 150000}
+     :sizes [100 300 1000]}))
 
 (defn- heads-read
   "[f's value, how many times f folded a store's roster]: the roster fold (konserve's reduce-log) is

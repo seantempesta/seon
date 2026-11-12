@@ -1331,7 +1331,9 @@
             ;; and the steps' one seeded store is the checkout's own, never a store this process was handed
             store (str checkout "/target/check-store")
             sh (fn [& argv] (let [r (apply lib/sh (concat child-env-scrub [(str "SEON_RESULTS_DIR=" (cfg/value :seon.config.proofs/results-dir))
-                                                                           (str "SEON_STORE=" store)]
+                                                                           (str "SEON_STORE=" store)
+                                                                           ;; the test service reads what its running items hold by it
+                                                                           (str "SEON_PROVE_BATCH=" (:seon.prove/batch req))]
                                                           ["nice" "-n" "15"] argv [:dir checkout]))]
                               (spit log (str "$ " (str/join " " argv) " (exit " (:exit r) ")\n" (:out r) (:err r)) :append true)
                               r))

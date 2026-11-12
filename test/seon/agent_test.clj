@@ -9,7 +9,7 @@
   (:require [clojure.test :refer [deftest is testing]] [clojure.java.shell :as sh] [clojure.edn :as edn]
             [clojure.string :as str] [seon.agent :as agent] [seon.reconcile :as r] [seon.proofs :as proofs] [seon.contract :as contract]
             [datahike.api :as d] [seon.db :as pdb] [seon.test-store :as ts] [seon.program-test] [seon.lib :as lib] [seon.program :as program] [seon.sock :as sock]
-            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async]))
+            [seon.fx :as fx] [seon.cost :as cost] [seon.config :as cfg] [seon.merge :as pm] [seon.profile :as profile] [seon.task :as task] [seon.writer :as writer] [seon.repl :as repl] [seon.agent-proc] [seon.ctx] [seon.render] [seon.turn] [my.test :as mt] [test-runner :as runner] [seon.ctx.wire-test] [my.task] [my.agent] [seon.template :as tpl] [seon.stall-proofs] [seon.doc] [clojure.core.async :as a] [clojure.core.async.flow :as flow] [jolt.async.remote :as remote] [jolt.async.remote.flow :as rflow] [jolt.io-poller :as poller]))
 
 (def ^:private await-file
   "seon.await, which a root (importing src only) loads by this path."
@@ -60,7 +60,8 @@
                                                  (if-let [r (get-in a [:response :value])] {:response r} a)))
                                   (if (fn? forms) (forms names) forms)))))))
 
-(deftest a-branchs-config-key-moves-the-tests-reading-it-and-no-other
+;; Estimate: reach graph of the world ~2M, 3 graph indexes at ~0.5M, 2 record-tx ~0.4M = ~4000000.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-branchs-config-key-moves-the-tests-reading-it-and-no-other
   ;; docs/merging.md#verdicts-are-a-cache: a test takes each key's value, so what a branch states of one key moves the tests reading it, and leaves the rest and the place keys alone
   (let [form (fn [nm k]
                (fn [db] (program/record-tx db {:id (str "app.k-test/" nm) :src (str "(deftest " nm " (seon.config/value " k "))") :ns 'app.k-test :ns-form? false
@@ -248,7 +249,8 @@
 ;; docs/merging.md#the-test-service: the one call proves a reference (Sean, 2026-11-11: "seon.test/prove #commit id or
 ;; whatever we are passing in to signify the branch or point in time and that runs it"). Wrong if a reference at an earlier
 ;; commit answers the head's verdicts: a past point always forks, onto a branch made at that commit, which loads its program
-(deftest a-reference-at-an-earlier-commit-is-proved-at-that-point
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-reference-at-an-earlier-commit-is-proved-at-that-point
   (let [[head past] (with-agent {}
                       (fn [{:keys [names eval-root]}]
                         (let [a (:agent names) ev (comp root-value eval-root)
@@ -263,7 +265,8 @@
     (is (= '[pt.atref/f-is-one] head) (str "the head is red: " (pr-str head)))
     (is (and (empty? (:red past)) (pos? (:pass past 0))) (str "the earlier commit is proved as it stood, green: " (pr-str past)))))
 
-(deftest a-tests-request-is-answered-while-an-eval-blocks
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-tests-request-is-answered-while-an-eval-blocks
   ;; task seon.agent/the-agent-is-a-flow-graph: root's :tests request goes to the agent's :tests proc,
   ;; never behind the eval the :repl proc runs (md-scan #21: a :tests waited behind a wait that held the
   ;; loop). An eval blocks on a channel take that nothing will answer; the test service proves the
@@ -282,7 +285,8 @@
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
 
-(deftest an-agent-ends-when-its-root-is-gone
+;; Estimate: own root started and killed (~2M), 5 requests ~150k, about 10 shell calls (pgrep, kill) at ~200k = ~4000000.
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 5}} an-agent-ends-when-its-root-is-gone
   ;; with its fork server gone first (a pid cleanup), an agent ends on EOF of its own socket to root,
   ;; whatever it is doing: an idle agent reads it; one evaluating a form with no tick budget is
   ;; interrupted by it (SIGIO); one blocked in a channel take, whose condition-wait reaches no safe
@@ -295,7 +299,8 @@
     (is (not (contains? left (agents blocked))) "the blocked agent ended")
     (is (empty? left) (str "agents still alive: " left "\n" out))))
 
-(deftest a-proof-run-ends-with-its-agent
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded); 2 shell calls (mkfifo, rm) at ~200k each = ~2650k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-proof-run-ends-with-its-agent
   ;; the agent's proof run (a fork of it) holds
   ;; the write end of a fifo and sleeps, a test that never writes to the agent's pipe; the
   ;; agent is killed (its task cancelled); the proof run ends with it, on the kernel's word that
@@ -327,7 +332,8 @@
     (is (= 49 began) "the proof run was in its test")
     (is (= -1 ended) (str "the proof run outlived its agent (byte " ended " after its sleep); agent " (pr-str pid) " kill " (pr-str killed)))))
 
-(deftest a-handful-of-tests-runs-in-one-child
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 6 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3000k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 6}} a-handful-of-tests-runs-in-one-child
   ;; task seon.agent/a-test-run-streams-its-reports: a run forks no more children than its work needs
   ;; (:seon.config.proofs/child-min-ms); five tests never measured count :seon.config.proofs/unmeasured-ms each, under it
   (let [form (fn [n] (str "(ns app.few" n "-test (:require [clojure.test :refer [deftest is]])) (deftest a (is (= 1 1)))"))
@@ -337,7 +343,8 @@
     (is (= {:children 1 :pass 5} (some-> (:value r) clojure.edn/read-string)))))
 
 ;; See docs/reconcile.md#a-task-holds-how-its-work-ended
-(deftest a-wake-that-ran-no-turn-has-no-end
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-wake-that-ran-no-turn-has-no-end
   ;; task seon.reconcile/a-wake-that-ran-no-turn-has-no-end: a turn moves only inside a turn, so a wake whose work! threw before
   ;; its first turn read the previous wake's end as its own: an old :waiting parked its task again and counted the message
   ;; that woke it as taken, and the throw's error lost to the old end's
@@ -352,7 +359,8 @@
     (is (nil? (:value after)) (str "and it wrote no end, so root reads none: " (pr-str after)))))
 
 ;; See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent
-(deftest a-stall-tasks-proofs-judge-only-a-task-that-names-them
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-stall-tasks-proofs-judge-only-a-task-that-names-them
   ;; seon.stall-proofs read their task's cause, so on any other task they were stray reds (the control of 2026-11-05)
   (let [p 'seon.stall-proofs/the-stall-ended
         plan (fn [proofs] (str "(let [p (seon.agent/test-plan (seon.agent/db) nil " proofs ")] (contains? (set (:selected p)) '" p "))"))
@@ -361,7 +369,8 @@
     (is (false? (:value not-named)) (str "and no other task's: " (pr-str not-named)))))
 
 ;; See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent
-(deftest an-eval-that-empties-the-agents-state-leaves-it-working
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} an-eval-that-empties-the-agents-state-leaves-it-working
   ;; a test run at an agent's REPL ended by resetting the state it had taken for its own (seon.ctx-test's end-agent!):
   ;; every later call was seon.agent/db's nil, and the agent died at its next prove (the control of 2026-11-05)
   (let [[gone after page] (in-agent ["(do (reset! seon.agent/state nil) :emptied)" "(+ 1 2)" "(some? (seon.repl/page-walk))"])]
@@ -369,7 +378,8 @@
     (is (= 3 (:value after)) (pr-str after))
     (is (true? (:value page)) (pr-str page))))
 
-(deftest an-agent-answers-while-its-tests-run
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded); 3 shell calls (2 mkfifo, rm) at ~200k each = ~3350k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 5}} an-agent-answers-while-its-tests-run
   ;; task seon.turn/observe-reads-are-renders (phase B): root's :tests request forks the test child
   ;; and a fiber reads it, so the agent's loop answers an eval while its own tests run. The test
   ;; child holds in its test until this test lets it go (a fifo, no clock): the eval is answered
@@ -403,28 +413,39 @@
     (is (= 42 (ts/value-of (ts/value-of (:response answered)))) (str "the agent answered while its test held: " (pr-str answered)))
     (is (= {:pass 1 :fail 0 :error 0} result) (str "and the run answered green once let go: " (pr-str result)))))
 
-(deftest a-test-childs-run-ends-at-its-exit-though-it-forked-a-grandchild
-  ;; agent a3 waited 3.5 h on main (2026-10-26) reading its test child's pipe to an end of file
-  ;; that never came: root's :tests in flight, the agent at 0% CPU. A process the test child forked
-  ;; held the write end past the child's exit. A forked child holds only what it is given
-  ;; (docs/processes.md#a-child-holds-what-it-is-given), so the grandchild here, given a pipe of its own
-  ;; to wait on, holds no copy of the child's, and the child's exit is the read's end of file. A
-  ;; regression waits for ever (no clock may end it): a hang is this test's red. The result line,
-  ;; longer than the reader's 1 MB read, is read whole
-  (let [result (pr-str {:pass 1 :fail 0 :error 0 :reports [] :pad (apply str (repeat 1200000 "x"))})
-        [r w] (sock/socketpair)
-        [gr gw] (sock/socketpair)
-        pid (lib/fork! {:fd w :keep #{gr} :refused (fn [n] {:refused n}) :parent identity
-                        :child (fn []
-                                 (lib/fork! {:keep #{gr} :refused (fn [_] nil) :parent (fn [_] nil)
-                                             :child (fn [] (let [rd (sock/line-reader gr)] (loop [] (when-not (= :eof (rd)) (recur)))))})
-                                 (sock/write-line! w result))})]
-    (lib/c-close gr)
-    (let [read (try (agent/read-to-exit r pid)
-                    (finally (lib/c-close r) (lib/c-close gw)))]
-      (is (= {:line result :status {:exit 0}} read) "the child's exit is the end of file, its grandchild still waiting"))))
+;; See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-test-child-is-a-proc-of-the-agents-graph
+  ;; the one-unit spec, fork-one step 2: a test child is forked by jolt.async.remote.flow/fork! as a proc of the agent's own
+  ;; Flow graph, its values folded by a proc of that graph, never read from a hand-made pipe. The graph's procs are read
+  ;; when the child's pid is told (forked: the child is running) and after the run: the child and its run's fold are
+  ;; procs of the graph while the run is in flight, and both are gone once it has answered
+  (let [[_ r] (in-agent ["(ns app.proc-test (:require [clojure.test :refer [deftest is]])) (deftest a (is (= 1 1)))"
+                         (str "(let [procs #(set (keys (:procs (clojure.datafy/datafy (:flow @seon.agent/state)))))"
+                              "      before (procs) during (atom nil)"
+                              "      r (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] (reset! during (procs))) '#{app.proc-test})]"
+                              "  (pr-str {:pass (:pass r) :added (count (remove before @during)) :after (= before (procs))}))")])
+        v (some-> (:value r) clojure.edn/read-string)]
+    (is (= {:pass 1 :added 2 :after true} v) (str "the child and its fold were procs while it ran, gone after: " (pr-str r)))))
 
-(deftest two-test-runs-at-once-each-read-their-child-to-its-end
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 40000000 :asks 2}} a-test-childs-run-ends-at-its-exit-though-it-forked-a-grandchild
+  ;; agent a3 waited 3.5 h on main (2026-10-26) for its test child's end, which never came: root's :tests in flight,
+  ;; the agent at 0% CPU. A process the test child forked held the child's end of its link past the child's exit. A
+  ;; forked child holds only what it is given (docs/processes.md#a-child-holds-what-it-is-given), so the grandchild
+  ;; here, a command started by the test (tail -f /dev/null, which waits for good) holds no copy of the child's link,
+  ;; and the child's exit ends the run. A regression waits for ever (no clock may end it): a hang is this test's red
+  (let [pidf (str (seon.config/checkout) "/target/runs/grandchild-" (random-uuid))
+        [_ r] (in-agent [(str "(ns app.gc-test (:require [clojure.test :refer [deftest is]]))"
+                              " (deftest forks (let [pid (.pid (.start (ProcessBuilder. ^java.util.List [\"tail\" \"-f\" \"/dev/null\"])))]"
+                              "                  (spit " (pr-str pidf) " (str pid)) (is (pos-int? pid))))")
+                         "(pr-str (select-keys (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) '#{app.gc-test}) [:pass :fail :error]))"])
+        gc (some-> (ts/output pidf) parse-long)
+        alive (when gc (lib/kill! gc 0))]
+    (when gc (lib/kill! gc (jolt.host/signal-number "KILL")))
+    (.delete (java.io.File. ^String pidf))
+    (is (= {:pass 1 :fail 0 :error 0} (some-> (:value r) clojure.edn/read-string)) (pr-str r))
+    (is (true? alive) "the grandchild was still waiting when the run answered")))
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded); 1 shell call (mkfifo) at ~200k = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} two-test-runs-at-once-each-read-their-child-to-its-end
   ;; docs/processes.md#a-child-holds-what-it-is-given: an agent runs the test service's items at once, each a run of its own
   ;; (seon.repl/serve-item!); a child of one run kept the other run's pipe end, so that run's end of file waited on the
   ;; other child and it answered a :pipe-held error with no report (bin/check agent-checks, 2026-11-12). Here run a's test
@@ -454,34 +475,8 @@
     (is (str/includes? (:seon.print/code (my.agent/prove-summary {} run)) "✗ the run: test process died")
         "the run's error is said")))
 
-(deftest a-test-childs-read-lets-the-agents-other-fibers-run
-  ;; the recipe hang of 2026-10-28 (the scratch paper hang-2026-10-28-a1-prove (git history)): agent a1's test child
-  ;; asked a1 something mid-run, and a1, reading the child's pipe, was blocked in a native kevent on
-  ;; its one main carrier, so the fiber that would answer never ran. The poller's ready is a hint:
-  ;; a stale one, left by the read before, ends the next park at once, and the read's wait then
-  ;; blocked. The reader here is a main carrier, as an agent is (a pool's other carriers would run
-  ;; the fiber and hide it); its writer writes one line, then waits for a go that another fiber of
-  ;; the reader sends when it sees that line. A regression waits for ever (no clock may end it): a
-  ;; hang is this test's red
-  (let [reader (fn []
-                 (let [[r w] (sock/socketpair)
-                       [gr gw] (sock/socketpair)
-                       pid (lib/fork! {:keep #{w gr} :refused (fn [n] {:refused n}) :parent identity
-                                       :child (fn []
-                                                (sock/write-line! w "1")
-                                                (let [rd (sock/line-reader gr)] (loop [] (when (= [] (rd)) (recur))))
-                                                (sock/write-line! w "2"))})
-                       _ (do (lib/c-close w) (lib/c-close gr))
-                       sent (promise)
-                       res (agent/read-to-exit r pid #(when (= "1" %)
-                                                        (clojure.core.async/go (deliver sent (sock/write-line! gw "go")))))]
-                   (lib/c-exit (if (and (= {:line "2"} (dissoc res :status)) (= true @sent) (= {:exit 0} (:status res))) 0 3))))
-        pid (lib/fork! {:refused (fn [n] {:refused n}) :parent identity
-                        :child (fn [] (jolt.host/main-carrier-run! reader))})]
-    (is (= {:exit 0} (lib/wait-status pid))
-        "the reader, a main carrier, read both lines: the go came from its other fiber while the read waited")))
-
-(deftest root-interrupts-a-blocked-take
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} root-interrupts-a-blocked-take
   ;; root's interrupt! stops an eval blocked in a
   ;; channel take, and the agent answers its next request
   (let [[stopped next-answer]
@@ -495,7 +490,8 @@
     (is (true? stopped) (str "the blocked eval answers interrupted by root: " stopped))
     (is (= 4 next-answer) (pr-str next-answer))))
 
-(deftest an-agent-holds-mains-tests-and-runs-them
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} an-agent-holds-mains-tests-and-runs-them
   ;; main holds the source root's test namespaces
   ;; (imported from test/), and an agent forked from the fork server holds them compiled:
   ;; it runs one without requiring it, and a green test reports green, a red one red
@@ -513,7 +509,8 @@
     (is (= {green #{:pass} red #{:fail}} (:value run))
         "main's test runs green in the agent; a red one beside it reports red")))
 
-(deftest root-holds-no-test-code-and-its-agents-hold-mains-tests
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} root-holds-no-test-code-and-its-agents-hold-mains-tests
   ;; task seon.system/root-holds-no-test-code: root imports test/ as facts (reach digests) and evaluates
   ;; none of it; the fork server loads the tests once, so the agent forked from it holds them
   ;; compiled (and a test child it forks runs them: an-agent-holds-mains-tests above)
@@ -552,7 +549,8 @@
                "the proof and the test reaching the change; nothing else (not its namespace's other test, not another namespace's)"))
          (finally (run! remove-ns '[pt.rc pt.rc-test pt.rc-other-test])))))
 
-(deftest a-plan-with-no-base-costs-what-a-plan-with-one-does
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-plan-with-no-base-costs-what-a-plan-with-one-does
   ;; a plan that selects with no base (mode :main: the test service's run of main, and the tests that run as it
   ;; does) builds its reach graph from the agent's base as any plan does: built from nothing it allocated 853 MB
   ;; against an update's 290 (2026-10-30), and a-death-costs-the-test-it-interrupted-and-no-other and
@@ -565,7 +563,8 @@
         v (:value r)]
     (is (and (map? v) (< (:ratio v) 1.5)) (str "no base costs about what a base does: " (pr-str v)))))
 
-(deftest a-death-costs-the-test-it-interrupted-and-no-other
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-death-costs-the-test-it-interrupted-and-no-other
   ;; task seon.agent/a-test-run-streams-its-reports: the test child wrote the run's one result
   ;; line at its end, so a death anywhere lost every report before it (the test service's run of
   ;; main: 344 tests, one death, 0 results). Each test's reports go as it ends; a death is the
@@ -578,7 +577,8 @@
         v (some-> (:value r) clojure.edn/read-string)]
     (is (= {:pass 2 :error 1 :died ["#'app.die-test/b-dies"] :passed ["#'app.die-test/a-first" "#'app.die-test/c-last"]} v) (pr-str r))))
 
-(deftest a-test-run-is-dealt-across-children-and-loses-none
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-test-run-is-dealt-across-children-and-loses-none
   ;; task seon.agent/a-test-run-streams-its-reports (the deal): the selected tests are dealt by seon.proofs/shards into
   ;; :seon.config.proofs/jobs test children, each its own fork; every test reports once, and a death in one child costs
   ;; only the test it ran. Sixteen tests of four namespaces and one that dies: at the default :seon.config.proofs/child-min-ms they are worth two children or more (a-handful-of-tests-runs-in-one-child is the bound's other side).
@@ -603,7 +603,8 @@
     (is (<= 2 (:children (v two))) "at least two children forked (a death forks a new one for what its child had left)")
     (is (= [16 1 ["#'app.par3-test/dies"]] ((juxt (comp count :ran) :error :died) (v two))) "all sixteen passed once, and the death cost only the test it ran")))
 
-(deftest a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-message-sent-while-the-agent-waits-on-its-tests-reaches-its-inbox
   ;; task seon.agent/an-agent-has-one-wait: prove! waits for root's answer on the same wait as
   ;; every other ask (await!), so a delivery read there lands in the inbox, as when idle
   (let [[sent proved taken] (in-agent #(vector {:op :message :agent (:agent %) :body "while proving"}
@@ -613,7 +614,8 @@
     (is (map? (:value proved)))
     (is (re-find #":body \"while proving\"" (:text taken)) (:text taken))))
 
-(deftest one-bound-one-verdict-and-the-judge-reruns-no-green
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} one-bound-one-verdict-and-the-judge-reruns-no-green
   ;; task seon.proofs/one-prove-path: a test's tick budget is its own, so two tests that each
   ;; need t ticks are green under a budget of 1.5 t wherever they run (a per-run budget made
   ;; the second red in one run and green alone); the turn's greens are stored at their digests,
@@ -635,7 +637,8 @@
     (is (= ['{bound-test/a :pass bound-test/b :pass} 0 2 false] (:value judge))
         (str "the judge after it: the same verdict, both reused, nothing run and no child forked " (pr-str judge)))))
 
-(deftest a-test-run-leaves-nothing-in-its-agents-working-directory
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-test-run-leaves-nothing-in-its-agents-working-directory
   ;; docs/failure-points.md, a directory walk: a test child works in a directory of its own
   ;; (seon.fx/run-dir, under the agents' working directory), so what a test writes relative to its
   ;; working directory is the run's, removed when the child has ended. The test writes a marker
@@ -656,7 +659,8 @@
     (is (false? (:target (:value after))) "the test's relative write is not in the agents' working directory")
     (is (not (.exists (java.io.File. (str "/tmp/seon-agents/tests/" (second (:value run)))))) "and its directory is removed")))
 
-(deftest a-red-at-its-digest-is-reused-with-its-failures
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3250k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-red-at-its-digest-is-reused-with-its-failures
   ;; task seon.proofs/a-red-at-its-digest-is-reused: this agent's run cached r red at its digest; r is green
   ;; if it runs, so a run would say :pass. The judge reuses the red, with the failure its run
   ;; cached, and forks nothing. Another's red is not reused: a digest does not see the machine, and it runs
@@ -691,7 +695,8 @@
     (is (= {:results '{reads-test/r :pass}} (:value green)) (pr-str green))
     (is (contains? (set (:value reads)) 'reads-test/r) (str "its green names what it read, itself among them: " (pr-str reads)))))
 
-(deftest a-test-run-writes-its-results-on-the-branch
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3250k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-test-run-writes-its-results-on-the-branch
   ;; task seon.proofs/test-results-are-a-few-facts (R2a): an agent's run of its proofs records each
   ;; result as facts on the test's var entity on its branch (seon.proofs/result-tx, beside the cache):
   ;; red with its digest and its failing assertions as data, main holding none of it; fixed and run again, green with no
@@ -742,7 +747,8 @@
     (is (= '{green-test/turned :red} first-facts) (pr-str first-facts))
     (is (= '{green-test/proof :green green-test/turned :green} second-facts) (pr-str second-facts))))
 
-(deftest a-proof-over-the-branchs-data-is-keyed-by-its-data-too
+;; Estimate: calc-db and 2 records ~1.8M, 2 test plans at ~2M, 2 reach-digests at ~1.3M, db-with x3 = ~9000000.
+(deftest ^{:seon.test/estimate {:ticks 9000000}} a-proof-over-the-branchs-data-is-keyed-by-its-data-too
   ;; Context's trial finding 14: an agent's proof over its branch's data (lab.proofs/the-tasks-i-cite-differ-from-my-base) ran
   ;; red before the agent's write and green after at one digest, so it was judged flaky and its task refused. Its digest held
   ;; its code and not the data it reads: a test namespace's own call of a branch reader (my.db, seon.agent/db) takes the
@@ -767,7 +773,8 @@
         "the tests reading no branch keep theirs")
     (is (= (checkout branch) (checkout written)) "bin/test's digests hold no branch")))
 
-(deftest an-agents-own-deftest-is-no-failure-point
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} an-agents-own-deftest-is-no-failure-point
   ;; docs/health.md#a-laws-unnamed-site: a deftest an agent defines at its REPL, in a namespace of its own (which takes a file under src,
   ;; seon.source/namespace-path), is a test by its var's :test (the compiler's fact), so its `is`'s catch opens no
   ;; :unnamed-site the done rule refuses on (seon.problems/caused); a catch in a function it defines there still does
@@ -780,7 +787,8 @@
     (is (not (site "p")) (pr-str caused))
     (is (site "f") (pr-str caused))))
 
-(deftest an-agents-greens-and-a-checkouts-are-one-store
+;; Estimate: calc-db and a record ~1.4M, 7 reach-digests of a small db at ~1.3M, 2 test plans at ~2M = ~10000000.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} an-agents-greens-and-a-checkouts-are-one-store
   ;; owner, 2026-10-23: a test green at its digest is not run again, "especially when freshly branched": an agent's greens and a
   ;; checkout's (bin/test's) are one verdict cache, so an agent's plan must key each test by the digest bin/test's plan does.
   ;; bin/test's is seon.program/graph-index over the program's reach graph; an agent's is its base's graph brought to its branch
@@ -799,7 +807,8 @@
     (is (= (checkout branch) (agent branch)) "and after its branch changes a form")
     (is (not= (checkout base) (checkout branch)) "which moved a digest")))
 
-(deftest a-previous-roots-inputs-are-not-shared
+;; Estimate: 2 db-with of one root entity ~0.1M each, 2 test-inputs reads, test-db is shared = ~500000.
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-previous-roots-inputs-are-not-shared
   ;; re-review 2026-10-22: the :root entity outlives its root, so a restart (or a root with no
   ;; source on the same main) must not key its agents' results by a fact an earlier boot wrote
   (let [inputs {:env "e" :tree "t" :config {} :data-refs {}}
@@ -808,7 +817,8 @@
     (is (= inputs (first (agent/test-inputs (db "b1")))) "this boot's inputs: its results are keyed by them")
     (is (nil? (first (agent/test-inputs (db "b2")))) "an earlier boot's: nothing keys by them, so nothing is reused")))
 
-(deftest a-forked-agent-knows-its-task
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-forked-agent-knows-its-task
   ;; root forks the agent for its
   ;; task, so my.task/current answers it at the agent's first form, before any turn loop
   ;; or context read begins (it was nil: root kept the task in its view only)
@@ -816,7 +826,8 @@
         [id] (in-agent (fn [n] (vreset! names n) ["(:seon.task/id (my.task/current))"]))]
     (is (= (:task @names) (:value id)) (pr-str id))))
 
-(deftest an-agent-inherits-a-static-heap
+;; Estimate: in-agent's own setup and teardown (2 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3500k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 2}} an-agent-inherits-a-static-heap
   ;; design agent-loop section 2: an agent forked after main moved inherits the fork server's
   ;; heap in Chez's static generation, so its collections never copy (un-share) it. Measured
   ;; 2026-10-25: 163 MB of the fork server's heap sat in generations 3 and 4 at fork, and one
@@ -834,7 +845,8 @@
         mb (/ (:value r) 1048576.0)]
     (is (< mb bound) (str "the agent inherited " mb " MB outside the static generation: " (pr-str r)))))
 
-(deftest an-agents-collect-trip-is-the-configured-one
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} an-agents-collect-trip-is-the-configured-one
   ;; docs/machine.md#what-a-process-owns-in-memory: Jolt's adaptive nursery raises any trip
   ;; below its floor (16 MiB) back to the floor, so a trip set directly never held and agents
   ;; collected every 16 MiB, not the configured 4 (measured 2026-10-28: 16777216); the
@@ -845,7 +857,8 @@
                          "(jolt.scheme/eval-string \"(collect-trip-bytes)\")"])]
     (is (= (seon.config/value :seon.config.agent/trip-bytes) (:value r)) (pr-str r))))
 
-(deftest a-test-childs-ceiling-is-its-own
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-test-childs-ceiling-is-its-own
   ;; docs/machine.md#what-a-process-owns-in-memory: a test child inherited its agent's absolute
   ;; ceiling, so a child of an agent that had grown had that much less room for its tests; its
   ;; ceiling is now its own heap at its fork plus the same allowance. The agent holds 300 MB
@@ -856,7 +869,8 @@
         v (some-> (:value r) clojure.edn/read-string)]
     (is (= {:pass 1 :fail 0 :error 0} v) (pr-str r))))
 
-(deftest a-fork-servers-static-grows-only-with-the-program
+;; Estimate: in-agent's own setup and teardown (10 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 10 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~17500k, 20000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 20000000 :asks 10}} a-fork-servers-static-grows-only-with-the-program
   ;; docs/machine.md#what-a-process-owns-in-memory: the fork server made its heap static before
   ;; every fork, so what each fork replaced (main's db, the reach graph, the index) stayed in
   ;; static for the server's life. Twenty forks with main moving (each a task of its own) but
@@ -881,7 +895,8 @@
                         {:seon.eval/id (str "e" (+ 1000000 k)) :seon.eval/by {:seon.system/id :root} :seon.eval/agent {:seon.system/id :root} :seon.eval/code "(+ 1 1)"}])
                (range i (+ i n)))))
 
-(deftest an-agents-start-costs-the-same-however-long-its-root-has-run
+;; Estimate: in-agent's own setup and teardown (4 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded); cost/expected and judge of 3 rows ~100k = ~7750k, 8000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 8000000 :asks 7}} an-agents-start-costs-the-same-however-long-its-root-has-run
   ;; docs/machine.md#an-agents-first-write: a cost proof in bytes, judged by seon.cost/judge on what
   ;; each agent measured. An agent's bytes from its :state mark (init done) to its first request
   ;; grew with its root's history: 5.1 MB at a shared root's first agent, 13.2 MB at its 40th, so this
@@ -909,7 +924,8 @@
         v (cost/judge e rows)]
     (is (:ok? v) (str (cost/explain e rows v) "\nat the root's start: " (first measured) " bytes"))))
 
-(deftest an-eval-reads-the-schema-entries-only-after-one-moved
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-eval-reads-the-schema-entries-only-after-one-moved
   ;; docs/machine.md#an-agents-first-write: seon.repl/branch-registry, which each eval calls (wrap-registry,
   ;; instrument, the page walk), read every schema entry (two passes, seon.program/schema-changes: 748
   ;; entries, 1.08 MB) to learn nothing had changed. With the registry held (the fork hands main's) a call
@@ -924,7 +940,8 @@
     (is (< (* 10 held) read) (str "a call of branch-registry with the registry held allocated " held " bytes; one read of the schema changes " read))
     (is (= [true false] (:value valid)) (str "after a registration the next eval binds it: " (pr-str reg) " " (pr-str valid)))))
 
-(deftest root-reads-the-health-the-render-proc-keeps
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} root-reads-the-health-the-render-proc-keeps
   ;; docs/health.md#cost: my.root/problems read main's health whole at every call (~600 MB on the standing
   ;; root); it reads the render proc's, kept by what each move of main changed, at the api's fold. It
   ;; answers what the whole read does, after boot and after main moved, and a read with nothing moved
@@ -941,7 +958,8 @@
     (is (= true (first (:value moved))) (str "after main moved, held and whole agree: " (pr-str moved)))
     (is (< (* 10 held) whole) (str "a held read allocated " held " bytes; a whole read " whole))))
 
-(deftest an-agents-first-search-reads-the-index-it-inherited
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} an-agents-first-search-reads-the-index-it-inherited
   ;; root's REPL writes main through my.test/code, a namespace the binary holds (seon.system requires it): a boot loads
   ;; nothing of main's program (docs/source.md#a-boot-resumes-from-the-db), and this test was red on a binary without it
   ;; docs/vector.md#search: an agent's first grep built the search's text index from nothing (seon.doc/text-index).
@@ -963,7 +981,10 @@
     (is current-after "and still the one held for its db")
     (is (pos? rows) "the query of the index it inherited answers in the forked child")))
 
-(deftest a-resumed-branchs-agent-is-this-boots
+;; Estimate: in-agent's own setup and teardown in this process (a task file, the attach, the kill and its branches' deletes: ~6 asks
+;; and their replies decoded, ~1.5M) + one root eval spawning onto a kept branch, its answer three claims' facts (~0.5M) = ~2M:
+;; 3,000,000 ticks (it was estimated at 200k from 30k an ask; measured 1.98M and 2.04M, past the 2M budget at the land of 03:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 7}} a-resumed-branchs-agent-is-this-boots
   ;; one kept branch, one spawn, three claims about an agent resumed onto it.
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
@@ -991,14 +1012,16 @@
                                                         " " (src k "(defn h [] 2)"))
                                                    (str "[:ready (:boot sys) [(name ag) (:text @(seon.system/submit! sys ag \"(:key @seon.agent/state)\"))]"
                                                         " (:text @(seon.system/submit! sys ag \"[(" g "/g) (" k "/h)]\"))]"))}]))
-                      (merging))
+                      ;; the default root (plans/tests-merge-root.md): its two namespaces of its own names on main, as every test's facts are
+                      {})
         [status boot [id text] gained] (:value r)]
     (is (= :ready status) (pr-str r))
     (is (str/includes? (str text) (str "\"" id "\"")) (str "it records under its own key, the name of its id, whatever boot the branch is from: " text))
     (is (not (str/includes? (str text) "an-earlier-boot")) "and no key of the earlier boot's")
     (is (str/includes? (str gained) ":value [7 2]") "a var main added, and main's redefinition of one the branch left alone")))
 
-(deftest a-failure-marked-through-the-server-holds-the-task
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-failure-marked-through-the-server-holds-the-task
   ;; owner, 2026-10-22: a failure is task data and root reacts to it. The agent marks its
   ;; task failed on its branch, hands the task back (seon_done), and root, at the
   ;; agent's end, holds the task as :failed and reports it among the problems
@@ -1026,7 +1049,8 @@
        " b (:db @(seon.system/branch-db sys (seon.task/default-branch " (pr-str id) ")))]"
        " [(select-keys t [:seon.task/outcome :seon.task/reason]) (seon.reconcile/pull-end b (:seon.task/agent t))])"))
 
-(deftest an-outside-agent-writes-its-end
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-outside-agent-writes-its-end
   ;; found by a worked example (evaluations session, 2026-10-23): an outside agent's :done
   ;; judged a task whose agent had no end, so it read "the agent wrote no end"
   ;; whatever its proofs said. The agent writes the end first, as a turn loop does: here its
@@ -1044,7 +1068,8 @@
     (is (str/includes? (str (:seon.task/reason t)) "proof-unknown demo-test/t") "and the task holds it")
     (is (not (str/includes? (str (:seon.task/reason t)) "no end")) "never read as an end nobody wrote")))
 
-(deftest a-branch-that-deletes-mains-test-it-breaks-is-not-merged
+;; Estimate: mt/code and mt/without ~0.7M, test-plan of branch against main ~3M, load-removed! and run-tests! of one test ~0.6M, r/index of main ~1M, done-input and done-explain ~0.3M = ~6000000.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-branch-that-deletes-mains-test-it-breaks-is-not-merged
   ;; owner, 2026-10-26: "auto merge (the goal) means the old tests need to pass too. So deleting
   ;; the old test doesn't stop the old test from running": a branch breaks what one of main's
   ;; tests checks and deletes that test; the test still judges, from main's definition, so the
@@ -1078,7 +1103,8 @@
 
 ;; docs/merging.md#main-moved-is-said-at-every-eval, the owner 2026-11-07: an agent never runs old code. A model's turn merged main when it moved; an
 ;; outside agent was told and went on running what it had, until it chose to merge. Its reply merges as a turn does
-(deftest an-outside-agents-reply-takes-mains-program
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-outside-agents-reply-takes-mains-program
   ;; on the shard's root: what main gains is a namespace of this test's own, which no other test reads
   (let [last-value (fn [r] (first (filter boolean? (map :value (:responses r)))))
         [_ before _ after]
@@ -1095,7 +1121,8 @@
     (is (false? (last-value before)) (pr-str before))
     (is (true? (last-value after)) (str "the reply after main moved holds main's program: " (pr-str after)))))
 
-(deftest an-agent-finds-no-repository
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded); slurp and count of one 40 KB source file ~300k = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} an-agent-finds-no-repository
   ;; owner, 2026-10-22: no git in agents, and no source-file editing as the way to develop
   ;; Seon; an agent works in a scratch dir with no repository above it
   ;; (:seon.config.agent/cwd) and still reads any file by its path
@@ -1105,7 +1132,8 @@
     (is (str/includes? (:text git) ":exit 128") (str "git finds no repository: " (pr-str git)))
     (is (str/includes? (:text git) "not a git repository") (pr-str git))))
 
-(deftest an-oom-carries-its-heap
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} an-oom-carries-its-heap
   ;; docs/machine.md#how-to-read-an-out-of-memory-error: an agent past its heap bound (:seon.config.agent/heap-extra-bytes)
   ;; gets OutOfMemoryError, and its error map keeps the heap by type (Jolt's :jolt/heap) as data
   (let [[oom after] (in-agent ["(loop [held ()] (recur (conj held (byte-array 1000000))))" "(+ 1 2)"]
@@ -1118,7 +1146,8 @@
     (is (> (:bytes (first (:top heap))) (/ (:dynamic heap) 2)) (str "one type holds most of it: " (pr-str (take 2 (:top heap)))))
     (is (str/includes? (:text after) "3") "the agent lives")))
 
-(deftest an-agent-slurps-a-child-within-its-heap
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} an-agent-slurps-a-child-within-its-heap
   ;; the coordinator's reproduction, 2026-10-29: in a forked agent a ProcessBuilder child of ~3 s whose stdout and
   ;; stderr are slurped by two futures took ~6.3 s, the agent's RSS jumped 78 MB -> 1.28 GB after the child exited
   ;; and the next commit ran out of memory. A sampler future reads the all-asleep detector's state (locks.ss
@@ -1137,7 +1166,8 @@
     ;; the reproduction's finding: ~1 GB of garbage during the stall, and live after a collection stays small
     (is (< (get-in (first rs) [:value :hist :dynamic]) 268435456) (pr-str (first rs)))))
 
-(deftest each-eval-call-is-answered-before-the-next
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} each-eval-call-is-answered-before-the-next
   ;; owner, 2026-10-22 (DECISIONS "Agents work at the REPL, through tool calls"): a reply was a
   ;; batch of forms whose results came only after the whole reply, and 18% of model turns were
   ;; repetition loops asking for answers the model could not see. Now each call of the one
@@ -1175,7 +1205,8 @@
     (is (= [:cap 2] [(:outcome e) (:model-calls e)]) (str "its proof green before any work proves none of it: it works, then caps " (pr-str e)))
     (is (str/includes? (str (:reason e)) "no-change") "unchanged, as root's judge would say")))
 
-(deftest the-page-is-a-message-in-the-conversation-and-the-prefix-holds
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} the-page-is-a-message-in-the-conversation-and-the-prefix-holds
   ;; docs/render.md#a-change-is-edits-by-name (owner, 2026-11-05: "make the rendering of the hiccup a normal eval that we inject into turn
   ;; 0 and then we can just do diffs when it changes"; stage 2b: the page is a generated eval of each turn, never written to the db): two real turns. The first request holds the page as
   ;; the call `(my.render/page p)` and its result; these turns move nothing the page shows, so no other is sent; and every request is the one before it, byte for byte, with the records added. The hash each turn recorded of
@@ -1211,7 +1242,8 @@
     (is (= "(my.agent/describe @ctx)" first-code) "the first request describes the record first, (describe @ctx), then the page")
     (is (str/includes? first-page "Your task") "the task's part")))
 
-(deftest a-printed-page-call-runs-at-the-agents-repl
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-printed-page-call-runs-at-the-agents-repl
   ;; docs/prompt.md: before a turn Seon shows the page as a call it made, and the agent can make either call itself with any point it
   ;; printed. The points a call prints are {:commit :t} (seon.ctx.wire/point-text), so my.render/diff takes them as printed: its code,
   ;; read from the request and evaluated in the agent, answers what the call's message showed
@@ -1228,7 +1260,8 @@
     (is (true? same) "its printed code, run at the agent's REPL, answers what the call's message showed")))
 
 ;; docs/resolution.md: the chain holds vars, so what a program defines is what it calls; a delay of fn values kept the old ones, and an edit of wrap-record reached nothing
-(deftest an-edit-of-a-middleware-runs-next
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-edit-of-a-middleware-runs-next
   (let [[_ _ marked vars] (in-agent ["(def marks (atom 0)) (in-ns 'seon.repl)"
                                      "(let [old wrap-registry] (alter-var-root #'wrap-registry (fn [_] (fn [h] (let [n (old h)] (fn [req] (swap! @(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\"))) inc) (n req)))))))"
                                      "@@(find-var (symbol (str (ns-name (first (filter #(ns-resolve % 'marks) (all-ns)))) \"/marks\")))"
@@ -1236,7 +1269,8 @@
     (is (pos? (:value marked)) (pr-str marked))
     (is (true? (:value vars)))))
 
-(deftest edit-says-what-it-did
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} edit-says-what-it-did
   (let [[_ many same fine] (in-agent (fn [{:keys [ns]}]
                                        [(str "(ns " ns ".ed) (defn f \"One.\" {:malli/schema [:=> [:cat] :int]} [] (+ 1 1 1))")
                                         (str "(seon.repl/edit! '" ns ".ed/f \"1\" \"2\")")
@@ -1249,7 +1283,8 @@
     (is (:edited (:value fine)) (pr-str fine))))
 
 ;; a read waits on no one: an agent in an eval that never ends is read by root from its branch, and an interrupt takes a test child with it
-(deftest a-read-does-not-wait-on-a-hung-test
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded); 1 shell call (rm) ~200k = ~3250k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-read-does-not-wait-on-a-hung-test
   (let [pidf (str (seon.config/checkout) "/target/tmp/hung-" (random-uuid))
         [read stopped gone]
         (with-agent {}
@@ -1272,7 +1307,8 @@
     (clojure.java.shell/sh "rm" "-f" pidf)))
 
 ;; a defmethod merges as a var does (seon.merge's key [:method multi dispatch]), so it is said as one is
-(deftest a-method-is-listed-with-what-a-branch-carries
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-method-is-listed-with-what-a-branch-carries
   (let [[_ method changes] (in-agent (fn [{:keys [ns]}]
                                        [(str "(ns " ns ".mm) (defmulti area \"Area.\" :k)")
                                         "(defmethod area :square [s] 1)"
@@ -1281,7 +1317,8 @@
     (is (some #(and (vector? %) (= ":square" (second %))) (:added (:value changes))) (pr-str (:value changes)))))
 
 ;; docs/failure-points.md: a live agent ran (def form-of ...) in seon.program as a scratch name, every later write threw in seon.program/record-tx, and the run died
-(deftest a-definition-that-breaks-its-own-recording-is-undone
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-definition-that-breaks-its-own-recording-is-undone
   (let [[broke after still] (in-agent ["(in-ns 'seon.program) (def form-of (fn [v] v))"
                                        "(def after-it 41) (inc after-it)"
                                        "(seon.program/definition-form? '(def x 1) (the-ns 'user))"])]
@@ -1291,7 +1328,8 @@
     (is (nil? (:ex still)) "and Seon's own var is as it was")))
 
 ;; docs/storage.md#collection: collection may have swept the commit a page is drawn at: the same datoms as of t, never a later page
-(deftest a-page-whose-commit-is-gone-is-drawn-as-of-its-t
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-page-whose-commit-is-gone-is-drawn-as-of-its-t
   (let [[at] (in-agent ["(let [db (seon.agent/db) gone (assoc-in db [:meta :datahike/parents] #{(random-uuid)}) t (:max-tx db)]
                            [(:max-tx (#'seon.ctx.wire/at-t gone t)) t (some? (:origin-db (#'seon.ctx.wire/at-t gone (dec t))))])"])
         [was t as-of?] (:value at)]
@@ -1300,7 +1338,8 @@
 
 ;; docs/ctx.md#what-the-model-reads-and-what-the-page-renders: the record the first request shows as (my.render/ctx p) is the agent's own
 ;; @ctx, the live atom, printed whole: the same thing it reads when it types @ctx, never a filtered copy (owner, 2026-11-11)
-(deftest the-record-shown-is-the-live-ctx
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} the-record-shown-is-the-live-ctx
   ;; after a turn, inside one eval: the live atom and (my.render/ctx p) at the agent's db's own point are the same value (red
   ;; before: the cold read named no branch, and a patch dropped a member's link transaction), and print the same bytes (red before:
   ;; an entity's array map printed in the order its keys were added, which a patch and a build differ in)
@@ -1319,7 +1358,8 @@
 
 ;; docs/render.md#a-change-is-edits-by-name: a wake is told what moved since the page it last showed, never the page again: a second whole page
 ;; costs about 4k tokens a wake
-(deftest a-wake-shows-what-moved-not-the-page-again
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} a-wake-shows-what-moved-not-the-page-again
   (let [[_ _ whole calls]
         (in-agent (fn [{:keys [task]}]
                     [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
@@ -1330,7 +1370,8 @@
     (is (= 2 (:value calls)) "the second wake took a turn, so it had the chance to show the page")
     (is (= 2 (:value whole)) "the record and the page whole once, across both wakes: nothing moved, so the second turn adds no page message")))
 
-(deftest a-call-after-one-that-threw-still-runs
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-call-after-one-that-threw-still-runs
   ;; docs/prompt.md: a reply's calls run in order, each whatever came before it (owner, 2026-11-08: "I want us to run every eval. Turns are precious
   ;; and one fuckup shouldn't punish the other evals"); every call has its tool message (the provider refuses a call with none)
   (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
@@ -1347,23 +1388,26 @@
     (is (str/includes? (:content r1) "boom") "the second call's error")
     (is (str/includes? (:content r2) ":value 2") (str "(inc a) ran after the call that threw: " (:content r2)))))
 
-(deftest a-model-call-holds-no-errors-or-finish
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-model-call-holds-no-errors-or-finish
   ;; docs/turn.md#the-turn-is-a-number: a turn records its call's forms, ms and model, and nothing reads a count of its errors or how its reply
   ;; finished, so a call holds neither (:seon.model-call/errors, :seon.model-call/finish); nor an eval the page its value carried (:seon.eval/page)
   (let [[_ _ held] (in-agent (fn [{:keys [task]}]
                              [(str "(seon.turn/work! {:task " (pr-str task) " :max-turns 1})")
                               "(seon.repl/eval-string \"(with-meta [1] {:seon.render/page :p})\" {\"ns\" \"user\" :origin :outside})"
-                              (str "(let [db (seon.agent/db)]"
-                                   " {:calls (mapv #(datahike.api/pull db '[*] %) (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/forms _]] db))"
-                                   "  :evals (mapv #(datahike.api/pull db '[*] %) (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/code _]] db))})")])
+                              ;; each call's and eval's attributes, read from its datoms in the agent: what the claim is about, never the whole entity
+                              (str "(let [db (seon.agent/db) attrs (fn [e] (set (map :a (datahike.api/datoms db :eavt e))))]"
+                                   " {:calls (mapv attrs (datahike.api/q '[:find [?m ...] :where [?m :seon.model-call/forms _]] db))"
+                                   "  :evals (mapv attrs (datahike.api/q '[:find [?e ...] :where [?e :seon.eval/code _]] db))})")])
                            {:config {:seon.config.ai/script 'seon.fixtures/calls-one-throws}})
         {:keys [calls evals]} (:value held)]
     (is (seq calls) (str "a turn left its model call: " (pr-str held)))
     (is (seq evals) "and its evals")
-    (is (every? #(not-any? #{:seon.model-call/errors :seon.model-call/finish} (keys %)) calls) (str "no errors or finish on a call: " (pr-str calls)))
-    (is (not-any? :seon.eval/page evals) (str "no page on an eval: " (pr-str evals)))))
+    (is (every? #(not-any? #{:seon.model-call/errors :seon.model-call/finish} %) calls) (str "no errors or finish on a call: " (pr-str calls)))
+    (is (not-any? #(contains? % :seon.eval/page) evals) (str "no page on an eval: " (pr-str evals)))))
 
-(deftest a-call-after-an-error-answer-still-runs
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-call-after-an-error-answer-still-runs
   ;; docs/prompt.md: a call answering an error value (a refused edit!) is one result; the reply's later calls run, as after a throw (owner, 2026-11-08)
   (let [[_ msgs] (in-agent (fn [{:keys [task ns]}]
                              (let [run (str ns "/t#refused")]
@@ -1379,7 +1423,8 @@
     (is (str/includes? (:content r1) "edit-refused") "the second call's error value")
     (is (str/includes? (:content r2) ":value 2") (str "(inc a) ran after the refused edit: " (:content r2)))))
 
-(deftest a-call-is-text-and-its-forms
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded); 5 pure call-problem checks ~50k = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-call-is-text-and-its-forms
   ;; owner, 2026-10-29: a call is text and one or more forms, run in order; one with no text or
   ;; no form answers a typed error as its one result and runs nothing (docs/prompt.md)
   (let [problem #'seon.repl/call-problem]
@@ -1404,7 +1449,8 @@
     (is (str/includes? r0 " 2]") "its value each one's, (inc g) after (def g 1)")
     (is (str/includes? r1 ":value 11") "and the call after it runs")))
 
-(deftest a-turn-that-throws-is-the-agents-to-read-and-the-second-ends-its-work
+;; Estimate: in-agent's own setup and teardown (3 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 6 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~6000k, 6000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 6000000 :asks 6}} a-turn-that-throws-is-the-agents-to-read-and-the-second-ends-its-work
   ;; docs/failure-points.md (a turn of the agent's loop): md-scan #16 registered :seon.ref/block with list keys its
   ;; scan did not make yet, the registration re-armed seon.ref/scan, and the request's own scan threw after the
   ;; turn's draw, out of work! (outcome :no-end). Here the agent breaks Seon's own seon.ctx.wire/render, which a turn
@@ -1436,7 +1482,8 @@
     (is (= :cap (:outcome end)) (pr-str end))
     (is (<= (:model-calls end) 3) (str "no model call past the cap: " (pr-str end)))))
 
-(deftest a-broken-parser-reaches-the-model
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-broken-parser-reaches-the-model
   ;; docs/failure-points.md#entrant-boundaries-a-defect-becomes-a-recorded-error-map: two DeepSeek runs of md-scan
   ;; gave seon.ref/scan's emit step a new arity its calls did not pass, so scan threw on every call; the turn's merge check,
   ;; seon.reconcile/hairy, parsed the task's plan with it (seon.ref/names) before every model call, so two turns
@@ -1445,16 +1492,17 @@
   ;; the model is called each turn, with the error in what it is sent (the attached task is :whole, so the check runs)
   (let [[_ end msgs] (in-agent (fn [{:keys [task ns]}]
                                       ["(in-ns 'seon.ref) (clojure.core/defn scan [& _] (throw (ex-info \"Wrong number of args (6) passed to: fn\" {})))"
-                                       (str "(seon.turn/work! {:task " (pr-str task) " :max-turns 2})")
-                                       "(mapv :content (:requests @seon.agent/state))"])
+                                       (str "(select-keys (seon.turn/work! {:task " (pr-str task) " :max-turns 2}) [:outcome])")
+                                       ;; answered in the agent: whether a request sent the error (each request is a whole context)
+                                       "(boolean (some #(clojure.string/includes? (str %) \"Wrong number of args (6)\") (map :content (:requests @seon.agent/state))))"])
                                     {:config {:seon.config.ai/script 'seon.fixtures/two-calls}})
         end (:value end)]
     (is (not= :error (:outcome end)) (str "the broken parser never ended the work: " (pr-str end)))
     (is (= :cap (:outcome end)) (pr-str end))
-    (is (some #(str/includes? (str %) "Wrong number of args (6)") (:value msgs))
-        (str "the model was sent the error: " (pr-str (:value msgs))))))
+    (is (true? (:value msgs)) "the model was sent the error")))
 
-(deftest an-agent-record-the-branch-holds-for-a-dead-process-becomes-this-processs
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} an-agent-record-the-branch-holds-for-a-dead-process-becomes-this-processs
   ;; task seon.agent/a-death-names-its-cause's resume path (bin/check resume, calc/square capped at 40): an
   ;; agent killed after it committed its record on its branch but before main recorded the start leaves the
   ;; branch's record of the agent (its key) naming the dead process's id; the restarted root starts the same agent
@@ -1466,7 +1514,8 @@
                                 "(= (name (:id @seon.agent/state)) (:seon.agent/key (datahike.api/entity (seon.agent/db) [:seon.agent/key (:key @seon.agent/state)])))"]))]
     (is (true? (:value mine)) (str "the record names this process: " (pr-str mine)))))
 
-(deftest a-step-that-throws-answers-its-error-and-the-agent-goes-on
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3250k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-step-that-throws-answers-its-error-and-the-agent-goes-on
   ;; task seon.agent/a-death-names-its-cause, as the owner ruled 2026-10-30 (task
   ;; seon.agent/the-agent-is-a-flow-graph, step 4): a defect no request's own boundary catches (here
   ;; the agent redefines, at its REPL as an agent changes the platform, a function its REPL proc calls
@@ -1493,24 +1542,27 @@
     (is (= (:value pid) (:value pid')) "in the same process")
     (is (re-find #":on-main" (pr-str on-main)) (str "and the defect is on main as a :platform problem: " (pr-str on-main)))))
 
-(defn- started "The line the child writes as test var v starts." {:malli/schema [:=> [:cat :string] :string]}
-  [v] (pr-str {:seon.test/started v}))
-
-(deftest a-killed-test-run-names-the-test-that-was-running
+;; Estimate: about 10 pure take-value and test-run-answer steps at ~10k = ~100000.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-killed-test-run-names-the-test-that-was-running
   (testing "a child killed while running app-test/slow: that test has no verdict (proofs/results), and its death is named with how the child ended"
-    (let [run (agent/test-run-answer (started "#'app-test/slow") {:signal 9})]
+    (let [acc (agent/take-value {:streamed [] :ended #{}} {:seon.test/started "#'app-test/slow"})
+          run (agent/test-run-answer acc {:signal 9})]
       (is (= {} (proofs/results run)) "a death is no verdict")
       (is (= [] (proofs/test-run-errors run)) "the death is the running test's, not an anonymous run error")
       (is (= ["#'app-test/slow" {:signal 9}] ((juxt :var :exit) (first (:reports run)))))))
-  (testing "a child that wrote its result last: the result"
+  (testing "a child that put its answer last: the answer"
     (let [res {:pass 1 :fail 0 :error 0 :test 1 :reports [{:type :pass :var "#'app-test/fast" :message nil}]}]
-      (is (= res (agent/test-run-answer (pr-str res) {:exit 0})))))
+      (is (= res (agent/test-run-answer (agent/take-value {:streamed [] :ended #{}} res) {:exit 0})))))
+  (testing "a child that died once its test had ended: a run error, never the ended test's"
+    (let [acc (reduce agent/take-value {:streamed [] :ended #{}} [{:seon.test/started "#'app-test/a"} {:seon.test/ended "#'app-test/a" :reports []}])]
+      (is (nil? (:var (first (:reports (agent/test-run-answer acc {:exit 1}))))))))
   (testing "a child that died before any test started: one run error naming its exit"
-    (let [run (agent/test-run-answer nil {:exit 1})]
+    (let [run (agent/test-run-answer {:streamed [] :ended #{}} {:exit 1})]
       (is (= {} (proofs/results run)))
       (is (= 1 (count (proofs/test-run-errors run)))))))
 
-(deftest after-merge-main-the-agent-judges-against-the-new-base
+;; Estimate: test-branch! ~1M, connect and 3 transacts ~0.5M, text-index build ~3M, merge-main! ~3M, 3 branch-changes at ~0.8M = ~10000000.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} after-merge-main-the-agent-judges-against-the-new-base
   ;; an agent chooses the tests that judge
   ;; its branch from what it changed since :base. merge-main! left :base at the main the agent
   ;; forked from, so main's own changes, merged in, counted as the agent's. In this process,
@@ -1547,7 +1599,8 @@
              "so the agent's divergence carries none of main's changes")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
-(deftest a-merge-of-a-main-moved-only-by-records-reads-no-content
+;; Estimate: test-branch! ~1M, 3 transacts and connect ~0.5M, 2 profile epochs ~1M, a mark-only merge and main-changes ~1M, then one real merge-main! ~3M = ~7000000.
+(deftest ^{:seon.test/estimate {:ticks 7000000}} a-merge-of-a-main-moved-only-by-records-reads-no-content
   ;; docs/storage.md#mains-content-mark: main moves on every request by records (an agent's status, embeddings); when its
   ;; content mark is still the base's, the agent's merge of main and what main changed since the base answer from the mark,
   ;; with no diff (today ~3 M ticks a request). Red before: merge-main! and main-changes diffed each content attribute.
@@ -1581,7 +1634,8 @@
          (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "a definition and its mark: main's change merges in")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
-(deftest a-pull-after-its-own-merge-starts-from-what-it-merged
+;; Estimate: test-branch! ~1M, 2 redefinitions and a commit ~0.5M, the writer merging the branch up ~4M, heard-main ~0.5M, one merge-main! ~3M = ~10000000.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-pull-after-its-own-merge-starts-from-what-it-merged
   ;; seon.agent/a-pull-after-its-own-merge-starts-from-what-it-merged: git's merge base after main merged this branch's commit C is C.
   ;; An agent whose task merged goes on (a chat's next message) and edits f1 again; its next pull of main meets its own first edit as
   ;; main's change. Judged from the main it last pulled, that is f1 changed on both sides, differently: a conflict with itself.
@@ -1614,7 +1668,8 @@
            (is (= "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2))" (src (agent/db))) "and its second edit stands"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
-(deftest an-agent-keeps-no-db-older-than-its-branchs-current
+;; Estimate: 5 rounds of note, branch-changes (~1M) and branch-graph (~3M) ~20M, one merge-main! ~3M, test-branch! ~1M, stale-dbs walks = ~30000000.
+(deftest ^{:seon.test/estimate {:ticks 30000000}} an-agent-keeps-no-db-older-than-its-branchs-current
   ;; docs/machine.md#roots-heap, a kept db value is a reference: after a run of its own commits, a
   ;; read of what they changed, its test plan's graph and a merge of main, the agent's state holds
   ;; its branch's current db and nothing older but the two main points it is judged by (:base, the
@@ -1654,7 +1709,8 @@
            (is (= [] (stale [:base :main])) "and after more of its own"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
-(deftest merge-main-brings-the-task-content-main-carried
+;; Estimate: test-branch! ~1M, 2 transacts ~0.5M, merge-main! ~3M, task read ~0.3M, carry-tx diff ~1M = ~6000000.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} merge-main-brings-the-task-content-main-carried
   ;; live finding F3 (pipeline 1): a session's merge-main! moved its base to main's head but
   ;; brought only the program, so the task content main had carried since the fork (another
   ;; session's design: its plan and registered proof) read at the agent's end as this branch
@@ -1719,7 +1775,8 @@
   "The agent removes the one message its @ctx holds, as `(swap! ctx update :seon.message/_to dissoc e)` does, and its branch commits."
   [] (swap! seon.ctx/ctx update :seon.message/_to dissoc (first (keys (:seon.message/_to @seon.ctx/ctx)))) (agent/commit!))
 
-(deftest one-message-reaches-two-agents
+;; Estimate: delivery-world ~2.5M, message transact, 2 deliver! at ~1M, a removal commit ~0.5M, 4 reads of @ctx = ~5000000.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} one-message-reaches-two-agents
   ;; docs/users.md#messages: one entity to two agents; each holds it; a removal retracts that agent's own ref only
   (delivery-world
    (fn [{:keys [conn as ka kb heads]}]
@@ -1738,7 +1795,8 @@
        (as kb #(is (= [body] (messages-held)) "b still holds it"))
        (is (= #{ka kb} (ref-of @conn nil)) "and main still names both")))))
 
-(deftest a-removed-message-is-not-delivered-again
+;; Estimate: delivery-world ~2.5M, deliver! ~1M, 2 ctx builds at ~2M, a removal commit ~0.5M = ~8000000.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-removed-message-is-not-delivered-again
   ;; docs/users.md#messages: the entity stays on the branch, so it is delivered once; the model's request no longer holds it
   (delivery-world
    (fn [{:keys [conn as ka cfg]}]
@@ -1769,7 +1827,8 @@
   (let [db (agent/db) k (:key @agent/state) c (seon.ctx/agent-ctx (seon.db/index) db (pdb/eid db :seon.agent/key k))]
     (mapv #(get-in c (conj % :seon.message/id)) (get (seon.ctx/placed-messages (seon.db/index) c) n []))))
 
-(deftest a-message-taken-by-one-agent-is-still-owed-to-the-other
+;; Estimate: delivery-world ~2.5M, a transact, 4 undelivered queries ~0.3M each, one deliver! ~1M = ~5000000.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-message-taken-by-one-agent-is-still-owed-to-the-other
   ;; docs/users.md#messages (owner, 2026-11-09: the message on the agent's branch is the proof of delivery): a's taking it writes a's branch alone
   (delivery-world
    (fn [{:keys [conn as ka kb heads]}]
@@ -1780,7 +1839,8 @@
      (is (= ["m-two"] (as kb #(mapv :id (agent/undelivered)))) "and b is owed it still: a's taking changes nothing for b")
      (is (= [] (d/q '[:find [?id ...] :where [_ :seon.message/id ?id]] (heads kb))) "b's branch holds none"))))
 
-(deftest a-message-synced-from-main-is-delivered-and-read-by-the-next-turn
+;; Estimate: delivery-world ~2.5M, 3 turn-at! at ~0.4M, 4 read-at (ctx build) at ~0.5M, a transact and commit, 2 undelivered = ~7000000.
+(deftest ^{:seon.test/estimate {:ticks 7000000}} a-message-synced-from-main-is-delivered-and-read-by-the-next-turn
   ;; docs/users.md#messages: a merge or sync of main brings the message entity onto the branch, and that is its delivery: no longer owed, read once, by the first turn whose basis is at or after it
   (delivery-world
    (fn [{:keys [conn as kb]}]
@@ -1798,7 +1858,8 @@
                  (turn-at! 3)
                  (is (= [] (read-at 3)) "and no turn after")))))) 
 
-(deftest a-private-branch-is-owed-a-message-until-its-own-act-delivers-it
+;; Estimate: delivery-world ~2.5M, 3 turn-at! ~1.2M, 2 deliver! ~2M, 4 read-at ~2M, queries = ~8000000.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-private-branch-is-owed-a-message-until-its-own-act-delivers-it
   ;; docs/users.md#messages: nothing merged from main: owed until seon.agent/deliver! writes it on the branch; read by the next turn; one delivered after a turn's basis reads at the turn after
   (delivery-world
    (fn [{:keys [conn as kb]}]
@@ -1817,7 +1878,8 @@
                    (turn-at! 3)
                    (is (= ["m-mid"] (read-at 3)))))))))
 
-(deftest a-program-pull-leaves-messages-alone
+;; Estimate: delivery-world ~2.5M, 2 transacts, one merge-main! ~3M, 3 deliver! ~3M, 4 queries = ~9000000.
+(deftest ^{:seon.test/estimate {:ticks 9000000}} a-program-pull-leaves-messages-alone
   ;; docs/users.md#messages: merge-main! brings the program, never another agent's messages
   (delivery-world
    (fn [{:keys [conn as ka kb heads]}]
@@ -1834,7 +1896,8 @@
        (as ka #(is (= [] (agent/deliver!)) "a is sent none"))
        (as kb #(do (agent/deliver!) (is (= [body] (messages-held))) (is (= ["m-b"] (on-branch kb)))))))))
 
-(deftest a-message-through-removal-merge-and-restart
+;; Estimate: delivery-world ~2.5M, a turn commit, 3 ctx builds, 3 deliver!, a three-way delta ~3M and merge-db ~1M, a removal commit = ~10000000.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-message-through-removal-merge-and-restart
   ;; docs/users.md#messages, context's break test, on the branches of a store (a restart is a process holding the branch anew:
   ;; a root restarting is not set up here): a message arrives after a turn's reply and evals, lands in the next turn after them,
   ;; leaves the request's earlier bytes as they were, is removed, the branch merges up, and the agent held anew is not sent it again
@@ -1868,7 +1931,8 @@
                      (is (= [body] (messages-held)))))
          (is (= #{ka kb} (set (map :seon.agent/key (:seon.message/to (d/entity @conn [:seon.message/id "m-late"]))))) "main still names both"))))))
 
-(deftest an-opened-eval-on-main-reaches-the-agents-ctx-at-its-next-take
+;; Estimate: test-branch! ~1M, 4 transacts ~0.8M, branch and connect ~0.6M, 2 untaken-facts, one deliver! ~1M, 3 ctx reads = ~4000000.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} an-opened-eval-on-main-reaches-the-agents-ctx-at-its-next-take
   ;; owner, 2026-10-26: take! is the one way outside facts reach the agent's branch, and so its
   ;; ctx. A reader's opened eval is the agent's :seon.agent/opened on main; the copy take! transacts
   ;; (untaken-facts) puts it on the branch, and @ctx, which follows the branch, holds it; a second copy
@@ -1903,7 +1967,8 @@
          (is (= [] (agent/untaken-facts)) "delivered: nothing more to copy")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
-(deftest a-stall-task-closes-when-its-conditions-hold
+;; Estimate: test-branch! ~1M, 3 transacts and a connect ~1M, 2 runs of 5 stall proofs at ~1.5M, an update! and commit ~0.5M = ~5000000.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-stall-task-closes-when-its-conditions-hold
   ;; owner, 2026-10-26: root's stall task (seon.template/stall) is done when its boundary
   ;; conditions hold, which are its proofs (seon.stall-proofs): red while the agent is stalled and
   ;; no cause is recorded; green once main retracts the stall and the worker records the cause
@@ -1933,7 +1998,8 @@
          (is (= {:pass 5} (proofs)) "green: the stall ended, the cause recorded with its evidence, and it is no bug")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
-(deftest an-agents-transactions-name-their-runtime
+;; Estimate: test-branch! and connect ~1.5M, 5 eval-string calls at ~1M, 2 transact! and 4 commit! at ~0.2M = ~8000000.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} an-agents-transactions-name-their-runtime
   ;; what an agent writes on its branch
   ;; (seon.agent/transact!, the run-ahead writer) carries the runtime that made it
   (ts/test-branch!
@@ -1981,7 +2047,8 @@
   []
   (*peek*))
 
-(deftest an-evals-output-streams-as-it-is-written
+;; Estimate: 6 eval-string calls at ~0.5M, ~50 frames read at ~5k, one future = ~3000000.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} an-evals-output-streams-as-it-is-written
   ;; task seon.fx/an-effect-streams-what-it-reads, docs/render.md#in-flight-output-streams: a model's eval sends its *out* and *err* to
   ;; root as they are written, in the parts "<call>/<k>/eval-<i>/out" and "/err" of its model call, each ended once however the eval
   ;; ends; the record keeps the text whole, as it did. An eval of no model call sends nothing, and only the REPL's own thread sends.
@@ -2039,7 +2106,8 @@
         (is (= ["a" "c"] (map :text (remove :end outs))) "each frame is one write's piece"))
       (finally (reset! agent/state old) (reset! agent/link old-link) (lib/c-close a) (lib/c-close b)))))
 
-(deftest an-agents-stream-frame-goes-to-the-web-procs-streams
+;; Estimate: 3 pure agent-frame steps at ~30k = ~100000.
+(deftest ^{:seon.test/estimate {:ticks 100000}} an-agents-stream-frame-goes-to-the-web-procs-streams
   ;; task seon.fx/an-effect-streams-what-it-reads: root's agent proc appends each piece an eval's output sends to that part's whole
   ;; text so far and puts the whole on the web proc's :streams in-port (Flow's dynamic route), so a dropped message there loses
   ;; nothing; at the part's :end it lets the text go
@@ -2054,7 +2122,8 @@
     (is (= ["x" "y"] (get-in st2 [:seon.agent-proc/streams "e1/out"])) "the proc holds the part's text while it runs")
     (is (empty? (:seon.agent-proc/streams st3)) "and lets it go at the end")))
 
-(deftest an-eval-run-again-replaces-itself
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 11 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~4250k, 5000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 5000000 :asks 11}} an-eval-run-again-replaces-itself
   ;; docs/turn.md#an-eval-can-be-run-again: through a real agent's REPL, the same record under its own id, its author and call kept,
   ;; its old code in history, and a run down to an eval goes in order and stops at the first that fails
   (let [probe "(fn [id] (let [db (seon.agent/db) e (seon.db/eid db :seon.eval/id id) p (datahike.api/pull db '[:seon.eval/code :seon.eval/by {:seon.eval/call [:seon.model-call/id]}] e)] (assoc p :e e :old (vec (distinct (map :v (filter #(= :seon.eval/code (:a %)) (datahike.api/datoms (datahike.api/history db) :eavt e))))))))"
@@ -2086,7 +2155,8 @@
       (is (= (:seon.eval/call before) (:seon.eval/call p)) "its place in the conversation kept")
       (is (some #{"(swap! order conj :a)"} old) "history holds what it was"))))
 
-(deftest an-agent-resets-to-a-point-and-goes-on
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-agent-resets-to-a-point-and-goes-on
   ;; docs/turn.md#an-agent-goes-back-to-an-eval: one call, a new branch from the eval's commit, the old branch as it was, the same key on both, and the agent goes on
   (let [back (fn [{:keys [agent task]}]
                (str "(let [conn (:conn sys) a (keyword " (pr-str agent) ") task " (pr-str task)
@@ -2121,7 +2191,8 @@
     (is (= (:was v) (name (:new v))) "the agent goes back under its own id: the old process is stopped, then the new one forked")
     (is (= (:was v) (:went-on v)) "under the session's key, and it goes on")))
 
-(deftest a-sentence-on-roots-page-is-a-task-an-agent-works
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-sentence-on-roots-page-is-a-task-an-agent-works
   ;; docs/tasks.md: the box on root's page asks for work; it no longer starts an agent with no task
   (let [r (peek (in-agent ["(+ 1 1)"
                            {:op :eval :agent "root"
@@ -2141,7 +2212,8 @@
     (is (= :running (:execution v)) "released, so the reconciler gives it an agent")
     (is (some? (:branch v)))))
 
-(deftest an-agent-launches-an-agent-on-a-task-of-its-own
+;; Estimate: in-agent's own setup and teardown (2 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3750k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 3}} an-agent-launches-an-agent-on-a-task-of-its-own
   ;; docs/agent.md#working-for-a-person: root makes the task and answers its id; it reaches its parent by a message
   (let [[a b] (in-agent ["(my.task/launch! \"Build the thing that greets people.\")"
                          "(my.task/launch! \"No such template.\" :nope)"])
@@ -2156,7 +2228,8 @@
     (is (string? started-by) "and who to tell how it ends")
     (is (re-find #"no template" (str (:seon.error/message (:value b)))) "a template that isn't one says so")))
 
-(deftest a-redefinition-in-an-agent-reaches-a-caller-compiled-into-the-binary
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-redefinition-in-an-agent-reaches-a-caller-compiled-into-the-binary
   ;; docs/source.md#the-binary-records-its-program: an agent runs main's program compiled into the binary, and a form it
   ;; evaluates is its branch's program, so a redefinition reaches the code main's binary compiled, its direct-linked calls
   ;; included (Jolt writes a redefinition through to its direct-linked sites). Written green: the property holds on the
@@ -2169,7 +2242,8 @@
     (is (nil? (:value before)) (str "before: the EDN reads " (pr-str before)))
     (is (re-find #"the config does not satisfy" (str (:value after))) (str "after: the compiled caller took the redefined value " (pr-str after)))))
 
-(deftest a-wait-on-main-whose-test-throws-answers-the-throw-and-the-write-stands
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-wait-on-main-whose-test-throws-answers-the-throw-and-the-write-stands
   ;; docs/flow.md#the-step-fn-contract-every-proc-follows: a wait on main (seon.system/await-db) is the api's state, checked on each
   ;; commit as of that commit, never a watch run inside the writer's commit. A watch's pred that threw went into the writer's
   ;; reset! inside commit-batch: the stored commit was taken for a failed one (refused, then retried), and the wait was never
@@ -2248,21 +2322,24 @@
   {:config {:seon.config.ai/script 'seon.fixtures/wait-call}
    :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})
 
-(deftest a-send-survives-its-receiver-dying
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-send-survives-its-receiver-dying
   ;; docs/users.md#messages: an agent's send is one entity on main, to the recipient's agent, so it is there however the recipient ends
   (let [[_ r] (in-agent #(send-test-forms % false) waiting-b)
         {:keys [body bkey found sender]} (:value r)]
     (is (string? body) (pr-str r))
     (is (= #{[bkey sender]} found) "the one message entity on main, to B, from A")))
 
-(deftest a-send-to-an-agent-with-no-process-waits-on-main
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-send-to-an-agent-with-no-process-waits-on-main
   ;; docs/users.md#messages: the recipient has no process (it ended), yet its entity is on main with its branch, so the send is the same fact
   (let [[_ r] (in-agent #(send-test-forms % true) waiting-b)
         {:keys [body bkey found sender]} (:value r)]
     (is (string? body) (pr-str r))
     (is (= #{[bkey sender]} found) "the send is not refused: the entity is on main, to B, from A")))
 
-(deftest a-reply-is-recorded-before-its-evals-run
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-reply-is-recorded-before-its-evals-run
   ;; deepseek-run6: records' call 28 read as a model call nobody answered, and its cost as none: the model had answered, and an eval of that
   ;; reply ran a test that deref'd a promise nobody delivers, at its own REPL. The record is written before the evals, so it says what happened
   (let [[_ r] (in-agent (fn [{:keys [ns]}]
@@ -2275,7 +2352,8 @@
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= "read: The reply itself." (:value r)) (pr-str r))))
 
-(deftest a-root-with-no-provider-ends-the-work-on-its-typed-error
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-root-with-no-provider-ends-the-work-on-its-typed-error
   ;; root's ruling 2026-10-22: a root with no model provider (no --profile) answers the
   ;; first turn with :seon.model/no-provider; the error reaches whoever can act on it: the
   ;; task's record on main and my.root/problems' :error rows
@@ -2308,7 +2386,8 @@
   (str "(do (in-ns 'seon.repl-test) (clojure.test/deftest " nm
        " (let [[r] (seon.agent-test/in-agent (fn [_] [\"(+ 1 1)\"]))] (clojure.test/is (= " n " (:value r))))) (in-ns 'user) :ok)"))
 
-(deftest a-process-test-gets-its-verdict-while-the-agent-can-act
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 9 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3750k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 9}} a-process-test-gets-its-verdict-while-the-agent-can-act
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches. The shape of seon.repl/a-docstring-redefinition-is-a-change's run (2026-11-06): the agent wrote
   ;; its proof as a process test and never ran it; deferred read as green, the run ended, and the judge found it red at the
   ;; merge with no turn left. Now its prove takes the gate's answer and the red is the agent's, on its status (the gate answered at its seam)
@@ -2331,7 +2410,8 @@
 
 ;; docs/merging.md#the-test-service: a run on a checkout plans its process tests, check steps and build as items of the service, each at
 ;; the digest this branch gives it, so nothing is left to a gate
-(deftest a-checkouts-plan-names-its-process-tests-steps-and-build
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 6 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3000k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 6}} a-checkouts-plan-names-its-process-tests-steps-and-build
   (let [t 'seon.repl-test/a-process-item-of-the-plan
         ;; an edge each (seon.program/reach-step): what this judges runs in the agent, by a string no reference shows
         _ '[seon.agent/handle! seon.agent/process-plan seon.agent/test-plan seon.proofs/plan-of]
@@ -2369,7 +2449,8 @@
 ;; docs/merging.md#verdicts-are-a-cache: base and branch are digested by the same inputs, so a branch that changed nothing selects
 ;; nothing as changed. Red before: the inputs design added the private checks, the index class and a process test's config
 ;; to the branch's inputs only, and an unchanged agent of the standing system selected 1,765 of 1,835 tests as changed
-(deftest an-unchanged-branch-reads-no-test-as-changed
+;; Estimate: one test plan of the world ~3M, index-of ~0.5M, 3 map comparisons = ~4000000.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} an-unchanged-branch-reads-no-test-as-changed
   (let [main (mt/world)
         plan (agent/test-plan main main #{})
         bd (:base-digests plan)]
@@ -2381,7 +2462,8 @@
     (is (empty? (:selected plan)) (pr-str (take 5 (:selected plan))))))
 
 ;; "if another agent has already run the same exact test we remove those" (owner, 2026-11-07)
-(deftest a-process-test-green-at-its-digest-asks-no-gate
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 14 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~5000k, 5000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 5000000 :asks 14}} a-process-test-green-at-its-digest-asks-no-gate
   ;; docs/merging.md#verdicts-are-a-cache. Another's green at this digest answers; another's red does not, and a schema the branch registers moves the
   ;; digest, since a process test takes the schema class and an agent's inputs are its root's boot's (seon.agent/test-plan)
   (let [t 'seon.repl-test/a-process-proof-already-green
@@ -2408,7 +2490,8 @@
 ;; docs/sharing.md#a-functions-cost-is-a-fact (the owner, 2026-11-11: no derived or observed value that collides is stored; :seon.fn/stats
 ;; stops being written): what an agent's functions cost is measured live in its process, (:fn-costs @seon.agent/state), and no
 ;; commit or end writes a :seon.fn/* datom on the branch. Red before: the end wrote one :seon.fn/stats sum a function
-(deftest what-a-function-cost-is-measured-live-and-never-stored
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} what-a-function-cost-is-measured-live-and-never-stored
   (let [called "(do (seon.lib/digest \"x\") (seon.lib/digest \"y\") (seon.agent/transact! [{:seon.eval/id \"probe\" :seon.eval/by {:seon.agent/key \"probe\"}}]) (seon.agent/commit!) :ok)"
         ended "(do (seon.agent/write-end! {:outcome :waiting}) :ok)"
         stored "(count (datahike.api/datoms (seon.agent/db) :aevt :seon.fn/stats))"
@@ -2418,7 +2501,8 @@
     (is (<= 2 (or (:value calls) 0)) (str "the live measure holds the calls: " (pr-str calls)))))
 
 ;; so it never reads as unjudged after it passed and the gate is not asked again; one green in the cache was never deferred, so it needs no fact
-(deftest a-deferred-test-that-is-no-proof-is-judged-once
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 10 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~4000k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 10}} a-deferred-test-that-is-no-proof-is-judged-once
   (let [t 'seon.repl-test/a-deferred-non-proof u 'seon.repl-test/a-cached-non-proof p 'seon.repl-test/the-in-process-proof
         _ '[seon.agent/judge! seon.agent/run-selection seon.proofs/facts-worth-keeping seon.proofs/gate-tx]
         digest (str "(get (:digests (seon.agent/test-plan (seon.agent/db) (:base @seon.agent/state) #{'" u "})) '" u ")")
@@ -2439,13 +2523,15 @@
     (is (= {:deferred [] :asks 1} (:value second-judge)) "judged again: nothing left unjudged, and no second ask")))
 
 ;; docs/merging.md#verdicts-are-a-cache: the answer keeps a pass only for what its asker reads; a test named was read as no verdict, "not green: 1 of 1"
-(deftest a-passing-test-reads-as-passed
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-passing-test-reads-as-passed
   (let [t 'seon.repl-test/a-plainly-green-named-test
         [_ named] (in-agent (fn [_] [(str "(do (in-ns 'seon.repl-test) (clojure.test/deftest a-plainly-green-named-test (clojure.test/is (= 2 (+ 1 1)))) (in-ns 'user) :ok)")
                                      (str "(:proofs (my.agent/prove '" t "))")]))]
     (is (= :pass (get (:value named) t)) (pr-str named))))
 
-(deftest a-test-that-waits-for-good-is-told-and-the-next-agent-goes-on
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-test-that-waits-for-good-is-told-and-the-next-agent-goes-on
   ;; deepseek-run3 (2026-11-06): an agent's own test deref'd a promise nobody delivers. Its test child parked for good at 0% CPU, tick budgets count no sleep,
   ;; and it held the test service's one slot: 5 of 5 agents idle in observe for 9 minutes. A signal the child waited on (SIGIO, for its
   ;; agent's death) counted as something that could wake it, so Jolt never told it (seon.intr/exit-at-eof!)
@@ -2454,12 +2540,140 @@
         [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r)})"]) {:proofs #{t}})]
     (is (= {t :error} (:proofs (:value proved))) (pr-str proved))))
 
-(deftest a-gate-that-cant-read-its-candidate-answers
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-test-waiting-on-a-subprocess-is-no-deadlock
+  ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test child ends a test as :seon.test/deadlock only when nothing can wake
+  ;; it. A test that waits on a subprocess (a git call, here sleep) is parked on the poller's wait for its exit, which will wake it:
+  ;; it runs to its end. Red before Jolt counted a fiber parked on poller I/O as idle (2026-11-12, the land at 21:55: tests that
+  ;; called git were ended as deadlocks in the standing system's test children). Estimate: one agent eval and one test child run
+  ;; of one test that waits about a second, the test process's ticks a few million
+  (let [t 'seon.problems-test/a-test-that-waits-on-a-subprocess
+        write "(do (in-ns 'seon.problems-test) (clojure.test/deftest a-test-that-waits-on-a-subprocess (clojure.test/is (zero? (:exit (clojure.java.shell/sh \"sleep\" \"1\")))))  (in-ns 'user) :ok)"
+        [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r) :failures (mapv :message (:failures r))})"]) {:proofs #{t}})]
+    (is (= {t :pass} (:proofs (:value proved))) (pr-str proved))))
+
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 2}} a-test-child-that-ran-an-a-thread-is-still-told-its-deadlock
+  ;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test that ran work on core.async's thread pool (a/thread) and then
+  ;; waits for good is still ended as :seon.test/deadlock. Deps' lead for the overrun of 2026-11-13 00:0x (the test child alive
+  ;; at 300 s, never quiescent): a/thread's idle pool worker stays parked in TIMED_WAITING, which Jolt counted as a thread that
+  ;; may run, so the child never went quiescent. Estimate: one agent eval and one test child's run of one test, a few million
+  ;; ticks of the test process
+  (let [t 'seon.problems-test/a-test-that-waits-for-good-after-an-a-thread
+        write "(do (in-ns 'seon.problems-test) (clojure.test/deftest a-test-that-waits-for-good-after-an-a-thread (clojure.test/is (= 1 (clojure.core.async/<!! (clojure.core.async/thread 1)))) (let [p (promise)] (clojure.test/is (= 1 @p)))) (in-ns 'user) :ok)"
+        [_ proved] (in-agent (fn [_] [write "(let [r (my.agent/prove)] {:proofs (:proofs r) :error (:error r)})"]) {:proofs #{t}})]
+    (is (= {t :error} (:proofs (:value proved))) (pr-str proved))))
+
+;; docs/merging.md#a-test-child-is-a-fork-of-a-live-agent: a test run's fold (seon.agent/test-run-step) answers once each child's two ends
+;; are held, its link's end and its reaped exit, whichever comes first. Run here through the real plumbing but the fork: a
+;; core.async.flow graph holding the fold proc, its resume forking each shard's child by fork-test-child, whose
+;; jolt.async.remote.flow/fork! makes a remote-pair whose other end (the child's) is opened in this process, the child's proc
+;; (jolt.async.remote.flow/proc) and its :conns added by one update!; its exit watch (jolt.io-poller/exit-chan) a channel this
+;; test closes, its reap (seon.lib/wait-status) {:exit 0}. Each value the fold takes is told on seen once its step returned,
+;; so the test waits for no clock: it knows each end was taken before it delivers the next.
+;; Estimate, this test's thread only (the fold, the children's procs and the link's pumps run on other carriers, and their
+;; ticks are not its): 5 runs, each one update! of a one-proc plan (~10k ticks); 7 children, each a socketpair opened (~3k) and
+;; an answer put on its end (~2k); some 20 channel takes and puts: ~100k ticks. (First estimated at 1M, as if the pumps', the
+;; codec's and the fold's work were this thread's; measured 94k.)
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-test-runs-fold-answers-whichever-end-of-a-child-comes-first
+  (let [saved @agent/state
+        {:keys [error-chan]} (let [g (flow/create-flow {:procs {} :conns []})] (swap! agent/state assoc :flow g) (flow/start g))
+        g (:flow @agent/state)
+        seen (a/chan 64)
+        ends (atom nil)
+        ;; the fold, its every step test-run-step's: its ends kept, each value it took told on seen
+        fold (fn ([] (agent/test-run-step))
+               ([args] (let [st (agent/test-run-step args)] (reset! ends (:ends st)) st))
+               ([st t] (agent/test-run-step st t))
+               ([st in v] (let [r (agent/test-run-step st in v)] (a/>!! seen in) r)))
+        ;; the run's children, in fork order: {:os :end (the child's end) :exit (its exit watch)}; a pid past any macOS pid
+        kids (atom []) next-os (atom 99999000)
+        exit-at-fork? (atom false)
+        fork (fn [g pid _child {:keys [in out conns] :as opts}]
+               (let [ropts (dissoc opts :in :out :conns :keep)
+                     [end fd] (remote/remote-pair ropts)
+                     kid {:os (swap! next-os inc) :end (remote/open fd ropts) :exit (a/promise-chan)}]
+                 (swap! kids conj kid)
+                 ;; the classic fork race: the child exits before the parent holds its pid
+                 (when @exit-at-fork? (a/close! (:exit kid)))
+                 (flow/update! g (fn [cfg] (-> cfg (assoc-in [:procs pid] (rflow/proc {:ins {in (:out end)} :outs {out (:in end)}}))
+                                               (update :conns (fnil into []) conns))))
+                 {:pid (:os kid)}))
+        kid-of (fn [os] (first (filter #(= os (:os %)) @kids)))
+        ;; fork-test-child tells the pid (:forked) after its exit watch started and before its state holds the pid (:by-os):
+        ;; with exit-at-fork?, it waits here until the reaped exit is on the fold's ends (taken and put back), so the fold's
+        ;; resume returns a state whose ends already hold that exit; each pid told goes on forked-c
+        forked-c (a/chan 8)
+        forked (fn [os] (when @exit-at-fork? (let [v (a/<!! @ends)] (a/>!! @ends v))) (a/>!! forked-c os))
+        run (fn [n shards]
+              (let [answer (a/promise-chan) pid (keyword "seon.test" (str "fold-" n))]
+                (reset! kids [])
+                (flow/update! g #(assoc-in % [:procs pid] {:proc (flow/process fold)
+                                                           :args {:answer answer :plan {} :ticks 0 :budgets nil :shards shards :forked forked :say (fn [_])}}))
+                ;; the fold forks in its resume, on its own thread: the run is the test's once every shard's child is told
+                (dotimes [_ (count shards)] (a/<!! forked-c))
+                {:pid pid :answer answer}))
+        exit! (fn [k] (a/close! (:exit k)) (a/<!! seen))
+        ;; the child's run: its answer, then its end closed as fork!'s child closes it (:out, then :sent awaited), then its socket
+        close! (fn [k] (let [{:keys [out sent] :as e} (:end k)]
+                         (a/>!! out {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var (str "#'app.fold/t" (:os k))}]})
+                         (a/close! out) (a/<!! sent) (remote/close! e)
+                         [(a/<!! seen) (a/<!! seen)]))
+        done (fn [{:keys [pid answer]}] (let [ans (a/poll! answer)] (flow/update! g #(update % :procs dissoc pid)) ans))
+        ;; the run's answer: n tests passed, its children's exit status held, and each ended child's run directory handed
+        ;; back with it for removal after the answer (run-children!), never removed inside the fold's step
+        answered (fn [r n] (let [[ans dirs :as got] (done r)]
+                             (is (and (= n (:pass ans) (:test ans)) (zero? (:error ans)) (= {:exit 0} (:exit ans))) (pr-str got))
+                             (is (= n (count dirs)) (str "one run directory per ended child, handed back with the answer: " (pr-str dirs)))))]
+    (try
+      (swap! agent/state assoc :fixtures-warm true :dirty? false)
+      (flow/resume g)
+      (with-redefs [rflow/fork! fork poller/exit-chan (let [real poller/exit-chan] (fn [os & more] (if-let [k (kid-of os)] (:exit k) (apply real os more)))) lib/wait-status (fn [_] {:exit 0})]
+        (testing "the child's exit is reaped before the fold's state holds its pid"
+          (reset! exit-at-fork? true)
+          (let [r (run 0 [['app.fold/t]]) [k] @kids]
+            (reset! exit-at-fork? false)
+            (is (= :seon.process/end (a/<!! seen)) "the exit, on ends during the fold's resume, is taken once the resume returned")
+            (is (nil? (a/poll! (:answer r))) "an exit alone is no answer")
+            (is (= [:seon.link/up :seon.link/up] (close! k)))
+            (answered r 1)))
+        (testing "the exit first, then the link's end"
+          (let [r (run 1 [['app.fold/t]]) [k] @kids]
+            (is (= :seon.process/end (exit! k)))
+            (is (nil? (a/poll! (:answer r))) "an exit alone is no answer")
+            (close! k)
+            (answered r 1)))
+        (testing "the link's end first, then the exit"
+          (let [r (run 2 [['app.fold/t]]) [k] @kids]
+            (close! k)
+            (is (nil? (a/poll! (:answer r))) "a closed link alone is no answer: the exit status is the run's")
+            (exit! k)
+            (answered r 1)))
+        (testing "two children, their ends interleaved: one's closed arrives while child-ended's update! for the other applies"
+          (let [r (run 3 [['app.fold/t] ['app.fold/u]]) [k1 k2] @kids]
+            (a/close! (:exit k1)) (a/close! (:exit k2))
+            ;; both links end at once, no wait between: k2's values reach the fold while it removes k1's proc
+            (doseq [k [k1 k2]] (let [{:keys [out]} (:end k)] (a/>!! out {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var (str "#'app.fold/t" (:os k))}]}) (a/close! out)))
+            (doseq [k [k1 k2]] (a/<!! (:sent (:end k))) (remote/close! (:end k)))
+            (dotimes [_ 6] (a/<!! seen))
+            (answered r 2)))
+        (testing "the second child's exit before the first's link end, the first's exit last"
+          (let [r (run 4 [['app.fold/t] ['app.fold/u]]) [k1 k2] @kids]
+            (close! k2) (exit! k2) (close! k1)
+            (is (nil? (a/poll! (:answer r))) "a child still running: no answer")
+            (exit! k1)
+            (answered r 2))))
+      (is (nil? (a/poll! error-chan)) "no proc threw")
+      (finally
+        (flow/stop g)
+        (reset! agent/state saved)))))
+
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-gate-that-cant-read-its-candidate-answers
   ;; docs/errors.md#nothing-crashes-and-nothing-hangs "every wait ends": a :gate's writer refusal comes back to whoever asked, no test run (seon.system/ext-op)
   (let [[r] (in-agent (fn [_] [{:op :eval :agent "root" :code "(:seon.error/type @(seon.system/call! sys {:op :gate :branch :no-such-branch :tests ['a/b]}))"}]))]
     (is (= :seon.writer/refused (:value r)) (pr-str r))))
 
-(deftest a-gate-that-cannot-run-is-the-proves-answer
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 6 asks of the test's own at ~0.25M (an eval's recorded answer decoded); one log file written and deleted ~50k = ~3000k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 6}} a-gate-that-cannot-run-is-the-proves-answer
   ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a gate that cannot run the candidate (its runner made no plan: on 2026-11-10 a checkout
   ;; that took another tree's binary) answers its typed error, and the agent's prove answers that error, never a verdict that reads as nothing to
   ;; judge; a gate whose run reached no test is a verdict that is not green. The gate answered at its seam (seon.agent/ask-gate)
@@ -2481,7 +2695,8 @@
     (is (= [:error :seon.fx/io-error] (:value refused)) (pr-str refused))
     (is (= [:verdict {t :error}] (:value unreached)) (pr-str unreached))))
 
-(deftest a-hand-back-with-a-red-process-test-is-no-green-end
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-hand-back-with-a-red-process-test-is-no-green-end
   ;; the same class through seon_done: an outside agent that hands back an unjudged process test ends on its verdict. The hand-back itself, in the agent, the gate
   ;; answered at its seam: :done goes on to the judge, whose own gate is a real one (no test runs one now: task seon.agent/a-real-gate-is-proved-in-seconds)
   (let [t 'seon.repl-test/a-handed-back-proof-of-the-gate
@@ -2491,7 +2706,8 @@
     (is (= :red (:outcome (:value end))) (pr-str end))
     (is (str/includes? (:reason (:value end)) "proof-red") (pr-str end))))
 
-(deftest a-task-whose-proofs-pass-is-done-only-when-what-it-reaches-is-green
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-task-whose-proofs-pass-is-done-only-when-what-it-reaches-is-green
   ;; the owner's ruling: a turn runs the proofs, the tests the change reaches run once they are green, judged as the
   ;; judge judges them, before it is done. md-scan #24 ended green on its proofs and the judge found 18 reds its change
   ;; made: here a green proof beside a change that breaks main's edit test (seon.fixtures/whole-stray) does not end
@@ -2519,7 +2735,8 @@
     (is (some (fn [[why t]] (and (= :stray-red why) (contains? broken t))) reasons)
         (str "its status names a test its change broke: " (pr-str reasons)))))
 
-(deftest a-red-whole-task-is-not-merged-and-its-next-turn-says-why
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-red-whole-task-is-not-merged-and-its-next-turn-says-why
   ;; the other way: a whole task whose proof is red is not merged. Its task does not end red: it
   ;; parks (it waits, or reaches its cap), and its turn after the red proof carries why, the done
   ;; rule's reasons as data in the status it reads (a task root refuses at its end gets root's verdict
@@ -2538,7 +2755,10 @@
     (is (not= :merged state) "not merged")
     (is (= [:proof-red] reasons) "the status carries why, as data: the proof is red")))
 
-(deftest a-requests-implement-continues-its-designs-request
+;; Estimate: in-agent's own setup and teardown (~6 asks and their replies, ~1.5M: measured on its neighbours) + a request through the
+;; stages pipeline and one await-db, their answers the implement's first turn and the design's last request whole (~1.5M) = ~3M:
+;; 5,000,000 ticks (it was 300k from 30k an ask; it spent 3.0M, at its budget's edge)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 5000000 :asks 8}} a-requests-implement-continues-its-designs-request
   ;; live finding A1, on a real request (the pipeline's: the implement's first request sent its own
   ;; task data in second place and no boundary, 512 of 35,126 tokens cached): through my.root/request! with the
   ;; staged choice (seon.template/stages, an experiment's: the default request is design-build and merge) and
@@ -2581,7 +2801,8 @@
                " implement " (pr-str (mapv #(subs (str (:role %) ":" (or (:content %) "") (some-> % :tool-calls first :code)) 0 (min 70 (count (str (:role %) ":" (or (:content %) "") (some-> % :tool-calls first :code))))) first-implement)))))
     (is (some #(str/includes? (str (:content %)) "Your task now is") (drop (count last-design) first-implement)) "then root's boundary")))
 
-(deftest a-waiting-agent-parks-and-a-message-wakes-the-same-process
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-waiting-agent-parks-and-a-message-wakes-the-same-process
   ;; design agent-loop section 2 (owner, 2026-10-25: "Always park"): an agent that waits parks its
   ;; session, its process kept; the owner's message wakes it, and the next wake is the same
   ;; process (its pid), on the same agent (the parked one's own: the harness's agent is another).
@@ -2616,7 +2837,8 @@
         "the wake's turns go on from the parked one's: the agent's one sequence, none restarting and none over a recorded one")
     (is (and pid1 (= pid1 pid2)) (str "one process for both wakes: " pid1 " " pid2))))
 
-(deftest a-text-reply-stays-in-the-history
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-text-reply-stays-in-the-history
   ;; task seon.ctx/the-context-is-the-agents-evals-and-seons (R1): a reply of text with no call
   ;; is the agent winding down; the record read only evals and messages, so the wake that
   ;; followed it sent a history without it. It is an assistant message of the next request
@@ -2636,7 +2858,8 @@
                          :decls [{:seon.task/name "w" :seon.task/plan "Wait." :seon.task/kind :work :seon.task/proofs '#{demo-test/t}}]})]
     (is (= ["Saw my own reply."] (:intent (:value r))) (pr-str r))))
 
-(deftest a-woken-agent-that-replies-stays-parked
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-woken-agent-that-replies-stays-parked
   ;; docs/turn.md#parked: a wake gives one conversation turn and its reply parks the agent: it isn't woken again by nothing, or it would spend its budget talking to itself (seen 2026-11-07 on a real model)
   (let [_ '[seon.reconcile/advance seon.reconcile/start seon.reconcile/settle-late]
         [_ r] (in-agent (fn [{:keys [ns]}]
@@ -2658,7 +2881,8 @@
     (is (= :parked outcome) (pr-str r))
     (is (apply = turns) (str "no more turns while nothing arrives: " (pr-str turns)))))
 
-(deftest a-reply-with-no-evals-stops-with-turns-left
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded); 3 pure reply-of calls ~50k = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-reply-with-no-evals-stops-with-turns-left
   ;; docs/model.md#one-tool-repl: a reply with text and no call is its message alone: nothing runs and the
   ;; agent waits, with turns left
   (let [reply (fn [text calls] {:usage {:prompt_tokens 10 :completion_tokens 2}
@@ -2673,7 +2897,8 @@
     (is (= ["" ["c1"]] [(:text no-text) (mapv :id (:tool-calls no-text))]) "a call with no text: the call runs, the message is empty")
     (is (= [:waiting 1] ((juxt :outcome :model-calls) (:value end))) (str "the agent waits after one turn of five: " (pr-str end)))))
 
-(deftest a-woken-agent-is-not-sent-its-own-loop
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-woken-agent-is-not-sent-its-own-loop
   ;; task seon.render/one-way-to-make-what-an-agent-is-sent, step 2: the eval that ran the parked work (seon.turn/work!) is
   ;; recorded when it returns, so a wake's request came to hold it as a message; it is no work of the agent's
   (let [[_ r] (in-agent (fn [{:keys [ns]}]
@@ -2698,7 +2923,8 @@
     (is (some #{"(my.turn/wait)"} sent-codes) (str "it sent the model's own eval: " (pr-str sent-codes) " of " (pr-str r)))
     (is (not-any? #(str/includes? % "seon.turn/work!") sent-codes) (pr-str sent-codes))))
 
-(deftest a-task-at-its-cap-is-recorded-cap-never-waiting
+;; Estimate: in-agent's own setup and teardown (3 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~5250k, 6000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 6000000 :asks 3}} a-task-at-its-cap-is-recorded-cap-never-waiting
   ;; root, 2026-10-26: a run whose last turn waits spent its budget, so it ends :cap, which a
   ;; live view reads as the budget spent, not as a wait for a message; a wait before the cap is
   ;; :waiting, and the agent's own fail! at the cap is :failed (its verdict holds the task)
@@ -2709,7 +2935,8 @@
     (is (= :waiting (outcome "wait-call" 2)) "a wait with turns left: waiting")
     (is (= :failed (outcome "fail-call" 1)) "fail! on the last turn: the agent's verdict")))
 
-(deftest a-failed-call-keeps-what-it-sent
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-failed-call-keeps-what-it-sent
   ;; root, 2026-10-24: a turn whose model call fails still records what it sent (the hash of its bytes, written as the
   ;; request goes; the request itself is made again from its records) and its typed error (an error is data: docs/errors.md#errors);
   ;; the debug page shows both
@@ -2730,7 +2957,8 @@
     (is (not (str/includes? (str (peek (:read (:value turn)))) "turns")) (str "the page announces no cap: " (peek (:read (:value turn)))))
     (is (= :seon.model/no-provider (:error (:value turn))) "and the typed error the call answered")))
 
-(deftest a-whole-tasks-work-turns-are-no-merge-turns
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-whole-tasks-work-turns-are-no-merge-turns
   ;; the first whole-task run (2026-10-26): all ten requests ended :merge-failed at turn 3, each work
   ;; turn counted against :seon.config.merge/max-merge-turns (2) as a merge task's turns are; a
   ;; whole task's turn is a merge turn only while what both sides changed is unresolved
@@ -2739,7 +2967,8 @@
                          :decls [{:seon.task/name "w" :seon.task/plan "Work." :seon.task/kind :whole :seon.task/proofs '#{demo-test/t}}]})]
     (is (= [:cap 4] ((juxt :outcome :model-calls) (:value end))) (pr-str (:value end)))))
 
-(deftest a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-proof-run-ends-at-its-budget-though-its-tests-run-bounded-evals
   ;; Jolt jolt/nested-tick-budget: a tick budget covers all the work inside it, nested
   ;; bounded runs' included. Step E's run 7 (2026-10-22): the agent's proof fork, whose
   ;; tests each run bounded evals (seon.intr/run), spun 2.5 h past its 2e11-tick budget.
@@ -2751,7 +2980,8 @@
     (is (= :seon.test/ticks-spent type) (:text r))
     (is (= "#'spin-test/spin" test) "naming the test that was running")))
 
-(deftest an-agent-commits-after-each-eval
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} an-agent-commits-after-each-eval
   ;; each eval of a turn (the screen's two, then the model's) is committed as it lands, so a page
   ;; shows it then, not at the turn's end. One model call of three evals (seon.fixtures/three-calls), so a turn whose evals
   ;; were committed together shows, whatever else the turn records (pages drew no page eval). Walked back from the branch's head, no commit adds more
@@ -2773,7 +3003,8 @@
     (is (< 3 (count ns)) (pr-str counts))
     (is (every? #(<= % 1) (map - ns (rest ns))) (str "each eval its own commit: " (pr-str ns) " commits that added more: " (pr-str (:over (:value counts)))))))
 
-(deftest a-model-turn-records-its-text-and-the-message-it-took
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 5 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2750k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 5}} a-model-turn-records-its-text-and-the-message-it-took
   ;; the owner's message is a fact root writes on
   ;; main (from the user, to the agent); the turn that delivers it writes the same
   ;; entity on its branch before its commit, with the agent's own ref (:seon.message/to), so the conversation
@@ -2824,7 +3055,8 @@
     (is (= #{[(:agent @names) 1]} (:eval-turns probed)) "the model's eval carries the turn, so does an outside eval after it (by the agent: an outside model works its task), the number in force; Seon ran no eval before the turn")
     (is (empty? (:loop-eval-turns probed)) "the turn loop's own eval, no conversation record, takes none")))
 
-(deftest a-compile-errors-line-and-suggestions-arrive-as-data
+;; Estimate: one failed analysis, suggestions by edit distance over ~3000 names at ~1k, error-map = ~3000000.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-compile-errors-line-and-suggestions-arrive-as-data
   ;; the exception Jolt's analyzer raises for `(prinltn 1)`, as the one error map: its line,
   ;; column and symbol are keys, its suggestions the fix, and nothing is a printed copy
   (let [e (try (eval (read-string "(prinltn 1)")) (catch Throwable e e))
@@ -2843,7 +3075,8 @@
   [code]
   (agent/error-map (try (binding [*ns* (the-ns 'user)] (eval (read-string code))) (catch Throwable e e))))
 
-(deftest a-private-var-says-the-form-that-reaches-it
+;; Estimate: one failed analysis (private var) and error-map, no suggestion search = ~100000.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-private-var-says-the-form-that-reaches-it
   ;; forgiving tools (data: 11 evals over 5 sessions died on "var: #'ns/f is not public", six in a row in one): Clojure's own
   ;; forms reach a private var, the var's value and a call through the var; the error says so
   (let [em (thrown "(seon.reader/fence \"x\")")]
@@ -2851,14 +3084,16 @@
     (is (str/includes? (str (:seon.error/fix em)) "(#'seon.reader/fence") (pr-str em))
     (is (str/includes? (str (:seon.error/fix em)) "@#'seon.reader/fence") (pr-str em))))
 
-(deftest a-schema-malli-does-not-know-is-named-with-its-nearest
+;; Estimate: one malli schema failure and its error-map with the nearest name = ~500000.
+(deftest ^{:seon.test/estimate {:ticks 500000}} a-schema-malli-does-not-know-is-named-with-its-nearest
   ;; data: a contract written [:time :inst] answered ":malli.core/invalid-schema" and nothing else; six turns went to
   ;; finding that the predicate is the symbol inst?
   (let [em (agent/error-map (try ((requiring-resolve 'malli.core/schema) [:vector :inst]) (catch Throwable e e)))]
     (is (str/includes? (str (:seon.error/message em)) ":inst") (pr-str em))
     (is (str/includes? (str (:seon.error/fix em)) "inst?") (pr-str em))))
 
-(deftest memory-is-read-when-asked
+;; Estimate: one measured call of 2 footprint reads, a touched scan of the counted fns = ~200000.
+(deftest ^{:seon.test/estimate {:ticks 200000}} memory-is-read-when-asked
   ;; task seon.agent/memory-is-read-when-asked: mem-mb is a reading made at the call, never a
   ;; value kept for a time, so each call reads the process's footprint again (jolt.host/
   ;; process-footprint-bytes, one call). The megabytes it answers move with the machine (a collection
@@ -2869,7 +3104,8 @@
     (is (= 2 (get reads 'seon.lib/real-mb)) "two calls, two readings: none kept between them")
     (is (and (pos? a) (pos? b)) "a reading in MB")))
 
-(deftest a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 7 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3250k, 4000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 4000000 :asks 7}} a-parked-agent-draws-its-parts-and-a-gone-one-answers-at-once
   ;; the agent draws its own page (one derivation, slice 2): the render proc's {:op :render} ask is
   ;; answered by an agent parked between requests with its parts' HTML, a key its branch renders
   ;; drawn by that render, recording nothing (the key is named by the agent's pattern, which pulls only what it names); a request to an agent that is gone is answered at
@@ -2893,40 +3129,39 @@
     (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")
     (is (= :seon.system/no-agent (:seon.error/type (:value gone))) (pr-str gone))))
 
-(deftest a-line-that-does-not-read-ends-its-test-and-the-run-goes-on
+(deftest ^{:seon.test/estimate {:ticks 200000}} a-value-that-does-not-read-ends-its-test-and-the-run-goes-on
   ;; task seon.agent/a-test-childs-line-always-reads (root, 2026-10-27): a report holding a value
-  ;; that prints as no EDN (an exception's #error {\n splits the line, a var's #'v does not read)
-  ;; killed its agent with exit 70. The line is that test's :error, once, and the next test's lines
-  ;; are taken as before
-  (let [enc seon.edn/encode
-        bad (enc {:seon.test/ended "#'app.t/b" :reports [{:type :fail :actual [(ex-info "boom" {:a 1}) #'clojure.core/inc]}]})
-        lines (concat [(enc {:seon.test/started "#'app.t/a"}) (enc {:seon.test/ended "#'app.t/a" :reports [{:type :pass :var "#'app.t/a"}]})
-                       (enc {:seon.test/started "#'app.t/b"})]
-                      (str/split-lines bad)
-                      [(enc {:seon.test/started "#'app.t/c"}) (enc {:seon.test/ended "#'app.t/c" :reports [{:type :pass :var "#'app.t/c"}]})])
-        acc (reduce agent/take-line {:streamed [] :ended #{} :fns {}} lines)
+  ;; that prints as no EDN (an exception's #error {, a var's #'v) killed its agent with exit 70. Read through the
+  ;; link's codec (seon.agent/child-codec) it is that test's :error, once, and the next test's values are taken as before
+  (let [{:keys [encode decode]} (#'agent/child-codec :seon.test/c1)
+        read #(decode (encode %))
+        bad {:seon.test/ended "#'app.t/b" :reports [{:type :fail :actual [(ex-info "boom" {:a 1}) #'clojure.core/inc]}]}
+        vs [{:seon.test/started "#'app.t/a"} {:seon.test/ended "#'app.t/a" :reports [{:type :pass :var "#'app.t/a"}]}
+            {:seon.test/started "#'app.t/b"} bad bad
+            {:seon.test/started "#'app.t/c"} {:seon.test/ended "#'app.t/c" :reports [{:type :pass :var "#'app.t/c"}]}]
+        read-vs (mapv read vs)
+        acc (reduce agent/take-value {:streamed [] :ended #{} :fns {}} read-vs)
         errors (filter #(= :error (:type %)) (:streamed acc))]
-    (is (< 1 (count (str/split-lines bad))) "the exception's raw newline splits the line")
-    (is (= 1 (count errors)) "the unreadable line is one :error")
+    (is (every? #(= :seon.test/c1 (:clojure.core.async.flow/pid %)) read-vs) "each value read names its child")
+    (is (= 1 (count errors)) "the unreadable value is one :error, though it came twice")
     (is (= "#'app.t/b" (:var (first errors))) "on the test that was running")
     (is (= :seon.test/unreadable-line (:seon.error/type (first errors))))
-    (is (= #{"#'app.t/a" "#'app.t/c"} (:ended acc)) "the tests around it are taken as before")
-    (is (= :error (get-in (agent/test-run-answer (enc {:a #'clojure.core/inc}) {:exit 0}) [:reports 0 :type]))
-        "a last line that does not read is the run's :error, not the agent's death")))
+    (is (= #{"#'app.t/a" "#'app.t/c"} (:ended acc)) "the tests around it are taken as before")))
 
-(deftest a-tests-ended-line-keeps-the-live-heap-it-left
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-tests-ended-value-keeps-the-live-heap-it-left
   ;; docs/cost.md#what-a-test-run-measures (root, 2026-10-28): 23 of 191 tests of a forked run ran
   ;; out of memory at the agent's heap ceiling with no stack; the heap each test leaves, after a
-  ;; collection, is on its ended line and kept per test, so the one that holds memory is named
-  (let [enc seon.edn/encode
-        acc (reduce agent/take-line {:streamed [] :ended #{} :fns {} :heap {}}
-                    [(enc {:seon.test/started "#'app.t/a"}) (enc {:seon.test/ended "#'app.t/a" :reports [] :heap 1200})
-                     (enc {:seon.test/started "#'app.t/b"}) (enc {:seon.test/ended "#'app.t/b" :reports [] :heap 900000})])]
-    (is (= {'app.t/a 1200 'app.t/b 900000} (:heap acc)))))
+  ;; collection, is on its ended value and kept per test, so the one that holds memory is named
+  (let [acc (reduce agent/take-value {:streamed [] :ended #{} :fns {} :heap {}}
+                    [{:seon.test/started "#'app.t/a"} {:seon.test/ended "#'app.t/a" :reports [] :heap 1200}
+                     {:seon.test/started "#'app.t/b"} {:seon.test/ended "#'app.t/b" :reports [] :heap 900000}])]
+    (is (= {'app.t/a 1200 'app.t/b 900000} (:heap acc)))
+    (is (nil? (:running acc)) "no test runs once the last has ended")))
 
 ;; docs/references.md#an-entity-cites: an agent is made citing what every agent cites (its own cite entities, written when
 ;; root makes it), and changes its own at its REPL; its page draws each as a task's cite is drawn
-(deftest an-agent-cites-what-it-reads-beside-its-task
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} an-agent-cites-what-it-reads-beside-its-task
   (let [[before added gone] (in-agent ["(mapv :cites (my.agent/uncite! \"docs/none.md\"))"
                                        "(mapv (juxt :cites :depth) (my.agent/cite! \"docs/agent.md?summary#the-agent\"))"
                                        "(mapv :cites (my.agent/uncite! \"docs/testing.md#testing-in-the-world\"))"])]
@@ -2938,7 +3173,8 @@
 
 ;; docs/references.md#an-entity-cites: an agent whose task's config cites a section its store does not hold starts and works, citing the rest;
 ;; root holds the missing address for it (its status, and a :seon.agent/cite-missing problem naming it), and its own cites leave it out
-(deftest an-agent-whose-store-lacks-a-cited-section-starts-and-says-which
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-agent-whose-store-lacks-a-cited-section-starts-and-says-which
   (let [gone "docs/none.md#not-there" held "docs/agent.md#merging"
         problem-code (str "(->> (get-in (my.root/problems sys) [:classes :agent :rows]) (filter #(= :seon.agent/cite-missing (:type %)))"
                           " (mapv (juxt :last-agent #(get-in % [:example :seon.doc/address]))))")
@@ -2955,7 +3191,8 @@
     (is (= [[(keyword (:agent (:value names))) gone]] (:value problems)) "and a :seon.agent/cite-missing problem of that agent names it")))
 
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
-(deftest main-moved-is-said-at-every-eval
+;; Estimate: 4 records of 1 to 4 forms ~3M, main-line over 2 moved mains at ~3M each (main diff and branch diff), base-as-main ~0.1M = ~10000000.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} main-moved-is-said-at-every-eval
   ;; the owner (root, 2026-10-28): "we are supposed to be telling the agent always at every eval reply
   ;; what is different with main ... there are never any surprises": what main changed since the base,
   ;; which of it the branch changed or calls, and what a merge of main would conflict on
@@ -2975,7 +3212,8 @@
 
 ;; docs/merging.md#main-moved-is-said-at-every-eval: a turn merges main in whenever main moved past the branch's
 ;; merge base (the owner, 2026-10-30: "updates as often as we can"), and never when it did not
-(deftest a-turn-merges-main-only-when-main-moved
+;; Estimate: test-branch! ~1M, one transact ~50k, 3 pure main-moved? comparisons = ~1000000.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-turn-merges-main-only-when-main-moved
   ;; committed values, as an agent's base and heard main are (a d/db-with value names no commit)
   (ts/test-branch!
     (fn [_ conn]
@@ -2987,7 +3225,8 @@
         (is (false? (agent/main-moved? nil main)) "no merge base yet: nothing to compare")))))
 
 ;; See docs/merging.md#main-moved-is-said-at-every-eval
-(deftest main-line-costs-what-changed
+;; Estimate: 3 records ~2.5M, first eval ~5M (main diff and branch diff), unchanged ~0.3M, second eval ~1M = ~9000000.
+(deftest ^{:seon.test/estimate {:ticks 9000000}} main-line-costs-what-changed
   ;; the coordinator, 2026-10-29: an eval should cost ms; main-line (13.9 M ticks, 38.8 MB, 304 contracted
   ;; calls on every eval, 13.0 M with main the base) is O(1) while main is the base, pays main's diff once
   ;; per (base, main) pair, and a later eval at the same main pays only the branch's diff and one query.
@@ -3004,7 +3243,8 @@
     (is (< (:ticks second-eval) (* 0.5 (:ticks first-eval))) "the second eval at the same main does not diff main again")
     (is (< (:bytes second-eval) (* 0.5 (:bytes first-eval))))))
 
-(deftest a-shell-child-costs-what-it-reads
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 2 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2000k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 2}} a-shell-child-costs-what-it-reads
   ;; the reproduction, 2026-10-29: in a forked agent, clojure.java.shell/sh of a ~3 s command (its two output pipes
   ;; read by two futures) spun after the child exited, ~470,000 passes a second and ~1.5 GB of garbage in 3.5 s, then ran
   ;; the agent out of memory or hung it (in 3 of 6 runs). The readers' wait to enter the io poller's monitor made
@@ -3021,7 +3261,8 @@
     (is (< (:mb (:value (first rs))) 64) (pr-str (first rs)))
     (is (= 3 (:value (second rs))) "the agent lives")))
 
-(deftest a-refused-write-in-a-proof-runs-finish-answers-the-asker-with-the-error
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} a-refused-write-in-a-proof-runs-finish-answers-the-asker-with-the-error
   ;; docs/errors.md#nothing-crashes-and-nothing-hangs (nothing hangs), docs/failure-points.md (a refused write): the run's results are
   ;; recorded on the branch when the run finishes, which the loop runs, not the asker's eval; a
   ;; write the branch refuses there answers the asker (my.agent/prove) with the error, never leaves it waiting.
@@ -3034,7 +3275,8 @@
     (is (= {:pass 1} (select-keys (:value r) [:pass])) (pr-str r))
     (is (some #(str/includes? % "transact refused: no") (:unrecorded (:value r))) "named, not thrown")))
 
-(deftest a-commit-the-store-refuses-leaves-the-agent-alive
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 6 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~3000k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 6}} a-commit-the-store-refuses-leaves-the-agent-alive
   ;; task seon.repl/a-commit-that-keeps-failing-ends-no-agent-silently;
   ;; docs/errors.md#nothing-crashes-and-nothing-hangs (nothing crashes), docs/storage.md#a-commit-the-store-refuses. A commit the store refuses used
   ;; to throw out of the agent's loop and end the process, the next commit throwing again on the same pending value.
@@ -3070,7 +3312,8 @@
     (is (= ["after" "kept before"] (own (:notes (:value r6)))) "the refused write is not on the branch")
     (is (= (:t (:value r6)) (:ctx-t (:value r6))) "@ctx agrees with the committed db")))
 
-(deftest the-reader-is-the-processs-own
+;; Estimate: 2 resets and one intake read = ~20000.
+(deftest ^{:seon.test/estimate {:ticks 20000}} the-reader-is-the-processs-own
   ;; optimization's review: the intake's reader kept in state was lost to an eval replacing it, and the next
   ;; intake started a second reader on the same socket; it is link's, beside the socket
   (let [old @agent/state old-link @agent/link ch (clojure.core.async/chan)]
@@ -3079,7 +3322,8 @@
          (is (identical? ch (agent/intake)) "the one reader's channel, whatever state became")
          (finally (reset! agent/state old) (reset! agent/link old-link)))))
 
-(deftest a-named-namespace-selects-its-tests
+;; Estimate: 3 mt/code of 1 to 3 forms at ~0.5M, 4 named-tests queries at ~0.1M = ~2000000.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-named-namespace-selects-its-tests
   ;; bench-scope-1: a prove naming three tests of a namespace on a branch that had changed nothing ran none
   ;; (ran 0, reused 0, each :none); named, a namespace's tests run whatever the branch changed
   (let [db (my.test/with (my.test/world)
@@ -3091,7 +3335,8 @@
     (is (= '#{app.nt-test/b-test} (agent/named-tests db '#{app.nt-test/b-test})) "a named test is itself, not its namespace")
     (is (= #{} (agent/named-tests db '#{app.nt-test/helper})) "a var that is no test names none")))
 
-(deftest an-agents-namespace-holds-the-docstring-its-form-gives
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 3 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2250k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 3}} an-agents-namespace-holds-the-docstring-its-form-gives
   ;; docs/source.md: a namespace's docstring, on an agent's own eval, however its ns form gives it (a name's metadata
   ;; reaches the account by seon.repl's own read of it, as a file's does by seon.source's)
   (let [[_ _ r] (in-agent (fn [{:keys [ns]}]
@@ -3102,7 +3347,9 @@
                           {})]
     (is (= ["By a string." "By its name."] (:value r)) (pr-str r))))
 
-(deftest an-eval-that-registers-a-schema-seons-answer-names-answers-what-it-did
+;; Estimate: in-agent's own setup and teardown (~6 asks and their replies, ~1.5M) + three evals and their recorded answers (~0.7M) = ~2.2M:
+;; 3,000,000 ticks (it was 300k from 30k an ask; it spent 2.2M)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 9}} an-eval-that-registers-a-schema-seons-answer-names-answers-what-it-did
   ;; the lab, 2026-11-04: an eval registered :seon.eval/response narrower, for its own use, and its later eval's answer failed
   ;; seon.repl/response's own contract: told an error, though its forms took effect
   (let [[reg made ran] (in-agent (fn [_]
@@ -3113,7 +3360,8 @@
     (is (nil? (:ex made)) (str "the definition's answer: " (pr-str made) " after " (pr-str reg)))
     (is (= 41 (:value ran)) (pr-str ran))))
 
-(deftest an-eval-makes-data-and-a-reader-makes-text
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 4 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~2500k, 3000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 4}} an-eval-makes-data-and-a-reader-makes-text
   ;; the owner, 2026-11-04: "why are we generating text for each eval? If we can store the value store the value and text is a
   ;; last resort". A model's eval prints nothing; a value that throws as it is realized is still its recorded error, since
   ;; making it plain realizes it; a value that is no data is stored as what it was
@@ -3130,7 +3378,8 @@
     (is (= "clojure.lang.Atom" (:seon.value/type (:value rec))) (pr-str rec))))
 
 
-(deftest evals-given-at-spawn-run-first-as-ordinary-evals
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} evals-given-at-spawn-run-first-as-ordinary-evals
   ;; docs/turn.md#an-eval-can-be-inserted: an agent spawned with :evals (pairs of text and code) runs them on its one REPL
   ;; queue before anything else, each recorded as any eval is, by whoever asked, at turn 0 and with no call id. One that
   ;; throws is recorded with its error and the rest run, as a reply's calls do (owner, 2026-11-08). A reader of the
@@ -3152,7 +3401,8 @@
         "three ordinary evals at turn 0 in order, by whoever asked, none a model's call; the throw recorded, and the next still runs")
     (is (= ["assistant" "tool" "assistant" "tool" "assistant" "tool"] (take 6 (:roles v))) "each reaches the request as a call and its result")))
 
-(deftest one-schema-write-builds-the-branch-index-once
+;; Estimate: one entity index build over the test store ~100 schema entries (~100k), 4 schema-moved calls = ~200000.
+(deftest ^{:seon.test/estimate {:ticks 200000}} one-schema-write-builds-the-branch-index-once
   ;; docs/data-modeling.md#a-schema-is-a-set-of-keys-written-together: the agent's state slot is its one copy of the entity index
   ;; (seon.agent/branch-schemas): the write that moves a schema entry builds it, and its readers (the registry, the ctx's patch, the
   ;; page walk's flush) are handed that one. :index-builds counts the builds in the state
@@ -3164,7 +3414,8 @@
     (is (some? (:index (:schema-registry moved))) "into the slot")
     (is (= 1 (:index-builds (seon.agent/schema-moved moved #{:seon.eval/id}))) "and a later write of another attribute builds no other")))
 
-(deftest a-session-restored-at-an-older-commit-runs-that-commits-definitions
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-session-restored-at-an-older-commit-runs-that-commits-definitions
   ;; docs/storage.md#compiled-code: a spawn with {:branch b :commit C}
   ;; makes b from the session's commit C and forks it from main's image with the program at C loaded over it, the way a resumed
   ;; agent loads its tip. Red before: a spawn took no commit, so the new agent held main's program and f was unbound. The answer says what
@@ -3187,7 +3438,8 @@
     (is (= :first (:then v)) (str "the restored agent runs the first commit's body: " (pr-str v)))
     (is (= 3 (count (:not-restored v))) (pr-str v))))
 
-(deftest a-restore-at-a-commit-the-store-no-longer-holds-is-refused
+;; Estimate: in-agent's own setup and teardown (1 x ~1.5M: the task file, attach, kill and its branches' deletes, ~6 asks of the harness and their replies) + 1 asks of the test's own at ~0.25M (an eval's recorded answer decoded) = ~1750k, 2000000 (was 200k a setup and 30k an ask, measured low at the land of 2026-11-13 04:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 2000000 :asks 1}} a-restore-at-a-commit-the-store-no-longer-holds-is-refused
   ;; docs/failure-points.md (the :spawn edge in seon.writer), docs/storage.md#compiled-code: a commit
   ;; the store holds no more (collected) is answered as a typed error naming it, no branch made and nothing crashed. Red before: the
   ;; commit was ignored and an agent on a branch from main's head answered a success.
@@ -3206,7 +3458,8 @@
     (is (str/includes? (str (:message v)) "gone") (pr-str v))
     (is (false? (:made v)) "no branch made")))
 
-(deftest my-task-status-shows-a-failing-proofs-source-as-the-page-does
+;; Estimate: 2 pure proof-as-read calls = ~30000.
+(deftest ^{:seon.test/estimate {:ticks 30000}} my-task-status-shows-a-failing-proofs-source-as-the-page-does
   ;; the physics audit (2026-11-11, high 3): docs/agent.md says (my.task/status) answers what the page's status shows, and the page draws a
   ;; red proof's :source and :calls; my.task/status stripped both, so an agent had to (source the-proof) to read the test it failed
   (let [read #'my.task/proof-as-read

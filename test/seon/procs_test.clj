@@ -20,13 +20,15 @@
 (defn- arity-0 [v] (let [d (v)] (is (describe-ok? d) (str v " describe")) d))
 (defn- step [v st in msg] (let [r (v st in msg)] (is (step-out-ok? r) (str v " transform " in)) r))
 
-(deftest every-step-fn-carries-the-contract
+;; Estimate: a few pure step calls ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} every-step-fn-carries-the-contract
   (doseq [v [#'writer/writer-proc #'reconcile/reconciler-proc #'server/fork-server-proc #'ap/agent-proc #'root/api-proc
              #'server/server-step #'repl/agent-step]]
     (is (= :seon.step/step-fn (:malli/schema (meta v))) (str v))
     (arity-0 v)))
 
-(deftest writer
+;; Estimate: 1 test-branch! x 1M; 5 step-fn calls x 0.1M (a transact or a commit read in each) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} writer
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         t0 (:max-tx @conn)]
@@ -51,7 +53,8 @@
     (testing "the stop transition releases the branch connections"
       (is (map? (#'writer/writer-proc st ::flow/stop))))))))
 
-(deftest a-refused-op-keeps-the-batch-committed-before-it
+;; Estimate: 1 test-branch! x 1M; 2 step-fn calls x 0.1M (a transact or a commit read in each) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-refused-op-keeps-the-batch-committed-before-it
   ;; docs/storage.md#durability-is-continuous-group-commit: an op other than :tx commits the batch first; an op that then
   ;; throws (an interop edge) is answered as its error, and the writer keeps the state after that commit. Red before: one
   ;; catch around both handed back the state from before the commit (batch 12: with writes then held ahead, the writer and
@@ -66,7 +69,8 @@
     (is (= 1 (- (:commits st2) (:commits st))) "and the writer counts the commit made before the op")
     (is (= 1 (count (:main outs))) "whose notice went out")))))
 
-(deftest the-writers-transactions-name-their-runtime
+;; Estimate: 1 test-branch! x 1M; 2 step-fn calls x 0.1M (a transact or a commit read in each) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} the-writers-transactions-name-their-runtime
   ;; main's transactions through the writer's group
   ;; commit carry the runtime that made them, and so does the stored commit the fork server's replica reads
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
@@ -77,7 +81,8 @@
     (let [m (first (:to-fork-server outs))]
       (is (= fp (:seon.tx/runtime (d/entity (d/commit-as-db conn (:commit m)) (:t m)))) "and so does the stored commit the replica reads"))))))
 
-(deftest a-writers-merge-names-its-runtime
+;; Estimate: 1 test-branch! 1M + 1 branch, connect and redefining transact 0.5M + 1 :octopus-merge step ~2M + the query and checks ~0.1M ~ 3.6M, about 4e6 ~ 4,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-writers-merge-names-its-runtime
   ;; a branch merged into main through the writer
   ;; (:octopus-merge, d/merge-db) is a transaction like any other: it names the runtime that made it
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
@@ -96,7 +101,8 @@
     (is (< t0 (:max-tx @conn)))
     (is (= (jolt.host/runtime-fingerprint) (:seon.tx/runtime (d/entity @conn (:max-tx @conn)))) "and its merge names the runtime")))))
 
-(deftest the-writer-marks-the-commit-that-moves-mains-content
+;; Estimate: 1 test-branch! 1M + 3 writer :tx steps (0.2M each, one a :flush? batch) + 1 branch, connect, transact 0.4M + 1 :octopus-merge step (~2M) + the writer's start ~0.3M + 4 queries ~0.4M ~ 4.7M, about 5e6 ~ 5,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} the-writer-marks-the-commit-that-moves-mains-content
   ;; docs/storage.md#mains-content-mark: every commit that moves main's content carries a new content mark, in that same
   ;; commit (what an agent reads from the store to skip its diffs of main), and a commit of records leaves it: a write, a
   ;; :flush? batch, an octopus merge, and the writer's start. Red before: no commit carried one
@@ -129,7 +135,8 @@
             (is (:merged? (first (:results (:r (first (filter #(= {:rid 4} (:dest %)) (:to-api outs))))))) "the branch merges")
             (is (< m2 (mark (at outs))) "and the merge moves it in its commit")))))))))
 
-(deftest a-merge-candidate-is-what-the-merge-writes
+;; Estimate: 1 test-branch! 1M + 1 branch, connect and 1 redefining transact 0.4M + 1 :merge-candidate step (the octopus merge's files and texts, a dry run, ~2M) + the query and checks ~0.2M ~ 3.6M, about 4e6 ~ 4,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-merge-candidate-is-what-the-merge-writes
   ;; the merge gate's checkout takes the writer's :merge-candidate: the files the octopus merge would write, with their
   ;; text, its changed schema entries' resources among them (md-scan 29: the gate wrote the changed namespace's file
   ;; but not :seon.ref/block's resource, so the checkout's new seon.ref/scan met its old schema and the seed threw)
@@ -154,7 +161,8 @@
         (str "the changed namespace's own source file, or it named as unfiled (the schema resource alone is not it): " (pr-str (select-keys r [:files :unfiled]))))
     (is (= t0 (:max-tx @conn)) "and main is unchanged: a candidate is never committed")))))
 
-(deftest the-fork-servers-replica-is-main-at-each-commit
+;; Estimate: 1 test-branch! 1M + a 2,000-note transact in one writer step (2,000 datoms x 5k = 10M) + the replica's commit-as-db read 1M + vec of d/datoms :eavt of main and the replica (2 x ~4,000 datoms x 0.5k = 4M) ~ 16M, about 2e7 ~ 20,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000000}} the-fork-servers-replica-is-main-at-each-commit
   ;; the fork server's replica reads each main commit from the store (d/commit-as-db of the
   ;; commit the writer names), never replaying its datoms: replaying the boot's 42,942-datom
   ;; source import took 3.5 s and the first fork waited behind it (2026-10-23). After a large
@@ -175,7 +183,8 @@
       (is (= 0 (:mismatch fst')))
       (is (= [:applied] (mapv :ev (:ev fouts))))))))
 
-(deftest a-fork-at-another-commit-is-recorded-misaligned
+;; Estimate: 1 test-branch! x 1M; 2 step-fn calls x 0.1M (a transact or a commit read in each); 1 transacts x 50k ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-fork-at-another-commit-is-recorded-misaligned
   ;; a new agent whose branch is not at the
   ;; commit :spawn named (or whose image is not at its t) says so in its hello, and root
   ;; records it as the agent's problem, :seon.agent/fork-misaligned
@@ -194,7 +203,8 @@
         (is (= at (get-in problem [:error :commit])))
         (remote/close! end) (sock/close! a'))))))
 
-(deftest a-context-read-makes-its-agent-neither-busy-nor-idle
+;; Estimate: 5 step-fn calls x 10k (pure state in, state out) ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-context-read-makes-its-agent-neither-busy-nor-idle
   ;; docs/server.md#ops: a read never writes (owner, 2026-11-10). A :context read is an eval of origin :context: in
   ;; flight, the agent is not made busy, and its answer reports the status it already had, so root's view of the agent
   ;; does not move and nothing is written to main for it (seon.system's record-agents writes only a change). An eval that
@@ -216,7 +226,8 @@
               (is (empty? (statuses outs)) "a read beside it changes nothing")))))
       (finally (remote/close! end) (sock/close! a')))))
 
-(deftest an-agent-that-reads-nothing-is-seen-as-a-stall
+;; Estimate: 4 step-fn calls x 10k (pure state in, state out) ~ 40,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000}} an-agent-that-reads-nothing-is-seen-as-a-stall
   ;; docs/processes.md#a-stalled-agent: root's frames to an agent never block its proc. An agent that stopped reading its
   ;; socket (an eval held in a blocking open(2)) left the proc's blocking put parked in its step, so it never took root's
   ;; :stall? and no stall was recorded (batch 16's problems step, 8.5 min). Here nothing ever takes from the end's :out:
@@ -230,7 +241,8 @@
     (is (= [:stalled] (map :op (:to-api outs))) "the proc takes :stall? and answers the stall")
     (is (= [5 6] [(:id (a/poll! out)) (:id (a/poll! out))]) "and its frames wait for the agent, in order")))
 
-(deftest a-reply-the-wire-cannot-encode-answers-its-asker-and-the-end-serves-on
+;; Estimate: a few pure step calls ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-reply-the-wire-cannot-encode-answers-its-asker-and-the-end-serves-on
   ;; task jolt.async/a-value-a-remote-end-cannot-encode-answers-its-asker: root's end sent an agent
   ;; a reply holding a sorted map by a comparator of its own (a function: no stable encoding), and the writer pump closed the end, which
   ;; root read as the agent's death. The reply goes in the end's :encode-error, ap/unencodable: the
@@ -248,7 +260,8 @@
       (is (= {:op :reply :k 8 :result {:ok true}} y) "the end carries the next frame"))
     (remote/close! root-end) (remote/close! agent-end)))
 
-(deftest a-request-the-wire-cannot-encode-answers-roots-asker-and-nothing-waits
+;; Estimate: 3 step-fn calls x 10k (pure state in, state out) ~ 30,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 30000}} a-request-the-wire-cannot-encode-answers-roots-asker-and-nothing-waits
   ;; the same class for a request of root's (an :id): root is its asker, so the agent proc answers
   ;; the rid it holds in flight with the typed error, from the frame the end's hook puts on its :in
   (let [[r a'] (sock/socketpair)
@@ -267,7 +280,8 @@
     (is (= :reply (:op (a/<!! (:in agent-end)))) "the agent is sent an answer no wait holds, and the end is open")
     (remote/close! end) (remote/close! agent-end)))
 
-(deftest an-agent-root-cannot-interrupt-is-a-problem-and-memory-rides-its-commits
+;; Estimate: 3 step-fn calls x 10k (pure state in, state out) ~ 30,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 30000}} an-agent-root-cannot-interrupt-is-a-problem-and-memory-rides-its-commits
   ;; shrink brief 3, rows 19 and 34: an agent whose boot check found root's interrupt cannot
   ;; reach it says so in its hello, and root records :seon.agent/interrupt-unreachable (the
   ;; answer nothing read before); its memory reaches root's view on its commits, never on each
@@ -282,7 +296,8 @@
     (is (= [{:mem-mb 12.5}] (sets {:op :committed :t 2 :txs 1 :mem-mb 12.5})) "a commit carries its memory to the view")
     (remote/close! end) (sock/close! a')))
 
-(deftest a-fork-names-the-commit-its-agent-starts-at
+;; Estimate: 1 test-branch! x 1M; 3 step-fn calls x 0.1M (a transact or a commit read in each) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-fork-names-the-commit-its-agent-starts-at
   ;; :spawn branches the agent from main's
   ;; head and asks the fork server, whose image holds main at that head (the FIFO), to fork it;
   ;; :fork names that commit and t, so the agent checks both (seon.agent/init!)
@@ -296,7 +311,8 @@
     (is (= (:max-tx @conn) (:t fork)) "main's t")
     (is (= (:commit fork) (d/commit-id (pdb/head conn b))) "which the agent's branch starts at")))))
 
-(deftest a-value-the-store-cannot-encode-is-refused-to-its-asker
+;; Estimate: a store on disk of its own opened and seeded (2,000 datoms x 5k = 10M) + 3 writer steps over it 0.3M + seon.fx/read-source of the 70 files of src (2.2 MB, about 1M) ~ 11M, about 1e7 ~ 10,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-value-the-store-cannot-encode-is-refused-to-its-asker
   ;; land6 re-proof (e2e loop): a sorted map on root's source fact reached the store's codec at
   ;; commit (konserve.jolt.fasl has none for one by a comparator of its own: a function; one by the default stores) and threw out of the writer as a proc
   ;; defect, unanswered. The commit refusing is the asker's error: the transaction that carried
@@ -320,7 +336,8 @@
           (is (= pins (get-in (d/pull @conn [:seon.system/source] [:seon.system/id :root]) [:seon.system/source :pins])))))))
      (finally (d/release conn) (seon.lib/remove-tree! path)))))
 
-(deftest the-flush-is-continuous-group-commit
+;; Estimate: 1 test-branch! x 1M; 7 step-fn calls x 0.1M (a transact or a commit read in each) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} the-flush-is-continuous-group-commit
   ;; owner 2026-10-21 (git history, "Durability is batched everywhere", superseded
   ;; paragraph): no window. A write is answered when committed in memory; the flusher parks
   ;; until something is unflushed, syncs once for everything committed so far, and says what it
@@ -347,7 +364,8 @@
             (is (true? (:dirty st4)))
             (is (= [{:op :dirty :commits (:commits st3)}] (mapv #(select-keys % [:op :commits]) (:to-flusher outs))))))))))))
 
-(deftest the-writer-answers-clean-once-the-flush-covers-its-commits
+;; Estimate: 1 test-branch! x 1M; 5 step-fn calls x 0.1M (a transact or a commit read in each) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} the-writer-answers-clean-once-the-flush-covers-its-commits
   ;; task seon.check/idle-waits-for-the-flush: a :clean request is held while the store is
   ;; dirty and answered by the step that takes the covering flush, after that flush's notice
   ;; to the api; a clean store answers at once
@@ -371,7 +389,8 @@
   "The writer's notice for conn's head, the commit after prev: {:t :prev :ops :commit :ns}, its :ns stamp 0 (data no step reads here)."
   [conn prev ops] {:t (:max-tx @conn) :prev prev :ops ops :commit (d/commit-id @conn) :ns 0})
 
-(deftest the-writers-main-notice-holds-no-db
+;; Estimate: 1 test-branch! x 1M; 2 step-fn calls x 0.1M (a transact or a commit read in each) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} the-writers-main-notice-holds-no-db
   ;; a queued notice pins its own version of
   ;; the index (docs/storage.md#a-kept-db-value-is-a-reference), so the notice names the commit and its consumers make the db
   ;; when they take it
@@ -392,7 +411,8 @@
       (is (= (d/commit-id @conn) (:commit n)))
       (is (= (:max-tx @conn) (:max-tx (d/commit-as-db conn (:commit n)))) "the consumer makes the db from it")))))
 
-(deftest reconciler
+;; Estimate: 1 test-branch! x 1M; 3 step-fn calls x 0.1M (a transact or a commit read in each) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} reconciler
   (ts/test-branch! (fn [_ conn] (let [st (#'reconcile/reconciler-proc {:boot "b" :conn conn :provider {:kind :scripted :script 'seon.fixtures/reply}})]
     (testing "a main commit with no tasks: the reconciler reads it and starts nothing (quiescence: seon.reconcile-test)"
       (let [[st outs] (step #'reconcile/reconciler-proc st :main (notice conn nil []))]
@@ -404,7 +424,8 @@
         (is (= (:flights st) (:flights st2)))
         (is (empty? (:to-api outs)))))))))
 
-(deftest a-wait-on-main-is-answered-at-the-reconcilers-quiet
+;; Estimate: 1 test-branch! x 1M; 1 transacts x 50k ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-wait-on-main-is-answered-at-the-reconcilers-quiet
   ;; task seon.system/a-wait-on-main-ends-when-nothing-can-make-it-true: a wait on main (seon.system/
   ;; await-db, named) asks the reconciler on :judge for its first quiet at or after :after. Before,
   ;; only a commit making the wait's pred true ended it, and a quiet spell that went on wrote no
@@ -447,7 +468,8 @@
             (v st3 ::flow/stop)
             (is (= {:stopped true} (deref p 0 ::unanswered))))))))))
 
-(deftest an-agent-forked-from-a-program-that-did-not-load-is-told
+;; Estimate: 1 test-branch! x 1M; 3 step-fn calls x 0.1M (a transact or a commit read in each); 1 transacts x 50k ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-agent-forked-from-a-program-that-did-not-load-is-told
   ;; docs/processes.md#an-agent-that-starts-without-its-program (owner, 2026-11-11: run, never silently): the fork server holds its program's
   ;; load errors while they stand, by namespace, and gives them to every agent it forks (fork-args' :program-errors), whose hello makes each a
   ;; recorded :seon.agent/load-failed problem of that agent. Red before: they went out once as an event, beside one fork, and were forgotten,
@@ -493,7 +515,8 @@
 ;; docs/references.md#an-entity-cites: an agent whose config cites a wiki section its store does not hold (a store older than its wiki) is
 ;; made citing the rest and says which are missing in its hello: each a recorded :seon.agent/cite-missing problem of that agent naming the
 ;; address, and its spawn's answer names them. Red before: the cite's lookup threw inside the fork server's step and no agent started
-(deftest an-agent-whose-store-lacks-a-cited-section-says-so-at-its-start
+;; Estimate: 1 test-branch! x 1M; 3 step-fn calls x 0.1M (a transact or a commit read in each) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-agent-whose-store-lacks-a-cited-section-says-so-at-its-start
   (let [gone "docs/nowhere.md#never-written"]
     (testing "its hello carries the addresses, and each is a recorded problem of that agent"
       (let [ap0 (#'ap/agent-proc {:id :a1 :end {:out (a/chan 4) :in (a/chan)} :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
@@ -514,7 +537,8 @@
            (is (= [gone] (:seon.agent/missing-cites (deref p 0 ::unanswered))) (pr-str (deref p 0 ::unanswered)))
            (is (= :idle (get-in st' [:view :agents :a1 :status])) "the agent runs")))))))
 
-(deftest fork-server-events
+;; Estimate: 6 step-fn calls x 10k (pure state in, state out) ~ 60,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 60000}} fork-server-events
   (let [st {:waiters (conj clojure.lang.PersistentQueue/EMPTY {:rid 5 :req {:op :stats}}) :pid 1 :log []}]
     (testing "a stats event answers the oldest waiter, by rid"
       (let [[st outs] (step #'server/fork-server-proc st :ev {:ev :stats :t 3})]
@@ -536,7 +560,8 @@
         (is (= #{42} (:forked st)) "the one not reaped is the stop's to end")
         (is (= [41] (map :pid (:to-api outs))) "and the exit goes on to the api")))))
 
-(deftest a-lost-fork-server-answers-every-waiter
+;; Estimate: 4 step-fn calls x 10k (pure state in, state out) ~ 40,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000}} a-lost-fork-server-answers-every-waiter
   ;; the server died with no standby to take its place (it died at boot, before its first
   ;; standby): every request it was asked, and every one asked after, is answered with the
   ;; error, and a fork's descriptor is closed. Unfixed, a stats request waited for good and a
@@ -571,7 +596,8 @@
         (is (= [:fs-down] (keep :op (:to-api outs))))))
     (sock/close! peer)))
 
-(deftest agent-proc-steps
+;; Estimate: 5 step-fn calls x 10k (pure state in, state out) ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} agent-proc-steps
   ;; root's end of the agent's socket is a jolt.async.remote end: the agent's frames arrive
   ;; as values on its :in (the agent proc's :from), and nil there is its close
   (let [[r a] (sock/socketpair)
@@ -598,7 +624,8 @@
     (remote/close! end)
     (sock/close! a)))
 
-(deftest api-server
+;; Estimate: 5 step-fn calls x 10k (pure state in, state out) ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} api-server
   (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
                           :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})]
     (testing "the view is answered to its caller's promise"
@@ -616,7 +643,8 @@
             [_ _] (step #'root/api-proc st :from-writer {:dest {:rid rid} :r {:ok true}})]
         (is (= {:ok true} @p))))))
 
-(deftest a-persons-ask-and-message-name-the-signed-in-user-and-are-refused-with-none
+;; Estimate: 1 test-branch! x 1M; 2 step-fn calls x 0.1M (a transact or a commit read in each); 2 transacts x 50k ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-persons-ask-and-message-name-the-signed-in-user-and-are-refused-with-none
   ;; docs/users.md#whats-on-screen: who asks is the user signed in on main, never the OS account
   (ts/test-branch!
    (fn [_ conn]
@@ -638,7 +666,8 @@
        (let [[_ outs] (ask {:op :message :id :a1 :from :root :body "the design is done"})]
          (is (some #(and (map? %) (= {:seon.system/id :root} (:seon.message/from %))) (txs outs)) "from the system, as root names itself"))))))
 
-(deftest root-moves-the-signed-in-users-focus-and-refuses-an-unknown-agent-or-no-user
+;; Estimate: 1 test-branch! x 1M; 2 step-fn calls x 0.1M (a transact or a commit read in each); 3 transacts x 50k ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} root-moves-the-signed-in-users-focus-and-refuses-an-unknown-agent-or-no-user
   ;; docs/users.md#whats-on-screen: root's focus! request writes the signed-in user's :seon.user/focus to the agent named by key
   (ts/test-branch!
    (fn [_ conn]
@@ -660,7 +689,8 @@
        (let [[_ outs] (ask (req "a1"))]
          (is (= [[:db/add [:seon.user/name "sean"] :seon.user/focus [:seon.agent/key "a1"]]] (vec (mapcat :tx-data (:to-writer outs)))) "the signed-in user's focus moves to the agent"))))))
 
-(deftest an-end-closed-on-a-live-pid-ends-the-agent-and-answers-its-waiter
+;; Estimate: 1 child process started, killed and waited on (3 calls, ~30k ticks each: the work is the kernel's) + api-proc and 3 pure state steps ~30k ~ 0.12M, about 1e5 ~ 100,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 100000}} an-end-closed-on-a-live-pid-ends-the-agent-and-answers-its-waiter
   ;; an agent whose end closed can never answer root again: root ends it at once (the kill its :kill
   ;; makes), and its exit, which comes, answers the requests it held through ::dying. No bound is
   ;; reached and no stall timer is armed. The pid is a real child (sleep 20), alive unless killed.
@@ -684,7 +714,8 @@
       (is (empty? (:seon.system/dying st')) "nothing is parked")
       (is (false? @(:seon.system/stall-timer st')) "and no stall timer was armed"))))
 
-(deftest a-step-that-throws-after-a-stall-check-leaves-the-check-armed
+;; Estimate: 5 step-fn calls x 10k (pure state in, state out) ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-step-that-throws-after-a-stall-check-leaves-the-check-armed
   ;; docs/clocks.md: root's stall check is a timer to itself (seon.step/timer). A step that took :stall-check and then
   ;; threw is undone by Flow (its state from before the step is kept); the timer's armed flag is a host object, so the
   ;; next step with an eval in flight arms it again. Red before: the flag was in the state (::stall-due), kept true by
@@ -705,7 +736,8 @@
           (#'root/api-proc st :ext {:op :noop})
           (is (= [{:op :stall-check} {:op :stall-check}] @puts) "the next step arms it again"))))))
 
-(deftest root-records-what-it-observes-of-its-agents
+;; Estimate: 4 step-fn calls x 10k (pure state in, state out) ~ 40,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000}} root-records-what-it-observes-of-its-agents
   ;; what root observes of an agent is facts on the
   ;; agent's entity, written when a member it records changes; a change it does not record
   ;; (the main t the agent reports) writes nothing
@@ -724,7 +756,8 @@
         (is (some #{[:db.fn/retractAttribute [:seon.process/id "a3/77"] :seon.process/running]} (:tx-data (first (:to-writer outs))))
             "the form returned: no longer running")))))
 
-(deftest root-view-of-an-agents-evals-holds-handles-not-values
+;; Estimate: two held calls, the second at n = 100,000: a 100,000-element vec (~20 ticks an element = 2M) + 2 strings of 100,000 chars (apply str repeat, ~20 ticks a char = 4M) + 4 api steps ~0.1M + pr-str of the 2 handles ~0 ~ 6M, about 5e6 ~ 5,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 5000000}} root-view-of-an-agents-evals-holds-handles-not-values
   ;; task seon.system/an-agents-view-keeps-handles-not-values (docs/machine.md#roots-heap):
   ;; the bytes root's view keeps of an agent's evals are the same whatever the evals returned, wrote or
   ;; threw. Red while the entry held the response whole (its :value, :out and an error's :data grew with them)
@@ -743,7 +776,8 @@
                  (count (pr-str evals))))]
     (is (= (held 10) (held 100000)) "bytes held do not grow with what the evals returned")))
 
-(deftest an-agent-that-ended-is-answered-ended-one-never-had-no-agent
+;; Estimate: 2 step-fn calls x 10k (pure state in, state out) ~ 20,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000}} an-agent-that-ended-is-answered-ended-one-never-had-no-agent
   ;; bin/check e2e-calc (2026-10-23): root's answer says whether the agent ended (its view
   ;; records :ended-ms: a kill, its run's end, a death) or root never had it, so a reader
   ;; (seon.prove) tells a cancel from a defect by the type alone
@@ -768,7 +802,8 @@
   "Protocol members a refused answer must not carry: an eval item's, a test count's, a merge's."
   #{:id :tag :ok :merged? :pass :fail :error :reports :applied :conflicts})
 
-(deftest a-refused-answer-is-the-one-error-map
+;; Estimate: 1 test-branch! x 1M; 6 step-fn calls x 0.1M (a transact or a commit read in each) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-refused-answer-is-the-one-error-map
   ;; a request no live agent can take, a function root refuses, and a write the writer refuses
   ;; each answer the one error map (seon.contract/error) and nothing beside it: no eval item
   ;; with id -1, no test count, no :ok or :merged? false
@@ -793,7 +828,8 @@
           r (:r (first (:to-api outs)))]
       (is (and (seon.contract/error? r) (not (contains? r :ok))) (pr-str r))))))
 
-(deftest a-collection-waits-until-no-agent-is-live
+;; Estimate: 3 step-fn calls x 10k (pure state in, state out) ~ 30,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 30000}} a-collection-waits-until-no-agent-is-live
   ;; root collects the store only as its only writer (owner, 2026-10-22, simplest first;
   ;; seon.db/collect!): a :collect while an agent is live is refused at once, naming the live
   ;; agents, and never reaches the writer; with none live it goes to the writer like any write
@@ -811,7 +847,8 @@
 
 ;; ---- request/answer: one asker's table (seon.step/pend, ask, answered) ---------------------
 
-(deftest one-asker-table-answers-each-request-once
+;; Estimate: 1 step-fn calls x 10k (pure state in, state out) ~ 10,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000}} one-asker-table-answers-each-request-once
   (let [st {:rid 0 :pending {}}
         [st m1] (step/ask st [:render :answers] :state {:op :state})
         [st m2] (step/ask st [:render :answers] [:branch :a1] {:op :write})
@@ -839,7 +876,8 @@
     (try (f (assoc st :pid 42))
          (finally (remote/close! end) (sock/close! a)))))
 
-(deftest an-eval-says-it-started
+;; Estimate: 2 step-fn calls x 10k (pure state in, state out) ~ 20,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 20000}} an-eval-says-it-started
   ;; the agent's {:op :started} is root's
   ;; :started event, with the eval's text (what a kill or an interrupt meant for it awaits)
   (agent-proc-on
@@ -848,14 +886,16 @@
            [_ outs] (step #'ap/agent-proc st :from {:op :started :id 7})]
        (is (= [{:type :started :agent :a1 :rid 7 :form "(loop [] (recur))"}] (mapv #(dissoc % :at-ms) (:events outs))))))))
 
-(deftest a-test-run-says-its-child-forked
+;; Estimate: 1 step-fn calls x 10k (pure state in, state out) ~ 10,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000}} a-test-run-says-its-child-forked
   ;; the agent sends the test child's pid once it is forked: root's :tests-started event
   (agent-proc-on
    (fn [st]
      (let [[_ outs] (step #'ap/agent-proc st :from {:op :tests-started :id 7 :pid 4242})]
        (is (= [{:type :tests-started :agent :a1 :rid 7 :pid 4242}] (mapv #(dissoc % :at-ms) (:events outs))))))))
 
-(deftest a-tab-hears-its-view-settled
+;; Estimate: 3 step-fn calls x 10k (pure state in, state out) ~ 30,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 30000}} a-tab-hears-its-view-settled
   ;; the render proc says when nothing it asked is in flight any more (after an answer, or
   ;; after what it sent the tabs), never while a request is out; the web proc puts a
   ;; settled comment on every feed
@@ -875,7 +915,8 @@
     (is (= ": settled\n\n" (a/poll! ch)))
     (is (= (count ": settled\n\n") (:bytes st)))))
 
-(deftest the-render-proc-asks-for-root-s-view-once-per-round-trip
+;; Estimate: 5 step-fn calls x 10k (pure state in, state out) ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} the-render-proc-asks-for-root-s-view-once-per-round-trip
   ;; the coalescing window is the request in flight, not a clock (ASK-BOUND-MS is gone)
   (let [events (a/chan 8)
         st {:events-ch events :rid 0 :pending {} :watch #{} :waiting {} :kf-wanted #{} :new-events [] :events []
@@ -898,7 +939,11 @@
 
 (defn- answer "What p was answered, or :unanswered." [p] (if (realized? p) @p :unanswered))
 
-(deftest a-proc-defect-names-where-it-threw
+;; Estimate, each piece measured in an agent (2026-11-13): the throw, a case miss (Jolt's IllegalArgumentException) ~0.7M; flow-error
+;; ~0.13M (its trace: Jolt keeps 25 frames, ~0.1M to read at any depth); api-state ~0.2M; one api step ~0.1M; step-out-ok?'s
+;; validation ~0.3M the first time its schema compiles: 1,500,000 ticks, its own work. Measured 2M-4.3M where it ran first in its
+;; shard, which charges the process's first compiles and loads to it: a measurement defect filed for tests, not this test's work
+(deftest ^{:seon.test/estimate {:ticks 1500000}} a-proc-defect-names-where-it-threw
   ;; the standing root's worst open problem: the reconciler's "No matching clause: " 255 times, a
   ;; case meeting nil, with nothing saying in which function or on what message
   (let [ex (try (case (:op {}) :a 1) (catch Exception x x))
@@ -912,7 +957,8 @@
     (is (= (:in m) (:seon.error/in (answer p))) "on the defect")
     (is (= :state (:took (answer p))) "with what its step took")))
 
-(deftest an-uncaught-error-reaches-root-never-only-stderr
+;; Estimate: 3 threads started and joined (~30k each) + 3 ex-info throws with their stacks (~20k each) + 1 go block 20k + api-state and 1 api step ~0.1M ~ 0.3M, about 2e5 ~ 200,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 200000}} an-uncaught-error-reaches-root-never-only-stderr
   ;; docs/errors.md#nothing-crashes-and-nothing-hangs (Point 2026, Sean's silent errors): a fiber died at start with its error
   ;; only on stderr ("Exception in go/fiber body"). Root takes every uncaught error (seon.system/catch-uncaught!): kept until it
   ;; listens, which its start fails on, then its :back, which the api records as a named defect
@@ -943,7 +989,8 @@
           (is (= [:proc-defect] (map :type (:events outs))) "an event, as any proc's defect")))
       (finally (Thread/setDefaultUncaughtExceptionHandler old) (reset! u {:back nil :early []})))))
 
-(deftest a-throwing-step-answers-every-pending-request
+;; Estimate: 1 test-branch! x 1M; 9 step-fn calls x 0.1M (a transact or a commit read in each) ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-throwing-step-answers-every-pending-request
   ;; Flow's step catch keeps the old state and drops the outputs; its error message carries the
   ;; message the step took (::flow/msg), which the pipe from Flow's error channel carries as :msg
   (let [st (api-state)]
@@ -990,7 +1037,8 @@
                          :view {:agents {}} :system (doto (promise) (deliver {:procs {} :conns []}))
                          :graph (doto (promise) (deliver (reify clojure.core.async.flow.impl.graph/Update (update-flow [_ _] {}))))})))))
 
-(deftest a-fork-server-step-that-throws-answers-and-the-server-serves-on
+;; Estimate: 2 test-branch! x 1M; 6 step-fn calls x 0.1M (a transact or a commit read in each); 1 transacts x 50k ~ 3,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-fork-server-step-that-throws-answers-and-the-server-serves-on
   ;; task seon.fork-server/a-throwing-fork-server-step-answers-its-asker: a main commit the fork
   ;; server cannot read (a :tx naming no commit: the replica's d/commit-as-db throws, as a bad
   ;; entity in a d/with did, 2026-10-29) threw out of its step. Unfixed, the server stayed alive
@@ -1025,7 +1073,8 @@
           (is (re-find #"fork server is lost" (str (:seon.error/message refused))) (pr-str refused))
           (is (= (:agents lost) (:agents after)) "no agent was made for the refused spawn"))))))))
 
-(deftest a-spawn-is-answered-at-its-agents-ready
+;; Estimate: 1 test-branch! x 1M; 3 step-fn calls x 0.1M (a transact or a commit read in each) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-spawn-is-answered-at-its-agents-ready
   ;; task seon.system/a-spawn-answers-at-its-agents-ready: never at once, while the agent is
   ;; :spawning, but at its hello, so what is sent to it next reaches a ready agent
   (spawning-api (fn [st]
@@ -1038,7 +1087,8 @@
         (step #'root/api-proc st :back {:op :status :agent a1 :set {:ready true}})
         (is (= {:id a1} (answer p)) "its hello answers it"))))))
 
-(deftest a-spawn-whose-agent-dies-first-answers-the-death
+;; Estimate: 3 test-branch! x 1M; 7 step-fn calls x 0.1M (a transact or a commit read in each) ~ 4,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-spawn-whose-agent-dies-first-answers-the-death
   ;; the end the agent met before its hello is the answer: died, with the exit status the fork
   ;; server reaped (the process's exit, never a timeout); stopped first, the stop
   (spawning-api (fn [st]
@@ -1074,7 +1124,8 @@
     (a/go-loop [] (when-let [m (a/<! ext)] (deliver (:p m) r) (recur)))
     (f {:ext ext :cfg cfg :conn conn :graph nil})))))
 
-(deftest root-state-never-answers-an-empty-system
+;; Estimate: 1 test-branch! x 1M ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} root-state-never-answers-an-empty-system
   ;; "Unknown is not {}": what the api answers is what the caller gets; a defect stays a defect
   (let [e (seon.contract/error :seon.system/proc-defect 'seon.system/api-proc "boom" {:pid :api})]
     (answering-sys e (fn [sys]
@@ -1084,7 +1135,8 @@
         (is (= e (root/errors sys))))
       (a/close! (:ext sys))))))
 
-(deftest the-step-loop-runs-flows-contract-in-one-thread
+;; Estimate: a few pure step calls ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} the-step-loop-runs-flows-contract-in-one-thread
   ;; a counter step-fn run by seon.step/run-loop over an in-memory transport
   (let [step-fn (fn ([] {:workload :io :ping-map-fn (fn [s] {:n (:n s)})})
                   ([_] {:n 0 :log []})
@@ -1100,7 +1152,8 @@
     (is (= [::flow/pause ::flow/resume ::flow/stop] (:log final)))
     (is (= [[:in 4]] @inbox) "nothing is taken after stop")))
 
-(deftest the-fork-server-step
+;; Estimate: 1 test-branch! 1M + 5 transacts and 4 server steps reading each commit (~0.2M each = 1M) + 3 reconcile/index of main (0.2M + 100k x 1 task each ~ 0.3M = 1M) + 1 branch, connect and transact 0.4M ~ 3.4M, about 4e6 ~ 4,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 4000000}} the-fork-server-step
   (ts/test-branch! (fn [cfg conn] (let [st (#'server/server-step {:db @conn :cfg cfg :store conn :conn nil})
         stored (fn [rep] {:op :tx :t (:max-tx @conn) :commit (d/commit-id @conn) :ns 0 :tx-data (pdb/report->tx rep)})]
     (testing "a main commit is read into its replica from the store"
@@ -1139,7 +1192,8 @@
                     (is (= (reconcile/index @bc) observed) "the branch's index listed"))
                   (finally (d/release bc)))))))))))))
 
-(deftest no-proc-keeps-a-db-older-than-its-branchs-current
+;; Estimate: 1 test-branch! 1M + 18 commits (create-tx + transact ~0.15M each = 2.7M) + 6 fork-server steps (0.2M = 1.2M) + 6 reconciler steps (a notice each, index observed ~0.5M = 3M) + 6 render advance-main (0.15M = 0.9M) + stale-dbs walks ~0.2M ~ 9M, about 8e6 ~ 8,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 8000000}} no-proc-keeps-a-db-older-than-its-branchs-current
   ;; docs/machine.md#roots-heap, a kept db value is a reference (owner, 2026-10-28: "I don't want us
   ;; carrying around large values for no reason"; 2026-10-29): after a run of main commits, each
   ;; proc that holds a db holds main's current one, and its older points as {:commit :t}. A proc's
@@ -1177,7 +1231,8 @@
   (let [{:keys [fail error]} (run-tests 'seon.procs-test)]
     (System/exit (if (zero? (+ fail error)) 0 1))))
 
-(deftest the-writer-keeps-the-union-current
+;; Estimate: 1 test-branch! 1M + building the union at the first :union (the seed's ~2,000 datoms re-added across branches, 5k x 2,000 = 10M) + 2 commits' datoms added and 1 branch + connect + 2 transacts (~1M) ~ 12M, about 1e7 ~ 10,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 10000000}} the-writer-keeps-the-union-current
   ;; seon.union through the writer: built at the first :union, then every main commit and
   ;; every agent's commit notice add their datoms, so one query over its answer sees both
   (ts/test-branch! (fn [cfg conn] (let [in (a/chan 16)
@@ -1197,7 +1252,8 @@
           [_ r2] (union-of st)]
       (is (= #{["from main" main] ["from a1" ab]} (bodies (:db r2))) "a main commit and an agent's commit, each under its branch"))))))
 
-(deftest a-fork-server-step-that-throws-answers-with-the-error-and-its-state-is-unchanged
+;; Estimate: 4 step-fn calls x 10k (pure state in, state out) ~ 40,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 40000}} a-fork-server-step-that-throws-answers-with-the-error-and-its-state-is-unchanged
   ;; docs/processes.md#a-step-that-throws: the server's step caught what it threw (a thrown step left the
   ;; process alive and silent, or dead, with every request it took unanswered); the event names the op
   ;; and carries the typed error, a fork's received socket is closed, and root's proc answers the asker
@@ -1241,7 +1297,8 @@
         (is (= -1 (sock/close! afd)) "root's copy of the agent's socket is closed")
         (sock/close! apeer)))))
 
-(deftest the-fork-servers-stop-ends-every-child-before-it-answers
+;; Estimate: a few pure step calls ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} the-fork-servers-stop-ends-every-child-before-it-answers
   ;; bin/check lifecycle's :left (docs/processes.md#a-stop-reaps-every-child): root SIGKILLed the fork
   ;; server while an agent that had closed its socket was still exiting, and launchd
   ;; inherited it, alive after stop!. Now the server's stop kills and reaps its children
@@ -1252,7 +1309,8 @@
     (server/server-step {:children #{pid} :status-buf (jolt.ffi/alloc 4)} ::flow/stop)
     (is (= -1 (seon.lib/c-kill pid 0)) "and gone when the stop answers: killed and reaped")))
 
-(deftest an-agents-memory-alone-moves-no-main
+;; Estimate: a few pure step calls ~ 50,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 50000}} an-agents-memory-alone-moves-no-main
   ;; root wrote an agent's memory on every change, so main moved five times under three reads of a
   ;; working agent (seon.server-test/a-later-read-draws-no-page-cold-and-costs-what-the-one-before-did)
   (let [st {:boot "b1" :agents {} :pending {} :rid 0 :view {:agents {:a1 {:status :busy :pid 7 :mem-mb 151.66}}}}
@@ -1266,7 +1324,8 @@
       (is (not-any? #(contains? % :seon.process/mem-mb) (:tx-data w)) "and no memory: nothing reads it as a fact"))))
 
 ;; docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08: one live process per agent (docs/decisions.md#an-id-is-the-content-of-the-facts-that-make-it-owner-2026-11-08)
-(deftest back-leaves-one-live-process-for-the-agent
+;; Estimate: 1 test-branch! x 1M; 3 step-fn calls x 0.1M (a transact or a commit read in each) ~ 1,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 1000000}} back-leaves-one-live-process-for-the-agent
   (spawning-api
    (fn [st]
      (let [live (fn [st] (vec (sort (keys (:agents st)))))
@@ -1285,7 +1344,8 @@
          (is (empty? (:seon.system/respawn st2)) "nothing waits to be forked")
          (is (= :spawning (get-in st2 [:view :agents :a3 :status])) "and the view holds the new process, not the old"))))))
 
-(deftest a-failed-standby-is-a-recorded-problem
+;; Estimate: 3 step-fn calls x 10k (pure state in, state out) ~ 30,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 30000}} a-failed-standby-is-a-recorded-problem
   ;; docs/processes.md#a-step-that-throws: the fork server's :standby-failed event reaches root's api,
   ;; which records a platform problem naming the threads and shows the server has no standby
   (let [st (#'root/api-proc {:boot "b1" :ext (a/chan 4) :back (a/chan 4) :to-writer (a/chan 4) :events (a/chan 4)
@@ -1299,6 +1359,14 @@
     (is (= :up (get-in st2 [:view :fork-server :status])) "the server itself still serves")
     (is (= true (get-in (first (step #'root/api-proc st2 :back {:ev :standby :gen 4 :pid 9})) [:view :fork-server :standby]))
         "the next standby made: the view shows it has one again")))
+
+(deftest ^{:seon.test/estimate {:ticks 50000}} a-forking-process-holds-only-io-procs
+  ;; the one-unit spec's law 1 (docs/processes.md#what-a-fork-inherits): a process that forks holds only :workload :io procs,
+  ;; so its procs run as fibers and a fork finds one active thread. An agent forks its own children: every step of its graph
+  ;; (seon.repl/agent-steps, what serve! builds from) is :io. Blocking foreign work (:mixed: the writer, the flusher, fx workers,
+  ;; render) runs only in root, which forks nothing after boot
+  (doseq [[pid step] seon.repl/agent-steps]
+    (is (= :io (:workload (step))) (str "an agent's " pid " proc is :io, not " (:workload (step))))))
 
 (defn- note-texts
   "The texts of the notes the test wrote (prefix p) on the connection's head."

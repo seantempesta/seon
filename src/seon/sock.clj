@@ -310,9 +310,7 @@
   empty) or :eof. It reads what is there (MSG_DONTWAIT) and, when nothing is, parks until fd
   is readable (poller/wait-ready: a fiber's park, so on a main carrier the process's other
   fibers run while it waits; a thread's wait elsewhere), then answers [] and the caller asks
-  again: an agent waits on its test child for the whole test run (seon.agent/run-tests-forked).
-  With wait!, that is what it calls when nothing is there (seon.agent/read-to-exit: fd's input or
-  its writer's exit, whichever comes first)."
+  again. With wait!, that is what it calls when nothing is there."
   {:malli/schema [:function [:=> [:cat :seon.lib/fd] :seon.host/fn] [:=> [:cat :seon.lib/fd :seon.host/fn] :seon.host/fn]]}
   ([fd] (line-reader fd #(poller/wait-ready fd :read)))
   ([fd wait!]
