@@ -345,14 +345,14 @@
            (contains? (:base ours) k) (assoc :seon.merge/base (get (:base ours) k))))))
 
 (defn replay
-  "The source's transactions since base, each whole as a group, those the branch skip wrote left out. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
+  "The source's transactions since base, each whole as a group, those the branch skip wrote left out (none when skip is nil). See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword]] [:vector [:map [:tx :int] [:meta :map] [:ops [:vector :any]]]]]}
   [base src skip]
   (let [wrote (second (d/datoms-diff (d/history base) (d/history src) :eavt []))
         by-tx (reduce (fn [m {:keys [e a v tx added]}] (if (= e tx) m (update m tx (fnil conj []) [(if added :db/add :db/retract) e a v])))
                       (sorted-map) wrote)
         meta (fn [t] (into {} (for [dt (d/datoms src :eavt t) :when (not= :db/txInstant (:a dt))] [(:a dt) (:v dt)])))]
-    (vec (for [[t ops] by-tx :let [m (meta t)] :when (not= skip (:seon.tx/branch m))]
+    (vec (for [[t ops] by-tx :let [m (meta t)] :when (or (nil? skip) (not= skip (:seon.tx/branch m)))]
            ;; retractions first: a value replaced in one transaction is retracted, then asserted
            {:tx t :meta m :ops (vec (sort-by #(if (= :db/retract (first %)) 0 1) ops))}))))
 
