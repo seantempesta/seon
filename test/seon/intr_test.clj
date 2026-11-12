@@ -9,7 +9,7 @@
   (let [stack @#'seon.intr/stack pending @#'seon.intr/pending held @stack]
     (try
       (reset! pending true)
-      (is (= :interrupted (try (intr/run nil (fn [] :ran)) (catch clojure.lang.ExceptionInfo e (when (:interrupted (ex-data e)) :interrupted))))
+      (is (= :interrupted (try (intr/run nil (fn [] :ran)) (catch ThreadDeath _ :interrupted)))
           "a pending interrupt stops the next eval")
       (reset! pending true)
       (is (true? (intr/forked!)))

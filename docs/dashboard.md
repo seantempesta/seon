@@ -2,7 +2,7 @@
 
 Root's dashboard is a live web page of the whole system, served on 127.0.0.1 by two procs of the root graph: the render proc decides what changed and renders it, and the web proc owns the listener and the tabs and renders nothing.
 
-The port is `:seon.config.web/port` (`bin/ports` gives each checkout its own; 0 serves nothing). The page is a render like every other view ([render](render.md#the-page)): a ctx through the one walk, each value by its schema's render over the one printer, laid out with Tailwind's classes.
+The port is `:seon.config.web/port` (`bin/ports` gives each checkout its own; 0 serves nothing; -1 binds one the kernel assigns, named in the web proc's ping, as a check's root does: no check binds a fixed port). A POST is the dashboard's own page's when its Origin is the address it was sent to, its Host on 127.0.0.1, whatever port was bound (```seon.web/same-origin?```). The page is a render like every other view ([render](render.md#the-page)): a ctx through the one walk, each value by its schema's render over the one printer, laid out with Tailwind's classes.
 
 ## The render proc
 
