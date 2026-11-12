@@ -297,6 +297,68 @@
     (is (= [{:reason :proof-red :symbol (t "a")}]
            (:reasons (j {:results {(t "a") :fail} :main-red #{(t "a")}}))) "a proof the task names always counts")))
 
+;; docs/merging.md#a-branch-lands-with-binland: whether a task is the merge step of another is read from its needs and its branch (the
+;; task needs one on its own branch), never its kind: the :merging mark, the done rule's behind and told, what a park keeps, the
+;; start's one-merge-at-a-time and the cites a need leaves out each follow it. A :work task with such a need is a merge step; a :merge
+;; task with none is not.
+(def ^:private step-world
+  "Tasks planted for the merge step's proofs: w, its merge step w-merge (its kind says :work, it needs w on w's branch), f (its kind
+  says :merge, it needs nothing) and l, a lone task."
+  (let [step (assoc (decl "w-merge" :needs ["w"]) :seon.task/kind :work :seon.task/branch (task/default-branch "demo/w"))
+        fake (assoc (decl "f") :seon.task/kind :merge)]
+    {:step step :fake fake :decls [(decl "w") step fake (decl "l")]}))
+
+(deftest a-merge-step-is-known-by-its-needs-and-branch
+  (let [{:keys [decls step]} step-world
+        j (fn [db nm facts] (judgment-of db nm facts))]
+    (testing "the :merging mark: the step while it works, a task that merges itself once judged, a :merge kind with no need never while it works"
+      (let [db (db-of decls :extra (concat (work "w" :done) (work "w-merge" :running) (work "f" :running) (work "l" :ready)))]
+        (is (= #{"demo/w-merge" "demo/l"} (:merging (r/index db))))))
+    (testing "a step added later takes its need's merge from it: the index observed holds what the index listed does"
+      (let [db0 (db-of [(decl "w")] :extra (work "w" :ready))
+            [db _ idxs] (observed-steps db0 [["the step is written" (task/create-tx db0 [step])]
+                                             ["and released" (task/execution-tx ["demo/w-merge"] :running)]])]
+        (is (= #{"demo/w"} (:merging (r/index db0))) "w, judged, merges itself while nothing follows it")
+        (is (= #{} (:merging (first idxs))) "then the step, which merges it, is the merge in flight")))
+    (testing "a need that moves to another branch: its step is a step no longer, in the index observed as in the index listed"
+      (let [db0 (db-of [(decl "w") step] :extra (concat (work "w" :ready) (work "w-merge" :running)))
+            [db _ idxs] (observed-steps db0 [["w moves to another branch" [{:seon.task/id "demo/w" :seon.task/branch :main/elsewhere}]]])]
+        (is (= #{"demo/w-merge"} (:merging (r/index db0))) "before: the step merges w while it works")
+        (is (= (:merging (r/index db)) (:merging (first idxs))) "the mark observed is the mark listed")
+        (is (not (contains? (:merging (first idxs)) "demo/w-merge")) "and the task that needed w on its branch no longer merges it")))
+    (testing "behind is the work's own only when no step follows it on its branch"
+      (let [db (db-of decls :extra (concat (work "w" :running) (work "l" :running)))
+            behind {:end {:outcome :green} :results {(t "w") :pass (t "l") :pass} :behind 2}]
+        (is (= {:outcome :done :reasons []} (j db "w" behind)) "w is followed by a step on its branch: never behind")
+        (is (= [:behind] (mapv :reason (:reasons (j db "l" behind)))) "a lone task, merging itself, is")))))
+
+(deftest a-merge-step-keeps-no-process-and-holds-where-a-task-that-merges-itself-is-told
+  (let [{:keys [decls]} step-world
+        db (db-of decls :extra (concat (work "w-merge" :running) (work "f" :running)))
+        waiting (fn [nm] {:end {:outcome :waiting} :results {(t nm) :fail}})
+        red (fn [nm] {:end {:outcome :red} :results {(t nm) :fail}})]
+    (is (not= :parked (:outcome (judgment-of db "w-merge" (waiting "w-merge")))) "the step keeps no process")
+    (is (= :parked (:outcome (judgment-of db "f" (waiting "f")))) "the :merge kind with no need to merge does")
+    (is (= :closed (:outcome (judgment-of db "w-merge" (red "w-merge")))) "the step's red holds for root")
+    (is (= :told (:outcome (judgment-of db "f" (red "f")))) "the other is told")))
+
+(deftest merges-start-one-at-a-time-for-a-merge-step-read-from-data
+  (let [{:keys [fake]} step-world
+        spawned #(set (map :task (filter (comp #{:spawn} :op) (actions-for %))))
+        step-of (fn [nm] (assoc (decl (str nm "-merge") :needs [nm]) :seon.task/kind :work :seon.task/branch (task/default-branch (str "demo/" nm))))]
+    (is (= 1 (count (spawned (db-of [(decl "a") (step-of "a") (decl "b") (step-of "b")] :extra (concat (work "a" :done) (work "b" :done)))))) "two steps, one starts")
+    (is (= #{"demo/f" "demo/g"} (spawned (db-of [fake (assoc (decl "g") :seon.task/kind :merge)]))) "two tasks of kind :merge with no need, both")))
+
+(deftest a-need-that-is-a-merge-step-leaves-its-cites-out-of-the-tasks
+  (let [{:keys [step fake]} step-world
+        db0 (d/db-with (empty-db) [{:seon.doc/address "docs/vector.md#the-pyramid" :seon.doc/heading "The pyramid"}
+                                   {:seon.doc/address "docs/agent.md#working-a-task" :seon.doc/heading "Working a task"}])
+        ds [(decl "w") (assoc step :seon.task/plan "Read [it](docs/vector.md#the-pyramid).")
+            (assoc fake :seon.task/plan "Read [it](docs/agent.md#working-a-task).")
+            (assoc (decl "x" :needs ["w-merge" "f"]) :seon.task/plan "Nothing cited.")]
+        db (d/db-with db0 (task/create-tx db0 ds))]
+    (is (= ["docs/agent.md#working-a-task"] (mapv task/cited-name (task/task-cites db "demo/x"))))))
+
 (deftest an-agent-with-no-end-records-no-fake-spend
   ;; task seon.model/budgets-are-data-and-spend-is-measured: the agent wrote no end (it died
   ;; or was killed before write-end!), so its turns, tokens and time are unknown: absent, never 0
@@ -535,14 +597,14 @@
     (is (not-any? #(contains? tk %) (keys stale)) "and gone after a judging that set none of them")))
 
 (deftest a-woken-task-whose-agent-never-started-is-spawned-under-its-key
-  ;; docs/users.md#roots-session: a parked task names an agent no root has started (a key and no boot, as root's session is at boot); a
-  ;; message to that key makes the task ready, and its action is a spawn, which takes the session's key (seon.task/session-key). The
+  ;; docs/users.md#roots-agent: a parked task names an agent no root has started (a key and no boot, as root's session is at boot); a
+  ;; message to that key makes the task ready, and its action is a spawn, which takes the session's key (seon.task/agent-key). The
   ;; woken check reads the task's agent key itself, so what an agent is in the index does not change (Optimization, 2026-11-08)
   (let [db (db-of [(decl "a")] :extra [{:db/id "ag" :seon.agent/key "never-started"}
                                         {:seon.task/id "demo/a" :seon.task/agent "ag" :seon.task/outcome :parked}])]
     (is (= [] (actions-for db)) "parked, it waits")
     (is (= [(spawn "a")] (actions-for db :woken ["never-started"])) "woken, it is spawned")
-    (is (= "never-started" (task/session-key db "demo/a")) "under its own key")))
+    (is (= "never-started" (task/agent-key db "demo/a")) "under its own key")))
 
 (deftest a-wake-whose-parked-process-is-gone-is-lost-and-the-next-start-a-spawn
   ;; flow-lab's hazard 6 (design agent-loop section 4): the parked process died before the wake's
@@ -904,8 +966,12 @@
                  ;; measured on LMDB (sizes 5, 15, 50 now; first at 10, 300 and 600): 0.36M ticks / 1.7 MB at 10, 10.1M / 50.6 MB at 300, 20.3M / 102 MB at 600, 34k ticks
                  ;; and 169 KB a task (about 26k / 135 KB its pull, seon.task/entity-value); 10 contracted calls a task and 12 fixed.
                  ;; Checked deeply, the same input read n^1.5 and more (each helper validated every entry)
+                 ;; a task is pulled by its schema's named attributes (seon.task's task-pull): on Datahike's pull today each named
+                 ;; attribute is a seek of its own, 35 seeks a task in place of the one :eavt range read '* made, so a task costs about
+                 ;; 100k ticks and 320 KB (measured at 5 and 15). Deep fixes' named-pull item (a named pull reads the entity's
+                 ;; :eavt range once) should bring it back under the old figure, 36k ticks and 180 KB a task
                  :fixed {:ticks 200000.0 :bytes 600000.0 :calls 20.0}
-                 :per-n {:ticks 36000.0 :bytes 180000.0 :calls 11.0}
+                 :per-n {:ticks 100000.0 :bytes 320000.0 :calls 11.0}
                  :sizes listed-sizes})))
 
 (deftest with-merge-chains-work-through-merges
@@ -1815,10 +1881,10 @@
         (is (nil? (:seon.task/reasons a)) "root's last reasons are no news to the fresh run")
         (is (= 1 (count (filter #(and (= :spawn (:op %)) (= "demo/a" (:task %))) (actions-for db3)))) "one fresh run")
         (is (= [(:seon.task/branch a)] (keep #(when (= "demo/a" (:task %)) (get-in % [:env :branch])) (actions-for db3))) "from its new branch")
-        (is (nil? (task/session-key db3 "demo/a")) "by a new agent: the old one's conversation is on the old branch")
+        (is (nil? (task/agent-key db3 "demo/a")) "by a new agent: the old one's conversation is on the old branch")
         (is (contains? (get-in (r/index db3) [:by-branch (:seon.task/branch a)]) "demo/a") "the index holds it under its new branch")
         (is (not (contains? (get-in (r/index db3) [:by-branch old]) "demo/a")) "and no longer under its old one")
-        (is (= (akey "a") (task/session-key db0 "demo/a")) "while the first run's agent is its session's on its own branch")))
+        (is (= (akey "a") (task/agent-key db0 "demo/a")) "while the first run's agent is its session's on its own branch")))
     (testing "a refine that changed nothing"
       (let [{db3 :db} (judge! db2 "a-refine" {:outcome :green})]
         (is (= :held (:seon.task/execution (task/task db3 "demo/a"))) "starts no run")))))

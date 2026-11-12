@@ -137,7 +137,7 @@
   "The view a path names, each a location the render proc resolves to an entity on main: :root, an
   entity's id (a number), or an agent by an address, `<agent>` ([:chat agent], its chat), which names it by its key (boot/id: a session,
   stable across a root's restarts, so what a link or a bookmark holds), its id in this boot, its task's id or its branch
-  (seon.render.proc/session-of resolves it; the suffix is cut first, so a key's slash is no matter); `<agent>/ctx` the agent itself, every render of its ctx;
+  (seon.render.proc/agent-named resolves it; the suffix is cut first, so a key's slash is no matter); `<agent>/ctx` the agent itself, every render of its ctx;
   `<agent>/debug` [:debug agent], what its model was sent; `root/debug` what root reads. The
   inverse of seon.render.ui/view-param. See docs/render.md#the-page."
   {:malli/schema [:=> [:cat [:maybe :string]] :any]}
@@ -218,7 +218,7 @@
           (and (= m :get) (= uri "/root/debug")) (html-response (ask! ch {:op :page :view [:debug :root]}))
           ;; an agent's page, the render of its ctx, by its id in root's boot
           (and (= m :get) (str/starts-with? uri "/agent/")) (html-response (ask! ch {:op :page :view (view-of (java.net.URLDecoder/decode (str/replace (subs uri 7) "+" "%2B") "UTF-8"))}))
-          ;; a user's page: an agent found by its :seon.user/name, by the same walk (seon.render.proc/session-of)
+          ;; a user's page: an agent found by its :seon.user/name, by the same walk (seon.render.proc/agent-named)
           (and (= m :get) (str/starts-with? uri "/user/")) (html-response (ask! ch {:op :page :view (view-of (java.net.URLDecoder/decode (str/replace (subs uri 6) "+" "%2B") "UTF-8"))}))
           ;; a page's list end scrolled into view: its next rows
           ;; a row's <details> toggled (the debug page): its unit renders its whole content while open

@@ -238,7 +238,7 @@
                                      {:files (count files)}))))))
 
 (def ^:private example-identities
-  "The attributes that name a record of an example session, each unique. See docs/tasks.md#a-task-names-example-sessions."
+  "The attributes that name a record of an example session, each unique. See docs/tasks.md#a-task-names-examples."
   [:seon.agent/key :seon.eval/id :seon.message/id :seon.model-call/id])
 
 (defn example-txs
@@ -269,7 +269,7 @@
   :seon.task/examples. Loading is idempotent: a session whose agent and every record main already holds
   writes nothing ({:ok true :changed 0 :batches 0}); else the last writer's answer with :batches, how many it
   wrote. The example agent has no branch (only the writer makes a branch): its records are main's, and its pages
-  open at /agent/main/example-<id>, the page of a branchless agent on main (seon.render.proc/location). See docs/tasks.md#a-task-names-example-sessions."
+  open at /agent/main/example-<id>, the page of a branchless agent on main (seon.render.proc/location). See docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat :seon.system/sys :string] :map]}
   [sys path]
   (let [txs (example-txs path)]

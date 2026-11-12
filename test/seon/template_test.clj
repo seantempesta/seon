@@ -106,6 +106,27 @@
     (is (= [:design :implement :merge] (mapv :seon.task/kind (tpl/stages d))) "the staged choice still makes its tasks")
     (is (seq (task/create-tx (ts/test-db) ds)) "a valid task set")))
 
+;; docs/merging.md#a-branch-lands-with-binland: a merge step is read from a task's needs and its branch, beside merges?
+(deftest a-merge-step-needs-a-task-on-its-own-branch
+  (let [w {:seon.task/id "demo/w"}
+        m {:seon.task/id "demo/w-merge" :seon.task/branch :task-demo-w}
+        on-w (assoc w :seon.task/branch :task-demo-w)]
+    (is (task/merge-step? m [on-w] []) "it needs a task on its own branch, and nothing there needs it")
+    (is (task/merge-step? (assoc m :seon.task/kind :work) [w] []) "a task with no branch of its own needing one on its default branch: its kind says nothing")
+    (is (not (task/merge-step? (assoc m :seon.task/kind :merge) [] [])) "needing nothing: not, whatever its kind")
+    (is (not (task/merge-step? m [(assoc w :seon.task/branch :task-demo-other)] [])) "a need on another branch is not its work")
+    (is (not (task/merge-step? w [] [])) "a lone task")
+    (is (and (not (task/merges? w [m])) (not (task/merge-step? w [] [m]))) "the work task a step follows is neither: it leaves its merge to the step and merges nothing of another's")
+    (let [[design implement merge] (map #(assoc % :seon.task/id (task/task-id (:seon.task/ns %) (:seon.task/name %))) (tpl/stages {:seon.task/ns 'demo :seon.task/name "st" :seon.task/plan "Make st."}))]
+      (is (not (task/merge-step? implement [design] [merge])) "a staged request's implement, between its design and its merge on one branch, is no merge step")
+      (is (task/merge-step? merge [implement] []) "the task after it, the last on the branch, is"))
+    (is (and (task/merges? m []) (task/merge-step? m [on-w] [])) "and a step with nothing on its branch needing it is both: it merges its work, and another's")
+    (let [db (ts/test-db)
+          decls (tpl/with-merge [{:seon.task/ns 'demo :seon.task/name "w" :seon.task/plan "Make w true."}])
+          db (d/db-with db (task/create-tx db decls))]
+      (is (false? (task/merge-step-on? db "demo/w")))
+      (is (true? (task/merge-step-on? db "demo/w-merge"))))))
+
 (deftest red-proofs-with-their-source-are-the-reproduction
   (let [w (working-a-task)
         k "docs/agent.md#working-a-task"]
@@ -143,10 +164,10 @@
         ;; on a branch of its own, and needing design, whose task has an agent: still not design's session
         db (d/db-with db (task/create-tx db [{:seon.task/ns 'demo :seon.task/name "other" :seon.task/plan "x" :seon.task/proofs #{'demo-test/other}
                                               :seon.task/needs #{"demo/workouts"}}]))]
-    (is (= "a1" (task/session-key db "demo/workouts-implement")) "implement continues design's agent")
-    (is (= "a1" (task/session-key db "demo/workouts-merge")) "merge too, through implement")
-    (is (nil? (task/session-key db "demo/other")) "a task on another branch is not the session of a task it needs")
-    (let [db (d/db-with db (task/start-tx db "demo/workouts-implement" "boot-2" (keyword (task/session-key db "demo/workouts-implement")) {:branch (task/default-branch "demo/workouts") :model nil :max-turns 4} 2))]
+    (is (= "a1" (task/agent-key db "demo/workouts-implement")) "implement continues design's agent")
+    (is (= "a1" (task/agent-key db "demo/workouts-merge")) "merge too, through implement")
+    (is (nil? (task/agent-key db "demo/other")) "a task on another branch is not the session of a task it needs")
+    (let [db (d/db-with db (task/start-tx db "demo/workouts-implement" "boot-2" (keyword (task/agent-key db "demo/workouts-implement")) {:branch (task/default-branch "demo/workouts") :model nil :max-turns 4} 2))]
       (is (= "a1" (:seon.agent/key (:seon.task/agent (d/entity db [:seon.task/id "demo/workouts-implement"]))))
           "a process of a later boot, on the session's agent"))))
 
