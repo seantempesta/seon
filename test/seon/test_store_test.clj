@@ -145,13 +145,13 @@
     (is (= (digest base) (digest (conj base (decl :app.task/zzz)))) "any other namespace too")
     (is (not= (digest base) (digest (conj base (decl :form/zzz)))) "a form's attribute: a new store")
     (is (not= (digest base) (digest (conj base (decl :var/zzz)))) "a var's too")
-    (is (= ts/kept-program-digest (ts/program-store-key (digest base) (jolt.host/runtime-fingerprint) (#'ts/codec-pins (seon.config/checkout))))
+    (is (= @ts/kept-program-digest (ts/program-store-key (digest base) (jolt.host/runtime-fingerprint) (#'ts/codec-pins (seon.config/checkout))))
         "this process's: its schema's, its runtime's and its checkout's codec pins")
     (is (not= (ts/program-store-key (digest base) "runtime-a" {}) (ts/program-store-key (digest base) "runtime-b" {}))
         "another runtime: another store, never an old encoding read by a new pin")
     (is (not= (ts/program-store-key (digest base) "r" {"reference-code/konserve" "a"}) (ts/program-store-key (digest base) "r" {"reference-code/konserve" "b"}))
         "another codec pin: another store")
-    (is (re-matches #"[0-9a-f]{8}" ts/kept-program-digest))))
+    (is (re-matches #"[0-9a-f]{8}" @ts/kept-program-digest))))
 
 (deftest an-ask-is-one-line-each-way-on-a-socket-of-its-own
   ;; docs/testing.md#a-root-costs-what-it-boots: ask opens its socket in-process (bin/ask was a perl process a

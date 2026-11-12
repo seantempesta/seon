@@ -525,7 +525,7 @@
     (do (println (str "TEST FAILED: " bad)) 1)
   (let [t0 (profile/now-ns)
         ;; the selection's time is the plan's: program db, reach graph, digests and the results read
-        plan (plan-of (source-tree) what all? names (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
+        plan (plan-of (source-tree) what all? names (seon.db/kept-store! (config/value :seon.config.proofs/program-store) @ts/kept-program-digest))]
   (if-let [u (:unread plan)]
     ;; a read that failed is not zero greens: nothing runs, and the run says why
     (do (println (str "TEST FAILED: " (:seon.error/message u)))
@@ -773,7 +773,7 @@
         tree (let [r (lib/sh (str (config/checkout) "/bin/tree") root base)]
                (if (zero? (:exit r)) (str/trim (:out r)) (throw (ex-info (str "bin/tree " root " " base ": " (:err r)) {}))))
         b (keyword (str (prefix-of #(fx/tree-file root base %)) tree))
-        path (str stem "-" ts/kept-program-digest)
+        path (str stem "-" @ts/kept-program-digest)
         ;; the base's own runner names its store by its own key (seon.test-store/program-store-key: its runtime and pins may be
         ;; another's), so its branch is read from whichever store of the stem holds it, never only this code's
         stems (fn [] (let [d (.getParentFile (io/file stem)) n (.getName (io/file stem))]
@@ -800,7 +800,7 @@
         base (fx/base-commit root)]
     (if-not base
       (do (println (str "HEALTH FAILED: no base: " root " has no commit before this one on " (config/value :seon.config.source/main))) 1)
-      (let [store (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest)
+      (let [store (seon.db/kept-store! (config/value :seon.config.proofs/program-store) @ts/kept-program-digest)
             head (with-wiki (program-db root store) root)
             ;; the base's tasks and wiki, as git holds them, in a directory of this run's own, removed once read; and where the base's
             ;; checkout is made when its program must be (base-program), removed once its runner ran
