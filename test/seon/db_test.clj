@@ -1591,7 +1591,7 @@
         (is (thrown? clojure.lang.ExceptionInfo (pdb/with @conn [{:seon.agent/key "half" :seon.agent/boot "b"}]))))
       (testing "it refuses only what the write broke"
         (let [db (:db-after (d/with @conn [{:seon.agent/key "half" :seon.agent/boot "b"}]))]
-          (is (nil? (pdb/invalid-entity (d/with db [{:seon.agent/key "whole" :seon.agent/agents [:seon.agent/key "half"]}])))
+          (is (nil? (pdb/invalid-entity (d/with db [{:seon.agent/key "whole" :seon.agent/parent [:seon.agent/key "half"]}])))
               "a ref to an incomplete entity is a datom of the referrer only")
           (is (nil? (pdb/invalid-entity (d/with db [{:seon.agent/key "half" :seon.agent/status :idle}])))
               "an entity incomplete before is not refused for a write that broke nothing")

@@ -1638,7 +1638,7 @@
   the whole entry one link to its page by its stable address, lit while it works, what it works on (what a person asked, its first
   line, else its task's name in words) and how it stands (`standing`), what its agent last told whoever started it (the task's reason,
   as root's message to them carries it: the owner's ruling on home tiles, docs/decisions.md), and under it, by this same
-  render, the agents it started (its :seon.agent/agents); at the depth its parent's pull stopped (members held as ids alone), how many
+  render, the agents it started (its :seon.agent/_parent); at the depth its parent's pull stopped (members held as ids alone), how many
   there are below, never a silent cut. Its group (`where-stands`) orders it, those that need the person first (CSS order). Drawn from the
   view alone: the joining pattern pulls what it reads (:seon.agent/entry's pattern). For the page alone (:wire/for \"page\"). See
   docs/users.md#whats-on-screen."
@@ -1653,7 +1653,7 @@
         {:keys [asked reply]} (if db (last-exchange db (:db/id (ratom/untracked c)) t) {:reply (:seon.task/reason t)})
         reply (or reply (when-not asked (:reason stands)))
         ;; the agents it started, as its parent's pull holds them: entries where they were pulled, ids alone where the pull stopped
-        as (get c :seon.agent/agents)
+        as (get c :seon.agent/_parent)
         ;; who it started, read tracked (the join's key set): one added or gone draws the entry again
         _ (when (map? (ratom/untracked as)) (doall (keys as)))
         kids (members as)
@@ -1730,7 +1730,7 @@
          [:span {:class "shrink-0 text-2xs muted"} "the person Seon works for"]]]
        ;; the agents it started, each by its own entry (root's session is the page itself, not listed)
        ;; who it started, read tracked by the join's key set: one added draws the entry again (read untracked, a live root's page never placed it)
-       (let [as (get c :seon.agent/agents)]
+       (let [as (get c :seon.agent/_parent)]
          (when (map? (ratom/untracked as)) (doall (keys as)))
          (when-let [kids (seq (started-agents as))] (into [:div {:class "started"}] kids)))]
       (agent-entry (:seon.db/db opts) c))
@@ -1827,7 +1827,7 @@
         {:keys [exchanges waiting]} (if k (stage-exchanges db ix c k turn) {:exchanges [] :waiting []})
         now (peek exchanges)
         ;; the sessions the person's tree holds (root's session pulls who started it, the user, and what they started), itself aside
-        held (count (for [u (members (get c :seon.agent/_agents)) a (started-agents (get u :seon.agent/agents))] a))]
+        held (count (for [u (members (get c :seon.agent/parent)) a (started-agents (get u :seon.agent/_parent))] a))]
     [:section (stage-now waiting now working? (if now (stage-values db ix c k now) []) held) (stage-folds exchanges (boolean (seq waiting)))]))
 
 (defn stage-list
@@ -2339,7 +2339,7 @@
   {:seon.render/style "#c-side > section { padding: 0.125rem 0.25rem; } #c-side .said { display: none; } #c-side .started { margin-left: 0.75rem; padding-left: 0.5rem; border-left: 1px solid var(--color-base-800); }"
    :seon.render/list "c-side" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map]]]] :any]}
   [{c :seon.ctx/ctx}]
-  (let [as (get c :seon.agent/agents)]
+  (let [as (get c :seon.agent/_parent)]
     ;; who is in it, read tracked (its key set): a member added or gone draws the list again; each entry is its own component
     (doall (keys as))
     [:ol {:id "c-side"} [#'root-side {}] (seq (started-agents as))]))
