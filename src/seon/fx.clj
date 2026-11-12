@@ -838,20 +838,24 @@
     (when (.isFile f) (parse-long (str/trim (slurp f))))))
 
 (defn- verdict-listing
-  "Every verdict file under dir as [file bytes mtime-ms]: the one count of the cache, by metadata
-  alone (a staged file or the .size ledger is not a verdict)."
+  "Every cached file under dir as [file bytes mtime-ms]: the one count of the cache, by metadata alone: a test's green or
+  red (<ns>/<name>/<digest>.pass.edn or .red.edn) and a green's recorded reads (reads.edn), evicted like a verdict (a missing
+  one only makes its test run); nothing else is (a staged file, the .size ledger, the last full run's record full-run.edn)."
   {:malli/schema [:=> [:cat :string] [:vector :any]]}
   [dir]
-  (vec (for [^java.io.File f (files-under dir) :when (str/ends-with? (.getName f) ".edn")]
+  (vec (for [^java.io.File f (files-under dir)
+             :let [n (.getName f)]
+             :when (or (str/ends-with? n ".red.edn") (str/ends-with? n ".pass.edn") (= n "reads.edn"))]
          [f (.length f) (.lastModified f)])))
 
 (defn- evict!
   "Keep the cache at dir within max-bytes after a write of added bytes (the files at kept, never
   removed). The size is kept in the cache's .size ledger, so a write that leaves the cache under the
   bound reads and rewrites one small file and counts nothing; past it (or with no ledger) the
-  verdict files are counted once, and the least recently used (the oldest mtime: seon.fx/stored-results
-  touches a verdict it reads) go first, greens and reds alike, until the cache is :seon.config.proofs/results-evict-percent
-  under the bound, so the writes after it count nothing, and the ledger is set to the true size. Other writers' additions and removals make the ledger a lower or
+  verdict files are counted once, and the least recently used (the oldest mtime: seon.fx/stored-results touches a verdict
+  it reads) go first, greens and reds alike (an LRU cache: the owner, 2026-11-12), until the cache is
+  :seon.config.proofs/results-evict-percent under the bound, so the writes after it count nothing, and the ledger is set to
+  the true size. A file that is no verdict (full-run.edn) is never counted or deleted. Other writers' additions and removals make the ledger a lower or
   higher guess, corrected by the next count. A file that would not delete stays (a cache a little
   over, never an error). Answers nil."
   {:malli/schema [:=> [:cat :string :int [:set :string] :int] :nil]}
