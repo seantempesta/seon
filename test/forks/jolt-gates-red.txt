@@ -1,5 +1,4 @@
 # Jolt's gates that are red on our line, one a line: GATE, then why. bin/jolt-gates is green when exactly
 # these are not PASS. Each was red on the pin before ours too; reading them as a set is task
 # jolt.host/jolt-is-at-upstreams-head. A gate that turns green leaves this file in the tip that fixed it.
-buildsmoke REAL: a built binary cannot write an image holding a closure over a local the release build folded into the code ('cannot write #<procedure> ... captured local n was optimized into the compiled code'; closure-scan 0 1 built, 0 0 under jolt run)
-largebytesgc 1 of 18, REAL and ours: (byte-array <a byte[]>) copies through na-from-seq's na-backing-copy, a plain bytevector-copy, not na-bytes-copy's immobile allocation, so a coerced large byte array is mobile and moves in a full collection (read from natives-array.ss; not yet run to confirm)
+buildsmoke REAL: a built binary cannot write an image holding a closure over a local the release build folded into the code ('cannot write #<procedure> ... captured local n was optimized into the compiled code'; closure-scan 0 1 built, 0 0 under jolt run): our release strip drops a closure's free-variable names, task jolt.backend/build-smoke-is-green-on-the-pin
