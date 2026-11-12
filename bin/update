@@ -84,6 +84,9 @@ if bin/system status >/dev/null 2>&1; then
 fi
 nice -n 15 bin/build > target/update-build.log 2>&1 || { tail -5 target/update-build.log >&2; fail "build (target/update-build.log)" }
 print "built $(ls -l target/seon | awk '{print $6, $7, $8}')"
+# a later landing moved main while this built (its update runs beside this one): the binary in place is not this tree's, and the
+# later update restarts the system on main's head; this one stops here, so two updates converge on main with no lock between them
+if [[ $(bin/tree "$MAIN") != $(<target/seon.tree) ]]; then print "UPDATE SUPERSEDED: main moved while this built; the update of main's head restarts the system"; exit 0; fi
 # the stop and the start are one act in a session of its own (setsid, as bin/held --detach): this process can end
 # between them (its caller's session gone, which ends its process group), and a stop with no start leaves the
 # system down. It runs to its end whoever waits on it; its output is a file, which survives this process too
