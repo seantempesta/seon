@@ -219,14 +219,17 @@
     (is (= [] (vec (for [[nsn src] forms op (quoted-operations nsn (read-in nsn src))] [nsn op])))
         "no src error names its operation as a quoted symbol")))
 
-(deftest git-is-read-through-fx
+;; its work: one substring search over every src form's text (~70M: the text is most of it), then reading the few that hold "git"
+(deftest ^{:seon.test/estimate {:ticks 80000000}} git-is-read-through-fx
   ;; task seon.fx/git-is-read-through-fx: git runs in one place, seon.fx/git-run (read two ways, git!:
   ;; a failure throws its words, and git-try: git's no is nil), and a checkout is told by its .git
   ;; through checked-out?; no other src form names the git command or a repository's own files (".git").
   ;; src's forms read as data from the compiler's facts
   (let [db (runner/program)
-        forms (d/q '[:find ?nsn ?src :where [?f :form/src ?src] [?f :form/ns ?ns] [?ns :ns/name ?nsn] [?ns :ns/file ?file]
-                     [(clojure.string/starts-with? ?file "src/")]] db)
+        ;; only forms whose text holds "git" can name it (each way names-git? matches needs that text), so only those are read
+        ;; as data: reading every src form was ~260M ticks of the test's own
+        forms (d/q '[:find ?nsn ?src :where [?ns :ns/file ?file] [(clojure.string/starts-with? ?file "src/")] [?ns :ns/name ?nsn]
+                     [?f :form/ns ?ns] [?f :form/src ?src] [(clojure.string/includes? ?src "git")]] db)
         read-in (fn [nsn src] (require nsn)
                   (binding [*read-eval* false *ns* (the-ns nsn)] (read-string {:read-cond :allow :features #{:clj}} src)))
         ;; a form names git when it holds the literal "git" or ".git", or is a call naming a shell
