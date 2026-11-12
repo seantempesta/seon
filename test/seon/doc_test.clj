@@ -537,6 +537,31 @@
     (is (= ["docs/gr.md#gr" "docs/gr.md#where-the-needle-is"] (map :at (doc/outline db "docs/gr.md"))) "outline: the page's sections in order")
     (is (nil? (doc/outline db "docs/none.md")) "a page db holds none of is nil")))
 
+;; docs/vector.md#search: a form that defines no var (a defmethod, an extend) is a hit too, named by its namespace at its
+;; file's line, as (lines 'the.ns) numbers it; grep answered nothing for (defmethod place :ns ...) and an agent spent ten
+;; turns finding it (seon.ctx/a-require-at-the-repl-says-the-form-that-records-it, 2026-11-12)
+(deftest grep-finds-a-method-at-its-namespaces-line
+  (let [src "(ns app.gm)\n(defmulti place (fn [k] k))\n(defmethod place :ns\n  [k] :needle-ns)\n(defn other [] 1)"
+        db (mt/with (mt/world) (mt/code 'app.gm src))
+        rows (doc/grep db "needle-ns" #{:var :test} "app.gm")]
+    (is (= [{:at "app.gm:4" :kind :var :text "[k] :needle-ns)"}] rows) (pr-str rows))
+    (is (= "  [k] :needle-ns)" (nth (clojure.string/split-lines (seon.source/file-text db 'app.gm)) 3)) "the line (lines 'app.gm) reads there")
+    (is (= ["app.gm:3"] (map :at (doc/grep db "defmethod place :ns" #{:var} nil))) "its first line too")))
+
+;; docs/vector.md#search: a regex has no trigram to ask the index for, so grep reads every text of the kinds asked, once, off
+;; the attribute's own datoms. Estimate (2026-11-12, main: 8191 texts, 7.7 M chars): the :aevt scan 1.4 M ticks and 7 MB,
+;; the regex 16 M ticks, so about 2 k ticks and 1 KB a text; budget 4 k and 4 KB. Measured before: 82 KB a text (a seek
+;; of :eavt for each text the scan already held, 120 KB each)
+(deftest a-regex-grep-costs-the-texts-it-reads
+  (let [db (mt/with (mt/world) (mt/code 'app.rg (apply str "(ns app.rg)\n" (for [i (range 200)] (str "(defn f" i "\n  \"Adds " i ".\"\n  [x] (+ x " i "))\n")))))
+        kinds #{:var :test :section :task :schema}
+        n (count (for [a [:schema/form :seon.task/plan :seon.doc/text :form/src] dt (d/datoms db :aevt a)] dt))
+        {:keys [ticks bytes value]} (mt/cost #(doc/grep db #"defn f1[0-9]\b" kinds nil))]
+    (is (< 100 n) "the world holds texts to read")
+    (is (seq value) "and the regex finds some")
+    (is (< bytes (* 4096 n)) (str bytes " bytes for " n " texts"))
+    (is (< ticks (* 4000 n)) (str ticks " ticks for " n " texts"))))
+
 ;; docs/vector.md#search: two readers of the text index on two db values (an agent's and main's) each get their answer.
 ;; text-index keeps one index; a reader on another db value builds its own and retires the other's, and with-index retried
 ;; while its index was retired under it: two readers could retire each other's for good (Deep fixes' reading of the 03:04

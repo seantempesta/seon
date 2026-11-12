@@ -588,9 +588,15 @@
         db0 (reduce d/db-with (ts/test-db) [[{:seon.system/id :root :seon.system/boot "b1"}] (seon.task/agent-tx :a1 {:status :busy :branch :task-x})])
         db (reduce d/db-with db0
                    [(seon.doc/load-tx db0 "docs" {seon.doc/system-page "# You are a Seon agent\n\nThe help page."})
-                    (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])
-                    (into [] (mapcat #(session-eval (str "e" %) (inc %))) (range n))
-                    [{:seon.agent/key k :seon.agent/turn n}]])
+                    (seon.task/create-tx db0 [{:seon.task/ns 't :seon.task/name "x" :seon.task/plan "Make x." :seon.task/proofs #{'t-test/x-test}}])])
+        ;; each turn its own transaction, its call holding its basis as seon.turn writes it: the point its request was made at, before
+        ;; its eval (a call with no basis made every request a first page at the db's own point)
+        db (reduce (fn [db i] (d/db-with db (conj (session-eval (str "e" i) (inc i))
+                                                  {:seon.model-call/id (:seon.model-call/id (seon.task/call-ref k (inc i)))
+                                                   :seon.model-call/basis {:commit (d/commit-id db) :t (:max-tx db) :task "t/x" :turn (inc i)
+                                                                           :max-turns 40 :origin :model}})))
+                   db (range n))
+        db (d/db-with db [{:seon.agent/key k :seon.agent/turn n}])
         ix (seon.program/index-of-db db)
         a (:db/id (d/entity db [:seon.agent/key k]))]
     [db ix a (fn [db] (let [t (seon.ctx/agent-ctx ix db a)]
@@ -627,8 +633,13 @@
                ;; measured 2026-11-12 on jolt/web by the test runner at 10 / 20 / 40: 2,768 / 3,828 / 6,068 calls, 3.10 / 3.92 / 5.63 MB,
                ;; 783k / 976k / 1.38M ticks (the request drawn cold, seon.ctx.wire/render, 2.4M at 40). The first estimate came from root's
                ;; REPL, whose binary counts no private helper's contracted calls; the test runner counts each
-               :per-n {:calls 110 :bytes 85000}
-               :fixed {:calls 1700 :bytes 2300000}
+               ;; restated 2026-11-12 (context, with web) once the input's calls held their basis as seon.turn writes it: each turn now
+               ;; lists its page message component too (+~55 calls, +25 KB a turn), and the first page is drawn once, at turn 1's basis,
+               ;; not at the db's own point at every request (fixed -800 calls, -450 KB). Measured on jolt/context: 2,539 / 4,179 / 7,552 calls,
+               ;; 2.93 / 4.21 / 6.47 MB at 10 / 20 / 40. The old figures measured an input whose calls had no basis, read at the store's parent commit,
+               ;; where the agent was not yet (seon.ctx.wire/db-at): its pages were empty
+               :per-n {:calls 170 :bytes 115000}
+               :fixed {:calls 850 :bytes 1850000}
                :sizes [10 20 40]})
   (cost/proof {:of 'seon.render/walk :input 'seon.render-cost-test/walk-same-of
                :n "turns of the agent, an eval each"

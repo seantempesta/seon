@@ -267,7 +267,7 @@
       :else
       {:kind :scalar :node {:seon.print/face :seon.print/object
                             ;; a TaggedLiteral's class is opaque on Jolt
-                            :seon.print/class (if (tagged-literal? x) "clojure.lang.TaggedLiteral" (clojure.lang.Compiler/demunge (.getName c)))
+                            :seon.print/class-name (if (tagged-literal? x) "clojure.lang.TaggedLiteral" (clojure.lang.Compiler/demunge (.getName c)))
                             :seon.print/rep (str "0x" (Integer/toHexString (System/identityHashCode x)))}})))
 
 (defn- leaf-width
@@ -278,7 +278,7 @@
   (case (:seon.print/face node)
     :seon.print/var (+ 2 (count (:seon.print/name node)))
     :seon.print/class (count (:seon.print/name node))
-    (+ 9 (count (:seon.print/class node)) (if-some [rep (:seon.print/rep node)] (inc (count rep)) 0))))
+    (+ 9 (count (:seon.print/class-name node)) (if-some [rep (:seon.print/rep node)] (inc (count rep)) 0))))
 
 (defn- node-continuation
   "The form a cut of `node` prints to read its rest; the whole collection for a map or set shown
@@ -404,11 +404,11 @@
    :seon.error/operation (symbol #'seon.print.select/insufficient-budget)
    :seon.error/message (str "The value printer's budget of " (:budget context) " characters cannot show this value's "
                             "first part, which needs " needed ".")
-   :seon.error/member :seon.render.profile/token-budget
+   :seon.error/member :seon.config.render.agent/token-budget
    :seon.error/expected "a budget covering the root and its first member"
    :seon.error/offending (:budget context)
    :seon.error/data {:seon.render.data/path []}
-   :seon.error/fix "Raise :seon.render.profile/token-budget, or read a deeper path."
+   :seon.error/fix "Raise :seon.config.render.agent/token-budget (a reply's budget) or :seon.config.render/part-budget (a part's), or read a deeper path."
    :seon.render.value/budget (:budget context)
    :seon.render.value/needed needed})
 

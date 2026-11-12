@@ -1199,8 +1199,8 @@
                                         (str "(seon.repl/edit! '" ns ".ed/f \"1\" \"2\")")
                                         (str "(seon.repl/edit! '" ns ".ed/f \"(+ 1\" \"(+ 1\")")
                                         (str "(seon.repl/edit! '" ns ".ed/f \"(+ 1 1 1)\" \"(+ 1 1 2)\")")]))]
-    (is (= :seon.repl/edit-refused (:seon.error/type (:value many))) (str "three places: refused, saying so: " (pr-str many)))
-    (is (str/includes? (:seon.error/message (:value many)) "occurs 3 times"))
+    (is (= :seon.repl/edit-refused (:seon.error/type (:ex many))) (str "three places: refused, saying so: " (pr-str many)))
+    (is (str/includes? (:seon.error/message (:ex many)) "occurs 3 times"))
     (is (contains? (:value same) :unchanged) (pr-str same))
     (is (not (contains? (:value same) :edited)) "nothing changed is not an edit")
     (is (:edited (:value fine)) (pr-str fine))))

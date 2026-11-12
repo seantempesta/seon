@@ -106,11 +106,19 @@
   the error that ended it and the turns' waste, as data: session D2), and the branch committed
   (a turn's end commits the agent's run-ahead writes)."
   {:malli/schema [:=> [:cat :map :seon.agent/outcome [:maybe :string] [:maybe :map]] :seon.turn/end]}
-  [{:keys [turn t0 log]} outcome reason error]
+  [{:keys [turn t0]} outcome reason error]
   (stage/stage!)
-  (let [{:keys [tokens model-calls]} (agent-usage (agent/db) (:key @agent/state))]
+  (let [db (agent/db) k (:key @agent/state)
+        {:keys [tokens model-calls]} (agent-usage db k)
+        ;; the run as its branch recorded it, whole across a restart (seon.learn/turns-of), and what its context showed: its task's
+        ;; cites and proofs
+        tid (some-> (d/entity db [:seon.agent/key k]) :seon.agent/task :seon.task/id)
+        shown (if tid {'seon.render.ui/cite (set (keep task/cited-name (task/task-cites db tid)))
+                       'seon.ctx.status/status (set (:seon.task/proofs (task/task db tid)))}
+                  {})
+        turns (learn/turns-of db k shown)]
   (agent/write-end! {:outcome outcome :reason reason :error error
-                     :waste (learn/summary (learn/waste (or log []) (learn/final-symbols (or log []))))})
+                     :waste (learn/summary (learn/waste turns (learn/final-symbols turns)))})
   ;; what was not measured is absent, never 0: an outside agent counts no model calls and no loop time
   (cond-> {:outcome outcome :results {} :uncontracted #{}}
     turn (assoc :turns turn :model-calls model-calls)
@@ -317,12 +325,7 @@
         ;; its evals' counts, and the time with them
         (agent/transact! [{:seon.model-call/id id :seon.model-call/forms (count calls)
                            :seon.model-call/ms (+ model-ms eval-ms)}])
-        (cond-> (-> (assoc st :turn (inc turn))
-                    ;; what this turn's parts showed, by producer, and what it evaluated (waste)
-                    (update :log (fnil conj []) {:n turn
-                                                 :shown {'seon.render.ui/cite (set (keep task/cited-name (task/task-cites db (:seon.task/id t))))
-                                                         'seon.ctx.status/status (set (map :test (:proofs s)))}
-                                                 :items (mapv (fn [{:keys [code response]}] {:form code :error (:ex response)}) calls)}))
+        (cond-> (assoc st :turn (inc turn))
           ;; a merge turn: each turn of a merge step (seon.task/merge-step?, read from its needs and branch, since a merge
           ;; step's every turn is merge work); a task that merges its own work does that work first, so only a turn with what
           ;; both sides changed still to resolve
