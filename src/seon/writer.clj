@@ -78,9 +78,7 @@
     nil))
 
 (defn- branch-merge
-  "seon.merge/three-way of branch b against main, from their merge base over Datahike's
-  commit graph (the branch point, or the main the branch last merged), the branch read
-  from the store (its agent commits it)."
+  "seon.merge/delta-three-way of branch b against main, from their merge base, as [head result base]. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.db/branch] [:tuple :seon.host/db :seon.merge/result :seon.host/db]]}
   [{:keys [conn]} b]
   (let [head (pdb/head conn b) base (pdb/branch-base conn (pdb/conn-main conn) b)]
@@ -109,12 +107,7 @@
        (catch Throwable e (refused (str "the merged tree doesn't analyze: " (ex-message e)) {}))))
 
 (defn- merge-refused
-  "Why branch head (its three-way r against main) cannot merge into main now (session M1), or
-  nil: main's program (and declared data) changed since the branch's merge base
-  (:seon.merge/behind: a merge task merges main first); its program calls intern, alter-var-root, eval or load-string,
-  or defines inside a function body (:seon.merge/mutation, seon.merge/mutations); it
-  carries an uncontracted function (:seon.merge/uncontracted: contracts decide what is
-  admitted). A changed doc merges as code does: its page is written back with the merge (seon.doc/files)."
+  "Why branch head cannot merge into main now by its program (behind, a mutation, an uncontracted function), or nil. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/result] [:maybe :map]]}
   [main head r]
   (let [uncontracted (pm/uncontracted (:ours r))]
@@ -151,11 +144,7 @@
         (contract/error :seon.merge/dangling #'seon.writer/dangling-refused said {:tx (:max-tx main) :dangling (vec ds)})))))
 
 (defn- member-applied!
-  "Branch head (from base) merged onto db, main with what is pending on main's connection, as the merge writes it: its plan
-  (seon.merge/plan base db head) refused (seon.merge/refusal), or applied after what is pending (seon.merge/apply-groups!) and
-  refused when the write check refuses one of its transactions or the result leaves a name unbound (dangling-refused; behind? when an earlier
-  member was taken). The one definition of what a merge writes: the octopus merge and the merge gate's candidate both
-  apply it. Answers {:db :reps} or {:refused why :reps}, :reps what of it is pending (abandoning them is the caller's)."
+  "Branch head merged onto db as the merge writes it, pending on main's connection: {:db :reps} or {:refused :reps}. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :seon.host/db :seon.host/db :seon.host/db :boolean] [:map [:reps [:vector :map]]]]}
   [conn main db base head behind?]
   (let [p (pm/plan base db head)]
@@ -167,12 +156,7 @@
           (if-let [why (dangling-refused main (:db a) behind?)] (assoc a :refused why) a))))))
 
 (defn- judged-members
-  "Each of branches judged as a member of an octopus merge into main, in order, against what it merges into (main with the earlier
-  members taken): refused when it cannot merge now (merge-refused), behind when its program changes meet an earlier member's
-  (it merges main first), else merged onto main with the earlier members as the merge writes it (member-applied!), pending on
-  main's connection, so the next is judged against it. One refused after transactions of its own were applied abandons every
-  pending one (datahike.writer/abandon-pending!) and is the answer {:retry b :refused why}: the merge is judged again without
-  it. Else answers {:members [{:branch :r :head :base :reps :refused}]}."
+  "Each of branches judged and applied in order as a member of an octopus merge, or {:retry b :refused why}. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.writer/state [:vector :seon.db/branch]] [:or [:map [:members [:vector :map]]] [:map [:retry :seon.db/branch] [:refused :map]]]]}
   [st branches]
   (let [conn (:conn st)
@@ -195,12 +179,7 @@
             {:taken #{} :db main :members []} branches)))
 
 (defn- committed!
-  "The octopus merge's members, applied and pending on main's connection (judged-members), committed: one transaction of
-  main's own a member, in member order (main's :seon.tx/branch, so main never ends on a member's: seon.ctx reads a db's
-  branch from its last transaction), each :seon.tx/merged its member's branch (cardinality one: one a member), the last also
-  holding main's content mark (docs/storage.md#mains-content-mark) and every member's head as its merge parents
-  ({:op 'merge!}); then one commit (datahike.writer/commit-pending!), its notices (stored!, main-commit) and each member's answer. Answers [st {:tx :datoms :results}]. See docs/decisions.md, 'A
-  merge replays the source's transactions on the branch that receives it'."
+  "The applied members committed with one transaction of main's own a member, the last holding the mark and the parents. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile :seon.host/db [:sequential :map] [:vector :map]] [:tuple :seon.writer/state :map]]}
   [st o main ok members]
   ;; git: each member's head becomes a parent, so its merge base moves to it; each member's parent is the commit its
@@ -223,10 +202,7 @@
       :results (mapv #(or (:refused %) (merge {:merged? true :tx t :keys (count (:ours (:r %)))} (written db (:ours (:r %))))) members)}]))
 
 (defn- pending-refused
-  "The refusal of op (:octopus-merge, :merge-candidate), which applies on main's connection's run-ahead and abandons what it
-  applied, when transactions are pending on that connection already, or nil. Nothing is pending when an op runs (writer-one
-  commits the batch first), so this is that invariant broken: the op writes nothing and abandons nothing, and the pending
-  transactions are left as they were for whoever applied them. See docs/storage.md#durability-is-continuous-group-commit."
+  "The refusal of a merge op that finds transactions pending on main's connection, or nil. See docs/storage.md#durability-is-continuous-group-commit."
   {:malli/schema [:=> [:cat :seon.host/conn :keyword] [:maybe :seon.writer/pending]]}
   [conn op]
   (when (dw/pending? conn)
@@ -235,12 +211,7 @@
                     {:op op})))
 
 (defn- octopus-merge
-  "Merge branches into main in ONE commit (an octopus merge, as git's, every member a parent): each member not refused
-  (judged-members) writes its plan (member-applied!), then main's own transactions (committed!), all in one commit or none;
-  one refused after its transactions were applied is answered so, and the others merge without it. Nothing is pending on
-  main's connection when it starts (writer-one commits the batch before any op but :tx; checked by pending-refused), and what
-  it leaves pending, by any exit, is abandoned. Answers [st {:results [answer per branch, in order]}]. See docs/decisions.md,
-  'A merge replays the source's transactions on the branch that receives it'."
+  "Merge branches into main in one commit, every member a parent. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.writer/state :seon.host/volatile [:vector :seon.db/branch]] [:tuple :seon.writer/state :map]]}
   [st o branches]
   (let [conn (:conn st)

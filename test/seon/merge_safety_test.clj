@@ -108,3 +108,10 @@
 ;; datahike.datom/value=: the same bytes written on both sides are no conflict
 (deftest byte-values-compare-by-content
   (is (= [] (pm/conflicts {:keys {[1 :seon.vector/f16] (byte-array [1 2])}} {:keys {[1 :seon.vector/f16] (byte-array [1 2])}}))))
+
+;; an entity the branch made and a ref to it, in one transaction: replayed whole, main holds what the ref names
+(deftest a-carried-ref-names-an-entity-main-holds
+  (world (fn [conn bc br ts _]
+           (d/transact bc [{:db/id (ts 0) :task/refs [{:var/name 'gen.only/v}]}])
+           (is (nil? (:refused (replay-up! conn br))))
+           (is (seq (d/datoms @conn :eavt (pdb/eid @conn :var/name 'gen.only/v)))))))

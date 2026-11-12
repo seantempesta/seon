@@ -13,14 +13,7 @@
   (-> (with-meta r nil) (assoc :applied (count (:applied r)))))
 
 (defn merge-main!
-  "git merge main: stage this runtime onto the branch, then merge main's changes since the merge base, as the one merge
-  does (seon.agent/merge-main!): main's transactions replayed onto the branch and loaded here. A conflict (an entity's
-  attribute this branch and main each changed to their own value since the base, :seon.merge/data-conflict) writes nothing:
-  the answer is the refusal naming them (:seon.merge/conflicts). Merge again with resolutions, {key value}, key [entity
-  attribute] (its :seon.merge/resolve shows it), value the one the branch keeps (:seon.merge/gone retracts it). Answers
-  {:ok :applied}, printed by
-  `merged-summary`: the whole value stays under the eval's handle. See docs/decisions.md, 'A merge replays the source's
-  transactions on the branch that receives it'."
+  "Merge main into this branch, settling conflicts by resolutions {[entity attribute] value}. See docs/agent.md#merging."
   {:malli/schema [:function [:=> [:cat] [:map [:ok :boolean]]] [:=> [:cat :map] [:map [:ok :boolean]]]]}
   ([] (merge-main! {}))
   ([resolutions]
@@ -28,8 +21,7 @@
    (with-meta (agent/merge-main! resolutions) {:seon.render/schema :seon.branch/merged})))
 
 (defn unmerged
-  "This branch's conflicts with main now, as a merge of main would answer them (seon.agent/main-conflicts), each a
-  :seon.merge/data-conflict whose :seon.merge/resolve is the merge-main! form that settles it. See docs/agent.md#merging."
+  "This branch's conflicts with main now, each with the form that settles it. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat] [:vector :seon.merge/data-conflict]]}
   []
   (agent/main-conflicts (:base @agent/state) (agent/db) (agent/heard-main)))

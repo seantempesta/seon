@@ -81,8 +81,7 @@
     (when (or (nil? needs) (contains? c needs)) c)))
 
 (defn program
-  "The program of db as {key content}: its live forms, the definitions pointing to them and
-  the stated entities. Cost: the program's forms and definitions, read once."
+  "The program of db as {key content}: its live forms, the definitions pointing to them and the stated entities. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/db] :seon.merge/program]}
   [db]
   (let [forms (program/live-forms db)
@@ -140,9 +139,7 @@
 ;; ---- the program where it changed: cost follows the change, not the program ------------
 
 (defn- entity-keys
-  "The program keys entity e bears on db: a form's own and those of the definitions it
-  makes (their content holds its text), a definition's own and that of the form it points
-  to (whose liveness it decides), and a stated entity's (a schema entry's)."
+  "The program keys entity e bears on db. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/db [:set :keyword] :int] [:set :seon.merge/program-key]]}
   [db many e]
   ;; one seek reads the entity's datoms; an entity that bears no key (a turn's facts, a
@@ -162,9 +159,7 @@
                   (for [[kind {:keys [id] :as row}] stated-keys :let [v (get x id)] :when (and (some? v) (bears? kind row v))] [kind v])))))
 
 (defn- key-content
-  "Key k's content on db, as `program` holds it, or nil when db's program lacks k. A form's
-  content is its row less where it was read (:source: one form id can be imported on one
-  branch and recorded at a REPL on another, the same text)."
+  "Key k's content on db, as `program` holds it, or nil. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/db :seon.merge/program-key] :any]}
   [db [kind a :as k]]
   (if-let [stated (stated-keys kind)]
@@ -179,23 +174,17 @@
             (when (and (program/live? db f) (contains? (:defines row) k)) (def-content db k e row))))))))
 
 (defn program-of
-  "The part of db's program at keys ks: `program` restricted to them, read key by key."
+  "db's program at keys ks. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.merge/program-key]] :seon.merge/program]}
   [db ks]
   (into {} (for [k ks :let [c (key-content db k)] :when (some? c)] [k c])))
 
 (def ^:private content-attr?
-  "Is a an attribute a key's content reads: the program's (program/attr-namespaces) or a stated one, never :db/txInstant,
-  which every transaction asserts and no key's content reads (a transaction's entity bears no key: reading it cost a descent
-  and two seeks a transaction, 87 of them for a branch of 18 evals). A predicate asked of each attribute (1,771 of them when main
-  only embedded), so no contracted call of its own (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program)."
+  "Is a an attribute a key's content reads (a plain predicate, asked of every attribute). See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   (fn [a] (boolean (and (keyword? a) (not= :db/txInstant a) (or (program/attr-namespaces (namespace a)) (stated-attr? a))))))
 
 (defn touched-by
-  "The program keys whose content may differ between base and db, given moved, the datoms that differ
-  between them (what datahike.api/datoms-diff answers, joined; a caller that holds them reads
-  nothing again): the keys borne, on base or on db, by each entity of a moved datom whose attribute is one a
-  key's content reads (content-attr?), never a platform record such as an embedding."
+  "The program keys whose content may differ between base and db, given moved, the datoms that differ. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db :seon.merge/moved] [:set :seon.merge/program-key]]}
   [base db moved]
   (into #{} (for [e (into #{} (comp (filter (comp content-attr? :a)) (map :e)) moved)
@@ -204,12 +193,7 @@
               k)))
 
 (defn content-datoms
-  "The datoms that differ between base and db in the attributes a key's content reads (content-attr?), what `touched-by` takes
-  as moved: one datahike.api/datoms-diff :aevt range per such attribute, so the platform's records are never walked (a whole
-  :eavt diff read every datom that differs, the 22,000 embedding datoms of a main that embedded after an agent forked: 313M
-  ticks and 640 MB for no key). Given diff, the datoms that differ that a caller read already, none is read: the content ones
-  among them, one filter. Read once, a vector, so every reader it is passed to reads the same datoms
-  (docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program, docs/cost.md#a-diff-per-attribute-costs-a-descent-each)."
+  "The datoms that differ between base and db in the attributes a key's content reads, or, given diff, those among it. See docs/cost.md#a-diff-per-attribute-costs-a-descent-each."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] [:vector :seon.host/datom]]
                   [:=> [:cat :seon.host/db :seon.host/db [:sequential :seon.host/datom]] [:vector :seon.host/datom]]]}
   ([base db]
@@ -218,9 +202,7 @@
   ([base db diff] (into [] (filter (comp content-attr? :a)) diff)))
 
 (defn moves-content?
-  "Whether a commit's resolved ops move main's content: a datom of an attribute a program key's content reads with no
-  (`content-attr?`), or of task content a branch carries (carried-platform-attrs). What the writer marks
-  main's commits by (docs/storage.md#mains-content-mark). Cost: the ops, one predicate each."
+  "Whether a commit's resolved ops move main's content. See docs/storage.md#mains-content-mark."
   {:malli/schema [:=> [:cat :seon.db/resolved-tx] :boolean]}
   [ops]
   (boolean (some (fn [[_ _ a]] (or (content-attr? a) (contains? carried-platform-attrs a))) ops)))
@@ -245,17 +227,13 @@
   (d/commit-id (if (and held (or (same-content? held main) (empty? (content-datoms held main)))) held main)))
 
 (defn touched-keys
-  "Every program key whose content may differ between base and any of dbs (`touched-by`, over
-  the datoms that differ in the attributes a key's content reads: `content-datoms`). Cost: those
-  datoms and one descent per such attribute, not the program and not what else main wrote."
+  "Every program key whose content may differ between base and any of dbs. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/db [:sequential :seon.host/db]] [:set :seon.merge/program-key]]}
   [base dbs]
   (into #{} (mapcat (fn [db] (touched-by base db (content-datoms base db)))) dbs))
 
 (defn delta-three-way
-  "`three-way` of base, ours and theirs read only where they differ (touched-keys): the
-  same answer, at the cost of what changed on each side since base, not of the program. With ours-moved, the datoms that differ
-  between base and ours (`content-datoms`, which a caller already read), ours is not diffed again."
+  "`three-way` of base, ours and theirs read only where they differ. See docs/storage.md#merges-read-what-changed."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :seon.merge/result]
                   [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/moved] :seon.merge/result]]}
   ([base ours theirs] (delta-three-way base ours theirs (content-datoms base ours)))
@@ -264,11 +242,7 @@
      (three-way (program-of base ks) (program-of ours ks) (program-of theirs ks)))))
 
 (defn readiness
-  "Whether branch db ours can merge into main theirs now, as a merge of main would find it, read
-  only: what main changed since base, their merge base (:main-moved, its program keys), and which
-  of those the branch changed too (:conflicts, the keys a merge of main would leave unmerged).
-  The three-way a merge runs (delta-three-way), so it costs what changed on each side since base.
-  With ours-moved, the datoms that differ between base and ours (`content-datoms`), ours is not diffed again."
+  "Whether branch ours can merge into main theirs now: what main moved since base and which of those the branch changed too. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :seon.merge/readiness]
                   [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :seon.merge/moved] :seon.merge/readiness]]}
   ([base ours theirs] (readiness base ours theirs (content-datoms base ours)))
@@ -277,8 +251,7 @@
      {:main-moved (vec (sort-by str (keys (:theirs r)))) :conflicts (vec (sort-by str (map :key (:conflicts r))))})))
 
 (defn delta-changes
-  "`changes` from db from to db to, read only where they differ (touched-keys); with moved, the datoms that
-  differ (which a caller already read), nothing is diffed again."
+  "`changes` from db from to db to, read only where they differ. See docs/storage.md#merges-read-what-changed."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db] :seon.merge/changes]
                   [:=> [:cat :seon.host/db :seon.host/db :seon.merge/moved] :seon.merge/changes]]}
   ([from to] (delta-changes from to (content-datoms from to)))
@@ -340,11 +313,7 @@
 ;; transactions on the branch that receives it') ----
 
 (defn net-change
-  "What db holds that base does not, and what base held that db does not, by entity id: {:keys {key now} :base {key base's
-  value}}. A key is [e a] for an attribute of cardinality one, its now db's value or ::gone, and [e a v] for one of
-  cardinality many, its now true or ::gone; :base holds the value base held at a key of cardinality one db retracted. A
-  transaction's own facts are no change, and neither is a fact both hold under two transactions (a merge's copy). See
-  docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  "What db changed since base by entity id, {:keys {[e a] or [e a v] now} :base {key base's value}}. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db] [:map [:keys :map] [:base :map]]]}
   [base db]
   (let [many? (fn [a] (= :db.cardinality/many (get-in (:schema db) [a :db/cardinality])))
@@ -361,16 +330,13 @@
     (reduce (step ::now) (reduce (step ::gone) {:keys {} :base {}} gone) added)))
 
 (defn conflict-key
-  "Conflict c's key, as net-change keys and a resolution names it: [entity attribute], or [entity attribute value] for an
-  attribute of cardinality many. See docs/agent.md#merging."
+  "Conflict c's key, [entity attribute] or [entity attribute value]. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat :seon.merge/data-conflict] [:vector :any]]}
   [{:seon.merge/keys [entity attribute] :as c}]
   (if (contains? c :seon.merge/value) [entity attribute (:seon.merge/value c)] [entity attribute]))
 
 (defn conflicts
-  "The conflicts of two sides' net changes since their base (net-change of each, ours the receiving branch's): every key
-  both changed to different ends (compared by content, datahike.datom/value=), each a :seon.merge/data-conflict with base's value
-  when it held one. [] when the two merge. Computed, never stored. See docs/agent.md#merging."
+  "Every key both sides' changes reach with different ends, as :seon.merge/data-conflict. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat :map :map] [:vector :seon.merge/data-conflict]]}
   [ours theirs]
   (vec (for [[k o] (:keys ours) :let [t (get (:keys theirs) k ::same)] :when (and (not= ::same t) (not (dd/value= o t)))]
@@ -379,12 +345,7 @@
            (contains? (:base ours) k) (assoc :seon.merge/base (get (:base ours) k))))))
 
 (defn replay
-  "The source's transactions since base as the transactions a merge writes on the branch that receives it, each whole, in
-  the source's order: {:tx the source transaction :meta its own facts (who wrote it, which eval; never its time) :ops
-  [[:db/retract e a v] ... [:db/add e a v] ...]}, so each state the receiving branch passes through is one the source held.
-  One the branch skip wrote itself (its :seon.tx/branch, come back through the other side) is left out. No reader the system
-  makes stands between two replayed transactions (a reference to a branch is a commit, and the merge commits once at its
-  end). See docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  "The source's transactions since base, each whole as a group, those the branch skip wrote left out. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/db :seon.host/db [:maybe :keyword]] [:vector [:map [:tx :int] [:meta :map] [:ops [:vector :any]]]]]}
   [base src skip]
   (let [wrote (second (d/datoms-diff (d/history base) (d/history src) :eavt []))
@@ -396,8 +357,7 @@
            {:tx t :meta m :ops (vec (sort-by #(if (= :db/retract (first %)) 0 1) ops))}))))
 
 (defn- written
-  "Every key the replayed groups write, with src's end at it (net-change's keys and ends): what the merge would set onto, a key the
-  source wrote and wrote back included. See docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  "Every key the groups write, with src's end at it. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/db [:vector :map]] :map]}
   [src groups]
   (let [many? (fn [a] (= :db.cardinality/many (get-in (:schema src) [a :db/cardinality])))]
@@ -405,11 +365,7 @@
                (if (many? a) [[e a v] (if (seq (d/datoms src :eavt e a v)) true ::gone)] [[e a] (or (:v (first (d/datoms src :eavt e a))) ::gone)])))))
 
 (defn plan
-  "What merging src into onto does, decided before anything is written, from the three values alone: their base, the branch
-  that receives (onto) and the branch merged in (src). {:conflicts [...]} when a key onto changed since base (net-change) is one
-  src's replayed transactions write (written) to another end, unless resolutions ({key value}, an agent's on a merge down) settle
-  it; else {:groups [...]}, src's transactions since base as onto will write them (replay). See docs/decisions.md, 'A merge
-  replays the source's transactions on the branch that receives it'."
+  "What merging src into onto does, decided before anything is written: {:conflicts} or {:groups}. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.host/db :seon.host/db] :map] [:=> [:cat :seon.host/db :seon.host/db :seon.host/db :map] :map]]}
   ([base onto src] (plan base onto src {}))
   ([base onto src resolutions]
@@ -418,10 +374,7 @@
      (if (seq cs) {:conflicts cs} {:groups groups}))))
 
 (defn refusal
-  "A merge refused, as data, one shape for the writer's merge up and an agent's merge down: its plan's conflicts
-  (:seon.merge/conflict-refused, nil when the plan has none), or, given a source transaction and what the receiving branch's
-  write check threw at it, :seon.merge/replay-refused (it moved since the base: merge the other way, and again). See
-  docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it'."
+  "A merge's refusal as a typed error: its plan's conflicts, or a replayed transaction the write check refused. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:function [:=> [:cat :map] [:maybe :seon.merge/conflict-refused]] [:=> [:cat :int :any] :seon.merge/replay-refused]]}
   ([p]
    (when (seq (:conflicts p))
@@ -438,12 +391,7 @@
                      {:seon.merge/refused (assoc err :db/id source-tx)}))))
 
 (defn apply-groups!
-  "Groups (plan's) applied on conn after what is pending, each its own transaction through the connection's checked 'transact!
-  (datahike.writer/apply!), not committed: its tx-meta meta0 with the source transaction's own :seon.tx/branch, :seon.tx/eval and
-  :seon.tx/merged (who made it; never its runtime or its time). The one write of a merge: the writer's merge up and an agent's
-  merge down both make it. Answers {:db the value after them :reps their reports :applied [source tx]}, with :refused {:tx
-  source-tx :exception e} at the first the write check refuses. See docs/decisions.md, 'A merge replays the source's
-  transactions on the branch that receives it'."
+  "Groups applied on conn, each its own transaction through the checked write, not committed. See docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.host/db :map [:sequential :map]] [:map [:reps [:vector :map]] [:applied [:vector :int]]]]}
   [conn db meta0 groups]
   (reduce (fn [acc g]

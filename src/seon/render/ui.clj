@@ -1160,9 +1160,7 @@
     (if (str/includes? t "\n") [:pre [:code t]] [:code t])))
 
 (defn data-conflict
-  "One merge conflict (the declared html render of :seon.merge/data-conflict) as the agent and a person read it: which attribute of
-  which entity (and member); what the base held (when it held one), your end and main's (a side that removed it says so); and the
-  form that settles it, its value the agent's to write. See docs/agent.md#merging."
+  "One merge conflict as html: the entity, attribute, base, both ends and the form that settles it. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat :seon.render/opts :seon.merge/data-conflict] :any]}
   [_ {:seon.merge/keys [entity attribute ours theirs resolve] :as c}]
   (let [side (fn [x] (if (= :seon.merge/gone x) [:em "removed"] [:pre [:code (as-text x)]]))]

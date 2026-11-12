@@ -130,17 +130,12 @@
                   after))))
 
 (defn resolving-form
-  "The form that settles a conflict at key k ([entity attribute], [entity attribute value]: seon.merge/conflict-key) on a merge
-  of main into this branch: my.branch/merge-main! with the resolution {k value}, value the agent's to write (the branch's end,
-  main's, or :seon.merge/gone). The one place it is built. See docs/agent.md#merging."
+  "The my.branch/merge-main! form that settles the conflict at key k. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat [:vector :any]] :any]}
   [k] (list 'my.branch/merge-main! {k 'value}))
 
 (defn main-conflicts
-  "The conflicts of branch db with main since their merge base base, as a merge of main would answer them (seon.merge/plan's,
-  ours the branch's), each with the form that settles it (:seon.merge/resolve, resolving-form): a judgment run on the db state, never stored. Held keyed by the three points it is a function of, as
-  main-changes is, the newest on the state (:main-conflicts), so a reader that finds them current reads it with no diff; a db
-  with no commit (a run-ahead value) is never held. [] when main is at base. See docs/agent.md#merging."
+  "Branch db's conflicts with main since base, as seon.merge/plan answers them, held by the three commits. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat [:maybe :seon.host/db] :seon.host/db [:maybe :seon.host/db]] [:vector :seon.merge/data-conflict]]}
   [base db main]
   (if (or (nil? base) (nil? main) (= (d/commit-id base) (d/commit-id main)))
@@ -546,9 +541,7 @@
 ;; ---- merging main into this branch (seon.merge; session M1) -------------------------------
 
 (defn- resolution-tx
-  "The branch's own write of resolutions, {key value} of the conflicts a merge of main names (seon.merge/conflict-key): a key
-  [e a] takes value, or is retracted for :seon.merge/gone; a key [e a v] (cardinality many) is asserted for true, retracted
-  for :seon.merge/gone. See docs/agent.md#merging."
+  "The branch's own write of resolutions {key value}. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat :map] [:vector :any]]}
   [resolutions]
   (vec (for [[[e a :as k] v] resolutions]
@@ -557,12 +550,7 @@
                :else [:db/add e a v]))))
 
 (defn merge-main!
-  "git merge main into this agent's branch, in this process (it owns the branch's writes), by the one merge (seon.merge/plan,
-  seon.merge/apply-groups!): main's transactions since the base, then one of the branch's own writing resolutions ({key value},
-  resolution-tx; an entity by its id or a lookup ref), then the merge's own (main's commit its parent, :seon.tx/merged main, the
-  agent's :seon.agent/base-commit), one commit or none; the changed definitions load here. A refusal writes nothing and is the
-  answer with :ok false (seon.merge/refusal, or the write check's own error for the branch's own write). Answers {:ok :applied
-  :resolved :t}. See docs/agent.md#merging."
+  "Merge main into this agent's branch by the one merge, settling conflicts by resolutions. See docs/agent.md#merging."
   {:malli/schema [:=> [:cat :map] [:map [:ok :boolean]]]}
   [resolutions]
   (commit!)
