@@ -49,7 +49,20 @@
                      [:=> [:cat :map] :map]
                      [:=> [:cat :map :seon.step/transition] :map]
                      [:=> [:cat :map :keyword :any] [:tuple :map :seon.step/outputs]]]
- :seon.step/control [:maybe [:enum :pause :resume :ping :stop]]
+ :seon.step/control [:maybe [:enum :pause :resume :ping :stop :interrupt]]
+ ;; the unit's messages (the one-unit spec's ports): each port is named by the key of the message it carries. A request goes up the tree to
+ ;; the proc :seon.step/to names, its answer comes back by its id; each is told apart by a key of its own (to, value, at-ms)
+ :seon.step/request-id [:int {:description "A request's id, from its asker's counter: its answer carries the same."}]
+ :seon.step/to [:keyword {:description "The proc a request is for, by its address in the graph (root's api, an fx owner, a child): each parent forwards up its link what is not its own."}]
+ :seon.step/value [:any {:description "An answer's value: what the request asked, or the typed error that says why not."}]
+ :seon.step/at-ms [:int {:description "When an event was made, wall-clock ms (seon.step/event's stamp)."}]
+ :seon.step/request [:map {:description "A request: its id and the proc it is for, beside what it asks."} [:seon.step/request-id :seon.step/request-id] [:seon.step/to :seon.step/to]]
+ :seon.step/answer [:map {:description "The one answer to a request: the request's id and its value."} [:seon.step/request-id :seon.step/request-id] [:seon.step/value :seon.step/value]]
+ :seon.step/event [:map {:description "A fact or a notice sent up, stamped when it was made."} [:seon.step/at-ms :seon.step/at-ms]]
+ ;; a link's two directions, one union each, so a link needs one in-port and one out-port (deps' fork!)
+ :seon.link/down [:or {:description "Down a link, from a parent to its child: a request (a run, an ask) or a control."} :seon.step/request :seon.step/control]
+ :seon.link/up [:or {:description "Up a link, from a child to its parent: an answer, an event, or a request routed up by its :seon.step/to."} :seon.step/answer :seon.step/event :seon.step/request]
+ :seon.process/end [:map {:description "A child process's end, into its parent's proc: its pid and the OS exit status, which the parent records on the process."} [:seon.process/pid :seon.process/pid] [:seon.process/exit :seon.process/exit]]
  ;; the writer's state and requests (seon.writer)
  :seon.writer/state [:map [:conn :seon.host/conn] [:cfg :seon.db/cfg]]
  :seon.writer/request [:map [:op :keyword]]
