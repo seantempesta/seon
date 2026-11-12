@@ -744,3 +744,18 @@
   (let [sel (fn [items] (#'seon.agent/grant-selection nil items (fn [] {:run [:everything]})))]
     (is (= [] (:run (sel {}))) "empty items: nothing runs")
     (is (= [:everything] (:run (sel nil))) "no items given: the run plans its own")))
+
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-removed-test-that-no-longer-loads-fails-alone-and-only-when-it-runs
+  ;; docs/merging.md#the-test-service. Found 2026-11-12 (tests-bootstrap): a test child defined every test the branch removed, from
+  ;; main's source, before running anything; one naming a var the branch also removed threw, and every child of the branch ended
+  ;; with one report naming no test: a process test granted there ran nothing. Only this run's removed tests load, each failure its own
+  (let [removed {'rm.gone-test/a "(clojure.test/deftest a (clojure.test/is (#'clojure.string/no-such-fn)))"
+                 'rm.gone-test/b "(clojure.test/deftest b (clojure.test/is true))"
+                 'rm.gone-test/c "(clojure.test/deftest c (clojure.test/is (#'clojure.string/no-such-fn-either)))"}]
+    (try
+      (let [unloaded (#'seon.agent/load-removed! removed '[rm.gone-test/a rm.gone-test/b])]
+        (is (= '#{rm.gone-test/a} (set (keys unloaded))) "the one that does not load is named; the other loads")
+        (is (re-find #"does not load on this branch" (get unloaded 'rm.gone-test/a)))
+        (is (some? (resolve 'rm.gone-test/b)) "a removed test this run runs is defined")
+        (is (nil? (resolve 'rm.gone-test/c)) "one this run does not run is not loaded"))
+      (finally (remove-ns 'rm.gone-test)))))

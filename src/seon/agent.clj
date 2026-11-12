@@ -997,14 +997,18 @@
       (finally (when-not @answered (some-> (:test-child @state) (lib/kill! (jolt.host/signal-number "KILL")))))))))
 
 (defn- load-removed!
-  "In a test child, define each of main's tests the branch removed (test-plan's :removed, {test
-  src}) from base's source, in its own namespace (its ns form first when the branch removed
-  that too), so it runs as main holds it. nil."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol :string]] :nil]}
-  [removed]
-  (doseq [[t src] removed]
-    (binding [*ns* (create-ns (symbol (namespace t)))] (load-string src)))
-  nil)
+  "In a test child, define each of main's tests the branch removed that this run runs (test-plan's :removed, {test src}, of
+  tests) from base's source, in its own namespace (its ns form first when the branch removed that too), so it runs as main
+  holds it. Answers {test message} of those whose source no longer loads on the branch (it names what the branch removed too):
+  each is that test's error, never the run's: one removed test naming a removed var ended every child of a branch, before any
+  test ran, 2026-11-12."
+  {:malli/schema [:=> [:cat [:map-of :qualified-symbol :string] [:sequential :qualified-symbol]] [:map-of :qualified-symbol :string]]}
+  [removed tests]
+  (into {} (for [[t src] (select-keys removed tests)
+                 :let [e (try (binding [*ns* (create-ns (symbol (namespace t)))] (load-string src)) nil
+                              (catch Throwable e e))]
+                 :when e]
+             [t (str "main's " t " does not load on this branch, which removed it: " (ex-message e))])))
 
 (defn- run-tests-here
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing
@@ -1261,7 +1265,12 @@
                ;; the test's own working directory: what a test writes relative to it is this run's, removed
                ;; below when the child has ended (docs/failure-points.md, a directory walk)
                (let [run-dir (fx/run-dir (lib/c-getpid))] (.mkdirs (java.io.File. ^String run-dir)) (lib/c-chdir run-dir))
-               (let [[res streamed?] (try [(do (load-removed! (:removed plan)) (run-tests-here w ticks tests)) true]
+               (let [[res streamed?] (try [(let [unloaded (load-removed! (:removed plan) tests)]
+                                                                ;; a removed test that no longer loads ends as its own error, streamed as a test's end
+                                                                (doseq [[t msg] unloaded]
+                                                                  (sock/write-line! w (sedn/encode {:seon.test/ended (str "#'" t)
+                                                                                                    :reports [{:type :error :var (str "#'" t) :message msg}]})))
+                                                                (run-tests-here w ticks (vec (remove unloaded tests)))) true]
                                           (catch Throwable e [{:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]} false]))]
                  ;; a run's reports went as its tests ended: this line is its end and its counts; a run that threw
                  ;; streamed none, so its line keeps the throw's report (scale's agents read :error 2 and nothing else)
