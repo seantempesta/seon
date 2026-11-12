@@ -917,7 +917,8 @@
         static cd
         ;; recorded reads (seon.proofs/read-digests): a test at its newest green's digest while all it read is unchanged; the
         ;; reads index made once a commit of this branch and kept in the agent's state, never per ask
-        held (let [h (fx/held-reads (vec (keys cd)))] (if (contract/error? h) {} h))
+        ;; never a test that reaches a process of its own: what the agent or root it drives ran is not in its record
+        held (let [h (fx/held-reads (proofs/reads-reusable idx))] (if (contract/error? h) {} h))
         cd (if (seq held)
              (let [at (pdb/point db)
                    rd (or (when (= at (first (:reads-index @state))) (second (:reads-index @state)))

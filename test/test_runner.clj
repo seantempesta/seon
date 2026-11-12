@@ -271,8 +271,10 @@
      ;; :reads holds beside the functions it called, so a reuse is sound until those reads are recorded as they happen
      :static-reads (into {} (keep (fn [[t v]] (when (seq (:reads v)) [t (:reads v)]))) idx)
      ;; recorded reads (seon.proofs/read-digests): the tests' newest greens that recorded what they read, and, when any did,
-     ;; the digest of everything a run can read on this tree; an unreadable record only makes its test run
-     :held (let [h (fx/held-reads (vec (keys idx)))] (if (:seon.error/type h) {} h))
+     ;; the digest of everything a run can read on this tree; an unreadable record only makes its test run. Not a test that
+     ;; reaches a process of its own: its run records what its own process called, never what the agent or root it drives
+     ;; ran for it (an eval's code is a string no reach shows), so it is reused at its digest only
+     :held (let [h (fx/held-reads (proofs/reads-reusable idx))] (if (:seon.error/type h) {} h))
      ;; the proofs of this tree that pass by a waiver (an :overrun in the form), counted on the db the plan reads
      :waived (count (problems/waived-proofs db {}))
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
