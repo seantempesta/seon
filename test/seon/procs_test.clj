@@ -232,7 +232,7 @@
 
 (deftest a-reply-the-wire-cannot-encode-answers-its-asker-and-the-end-serves-on
   ;; task jolt.async/a-value-a-remote-end-cannot-encode-answers-its-asker: root's end sent an agent
-  ;; a reply holding a sorted map (no stable encoding), and the writer pump closed the end, which
+  ;; a reply holding a sorted map by a comparator of its own (a function: no stable encoding), and the writer pump closed the end, which
   ;; root read as the agent's death. The reply goes in the end's :encode-error, ap/unencodable: the
   ;; asker's :k gets the typed error, and the next frame follows on the same end.
   (let [[r a'] (sock/socketpair)
@@ -240,7 +240,7 @@
         root-end (remote/open r {:codec codec' :pump :fiber :encode-error (partial ap/unencodable (a/chan 1))})
         agent-end (remote/open a' {:codec codec' :pump :fiber})
         take! #(a/<!! (:in agent-end))]   ; a closed end answers nil, so no wait outlives it
-    (a/>!! (:out root-end) {:op :reply :k 7 :result (sorted-map :a 1)})
+    (a/>!! (:out root-end) {:op :reply :k 7 :result (sorted-map-by compare :a 1)})
     (a/>!! (:out root-end) {:op :reply :k 8 :result {:ok true}})
     (let [x (take!) y (take!)]
       (is (= [:reply 7 :seon.agent/unencodable] [(:op x) (:k x) (get-in x [:result :seon.error/type])]) (pr-str x))
@@ -257,7 +257,7 @@
         end (remote/open r {:codec codec' :pump :fiber :in in :encode-error (partial ap/unencodable in)})
         agent-end (remote/open a' {:codec codec' :pump :fiber})
         st (#'ap/agent-proc {:id :a1 :end end :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
-        [st _] (step #'ap/agent-proc st :in {:op :req :rid 5 :kind :eval :msg {:op :eval :forms "(+ 1 2)" :opts (sorted-map :a 1)}})
+        [st _] (step #'ap/agent-proc st :in {:op :req :rid 5 :kind :eval :msg {:op :eval :forms "(+ 1 2)" :opts (sorted-map-by compare :a 1)}})
         frame (a/<!! in)
         [st' outs] (step #'ap/agent-proc st :from frame)
         answered (first (filter #(= {:rid 5} (:dest %)) (:to-api outs)))]
@@ -298,7 +298,7 @@
 
 (deftest a-value-the-store-cannot-encode-is-refused-to-its-asker
   ;; land6 re-proof (e2e loop): a sorted map on root's source fact reached the store's codec at
-  ;; commit (konserve.jolt.fasl has no encoding for it) and threw out of the writer as a proc
+  ;; commit (konserve.jolt.fasl has none for one by a comparator of its own: a function; one by the default stores) and threw out of the writer as a proc
   ;; defect, unanswered. The commit refusing is the asker's error: the transaction that carried
   ;; it is answered :seon.writer/refused, the others in its batch commit, and the writer goes on.
   ;; A store on disk of this test's own, the last resort: the in-memory test store has no codec
@@ -308,7 +308,7 @@
         st (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer in :events (a/chan 16)})
         source (fn [pins] {:seon.system/id :root :seon.system/source {:root "tree" :files 0 :forms 0 :ms 0.0 :pins pins}})]
     (a/>!! in {:op :tx :branch :db :tx-data [{:note/text "after" :note/agent :t}] :dest {:rid 2}})
-    (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [(source (into (sorted-map) (for [i (range 40)] [(str "reference-code/m" i) (apply str (repeat 40 "a"))])))] :dest {:rid 1}})
+    (let [[st outs] (step #'writer/writer-proc st :in {:op :tx :branch :db :tx-data [(source (into (sorted-map-by compare) (for [i (range 40)] [(str "reference-code/m" i) (apply str (repeat 40 "a"))])))] :dest {:rid 1}})
           answers (into {} (keep (fn [x] (when-let [r (get-in x [:dest :rid])] [r (:r x)]))) (:to-api outs))]
       (is (= :seon.writer/refused (:seon.error/type (answers 1))) (pr-str (answers 1)))
       (is (true? (:ok (answers 2))) "the batch's other transaction commits")
