@@ -1825,3 +1825,13 @@
      :fixed {:ticks 400000 :bytes 1000000}
      :sizes [10 100 1000]}))
 
+(deftest ^{:seon.test/estimate {:ticks 2000000}} equal-schemas-key-the-same-whatever-order-built-them
+  ;; See docs/forks.md#datahike: the schema meta's key is a hash of its bytes, so its maps and sets are put in one order
+  ;; first; a different schema keys differently
+  (let [k datahike.writing/schema-meta-uuid
+        a {:schema (array-map :x/a {:db/valueType :db.type/long} :x/b {:db/valueType :db.type/string}) :rschema {:db/index #{:x/a :x/b}}}
+        b {:schema (array-map :x/b {:db/valueType :db.type/string} :x/a {:db/valueType :db.type/long}) :rschema {:db/index #{:x/b :x/a}}}
+        c (assoc-in a [:schema :x/b :db/valueType] :db.type/long)]
+    (is (= (k a) (k b)) "the same schema in two orders")
+    (is (not= (k a) (k c)) "a different schema")))
+
