@@ -466,3 +466,24 @@
         e (pdb/eid db2 :seon.task/id "demo/t")]
     (is (= 7 (:seon.config.agent/max-turns (task/task db2 "demo/t"))) "task reads it")
     (is (= 7 (:seon.config.agent/max-turns (second (task/entity-value db2 e)))) "and so does the reconciler's index")))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000}} an-unchanged-tasks-cites-follow-the-code-that-reads-them
+  ;; docs/data-modeling.md#derived-data-is-a-cache-never-relied-on (context, 2026-11-12: a task kept the cites of the reader that
+  ;; wrote them): a task's cites are derived from its text by the citation reader, so they are kept by the digest of both, and an
+  ;; entry whose text is unchanged is read again when the reader's code moved, and only then
+  (let [db0 (db-with-program)
+        files {'demo [(decl "It uses `demo/f`.")]}
+        db1 (d/db-with db0 (task/load-tx db0 files))
+        e (fn [db] (pdb/eid db :seon.task/id "demo/t"))
+        cites (fn [db] (set (map task/cited-name (task/cites-of db (e db)))))
+        ;; the cites an older reader left: none
+        stale (d/db-with db1 (for [{c :e} (d/datoms db1 :avet :seon.cite/of (e db1))] [:db/retractEntity c]))
+        ;; the reader's code moves (its form's code, as an import records it)
+        moved (d/db-with stale [{:db/id "tns" :ns/name 'seon.task :ns/file "src/seon/task.clj"}
+                                {:db/id "tf" :form/id "seon.task/new-reader" :form/src "(defn- text-citations [db decl] [])" :form/code "seon.task/new-reader"
+                                 :form/ns "tns" :form/order 0 :form/defines ["tv"]}
+                                {:db/id "tv" :var/name 'seon.task/text-citations :var/ns "tns" :var/form "tf"}])]
+    (is (= #{(quote demo/f)} (cites db1)) "a new entry's cites")
+    (is (= [] (task/load-tx db1 files)) "an unchanged entry under the same reader writes nothing")
+    (is (= [] (task/load-tx stale files)) "its cites are kept by their digest: the same text and reader read nothing again")
+    (is (= #{(quote demo/f)} (cites (d/db-with moved (task/load-tx moved files)))) "the reader's code moved: an unchanged entry's cites follow")))

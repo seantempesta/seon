@@ -136,6 +136,28 @@
                                (str "and the tasks; cites of nothing: "
                                     (pr-str (dead-cites (:db-after (pdb/speculate db tasks-only)) decls)))))))
 
+(defn- completes-of
+  "The task names text's Completes: lines give, by bin/land's one grammar (its `completes`): after Completes:, anywhere in a line, one
+  ns/name or a comma-separated list, a name ending at whitespace or a mark no name ends in. See docs/merging.md#a-merge-says-what-it-completes."
+  [text]
+  (let [nm "[\\w.\\-]+/[\\w.!?*+<>=\\-]*[\\w!?*+<>=\\-]"]
+    (vec (for [m (re-seq (re-pattern (str "Completes:\\s*(" nm "(?:\\s*,\\s*" nm ")*)")) text) k (str/split (second m) #"\s*,\s*")] k))))
+
+(deftest ^{:seon.test/execs ["bin/land"] :seon.test/estimate {:ticks 1000000 :execs 1}} a-completes-line-is-read-one-way
+  ;; docs/merging.md#a-merge-says-what-it-completes: bin/land and this namespace read Completes: lines by one grammar, each case a line
+  ;; a landing wrote (web's b458ac25e0 ended its name with a sentence's period; runtime's 4602c8252c a bulleted list)
+  (let [lines [["Completes: seon.render/roots-debug-page-shows-its-request. What allowed it" ["seon.render/roots-debug-page-shows-its-request"]]
+               ["- Completes: seon.agent/a-test-child-that-dies-says-why, seon.agent/a-held-pipe-names-its-holder-and-is-reported"
+                ["seon.agent/a-test-child-that-dies-says-why" "seon.agent/a-held-pipe-names-its-holder-and-is-reported"]]
+               ["Merge jolt/context: Completes: seon.ctx/the-record-is-one-reference-type" ["seon.ctx/the-record-is-one-reference-type"]]
+               ["Completes: seon.task/a-refine-reads-its-run (what is left of it is another)" ["seon.task/a-refine-reads-its-run"]]
+               ["Completes: a.b/c!, d.e/f?;" ["a.b/c!" "d.e/f?"]]
+               ["It completes nothing: no such line" []]]
+        land (fn [line] (vec (remove str/blank? (str/split-lines (:out (sh/sh "zsh" (str (config/checkout) "/bin/land") "--completes" :in (str line "\n")))))))]
+    (doseq [[line want] lines] (is (= want (completes-of line)) (str "this namespace reads " line)))
+    ;; bin/land run once over every line: what it reads, in the lines' order
+    (is (= (vec (mapcat second lines)) (land (str/join "\n" (map first lines)))) "bin/land reads each the same")))
+
 (deftest no-shipped-task-is-merged-work
   ;; docs/merging.md#a-merge-says-what-it-completes: the merge
   ;; that completes a task's work says so in its message, a `Completes: ns/name` line, and removes its entry in
@@ -143,16 +165,23 @@
   ;; names no entry left in the files. Nothing is guessed from the message's text: a merge that names a task it
   ;; filed, or one it moved without finishing, completes nothing (twice on 2026-10-31 a merge naming a filed task
   ;; read as merged work left behind, and a list of exceptions had grown to thirteen).
-  ;; It reads main as this repository holds it: the next branch's run names an entry a merge left behind
+  ;; It reads main as this repository holds it, each completion at its own merge: an entry filed again after the merge that
+  ;; completed it (seon.render/the-root-tile-counts-the-program-it-loaded, restored by Web's review 2026-11-10) is a task again
   (let [root (config/checkout)
-        bodies (str/split (:out (sh/sh "git" "-C" root "log" "--first-parent" "--merges" "--format=%B%x1e" "main")) #"\x1e")
-        completes (set (for [b bodies m (re-seq #"(?m)^Completes: (\S+)\s*$" b)] (second m)))
-        left (for [[ns-sym ds] (shipped-task-files) :when (vector? ds) d ds
-                   :let [k (str ns-sym "/" (:seon.task/name d))]
-                   :when (completes k)]
-               k)]
+        merges (for [x (str/split (:out (sh/sh "git" "-C" root "log" "--first-parent" "--merges" "--format=%H%x1f%B%x1e" "main")) #"\x1e")
+                     :let [[sha body] (str/split (str/trim x) #"\x1f" 2)] :when body] [sha body])
+        bodies (map second merges)
+        named completes-of
+        ;; the entries a merge's own tree holds, one git grep a merge that completes anything
+        held-at (fn [sha] (set (for [l (str/split-lines (:out (sh/sh "git" "-C" root "grep" "-o" "-E" ":seon.task/name \"[^\"]+\"" sha "--" "resources/seon/tasks")))
+                                     :let [[_ path n] (re-find #"^[^:]+:resources/seon/tasks/(.+)\.edn::seon.task/name \"([^\"]+)\"$" l)] :when n]
+                                 (str path "/" n))))
+        ;; what the files hold today: a name a merge left behind and a later commit removed is history, not a leftover
+        today (set (for [[ns-sym ds] (shipped-task-files) :when (vector? ds) d ds] (str ns-sym "/" (:seon.task/name d))))
+        left (vec (for [[sha body] merges :let [ks (filter today (named body))] :when (seq ks) :let [held (held-at sha)] k ks :when (held k)]
+                    (str k " at " (subs sha 0 10))))]
     (is (seq bodies) "main's merges are read")
-    (is (= [] (vec left)) "each is completed work: remove its entry from resources/seon/tasks/ in the merge that says Completes: it")))
+    (is (= [] left) "each is completed work: remove its entry from resources/seon/tasks/ in the merge that says Completes: it")))
 
 (deftest a-file-task-merges-itself
   ;; a task loaded from a
