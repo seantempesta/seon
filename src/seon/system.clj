@@ -421,7 +421,9 @@
                                 :stderr (some-> (agent/stderr-path (get-in st [:view :store :agents-dir]) agent) (lib/tail-bytes (cfg/value :seon.config.root/death-stderr-bytes)))
                                 :last-op (some-> (:running v) (select-keys [:form :since-ms]) (assoc :kind :eval))}))
         e (or died (ended agent (str "agent " (name agent) " ended")))]
-    (step/out! o :events (step/event {:type (or stop :dead) :agent agent}))
+    ;; a death names itself: its error (exit status when reaped, its stderr's tail, the eval it was in) goes with the event,
+    ;; so whoever waits on it (a test's with-agent before its hello) says why, never {:end :dead}
+    (step/out! o :events (step/event (cond-> {:type (or stop :dead) :agent agent} died (assoc :error died))))
     (let [st (cond
                (nil? died) (reduce (fn [st r] (deliver-rid st o r e)) (answer-spawn st o agent e) inflight)
                ;; the exit status is known (reaped first), or never will be (a clone, an
@@ -635,6 +637,8 @@
               msg (case op
                     :eval (cond-> {:op :eval :forms (:forms m)} (:ticks m) (assoc :ticks (:ticks m)) (:origin m) (assoc :origin (:origin m)))
                     :tests (cond-> {:op :tests} (:ticks m) (assoc :ticks (:ticks m)) (:names m) (assoc :names (:names m)) (:mode m) (assoc :mode (:mode m)) (:plan? m) (assoc :plan? true) (:process? m) (assoc :process? true) (:items m) (assoc :items (:items m))
+                                            ;; a session's or a landing's checkout: its granted items' test children read its files and its process store
+                                            (:checkout m) (assoc :checkout (:checkout m))
                                             (get-in st [:view :agents id :task]) (assoc :task (get-in st [:view :agents id :task])))
                     :judge {:op :judge}
                     :stats {:op :stats}

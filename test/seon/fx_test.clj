@@ -160,6 +160,16 @@
         (is (not (clojure.string/ends-with? a "/nonexistent/git")) (str "a wrong link is replaced: " a))
         (is (= a b) "a right link is left as it is: the same inode, never unlinked under a running spawn")))))
 
+;; docs/source.md#tests-run-by-reach: the kept program store is the repository's, as the verdict cache is: a tree any checkout
+;; analyzed is every checkout's, so health's base after a merge (the landing's tree) is read, not imported again in a new
+;; checkout (~58 s cold, 2026-11-12). bin/env names it in the main tree's target/ from any worktree. Cost: one zsh start, ~0.05 s.
+(deftest ^{:seon.test/estimate {:ticks 1000000} :seon.test/execs ["git" "zsh"]} the-kept-program-store-is-the-main-trees-for-every-checkout
+  (let [env (str (cfg/checkout) "/bin/env")
+        main (clojure.string/trim (:out (clojure.java.shell/sh "git" "-C" (str (cfg/checkout)) "rev-parse" "--path-format=absolute" "--git-common-dir")))
+        main-tree (.getCanonicalPath (.getParentFile (java.io.File. main)))
+        got (clojure.string/trim (:out (clojure.java.shell/sh "env" "-u" "SEON_PROGRAM_STORE" "zsh" "-c" "ROOT=$1 . $2 >/dev/null 2>&1; print -r -- $SEON_PROGRAM_STORE" "x" (str (cfg/checkout)) env)))]
+    (is (= (str main-tree "/target/program-store") got) (str "bin/env names the main tree's store, whatever checkout sources it: " got))))
+
 (deftest a-file-the-program-loads-reads
   ;; docs/source.md#a-program-file: seen 2026-11-07, edamame refused three files Jolt loads (a #() inside a #(), a symbol with two slashes in EDN), so a write-back naming them was refused; the check reads as the loader does
   (is (nil? (fx/unread-text "src/x.clj" "(ns x)\n(def f #(do (g #(h %)) %))\n")) "a fn literal inside one reads, as Jolt's reader loads it")
@@ -350,7 +360,10 @@
 ;; :tests effect reads main's verdict at that digest from the cache (reds-at) and names the reds that are main's (:main-red):
 ;; red at the base digest, or at a digest the change did not move; a red at a base digest main holds green, or a test new on
 ;; the branch (no base digest), is the change's. Its probe verdicts are under a namespace of this run's, removed after
-(deftest a-gate-names-the-reds-that-are-mains
+(deftest ^{:seon.test/estimate {:ticks 3000000} :seon.test/execs ["git"]} a-gate-names-the-reds-that-are-mains
+  ;; T1 (2026-11-12): run-on-checkout (a detached worktree, bin/worktree, the checkout's files) is not this test's subject: it is
+  ;; answered as it answers, gate-answer of the proved tree, so the claim reads run-tests' :main-red alone. Work: one git init and
+  ;; commit (branch-head reads it), two run-tests, three verdict writes, one reds-at read: ~10 git calls, ~1 M ticks
   (let [repo (.getCanonicalPath (doto (java.io.File. (str (seon.config/checkout) "/target/tmp/fx-gate-main-" (random-uuid))) (.mkdirs)))
         git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@localhost" args)] (clojure.string/trim (str (:out r)))))
         pn (str "gate-probe-" (random-uuid))
@@ -367,13 +380,14 @@
     (try
       (git "init" "-q" "-b" "main")
       (spit (str repo "/.gitignore") "/target/\n/runs/\n") (spit (str repo "/f") "1") (git "add" "-A") (git "commit" "-q" "-m" "one")
-      (let [run (fn [base] (fx/run-tests {:req (cond-> {:repo repo :branch "main" :files {"src/a.clj" (str "(ns a) ; " (random-uuid))} :tests [mains own fresh]}
+      (with-redefs [seon.fx/run-on-checkout (fn [prove _sha req] {:value (assoc (fx/gate-answer (prove req) (:tests req)) :ms 0)})]
+       (let [run (fn [base] (fx/run-tests {:req (cond-> {:repo repo :branch "main" :files {"src/a.clj" (str "(ns a) ; " (random-uuid))} :tests [mains own fresh]}
                                                  base (assoc :base base))
                                           :ctx {:prove-tree prove}}))
             r (run {mains (str pn "-b1") own (str pn "-b2") fresh nil})]
         (is (= {mains :fail own :fail fresh :fail} (get-in r [:value :results])) (pr-str r))
         (is (= #{mains} (get-in r [:value :main-red])) "red on main at its base digest: main's; green there, or new on the branch: the change's")
-        (is (nil? (get-in (run nil) [:value :main-red])) "no base, no :main-red: every red the change's"))
+        (is (nil? (get-in (run nil) [:value :main-red])) "no base, no :main-red: every red the change's")))
       (finally (seon.lib/remove-tree! repo) (seon.lib/remove-tree! (str cache "/" pn))))))
 
 (deftest a-gate-runs-on-the-head-a-new-merges-branch-would-start-at
@@ -416,19 +430,19 @@
         mk (fn [rel text] (let [f (java.io.File. d rel)] (.mkdirs (.getParentFile f)) (spit f text)))
         link (fn [rel to] (java.nio.file.Files/createSymbolicLink (.toPath (java.io.File. d rel)) (.toPath (java.io.File. to)) (into-array java.nio.file.attribute.FileAttribute [])))]
     (try
-      (mk "a/one.edn" "1") (mk "b/c/two.edn" "22") (mk "three.txt" "333")
+      (mk "a/one.pass.edn" "1") (mk "b/c/two.red.edn" "22") (mk "three.txt" "333")
       (link "a/loop" d)              ;; a link back to the root
       (link "b/up" (str d "/b"))     ;; a link to its own parent
       (link "b/c/out" "/tmp")        ;; a link out of the tree
       (link "a/file-link.edn" (str d "/three.txt"))
       (let [names (mapv #(.getName ^java.io.File %) (fx/files-under d))]
-        (is (= ["file-link.edn" "one.edn" "three.txt" "two.edn"] (sort names)) "each file once, a link to a file as a file"))
+        (is (= ["file-link.edn" "one.pass.edn" "three.txt" "two.red.edn"] (sort names)) "each file once, a link to a file as a file"))
       (testing "the cache count sees each verdict once"
         (let [r (fx/write-verdicts! d {:id "run" :tree "t"} {'a/t {:test 'a/t :digest "d1" :pass 1 :fail 0 :error 0}} {} 1)]
           (is (= {:recorded 1} r))
-          ;; a bound of 1 byte evicts every verdict not just written: the walk ended and removed the three old .edn files
-          (is (not (.exists (java.io.File. d "a/one.edn"))))
-          (is (not (.exists (java.io.File. d "b/c/two.edn"))))))
+          ;; a bound of 1 byte evicts every verdict not just written (verdict-listing counts .pass.edn and .red.edn): the walk ended and removed the old ones
+          (is (not (.exists (java.io.File. d "a/one.pass.edn"))))
+          (is (not (.exists (java.io.File. d "b/c/two.red.edn"))))))
       (finally (seon.lib/remove-tree! d)))))
 
 ;; docs/merging.md#a-merge-runs-what-the-change-reaches: 17 gates in a row built one candidate to the one refusal, about 40 s each, holding the worker
@@ -676,7 +690,7 @@
 
 ;; docs/source.md#tests-run-by-reach: a green whose run recorded what it read keeps that record beside its verdicts, the
 ;; newest only, and a red keeps none: what a plan's reuse check reads, one small file a test
-(deftest a-green-keeps-what-its-run-read-beside-its-verdicts
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-green-keeps-what-its-run-read-beside-its-verdicts
   (let [dir (str (cfg/checkout) "/target/reads-" (random-uuid)) t 'a.r-test/t]
     (try
       (fx/write-verdicts! dir {:id "r"} {t {:digest "d1" :pass 1 :fail 0 :error 0 :reads {'a/f "f1"}}} {})

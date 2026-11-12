@@ -231,7 +231,16 @@
     (let [lf (program/live-forms db)
           [whole errs] (#'program/required! db lf lf)]
       (is (= [] errs))
-      (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from"))))
+      (is (= #{'seon.required-whole} whole) "loaded whole by require, its file found under the tree main states it was imported from"))
+    ;; a branch that removed a form of it (its def here): the file, main's, still holds that form, so it is no longer the
+    ;; branch's namespace whole; required whole, it brought main's forms back over the branch's (a test child naming a var
+    ;; its branch deleted, 2026-11-12)
+    (let [text (get files path)
+          db2 (d/db-with db (source/refresh-tx db {path (subs text 0 (.indexOf ^String text "(def here"))}))]
+      (remove-ns 'seon.required-whole)
+      (let [lf (program/live-forms db2)
+            [whole _] (#'program/required! db2 lf lf)]
+        (is (not (contains? whole 'seon.required-whole)) "a file holding a form the branch removed is not loaded whole")))))
 
 (deftest a-speculation-of-what-it-reads-reads-what-the-whole-would
   ;; docs/storage.md#the-write-checks-every-entity-it-touches: seon.db/project-tx cuts a transaction to the attributes a speculation reads

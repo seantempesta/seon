@@ -267,9 +267,14 @@
      :no-test (vec (sort-by str (concat (remove (set (map (comp symbol namespace key) all)) nss)
                                         (remove all vars))))
      :digests (update-vals idx :digest)
+     ;; each test's reads besides code (config keys, the tree, a root, the binary: graph-index's :reads), what its recorded
+     ;; :reads holds beside the functions it called, so a reuse is sound until those reads are recorded as they happen
+     :static-reads (into {} (keep (fn [[t v]] (when (seq (:reads v)) [t (:reads v)]))) idx)
      ;; recorded reads (seon.proofs/read-digests): the tests' newest greens that recorded what they read, and, when any did,
-     ;; the digest of everything a run can read on this tree; an unreadable record only makes its test run
-     :held (let [h (fx/held-reads (vec (keys idx)))] (if (:seon.error/type h) {} h))
+     ;; the digest of everything a run can read on this tree; an unreadable record only makes its test run. Not a test that
+     ;; reaches a process of its own: its run records what its own process called, never what the agent or root it drives
+     ;; ran for it (an eval's code is a string no reach shows), so it is reused at its digest only
+     :held (let [h (fx/held-reads (proofs/reads-reusable idx))] (if (:seon.error/type h) {} h))
      ;; the proofs of this tree that pass by a waiver (an :overrun in the form), counted on the db the plan reads
      :waived (count (problems/waived-proofs db {}))
      :process (set (keep (fn [[t v]] (when (:process? v) t)) idx))
@@ -355,6 +360,24 @@
     (write! (str out "/stall-bounds") (apply str (for [[t m] (sort-by key ms)] (str t " " (max floor (* k m)) " " (* e (max floor m)) "\n"))))
     (count dealt)))
 
+(defn- write-reads!
+  "The run's reads, for its shards to key each green by what it read (seon.proofs/reads-key): out/reads-index.fasl, the digest
+  of every read on the planned tree (plan's :rd, seon.program/reads-index, kept per tree in the program store), and
+  out/static-reads.edn, each test's reads besides code (plan's :static-reads). Written only when tests run. See
+  docs/source.md#tests-run-by-reach."
+  [out plan run-tests]
+  (when (seq run-tests)
+    (java.nio.file.Files/write (.toPath (io/file out "reads-index.fasl")) ^bytes (fasl/serialize @(:rd plan)) (make-array java.nio.file.OpenOption 0))
+    (write! (str out "/static-reads.edn") (sedn/encode (select-keys (:static-reads plan) run-tests)))))
+
+(defn- shard-reads
+  "{:rd :static} of the run whose shard file is file (write-reads!: beside it), or nil when the run wrote none."
+  [file]
+  (let [d (.getParentFile (io/file file)) f (io/file d "reads-index.fasl") st (io/file d "static-reads.edn")]
+    (when (.isFile f)
+      {:rd (fasl/deserialize {} (java.nio.file.Files/readAllBytes (.toPath f)))
+       :static (if (.isFile st) (edn/read-string (slurp st)) {})})))
+
 (defn- shard!
   "One shard bin/test runs (out/shard-<i>.edn): its namespaces required, its tests run
   (seon.proofs/run-tests!), each test named as it starts (started) and as it ends (ended), each
@@ -366,6 +389,10 @@
   (seon.fx/forget-greens!) and nothing else is stored, and the run stays as reported. Then SHARD n green m red. Answers the exit status."
   [file]
   (let [{:keys [tests digests tree mg rerun]} (edn/read-string (slurp file))
+        ;; what each green read, keyed by the run's reads index (write-reads!): the functions it called, itself, its static reads
+        {:keys [rd static]} (shard-reads file)
+        with-reads (fn [x] (cond-> x rd (assoc :reads (proofs/reads-key rd {:fns (conj (into #{} (map :var) (:fns x)) (:test x))
+                                                                              :keys (get static (:test x))}))))
         t0 (profile/now-ns)]
     (doseq [n (distinct (map (comp symbol namespace) tests))] (require n))
     ;; armed as root arms them at boot, so a proof counts the same contracted calls here as in an agent's test child (docs/cost.md#counting-calls)
@@ -380,14 +407,9 @@
                                  (fn [x] (cond (:seon.test/started x) (println "started" (:seon.test/started x))
                                                (:seon.test/output x) (print (:seon.test/output x))
                                                (:seon.test/report x) (let [m (:seon.test/report x)]
-                                                                        ;; a failing assertion, as the results keep it (seon.proofs/failures): by the one printer
+                                                                        ;; a failing assertion, as the results keep it (seon.proofs/failures): the agent's one reading of a report
                                                                         (when (#{:fail :error} (:type m))
-                                                                          (vswap! reports conj (cond-> {:type (:type m) :var (str "#'" (:test x))}
-                                                                                                 (:message m) (assoc :message (str (:message m)))
-                                                                                                 (contains? m :expected) (assoc :expected (print/text (:expected m) (:part print/budgets)))
-                                                                                                 (contains? m :actual) (assoc :actual (print/text (:actual m) (:part print/budgets)))
-                                                                                                 ;; a cost proof's verdict, as data, so its reused red reports it (seon.proofs/costs)
-                                                                                                 (and (map? (:actual m)) (:verdict (:actual m))) (assoc :cost (select-keys (:actual m) [:rows :verdict]))))))
+                                                                          (vswap! reports conj (seon.agent/test-report m (str "#'" (:test x))))))
                                                ;; a test's end, so bin/stalls never names one that finished
                                                ;; and its cost, the work it did (a green test's is read nowhere else)
                                                (:reused x) (do (println "reused" (:test x) "(green at its digest since the plan: another run stored it)")
@@ -397,13 +419,12 @@
                                                          (when (proofs/green? x)
                                                            (let [own (filterv #(= (:var %) (str "#'" (:test x))) @reports)
                                                                  c ((proofs/costs {:reports own}) (:test x))]
-                                                             (doseq [u (record-run! run {(:test x) (cond-> x c (assoc :cost c))} {})]
+                                                             (doseq [u (record-run! run {(:test x) (with-reads (cond-> x c (assoc :cost c)))} {})]
                                                                (println "UNRECORDED" (:key u) (:message u)))
                                                              (vswap! written assoc (:test x) (:digest x))))
                                                          (when-not (proofs/green? x) (println "RED" (:test x) (pr-str (select-keys x [:pass :fail :error :message]))))))
                                    (flush))
                                  (config/value :seon.config.agent/test-ticks)
-                                 (fx/test-budgets tests)
                                  ;; a green another run stored since the plan, looked up just before the test would start
                                  ;; (not one the plan says runs whatever the cache holds: a full run's, the reuse audit's)
                                  (fn [t dg] (when-not (contains? rerun t)
@@ -481,7 +502,8 @@
                   (fn [cand]
                     (let [r (read-results cand)]
                       (if (contract/error? r) (do (vreset! unread r) {}) r))))]
-    (cond-> (assoc p :binary-current (:binary-current reach) :waived (:waived reach)) @unread (assoc :unread @unread))))
+    (cond-> (assoc p :binary-current (:binary-current reach) :waived (:waived reach) :static-reads (:static-reads reach) :rd (:rd reach))
+      @unread (assoc :unread @unread))))
 
 (defn build-text
   "out/build's text, what bin/test builds target/seon for: when a selected key reaches the binary (bin-keys) and the binary is
@@ -503,7 +525,7 @@
     (do (println (str "TEST FAILED: " bad)) 1)
   (let [t0 (profile/now-ns)
         ;; the selection's time is the plan's: program db, reach graph, digests and the results read
-        plan (plan-of (source-tree) what all? names (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest))]
+        plan (plan-of (source-tree) what all? names (seon.db/kept-store! (config/value :seon.config.proofs/program-store) @ts/kept-program-digest))]
   (if-let [u (:unread plan)]
     ;; a read that failed is not zero greens: nothing runs, and the run says why
     (do (println (str "TEST FAILED: " (:seon.error/message u)))
@@ -554,6 +576,7 @@
                          ;; run whatever the cache holds: every test of a full run (bin/test --all, which a rerun by name asks
                          ;; for too), and the reuse audit's greens, whose rerun is its point
                          (if (true? all?) run-tests audit))
+        _ (write-reads! out plan (if no-test [] run-tests))
         ;; what runs and reaches the binary (a test that reaches binary-sh, a step that runs a seon.check
         ;; mode): bin/test builds target/seon only when this is not empty, bin/check seeds only for the steps
         step-bin (filterv proofs/step-needs-binary? run-steps)
@@ -602,12 +625,11 @@
     (when checks?
       (write! (str out "/steps") (str (str/join " " run-steps) (when (seq run-steps) "\n")))
       (write! (str out "/steps.edn") (sedn/encode {:tree (:tree inputs) :digests (select-keys steps run-steps)}))
-      ;; each measured step's bound, past which bin/check captures its evidence and ends it red (STEP-OVERRAN): the step-end
-      ;; factor times its median measured run, floored at the stall bound; a step never measured has none (the owner's fourth
-      ;; clock exception, docs/clocks.md#time-decides-the-owners-exceptions)
-      (let [k (config/value :seon.config.check/step-end-factor) floor (config/value :seon.config.agent/stall-ms)]
-        (write! (str out "/step-bounds") (apply str (for [[st m] (sort-by key (measured-ms (remove proofs/mg-key? run-steps)))]
-                                                      (str st " " (max floor (* k m)) "\n")))))
+      ;; every step's bound, past which bin/check captures its evidence and ends it red (STEP-OVERRAN): seon.proofs/step-bounds,
+      ;; the one rule (a step never measured takes the largest measured median; docs/clocks.md#time-decides-the-owners-exceptions)
+      (let [steps (vec (remove proofs/mg-key? run-steps))]
+        (write! (str out "/step-bounds") (apply str (for [[st b] (sort-by key (proofs/step-bounds steps (measured-ms (keys proofs/check-steps))))]
+                                                      (str st " " b "\n")))))
       (when (seq run-steps) (println "prove: check steps to run:" (str/join " " run-steps)
                                      ))
       (when (seq missing)
@@ -751,11 +773,17 @@
         tree (let [r (lib/sh (str (config/checkout) "/bin/tree") root base)]
                (if (zero? (:exit r)) (str/trim (:out r)) (throw (ex-info (str "bin/tree " root " " base ": " (:err r)) {}))))
         b (keyword (str (prefix-of #(fx/tree-file root base %)) tree))
-        path (str stem "-" ts/kept-program-digest)]
+        path (str stem "-" @ts/kept-program-digest)
+        ;; the base's own runner names its store by its own key (seon.test-store/program-store-key: its runtime and pins may be
+        ;; another's), so its branch is read from whichever store of the stem holds it, never only this code's
+        stems (fn [] (let [d (.getParentFile (io/file stem)) n (.getName (io/file stem))]
+                       (for [f (sort (or (.list d) (make-array String 0))) :when (re-matches (re-pattern (str "\\Q" n "\\E-[0-9a-f]{8}")) f)]
+                         (str d "/" f))))
+        any (fn [] (some #(read-branch % b) (stems)))]
     (or (read-branch store (tree-branch tree))
-        (read-branch path b)
+        (any)
         (make-base-tree! root base tree store stem path at)
-        (read-branch path b)
+        (any)
         (contract/error :seon.fx/io-error #'test-runner/base-program
                         (str "the base's program store " path " keeps no branch " b ": the base's program schema or importer is not this code's") {:path path}))))
 
@@ -772,7 +800,7 @@
         base (fx/base-commit root)]
     (if-not base
       (do (println (str "HEALTH FAILED: no base: " root " has no commit before this one on " (config/value :seon.config.source/main))) 1)
-      (let [store (seon.db/kept-store! (config/value :seon.config.proofs/program-store) ts/kept-program-digest)
+      (let [store (seon.db/kept-store! (config/value :seon.config.proofs/program-store) @ts/kept-program-digest)
             head (with-wiki (program-db root store) root)
             ;; the base's tasks and wiki, as git holds them, in a directory of this run's own, removed once read; and where the base's
             ;; checkout is made when its program must be (base-program), removed once its runner ran

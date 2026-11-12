@@ -242,8 +242,8 @@
   binary's by default). A schema is asked of an entity when the transaction added or retracted an attribute it owns; it
   refuses only what this write broke: on an entity that was that thing before (it held a key the schema itself
   requires), a required key it held before and not after; on one the write makes that thing, every one it lacks. An entity
-  incomplete before stays as it was (a whole-store scan's to report), and one left holding none of them has stopped
-  being that thing. Presence is one seek
+  incomplete before stays as it was (a whole-store scan's to report), and one left holding none of the keys the schema
+  itself requires (its parents' are the parent's) has stopped being that thing. Presence is one seek
   per (entity, key), so a write costs its touched entities' required keys, never an entity's size or the store's; values
   are each datom's own check (`invalid-datom`). The first refusal by entity id, then schema, and every entity it broke in
   :entities (each by its identity). See
@@ -264,7 +264,9 @@
                         (let [added? (boolean (some true? (vals did)))
                               req (required-keys k)
                               after (filterv #(or (true? (get did %)) (has? db-after e %)) req)]
-                          (when (or added? (seq after))
+                          ;; still that thing while it holds a key the schema itself requires: a parent's keys
+                          ;; (a test's :var/name) leave it the parent, and a test whose estimate went is a var again
+                          (when (or added? (some (set after) (own-required k)))
                             (when-let [gone (seq (remove (set after) req))]
                               (let [was? (some #(has? db-before e %) (own-required k))
                                     broke (if was? (filter #(has? db-before e %) gone) gone)]
@@ -739,13 +741,18 @@
   to :db (datahike.api/delete-branch!; a branch's connections are released first): what a
   check step or a test made for itself, deleted by the run that made it. Real agent runs are
   never deleted this way (DECISIONS, Runs are kept, history and all). Answers the deleted branches;
-  a main the store lacks deletes nothing."
+  a main the store lacks deletes nothing, and a branch another process deleted between the listing and its delete (two test
+  processes reclaiming one dead process's main at once, seon.test-store/reclaim!) is gone already: not this call's, never its error."
   {:malli/schema [:=> [:cat :seon.host/conn :seon.db/branch] [:vector :seon.db/branch]]}
   [conn main]
   (let [under (mapv #(on-main main %) (of-main main (d/branches conn)))
         bs (cond-> under (branch? conn main) (conj main))]
-    (doseq [b bs] (d/delete-branch! conn b))
-    bs))
+    (into [] (filter (fn [b]
+                       ;; the edge where a branch deleted under this call is answered as gone (docs/failure-points.md)
+                       (try (d/delete-branch! conn b) true
+                            (catch clojure.lang.ExceptionInfo e
+                              (if (= :branch-does-not-exist (:type (ex-data e))) false (throw e))))))
+          bs)))
 
 (defn tree-branch?
   "Whether b names a checkout's proving branch, tree-<its 40-hex tree id> (seon.system/tree-branch): the only branch the system

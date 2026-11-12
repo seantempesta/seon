@@ -37,7 +37,7 @@ Run, then right, then fast. If you can't show it running, it isn't done.
 
 ## 3. How work moves
 
-**Work is tasks** ([tasks](docs/tasks.md)): an entry in `resources/seon/tasks/<owning-ns>.edn` with `:seon.task/plan` (what exists, the cause, what it replaces and deletes), `:seon.task/proofs` (the tests that say it is done) and `:seon.task/needs`. The plan is written before anything is built. Order: delete first, then foundations, then fixes. A problem outside your task is filed as a task, never fixed in passing.
+**Work is tasks** ([tasks](docs/tasks.md)): an entry in `resources/seon/tasks/<owning-ns>.edn` with `:seon.task/plan` (what exists, the cause, what it replaces and deletes), `:seon.task/proofs` (the tests that say it is done) and `:seon.task/needs`. The plan is written before anything is built, and its owner's lead reads it before the build starts (owner, 2026-11-12: "The broken ones mean we don't have clear research or plans in place. Do more forward planning"). A plan names every path that runs the change: `bin/land`, `bin/prove`, the prove service, agents on the standing system, test children, worktree systems, `bin/update`. A change to shared machinery (the `bin/` scripts, the prove service, a pin, the api or fork server, a key, schema or config entry other areas read) is run end to end through each of those paths before anything relies on it. A cause is named only after both ends of its code path are read. Order: delete first, then foundations, then fixes. A problem outside your task is filed as a task, never fixed in passing.
 
 **The method:**
 1. **Learn.** List what exists before designing. Ask what the ordinary Clojure (or library) way is, and why ours is it or is not.
@@ -131,7 +131,7 @@ Name things with Clojure's, its libraries', Jolt's and git's words: entity, attr
 
 ## 8. The machine
 
-- **Seon's target is a 16 GB MacBook M1** (`bin/check scale`). The machine the sessions build on has 18 cores and 128 GB.
+- **Seon's target is a 16 GB MacBook M1** (`bin/check scale-work`). The machine the sessions build on has 18 cores and 128 GB.
 - **Heavy runs** (`bin/build`, `bin/prove`) run under `nice -n 15`; the test system sets its workers from the cores (§3).
 - **Never flood it:** anything that makes threads or processes starts at n ≤ 100; one experiment at a time; never make load to reproduce something, and no test makes load (owner, 2026-11-12: "No tests that simulate load by loading my machine ... test 95% of what you're testing and have it be the most important 95%"): a claim is proved by a fast test of its one path, and a race is fixed by design, never sought by load ([machine](docs/machine.md#processes)).
 - **Kill only verified PIDs:** read the full command and its cwd first; never `pkill`, `killall` or a `pgrep -f` pattern. A system's processes end with it.
