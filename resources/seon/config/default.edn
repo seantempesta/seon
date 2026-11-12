@@ -610,10 +610,12 @@
  ;; Unit: vars. A test's own namespace calling one makes a store of its own instead of the shared world (my.test/world,
  ;; seon.test-store/test-db, test-branch!). At the bound (one called): an :undeclared-test row.
  :seon.config.proofs/own-store-vars #{datahike.api/create-database seon.db/seed!}
- ;; Unit: shards. How many runner processes bin/test starts at once (seon.proofs/shards), and how many steps bin/check
- ;; runs at once: the machine's cores (#seon/cores), so no one passes a count (owner, 2026-11-12: "Remove all restricting").
+ ;; Unit: shards. How many runner processes bin/test starts at once (seon.proofs/shards), and how many steps bin/check runs
+ ;; at once. 4, not the cores: each shard boots a test root of its own (its fork server warms ~1e9 ticks before its first agent),
+ ;; and 18 at once under other proves ran the system tests' roots past their bound (measured 2026-11-12: CPU 0.0 s, waiting on
+ ;; their roots). The service's workers follow the cores (max-workers); this shard path goes with one-root and the service.
  ;; SEON_PROOF_JOBS is bin/test's own hand-off to its child steps. At the bound: a run never has more shards.
- :seon.config.proofs/jobs #long #or [#env SEON_PROOF_JOBS #seon/cores nil]
+ :seon.config.proofs/jobs #long #or [#env SEON_PROOF_JOBS 4]
  ;; The test service's admission (seon.prove/admission, docs/merging.md#the-test-service): three optional bounds, any
  ;; combination (the owner: "a fixed max number and a load max and core max ... any combination has a solution"). An unset
  ;; key binds nothing; with neither count set, the machine's cores (:seon.config.machine/cores) bound the items at once.
