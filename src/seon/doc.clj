@@ -474,10 +474,16 @@
   {:malli/schema [:=> [:cat :seon.host/db :int :qualified-keyword [:set :keyword]] [:vector :map]]}
   [db e a kinds]
   (case a
-    :form/src (vec (for [dv (d/datoms db :eavt e :form/defines)
-                         :let [v (d/entity db (:v dv)) n (:var/name v) kind (if (contains? (set (:var/meta v)) :test) :test :var)]
-                         :when (and n (kinds kind))]
-                     {:kind kind :name n}))
+    :form/src (let [ds (map #(d/entity db (:v %)) (d/datoms db :eavt e :form/defines))]
+                (if-let [vs (seq (filter :var/name ds))]
+                  (vec (for [v vs :let [n (:var/name v) kind (if (contains? (set (:var/meta v)) :test) :test :var)] :when (kinds kind)]
+                         {:kind kind :name n}))
+                  ;; a form that defines no var (a defmethod, an extend: a method or an impl) is its namespace's, at the line
+                  ;; its file holds it on (seon.source/file-text, which (lines 'the.ns) reads), as an ns form's is
+                  (when-let [n (and (seq ds) (some-> (d/entity db e) :form/ns :ns/name))]
+                    (let [kind (if (str/ends-with? (str n) "-test") :test :var)
+                          t (source/file-text db n) i (str/index-of t (:form/src (d/entity db e)))]
+                      (when (and i (kinds kind)) [{:kind kind :name n :line0 (count (filter #{\newline} (subs t 0 i)))}])))))
     :seon.doc/text (when (kinds :section) [{:kind :section :name (:seon.doc/address (d/entity db e))}])
     :seon.task/plan (when (kinds :task) [{:kind :task :name (:seon.task/id (d/entity db e))}])
     :schema/form (when (kinds :schema) [{:kind :schema :name (:schema/key (d/entity db e))}])))
@@ -711,7 +717,7 @@
                ;; text (a section's, a plan's) holds a paragraph on one line: its row is each sentence that
                ;; matches, as grep -o selects the match, so a hit costs its sentence and not its paragraph
                part (if (#{:seon.doc/text :seon.task/plan} a) (filter #(re-find re %) (str/split line #"(?<=[.!?])\s+")) [line])]
-           [(str (:name h)) i {:at (str (:name h) ":" (inc i)) :kind (:kind h) :text (str/trim part)}])
+           [(str (:name h)) (+ (:line0 h 0) i) {:at (str (:name h) ":" (inc (+ (:line0 h 0) i))) :kind (:kind h) :text (str/trim part)}])
          (sort-by (juxt first second))
          (mapv peek))))
 

@@ -537,6 +537,17 @@
     (is (= ["docs/gr.md#gr" "docs/gr.md#where-the-needle-is"] (map :at (doc/outline db "docs/gr.md"))) "outline: the page's sections in order")
     (is (nil? (doc/outline db "docs/none.md")) "a page db holds none of is nil")))
 
+;; docs/vector.md#search: a form that defines no var (a defmethod, an extend) is a hit too, named by its namespace at its
+;; file's line, as (lines 'the.ns) numbers it; grep answered nothing for (defmethod place :ns ...) and an agent spent ten
+;; turns finding it (seon.ctx/a-require-at-the-repl-says-the-form-that-records-it, 2026-11-12)
+(deftest grep-finds-a-method-at-its-namespaces-line
+  (let [src "(ns app.gm)\n(defmulti place (fn [k] k))\n(defmethod place :ns\n  [k] :needle-ns)\n(defn other [] 1)"
+        db (mt/with (mt/world) (mt/code 'app.gm src))
+        rows (doc/grep db "needle-ns" #{:var :test} "app.gm")]
+    (is (= [{:at "app.gm:4" :kind :var :text "[k] :needle-ns)"}] rows) (pr-str rows))
+    (is (= "  [k] :needle-ns)" (nth (clojure.string/split-lines (seon.source/file-text db 'app.gm)) 3)) "the line (lines 'app.gm) reads there")
+    (is (= ["app.gm:3"] (map :at (doc/grep db "defmethod place :ns" #{:var} nil))) "its first line too")))
+
 ;; docs/vector.md#search: two readers of the text index on two db values (an agent's and main's) each get their answer.
 ;; text-index keeps one index; a reader on another db value builds its own and retires the other's, and with-index retried
 ;; while its index was retired under it: two readers could retire each other's for good (Deep fixes' reading of the 03:04

@@ -45,7 +45,7 @@ At the defaults (128 coarse dims, shortlist 400, 768 fine) recall@10 against the
 
 ## Search
 
-**A search answers as grep does.** `my.agent/search` answers its hits as `my.agent/grep`'s rows (```my.agent/hit-rows```): each `{:at "name:n" :kind :text}`, the line of the hit's text that holds a word of the query, with its `:name` and `:relevance`. Agents trust grep because it shows the line.
+**A search answers as grep does.** `my.agent/search` answers its hits as `my.agent/grep`'s rows (```my.agent/hit-rows```): each `{:at "name:n" :kind :text}`, the line of the hit's text that holds a word of the query, with its `:name` and `:relevance`. Agents trust grep because it shows the line. A line of a namespace's ns form, or of a form that defines no var (a `defmethod`, an `extend`), is the namespace's, at the line its file holds it on, which `(lines 'the.ns)` reads (`seon.doc-test/grep-finds-a-method-at-its-namespaces-line`).
 
 The text ranking is SQLite's FTS5 (```seon.doc/tokens```): BM25 over the Porter stems of the query's words (```seon.doc/words```: lower case, split at every character that is no letter or digit, so `datoms-diff` is `datoms` and `diff`), quoted and joined by OR; a text's score is its z above the mean of every text of the kinds asked. A word matches a whole term by its stem: "watching" finds `watch!`, and "it" is no part of "edit". The index's idf is over the whole table; relevance scores its pool apart with ```seon.doc/bm25``` ([relevance](#relevance)).
 
