@@ -372,7 +372,7 @@
   {:malli/schema [:=> [:cat [:maybe :seon.task/id] [:maybe :string] :any :boolean] :nil]}
   [task message evals turn?]
   (let [n (when turn? (begin! task) (inc (agent/turn-now)))
-        ;; as a model's turn does (work!): main moved, its program comes in now, so an outside agent is on main's code too and a conflict is an unmerged entry it sees
+        ;; as a model's turn does (work!): main moved, its program comes in now, so an outside agent is on main's code too and a conflict is one its status names (seon.agent/main-conflicts)
         _ (when (and turn? (agent/main-moved? (:base @agent/state) (agent/heard-main))) (branch/merge-main!))
         [id basis] (when turn? (open-turn! task n 1 false nil))
         _ (when turn? (agent/transact! [{:seon.model-call/id id :seon.model-call/basis basis}]) (agent/commit!))
@@ -425,8 +425,8 @@
   (let [;; read before begin!, which starts the turn state anew when it has none yet
         stop (get-in @agent/state [:turn :stop])
         _ (begin! task)
-        ;; main taken now, as work! takes it at each start, so green work is never judged for being behind; a conflict is an
-        ;; unmerged entry, a reason the status says. Asked of main itself, never of what this process last heard of it (an
+        ;; main taken now, as work! takes it at each start, so green work is never judged for being behind; a conflict writes
+        ;; nothing and is a reason the status says. Asked of main itself, never of what this process last heard of it (an
         ;; outside agent's green task was judged behind 78 with that guard, 2026-11-11); a branch at main's head brings nothing
         _ (branch/merge-main!)
         _ (observe task)
@@ -480,7 +480,7 @@
                    (fn []
                      (try
                        ;; main moved since the last turn: merge it in now, so the agent works on main's program and
-                       ;; wiki as they are and a conflict is an unmerged entry it sees and resolves before it can
+                       ;; wiki as they are and a conflict is one its status names, which it settles before it can
                        ;; merge (the owner, 2026-10-30: "updates as often as we can")
                        (when (agent/main-moved? (:base @agent/state) (agent/heard-main)) (branch/merge-main!))
                        (let [obs (observe task)
@@ -503,7 +503,11 @@
                            ;; (a green run that ended behind main's newer merges was judged behind: swarm's s9)
                            (and (not no-status?) (empty? reasons))
                            (let [m (branch/merge-main!)]
-                             (if (and (empty? (:applied m)) (empty? (:conflicts m))) (ended st :green (unjudged-reason s) nil) [::next st]))
+                             (cond (and (empty? (:applied m)) (empty? (:seon.merge/conflicts m))) (ended st :green (unjudged-reason s) nil)
+                                   ;; main conflicts with the branch: the main it heard is recorded as a turn records it (main-base-tx), so the
+                                   ;; next status reads the conflicts (seon.agent/main-conflicts) and the agent resolves them in a turn
+                                   (seq (:seon.merge/conflicts m)) (do (agent/transact! (main-base-tx)) [::next st])
+                                   :else [::next st]))
                            ;; the agent's own fail! is its verdict, at the cap too; a wait on the last turn is
                            ;; the budget spent, so the run is :cap, never :waiting (its session parks either way)
                            (= :failed (:outcome stop)) (ended st :failed (:reason stop) nil)

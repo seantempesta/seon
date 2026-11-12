@@ -349,7 +349,7 @@
           (is (= [k] (in one "(:config (my.branch/changes))")))
           (is (= :nowhere (in two reads-the-key))))
         (testing "it merges, and writes back byte-preserved"
-          (is (true? (at-root "(-> @(seon.system/call! sys {:op :write :req {:op :octopus-merge :branches [:task-cfgt-one] :data-attrs #{}}}) :results first :merged?)")))
+          (is (true? (at-root "(-> @(seon.system/call! sys {:op :write :req {:op :octopus-merge :branches [:task-cfgt-one]}}) :results first :merged?)")))
           (is (= 7 (at-root reads-the-key)) "root holds main's")
           (is (= 7 (at-root (str "(get-in (datahike.api/pull @(:conn sys) [{:seon.system/config [" k "]}] [:seon.system/id :root]) [:seon.system/config " k "])"))) "and main's config in force, the entity root's :seon.system/config names, says so")
           (is (= (let [end (str/last-index-of held "}")] (str (subs held 0 end) "\n " k " 7" (subs held end)))
@@ -539,8 +539,8 @@
   "main after a branch from it records forms (as the agent's REPL does) and merges."
   [main & forms]
   (let [branch (apply pt/record main forms)
-        r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))]
-    [(d/db-with main (pm/merge-tx main main branch (keys (:ours r)) #{})) (:ours r)]))
+        r (pm/three-way (pm/program main) (pm/program branch) (pm/program main))]
+    [branch (:ours r)]))
 
 (deftest a-change-to-a-namespace-with-no-file-is-named-never-dropped
   ;; changed-files leaves a form out when its namespace has no :ns/file; unfiled-forms names it,
@@ -678,8 +678,8 @@
         _ (is (= [] (source/modes-tx main (:modes r))) "read again, nothing to write")
         edited "#!/bin/sh\n# bin/x says hello\necho 2\n"
         ours (d/db-with main (source/file-tx "bin/x" edited))
-        ch (:ours (seon.merge/delta-three-way main ours main #{}))
-        merged (d/db-with main (seon.merge/merge-tx main main ours (keys ch) #{}))
+        ch (:ours (seon.merge/delta-three-way main ours main))
+        merged ours
         paths (source/changed-files merged ch)
         c (fx/git-commit {:req {:dir tree :branch "jolt/seon-merges" :files (source/files merged paths) :modes (source/modes merged paths) :message "m"}})]
     (is (some? (get-in c [:value :sha])) (pr-str c))
@@ -854,8 +854,8 @@
   [main nsym text & forms]
   (let [branch (apply pt/record main forms)
         _ (hold! nsym text)
-        r (pm/three-way (pm/program main #{}) (pm/program branch #{}) (pm/program main #{}))
-        rep (d/with main (pm/merge-tx main main branch (keys (:ours r)) #{}))]
+        r (pm/three-way (pm/program main) (pm/program branch) (pm/program main))
+        rep (d/with main (let [[gone added] (d/datoms-diff main branch :eavt [])] (into (mapv (fn [x] [:db/retract (:e x) (:a x) (:v x)]) gone) (map (fn [x] [:db/add (:e x) (:a x) (:v x)])) added)))]
     [(:db-after rep) (program/load-changes! (:db-after rep) (pdb/report->tx rep))]))
 
 (deftest a-merge-to-imported-source-loads-in-place

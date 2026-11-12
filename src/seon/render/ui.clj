@@ -1142,6 +1142,18 @@
         t (if (and (seq? form) (= 'do (first form))) (str/join "\n" (map one (rest form))) (one form))]
     (if (str/includes? t "\n") [:pre [:code t]] [:code t])))
 
+(defn data-conflict
+  "One merge conflict as html: the entity, attribute, base, both ends and the form that settles it. See docs/agent.md#merging."
+  {:malli/schema [:=> [:cat :seon.render/opts :seon.merge/data-conflict] :any]}
+  [_ {:seon.merge/keys [entity attribute ours theirs resolve] :as c}]
+  (let [side (fn [x] (if (= :seon.merge/gone x) [:em "removed"] [:pre [:code (as-text x)]]))]
+    [:div {:key (str [entity attribute (:seon.merge/value c)])}
+     [:p [:code (str attribute)] " of entity " [:code (str entity)] (when (contains? c :seon.merge/value) (list ", the value " [:code (as-text (:seon.merge/value c))]))]
+     (into [:dl]
+           (concat (when (contains? c :seon.merge/base) [[:dt "base"] [:dd (side (:seon.merge/base c))]])
+                   [[:dt "yours"] [:dd (side ours)] [:dt "main's"] [:dd (side theirs)]]))
+     (when resolve [:p "Settle it: " [:code (as-text resolve)]])]))
+
 (defn status-hiccup
   "How the work stands (seon.ctx.status/status's data s), written to the agent at the moment it reads it. Each proof answers the
   question its state asks: not written, where it goes and a test to copy; red, what it asserted and what it got; every proof
@@ -1214,10 +1226,9 @@
      ;; merge: nothing until something conflicts; then both sides and the form that settles each
      (when (seq unmerged)
        [:div {:key :unmerged}
-        [:p "Main changed these too, so they are unmerged. Settle each: keep yours, or take main's."]
-        (for [{:keys [key ours theirs]} unmerged]
-          [:div {:key key} [:p [:code (str key)] ". Yours:"] [:pre [:code (as-text ours)]] [:p "Main's:"] [:pre [:code (as-text theirs)]]
-           [:p "Keep yours: " [:code (str "(my.branch/resolve! '" key ")")] ". Take main's: " [:code (str "(my.branch/resolve! '" key " :theirs)")] "."]])])
+        [:p "Main changed these too since your base, so they are unmerged. Settle each by writing its value in the form shown."]
+        ;; each by its schema's render (:seon.merge/data-conflict), the same the person's page draws
+        (for [c unmerged] (data-conflict {} c))])
      (cond
        (and green? (empty? blocks) (empty? unmerged))
        [:p {:key :merging} "Every proof passes and nothing blocks merging."]

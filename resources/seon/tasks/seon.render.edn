@@ -3,7 +3,7 @@
   :seon.task/kind :work
   :seon.task/proofs #{}}
  {:seon.task/name "a-merge-conflict-shows-on-the-page"
-  :seon.task/plan "What exists: the agent's status part (`seon.render.ui/status-hiccup`) draws each unmerged entry with its key, yours and main's text and the forms that settle it; a task's merge conflicts (:seon.task/conflicts: key, kind, base, ours, theirs) are drawn nowhere with their base, and the run entry (`seon.render.ui` line showing N conflicts) and the problems banner show only a count. Correct: a declared html render of :seon.merge/conflict with its three sides, shown from the run entry and the task's page as well as the agent's status."
+  :seon.task/plan "What exists (since the one merge, jolt/mergeop-dfx): a conflict is data, :seon.merge/data-conflict (computed, never stored), with its declared html render seon.render.ui/data-conflict: the value of the entity by its identity, its base, each side's end, and the form that settles it; the agent's status (`seon.render.ui/status-hiccup`, :unmerged) draws each by it. Left: the run entry (a line showing N conflicts) and the problems banner show only a count, and a task's page shows no conflict: each reads the status's :unmerged (no second computation) and draws each conflict by the same render."
   :seon.task/kind :work
   :seon.task/proofs #{seon.render-test/a-merge-conflict-shows-its-three-sides}}
  {:seon.task/name "what-a-branch-will-merge-shows-on-the-page"

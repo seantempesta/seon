@@ -1643,9 +1643,8 @@
             br (pdb/connect (assoc cfg :branch b))
             addrs (fn [db] (let [v (volatile! #{})] (org.replikativ.persistent-sorted-set/walk-addresses (:eavt db) (fn [a] (when a (vswap! v conj a)) true)) @v))
             merge! (fn []
-                     (let [base (d/commit-as-db br (d/merge-base br b :db))
-                           r (seon.merge/delta-three-way base @br @main #{})]
-                       (d/merge-db br #{:db} (vec (seon.merge/merge-tx @br base @main (:apply r) #{})))))
+                     (let [base (d/commit-as-db br (d/merge-base br b :db))]
+                       (d/merge-db br #{:db} (vec (mapcat :ops (:groups (seon.merge/plan base @br @main)))))))
             private (fn [] (let [m (addrs @main) o (addrs @br)] [(count (remove m o)) (count o)]))]
         (try
           ;; main grows by a namespace a round, and the branch takes each by merge; then the branch writes one note
@@ -1657,7 +1656,7 @@
           (let [[own total] (private)]
             (is (:crypto-hash? (:config @br)) "the store's nodes are addressed by their content")
             ;; the branch's own nodes are its one write's path and a few leaves, under a tenth of the tree (Sean, 2026-11-10; measured 9 of
-            ;; 156 on a seed of 2000, 5 of 85 on this one): persistent-sorted-set is a plain B-tree whose leaf cut depends on insertion order, and seon.merge/merge-tx inserts
+            ;; 156 on a seed of 2000, 5 of 85 on this one): persistent-sorted-set is a plain B-tree whose leaf cut depends on insertion order, and a merge inserts
             ;; main's datoms in another order than main did, so a branch can own leaves holding only main's datoms (the literal 8 passed
             ;; by luck). Random addresses kept 76 of 157 (48%) after the same 20 merges, red here; docs/sharing.md#what-a-branchs-nodes-are
             (is (<= own (quot total 10)) (str own " of " total " nodes are the branch's own after 20 merges and one write of its own")))

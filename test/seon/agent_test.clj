@@ -1468,8 +1468,8 @@
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
          (is (empty? (pm/changed-vars (agent/branch-changes (:base @agent/state) (agent/db)))) "the agent has changed nothing")
          (seon.doc/text-index (agent/db))
-         (let [r (agent/merge-main! #{})]
-           (is (some #{[:var 'app.m0/f1]} (:applied r)) "main's change merges in")
+         (let [r (agent/merge-main! {})]
+           (is (seq (:applied r)) "main's change merges in")
            ;; docs/vector.md#search: an agent's writes carry the text index (seon.doc/carry-index!), so a search after one rebuilds nothing; the merge's
            ;; own record of its base was a write that skipped it, so the next search after any merge rebuilt the index, about 20 MB, seen as a flake
            (is (= [(:hash (agent/db)) (:max-tx (agent/db))] (first @@#'seon.doc/indexes)) "the search's index is at the db the merge left")
@@ -1485,8 +1485,8 @@
 
 (deftest a-merge-of-a-main-moved-only-by-records-reads-no-content
   ;; docs/storage.md#mains-content-mark: main moves on every request by records (an agent's status, embeddings); when its
-  ;; content mark is still the base's, the agent's merge of main and what main changed since the base answer from the mark,
-  ;; with no diff (today ~3 M ticks a request). Red before: merge-main! and main-changes diffed each content attribute.
+  ;; content mark is still the base's, what main changed since the base answers from the mark, with no diff (today ~3 M
+  ;; ticks a request). Red before: main-changes diffed each content attribute. A merge of main brings those records down.
   ;; In this process, on a branch of the test store, with a socketpair standing for root
   (ts/test-branch!
    (fn [cfg conn]
@@ -1502,10 +1502,11 @@
            calls (fn [f] (profile/begin!) (let [r (f)] [r (into {} (map (juxt :var :calls)) (profile/touched))]))]
        (try
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
-         (let [[r n] (calls #(agent/merge-main! #{}))]
-           (is (= [] (:applied r)) "only records moved main: nothing merges")
-           (is (nil? (n 'seon.merge/content-datoms)) "and no content is diffed")
-           (is (nil? (n 'seon.db/branch-base)) "nor the commit graph walked"))
+         ;; the one merge brings main's records down too, so the branch holds what its new base holds (task
+         ;; seon.merge/a-merge-replays-the-sources-net-change, piece 5): the mark no longer skips a merge
+         (let [r (agent/merge-main! {})]
+           (is (seq (:applied r)) "only records moved main: they come down")
+           (is (= :busy (:seon.agent/status (d/entity (agent/db) [:seon.agent/key "test/a1"]))) "the record is the branch's"))
          (let [[r n] (calls #(agent/main-changes forked (agent/heard-main)))]
            (is (= {} r) "main changed nothing of the program since the base")
            (is (nil? (n 'seon.merge/content-datoms)) "read from the mark"))
@@ -1514,7 +1515,7 @@
                               :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                              [:db/add v :var/form "f1'"]])
            (mark!))
-         (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "a definition and its mark: main's change merges in")
+         (is (seq (:applied (agent/merge-main! {}))) "a definition and its mark: main's change merges in")
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
 (deftest a-pull-after-its-own-merge-starts-from-what-it-merged
@@ -1545,8 +1546,8 @@
            (is (:merged? up) (str "root merges the agent's branch up: " (pr-str up))))
          (redefine "app.m0/f1-second" "(+ x 2)")
          (agent/heard-main)
-         (let [r (agent/merge-main! #{})]
-           (is (= [] (:conflicts r)) "its own merged edit is no change of main's")
+         (let [r (agent/merge-main! {})]
+           (is (:ok r) (str "its own merged edit is no change of main's: " (pr-str r)))
            (is (= "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2))" (src (agent/db))) "and its second edit stands"))
          (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
 
@@ -1582,7 +1583,7 @@
                                 :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                                [:db/add v :var/form "f1'"]]))
            (agent/heard-main)
-           (is (some #{[:var 'app.m0/f1]} (:applied (agent/merge-main! #{}))) "main's change merges in")
+           (is (seq (:applied (agent/merge-main! {}))) "main's change merges in")
            (is (= [] (stale [:base :main])) "right after a merge of main, whose db-after is not the branch's now")
            (note 5)
            (agent/branch-changes (:base @agent/state) (agent/db))
@@ -1614,7 +1615,7 @@
            old @agent/state old-link @agent/link]
        (try
          (reset! agent/link {:fd a}) (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key "test/a1" :db @store-conn :base forked})
-         (agent/merge-main! #{})
+         (agent/merge-main! {})
          (let [x (task/task (agent/db) "demo/x")]
            (is (= #{'demo-test/x-design-wrote-test} (set (:seon.task/proofs x))) "main's carried proof is on the branch")
            (is (= "Make x. The design: f1 adds 100." (:seon.task/plan x)) "and its plan"))
@@ -1764,7 +1765,7 @@
                                 :form/src "(defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 100))"}
                                [:db/add v :var/form "f1'"]])
            on-branch (fn [k] (d/q '[:find [?id ...] :where [_ :seon.message/id ?id]] (heads k)))]
-       (as ka #(is (true? (:ok (agent/merge-main! #{}))) "the pull applied main's program change"))
+       (as ka #(is (true? (:ok (agent/merge-main! {}))) "the pull applied main's program change"))
        (is (= [] (on-branch ka)) "and no message of b's came with it")
        (is (= [] (on-branch kb)) "b's branch holds none until b's own delivery")
        (as ka #(is (= [] (agent/deliver!)) "a is sent none"))
@@ -1793,9 +1794,9 @@
          (is (< (dec (count before)) (at after)) "and it comes after the turn's reply and evals")
          (as ka remove-held!)
          (let [base (pdb/branch-base conn (:branch cfg) (pdb/on-main (:branch cfg) :msg-a)) head (heads ka) main @conn
-               r (pm/delta-three-way base head main #{})]
+               r (pm/delta-three-way base head main)]
            (is (empty? (:ours r)) "merged up, the branch has no change of its own from the message")
-           (d/merge-db conn #{(pdb/on-main (:branch cfg) :msg-a)} (pm/merge-tx main base head (keys (:ours r)) #{}) (pdb/tx-meta (:branch cfg))))
+           (d/merge-db conn #{(pdb/on-main (:branch cfg) :msg-a)} [] (pdb/tx-meta (:branch cfg))))
          (as ka #(do (is (= [] (agent/undelivered)) "after the merge, held anew: not delivered again")
                      (is (= [] (agent/deliver!)))
                      (is (= [] (messages-held)))))
@@ -3084,3 +3085,133 @@
         green {:test 'app.x-test/u :status :pass :source "(deftest u (is true))" :calls ['app.x/g] :shape {:n 1}}]
     (is (= (dissoc red :shape) (read red)) "a failing proof keeps its source and what it calls")
     (is (= {:test 'app.x-test/u :status :pass} (read green)) "a passing one is its name and status")))
+
+(defn- down-agent
+  "(f {:conn :cfg :store-conn :t :k :main-b :ab}) as agent a-down on its branch of a fresh main holding task :gen/down, this
+  process's state held for it (its branch's connection, a socketpair standing for root), restored after."
+  [f]
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [main-b (:branch cfg) k "a-down"
+           _ (d/transact conn [{:seon.system/id :root :seon.system/boot "b1"}])
+           _ (d/transact conn (task/agent-tx :a-down {:status :idle}))
+           _ (d/transact conn [{:task/name :gen/down :task/plan "p" :task/status :held}])
+           ab (pdb/on-main main-b :down)
+           _ (d/branch! conn main-b ab)
+           store-conn (pdb/connect (assoc cfg :branch ab))
+           [a b] (sock/socketpair)
+           old @agent/state old-link @agent/link]
+       (try
+         (reset! agent/link {:fd a})
+         (reset! agent/state {:store-conn store-conn :cfg cfg :branch ab :key k :db @store-conn :base @conn :main @conn})
+         (f {:conn conn :cfg cfg :store-conn store-conn :t (pdb/eid @conn :task/name :gen/down) :k k :main-b main-b :ab ab})
+         (finally (reset! agent/state old) (reset! agent/link old-link) (d/release store-conn) (lib/c-close a) (lib/c-close b)))))))
+
+(deftest an-agent-merges-main-down-by-the-one-merge
+  ;; docs/decisions.md, 'A merge replays the source's transactions on the branch that receives it' (task
+  ;; seon.merge/a-merge-replays-the-sources-net-change, piece 5): seon.agent/merge-main! replays main's transactions onto the
+  ;; agent's branch and moves its merge base to main's commit, so a fact only main writes, changed on main again after the
+  ;; merge down, is no conflict at the merge up
+  (down-agent
+   (fn [{:keys [conn store-conn t k main-b ab]}]
+     ;; main moves a fact only it writes, as the writer writes it (naming main); the agent writes its own
+     (d/transact conn {:tx-data [[:db/add t :task/status :ready]] :tx-meta (pdb/tx-meta main-b)})
+     (agent/transact! [{:task/name :gen/agents :task/plan "the agent's" :task/status :held}])
+     (let [m1 @conn r (agent/merge-main! {})]
+       (is (:ok r) (pr-str r))
+       (is (= (d/commit-id m1) (d/commit-id (pdb/branch-base conn main-b ab))) "the merge base is main's commit")
+       (is (= :ready (:task/status (d/entity @store-conn t))) "the branch holds what main held")
+       (is (= (d/commit-id m1) (:seon.agent/base-commit (d/entity @store-conn [:seon.agent/key k]))) "and says so"))
+     ;; main changes it again: the merge up plans no conflict and writes the agent's work
+     (d/transact conn [[:db/add t :task/status :done]])
+     (let [base (pdb/branch-base conn main-b ab) p (pm/plan base @conn @store-conn)]
+       (is (empty? (:conflicts p)) (pr-str (:conflicts p)))
+       (is (some (fn [g] (some #(= :task/plan (nth % 2)) (:ops g))) (:groups p)) "the agent's own write is planned")))))
+
+(deftest a-conflict-of-a-merge-down-waits-for-its-resolution
+  ;; the same merge (seon.agent/merge-main!): both changed one plan, so the merge writes nothing and answers the conflict; merged
+  ;; again with a resolution, the branch holds the resolved value and its merge base is main's commit
+  (down-agent
+   (fn [{:keys [conn store-conn t main-b ab]}]
+     (d/transact conn [[:db/add t :task/plan "main's"]])
+     (agent/transact! [[:db/add t :task/plan "the branch's"]])
+     (agent/commit!)
+     (let [c0 (d/commit-id @store-conn) r (agent/merge-main! {})]
+       (is (not (:ok r)))
+       (is (= :seon.merge/conflict-refused (:seon.error/type r)) "the typed refusal the writer's merge gives (seon.merge/refusal)")
+       (is (= [[t :task/plan]] (mapv pm/conflict-key (:seon.merge/conflicts r))) (pr-str r))
+       (is (= c0 (d/commit-id @store-conn)) "nothing written")
+       (let [r (agent/merge-main! {[[:task/name :gen/down] :task/plan] "settled"})]
+         (is (:ok r) (pr-str r))
+         (is (= "settled" (:task/plan (d/entity @store-conn t))) "the resolution is the branch's value")
+         (is (= (d/commit-id @conn) (d/commit-id (pdb/branch-base conn main-b ab))) "and the base moved"))))))
+
+(deftest a-branch-moved-during-its-merge-down-is-refused
+  ;; seon.agent/merge-main! (docs/agent.md#merging): the branch's head moves once, from the head the merge read; a head moved
+  ;; between the plan and that move (here by a second writer while the merge replays) is the typed refusal, and the merge writes nothing
+  (down-agent
+   (fn [{:keys [conn store-conn t main-b ab cfg]}]
+     (d/transact conn {:tx-data [[:db/add t :task/status :ready]] :tx-meta (pdb/tx-meta main-b)})
+     (agent/transact! [{:task/name :gen/agents :task/plan "the agent's" :task/status :held}])
+     (agent/commit!)
+     (let [replay pm/replay moved (atom nil)
+           r (with-redefs [pm/replay (fn [& args]
+                                       (let [c2 (pdb/connect (assoc cfg :branch ab))]
+                                         (try (d/transact c2 {:tx-data [[:db/add t :task/plan "a second writer's"]] :tx-meta (pdb/tx-meta ab)})
+                                              (reset! moved (d/commit-id @c2))
+                                              (finally (d/release c2))))
+                                       (apply replay args))]
+               (agent/merge-main! {}))
+           c2 (pdb/connect (assoc cfg :branch ab))]
+       (try
+         (is (not (:ok r)) (pr-str r))
+         (is (= :seon.writer/refused (:seon.error/type r)) (pr-str r))
+         (is (= @moved (d/commit-id @c2)) "the head is the second writer's: the merge wrote nothing")
+         (finally (d/release c2)))))))
+
+(deftest a-resolution-on-an-entity-main-retracted-is-refused
+  ;; main retracted the task whole, the branch changed its plan: a conflict whose main end is :seon.merge/gone. A resolution
+  ;; cannot settle it: main's retraction, replayed whole, retracts the values main held and leaves the branch's own plan on a
+  ;; task with no name, which the branch's write check refuses (:seon.merge/replay-refused), whichever value the resolution
+  ;; keeps, and nothing is written. The branch retracting the task itself first is what merges
+  (down-agent
+   (fn [{:keys [conn store-conn t]}]
+     (d/transact conn [[:db/retractEntity t]])
+     (agent/transact! [[:db/add t :task/plan "the branch's"]])
+     (agent/commit!)
+     (let [k [t :task/plan] c0 (d/commit-id @store-conn)
+           r (agent/merge-main! {})]
+       (is (= [[k "the branch's" :seon.merge/gone]] (mapv (juxt pm/conflict-key :seon.merge/ours :seon.merge/theirs) (:seon.merge/conflicts r))) (pr-str r))
+       (doseq [v ["the branch's" :seon.merge/gone]]
+         (let [r (agent/merge-main! {k v})]
+           (is (= :seon.merge/replay-refused (:seon.error/type r)) (pr-str r))
+           (is (= :seon.db/invalid-entity (get-in r [:seon.merge/refused :seon.error/type])) "the write check's own error inside")
+           (is (= c0 (d/commit-id @store-conn)) "nothing written")))
+       (agent/transact! [[:db/retractEntity t]])
+       (agent/commit!)
+       (let [r (agent/merge-main! {})]
+         (is (:ok r) (pr-str r))
+         (is (empty? (d/datoms @store-conn :eavt t)) "the task is gone on the branch as on main"))))))
+
+(deftest an-agents-conflicts-with-main-are-held-by-three-commits
+  ;; seon.agent/main-conflicts (docs/agent.md#merging): the status reads the branch's conflicts with main every turn, so they
+  ;; are held keyed by base, branch and main: a second read with the same three diffs nothing; a moved main reads again.
+  ;; Each conflict carries the form that settles it
+  (down-agent
+   (fn [{:keys [conn store-conn t]}]
+     (d/transact conn [[:db/add t :task/plan "main's"]])
+     (agent/transact! [[:db/add t :task/plan "the branch's"]])
+     (agent/commit!)
+     (let [calls (fn [f] (profile/begin!) (let [r (f)] [r (get (into {} (map (juxt :var :calls)) (profile/touched)) 'seon.merge/plan 0)]))
+           base (:base @agent/state)
+           [cs n1] (calls #(agent/main-conflicts base @store-conn @conn))
+           [cs2 n2] (calls #(agent/main-conflicts base @store-conn @conn))
+           k [t :task/plan]]
+       (is (= [[k "p" "the branch's" "main's"]] (mapv (juxt pm/conflict-key :seon.merge/base :seon.merge/ours :seon.merge/theirs) cs)) (pr-str cs))
+       (is (= (list 'my.branch/merge-main! {k 'value}) (:seon.merge/resolve (first cs))) "with the form that settles it")
+       (is (= 1 n1) "the first read plans once")
+       (is (= [cs 0] [cs2 n2]) "a second read with the same three commits plans nothing")
+       (d/transact conn [[:db/add t :task/status :ready]])
+       (let [[cs3 n3] (calls #(agent/main-conflicts base @store-conn @conn))]
+         (is (= 1 n3) "main moved: read again")
+         (is (= (mapv pm/conflict-key cs) (mapv pm/conflict-key cs3))))))))

@@ -219,7 +219,7 @@
   diff (seon.merge/delta-changes of :seon.agent/base-commit against db): the functions without a
   contract, the problems it caused and the sections it made stale (seon.problems/caused-split),
   what its merge carries, and whether it can merge now when the task merges itself; its
-  unmerged entries; a test run that failed as a whole (:seon.agent/test-error). It reads facts
+  conflicts with main (:unmerged, seon.agent/main-conflicts); a test run that failed as a whole (:seon.agent/test-error). It reads facts
   about the work only, never the conversation (its turns, evals and messages), so a turn's record
   draws it again only when it changed the work; the turn number and a cut reply are the run's
   (seon.render.ui/agent-state). Nothing is held: each is a fact of db. :reasons is the done rule's
@@ -251,13 +251,15 @@
         results (into {} (keep (fn [[t {st :status}]] (when (not= :deferred st) [t st]))) vs)
         ;; what the branch did since its merge base is a diff of two commits' trees, and a db as of a t (a past turn past the store's keep, docs/storage.md#collection) has none: it leaves that out
         base (when (:store db) (some->> (:seon.agent/base-commit ag) (d/commit-as-db (:store db))))
-        moved (when base (pm/content-datoms base db #{}))
-        ch (if base (pm/delta-changes base db #{} moved) {})
+        moved (when base (pm/content-datoms base db))
+        ch (if base (pm/delta-changes base db moved) {})
         ;; what caused-split reads differs from the content (sections, names, plans, catches): its own
         ;; attributes' diff, one descent each (seon.problems/caused-datoms), never a scan of the wiki
         split (when base (problems/caused-split base db ch (problems/caused-datoms base db)))
         gaps (vec (sort-by str (pm/uncontracted ch)))
-        unmerged (pm/unmerged db)
+        ;; its conflicts with main as the agent last heard it, from its merge base (seon.agent/main-conflicts: held by the three
+        ;; commits, so a turn that moved none of them reads them with no diff)
+        unmerged (agent/main-conflicts base db (some->> (:seon.agent/main-commit ag) (d/commit-as-db (pdb/store-of db))))
         ;; a design task's plan before the work: the plan its branch began with, its merge base's (the judge reads the same, seon.reconcile/judge)
         plan-before (when (and base (= :design kind)) (some-> (task/task base tid) :seon.task/accumulated :plan))
         proof? (set proofs)
@@ -308,7 +310,7 @@
       ;; what no gate will run stays unjudged, said here because it ends no run (seon.task/unjudged)
       unjudged (assoc :unjudged unjudged)
       test-error (assoc :test-run {:failed [(:seon.error/message test-error)]})
-      (seq unmerged) (assoc :unmerged (mapv #(select-keys % [:key :base :ours :theirs]) unmerged))
+      (seq unmerged) (assoc :unmerged unmerged)
       (seq gaps) (assoc :without-a-contract gaps)
       (seq (:caused split)) (assoc :caused (:caused split))
       (seq (:attention split)) (assoc :attention (:attention split))
