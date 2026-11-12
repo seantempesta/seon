@@ -660,28 +660,6 @@
     (is (= :red (:seon.test/status (first (proofs/result-tx {} {'a/t (assoc red :ms 1 :ticks 1 :bytes 1)} {} {} {'a/t "d"})))))
     (is (:flaky (proofs/verdict "d" green (assoc red :failures []))) "green and red at one digest are flaky in the cache")))
 
-;; docs/checks.md#modes: an edit that reaches no test the agent-tests step runs boots nothing, so its key moves with them and with its own code only
-(deftest the-agent-tests-step-is-keyed-by-what-it-runs
-  (let [t (fn [d] {:digest d :process? false}) p (fn [d] {:digest d :process? true})
-        base (proofs/agent-tests-digest "step" 2 {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p1")})]
-    (is (= base (proofs/agent-tests-digest "step" 2 {'a/u (t "d2") 'a/t (t "d1") 'a/process (p "p1")})) "in any order, the same key")
-    (is (= base (proofs/agent-tests-digest "step" 2 {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p2")})) "a process test it does not run does not move it")
-    (is (not= base (proofs/agent-tests-digest "step" 2 {'a/t (t "d9") 'a/u (t "d2") 'a/process (p "p1")})) "a test it runs does")
-    (is (not= base (proofs/agent-tests-digest "step" 2 {'a/t (t "d1") 'a/process (p "p1")})) "so does one removed")
-    (is (not= base (proofs/agent-tests-digest "other" 2 {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p1")})) "and so does the step's own code")
-    (let [one (proofs/agent-tests-digest "step" 1 {'a/t (t "d1") 'a/u (t "d2")})]
-      (is (= one (proofs/agent-tests-digest "step" 1 {'a/t (t "d1") 'a/u (t "d3")})) "a test outside the sample does not move it")
-      (is (not= one (proofs/agent-tests-digest "step" 1 {'a/t (t "d1") 'a/u (t "d0")})) "and one that moves into the sample does"))))
-
-;; docs/checks.md#modes: the same tests choose the same sample, of the size asked, and a moved digest moves it
-(deftest the-agent-tests-sample-is-the-lowest-digests
-  (let [ds {'a/t "d3" 'a/u "d1" 'a/v "d2" 'a/w "d4"}]
-    (is (= '#{a/u a/v} (proofs/agent-tests-sample 2 ds)))
-    (is (= (proofs/agent-tests-sample 2 ds) (proofs/agent-tests-sample 2 (into (sorted-map-by #(compare (str %2) (str %1))) ds))) "in any order")
-    (is (= '#{a/w a/u} (proofs/agent-tests-sample 2 (assoc ds 'a/w "d0"))) "a digest that moves moves the choice")
-    (is (= (set (keys ds)) (proofs/agent-tests-sample 100 ds)) "fewer tests than the sample: all of them")))
-
-;; docs/merging.md#a-merge-runs-what-the-change-reaches: a few seconds stay one process; a gate's 751 s splits
 (deftest a-run-has-the-shards-its-work-is-worth
   (let [ts '[a/t a/u a/v a/w]]
     (is (= 1 (proofs/worth-shards ts 4 '{a/t 1000 a/u 1000 a/v 1000 a/w 1000} 30000)) "seconds of work: one")

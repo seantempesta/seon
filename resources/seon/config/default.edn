@@ -592,10 +592,6 @@
  ;; change reused 226 of 233 process tests' greens; five were red): 10 a class, ~12 s CPU a run. At the bound: the
  ;; other reused greens are not run again this run.
  :seon.config.proofs/reuse-audit 10
- ;; Unit: tests. How many tests the agent-tests check runs through an agent, the lowest digests (seon.proofs/agent-tests-sample). A fault that
- ;; hits 3 percent of tests shows in 100 with 95 percent odds. Provenance: all 1,154 cost 136 to 166 s of each wide prove and ran again what
- ;; bin/test had just run; the owner chose a sample, 2026-11-06. At the bound: the other tests are not run this way in that run.
- :seon.config.proofs/agent-tests-sample 100
  ;; Unit: verdicts. How many of a test's newest greens its history holds (seon.fx/history), which its typical
  ;; ms, tick budget and slow-test read take: a median of few keeps out one hung run, and a test's cost stops
  ;; growing with the digests it has had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
