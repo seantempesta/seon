@@ -160,7 +160,7 @@
   (if (or (not= :test (:kind it :test)) (= :turn (:mode it)))
     #{k}
     (let [{:keys [agent mode checkout]} it
-          fits? (fn [o] (and (= :queued (:status o)) (= :test (:kind o :test)) (not (:alone? o))
+          fits? (fn [o] (and (= :queued (:status o)) (= :test (:kind o :test))
                              (= agent (:agent o)) (= mode (:mode o)) (= checkout (:checkout o)) (some (:waiters it) (:waiters o))
                              (not-any? (:items st) (:needs o))))
           queued (count (filter fits? (vals (:items st))))
@@ -179,7 +179,7 @@
   holding it as {:op :tests :id agent :mode m :names #{test} :items {test digest}} (each at the digest the agent's plan gave
   it: seon.agent/item-selection), or, an item of another :kind (a build, a check
   step, a tree's build or seed), of root's effect owner as {:op :fx :kind :item :req {:kind :tree :checkout :name :digest
-  :binary? :bound}}; an :alone? item (a step about the machine) only with nothing running, and nothing beside it; an item is not granted while an item it :needs (a set: its tree's build, seed) is queued or running;
+  :binary? :bound}}; an item is not granted while an item it :needs (a set: its tree's build, seed) is queued or running;
   tagged
   [:batch bid]; each queued item passed over ages a skip.
   Answers [st outputs]."
@@ -192,10 +192,7 @@
           ;; the askers of a turn, once a grant: most grants have none, and then no item's waiters are read for them
           turns (into #{} (keep (fn [[r a]] (when (= :turn (:prio a)) r))) (:askers st))
           running (count (:batches st))
-          ;; a step about the machine itself (:alone?, seon.proofs/machine-steps) runs with nothing beside it: none is granted
-          ;; while one runs, and one is granted only with nothing running
-          alone (some (fn [[_ b]] (some #(:alone? (get-in st [:items %])) b)) (:batches st))
-          free? (and (pos? (free-workers st)) (not alone))
+          free? (pos? (free-workers st))
           ;; each asker's work left: the measured ms of its queued items, one pass (an item many wait on counts for each)
           ;; with one asker every item ties, so the pass is made only when two or more wait
           left (when (and free? (next (:askers st))) (reduce-kv (fn [m _ it] (if (= :queued (:status it)) (reduce #(update %1 %2 (fnil + 0) (:ms it 1)) m (:waiters it)) m))
@@ -203,7 +200,7 @@
           [k it] (when free?
                    (reduce-kv (fn [best k it]
                                 ;; an item that needs its tree's build or seed waits while that is queued or running (a red one ends it)
-                                (if (and (= :queued (:status it)) (not-any? (:items st) (:needs it)) (or (not (:alone? it)) (zero? running)))
+                                (if (and (= :queued (:status it)) (not-any? (:items st) (:needs it)))
                                   ;; a turn's first; then the item of the asker nearest done (shortest remaining work first: the least
                                   ;; mean time to an answer over askers); its waiters and age only break a tie
                                   (let [v (+ (if (and (seq turns) (some turns (:waiters it))) 1e12 0)
@@ -310,7 +307,7 @@
     (let [st (reduce (fn [st [k m]]
                        (if (get-in st [:items k])
                          (update-in st [:items k :waiters] conj rid)
-                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :binary? :bound :alone?]) :status :queued :waiters #{rid} :at (:bid st 0)))))
+                         (assoc-in st [:items k] (assoc (select-keys m [:agent :ms :mode :kind :needs :tree :checkout :binary? :bound]) :status :queued :waiters #{rid} :at (:bid st 0)))))
                      (assoc-in st [:askers rid] {:left (set (keys items)) :prio prio :results {}
                                                  ;; the items that are its proofs: past a red it still waits for these (item-ended)
                                                  :proofs (into #{} (filter #(contains? proofs (first %))) (keys items))}) items)]
@@ -550,8 +547,8 @@
                   ;; it needs the tree's seed: the binary and the process tests' store
                   (concat (for [[t d] (:process r)]
                             [[t d] (cond-> (assoc on :kind :test :agent (:agent run) :mode (:mode run) :ms (get-in r [:ms t])) seed? (assoc :needs #{sk}))])
-                          (for [[s {:keys [digest binary? bound alone?]}] (:steps r)]
-                            [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?) :bound bound) alone? (assoc :alone? true)
+                          (for [[s {:keys [digest binary? bound]}] (:steps r)]
+                            [[s digest] (cond-> (assoc on :kind :step :binary? (boolean binary?) :bound bound)
                                           seed? (assoc :needs #{sk}))])))
       build? (assoc bk (assoc on :kind :build))
       seed? (assoc sk (cond-> (assoc on :kind :seed :binary? stores?) build? (assoc :needs #{bk}))))))

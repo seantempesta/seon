@@ -37,7 +37,7 @@ When a red has no cause, read the data it left (the store, the logs of every fai
 
 ## The target: a 16 GB MacBook M1
 
-Seon must run on a 16 GB MacBook M1: root, the fork server and `:seon.config.agent/max-running` agents stay within `:seon.config.machine/memory-mb` (4096), and `bin/check scale` fails past it. A process's memory is what macOS charges it, `phys_footprint` (`seon.lib/real-mb`); a forked child is charged every inherited page it touches though only its writes are copies, so `bin/check scale` charges each agent the machine's drop in free plus inactive memory (`seon.lib/sysmem`) and root and the fork server their footprints ([cost](cost.md#how-we-measure)). A cost that grows with something other than the work (a walk of the 64 GiB map reservation) is found by a cost proof sized by what it walks ([storage](storage.md#the-map-is-address-space)).
+Seon must run on a 16 GB MacBook M1: root, the fork server and `:seon.config.agent/max-running` agents stay within `:seon.config.machine/memory-mb` (4096), as `bin/check scale-work` reports. A process's memory is what macOS charges it, `phys_footprint` (`seon.lib/real-mb`); a forked child is charged every inherited page it touches though only its writes are copies, so `bin/check scale-work` charges each agent the machine's drop in free plus inactive memory (`seon.lib/sysmem`) and root and the fork server their footprints ([cost](cost.md#how-we-measure)). A cost that grows with something other than the work (a walk of the 64 GiB map reservation) is found by a cost proof sized by what it walks ([storage](storage.md#the-map-is-address-space)).
 
 The development Mac is larger (18 cores, 128 GB): a run there is judged by its free cores and memory, not by the target's numbers.
 

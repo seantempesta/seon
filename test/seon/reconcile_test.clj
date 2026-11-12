@@ -1893,3 +1893,60 @@
     (is (not (contains? (starts running) "demo/r")) "not while the task it is after runs")
     (is (contains? (starts capped) "demo/r") "a cap is an end: the task after it starts")
     (is (not (contains? (starts capped) "demo/n")) "a task that needs a's result still waits: a cap is no result")))
+
+;; docs/merging.md#seons-merge-is-a-three-way-merge-of-the-program: replaces the `swarm` check step's claim (test/seon/e2e.clj swarm, the deleted step's specs).
+;; The convergence lives in the writer's octopus merge and seon.merge, not in the reconciler's step (which only starts merges one at a time,
+;; merges-start-one-at-a-time-for-a-merge-step-read-from-data), so it is held there: n tasks over 5 shared vars, each task's branch rewrites its
+;; var; every round merges what it can (a member that meets an earlier member's var is behind), each behind branch merges main in, keeps its
+;; own side of the conflict (as swarm's script does) and merges again. Estimate: 12 branches, 5+12 refresh-txs, 3 rounds of one octopus
+;; merge (each judges <= 12 members by delta-three-way over one key), 7 merge-main steps; about 40 transactions of a few hundred datoms each
+;; at ~5,000 ticks apiece, plus a branch fork each.
+(deftest ^{:seon.test/estimate {:ticks 100000000}} concurrent-merges-into-main-converge-whatever-the-order
+  {:seon.test/estimate {:ticks 500000}}
+  (ts/test-branch!
+   (fn [cfg conn]
+     (let [n 12
+           path "src/app/sw.clj"
+           s "{:malli/schema [:=> [:cat :int] :int]}"
+           text (fn [bodies] (str "(ns app.sw)\n" (apply str (for [j (range 5)] (str "(defn v" j " " s " [x] " (get bodies j "x") ")\n")))))
+           on (fn [c files] (d/transact c (source/refresh-tx @c files)))
+           branch (fn [nm] (let [b (pdb/on-main (:branch cfg) nm)] (d/branch! conn (:branch cfg) b) [b (pdb/connect (assoc cfg :branch b))]))
+           w (volatile! (#'writer/writer-proc {:conn conn :cfg cfg :recovered [] :boot-main @conn :durable? false :to-writer (a/chan 4) :events (a/chan 4)}))
+           ask (fn [req] (let [[st outs] (#'writer/writer-proc @w :in (assoc req :dest {:rid 1}))] (vreset! w st) (:r (first (:to-api outs)))))
+           src-of (fn [db j] (:form/src (:var/form (d/entity db [:var/name (symbol (str "app.sw/v" j))]))))
+           ;; git merge main into the branch, then keep its own side of each conflict (seon.agent/merge-main!, my.branch/resolve!)
+           merge-main! (fn [b bc]
+                         (let [main @conn head @bc
+                               base (pdb/branch-base conn (pdb/main-branch cfg) b)
+                               r (pm/delta-three-way base head main #{})]
+                           (d/merge-db bc #{(d/commit-id main)}
+                                       (-> (pm/merge-tx head base main (:apply r) #{}) (into (pm/unmerged-tx head (:conflicts r) (:max-tx main))))
+                                       (pdb/tx-meta b))
+                           (doseq [e (pm/unmerged @bc)] (d/transact bc (pm/resolve-tx @bc (:key e))))
+                           (count (:conflicts r))))
+           conns (atom [])]
+       (try
+         (on conn {path (text {})})
+         (let [tasks (vec (for [k (range n)
+                                :let [[b bc] (branch (keyword (str "sw-s" k)))]]
+                            (do (swap! conns conj bc)
+                                (on bc {path (text {(mod k 5) (str "(+ x " (mod k 5) (apply str (repeat (quot k 5) " 0")) ")")})})
+                                {:k k :branch b :conn bc :body (str "(+ x " (mod k 5) (apply str (repeat (quot k 5) " 0")) ")")})))]
+           (loop [pending tasks rounds 0 conflicts 0 order []]
+             (if (and (seq pending) (< rounds 10))
+               (let [rs (:results (ask {:op :octopus-merge :branches (mapv :branch pending)}))
+                     done (keep identity (map (fn [t r] (when (:merged? r) t)) pending rs))
+                     behind (remove (set done) pending)]
+                 (is (seq done) "every round merges at least one: no branch waits on nothing")
+                 (is (every? #(= :seon.merge/behind (:seon.error/type %)) (remove :merged? rs)) "what is not merged is behind, never lost")
+                 (recur (vec behind) (inc rounds) (+ conflicts (reduce + (map #(merge-main! (:branch %) (:conn %)) behind))) (into order done)))
+               (do
+                 (is (empty? pending) "every task's merge went in")
+                 (is (= 3 rounds) "the rounds are the most tasks one var has")
+                 (is (= n (count order)))
+                 (is (pos? conflicts) "the tasks on one var did conflict, and each conflict was met by merging main")
+                 (doseq [j (range 5)]
+                   (is (= (:body (last (filter #(= j (mod (:k %) 5)) order)) ) (second (re-find #"\[x\] (.*)\)$" (src-of @conn j))))
+                       (str "main holds v" j " as the last task merged on it wrote it")))
+                 (is (every? #(not= "x" (second (re-find #"\[x\] (.*)\)$" (src-of @conn %)))) (range 5)) "no var is left as it began")))))
+         (finally (run! d/release @conns)))))))

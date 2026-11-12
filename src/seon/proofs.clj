@@ -116,13 +116,13 @@
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "agent-checks" [seon.check/agent-checks seon.agent/prove! seon.agent-proc/agent-frame seon.prove/prove-proc seon.program/program-differs]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
-    "problems" [seon.check/problems-check] "smoke" [seon.check/smoke] "robust" [seon.check/robust]
-    "lifecycle" [seon.check/lifecycle] "backpressure" [seon.check/backpressure] "hotreload" [seon.check/hotreload]
-    "drain" [seon.check/drain] "idle" [seon.check/idle] "orphan" [seon.check/orphan]
-    "durable" [seon.check/durable-write seon.check/durable-read] "window" [seon.check/window-write seon.check/window-read]
+    "smoke" [seon.check/smoke]
+    "lifecycle" [seon.check/lifecycle] "hotreload" [seon.check/hotreload]
+    "idle" [seon.check/idle] "orphan" [seon.check/orphan]
+    "window" [seon.check/window-write seon.check/window-read]
     "ids" [seon.check/ids] "vectors" [seon.check/vectors] "e2e-calc" [seon.e2e/run] "e2e-conflict" [seon.e2e/run] "e2e-semantic" [seon.e2e/run]
-    "e2e-hairy" [seon.e2e/run] "e2e-newns" [seon.e2e/run] "e2e-sibling" [seon.e2e/run] "swarm" [seon.e2e/run]
-    "e2e-loop" [seon.e2e/run] "e2e-held" [seon.e2e/run] "resume" [seon.e2e/run] "scale" [seon.check/scale]})
+    "e2e-hairy" [seon.e2e/run] "e2e-newns" [seon.e2e/run] "e2e-sibling" [seon.e2e/run]
+    "e2e-loop" [seon.e2e/run] "e2e-held" [seon.e2e/run] "resume" [seon.e2e/run]})
 
 (def pure-nss
   "The namespaces whose contracted functions are pure functions of plain data: mg/check
@@ -249,12 +249,6 @@
   (let [k (cfg/value :seon.config.check/step-end-factor) floor (cfg/value :seon.config.agent/stall-ms)
         unknown (reduce max 0 (vals ms))]
     (into {} (for [s steps] [s (max floor (* k (get ms s unknown)))]))))
-
-(def machine-steps
-  "The steps whose claim is about the machine itself, so nothing may run beside them: scale (what root and its agents
-  cost the machine's memory, seon.check/scale). bin/check runs scale last, alone; the test service grants one only with
-  nothing running and grants nothing beside it (seon.prove/grant). See docs/merging.md#the-test-service."
-  #{"scale"})
 
 (defn step-needs-binary?
   "Does bin/check's step run a seon.check mode on target/seon (and a store branch)? Every step

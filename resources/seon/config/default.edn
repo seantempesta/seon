@@ -238,14 +238,9 @@
  ;; at load 30-40 before proves took slots; past 10 is a hang more often than a slow machine.
  :seon.config.check/step-end-factor 10
  ;; Unit: ms over which a check measures that something does not happen: a paused agent's
- ;; request unanswered (lifecycle), a paused proc's flood not taken and a paused writer's
- ;; commits held (backpressure). Provenance: the windows it replaced were 300, 400 and 500 ms.
+ ;; request unanswered (lifecycle). Provenance: the windows it replaced were 300, 400 and 500 ms.
  ;; Load only makes what it measures likelier. At the bound: the measurement is read.
  :seon.config.check/hold-ms 500
- ;; Unit: ms after scale's agents are killed over which it measures the memory the kernel
- ;; returns (:system-available-returned-mb-per-agent, reported, not checked). Provenance: the
- ;; window it replaced. At the bound: the available memory is read.
- :seon.config.check/pages-ms 500
  ;; Unit: ms between the readings scale-work takes of the machine's available memory and of each process
  ;; under root's fork server while its agents work (seon.check/scale-work). Provenance: a footprint
  ;; reading of ~25 processes takes ~100-300 ms; the window is what the test children's peaks are caught

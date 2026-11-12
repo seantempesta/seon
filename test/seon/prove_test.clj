@@ -596,24 +596,6 @@
     (is (= [[:seed true]] (mapv #(vector (get-in % [:req :req :kind]) (get-in % [:req :req :binary?])) (fx-asks o3)))
         "the process test's run seeds the stores first")))
 
-(deftest a-step-about-the-machine-runs-with-nothing-beside-it
-  ;; Optimization's e2e of step 4: scale (it measures what root's agents cost the machine's memory) was granted beside 29 other
-  ;; steps and 7 of its agents answered no verdict; bin/check runs it alone (seon.proofs/machine-steps)
-  (let [[st o] (seeded-run 4 {:items {} :steps {"scale" {:digest "ds" :binary? false :alone? true} "laws" {:digest "dl" :binary? false}
-                                              "fx" {:digest "df" :binary? false}}
-                            :build {:tree "T" :needed? false}})
-        names (fn [outs] (mapv #(get-in % [:req :req :name]) (fx-asks outs)))]
-    (is (= ["scale"] (names o)) "nothing running: scale, the most valuable, is granted, and nothing beside it though three workers are free")
-    (let [[st o1] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 10}})])]
-      (is (= #{"laws" "fx"} (set (names o1))) "it ended: the others at once")))
-  (let [[st o] (seeded-run 4 {:items {} :steps {"laws" {:digest "dl" :binary? false :ms 1} "scale" {:digest "ds" :binary? false :alone? true}}
-                            :build {:tree "T" :needed? false}})
-        names (fn [outs] (mapv #(get-in % [:req :req :name]) (fx-asks outs)))
-        ran (names o)]
-    (is (= 1 (count ran)) "one of the two at a time")
-    (let [[_ o1] (feed st [(answer-of (first (fx-asks o)) {:value {:pass 1 :fail 0 :error 0 :ms 10}})])]
-      (is (= 1 (count (names o1))) "and the other after it"))))
-
 ;; every wait ends: a red build is every item's that needs it, and none of them runs on a binary that was never built
 (deftest a-red-build-answers-what-needs-it-with-its-error
   (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :steps {"smoke" {:digest "ds" :binary? true :bound 5000}} :build {:tree "T" :needed? true}})

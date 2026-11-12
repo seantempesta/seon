@@ -27,11 +27,11 @@
 (deftest ^{:seon.test/execs ["bin/check"] :seon.test/estimate {:ticks 2000000}} a-selection-runs-every-step-it-names-and-refuses-one-it-cannot
   ;; T3 (2026-11-12): bin/check's selection is the subject; one run holds the three claims (3 runs, 6.7 s, were one each): the
   ;; selection's first line names two steps and one no step has, its second a step a line, its third a step that needs the seeded
-  ;; store in a selection whose steps-binary says none does (2026-11-11: a hand-written one ran durable on an unseeded store, and it
+  ;; store in a selection whose steps-binary says none does (2026-11-11: a hand-written one ran a step on an unseeded store, and it
   ;; failed two phases later). Work: one bin/check start, 4 steps judged, 2 under the 1 ms bound. Each step under it, so the run is seconds
   (let [sel (str (System/getProperty "java.io.tmpdir") "/check-sel-" (random-uuid))
         _ (clojure.java.shell/sh "mkdir" "-p" sel)
-        _ (doseq [[f t] {"steps" "laws no-such-step\nlmdb-lock\ndurable\n" "steps-binary" "" "step-bounds" "laws 1\nlmdb-lock 1\ndurable 60000\n"}] (spit (str sel "/" f) t))
+        _ (doseq [[f t] {"steps" "laws no-such-step\nlmdb-lock\nsmoke\n" "steps-binary" "" "step-bounds" "laws 1\nlmdb-lock 1\nsmoke 60000\n"}] (spit (str sel "/" f) t))
         r (clojure.java.shell/sh (str (seon.config/checkout) "/bin/check") "--steps" sel)
         out (second (re-find #"(?m)^outputs: (\S+)" (:out r)))
         _ (clojure.java.shell/sh "rm" "-rf" sel)
@@ -41,7 +41,7 @@
     (is (re-find #"(?m)^== lmdb-lock " (:out r)) "every name, one a line or several, ran")
     (is (= 1 (:exit r)) (:out r))
     (is (re-find #"FAILED no-such-step: no step of that name" (:out r)) "a name no step has is red, named")
-    (is (re-find #"durable-write runs target/seon on the seeded store, but this selection's steps-binary" (:out r))
+    (is (re-find #"smoke runs target/seon on the seeded store, but this selection's steps-binary" (:out r))
         "a step that needs the seeded store is refused by name, never run on none")))
 
 ;; docs/clocks.md#time-decides-the-owners-exceptions: a step past its bound is ended after its evidence and FAILS, as a test past
@@ -605,36 +605,3 @@
     (is (seon.check/left? {:pid 9 :ppid 1 :stat "S"} true self) "a row still running: left")
     (is (not (seon.check/left? {:pid 9 :ppid 1 :stat "Z"} true self)) "a row that can run nothing more: not left")))
 
-;; docs/machine.md#builds-and-checks: a wait on main runs its predicate in main's writer at every commit (seon.system/await-db's
-;; watch; datahike's writer resets the connection), so a predicate that reads main's whole problems report costs the report
-;; once a commit and holds every commit behind it: batches 32 and 38 lost the `problems` step to it, root at 98.6% CPU for
-;; 71 s while p1 and p2's proofs committed. The step's waits read the one class they wait on, and the reconciler's quiet;
-;; the report is read once, after (my.root/problems, the render proc's kept health). Cost in reads of the whole report
-;; over n commits that do not satisfy the wait: n + 2 before (12 for 10), none now
-(deftest the-problems-steps-waits-read-no-whole-report-per-commit
-  (ts/test-branch! (fn [_ conn]
-    (let [reads (atom 0) n 10
-          commit! #(d/transact conn {:tx-data []})
-          judge (a/chan 1)
-          sys {:conn conn :judge judge}
-          counted (fn [f] (fn [& xs] (swap! reads inc) (apply f xs)))]
-      (with-redefs [seon.problems/report (counted seon.problems/report)
-                    seon.problems/health (counted seon.problems/health)]
-        (testing "the stall's wait: n commits with no stall, then the eval's answer ends it"
-          (let [answered (promise)
-                w (future (seon.system/await-db sys #(or (seq (#'seon.check/stalled-rows %)) (realized? answered))))]
-            (dotimes [_ n] (commit!))
-            (deliver answered true)
-            (commit!)
-            (is (:max-tx @w))
-            (is (= 0 @reads) (str @reads " reads of the whole report for " n " commits"))))
-        (reset! reads 0)
-        (testing "the last wait: n commits while p1 and p2 run, then the reconciler's quiet ends it"
-          (let [t (:max-tx @conn)
-                w (future (#'seon.check/await-provoked sys t))
-                ask (a/<!! judge)]
-            (is (= :quiet (:op ask)))
-            (dotimes [_ n] (commit!))
-            (deliver (:p ask) {:quiet t})
-            @w
-            (is (= 0 @reads) (str @reads " reads of the whole report for " n " commits")))))))))

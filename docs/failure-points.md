@@ -98,7 +98,7 @@ The failure points whose edge answers data with no catch.
 | A peer's socket is gone | root: `jolt.async.remote`'s reader pump; others: `seon.sock/fill!`, `seon.sock/recv!` | root: the agent proc reads `{:op :dead}`; elsewhere `:eof` |
 | A socket write the kernel cannot take or refuses | `seon.sock/write-all!` (under `seon.sock/send-frame!`, `seon.sock/write-line!`) | `EINTR` retries; `EAGAIN` and `ENOBUFS` wait for `POLLOUT` and go on from the offset, so a frame arrives whole; `EPIPE` and `ECONNRESET` answer `:epipe`; any other errno throws `:seon.sock/write-failed` (`:errno :fd :sent :of`) (`seon.sock-test/a-frame-larger-than-the-socket-buffer-reaches-a-slow-live-peer-whole`) |
 | The platform refuses the process's memory figure | `seon.agent/mem-mb` (Jolt's `jolt.host/process-footprint-bytes` answers nil) | arithmetic on nil throws: a gauge never reads a made-up number |
-| `host_statistics64` refuses | `seon.lib/sysmem` | `:seon.lib/sysmem-refused`; `bin/check scale` fails naming it |
+| `host_statistics64` refuses | `seon.lib/sysmem` | `:seon.lib/sysmem-refused`; `bin/check scale-work` fails naming it |
 | `getloadavg` refuses | `seon.lib/load-average` | `:seon.lib/load-refused`, thrown in `seon.prove/machine-load`; the step's state stays |
 | `fork()` refused (another Chez thread active) | `seon.lib/fork!`, the one spawning skeleton | checked once, never waited out: `:fork-failed` / `:standby-failed` with `:active-threads`; `:seon.test/fork-refused`; `:clone-failed` |
 | A forked child's code throws or escapes | `seon.lib/fork!`'s child | the child exits 1, the throw on its stderr, never unwinding into the parent's frames |

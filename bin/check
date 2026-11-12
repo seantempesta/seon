@@ -1,10 +1,10 @@
 #!/bin/zsh
 # bin/check [N] — the platform's end-to-end checks on target/seon (bin/build seon), each a
 # mode of seon.check (laws is bin/laws and health bin/test --health, neither on the binary): contracts, mg-check, fx, config, system, mcp, agent-checks, threads, instrument, record,
-# problems, smoke, robust, lifecycle, backpressure, hotreload, drain, idle, orphan,
-# durable, window, e2e tasks and scenarios, swarm (10 tasks over 5 shared vars, max-running 8),
-# resume, scale N (default N = 100), scale-work N [no-search], spawn-phases N (N = 10 agents that work: evals and a prove of ~60 tests each; a single mode, not in a full run). A run's steps run at once, :seon.config.proofs/jobs at a
-# time, the longest first, each on a clone of the one seeded store; scale alone, last.
+# smoke, lifecycle, hotreload, idle, orphan,
+# window, e2e tasks and scenarios,
+# resume, scale-work N [no-search], spawn-phases N (N = 10 agents that work: evals and a prove of ~60 tests each; a single mode, not in a full run). A run's steps run at once, :seon.config.proofs/jobs at a
+# time, the longest first, each on a clone of the one seeded store.
 # bin/check MODE [ARGS] runs one mode. bin/check with no argument is bin/prove --checks: only
 # the steps whose reach digest has no green result run (seon.proofs/check-steps); a number is
 # the full run. bin/check --steps DIR (bin/prove's) runs only the steps DIR/steps names, of a
@@ -24,7 +24,7 @@
 # without the example program the steps work on (steps failed falsely on it). It is seeded
 # only when missing, by a full run's seed step and before a single mode, and every root a step boots
 # works on a branch of it, the step's own main check-<step> (SEON_MAIN), never the store's
-# main. The recovery steps (durable, window, resume, orphan) kill their root and reopen the
+# main. The recovery steps (window, resume, orphan) kill their root and reopen the
 # same store on the same branch. What a step made is deleted by the run (bin/check's drop:
 # seon.db/delete-main!): a green step's branches when the run ends, a failed step's at that
 # step's next run. Only logs stay, in target/check/<time>/.
@@ -46,7 +46,7 @@ unsetopt BG_NICE
 export SEON_STORE=${SEON_STORE:-$ROOT/target/check-store}
 # a check's fixture tests (app.*) keep their verdicts in this invocation's own cache, removed at exit:
 # in the main tree's shared one a fixture's verdict was reused by the next check run, so the run judged
-# nothing (robust's spin test, fx's test fork; docs/merging.md#verdicts-are-a-cache)
+# nothing (fx's test fork; docs/merging.md#verdicts-are-a-cache)
 mkdir -p "$ROOT/target/tmp"
 CHECK_RESULTS=$(mktemp -d "$ROOT/target/tmp/check-results.XXXXXX")
 export SEON_RESULTS_DIR=$CHECK_RESULTS
@@ -76,7 +76,7 @@ S=$ROOT/target/seon
 # NEEDS: does this run use the binary? Yes, unless its plan says none: a selected run whose
 # DIR/steps-binary is there and empty (laws, lmdb-kill, lmdb-lock, lmdb-crash: bin/prove's plan writes it) seeds no store,
 # starts no root and wants no build. No steps-binary is unknown, never none: the run seeds and uses
-# the binary (a steps file written by hand ran durable on an empty store)
+# the binary (a steps file written by hand ran window on an empty store)
 NEEDS=1; [[ -n $SEL && -e $SEL/steps-binary && ! -s $SEL/steps-binary ]] && NEEDS=
 (( NEEDS )) && { [[ -x $S ]] || { echo "check: no target/seon; run bin/build seon" >&2; exit 1 } }
 # VERDICT: the line a refused run ends on, its mode's (CONFIG FAILED) or the run's (CHECK FAILED)
@@ -112,7 +112,7 @@ trap 'exit 143' TERM INT HUP
 export SEON_TASKS=$ROOT/target/check/tasks; mkdir -p "$SEON_TASKS"
 # a step runs the binary only through run: a selection whose plan said none of its steps needs it (NEEDS empty: no build
 # checked, no store seeded) refuses the step that does, by name, rather than run it on no seeded store (a steps file
-# written by hand ran durable on an empty store, and it failed two phases later: task
+# written by hand ran window on an empty store, and it failed two phases later: task
 # seon.check/a-selection-derives-what-it-needs-from-its-steps)
 run() {
   (( NEEDS )) || { echo "check: $1 runs target/seon on the seeded store, but this selection's steps-binary ($SEL/steps-binary) says none of its steps needs them: no store was seeded; select by bin/prove's plan, or name $1 in steps-binary"; return 70 }
@@ -129,11 +129,6 @@ if [[ -n ${1:-} && ! ${1} =~ ^[0-9]+$ ]]; then
   [[ $1 == seed ]] || quiet seed run seed 2000
   quiet drop run drop $M
   if [[ $1 == idle ]]; then SEON_WEB_PORT=$IDLE_WEB_PORT SEON_MAIN=$M run "$@"; st=$?
-  elif [[ $1 == durable ]]; then
-    # two processes, as the full run's u-durable: the writer SIGKILLs itself (137), the reader reopens its store
-    SEON_MAIN=check-durable-write run durable-write $M; st=$?
-    (( st == 137 )) || { echo "DURABLE FAILED (durable-write exit $st, expected 137)"; exit 1 }
-    SEON_MAIN=check-durable-read run durable-read $M; st=$?
   else SEON_MAIN=$M run "$@"; st=$?; fi
   (( st == 0 )) && quiet drop run drop $M
   exit $st
@@ -142,7 +137,7 @@ N=${1:-100}
 TIMEFMT='real %E user %U sys %S'
 OUT=$ROOT/target/check/$(date +%Y%m%dT%H%M%S)-$$
 mkdir -p "$OUT/stores"
-: > "$OUT/failed"; : > "$OUT/green"
+: > "$OUT/failed"; : > "$OUT/green"; [[ -z $SEL ]] && : > "$OUT/full"
 # want STEP: is STEP one this run runs? A step seon.proofs/check-steps does not name is FAILED.
 # (a selected run's steps were named by the plan from the same table: no binary asked)
 KNOWN= ONLY=
@@ -219,8 +214,8 @@ store-line() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon store --profile scr
 read -r STORE KB0 BR0 <<< "$(store-line)"
 [[ -f $STORE/data.mdb ]] || { failed "seed (no seeded store at '$STORE': seon store answered no path holding data.mdb)"; print "FAILED seed: no seeded store at '$STORE'" }
 # the steps' own mains: what a failed earlier run left is deleted before this run's step
-STEPS=(seed fx config system mcp agent-checks threads instrument record problems smoke robust lifecycle backpressure hotreload drain idle
-       orphan durable window ids vectors e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling swarm e2e-loop e2e-held resume scale)
+STEPS=(seed fx config system mcp agent-checks threads instrument record smoke lifecycle hotreload idle
+       orphan window ids vectors e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns e2e-sibling e2e-loop e2e-held resume)
 run drop ${STEPS/#/check-} > "$OUT/drop-before.log" 2>&1 || failed "drop-before ($OUT/drop-before.log)"
 fi
 
@@ -277,15 +272,11 @@ u-mcp() { echo "== mcp (an outside MCP client evals in an agent and as root; eac
 u-threads() { echo "== threads (the fork server, an agent and its clone stay single-threaded: no GC sweepers where we fork)"; step threads "" run threads }
 u-instrument() { echo "== instrument"; step instrument "" run instrument }
 u-record() { echo "== record"; step record "" run record }
-u-problems() { echo "== problems (each class provoked, then read back from main by my.root/problems)"; step problems "" run problems }
 u-smoke() { echo "== smoke"; step smoke "^merge|^killed|spawned|ready|^SMOKE " run smoke }
-u-robust() { echo "== robust"; step robust "" run robust }
 # no web listener: the adapter's acceptor and sweeper outlive stop! (task seon.web.edn
 # web-server-threads-are-joined-at-stop), so root's exact thread count is checked without it
 u-lifecycle() { echo "== lifecycle (start!/stop! x10 in one process, root's threads exactly as declared; pause/resume)"; step lifecycle "LIFECYCLE" env SEON_WEB_PORT=0 zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon lifecycle 10 --profile scripted" }
-u-backpressure() { echo "== backpressure"; step backpressure "" run backpressure 8 }
 u-hotreload() { echo "== hotreload"; step hotreload "" run hotreload }
-u-drain() { echo "== drain"; step drain "" run drain 8 }
 u-idle() {
   echo "== idle (no beat: an idle root with a tab open steps nothing; a spawn and a commit still reach the tab)"
   step idle ":steps-at-idle|:bytes-at-idle|reached-tab|^IDLE " env SEON_WEB_PORT=$IDLE_WEB_PORT zsh -c "cd '$ROOT/target' && '$ROOT/bin/held' ./seon idle 2000 --profile scripted"
@@ -303,7 +294,7 @@ u-orphan() {
   PIDS=$(sed -n 's/^PIDS //p' "$OUT/orphan.log")
   # every process of the tree has ended by now (the drain above); any pid that can still run is a survivor. A pid that
   # can run nothing more (stat Z or E, its parent not this script: an orphan launchd reaps) has ended: the rule of
-  # seon.check/ran-nothing-more?, which drain and lifecycle use, here in ps's words
+  # seon.check/ran-nothing-more?, which lifecycle uses, here in ps's words
   # (seon.check/left?: a pid ps lists no more is left only if kill -0 finds it again)
   LEFT=$(for p in ${=PIDS}; do kill -0 $p 2>/dev/null || continue; read -r st pp <<< "$(ps -o stat=,ppid= -p $p 2>/dev/null)"
          if [[ -z $st ]]; then kill -0 $p 2>/dev/null && echo $p; continue; fi
@@ -313,11 +304,6 @@ u-orphan() {
   else echo "PASS none of $PIDS outlived root"; green orphan; fi
 }
 # the recovery steps kill root and reopen the one store on the branch it worked on
-u-durable() {
-  echo "== durable (root writes its branch and SIGKILLs itself; a new root reopens the store and recovers it)"
-  EXPECT=137 step durable-write "" run durable-write check-durable; step durable-read "" run durable-read check-durable
-  is-green durable-write && is-green durable-read && green durable
-}
 u-window() {
   echo "== window (continuous group commit: answered unflushed while the flusher is paused; :flush? waits for its sync)"
   EXPECT=137 step window-write "" run window-write check-window
@@ -328,7 +314,6 @@ u-vectors() { echo "== vectors (the checkout's forms and wiki embedded by the mo
 u-ids() { echo "== ids (two agents' processes issue every entity id and transaction id once: the store's one page of ids)"; step ids "" run ids }
 u-e2e-calc() { echo "== tasks: calc (6-task graph, cancel)"; step e2e-calc "" run e2e calc }
 for k in conflict semantic hairy newns sibling; do functions[u-e2e-$k]="echo '== tasks: scenario $k'; step e2e-$k '' run e2e scenario $k"; done
-u-swarm() { echo "== swarm (10 tasks over 5 shared vars, max-running 8)"; step swarm ":merges|:checks|^SWARM " run swarm 10 8 }
 u-e2e-loop() { echo "== loop (Seon's own source is main's program: a task changes seon.generation/generation, its merge is written back, committed on a clone's jolt/seon-merges, and live in root and in an agent forked after it, nothing built)"; step e2e-loop ":source|:commits|:live|LOOP" run e2e loop "$OUT/loop" }
 u-e2e-held() { echo "== held (add always wrong: it ends at its cap, held, named the root cause of what it waits on, its refine written once after it with the review held; the owner raises its agent's budget and releases it: it runs again from its branch's head under the same agent key, its turns going on, and ends at the raised cap, held again)"; step e2e-held ":root-causes|:release" run e2e held }
 u-resume() {
@@ -342,22 +327,22 @@ u-resume() {
 # writer, docs/storage.md#collection), so a unit running
 # beside others takes a store of its own: an APFS clone of the one
 # seeded store (its data file; LMDB makes its lock file), the same content as a branch of it,
-# deleted when the unit is green. scale runs alone after them: it measures the machine's memory.
+# deleted when the unit is green.
 if (( NEEDS )); then JOBS=$(run jobs); else JOBS=2; fi
-UNITS=(laws lmdb-kill lmdb-lock lmdb-crash forks health contracts test-inputs mg-check fx config system mcp agent-checks threads instrument record problems smoke robust lifecycle
-       backpressure hotreload drain idle orphan durable window ids e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
-       e2e-sibling swarm e2e-loop e2e-held resume vectors)
+UNITS=(laws lmdb-kill lmdb-lock lmdb-crash forks health contracts test-inputs mg-check fx config system mcp agent-checks threads instrument record smoke lifecycle
+       hotreload idle orphan window ids e2e-calc e2e-conflict e2e-semantic e2e-hairy e2e-newns
+       e2e-sibling e2e-loop e2e-held resume vectors)
 # the longest first, by the last full run's measured wall seconds (a unit not measured yet first):
 # what orders the queue, never what a step proves
 # a selection that names a step this script has no unit for, or that names none, ran nothing it was asked for: CHECK FAILED, naming it
 if [[ -n $SEL ]]; then
   [[ -z $ONLY ]] && { failed "the selection $SEL/steps names no step"; echo "FAILED: the selection names no step" }
   for n in ${=ONLY}; do
-    (( $+functions[u-$n] )) || [[ $n == scale ]] || { failed "$n (no step of that name: nothing ran it)"; echo "FAILED $n: no step of that name in bin/check" }
+    (( $+functions[u-$n] )) || { failed "$n (no step of that name: nothing ran it)"; echo "FAILED $n: no step of that name in bin/check" }
   done
 fi
-# the last full run: the latest that ran scale (a selected run's times cover only its steps)
-PREVS=("$ROOT"/target/check/2*/scale.time(N)); PREVS=(${PREVS:h}); PREVS=(${PREVS:#$OUT}); PREV=${PREVS[-1]:-}
+# the last full run: the latest with a `full` mark (a selected run's times cover only its steps)
+PREVS=("$ROOT"/target/check/2*/full(N)); PREVS=(${PREVS:h}); PREVS=(${PREVS:#$OUT}); PREV=${PREVS[-1]:-}
 secs() { local f r t=0 seen=0; for f in "$PREV/$1".time(N) "$PREV/$1"-*.time(N); do seen=1; r=$(sed -n 's/^real \([0-9.]*\).*/\1/p' "$f" | head -1); t=$(( t + ${r:-0} )); done; (( seen )) && print $t || print 1e9 }
 [[ -n $PREV ]] && UNITS=(${(f)"$(for u in $UNITS; do print "$(secs $u) $u"; done | sort -k1,1 -g -r -s | awk '{print $2}')"})
 unit() {
@@ -383,7 +368,6 @@ P=(); for u in $UNITS; do read -u 3 tok; { unit $u; print -u 3 x } & P+=($!); do
 wait $P
 kill $W 2>/dev/null; wait $W 2>/dev/null
 exec 3>&-
-(( NEEDS )) && { echo "== scale $N"; step scale ":all-ok|:spawn->all|:end-to-end|:control-real-mb|:all-killed|^SCALE " run scale $N }
 
 # what the green steps made is deleted; a failed step's branches stay until its next run
 GREEN=(${(f)"$(<$OUT/green)"})

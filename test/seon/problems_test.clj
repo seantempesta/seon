@@ -1545,3 +1545,25 @@
         split (problems/caused-split planned moved)]
     (is (= #{} (problems/caused planned moved)) "nothing refuses the branch's done")
     (is (some #(str/starts-with? % "app/plan cites app.calc/inc2") (:attention split)) "the agent is shown the plan its change made stale")))
+
+;; ---- a judged cost verdict reads as a :cost problem --------------------------------------
+
+;; Replaces the problems check step's claim, proved by running a cost proof through an agent, that a judged cost
+;; proof's verdict reads as a :cost row of health (docs/health.md): estimate one world (~10 M ticks, as
+;; seeded's) and two health reads of a db of one task, ~40 M ticks.
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-judged-cost-verdict-reads-as-a-cost-problem
+  (let [rows [{:n 1 :calls 10} {:n 10 :calls 100} {:n 100 :calls 2000}]
+        red {:ok? false :over [{:dim :calls :n 100 :ratio 2.0}] :steeper [] :under [] :unmeasured []}
+        green {:ok? true :over [] :steeper [] :under [] :unmeasured []}
+        db (d/db-with (world)
+                      [(ended "t/slow" {:seon.task/proofs #{'app.t/f-cost 'app.t/g-cost}
+                                        :seon.task/costs {'app.t/f-cost {:rows rows :verdict red}
+                                                          'app.t/g-cost {:rows rows :verdict green}}})])
+        cost (get-in (problems/health db) [:classes :cost :rows])
+        row (first cost)]
+    (is (= 1 (count cost)) "the red verdict is one row; the green one is none")
+    (is (= ["t/slow" 'app.t/f-cost red rows] ((juxt :task :test :verdict :rows) row)) "its task, test, verdict and rows")
+    (is (false? (get-in row [:verdict :ok?])))
+    (is (empty? (get-in (problems/health (d/db-with (world) [(ended "t/ok" {:seon.task/proofs #{'app.t/g-cost}
+                                                                            :seon.task/costs {'app.t/g-cost {:rows rows :verdict green}}})]))
+                        [:classes :cost :rows])) "a green verdict reads as no problem")))

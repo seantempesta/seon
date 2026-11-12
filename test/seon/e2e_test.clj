@@ -37,7 +37,7 @@
        (filter qualified-symbol?) (remove #(= "app.proofs" (namespace %))) distinct vec))
 
 (deftest a-default-plan-cites-the-vars-its-proof-calls
-  (let [specs (concat fx/calc (mapcat :specs (vals fx/scenarios)) (fx/swarm-specs 6))
+  (let [specs (concat fx/calc (mapcat :specs (vals fx/scenarios)))
         planless (filter #(and (:name %) (:proof %) (not (:plan %))) specs)
         plan-of #(:seon.task/plan (first (filter (fn [d] (= (:name %) (:seon.task/name d))) (fx/decls [%] 'x nil))))]
     (is (seq planless))

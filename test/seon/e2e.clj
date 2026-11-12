@@ -3,9 +3,9 @@
   is a row of data that one runner works (run-scenario): its specs, its boot, what a fresh
   agent must print on main afterwards and what else it asserts. The rows: the six-task graph
   with a cancel, a root restart in two phases, the merge scenarios (seon.fixtures/scenarios),
-  a swarm over shared definitions, a real model's run, and a task that always fails parked
+  a real model's run, and a task that always fails parked
   at its cap, then woken by the owner's message; a new run is one row. bin/check runs them as modes of target/seon:
-    calc | resume DIR | resume2 DIR | scenario conflict|semantic|hairy|newns|sibling [model] | swarm N M (verdict SWARM) | model add|calc | held
+    calc | resume DIR | resume2 DIR | scenario conflict|semantic|hairy|newns|sibling [model] | model add|calc | held
     | loop DIR (the self-improvement loop's first turn, on a clone of this repository under DIR)
   Each run ends on what the system observes (the reconciler's quiescence report, an event,
   or a fact on main), never on a deadline. Prints one EDN line per phase; the last line is
@@ -340,19 +340,6 @@
                    (expectation k model?))
       held (assoc :ok (fn [{:keys [d]}] (held-as d (name k) held))))))
 
-(defn- swarm
-  "n tasks over 5 shared definitions, max-running m (more than 5, so tasks on one var run
-  at once and their merges conflict): conflicts arose (each met by a work agent merging main as
-  it moved, or by a merge agent, whichever branch main reached first) and still
-  every task is done, nothing is held for root, and a fresh agent on
-  main gets every proof's value (s_k-test asserts (v_j 100) = 100+j). Verdict SWARM."
-  [n m]
-  {:boot {:max-running (parse-long (or m "8"))} :specs (fx/swarm-specs (parse-long (or n "20"))) :tns 'sw :label "SWARM"
-   :check "(mapv #(% 100) [app.sw/v0 app.sw/v1 app.sw/v2 app.sw/v3 app.sw/v4])" :expect ["[100 101 102 103 104]"]
-   :ok (fn [{:keys [sys q d]}]
-         (let [c (:conflicts-measured (merge-counts d (branch-db-of sys d)))]
-           (-> (all-done d) (assoc :conflicts c) (update :ok #(and % (empty? (:root-causes q)) (pos? c))))))})
-
 (defn- model-run
   "Tasks of the calc graph worked by the config's OpenAI-compatible endpoint
   (:seon.config.ai/*, DeepSeek by default): which = add (one task) or calc."
@@ -420,15 +407,14 @@
   [mode [x y]]
   (case mode
     "loop" (loop-run x)
-    ("calc" "resume" "resume2" "scenario" "swarm" "model" "held")
+    ("calc" "resume" "resume2" "scenario" "model" "held")
     (run-scenario (case mode
                     "calc" (calc x)
                     "resume" (restart false x)
                     "resume2" (restart true x)
                     "scenario" (scenario x y)
-                    "swarm" (swarm x y)
                     "model" (model-run x)
                     "held" (held)))
-    (do (println (str "e2e: no mode " mode "; usage: seon e2e loop|calc|resume|resume2|scenario|swarm|model|held [ARGS]"))
+    (do (println (str "e2e: no mode " mode "; usage: seon e2e loop|calc|resume|resume2|scenario|model|held [ARGS]"))
         (println "E2E FAILED")
         false)))

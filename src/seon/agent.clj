@@ -1676,8 +1676,8 @@
 (defn process-plan
   "Of sel (run-plan's), what a run on a checkout runs beside its in-process items, each at the digest this branch gives it
   (docs/merging.md#the-test-service): :process {test digest}, the process tests it left (:deferred) that have one; :steps
-  {step {:digest :binary? :bound :alone?}}, the bin/check steps with no green at their digest as bin/prove plans them
-  (:alone?, a step of seon.proofs/machine-steps, runs with nothing beside it; seon.proofs/plan-of over this branch's reach graph and inputs, every step that reaches a process kept, the generative
+  {step {:digest :binary? :bound}}, the bin/check steps with no green at their digest as bin/prove plans them
+  (seon.proofs/plan-of over this branch's reach graph and inputs, every step that reaches a process kept, the generative
   check's keys left to the shards), :bound seon.proofs/step-bounds' (every step has one), :binary? seon.proofs/step-needs-binary?; a request naming tests or namespaces (names) runs only the
   steps it names among them (bin/prove --root PORT seon.config-test config), as the plain bin/prove NS runs none; :missing, the steps with no digest here (one naming a
   function the program lacks; health, keyed by a base tree no branch holds); :build {:tree :needed?}, needed when a process
@@ -1697,8 +1697,7 @@
         ;; every step's bound (seon.proofs/step-bounds: one never measured takes the largest measured median), from every check
         ;; step's median, read once when a step runs
         bounds (if (seq run) (proofs/step-bounds run (fx/typical-ms (vec (keys proofs/check-steps)))) {})
-        steps (into {} (for [s run] [s (cond-> {:digest (get (:steps p) s) :binary? (proofs/step-needs-binary? s) :bound (bounds s)}
-                                         (proofs/machine-steps s) (assoc :alone? true))]))]
+        steps (into {} (for [s run] [s {:digest (get (:steps p) s) :binary? (proofs/step-needs-binary? s) :bound (bounds s)}]))]
     (if-let [u @unread]
       {:unread u}
       {:process process :steps steps :mg mg :missing (vec (:missing p)) :deferred (vec (remove process (:deferred sel)))

@@ -22,7 +22,7 @@ The sites where the owner allowed time to decide: the delayed insert, the one ti
 
 The check harness (`seon.check`, `seon.e2e`) and the tests are read too, so a wait there that stands for an event is the event instead ([machine](machine.md#builds-and-checks)).
 - `seon.check/scale-work`: the window between its readings of memory and footprints (`:seon.config.check/sample-ms`); nothing waits on a reading.
-- `seon.check/backpressure`, `seon.check/scale`, `seon.check/idle`: the window over which a check measures that something does not happen, or what it costs (`:seon.config.check/hold-ms`, `:seon.config.check/pages-ms`, idle's argument).
+- `seon.check/idle`: the window over which a check measures that something does not happen, or what it costs (`:seon.config.check/hold-ms`, `:seon.config.check/pages-ms`, idle's argument).
 - `seon.check/ping`, `seon.check/system-check`: Flow's ping bounded by `:seon.config.check/ping-ms`; a proc that has not taken its control message is recorded `:blocked` (a missing expected proc is `:no-answer`).
 
 ## Time decides (a test's subject)

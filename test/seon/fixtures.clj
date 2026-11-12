@@ -187,31 +187,6 @@
            :replies {"a" [(apply calls "Each fK adds K." "(in-ns 'app.m)" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ x " k ")"))))]
                      "b" [(apply calls "Each fK adds K, other way round." "(in-ns 'app.m)" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ " k " x)"))))]}}})
 
-(defn swarm-specs
-  "n tasks over 5 shared definitions: task sK rewrites app.sw/v(K mod 5) to add (K mod
-  5) in its own text (so two tasks on one var conflict) and proves it."
-  {:malli/schema [:=> [:cat pos-int?] [:vector :map]]}
-  [n]
-  (into (vec (for [j (range 5)] {:var (str "v" j) :ns 'app.sw :stub (defn1 (str "v" j) "0")}))
-        (for [k (range n) :let [j (mod k 5)]]
-          {:name (str "s" k) :ns 'app.sw :proofs #{(symbol "app.proofs" (str "s" k "-test"))}
-           :proof (str "(deftest s" k "-test (is (= " (+ 100 j) " (app.sw/v" j " 100))))")
-           :plan (str "Make `app.sw/v" j "` add " j "; its proof is `app.proofs/s" k "-test`.")})))
-
-(defn- swarm-reply
-  "Work task sK's scripted reply: a conflict main brought onto its branch (a work agent merges main
-  every turn it moved, seon.turn/work!) is resolved keeping its own side, as a work agent does
-  before it can be done, then its definition is written. Whether a conflict meets a task's work
-  agent or its merge agent is the order main's merges came in (swarm red once, 2026-10-31: sw/s5's
-  second run met s0's v0 and, never resolving it, ran to its cap); both resolve it."
-  {:malli/schema [:=> [:cat :string] [:maybe :seon.model/script-reply]]}
-  [nm]
-  (when-let [k (and (str/starts-with? nm "s") (parse-long (subs nm 1)))]
-    (let [j (mod k 5)]
-      (calls "Keep my side of a conflict main brought, then rewrite in my own words."
-             "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :ours))"
-             "(in-ns 'app.sw)" (defn1 (str "v" j) (str "(+ x " j (str/join (repeat (quot k 5) " 0")) ")"))))))
-
 (def ^:private generic
   "The scripted model's reply by task kind (from the name): a merge agent takes main's side of
   every unmerged entry; a design agent improves the plan and waits."
@@ -405,7 +380,7 @@
 
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one
-  repeats); a swarm task's reply is generated from its index; a merge or design task
+  repeats); a merge or design task
   without a script gets the generic reply of its kind; any other task, a message without a call."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [task turn]}]
@@ -413,7 +388,6 @@
     (if-let [rs (or (get all-replies task) (get all-replies nm))]
       (nth rs (min turn (dec (count rs))))
       (or (some (fn [[suffix r]] (when (str/ends-with? nm suffix) r)) generic)
-          (swarm-reply nm)
           (says "No script for this task.")))))
 
 ;; the curated session is read from its own file once per call (small), never held
