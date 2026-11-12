@@ -56,7 +56,7 @@ A caller outside root's procs (the server, a test, the dashboard) reaches root t
 
 A branch has at most one live agent, and root refuses a spawn past `:seon.config.root/max-agents` live agents: both are refused spawns the api answers, recorded on the task.
 
-The reconciler writes a refusal on the task (```seon.task/refused-tx```, outcome `:refused`) and asks again only once main moves. A holder whose own task is already judged is stopped, and its stop asks the refused start again (```seon.reconcile-test/a-refused-start-is-asked-again-when-its-holder-ends```); a holder still working is never stopped for another. The api refuses `:collect` while any agent is live ([storage](storage.md#collection)).
+The reconciler writes a refusal on the task (```seon.task/refused-tx```, outcome `:refused`) and asks again only once main moves. A process's end is a fact on main (`:seon.process/ended-ms`, written by ```seon.task/agent-tx```), and a commit holding one asks every refused start again, whoever held the branch: the task's own agent still ending after a wake (```seon.reconcile-test/a-wake-refused-by-its-own-ending-process-asks-again-at-its-end```), or a holder whose own task is already judged, which is stopped so that it ends (```seon.reconcile-test/a-refused-start-is-asked-again-when-its-holder-ends```); a holder still working is never stopped for another. The api refuses `:collect` while any agent is live ([storage](storage.md#collection)).
 
 `:spawn` is answered `{:id}` at the agent's hello, so what is sent next reaches a ready agent. An agent that ends first answers that end instead (`:seon.agent/died`, `:seon.agent/failed`, `:seon.system/ended`), exactly once, and the reconciler takes it as a death, not a refusal.
 

@@ -1683,13 +1683,44 @@
         [st outs3] (r/reconciler-proc st :answers {:tag (:tag w) :r {:ok true}})
         [db2 ops2] (commit db (get-in w [:req :req :tx-data]))
         [st outs4] (main st db2 ops2)
-        ;; the holder's end, after the refusal: root answers the stop
-        [_ outs5] (if k (r/reconciler-proc st :answers {:tag (:tag k) :r {:killed :a-a}}) [st {}])]
+        ;; root answers the stop: an answer is no fact, and asks nothing again
+        [st outs5] (if k (r/reconciler-proc st :answers {:tag (:tag k) :r {:killed :a-a}}) [st {}])
+        ;; the holder's end, after the refusal: root records its process ended (seon.task/agent-tx's :seon.process/ended-ms)
+        [db3 ops3] (commit db2 [{:seon.process/id "p-a-a" :seon.process/ended-ms 1}])
+        [_ outs6] (main st db3 ops3)]
     (is (= ["demo/b"] (spawns outs)) "b is asked for")
     (is (= [:a-a] (kills outs2)) "refused by a done task's agent: that agent is stopped")
     (is (= [] (spawns outs3)) "the write's answer starts nothing")
     (is (= [] (spawns outs4)) "nor does the refused answer's own commit")
-    (is (= ["demo/b"] (spawns outs5)) "the holder's end: b asks again, nothing else having moved main")))))
+    (is (= [] (spawns outs5)) "nor the stop's answer: it is no fact")
+    (is (= ["demo/b"] (spawns outs6)) "the holder's end, a fact on main: b asks again, nothing else having moved main")))))
+
+;; docs/reconcile.md#a-task-holds-how-its-work-ended (context's worktree run, 2026-11-12 18:01): a task told and woken while its own
+;; agent's process is still ending is refused, its branch held by that process; nothing is stopped (its task is told, not done), and
+;; it asked again only when main moved for another reason: it stood :running/:refused for an hour. The process's end is a fact on
+;; main (:seon.process/ended-ms), and a commit holding one lets a refused start ask again.
+;; Estimate: as its neighbour: 1 test-branch! x 1M, 1 db-of x 0.5M, three commits and the reconciler's steps ~0.5M ~ 2,000,000 ticks
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-wake-refused-by-its-own-ending-process-asks-again-at-its-end
+  (ts/test-branch! (fn [_ conn]
+  (let [commit (fn [db tx] (let [rep (d/with db tx)] [(:db-after rep) (pdb/report->tx rep)]))
+        main (fn [st db ops] (r/reconciler-proc st :main (assoc (ts/commit-of conn db) :ops ops)))
+        spawns (fn [outs] (vec (keep #(when (= :spawn (get-in % [:req :op])) (get-in % [:req :opts :task])) (:to-api outs))))
+        why "branch :demo/a is held by live agent a-a working demo/a: its seon_done or an end frees it"
+        db (db-of [(decl "a")])
+        [st outs] (main (r/reconciler-proc {:boot "boot-1" :conn conn}) db [])
+        asked (first (filter #(= :spawn (get-in % [:req :op])) (:to-api outs)))
+        ;; refused by its own agent, whose task (this one) is no done task: nothing is stopped
+        [st outs2] (r/reconciler-proc st :answers {:tag (:tag asked) :r (contract/error :seon.system/refused 'seon.system/spawn! why {:branch :demo/a :agent :a-a :task "demo/a"})})
+        w (first (filter #(= :write (get-in % [:req :op])) (:to-api outs2)))
+        [st _] (r/reconciler-proc st :answers {:tag (:tag w) :r {:ok true}})
+        [db2 ops2] (commit db (get-in w [:req :req :tx-data]))
+        [st outs4] (main st db2 ops2)
+        [db3 ops3] (commit db2 [{:seon.process/id "p-a-a" :seon.process/ended-ms 1 :seon.process/exit 0}])
+        [_ outs5] (main st db3 ops3)]
+    (is (= ["demo/a"] (spawns outs)) "a is asked for")
+    (is (not-any? #(= :kill (get-in % [:req :op])) (:to-api outs2)) "its own agent is not stopped: its task is not done")
+    (is (= [] (spawns outs4)) "the refused answer's own commit asks nothing again")
+    (is (= ["demo/a"] (spawns outs5)) "its process's end, a fact on main: a asks again")))))
 
 ;; Estimate: 1 test-branch! x 1M (a pointer write, connect, release, delete); 1 db-of x 0.5M (test-db fork 0.1M + ~4 tasks x 60k create-tx + execution and boot transacts 0.1M) ~ 2,000,000 ticks
 (deftest ^{:seon.test/estimate {:ticks 2000000}} a-start-refused-by-a-working-agent-stops-nothing
