@@ -3,7 +3,7 @@
   Writes go to the agent's own branch; root sees them when the branch merges, and a
   failure at the run's end (root's judge reads the branch)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.proofs :as proofs] [seon.turn :as turn] [seon.ctx.status :as status] [seon.ctx] [seon.contract :as contract] [seon.db :as pdb] [datahike.api :as d]))
+  (:require [seon.contract :refer [defn defn-]] [seon.agent :as agent] [seon.print :as print] [seon.task :as task] [seon.proofs :as proofs] [seon.turn :as turn] [seon.ctx.status :as status] [seon.ctx] [seon.contract :as contract] [seon.db :as pdb] [seon.learn :as learn] [datahike.api :as d]))
 
 (defn current
   "The task this agent works, as data (:seon.task/task)."
@@ -16,6 +16,16 @@
   each turn of its run is sent after the help page, the form a cut of it reads its rest through."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
   [] (when-let [t (current)] (status/task-data (agent/db) t (task/task-cites (agent/db) (:seon.task/id t)))))
+
+(defn run
+  "Task id's last run, folded (seon.learn/run): each turn with what it read, the vars its final definitions used, and what it
+  lost (the waste rows, by producer), read from its agent's branch. What a refine reads first. Answers
+  :seon.db/unresolved when the branch is gone. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.task/id] [:or :map :seon.db/unresolved]]}
+  [id]
+  (let [a (:seon.task/agent (d/entity (agent/db) [:seon.task/id id]))
+        db (pdb/at (:store-conn @agent/state) (agent/db) {:branch (pdb/on-main (pdb/main-branch (:cfg @agent/state)) (:seon.agent/branch a))})]
+    (if (contract/error? db) db (learn/run db (:seon.agent/key a)))))
 
 (defn update!
   "clojure.core/update on a content member of this agent's task (:seon.task/plan,

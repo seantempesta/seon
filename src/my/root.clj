@@ -420,9 +420,8 @@
   [sys id]
   (let [a (:seon.task/agent (d/entity @(:conn sys) [:seon.task/id id]))
         db (:db @(root/branch-db sys (:seon.agent/branch a)))
-        turns (learn/turns-of db (:seon.agent/key a) {})
-        rows (learn/waste turns (learn/final-symbols turns))]
-    {:turns (count turns) :rows rows :summary (learn/summary rows)}))
+        {:keys [turns waste summary]} (learn/run db (:seon.agent/key a))]
+    {:turns (count turns) :rows waste :summary summary}))
 
 (defn first-moves!
   "Score the first move a model makes on each task of ids (task ids on main): per task, its

@@ -118,7 +118,7 @@
                   {})
         turns (learn/turns-of db k shown)]
   (agent/write-end! {:outcome outcome :reason reason :error error
-                     :waste (learn/summary (learn/waste turns (learn/final-symbols turns)))})
+                     :waste (learn/summary (learn/waste turns (learn/final-symbols db turns)))})
   ;; what was not measured is absent, never 0: an outside agent counts no model calls and no loop time
   (cond-> {:outcome outcome :results {} :uncontracted #{}}
     turn (assoc :turns turn :model-calls model-calls)

@@ -1037,7 +1037,8 @@
       :seon.task/after #{(:seon.task/id t)}
       :seon.task/proofs refine-proofs
       :seon.task/plan (str "Refine the task `" (:seon.task/id t) "`, which has just ended, as " refine-section " says: read the run that "
-                           "worked it (its agent " (:seon.task/agent t) " on branch " br ", read with (my.db/at {:branch " br "})), then make the task "
+                           "worked it (its agent " (:seon.task/agent t) " on branch " br "), folded by my.task/run, called ``(my.task/run \"" (:seon.task/id t) "\")``: each turn "
+                           "with what it read, the vars its final definitions used (the change site), and what it lost; then make the task "
                            "better for whoever works it next: its plan (first what blocked the run, then what it learned and did not use), what it cites, "
                            "and the wiki sections it pulled; and keep that run as an example, the turns worth learning from, by "
                            "(seon.ctx.session/session-tx db key id) less the transactions of the turns that taught nothing, written with my.db/transact!. "

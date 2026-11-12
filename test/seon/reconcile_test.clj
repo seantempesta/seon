@@ -1872,12 +1872,15 @@
   ;; docs/tasks.md#a-refine-curates-its-own-task (the owner, 2026-11-12: "It has proofs and a needs pointing at the task and the normal
   ;; task machinery should just work"): a task's end writes its refine, a :work task after it on a branch of its own, proved by what it
   ;; edits and the task's own proofs, released; and the refine's review, its merge step, held for a session
-  (let [db (with-refine-section (db-of [(decl "a")]))
+  (let [;; the call a refine reads its run with, as a store holding the program holds it
+        db (d/db-with (with-refine-section (db-of [(decl "a")])) [{:var/name 'my.task/run}])
         tx (task/refine-tx db "demo/a")
         db1 (d/db-with db tx)
         r (task/task db1 "demo/a-refine")
         v (task/task db1 "demo/a-refine-review")]
     (is (seq tx) "an ended task gets its refine")
+    (is (contains? (set (keep task/cited-name (task/task-cites db1 "demo/a-refine"))) 'my.task/run)
+        "its page cites the one call that reads the run folded (my.task/run): the loop task's refine spent 24 turns writing that read")
     (is (= :work (:seon.task/kind r)) "a task like any: judged by its proofs")
     (is (= #{"demo/a"} (:seon.task/after r)) "after the task it refines: it starts when that one has ended")
     (is (empty? (:seon.task/needs r)) "it needs nothing: no result of the task is wanted")
