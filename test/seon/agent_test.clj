@@ -655,6 +655,17 @@
         (str "red as recorded, with its failure, nothing run and no child forked " (pr-str judge)))
     (is (= [:pass 1] (:value other)) (str "another's red runs, and is green: " (pr-str other)))))
 
+(deftest an-agents-green-records-what-it-read
+  ;; docs/source.md#tests-run-by-reach: a green an agent's run stores is keyed by what it read (seon.proofs/reads-key): the
+  ;; functions it called and itself, at the digests of the agent's reads index, beside its verdict as reads.edn, so a later plan
+  ;; reuses it while none of those moved (seon.proofs/read-digests). Red before: an agent's run wrote no reads
+  (let [[_ green reads] (in-agent ["(ns reads-test (:require [clojure.test :refer [deftest is]])) (defn f [x] (inc x)) (deftest r (is (= 2 (f 1))))"
+                                   "(select-keys (my.agent/prove) [:results])"
+                                   "(some-> (get (seon.fx/held-reads ['reads-test/r]) 'reads-test/r) first :reads keys set)"]
+                                  {:proofs #{'reads-test/r}})]
+    (is (= {:results '{reads-test/r :pass}} (:value green)) (pr-str green))
+    (is (contains? (set (:value reads)) 'reads-test/r) (str "its green names what it read, itself among them: " (pr-str reads)))))
+
 (deftest a-test-run-writes-its-results-on-the-branch
   ;; task seon.proofs/test-results-are-a-few-facts (R2a): an agent's run of its proofs records each
   ;; result as facts on the test's var entity on its branch (seon.proofs/result-tx, beside the cache):

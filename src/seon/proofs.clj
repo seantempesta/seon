@@ -92,7 +92,7 @@
   seon.check mode functions its body runs, whose reach is the step's (seon.program/
   graph-index with roots), with the checkout's :env (bin/, native/, resources/, the pins:
   the binary's other inputs) in every digest. laws (bin/laws) reads the whole tree and has no
-  functions: its key is the tree's digest (step-digests). agent-tests' is what it reaches and the digests of the tests it runs (agent-tests-digest), so an edit that reaches none of them boots nothing (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent); it names as roots the functions its eval names in a string. health (what the checkout caused since its
+  functions: its key is the tree's digest (step-digests)., so an edit that reaches none of them boots nothing (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent); it names as roots the functions its eval names in a string. health (what the checkout caused since its
   base, seon.problems/caused-split over the program and the wiki, booted on the checkout's source)
   is keyed by the tree and its base's tree (:caused): a moved var leaves the citations of docs/
   dead, which no function's reach shows, and the same tree against another base is another answer.
@@ -102,7 +102,7 @@
   its own: its keys are one per pure contracted function (mg-roots) and the schema registry (mg-registry),
   each digested by what it reaches and run in bin/test's shards beside the tests (mg-run); the step runs
   them all, in the binary, for bin/check mg-check and the full run (docs/checks.md#the-generative-check-is-per-function)."
-  '{"laws" :tree "agent-tests" [seon.check/agent-tests seon.agent/run-tests-forked seon.repl/page-walk] "health" :caused "lmdb-kill" :pins "lmdb-lock" :pins "lmdb-crash" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
+  '{"laws" :tree "health" :caused "lmdb-kill" :pins "lmdb-lock" :pins "lmdb-crash" :pins "forks" :pins "contracts" [seon.check/contracts] "test-inputs" [seon.check/test-inputs] "mg-check" :mg "fx" [seon.check/fx]
     "config" [seon.check/config-check] "system" [seon.check/system-check] "mcp" [seon.check/mcp-proof]
     "agent-checks" [seon.check/agent-checks seon.agent/prove! seon.agent-proc/agent-frame seon.prove/prove-proc seon.program/program-differs]
     "threads" [seon.check/threads-check] "instrument" [seon.check/instrument] "record" [seon.check/record]
@@ -239,21 +239,6 @@
   does but binary-free's, so a run of only those builds nothing and seeds nothing."
   {:malli/schema [:=> [:cat :string] :boolean]}
   [step] (boolean (and (contains? check-steps step) (not (binary-free step)))))
-
-(defn agent-tests-sample
-  "The tests of digests ({test digest}) the agent-tests step runs: the n of lowest digest, a choice that is the same for the same tests and moves as they do (docs/checks.md#modes)."
-  {:malli/schema [:=> [:cat pos-int? [:map-of :qualified-symbol :string]] [:set :qualified-symbol]]}
-  [n digests]
-  (into #{} (map key) (take n (sort-by (juxt val (comp str key)) digests))))
-
-(defn agent-tests-digest
-  "The agent-tests step's key: dg, the digest of what the step's own code reaches, with the digest of each test it runs, agent-tests-sample's n of idx's
-  ({test {:digest :process?}}, seon.program/graph-index's) that reach no process, so it moves when one of them or the step does and no other edit reaches it
-  (docs/checks.md#modes)."
-  {:malli/schema [:=> [:cat :string pos-int? :map] :string]}
-  [dg n idx]
-  (let [digests (into {} (for [[t {:keys [digest process?]}] idx :when (not process?)] [t digest]))]
-    (lib/digest (apply str dg (for [t (sort-by str (agent-tests-sample n digests))] (str "\n" t " " (digests t)))))))
 
 (defn step-digests
   "Of check-steps, {:digests {step digest} :missing [step ...]}: the reach digests (digests-of,
@@ -565,11 +550,6 @@
         ;; both its own code's digest and its tests' without the tree: it runs each in a fork of an agent, which an edit to a file a test scans does not change
         ;; it reads test/'s files themselves, which the code a step's key takes leaves out
         steps (cond-> steps (get steps "test-inputs") (update "test-inputs" #(lib/digest (str % "\n" (:tree inputs)))))
-        steps (cond-> steps (get steps "agent-tests")
-                (assoc "agent-tests" (let [in (assoc inputs :tree "" :code "")]
-                                       (agent-tests-digest (:digest (get (program/graph-index graph in (select-keys check-steps ["agent-tests"])) "agent-tests"))
-                                                           (cfg/value :seon.config.proofs/agent-tests-sample)
-                                                           (program/graph-index graph in nil)))))
         process (into (if tests? process #{}) (keep (fn [[k v]] (when (:process? v) k))) step-idx)
         named? (or (true? all?) (seq names))
         merge? (= :merge all?)
@@ -637,20 +617,20 @@
   Each measure opens its own epoch of contracted calls (seon.profile/begin!), so a caller's epoch
   open around an in-process run counts from the last test on (bin/test's shards open none). A var for which (skip? v) holds,
   asked just before it would start, is not run: another run has its verdict now (run-tests!'s reused)."
-  {:malli/schema [:=> [:cat :symbol [:sequential :any] [:maybe pos-int?] [:maybe [:map-of :qualified-symbol pos-int?]] :seon.host/fn :seon.host/fn] :nil]}
-  [n vars ticks budgets done skip?]
+  {:malli/schema [:=> [:cat :symbol [:sequential :any] [:maybe pos-int?] :seon.host/fn :seon.host/fn] :nil]}
+  [n vars ticks done skip?]
   (let [each (t/join-fixtures (get @t/each-fixtures n []))
-        ;; a test's own budget: its history's (budgets, seon.fx/test-budgets), raised to the
-        ;; ^{:seon.test/ticks n} on its deftest (in its digest, being its source), never past ticks
-        budget (fn [v] (when ticks (min ticks (max (get budgets (test-symbol (str v)) ticks) (or (:seon.test/ticks (meta v)) 0)))))
+        ;; a test's budget: ten times the ticks its deftest states (^{:seon.test/estimate {:ticks n}}, in its digest, being its
+        ;; source), never past ticks; a test that states none runs under ticks (docs/merging.md#a-tests-tick-budget)
+        budget (fn [v] (when ticks (if-let [e (:ticks (:seon.test/estimate (meta v)))] (min ticks (* 10 e)) ticks)))
         one (fn [v]
               (try (jolt.host/run-interruptible (jolt.host/make-interrupt) #(t/test-var v) (budget v))
                    (catch Throwable e
                      (if-let [spent (:jolt/ticks-spent (ex-data e))]
                        (t/do-report {:type :error :var v :seon.error/type :seon.test/ticks-spent :ticks spent :budget (budget v)
-                                     :message (str "the test spent its budget of " (budget v) " engine ticks (work done, not time): max(floor, factor x its median green ticks) capped by the config's test-ticks "
-                                                   "(docs/merging.md#a-tests-tick-budget). A test that never ends, or more work than one test may do: fix the loop, or, for work it needs, "
-                                                   "mark the deftest ^{:seon.test/ticks N}")})
+                                     :message (str "the test spent its budget of " (budget v) " engine ticks (work done, not time): ten times the ticks its estimate states, or the config's test-ticks "
+                                                   "(docs/merging.md#a-tests-tick-budget). Ten times over its estimate is the finding: fix the work, or, when the estimate was "
+                                                   "wrong, state on the deftest what it must do, ^{:seon.test/estimate {:ticks N}}, worked from first principles")})
                        (throw e)))))
         ;; a test whose run threw past its budget is not done: it stays unreported (run-tests!)
         ;; read before the next test's measure opens its epoch: the test's own contracted calls
@@ -677,8 +657,8 @@
   since this run's plan) is this test's result, :reused true, and the test is not run. Answers {test result}; a test that never reported, because its namespace's
   run threw (a fixture), is an :error result (:unreported true: no verdict of its own, never
   stored) and an :error report carrying that throw's message and data. Each test runs within its budget of engine ticks of work of its own (Jolt's
-  run-interruptible): the one from budgets ({test ticks}, seon.fx/test-budgets: from the test's own
-  green history, docs/merging.md#a-tests-tick-budget) else ticks, and never more than ticks (nil or 0:
+  run-interruptible): ten times the ticks its deftest's ^{:seon.test/estimate {:ticks n}} states, else ticks, and never more
+  than ticks (docs/merging.md#a-tests-tick-budget; nil or 0:
   unbounded). The budget used is on the result (:budget). A test's verdict is a function of the test
   alone, never of what ran before it in the run: one bound wherever it runs (bin/test, an agent's turn,
   the judge). A test past it is an :error report of the typed :seon.test/ticks-spent naming it,
@@ -691,14 +671,11 @@
                              [:map-of :qualified-symbol :map]]
                   [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?]]
                    [:map-of :qualified-symbol :map]]
-                  [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?] [:maybe [:map-of :qualified-symbol pos-int?]]]
-                   [:map-of :qualified-symbol :map]]
-                  [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?] [:maybe [:map-of :qualified-symbol pos-int?]] [:maybe :seon.host/fn]]
+                  [:=> [:cat [:sequential :qualified-symbol] [:map-of :qualified-symbol [:maybe :string]] :seon.host/fn [:maybe nat-int?] [:maybe :seon.host/fn]]
                    [:map-of :qualified-symbol :map]]]}
-  ([tests digests note!] (run-tests! tests digests note! nil nil nil))
-  ([tests digests note! ticks] (run-tests! tests digests note! ticks nil nil))
-  ([tests digests note! ticks budgets] (run-tests! tests digests note! ticks budgets nil))
-  ([tests digests note! ticks budgets reused]
+  ([tests digests note!] (run-tests! tests digests note! nil nil))
+  ([tests digests note! ticks] (run-tests! tests digests note! ticks nil))
+  ([tests digests note! ticks reused]
   (let [tset (set tests) ticks (when (and ticks (pos? ticks)) ticks)]
     (into {} (for [[n ts] (group-by (comp symbol namespace) tests)
                    :let [counts (volatile! {}) ran (volatile! {}) out (java.io.StringWriter.)
@@ -720,7 +697,7 @@
                                                                                   (note! {:seon.test/report m :test v}))
                                                          nil))
                                                      (binding [t/*test-out* out] (report m)))]
-                                  (try (test-vars n (keep #(ns-resolve n (symbol (name %))) ts) ticks budgets done!
+                                  (try (test-vars n (keep #(ns-resolve n (symbol (name %))) ts) ticks done!
                                                   ;; a green another run stored since this run's plan, looked up just before the test would
                                                   ;; start: reused, never run again (its result names the run that wrote it)
                                                   (fn [tv] (let [v (test-symbol (str tv))]

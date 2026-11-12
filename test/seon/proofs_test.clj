@@ -260,7 +260,7 @@
         asked (atom [])
         ;; another run stored twice-test's green at its digest after this run was planned
         reused (fn [t d] (swap! asked conj [t d]) (when (= t 'app.pv-calc-test/twice-test) {:digest d :pass 1 :fail 0 :error 0}))
-        ran (proofs/run-tests! tests dg #(swap! notes conj %) nil nil reused)
+        ran (proofs/run-tests! tests dg #(swap! notes conj %) nil reused)
         started (set (keep :seon.test/started @notes))]
     (is (= '[[app.pv-calc-test/add-test "d-add"] [app.pv-calc-test/twice-test "d-twice"]] (sort-by str @asked)) "each test asked for at its digest")
     (is (started 'app.pv-calc-test/add-test) "a test with no stored green runs")
@@ -315,22 +315,24 @@
     (is (pos-int? (:ticks (unbounded 'app.pv-budget-test/after))) "an unbounded run (bin/test with 0) counts ticks too")
     (is (pos-int? (:ticks (ran 'app.pv-budget-test/after))) "each result carries the ticks it did")))
 
-(deftest a-tests-budget-is-its-own-and-its-mark-raises-it
-  ;; 2026-10-29: a runaway test ends within its own history's budget, typed and naming it; a test marked
-  ;; ^{:seon.test/ticks n} may run n (never over the cap); the budget used is on its result
+;; docs/merging.md#a-tests-tick-budget: a test's budget is ten times the ticks its deftest states it should cost (the owner,
+;; 2026-11-12: measured over ten times the estimate stops the work), never past the cap; a test that states none runs under the
+;; cap, and no history is read. Red before: the budget was max(4e9 floor, 10 x the median of its greens), whatever it stated
+(deftest a-tests-budget-is-ten-times-its-stated-estimate
   (record (ts/test-db) 'user "(ns app.pv-own-budget-test (:require [clojure.test :refer [deftest is]]))"
-          'app.pv-own-budget-test "(deftest spins (loop [] (recur)))"
-          'app.pv-own-budget-test "(deftest ^{:seon.test/ticks 3000000} marked (loop [i 0] (when (< i 1000000) (recur (inc i)))) (is true))"
-          'app.pv-own-budget-test "(deftest ^{:seon.test/ticks 999999999999} marked-over-the-cap (loop [] (recur)))")
-  (let [notes (atom [])
-        ts '[app.pv-own-budget-test/spins app.pv-own-budget-test/marked app.pv-own-budget-test/marked-over-the-cap]
-        ran (proofs/run-tests! ts {} #(swap! notes conj %) 50000000 (zipmap ts (repeat 200000)))]
-    (is (= 200000 (:budget (ran 'app.pv-own-budget-test/spins))) "the budget it ran under, from its history")
-    (is (= 1 (:error (ran 'app.pv-own-budget-test/spins))) "past it: red, named")
-    (is (< (:ticks (ran 'app.pv-own-budget-test/spins)) 2000000) "after about its budget's work, not the cap's")
-    (is (proofs/green? (ran 'app.pv-own-budget-test/marked)) "a marked test runs past its history's budget")
-    (is (= 3000000 (:budget (ran 'app.pv-own-budget-test/marked))))
-    (is (= 50000000 (:budget (ran 'app.pv-own-budget-test/marked-over-the-cap))) "and never past the cap")))
+          'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 100000}} estimated-spins (loop [] (recur)))"
+          'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 3000000}} within (loop [i 0] (when (< i 1000000) (recur (inc i)))) (is true))"
+          'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 999999999999}} estimated-over-the-cap (loop [] (recur)))"
+          'app.pv-own-budget-test "(deftest stated-none (is true))")
+  (let [ts '[app.pv-own-budget-test/estimated-spins app.pv-own-budget-test/within app.pv-own-budget-test/estimated-over-the-cap app.pv-own-budget-test/stated-none]
+        ran (proofs/run-tests! ts {} (fn [_]) 50000000)]
+    (is (= 1000000 (:budget (ran 'app.pv-own-budget-test/estimated-spins))) "ten times its estimate")
+    (is (= 1 (:error (ran 'app.pv-own-budget-test/estimated-spins))) "past it: red, named")
+    (is (< (:ticks (ran 'app.pv-own-budget-test/estimated-spins)) 5000000) "after about its budget's work, not the cap's")
+    (is (proofs/green? (ran 'app.pv-own-budget-test/within)) "a test inside ten times its estimate is green")
+    (is (= 30000000 (:budget (ran 'app.pv-own-budget-test/within))))
+    (is (= 50000000 (:budget (ran 'app.pv-own-budget-test/estimated-over-the-cap))) "and never past the cap")
+    (is (= 50000000 (:budget (ran 'app.pv-own-budget-test/stated-none))) "a test that states none runs under the cap")))
 
 (deftest shards-are-dealt-by-measured-work
   ;; pure-tests 2026-10-23: dealt by count, the full run's shards ended 437, 397, 110 and 68 s
@@ -658,28 +660,6 @@
     (is (= :red (:seon.test/status (first (proofs/result-tx {} {'a/t (assoc red :ms 1 :ticks 1 :bytes 1)} {} {} {'a/t "d"})))))
     (is (:flaky (proofs/verdict "d" green (assoc red :failures []))) "green and red at one digest are flaky in the cache")))
 
-;; docs/checks.md#modes: an edit that reaches no test the agent-tests step runs boots nothing, so its key moves with them and with its own code only
-(deftest the-agent-tests-step-is-keyed-by-what-it-runs
-  (let [t (fn [d] {:digest d :process? false}) p (fn [d] {:digest d :process? true})
-        base (proofs/agent-tests-digest "step" 2 {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p1")})]
-    (is (= base (proofs/agent-tests-digest "step" 2 {'a/u (t "d2") 'a/t (t "d1") 'a/process (p "p1")})) "in any order, the same key")
-    (is (= base (proofs/agent-tests-digest "step" 2 {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p2")})) "a process test it does not run does not move it")
-    (is (not= base (proofs/agent-tests-digest "step" 2 {'a/t (t "d9") 'a/u (t "d2") 'a/process (p "p1")})) "a test it runs does")
-    (is (not= base (proofs/agent-tests-digest "step" 2 {'a/t (t "d1") 'a/process (p "p1")})) "so does one removed")
-    (is (not= base (proofs/agent-tests-digest "other" 2 {'a/t (t "d1") 'a/u (t "d2") 'a/process (p "p1")})) "and so does the step's own code")
-    (let [one (proofs/agent-tests-digest "step" 1 {'a/t (t "d1") 'a/u (t "d2")})]
-      (is (= one (proofs/agent-tests-digest "step" 1 {'a/t (t "d1") 'a/u (t "d3")})) "a test outside the sample does not move it")
-      (is (not= one (proofs/agent-tests-digest "step" 1 {'a/t (t "d1") 'a/u (t "d0")})) "and one that moves into the sample does"))))
-
-;; docs/checks.md#modes: the same tests choose the same sample, of the size asked, and a moved digest moves it
-(deftest the-agent-tests-sample-is-the-lowest-digests
-  (let [ds {'a/t "d3" 'a/u "d1" 'a/v "d2" 'a/w "d4"}]
-    (is (= '#{a/u a/v} (proofs/agent-tests-sample 2 ds)))
-    (is (= (proofs/agent-tests-sample 2 ds) (proofs/agent-tests-sample 2 (into (sorted-map-by #(compare (str %2) (str %1))) ds))) "in any order")
-    (is (= '#{a/w a/u} (proofs/agent-tests-sample 2 (assoc ds 'a/w "d0"))) "a digest that moves moves the choice")
-    (is (= (set (keys ds)) (proofs/agent-tests-sample 100 ds)) "fewer tests than the sample: all of them")))
-
-;; docs/merging.md#a-merge-runs-what-the-change-reaches: a few seconds stay one process; a gate's 751 s splits
 (deftest a-run-has-the-shards-its-work-is-worth
   (let [ts '[a/t a/u a/v a/w]]
     (is (= 1 (proofs/worth-shards ts 4 '{a/t 1000 a/u 1000 a/v 1000 a/w 1000} 30000)) "seconds of work: one")

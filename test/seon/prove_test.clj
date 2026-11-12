@@ -724,14 +724,14 @@
       (let [[_ o] (prove/ask-items st0 1 :batch {['app.l-test/a "da"] it ['app.l-test/b "db"] it ['app.l-test/c "dc"] it})]
         (is (= 3 (count (batches o))) "the load under it: as many as the workers allow")))))
 
-;; docs/merging.md#the-test-service: with max-cores and max-load unset, the shipped max-workers (8) is the bound; with no count
-;; set the machine's cores are
+;; docs/merging.md#the-test-service: with max-cores and max-load unset, the shipped max-workers, the machine's cores
+;; (#seon/cores), is the bound; with no count set the cores are too
 (deftest the-shipped-bound-holds-when-the-others-are-unset
   ;; the service's init takes the admission of the config in force (seon.prove/config-admission), whatever machine runs it
   (let [init (prove/prove-proc {:conn nil})
         st (proc0)
         [_ outs] (prove/ask-items st 1 :batch (into {} (for [i (range 10)] [[(symbol "app.s-test" (str "t" i)) (str "d" i)] {:agent :a1 :ms 5}])))]
     (is (= (prove/config-admission) (select-keys init [:workers :max-load])))
-    (is (= 8 (:workers st)) "the shipped max-workers")
-    (is (= 8 (count (batches outs)))))
+    (is (= (seon.config/value :seon.config.machine/cores) (:workers st)) "the shipped max-workers: the machine's cores")
+    (is (= (min 10 (:workers st)) (count (batches outs))) "ten items over that many workers, a share each"))
   (is (= {:workers 4} (prove/admission {:cores 4}))))

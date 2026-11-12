@@ -56,7 +56,6 @@ Sessions reach each other through files in the managing session's notes folder: 
 - **A message is one file of 10 lines or fewer.** Line 1 says what is needed: a tip to land (`LAND <branch> <sha>`), a ruling with the sender's pick, or a fact.
 - **Each session watches its own inbox** with a background command that exits when a file arrives, then reads it and starts the watcher again.
 - **The mailbox is the home of no fact:** what a message teaches goes into the wiki section or task entry that owns it.
-- **`mail/PROVING`** lists the proves running: at most two (AGENTS.md §3).
 
 ## No fan-out
 

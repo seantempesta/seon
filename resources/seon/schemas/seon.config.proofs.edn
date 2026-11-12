@@ -7,7 +7,6 @@
  :seon.config.proofs/results-evict-percent [:int {:min 0 :max 100 :seon.config/unit "percent" :description "How far under results-max-bytes a write past it takes the cache."}]
  :seon.config.proofs/shard-min-ms [:int {:min 1 :seon.config/unit "ms" :description "The least work a shard of an incremental run is worth."}]
  :seon.config.proofs/reuse-audit [:int {:min 0 :seon.config/unit "tests" :description "How many reused greens of each class (tests that start a process, tests that do not) a run runs again, chosen by the tree (seon.proofs/plan-of's :audit)."}]
- :seon.config.proofs/agent-tests-sample [:int {:min 1 :seon.config/unit "tests" :description "How many tests the agent-tests check runs through an agent."}]
  :seon.config.proofs/recent-verdicts [:int {:min 1 :seon.config/unit "verdicts" :description "How many of a test's newest greens its history holds."}]
  :seon.config.proofs/program-store [:string {:seon.config/place true :min 1 :seon.config/unit "path" :description "The plan's store of kept program dbs, a branch per git tree id (test-runner/program-db)."}]
  :seon.config.proofs/program-store-max-bytes [:int {:min 1 :seon.config/unit "bytes" :description "The kept program dbs' store on disk; past it the store is removed before it is opened and starts again from the run's tree."}]
