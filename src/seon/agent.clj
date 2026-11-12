@@ -1033,7 +1033,8 @@
                                     (swap! reports into @current)
                                     (reset! current []))
                       :else nil))
-        _ (binding [mr/*registry* (program/schema-registry (program/schema-changes (db)))]
+        ;; the branch's registry as the REPL binds it: the one held (branch-schemas), never derived again here
+        _ (binding [mr/*registry* (:registry (branch-schemas))]
             (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks))
         reports @reports
         counts (frequencies (map :type reports))]
