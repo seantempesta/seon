@@ -44,7 +44,7 @@
   (let [built (get-in (seon.program/binary-program) [:inputs :tree])
         pn (str "probe-" (random-uuid))
         out (str (seon.config/checkout) "/target/tmp/store-steps-" pn)
-        judged (fn [tree] (#'seon.system/judged-path built tree))
+        judged (fn [tree] (#'seon.system/judged-path built tree :all))
         stored? (fn [dg] (contains? (test-runner/read-results {"config" dg}) dg))
         run (fn [tree dg answer]
               (seon.fx/write-file {:req {:path (judged tree) :text (seon.edn/encode {:answer answer})}})

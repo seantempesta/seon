@@ -299,11 +299,18 @@
                          (let [blob (str/trim (:out (sh/sh "git" "-C" here "hash-object" "-w" "--stdin" :in (f (let [fl (java.io.File. (str here "/" path))] (if (.isFile fl) (slurp fl) ""))))))]
                            (git env "update-index" "--add" "--cacheinfo" (str "100644," blob "," path))))
                        (let [t (str/trim (git env "write-tree"))] (.delete (java.io.File. idx)) t)))
-        current (fn [from] (root/binary-current db {:inputs {:tree from}} tree g))
+        current (fn [from] (root/binary-current db {:inputs {:tree from}} tree {:graph g :scope :root}))
+        ;; what a process on a store without Seon's source runs (bin/check's roots, a binary test's): every var the binary holds
+        current-all (fn [from] (root/binary-current db {:inputs {:tree from}} tree {:graph g :scope :all}))
         tweak (fn [marker] (fn [text] (str/replace-first text marker (str marker " "))))]
     (is (nil? (current tree)) "the same tree")
     (is (nil? (current (built-with "test/seon/required_whole.clj" #(str % "\n;; a test changed\n")))) "a test's change: a process loads it from main")
-    (is (nil? (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form's change: the agent loads it from main")
+    (is (nil? (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))) "an agent-only form's change: root's agents load it from main")
+    ;; the land that hung 58 min (2026-11-12): bin/check's roots run on a store seeded with an example program, so their agents ran
+    ;; the binary's old seon.agent/test-child, which the plan judged current and never built
+    (let [r (current-all (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))]
+      (is (some #{'seon.agent/run-selection} (:reaches r)) (str "an agent-only form's change, for a process whose main holds no Seon source: not current " (pr-str r))))
+    (is (nil? (current-all (built-with "test/seon/required_whole.clj" #(str % "\n;; a test changed\n")))) "a test's change, for any process: the binary holds no test")
     ;; batch 90 (Point, 2026-11-12): the plan judged the binary current for a change root runs none of, built nothing, and each
     ;; test's system refused every spawn, judging the same two trees over its own store, which holds another program: one answer
     ;; for two trees, the one the plan judged over the tree's program, whatever db reads it after
@@ -316,8 +323,8 @@
       ;; rule (a), as bin/test reads it (the plan's out/build): a process test selected, and a build only for a binary not current
       (testing "bin/test builds target/seon for a root-side change and for nothing else"
         (is (seq (test-runner/build-text ['seon.agent-test/in-agent-sample] r)) "the root-side change builds")
-        (is (= "" (test-runner/build-text ['seon.agent-test/in-agent-sample] (current (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))))
-            "an agent-only change builds nothing")
+        (is (seq (test-runner/build-text ['seon.agent-test/in-agent-sample] (current-all (built-with "src/seon/agent.clj" (tweak "(defn run-selection")))))
+            "an agent-only change builds: a step's agents run the binary's code")
         (is (= "" (test-runner/build-text [] r)) "and no process test selected builds nothing")))
     (is (= ["reference-code/lmdb"] (:reaches (current (built-with "reference-code/lmdb" :pin)))) "a pin: not current")
     ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a candidate whose build input differs from the running binary's only in its runtime
@@ -331,8 +338,8 @@
     (is (= ["zz-unplaced.txt"] (:reaches (current (built-with "zz-unplaced.txt" (constantly "x"))))) "a path no rule places: not current")
     (is (nil? (current (built-with "claude_scratch/notes.md" (constantly "x"))))
         "a path the tree's id leaves out (:seon.config.source/tree-excludes, which no build reads) never makes a binary stale")
-    (is (= :binary-tree (:missing (root/binary-current db {} tree g))) "a binary that recorded no tree, against a main that holds one: unknown, never current")
-    (is (nil? (root/binary-current db {:inputs {:tree tree}} nil g)) "a main with no source fact: nothing known differs")))
+    (is (= :binary-tree (:missing (root/binary-current db {} tree {:graph g :scope :root}))) "a binary that recorded no tree, against a main that holds one: unknown, never current")
+    (is (nil? (root/binary-current db {:inputs {:tree tree}} nil {:graph g :scope :root})) "a main with no source fact: nothing known differs")))
 
 (deftest a-config-entry-writes-back-only-its-own-bytes
   ;; docs/source.md#a-program-file: the config file is one entity per entry, each form its exact text with its tags unread, and a write-back changes only what an entry changed
