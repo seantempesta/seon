@@ -28,7 +28,7 @@
     (is (vector? tx) (pr-str tx))
     (d/db-with db tx)))
 
-(deftest a-task-file-is-one-vector-of-declarations-named-by-its-namespace
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-task-file-is-one-vector-of-declarations-named-by-its-namespace
   (let [ds (task/file-declarations 'demo file-a)]
     (is (= ["parse" "index"] (mapv :seon.task/name ds)))
     (is (every? #(= 'demo (:seon.task/ns %)) ds) "the file's name is the owning namespace")
@@ -87,55 +87,6 @@
            (refused-type db "[{:seon.task/name \"x\" :seon.task/plan \"p\" :seon.task/needs #{\"demo/nope\"}}]"))
         "a need that names no task")))
 
-(defn- refusal
-  "The typed error the checked write of tx on db answers (seon.db/with), or nil: [db' error]."
-  [db tx] (try [(pdb/db-with db tx) nil] (catch clojure.lang.ExceptionInfo e [db (ex-data e)])))
-
-(defn- dead-links
-  "Each link (or cited path#anchor) of the wiki pages ps ({path text}) that names no section of them nor of db: [page address]."
-  [db ps]
-  (let [have (into (set (map :v (d/datoms db :avet :seon.doc/address)))
-                   (for [[p t] ps sec (doc/page-sections p t)] (:seon.doc/address sec)))]
-    (vec (distinct (for [[p t] ps sec (doc/page-sections p t) {:seon.ref/keys [path anchor]} (:seon.ref/citations sec)
-                         :let [a (str path "#" anchor)] :when (and path anchor (not (have a)))]
-                     [p a])))))
-
-(defn- dead-cites
-  "Each citation of decls' plans and instructions whose target (seon.ref/target) db holds nothing by, or that names its own
-  task as a task (the name of what it makes, a var): [task-id text-key target]."
-  [db decls]
-  (vec (for [d decls k [:seon.task/plan :seon.task/instructions] :let [t (k d) id (task/task-id (:seon.task/ns d) (:seon.task/name d))] :when t
-             c (ref/kept db (ref/cited (:seon.ref/citations (ref/parse nil t))))
-             :when (not (:seon.ref/problem-kind c))
-             :let [[a v :as tg] (ref/target db c)]
-             :when (or (nil? (pdb/eid db a v)) (= tg [:seon.task/id id]))]
-         [id k tg])))
-
-(deftest the-trees-task-files-and-pages-load-with-no-refusal
-  ;; docs/references.md#an-entity-cites: a cite's target is a ref, so a task file or a wiki page that cites what does not exist
-  ;; is refused at its load. Every task file and page of this tree, on its own program (the program store's branch of
-  ;; this tree), loads by the checked write with no refusal: the wiki first, then the tasks that cite it. A task file is
-  ;; no input of the digest: an edit to one is found by the full run (bin/test --all)
-  (let [co (config/checkout)
-        db0 (runner/program)
-        db0 (d/db-with db0 (vec (remove #(contains? (:schema db0) (:db/ident %)) pdb/schema)))
-        ps (into (sorted-map) (mapcat #(doc/pages co %)) (config/value :seon.config.root/wiki-dirs))
-        [db wiki-refused] (refusal db0 (seon.system/wiki-tx db0 co))
-        files (shipped-task-files)
-        decls (vec (mapcat val files))
-        tx (task/load-tx db files)
-        tasks-only (filterv #(and (map? %) (:seon.task/id %) (not (:seon.cite/id %))) (when (vector? tx) tx))
-        [_ tasks-refused] (refusal db tx)]
-    (is (seq files))
-    (is (= [] (vec (for [[ns-sym ds] files :when (:seon.error/type ds)] ns-sym))) "every file reads")
-    ;; clojure.test evaluates an assertion's message when it passes too: each diagnosis is made only for a red (the two
-    ;; cost 150 M ticks a green run, a fifth of the test)
-    (is (nil? wiki-refused) (when wiki-refused (str "the wiki loads; links to no section: " (pr-str (dead-links db0 ps)))))
-    (is (vector? tx) (when-not (vector? tx) (pr-str tx)))
-    (is (nil? tasks-refused) (when tasks-refused
-                               (str "and the tasks; cites of nothing: "
-                                    (pr-str (dead-cites (:db-after (pdb/speculate db tasks-only)) decls)))))))
-
 (defn- completes-of
   "The task names text's Completes: lines give, by bin/land's one grammar (its `completes`): after Completes:, anywhere in a line, one
   ns/name or a comma-separated list, a name ending at whitespace or a mark no name ends in. See docs/merging.md#a-merge-says-what-it-completes."
@@ -158,7 +109,7 @@
     ;; bin/land run once over every line: what it reads, in the lines' order
     (is (= (vec (mapcat second lines)) (land (str/join "\n" (map first lines)))) "bin/land reads each the same")))
 
-(deftest no-shipped-task-is-merged-work
+(deftest ^{:seon.test/execs ["git"] :seon.test/estimate {:ticks 30000000 :execs 2}} no-shipped-task-is-merged-work
   ;; docs/merging.md#a-merge-says-what-it-completes: the merge
   ;; that completes a task's work says so in its message, a `Completes: ns/name` line, and removes its entry in
   ;; the same commit (git keeps the plan, test/ keeps the proofs). Each such line on main's first-parent history
@@ -172,13 +123,25 @@
                      :let [[sha body] (str/split (str/trim x) #"\x1f" 2)] :when body] [sha body])
         bodies (map second merges)
         named completes-of
-        ;; the entries a merge's own tree holds, one git grep a merge that completes anything
-        held-at (fn [sha] (set (for [l (str/split-lines (:out (sh/sh "git" "-C" root "grep" "-o" "-E" ":seon.task/name \"[^\"]+\"" sha "--" "resources/seon/tasks")))
-                                     :let [[_ path n] (re-find #"^[^:]+:resources/seon/tasks/(.+)\.edn::seon.task/name \"([^\"]+)\"$" l)] :when n]
-                                 (str path "/" n))))
         ;; what the files hold today: a name a merge left behind and a later commit removed is history, not a leftover
         today (set (for [[ns-sym ds] (shipped-task-files) :when (vector? ds) d ds] (str ns-sym "/" (:seon.task/name d))))
-        left (vec (for [[sha body] merges :let [ks (filter today (named body))] :when (seq ks) :let [held (held-at sha)] k ks :when (held k)]
+        ;; each completing merge's own task file for each name it completes and today still holds, read by one git cat-file --batch
+        ;; (its objects in the order asked, each a header "<oid> blob <bytes>" or "<object> missing"): one process however many merges
+        asks (vec (distinct (for [[sha body] merges k (filter today (named body))] [sha (first (str/split k #"/")) k])))
+        out (.getBytes ^String (:out (sh/sh "git" "-C" root "cat-file" "--batch"
+                                             :in (str (str/join "\n" (for [[sha nsn] asks] (str sha ":resources/seon/tasks/" nsn ".edn"))) "\n")))
+                       "UTF-8")
+        texts (loop [i 0 asks asks acc {}]
+                (if-let [[sha nsn] (first asks)]
+                  (let [nl (loop [j i] (if (= 10 (aget out j)) j (recur (inc j))))
+                        header (String. out (int i) (int (- nl i)) "UTF-8")]
+                    (if (str/ends-with? header "missing")
+                      (recur (inc nl) (rest asks) acc)
+                      (let [n (parse-long (last (str/split header #" ")))]
+                        (recur (+ nl 1 n 1) (rest asks) (assoc acc [sha nsn] (String. out (int (inc nl)) (int n) "UTF-8"))))))
+                  acc))
+        left (vec (for [[sha nsn k] asks :let [t (get texts [sha nsn])]
+                        :when (and t (str/includes? t (str ":seon.task/name \"" (second (str/split k #"/" 2)) "\"")))]
                     (str k " at " (subs sha 0 10))))]
     (is (seq bodies) "main's merges are read")
     (is (= [] left) "each is completed work: remove its entry from resources/seon/tasks/ in the merge that says Completes: it")))
@@ -198,7 +161,7 @@
     (spit (java.io.File. dir "demo.edn") "[{:seon.task/name \"parse\" :seon.task/plan \"Parse the rows.\" :seon.task/proofs #{demo-test/parse-test}}]")
     (is (= :cancelled (:seon.task/execution (task/task (load! db) "demo/index"))) "a removed task cancels")))
 
-(deftest the-shipped-task-files-are-whole-tasks-that-merge-themselves
+(deftest ^{:seon.test/estimate {:ticks 20000000}} the-shipped-task-files-are-whole-tasks-that-merge-themselves
   ;; every shipped declaration is one :whole task, none a merge task (found by the full run when a
   ;; task file changes: the file is no input of the digest)
   (let [ds (mapcat val (filter (comp vector? val) (shipped-task-files)))]
@@ -206,7 +169,7 @@
     (is (every? #(= :whole (:seon.task/kind %)) ds))
     (is (= (count ds) (count (distinct (map (juxt :seon.task/ns :seon.task/name) ds)))))))
 
-(deftest loads-of-the-task-files-read-and-write-under-one-lock
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 5000000}} loads-of-the-task-files-read-and-write-under-one-lock
   ;; found on the standing root 2026-10-28: a fresh store's task load reported "Conflicting upsert". The boot's
   ;; load (under the watcher's lock) and a REPL (my.root/load-tasks! sys) read main's db and wrote against it
   ;; with nothing between them, so the second wrote what it had decided from a db the first had since

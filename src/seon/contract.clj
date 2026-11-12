@@ -57,19 +57,21 @@
   "Whether v is plain data, what the store keeps and EDN carries (docs/storage.md#plain-data): nil, a boolean, a number,
   character, string, keyword, symbol, uuid or instant, or a map, vector, set or list of them. Not a record; not a sorted
   collection, whose comparator is a function; not bytes, which EDN does not carry; not a seq that is no list (lazy, a
-  range), which telling would realize. A narrower test than Datahike's on a data value, which walks any seq. visit, called on
-  each node before it is looked at, ends the walk by answering false: `kept`'s budget."
-  {:malli/schema [:function [:=> [:cat :any] :boolean] [:=> [:cat :any [:maybe :seon.host/fn]] :boolean]]}
-  ([v] (plain? v nil))
-  ([v visit]
-   ((fn ok [x]
-      (and (or (nil? visit) (visit x))
-           (cond (or (nil? x) (boolean? x) (number? x) (char? x) (string? x) (keyword? x) (symbol? x) (uuid? x) (inst? x)) true
-                 (or (clojure.core/record? x) (sorted? x)) false
-                 (map? x) (every? (fn [[k y]] (and (ok k) (ok y))) x)
-                 (or (vector? x) (set? x) (list? x)) (every? ok x)
-                 :else false)))
-    v)))
+  range), which telling would realize. A narrower test than Datahike's on a data value, which walks any seq. With budget and
+  room (`kept`'s), also no more than budget nodes and no string longer than room: the walk threads the nodes left, a value."
+  {:malli/schema [:function [:=> [:cat :any] :boolean] [:=> [:cat :any pos-int? [:maybe nat-int?]] :boolean]]}
+  ([v] (plain? v Long/MAX_VALUE nil))
+  ([v budget room]
+   ;; answers the nodes left after x, or nil when x is not plain or the budget is spent
+   (some? ((fn ok [x left]
+             (let [left (dec left)]
+               (when (and (pos? left) (or (nil? room) (not (string? x)) (<= (count x) room)))
+                 (cond (or (nil? x) (boolean? x) (number? x) (char? x) (string? x) (keyword? x) (symbol? x) (uuid? x) (inst? x)) left
+                       (or (clojure.core/record? x) (sorted? x)) nil
+                       (map? x) (reduce (fn [l [k y]] (or (some->> l (ok k) (ok y)) (reduced nil))) left x)
+                       (or (vector? x) (set? x) (list? x)) (reduce (fn [l y] (or (ok y l) (reduced nil))) left x)
+                       :else nil))))
+           v budget))))
 
 (clojure.core/defn- type-name
   "The name of v's class, the one word a value kept as its type is told by (`plainly`)."
@@ -113,15 +115,15 @@
   measure. See docs/storage.md#plain-data."
   {:malli/schema [:=> [:cat :any pos-int?] :boolean]}
   [v bound]
-  (let [left (volatile! bound)
-        ok (fn ok [x]
-             (vswap! left - (if (or (string? x) (keyword? x) (symbol? x)) (count (str x)) 1))
-             (and (>= @left 0)
-                  (cond (or (instance? datahike.db.DB x) (instance? datahike.db.AsOfDB x) (instance? datahike.datom.Datom x)) true
-                        (map? x) (every? (fn [[k y]] (and (ok k) (ok y))) x)
-                        (or (vector? x) (set? x) (seq? x)) (every? ok x)
-                        :else true)))]
-    (ok v)))
+  ;; the walk answers what is left of the bound after x, or nil once it is passed: the budget is a value it threads
+  (some? ((fn walk [x left]
+            (let [left (- left (if (or (string? x) (keyword? x) (symbol? x)) (count (str x)) 1))]
+              (when (>= left 0)
+                (cond (or (instance? datahike.db.DB x) (instance? datahike.db.AsOfDB x) (instance? datahike.datom.Datom x)) left
+                      (map? x) (reduce (fn [l [k y]] (or (some->> l (walk k) (walk y)) (reduced nil))) left x)
+                      (or (vector? x) (set? x) (seq? x)) (reduce (fn [l y] (or (walk y l) (reduced nil))) left x)
+                      :else left))))
+          v bound)))
 
 (clojure.core/defn- pred {:malli/schema [:=> [:cat :qualified-keyword :seon.host/fn] [:tuple :qualified-keyword :seon.host/schema]]} [k p] [k (m/-simple-schema {:type k :pred p})])
 
@@ -491,10 +493,9 @@
     (cond
       (or (nil? v) (boolean? v) (number? v) (keyword? v) (symbol? v) (uuid? v) (inst? v)) v
       (string? v) (if (<= (count v) room) v (:text (print/plain v budget)))
-      :else (let [left (volatile! budget)]
-              (if (plain? v (fn [x] (and (pos? (vswap! left dec)) (or (not (string? x)) (<= (count x) room)))))
-                v
-                (print/code (print/text v budget)))))))
+      :else (if (plain? v budget room)
+              v
+              (print/code (print/text v budget))))))
 
 (defn bounded
   "The error map m with each member kept (`kept`): for root, which keeps other processes' errors

@@ -326,7 +326,8 @@
         main (d/db-with main (vector/tx-data [e] [(peek (first (filter (comp #{e} first) (vector/due main "m"))))] (vectors 1 1 1 768) "m"))
         branch (d/db-with main [[:db/add e :seon.task/plan "the plan rewritten"] {:form/id "y/1" :form/ns {:ns/name (quote app.t)} :form/order 0 :form/src "(defn h [])"}])
         [n db asked] (on-branch main branch answered #(agent/embed-written! 64 "m"))]
-    (is (= [[:embed ["task: search result | query: the plan rewritten" "title: none | text: (defn h [])"]]] asked)
+    ;; a request's texts in the order of their entities' ids, which a content id (a task's) does not keep by time: compared as a set
+    (is (= [[:embed #{"task: search result | query: the plan rewritten" "title: none | text: (defn h [])"}]] (mapv #(update % 1 set) asked))
         "one request for what the branch wrote: the rewritten plan, as a search asks, and its new form")
     (is (= 2 n))
     (is (empty? (filter (comp #{e} first) (vector/due db "m")))
@@ -402,7 +403,8 @@
     (is (empty? (vector-keys (d/pull db '[*] t))) "an embedded task's own pull holds none of its vector")
     (is (empty? (vector-keys (d/pull db '[*] ev))) "nor an embedded eval's")
     (is (< (apply max (map #(Math/abs (- %1 %2)) v2 (vector/vector-of db ev))) 0.001) "its vector is found through :seon.vector/of")
-    (is (= [ev t] (sort-by #(- %) (map :v (d/datoms db :aevt :seon.vector/of)))) "one vector entity for each entity embedded")
+    (is (= #{ev t} (set (map :v (d/datoms db :aevt :seon.vector/of)))) "one vector entity for each entity embedded")
+    (is (= 2 (count (d/datoms db :aevt :seon.vector/of))) "and no more")
     (is (= #{"m"} (set (map :v (d/datoms db :aevt :seon.vector/model)))))
     (let [db2 (d/db-with db (vector/tx-data [ev] ["2"] [v1] "m2"))]
       (is (= 2 (count (d/datoms db2 :aevt :seon.vector/of))) "a vector written again replaces the entity's, in place")

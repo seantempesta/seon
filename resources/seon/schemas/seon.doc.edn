@@ -2,7 +2,7 @@
 ;; per heading of docs/*.md, as one parse (seon.ref/parse) reads it. Its references are what
 ;; its own text cites (sections by link, vars by name), so a section's backlinks are who cites
 ;; it. Stored shapes; the Datahike attributes are derived from :seon.doc/fact.
-{:seon.doc/address [:and {:seon.db/identity true :description "The section's address, path#anchor as the parse writes it, such as docs/references.md#one-parse. See docs/references.md#the-wiki-in-the-store."} :string]
+{:seon.doc/address [:and {:seon.db/identity true :seon.db/content-id true :description "The section's address, path#anchor as the parse writes it, such as docs/references.md#one-parse. See docs/references.md#the-wiki-in-the-store."} :string]
  :seon.doc/heading [:string {:description "The heading as its line writes it, in Markdown (a code span keeps its backticks)."}]
  :seon.doc/level [:int {:min 1 :max 6 :description "The heading's level, where a single # is 1."}]
  :seon.doc/position [:int {:description "The section's place among its parent's sections as the page holds them, 0 first."}]
