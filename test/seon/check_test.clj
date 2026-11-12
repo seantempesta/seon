@@ -340,7 +340,7 @@
 ;; docs/references.md#task-references: a task's citation of nothing is refused at its write (owner, 2026-11-09); the health step loads
 ;; the tree's tasks through that one checked write, so a task citing a key no program holds is health's typed refusal, never a lookup
 ;; Datahike throws (batch 15: a plan citing :db/contentId in one backtick threw out of health before any row)
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-task-citing-nothing-is-the-health-steps-typed-refusal
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-task-citing-nothing-is-the-health-steps-typed-refusal
   (let [dir (str (System/getProperty "java.io.tmpdir") "/health-cite-" (random-uuid))
         tasks (str dir "/" (#'test-runner/tasks-dir))
         _ (clojure.java.shell/sh "mkdir" "-p" tasks (str dir "/docs"))
@@ -351,7 +351,7 @@
     (is (= {:seon.error/type :seon.db/no-target :target [:schema/key :no.such/key] :by "zz/t"} (select-keys r [:seon.error/type :target :by])) (pr-str r))
     (is (str/includes? (str (:seon.error/message r)) "two backticks") "its message says what to write for a name that is no citation")))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-problem-the-base-had-is-not-the-branchs
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-problem-the-base-had-is-not-the-branchs
   (let [[base] (catch-db (ts/test-db) 1)
         h (test-runner/branch-health base base nil)]
     (is (pos? (get-in (seon.problems/health base) [:classes :unnamed-site :n])) "the base has an open problem")
@@ -370,14 +370,14 @@
     (testing "a class no verdict judges (an attention class never fails a branch) is refused, never a green"
       (is (thrown? Exception (test-runner/branch-health base head [:stale-section]))))))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-class-the-health-step-does-not-read-is-refused
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-class-the-health-step-does-not-read-is-refused
   (let [[base] (catch-db (ts/test-db) 1)
         [head] (catch-db base 2)]
     ;; the running system's state is no branch's content: no verdict of caused-split judges it
     (doseq [c [:stalled :stale-pin :stale-binary :unsynced :problem-unlinked]]
       (is (thrown? Exception (test-runner/branch-health base head [c])) (str (name c) " is no verdict of caused-split")))))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} the-health-steps-checks-are-the-classes-caused-reads
+(deftest ^{:seon.test/estimate {:ticks 5000000}} the-health-steps-checks-are-the-classes-caused-reads
   (let [[base] (catch-db (ts/test-db) 1)
         attention? (:seon.problems/attention (contract/properties :seon.problems/class))]
     (is (= (into #{} (comp (remove attention?) (map #(keyword (str "no-" (name %))))) seon.problems/caused-classes)
