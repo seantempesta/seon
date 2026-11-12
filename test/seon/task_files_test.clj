@@ -143,20 +143,20 @@
   (let [nm "[\\w.\\-]+/[\\w.!?*+<>=\\-]*[\\w!?*+<>=\\-]"]
     (vec (for [m (re-seq (re-pattern (str "Completes:\\s*(" nm "(?:\\s*,\\s*" nm ")*)")) text) k (str/split (second m) #"\s*,\s*")] k))))
 
-(deftest a-completes-line-is-read-one-way
+(deftest ^{:seon.test/execs ["bin/land"] :seon.test/estimate {:ticks 1000000 :execs 1}} a-completes-line-is-read-one-way
   ;; docs/merging.md#a-merge-says-what-it-completes: bin/land and this namespace read Completes: lines by one grammar, each case a line
   ;; a landing wrote (web's b458ac25e0 ended its name with a sentence's period; runtime's 4602c8252c a bulleted list)
-  (let [lines {"Completes: seon.render/roots-debug-page-shows-its-request. What allowed it" ["seon.render/roots-debug-page-shows-its-request"]
-               "- Completes: seon.agent/a-test-child-that-dies-says-why, seon.agent/a-held-pipe-names-its-holder-and-is-reported"
-               ["seon.agent/a-test-child-that-dies-says-why" "seon.agent/a-held-pipe-names-its-holder-and-is-reported"]
-               "Merge jolt/context: Completes: seon.ctx/the-record-is-one-reference-type" ["seon.ctx/the-record-is-one-reference-type"]
-               "Completes: seon.task/a-refine-reads-its-run (what is left of it is another)" ["seon.task/a-refine-reads-its-run"]
-               "Completes: a.b/c!, d.e/f?;" ["a.b/c!" "d.e/f?"]
-               "It completes nothing: no such line" []}
+  (let [lines [["Completes: seon.render/roots-debug-page-shows-its-request. What allowed it" ["seon.render/roots-debug-page-shows-its-request"]]
+               ["- Completes: seon.agent/a-test-child-that-dies-says-why, seon.agent/a-held-pipe-names-its-holder-and-is-reported"
+                ["seon.agent/a-test-child-that-dies-says-why" "seon.agent/a-held-pipe-names-its-holder-and-is-reported"]]
+               ["Merge jolt/context: Completes: seon.ctx/the-record-is-one-reference-type" ["seon.ctx/the-record-is-one-reference-type"]]
+               ["Completes: seon.task/a-refine-reads-its-run (what is left of it is another)" ["seon.task/a-refine-reads-its-run"]]
+               ["Completes: a.b/c!, d.e/f?;" ["a.b/c!" "d.e/f?"]]
+               ["It completes nothing: no such line" []]]
         land (fn [line] (vec (remove str/blank? (str/split-lines (:out (sh/sh "zsh" (str (config/checkout) "/bin/land") "--completes" :in (str line "\n")))))))]
-    (doseq [[line want] lines]
-      (is (= want (completes-of line)) (str "this namespace reads " line))
-      (is (= want (land line)) (str "bin/land reads " line)))))
+    (doseq [[line want] lines] (is (= want (completes-of line)) (str "this namespace reads " line)))
+    ;; bin/land run once over every line: what it reads, in the lines' order
+    (is (= (vec (mapcat second lines)) (land (str/join "\n" (map first lines)))) "bin/land reads each the same")))
 
 (deftest no-shipped-task-is-merged-work
   ;; docs/merging.md#a-merge-says-what-it-completes: the merge

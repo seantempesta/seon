@@ -467,7 +467,7 @@
     (is (= 7 (:seon.config.agent/max-turns (task/task db2 "demo/t"))) "task reads it")
     (is (= 7 (:seon.config.agent/max-turns (second (task/entity-value db2 e)))) "and so does the reconciler's index")))
 
-(deftest an-unchanged-tasks-cites-follow-the-code-that-reads-them
+(deftest ^{:seon.test/estimate {:ticks 20000000}} an-unchanged-tasks-cites-follow-the-code-that-reads-them
   ;; docs/data-modeling.md#derived-data-is-a-cache-never-relied-on (context, 2026-11-12: a task kept the cites of the reader that
   ;; wrote them): a task's cites are derived from its text by the citation reader, so they are kept by the digest of both, and an
   ;; entry whose text is unchanged is read again when the reader's code moved, and only then
