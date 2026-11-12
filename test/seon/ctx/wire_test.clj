@@ -3,7 +3,7 @@
   red one its source and its failures (expected and actual), a reference already shown as a
   proof is not shown again, a merge task's plan stays its own."
   (:require [my.branch] [seon.test-store :as ts] [clojure.test :refer [deftest is testing]] [datahike.api :as d]
-            [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.ctx.search :as search] [seon.ctx.session :as session] [seon.ctx.status :as status] [seon.ctx.wire :as wire] [seon.print :as print]
+            [seon.db :as pdb] [seon.vector :as vector] [seon.task :as task] [seon.ctx.search :as search] [seon.ctx.session :as session] [my.schema] [seon.ctx.status :as status] [seon.ctx.wire :as wire] [seon.print :as print]
             [seon.doc-test] [seon.reader :as reader] [seon.proofs :as proofs] [seon.agent :as agent] [seon.doc :as doc] [seon.judge] [seon.ctx :as ctx] [seon.fixtures] [seon.render :as render] [seon.render.ui] [seon.web.html] [my.test :as t]
             [seon.print.select :as select] [seon.ratom] [clojure.walk] [clojure.string :as str] [seon.lib] [seon.edn] [seon.print-test :as print-test] [seon.repl :as repl] [seon.model] [seon.config] [clojure.data.json] [seon.render-cost-test]))
 
@@ -553,7 +553,7 @@
 (deftest an-owners-message-reaches-the-next-turn
   ;; owner, 2026-10-23 (parity row 73): the page's message bar sends the owner's words through
   ;; root's delivery; the turn that takes them writes the message fact on its branch, so the
-  ;; conversation holds it in tx order (seon.ctx/turn-members), rendered by the message fact's
+  ;; conversation holds it in tx order (seon.ctx/placed-messages), rendered by the message fact's
   ;; own messages (seon.seon.fixtures/eval-messages; docs/render.md)
   (let [[m] (seon.fixtures/message-messages {} {:seon.message/from {:seon.agent/key "owner"} :seon.message/body "use demo/g, not a new helper"})]
     (is (= "user" (:role m)))
@@ -1916,7 +1916,30 @@
         (is (str/includes? (:seon.error/message none) "no agent is keyed"))
         (is (= [:seon.ctx/session-refused "b/bare"] ((juxt :seon.error/type :key) bare)) "an agent with no plan and no description has no request to show: not an empty one")
         (is (str/includes? (:seon.error/message bare) "no request to show"))
-        (is (vector? (session/session-tx @conn "b/src" "x")) "an agent that has a request is shown")))))
+        (is (vector? (session/session-tx @conn "b/src" "x")) "an agent that has a request is shown")
+        ;; a record is its own attributes less :db/id and :at (session-records): a ref it holds (a message's :seon.message/to) is re-keyed
+        ;; by its identity (example-rekey), never an entity id of the store it came from
+        (is (not-any? #(and (map? %) (contains? % :db/id)) (tree-seq coll? seq (session/session-tx @conn "b/src" "x"))) "no :db/id anywhere in what it answers")))))
+
+(deftest an-example-refuses-a-history-record-of-a-kind-it-does-not-hold-naming-its-schema
+  ;; docs/tasks.md#a-task-names-example-sessions: a member the conversation places (seon.ctx/placed-messages) is recorded as the entity it is,
+  ;; by its schema, never as a message; one of a kind an example does not hold (the note of seon.render-test's registered-schema world) is refused, naming its schema, never dropped
+  (ts/test-branch!
+    (fn [_ conn]
+      (source-session! conn)
+      (doseq [[k form] [[:lab.note/id [:and {:seon.db/identity true} :string]] [:lab.note/text :string]
+                        [:lab.note/agent [:and {:seon.db/to [:seon.db/agent-fact]} :seon.db/ref]]
+                        [:lab.note/note-fact [:map {:seon.db/attributes true :seon.render/hiccup 'seon.render-test/note-html :seon.render/openai-compat 'seon.render-test/note-msgs}
+                                                 [:lab.note/id :lab.note/id] [:lab.note/text :lab.note/text] [:lab.note/agent :lab.note/agent]]]]]
+        (d/transact conn (:tx (my.schema/registration @conn k form false))))
+      (d/transact conn [{:seon.agent/key "b/src" :seon.ctx/pattern (conj (render/schema-property (seon.db/index) :seon.db/agent-fact :seon.ctx/pattern)
+                                                                         {[:lab.note/_agent :tx :at] [:db/id :lab.note/id :lab.note/text]})}])
+      (d/transact conn [{:lab.note/id "n1" :lab.note/text "the note" :lab.note/agent [:seon.agent/key "b/src"]}])
+      ;; a turn after it, so the note is placed in a turn the example records
+      (d/transact conn [{:seon.model-call/id (seon.lib/call-id "b/src" 3) :seon.model-call/agent [:seon.agent/key "b/src"] :seon.model-call/n 3 :seon.model-call/origin :model :seon.model-call/reply "Noted."}])
+      (let [r (session/session-tx @conn "b/src" "x")]
+        (is (= :seon.ctx/session-refused (:seon.error/type r)) "a record of a kind an example does not hold is refused")
+        (is (str/includes? (str (:seon.error/message r)) ":lab.note/note-fact") "naming its schema")))))
 
 (deftest an-example-keeps-an-eval-of-ctx-as-its-marker
   ;; the owner, 2026-11-04: "if an agent needs to swap or modify ctx then that needs to be present": no eval is left out of an
