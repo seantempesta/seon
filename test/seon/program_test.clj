@@ -1629,3 +1629,29 @@
     (is (= (get a 'app.rd/f) (get b 'app.rd/f)) "g edited: f, which calls it, does not move: a run that called g records g")
     (is (not= (get a 'app.rd/g) (get b 'app.rd/g)) "and g moves")
     (is (not= (get a 'app.rd/f) (get c 'app.rd/f)) "the data def f reads without calling moves f")))
+
+(defn- test-ns-text
+  "A test namespace app.kind-test whose deftests state metas (a vector of metadata maps, nil for none), named t0, t1, ..."
+  [metas]
+  (apply str "(ns app.kind-test (:require [clojure.test :refer [deftest is]]))\n"
+         (map-indexed (fn [i m] (str "(deftest " (when m (str "^" (pr-str m) " ")) "t" i " (is true))\n")) metas)))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-tests-metadata-is-its-facts-and-names-it
+  ;; docs/testing.md#test-kinds: a metadata key an entity schema owns is that attribute's fact on the var, value and all, so
+  ;; the test is named by the attributes it holds (seon.db/most-specific); taken off its deftest, the fact is retracted
+  ;; and the var is a var again (the write check holds a test to its own keys, not its parent's). Work: the world (cached) and two
+  ;; imports of a four-form namespace, ~5 M ticks each.
+  (let [est {:ticks 1000}
+        db (mt/with (mt/world) (mt/code 'app.kind-test (test-ns-text [{:seon.test/estimate est}
+                                                                        {:seon.test/estimate est :seon.test/root []}
+                                                                        {:seon.test/estimate est :seon.test/execs ["bin/check"]}
+                                                                        nil])))
+        ent #(dissoc (into {} (d/pull %1 '[*] [:var/name (symbol "app.kind-test" (str "t" %2))])) :db/id :var/form :var/ns)
+        named #(pdb/most-specific (pdb/index) (ent %1 %2))]
+    (is (= est (:seon.test/estimate (ent db 0))) "the estimate, value and all")
+    (is (= [:seon.test/test :seon.test/system-test :seon.test/binary-test :seon.db/var-fact] (mapv #(named db %) (range 4)))
+        "each named by what it holds")
+    (is (= ["bin/check"] (:seon.test/execs (ent db 2))))
+    (let [db2 (mt/with db (mt/code 'app.kind-test (test-ns-text [nil])))]
+      (is (nil? (:seon.test/estimate (ent db2 0))) "taken off the deftest, retracted")
+      (is (= :seon.db/var-fact (named db2 0))))))

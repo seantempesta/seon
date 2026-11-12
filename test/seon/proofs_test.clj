@@ -252,7 +252,7 @@
 ;; docs/merging.md#verdicts-are-a-cache: a run asks the cache for a test's green just before the test would start, so a green
 ;; another run stored since this run's plan is reused, never run again (owner, 2026-11-10: ten agents asking for the whole
 ;; suite "just want to know if the tests have passed"); a step toward the test service owning each (test, digest) item
-(deftest a-green-stored-since-the-plan-is-reused-not-run
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-green-stored-since-the-plan-is-reused-not-run
   (prog)
   (let [tests '[app.pv-calc-test/add-test app.pv-calc-test/twice-test]
         dg '{app.pv-calc-test/add-test "d-add" app.pv-calc-test/twice-test "d-twice"}
@@ -318,7 +318,7 @@
 ;; docs/merging.md#a-tests-tick-budget: a test's budget is ten times the ticks its deftest states it should cost (the owner,
 ;; 2026-11-12: measured over ten times the estimate stops the work), never past the cap; a test that states none runs under the
 ;; cap, and no history is read. Red before: the budget was max(4e9 floor, 10 x the median of its greens), whatever it stated
-(deftest a-tests-budget-is-ten-times-its-stated-estimate
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-tests-budget-is-ten-times-its-stated-estimate
   (record (ts/test-db) 'user "(ns app.pv-own-budget-test (:require [clojure.test :refer [deftest is]]))"
           'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 100000}} estimated-spins (loop [] (recur)))"
           'app.pv-own-budget-test "(deftest ^{:seon.test/estimate {:ticks 3000000}} within (loop [i 0] (when (< i 1000000) (recur (inc i)))) (is true))"

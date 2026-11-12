@@ -597,6 +597,23 @@
  ;; growing with the digests it has had. Provenance: all of them cost 30.6 s across 1,708 tests, the newest 5 cost 4.4 s, and the same 1,524
  ;; tests got a time (2026-11-06, commit message). At the bound: older verdicts are not read.
  :seon.config.proofs/recent-verdicts 5
+ ;; What each set of tests may state and reach (docs/testing.md#test-kinds; seon.problems/undeclared-tests judges the tests a
+ ;; branch changed). Unit: engine ticks. The most a test's :seon.test/estimate may state as :ticks: its budget is ten times
+ ;; it, so a test past 1e9 ticks is split or moved to a system test's root. At the bound: an :undeclared-test row naming it.
+ :seon.config.proofs/test-ticks-cap 100000000
+ ;; Unit: asks (requests to its root). The most a system test's estimate may state as :asks. At the bound: an :undeclared-test row.
+ :seon.config.proofs/system-test-asks-cap 20
+ ;; Unit: commands. The most a binary test's estimate may state as :execs. At the bound: an :undeclared-test row.
+ :seon.config.proofs/binary-test-execs-cap 3
+ ;; Unit: vars. Reaching one, through the test namespaces' own code, makes a test a system test, which names its root
+ ;; (:seon.test/root). At the bound (one reached, none named): an :undeclared-test row.
+ :seon.config.proofs/system-vars #{seon.test-store/start-root! seon.agent-test/in-agent seon.agent-test/with-agent}
+ ;; Unit: vars. Reaching one makes a test a binary test, which names the commands it runs (:seon.test/execs). At the
+ ;; bound (one reached, none named): an :undeclared-test row.
+ :seon.config.proofs/exec-vars #{seon.test-store/binary-sh clojure.java.shell/sh}
+ ;; Unit: vars. A test's own namespace calling one makes a store of its own instead of the shared world (my.test/world,
+ ;; seon.test-store/test-db, test-branch!). At the bound (one called): an :undeclared-test row.
+ :seon.config.proofs/own-store-vars #{datahike.api/create-database seon.db/seed!}
  ;; Unit: shards. How many runner processes bin/test starts at once (seon.proofs/shards), and how many steps bin/check
  ;; runs at once: the machine's cores (#seon/cores), so no one passes a count (owner, 2026-11-12: "Remove all restricting").
  ;; SEON_PROOF_JOBS is bin/test's own hand-off to its child steps. At the bound: a run never has more shards.

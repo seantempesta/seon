@@ -238,8 +238,8 @@
   binary's by default). A schema is asked of an entity when the transaction added or retracted an attribute it owns; it
   refuses only what this write broke: on an entity that was that thing before (it held a key the schema itself
   requires), a required key it held before and not after; on one the write makes that thing, every one it lacks. An entity
-  incomplete before stays as it was (a whole-store scan's to report), and one left holding none of them has stopped
-  being that thing. Presence is one seek
+  incomplete before stays as it was (a whole-store scan's to report), and one left holding none of the keys the schema
+  itself requires (its parents' are the parent's) has stopped being that thing. Presence is one seek
   per (entity, key), so a write costs its touched entities' required keys, never an entity's size or the store's; values
   are each datom's own check (`invalid-datom`). The first refusal by entity id, then schema, and every entity it broke in
   :entities (each by its identity). See
@@ -260,7 +260,9 @@
                         (let [added? (boolean (some true? (vals did)))
                               req (required-keys k)
                               after (filterv #(or (true? (get did %)) (has? db-after e %)) req)]
-                          (when (or added? (seq after))
+                          ;; still that thing while it holds a key the schema itself requires: a parent's keys
+                          ;; (a test's :var/name) leave it the parent, and a test whose estimate went is a var again
+                          (when (or added? (some (set after) (own-required k)))
                             (when-let [gone (seq (remove (set after) req))]
                               (let [was? (some #(has? db-before e %) (own-required k))
                                     broke (if was? (filter #(has? db-before e %) gone) gone)]
