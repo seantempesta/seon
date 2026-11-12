@@ -434,11 +434,10 @@
          ;; the task the asker works is held in its ctx already: one comparison a hit, and only when it works one
          own (get-in @seon.ctx/ctx [:seon.agent/task :seon.task/id])
          own? (when (and own (kinds :task)) (str own ":"))
-         {mine true rows false} (if own?
-                                  (group-by #(boolean (and (= :task (:kind %)) (str/starts-with? (:at %) own?))) rows)
-                                  {false rows})
-         n (count mine)
-         rows (cond-> rows
+         mine? (fn [r] (boolean (and own? (= :task (:kind r)) (str/starts-with? (:at r) own?))))
+         n (count (filter mine? rows))
+         ;; always a vector, empty when nothing is left: the empty answer below is a value (a group-by's missing key was nil)
+         rows (cond-> (filterv (complement mine?) rows)
                 (pos? n) (conj {:kind :own-task :name own :left n
                                 :text (str "your own task's plan, " own " (" n " line" (when (< 1 n) "s")
                                            "), left out: your ctx holds it")}))]
