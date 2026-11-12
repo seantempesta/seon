@@ -243,52 +243,46 @@
           (recur st (conj outs m) ld))))))
 
 (defn- item-ended
-  "Item k ended with result r ({:pass :fail :error} counts, its :failures; an error: its batch died; a signal, {:signal
-  :overran :ms}: a step that ran past its bound, no verdict): each asker waiting on it loses it; one that met a red or an
-  error is answered so at once; one with nothing left is answered green, its signals listed (:signals). A signal is
-  neither red nor green. The item leaves the state: its verdict is the cache's now (its runner wrote it as it ended).
+  "Item k ended with result r ({:pass :fail :error} counts, its :failures; an error: its batch died): each asker waiting on
+  it loses it; one that met a red or an error is answered so at once; one with nothing left is answered green. The item leaves the state: its verdict is the cache's now (its runner wrote it as it ended).
   A build or seed that is not green is its typed error, and so is every item that needs it (none is granted). Each asker is
   first told the verdict as it lands, {:op :prove-verdict :key asker :test :digest :kind :status (:pass :fail :error,
-  :signal, or :no-verdict for an error) :ms :failures}, which root puts on its events for a streaming :prove to write
+  or :no-verdict for an error) :ms :failures}, which root puts on its events for a streaming :prove to write
   (docs/merging.md#the-test-service). Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :any :any] [:tuple :map [:vector :map]]]}
   [st k r]
   (let [{:keys [waiters kind checkout]} (get-in st [:items k])
         st (update st :items dissoc k)
         [t d] k
-        signal? (and (map? r) (some? (:signal r)))
-        r (if (and (#{:build :seed} kind) (not signal?) (not (contract/error? r)) (not (proofs/green? r)))
+        r (if (and (#{:build :seed} kind) (not (contract/error? r)) (not (proofs/green? r)))
             (contract/error :seon.prove/build-red #'seon.prove/item-ended (str "the " (name kind) " of tree " d " is red") {:tree d :kind kind :answer r})
             r)
-        red? (and (not signal?) (or (contract/error? r) (not (proofs/green? r))))
+        red? (or (contract/error? r) (not (proofs/green? r)))
         ;; a green build or seed is the checkout's for its tree: a later run of that tree reuses it (ask-items), so no second
         ;; one relinks the binary or remakes the store while the first run's items read them. One tree a checkout: a new
         ;; tree's replaces it
-        st (if (and (#{:build :seed} kind) (not red?) (not signal?))
+        st (if (and (#{:build :seed} kind) (not red?))
              (update-in st [:made checkout] #(if (= d (:tree %)) (update % :items conj k) {:tree d :items #{k}}))
              st)
         ms (or (get-in r [:answer :measured t :ms]) (when (map? r) (:ms r)))
         verdict (cond-> (cond (contract/error? r) {:test t :digest d :status :no-verdict :failures [(select-keys r [:seon.error/type :seon.error/message])]}
-                              signal? {:test t :digest d :status :signal :signal (:signal r)}
                               :else (cond-> {:test t :digest d :status (proofs/status-of r)} (seq (:failures r)) (assoc :failures (:failures r))))
                   kind (assoc :kind kind)
                   ms (assoc :ms ms))
         [st outs] (reduce (fn [[st outs] rid]
-                            (let [st (cond-> (-> st (update-in [:askers rid :left] disj k) (update-in [:askers rid :verdicts] (fnil conj []) verdict))
-                                       signal? (update-in [:askers rid :signals] (fnil conj []) (select-keys verdict [:test :digest :kind :signal :ms]))
-                                       (not signal?) (assoc-in [:askers rid :results t] r))
-                                  {:keys [left results signals]} (get-in st [:askers rid])]
+                            (let [st (-> st (update-in [:askers rid :left] disj k) (update-in [:askers rid :verdicts] (fnil conj []) verdict)
+                                         (assoc-in [:askers rid :results t] r))
+                                  {:keys [left results]} (get-in st [:askers rid])]
                               (cond
                                     ;; a red, and a proof of the asker's still to hear: it keeps waiting for its proofs alone (Sean,
                                     ;; 2026-11-11: an agent sees every proof's verdict, never :none because another went red); the
                                     ;; other items it waited on it no longer needs (drop-waits)
                                     (and (or red? (get-in st [:askers rid :red?])) (some (get-in st [:askers rid :proofs] #{}) left))
                                     [(drop-waits (assoc-in st [:askers rid :red?] true) rid (remove (get-in st [:askers rid :proofs]) left)) outs]
-                                    (or red? (get-in st [:askers rid :red?])) (let [[st o] (answer-asker st rid (cond-> {:green false :results results
-                                                                                    :red (vec (sort-by str (keep (fn [[t r]] (when (or (contract/error? r) (not (proofs/green? r))) t)) results)))}
-                                                                             (seq signals) (assoc :signals signals)))]
+                                    (or red? (get-in st [:askers rid :red?])) (let [[st o] (answer-asker st rid {:green false :results results
+                                                                                    :red (vec (sort-by str (keep (fn [[t r]] (when (or (contract/error? r) (not (proofs/green? r))) t)) results)))})]
                                            [st (into outs o)])
-                                    (empty? left) (let [[st o] (answer-asker st rid (cond-> {:green true :results results} (seq signals) (assoc :signals signals)))] [st (into outs o)])
+                                    (empty? left) (let [[st o] (answer-asker st rid {:green true :results results})] [st (into outs o)])
                                     :else [st outs])))
                           [st (mapv #(assoc verdict :op :prove-verdict :key %) (sort-by str waiters))] (sort-by str waiters))]
     (if (and (#{:build :seed} kind) red?)
@@ -326,8 +320,8 @@
   "Batch bid's answer r (the agent's :tests answer: its :reports by test var, its :failures; or the error its run answered,
   a died child among them): each of its items ended with its own result, one the answer does not name with the typed
   :seon.prove/no-verdict (never silence), every item of a batch that errored with that error; or, for an item of root's
-  effect owner (a build, a process test, a step), its {:value {:pass :fail :error :failures :ms}}, a step's {:value
-  {:signal :overran :ms}}, or its typed error; its slot is free again and the next is granted. Answers [st outputs]."
+  effect owner (a build, a process test, a step), its {:value {:pass :fail :error :failures :ms}}, or its typed
+  error; its slot is free again and the next is granted. Answers [st outputs]."
   {:malli/schema [:=> [:cat :map :int :any] [:tuple :map [:vector :map]]]}
   [st bid r]
   (let [batch (get-in st [:batches bid])
@@ -337,8 +331,7 @@
         reported (when-not (or fx? (contract/error? r)) (into #{} (keep #(some-> (:var %) (subs 2) symbol)) (:reports r)))
         v (when fx? (:value r))
         result (fn [[t d]] (cond (contract/error? r) r
-                                 ;; root's effect owner ran it: a step's signal is no verdict; a verdict reads as a test's
-                                 (and fx? (:signal v)) v
+                                 ;; root's effect owner ran it: its verdict reads as a test's
                                  (and fx? (map? v)) (assoc v :answer {:pass (:pass v 0) :fail (:fail v 0) :error (:error v 0) :digests {t d}
                                                                       :reports (if (seq (:failures v)) (mapv #(assoc % :var (str "#'" t)) (:failures v)) [{:type :pass :var (str "#'" t)}])})
                                  (and (not fx?) (fails t)) {:pass 0 :fail 1 :error 0 :failures (fails t) :answer r}
@@ -409,11 +402,10 @@
   read: the plan's reused reports, each item's own reports, every digest, function cost and measure (:measured, which the
   asker's agent writes as its facts: seon.agent/record-answer!), the counts, what was selected, deferred and why, and
   any verdict the cache would not take (:unstored). A process test's and a check step's results count as a test's; a
-  build's is no result of the run (an item that needed it answers its error); a step's signals are listed (:signals), no
-  verdict. :red names every red of the run by its item's name, a check step's (a string) among the tests (finish keeps it), as
+  build's is no result of the run (an item that needed it answers its error). :red names every red of the run by its item's name, a check step's (a string) among the tests (finish keeps it), as
   its failing reports could not: a step's name is no test var. See docs/merging.md#the-test-service."
-  {:malli/schema [:=> [:cat :map :map [:maybe [:vector :map]]] :map]}
-  [base results signals]
+  {:malli/schema [:=> [:cat :map :map] :map]}
+  [base results]
   (let [results (into {} (remove (comp vector? key)) results)
         own (fn [t r] (if (contract/error? r)
                         [{:type :error :var (str "#'" t) :message (:seon.error/message r) :seon.error/type (:seon.error/type r)}]
@@ -432,7 +424,8 @@
              :red (vec (sort-by str (distinct (concat (keys (proofs/failures {:reports (vec (:reused-reports base))}))
                                                       (keep (fn [[t r]] (when (or (contract/error? r) (not (proofs/green? r))) t)) results)))))}
       (seq (:why base)) (assoc :why (:why base))
-      (seq signals) (assoc :signals signals)
+      ;; each deferred test's digest at the base, as the agent's plan gave it: what the merge check reads main's verdict at
+      (seq (:deferred-digests base)) (assoc :deferred-digests (:deferred-digests base))
       (seq (:missing base)) (assoc :missing (:missing base))
       ;; a verdict the cache would not take, named as its run named it
       (some (comp :unstored :answer) (vals results)) (assoc :unstored (vec (mapcat (comp :unstored :answer) (vals results)))))))
@@ -476,7 +469,7 @@
                   ;; that could not run answers; the verdicts that did land are the cache's
                   (let [rs (:results (:r o))
                         [st more] (finish st k (or (some (fn [[_ r]] (when (contract/error? r) r)) (sort-by (comp str key) rs))
-                                                   (assoc (run-answer (:base run) rs (:signals (:r o))) :verdicts (:verdicts (:r o) []))))]
+                                                   (assoc (run-answer (:base run) rs) :verdicts (:verdicts (:r o) []))))]
                     [st (into acc more)])
                   [st acc]))
               [st (conj acc o)]))

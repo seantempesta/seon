@@ -214,7 +214,7 @@
   (is (= :disabled (:seon.config.ai/thinking (config/resolved (assoc config/config :seon.config.ai/thinking :disabled))))))
 
 (deftest a-key-the-config-lacks-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.ai/reasoning-effort)))))
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.ai/temperature)))))
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-provider-is-the-config-s
@@ -222,7 +222,8 @@
   (is (= {:kind :scripted :script 'seon.fixtures/reply} (config/provider (shipped :scripted))))
   (let [p (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled))]
     (is (= {:kind :openai-compat :base-url "https://api.deepseek.com" :model "deepseek-flash" :api-key-env "DEEPSEEK_API_KEY"
-            :max-tokens (config/value :seon.config.ai/max-tokens) :replay-reasoning (config/value :seon.config.ai/replay-reasoning) :thinking :disabled}
+            :max-tokens (config/value :seon.config.ai/max-tokens) :replay-reasoning (config/value :seon.config.ai/replay-reasoning) :thinking :disabled
+            :reasoning-effort (config/value :seon.config.ai/reasoning-effort)}
            p))
     ;; whether earlier reasoning goes back is the config key, obeyed as written (owner, 2026-10-24)
     (let [off (config/provider (assoc config/config :seon.config.ai/provider :openai-compat :seon.config.ai/thinking :disabled
@@ -434,7 +435,7 @@
   (is (= [:config "resources/seon/config/default.edn"] (:source (config/resolve :seon.config.root/max-agents)))))
 
 (deftest a-setting-set-nowhere-is-refused-not-nil
-  (is (= :seon.config/refused (:seon.error/type (refused #(config/resolve :seon.config.ai/reasoning-effort {:model "deepseek-flash"})))))
+  (is (= :seon.config/refused (:seon.error/type (refused #(config/resolve :seon.config.ai/temperature {:model "deepseek-flash"})))))
   (is (= :seon.config/refused (:seon.error/type (refused #(config/value :seon.config.nope/x))))))
 
 (deftest the-manifest-is-validated-and-written-as-entities-on-main
@@ -552,3 +553,16 @@
       (spit (java.io.File. wt ".git") (str "gitdir: " main-tree "/.git/worktrees/x\n"))
       (is (= "jolt/seon-merges-x" (own (str wt))) "a worktree's, by its .git file")
       (.delete (java.io.File. wt ".git")) (.delete wt) (.delete (.getParentFile wt)))))
+
+;; docs/config.md#a-process-holds-its-branchs-config: a branch's config file is checked against the schema the same change
+;; states: a key its schema file adds is read, never refused by this process's older schema (Tests' prove of a branch that
+;; changed both, through the system, was skipped: 2026-11-12). Red before: text-refusal took no schema changes
+(deftest a-config-file-is-checked-against-the-schema-its-change-states
+  (let [text (slurp (str (config/checkout) "/" config/shipped-file))
+        with-key (clojure.string/replace-first text "{" "{:seon.config.zz/new-key 3\n ")
+        form (get config/schema-forms :seon.config/config)
+        changes {:seon.config/config (conj form [:seon.config.zz/new-key {:optional true} :seon.config.zz/new-key])
+                 :seon.config.zz/new-key [:int {:description "A key a branch adds."}]}]
+    (is (string? (config/text-refusal with-key)) "this process's schema has no such key")
+    (is (nil? (config/text-refusal with-key changes)) (str "the change's own schema has it: " (config/text-refusal with-key changes)))
+    (is (nil? (seon.fx/unreadable config/shipped-file with-key changes)) "and the file reads as its reader reads it")))

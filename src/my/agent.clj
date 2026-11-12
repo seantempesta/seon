@@ -26,8 +26,8 @@
                               what it changed since main, each one with a result at its digest reused
     (process-test? 'ns/t-test) why test t reaches a process (nil: it does not): it runs at the judge
     @ctx                      this agent's record as a map: :seon.agent/task, :seon.model-call/_agent, :seon.message/_to and :seon.eval/_agent,
-                              kept current as it works; the page shows it as a block (@seon.ctx/ctx
-                              from any namespace)
+                              kept current as it works; the page shows it as a block. ctx is seon.ctx/ctx,
+                              read so when a form compiles: (resolve 'ctx) is nil, #'seon.ctx/ctx its var
     (swap! ctx assoc-in p v)  a change to it, as to any atom (assoc-in, update-in, dissoc): one checked
                               transaction on the branch, or refused with why; the next turn tells it
     (cite! \"docs/x.md?full#y\") read a section (a page whole with no anchor, or a name) beside the task,
@@ -418,6 +418,8 @@
 (defn grep
   "Like grep, over this branch's program: every line matching pattern in the functions, tests, wiki sections,
   task plans and schema entries, one row each, [{:at \"seon.task/accumulate:3\" :kind :var :text \"...\"}] (seon.doc/grep).
+  The plan of the task you work is left out — your ctx holds it already — and a last {:kind :own-task} row says so,
+  naming that task and how many of its lines matched; another task's plan is a hit as any text is.
   pattern is a string, matched as written, or a regex (#\"plan|proof\"); a string with a regex's operators that matches
   nothing answers [], shown with its regex form (`grep-none-text`). opts, and no others: :in, a set of kinds (:var :test
   :section :task :schema), :ns, a name and what is under it (\"seon.ref\": seon.ref/x and seon.ref.y/z, not seon.ref-test). The answer is data, and whole: narrow it as you
@@ -430,7 +432,17 @@
                    [:vector :map]]]}
   ([pattern] (grep pattern {}))
   ([pattern {:keys [in ns]}]
-   (let [db (agent/db) kinds (or in every-kind) rows (doc/grep db pattern kinds ns)]
+   (let [db (agent/db) kinds (or in every-kind) rows (doc/grep db pattern kinds ns)
+         ;; the task the asker works is held in its ctx already: one comparison a hit, and only when it works one
+         own (get-in @seon.ctx/ctx [:seon.agent/task :seon.task/id])
+         own? (when (and own (kinds :task)) (str own ":"))
+         mine? (fn [r] (boolean (and own? (= :task (:kind r)) (str/starts-with? (:at r) own?))))
+         n (count (filter mine? rows))
+         ;; always a vector, empty when nothing is left: the empty answer below is a value (a group-by's missing key was nil)
+         rows (cond-> (filterv (complement mine?) rows)
+                (pos? n) (conj {:kind :own-task :name own :left n
+                                :text (str "your own task's plan, " own " (" n " line" (when (< 1 n) "s")
+                                           "), left out: your ctx holds it")}))]
      ;; a string is its text as written: one holding a regex's operators that matches nothing is still [] (a
      ;; value, so a reply's later calls run), shown with its regex form: the string's characters between #" and ",
      ;; a quote escaped

@@ -644,21 +644,6 @@
     (is (= [2 2 2 2] (mapv count grants)) (str "8 tests on 4 workers: 4 forks of 2: " (pr-str grants)))
     (is (= items (apply merge grants)) "every test granted once")))
 
-;; a step past its bound is a signal (docs/clocks.md#time-decides-the-owners-exceptions), never a verdict: its asker is answered
-;; on the rest, and the answer names it
-(deftest a-step-that-overran-is-a-signal-not-a-red
-  (let [[st o] (seeded-run 4 {:items {'a.b-test/t "dt"} :steps {"laws" {:digest "dl" :binary? false :bound 100}} :build {:tree "T" :needed? false}})
-        [s] (fx-asks o)
-        [t] (remove #(get-in % [:req :plan?]) (asks o :tests))
-        [st o2] (feed st [(answer-of s {:value {:signal :overran :ms 150}})])
-        [_ o3] (feed st [(answer-of t {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.b-test/t"}]})])
-        [r] (run-answers o3)]
-    (is (= {:kind :step :name "laws" :bound 100 :binary? false} (select-keys (get-in s [:req :req]) [:kind :name :bound :binary?])) "no build: none is needed")
-    (is (empty? (run-answers o2)) "the signal answers no one")
-    (is (= [:signal] (mapv :status (filter #(= :prove-verdict (:op %)) o2))) "it streams as a signal")
-    (is (= [[] 1 0] ((juxt :red :pass :fail) r)) (pr-str r))
-    (is (= [{:test "laws" :digest "dl" :kind :step :signal :overran :ms 150}] (:signals r)))))
-
 ;; docs/merging.md#the-test-service: a step on the binary needs its tree's seeded store, made once a tree after the build; a red seed is its steps'
 (deftest a-binary-step-waits-for-the-seed-and-a-red-seed-is-its-error
   (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :steps {"smoke" {:digest "ds" :binary? true :bound 5000}} :build {:tree "T" :needed? true}})
@@ -746,3 +731,13 @@
         r (:r (first (filter #(= :prove-answer (:op %)) all)))]
     (is (= 1 (:error r)) "the error is counted")
     (is (= [held] (filterv :exit (:reports r))) (str "and its report is in the answer, once: " (pr-str (:reports r))))))
+
+;; docs/merging.md#a-merge-runs-what-the-change-reaches: the judge's run through the test service answers, for each test it defers to
+;; the merge check, that test's digest at the task's base, as the agent's plan computed it from the base's program. The merge check
+;; reads main's verdict at that digest (seon.fx/reds-at). Red before: the service built its answer without it, so the first real task
+;; on the store made at 06:46 carried a nil base digest for all 244 deferred tests, read as "new on the branch", and every red held it
+(deftest a-runs-answer-carries-each-deferred-tests-base-digest
+  (let [base {:deferred ['a.b-test/p 'a.b-test/q] :deferred-digests {'a.b-test/p "bp" 'a.b-test/q nil} :selected [] :at-judge 0}
+        r (#'seon.prove/run-answer base {})]
+    (is (= ['a.b-test/p 'a.b-test/q] (:deferred r)))
+    (is (= {'a.b-test/p "bp" 'a.b-test/q nil} (:deferred-digests r)) "each deferred test's base digest, nil only for a test new on the branch")))

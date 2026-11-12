@@ -422,15 +422,18 @@
 
 (defn text-refusal
   "Why text can't be the shipped config on this process's branch, as a boot reads it with no profile, or nil: its message names each key. What a write of the file checks first (seon.fx/unreadable). See docs/source.md#a-program-file."
-  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
-  [text]
+  {:malli/schema [:function [:=> [:cat :string] [:maybe :string]] [:=> [:cat :string [:maybe [:map-of :qualified-keyword :any]]] [:maybe :string]]]}
+  ([text] (text-refusal text nil))
+  ;; changes: schema entries the same change states ({k form}, a branch's schema files read with it), so a config key and its
+  ;; schema changed together are checked against each other, never against this process's schema alone
+  ([text changes]
   ;; docs/failure-points.md: text that aero can't read, or a map that doesn't validate, is this answer
   (try
     (layered [[shipped-file (read-layer (java.io.StringReader. text) :default (checkout))]
               ["no --profile" {:seon.config.root/profile :default}]]
-             (:schema @held))
+             (if (seq changes) (schema-of changes) (:schema @held)))
     nil
-    (catch Throwable e (ex-message e))))
+    (catch Throwable e (ex-message e)))))
 
 ;; ---- reading a setting: the one resolver ------------------------------------------------------
 ;; Owner: settings are per model, per provider and per task; "a principle and not just
@@ -474,7 +477,7 @@
 ;; ---- the model provider, as the config states it --------------------------------------------
 
 (defn provider
-  "The model provider config c names (:seon.config.ai/*, resolved for its model: thinking too, so a model's or a task's wins over the file's, and a task's reasoning effort; docs/model.md#thinking-is-off-by-default): none, the
+  "The model provider config c names (:seon.config.ai/*, resolved for its model: thinking too, so a model's or a task's wins over the file's, and a task's reasoning effort; docs/model.md#thinking-is-on-at-low-effort): none, the
   scripted provider (a test fixture), or the OpenAI-compatible endpoint with the NAME of its key's
   environment variable (never the key)."
   {:malli/schema [:=> [:cat :seon.config/config] :seon.model/provider]}
@@ -487,8 +490,8 @@
                               :api-key-env (v :seon.config.ai/api-key-variable) :max-tokens (v :seon.config.ai/max-tokens)
                               :replay-reasoning (v :seon.config.ai/replay-reasoning)}
                        ;; thinking is shipped (default.edn), so the resolver reads it, a model's or a task's over the file's; temperature
-                       ;; and effort are left out of the file on purpose (the provider's own default), so they are read where a layer
-                       ;; states them, the task's merged into c by provider-at (docs/model.md#thinking-is-off-by-default)
+                       ;; is left out of the file on purpose (the provider's own default), and effort may be, so each is read where a
+                       ;; layer states it, the task's merged into c by provider-at (docs/model.md#thinking-is-on-at-low-effort)
                        true (assoc :thinking (v :seon.config.ai/thinking))
                        (:seon.config.ai/temperature c) (assoc :temperature (:seon.config.ai/temperature c))
                        (:seon.config.ai/reasoning-effort c) (assoc :reasoning-effort (:seon.config.ai/reasoning-effort c))))))
