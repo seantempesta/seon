@@ -81,11 +81,11 @@
     (d/release bc)
     r))
 
-;; estimate: its fixtures (data-of 10, 30, 100) declare 140 attributes in three schema transactions, ~0.9M, 1.3M and 2.9M
-;; since a schema change's commit keys its schema by a hash of its bytes (it was ~6M fixed each), then three branches and four
-;; data transactions a size (~0.1M each) and the merges (<0.1M each): ~10M. Measured 47M: ~21M of it is data-of's first schema
-;; transaction costing 23.6M here and 2.9M elsewhere, filed: seon.merge/a-first-schema-transaction-costs-the-same-wherever-it-runs
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-merge-reads-the-data-attributes-from-the-index
+;; estimate: its fixtures (data-of 10, 30, 100) declare 140 attributes in three schema transactions at ~35k an attribute
+;; (0.4M, 1.1M, 3.5M) and their commits (~1.2M each), then three branches, three connects and four transactions a size
+;; (~1.3M a size); the proof's warm calls of the merge (~20 a size at ~0.2M): ~20M. It was 47M: data-of builds its
+;; attributes with hash-map, and each schema datom before :db/ident rebuilt the whole reverse schema (Datahike, fixed)
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-merge-reads-the-data-attributes-from-the-index
   ;; task seon.merge/data-attrs-read-from-the-attribute-index: a merge of declared data (:all)
   ;; read which attributes are data from (d/schema db), which rebuilds the whole schema map on
   ;; every call, once per db per read; agents merge main at every green. Now whether an attribute
