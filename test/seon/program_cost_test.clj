@@ -174,9 +174,9 @@
     [(:store base) (first (remove nil? (seq (.-_addresses (.root ^org.replikativ.persistent_sorted_set.PersistentSortedSet (:eavt base))))))]))
 
 (deftest a-stored-node-reads-at-its-decode
-  ;; deps 2026-11-12: 86 KB / 9.3k ticks a read in the morning, 46.5 KB / 5.8k with get-immutable, 28.3 KB / 5.0k
+  ;; deps 2026-11-12: 86 KB / 9.3k ticks a read in the morning, 46.5 KB / 5.8k with get-immutable, 24.2 KB / 4.9k
   ;; once a uuid holds its halves and no text, a keyword decodes from its bytes, uuid text and parse take no
-  ;; rest list or bignum step, a digest is one block and a foreign byte move copies once (Jolt, konserve, crypto)
+  ;; rest list or bignum step, a digest is one block, a foreign byte move copies once and readAllBytes reads once (Jolt, konserve, crypto)
   (try
     (cost/proof
       {:of 'konserve.core/get-immutable :input 'seon.program-cost-test/node-read-of
@@ -186,12 +186,12 @@
                   "child address, an intern key per new keyword, the key and address vectors; no metadata, lock or revision")
        :growth :constant
        ;; the floor is ~12 KB / ~3k ticks (the work above at a 32-entry branch: 32 datoms, 32 addresses, 1.78 KB
-       ;; raw). This design's estimate adds what it is known to spend over that: the read's own wrapper and env
-       ;; (~8 KB), LMDB's blob and zstd's frame (~2.5 KB beyond their bytes) and the Jolt->Scheme call edges
-       ;; (~5 KB): ~28 KB / ~5k ticks for a branch, a leaf less. Measured 28.3 KB / 5.0k at a branch (100
-       ;; forms), 20.5 KB / 3.9k at a leaf, once jolt.ffi's byte moves copy once. The wrapper is the gap left.
+       ;; raw). This design's estimate adds what it is known to spend over that: the read's stream and env
+       ;; (~4 KB), LMDB's blob and zstd's frame (~2.5 KB beyond their bytes) and the Jolt->Scheme call edges
+       ;; (~5 KB): ~24 KB / ~5k ticks for a branch, a leaf less. Measured 24.2 KB / 4.9k at a branch (100
+       ;; forms), 16.4 KB / 3.7k at a leaf. The decode (8 KB, a record per datom and address) is the gap left.
        :per-n {}
-       :fixed {:ticks 5000.0 :bytes 29000.0 :calls 0}
+       :fixed {:ticks 5000.0 :bytes 25000.0 :calls 0}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 
