@@ -59,15 +59,20 @@
                   (or (empty? merges) live-merge?)))]
     [ok idx' full incr]))
 
+(def ^:private commits
+  "The commits of a random history: the depth the 1e8-tick cap allows at ~0.9M ticks a commit (the oracle's full reconcile and
+  the incremental observe over a 4-task world growing to ~15). A history the pinned seed needed (140) is a scenario of its own."
+  105)
+
 (defn- equals-full
-  "A random history from seed, 150 commits, in a world of n work tasks (r3.fx/world, a value in memory): after each, the
+  "A random history from seed, `commits` long, in a world of n work tasks (r3.fx/world, a value in memory): after each, the
   incremental reconciler's actions against the oracle's."
   [n seed]
   (let [rng (java.util.Random. seed)
         ;; one merge at a time: the octopus merge degenerates to M1's merge queue, the oracle's rule
         db0 (d/db-with (fx/world n 6) (vec (seon.test-store/root-tx {:seon.config.merge/max-running 1})))]
     (loop [k 0 db db0 idx (r/index db0) bad 0]
-      (if (= k 150)
+      (if (= k commits)
         (is (zero? bad) (str "seed " seed))
         (let [tx (rand-step db rng k)
               rep (when (seq tx) (try (d/with db (vec tx)) (catch Throwable _ nil)))
@@ -84,10 +89,9 @@
 
 (deftest ^{:seon.test/estimate {:ticks 100000000}} incremental-equals-full
   ;; one seed in the automatic run, five in the full one (:seon.config.proofs/seeds). The world is the fewest tasks every step kind
-  ;; reaches: 2 work tasks (4 with their merges; kind 7 needs a plain work task and one that is not), in memory (r3.fx/world),
-  ;; growing by kind 3 to ~20 at commit 150. Estimate: 150 commits x the oracle's full reconcile at ~80k ticks a task (measured:
-  ;; 144M, where 45k a task was assumed) x ~12 tasks on average = ~1.4e8, held at the 1e8 cap while the owner decides the depth:
-  ;; 150 commits keep histories as deep as a bug has needed (140)
+  ;; reaches: 2 work tasks (4 with their merges; kind 7 needs a plain work task and one that is not), in memory (r3.fx/world).
+  ;; Estimate: 105 commits (`commits`) x ~0.9M ticks a commit (the oracle's named pull and reconcile ~0.25M, the incremental observe
+  ;; ~0.4M: seon.task/entity-value pulls a changed task's whole schema, ~31k ticks a task, filed; the step's own reads) = ~95M
   (doseq [seed (let [s (proofs/test-seed)] (map #(+ s %) (range (config/value :seon.config.proofs/seeds))))]
     (equals-full 2 seed)))
 
