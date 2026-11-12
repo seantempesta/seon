@@ -1238,7 +1238,7 @@
   ;; docs/storage.md#history: my.agent/history on a var (a symbol), a task (a lookup ref) and a name that is no var;
   ;; my.db/at the db at a point, each shape, read in a real agent (a fork of the fork server on its own branch)
   ;; :at stays on the agent's side: a date's pr-str does not read back (jolt.host/a-date-prints-what-reads-back)
-  (let [[_ _ rows task-rows nothing both opt-t foreign bad-branch bad-commit branch-ok commit-ok mix]
+  (let [[_ _ rows task-rows nothing both opt-t foreign bad-branch bad-commit branch-ok bare-ok commit-ok mix]
         (at/in-agent
          (fn [{:keys [task]}]
            ["(defn zz-h [] 1)"
@@ -1257,6 +1257,8 @@
             "(:seon.error/type (my.db/at {:branch :no-such-branch}))"
             "(:seon.error/type (my.db/at {:commit (random-uuid)}))"
             "(let [b (:branch @seon.agent/state)] (= (:seon.error/type (my.db/at {:branch b})) nil))"
+            ;; a branch as a task names it (its root's main left off) reads the same branch as the store's name for it
+            "(let [b (:branch @seon.agent/state) m (seon.db/main-branch (:cfg @seon.agent/state)) bare (if (= (name m) (namespace b)) (keyword (name b)) b)] [(not= b bare) (= (:max-tx (my.db/at {:branch b})) (:max-tx (my.db/at {:branch bare})))])"
             "(let [b (:branch @seon.agent/state) c (datahike.api/commit-id (my.db/at {:branch b}))] (= (:max-tx (my.db/at {:commit c})) (:max-tx (my.db/at {:branch b}))))"
             "(try (my.db/at {:commit (random-uuid) :t 1}) :no (catch Exception e :refused))"]))]
     (is (= 2 (count (filter :added? (:value rows)))) (str "the var's two definitions: " (pr-str rows)))
@@ -1269,6 +1271,7 @@
     (is (= :seon.db/unresolved (:value bad-branch)))
     (is (= :seon.db/unresolved (:value bad-commit)))
     (is (true? (:value branch-ok)))
+    (is (= [true true] (:value bare-ok)) (str "a branch named as its task names it is the store's (loop 2's refine lost ~10 evals): " (pr-str bare-ok)))
     (is (true? (:value commit-ok)))
     (is (= :refused (:value mix)) "a contradictory option is refused")))
 

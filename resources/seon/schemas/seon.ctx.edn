@@ -32,6 +32,8 @@
                                          [:held :map] [:swapped :map]]]
  ;; a pattern the walk cannot read (seon.ctx/spec): no vector, an option neither pull's nor :by, a
  ;; join naming no attribute or with no pattern; the clause it stopped at
+ ;; ctx takes no validator (set-validator! on seon.ctx/ctx): every write is checked by write!, the one writer path
+ :seon.ctx/no-validator [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/no-validator]]]]
  :seon.ctx/invalid-pattern [:and :seon.error/base [:map [:seon.error/type [:= :seon.ctx/invalid-pattern]] [:clause :any]]]
  ;; metadata on the value of a join a :limit windows (seon.ctx/join writes it; seon.print.emit reads it to say how many more there are)
  :seon.ctx/count [:int {:min 0 :description "How many members a windowed join has in the db, as metadata on the value the context holds for it, which holds only the window: (:seon.ctx/count (meta (:seon.eval/_agent @ctx))). Absent when no :limit made the value. See docs/ctx.md#the-pattern."}]
