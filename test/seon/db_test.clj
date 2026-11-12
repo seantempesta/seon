@@ -736,12 +736,15 @@
 (deftest stored-values-compress-through-the-codecs-the-build-made
   ;; the store's values are zstd frames (the default) or LZ4 frames, through the libzstd and
   ;; liblz4 bin/build makes from their pinned sources (reference-code/zstd; Chez's vendored
-  ;; lz4), target/lib, bin/env's JOLT_ZSTD_LIB and JOLT_LZ4_LIB, never a system library; a
-  ;; frame round-trips, and real text (the checkout's docs) compresses
+  ;; lz4), a build's target/lib, bin/env's JOLT_ZSTD_LIB and JOLT_LZ4_LIB, never a system library; a
+  ;; frame round-trips, and real text (the checkout's docs) compresses. The libs are the running
+  ;; build's, loaded at its start: a test forked from the standing root's agent (a landing's live
+  ;; route) runs main's build of the same pins, whatever checkout its files are read from (a pin
+  ;; moved takes the checkout's own build: seon.system/binary-current)
   (let [text (.getBytes ^String (slice @text 0 65536) "UTF-8")]
     (doseq [[lib compress decompress] [[konserve.jolt.zstd/lib-path konserve.jolt.zstd/compress konserve.jolt.zstd/decompress]
                                        [konserve.jolt.lz4/lib-path konserve.jolt.lz4/compress konserve.jolt.lz4/decompress]]]
-      (is (str/starts-with? lib (str (cfg/checkout) "/target/lib/")) lib)
+      (is (and (re-find #"/target/lib/lib(zstd|lz4)\.dylib$" lib) (.isFile (java.io.File. ^String lib))) (str lib ": a build's own library, loaded"))
       (let [frame (compress text)]
         (is (= (seq text) (seq (decompress frame))) (str lib ": a frame round-trips"))
         (is (< (alength frame) (/ (alength text) 1.5)) (str lib ": 64 KiB of docs compress to " (alength frame) " bytes"))))

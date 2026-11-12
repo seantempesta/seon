@@ -857,6 +857,32 @@
           (println (if ok "HEALTH OK" "HEALTH FAILED"))
           (if ok 0 1))))))
 
+(defn route
+  "The route a landing of the checkout at root takes, against the standing root whose binary was built from tree running
+  (docs/merging.md#a-branch-lands-with-binland): {:route :live} when that binary is current for root's tree by
+  seon.system/binary-current at :root scope (what root runs from its binary while its agents load the rest: the branch is
+  proved in a fork of main's agent, its diff loaded, through the test service); else {:route :local :why answer}, the
+  checkout's own build (a pin, native code, a baked resource, root's own code, or a binary of no known tree). db and g
+  are the plan's program and reach graph of root's tree."
+  [db g running tree]
+  (if-let [why (seon.system/binary-current db {:inputs {:tree running}} tree {:graph g :scope :root})]
+    {:route :local :why why}
+    {:route :live}))
+
+(defn- route!
+  "bin/test --route RUNNING: prints `route: live` or `route: local <why>` for this checkout's tree against a binary built
+  from tree RUNNING (bin/land asks the standing root for it). Answers 0 live, 3 local."
+  [running]
+  (let [root (source-tree)
+        tree (fx/tree-id root)
+        store (ts/shared-program-store! (config/value :seon.config.proofs/program-store) @ts/kept-program-digest)
+        db (program-db root store tree (config/value :seon.config.proofs/program-store-max-bytes))
+        in (fx/inputs root config/config (config/checkout) tree)
+        g (reach-graph-of db (:data-refs in) store)
+        {r :route why :why} (route db g (not-empty running) tree)]
+    (println (str "route: " (name r) (when why (str " " (pr-str (select-keys why [:binary :tree :reaches :missing]))))))
+    (if (= :live r) 0 3)))
+
 (defn -main [& args]
   ;; a shard forks (a test's child, its store's create), so it starts no collector sweeper, as the binary does
   ;; (seon.main/-main, seon.lib/gc-sweepers!): a sweeper started in a forked child deadlocked it on Chez's
@@ -871,5 +897,7 @@
         "--shard" (shard! (first more))
         "--store-steps" (store-steps! (first more))
         "--overran" (overran! (first more))
+        ;; --route RUNNING: bin/land's route, live through the standing root or the checkout's own build
+        "--route" (route! (first more))
         ;; --health [CLASS ...]: bin/check's health step
         "--health" (health! (map keyword more))))))

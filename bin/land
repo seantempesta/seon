@@ -4,7 +4,9 @@
 # (bin/worktree NAME), never the main tree, which stays on main and clean.
 #   1. merge main into the branch (a conflict stops it: resolve, commit, run it again);
 #   1b. bin/check health and bin/laws, seconds: a red stops the landing before any prove;
-#   2. bin/prove --out DIR --merge on that tip (the local path: see step 2's note below), niced, beside any other run (results are shared by digest across
+#   2. the tip proved by its route (bin/test --route, printed and named in the message): live, bin/prove --merge through the
+#      standing system's test service, when the standing root's binary is current for the tip (seon.system/binary-current,
+#      :root scope); else bin/prove --out DIR --merge, the checkout's own build. Niced, beside any other run (results are shared by digest across
 #      every checkout, and each run writes under its own target/prove/<id>: no run waits on another); a diff of
 #      docs/, resources/seon/tasks/ and top-level *.md only runs bin/check health and seon.doc-test instead (AGENTS.md §3).
 #      The log and the run's directory are kept in the main tree's target/land/, past the worktree's removal;
@@ -123,12 +125,22 @@ DOCS=$(print -r -- "$CHANGED" | grep -vE '^(docs/|resources/seon/tasks/)|^[^/]+\
 if [[ -n $CHANGED && -z $DOCS ]]; then
   { nice -n 15 "$HERE/bin/test" seon.doc-test && print "MERGE OK"; } > "$LOG" 2>&1 & PJ=$!
 else
-  # by the owner's fallback (2026-11-11: a run forks main and loads the branch's whole program in order in one eval, from the
-  # branch in the store, as replay does; the fallback a binary built from the branch's source, its tests forked from it):
-  # this checkout's own build and runner. The standing system's items are forks of an agent started in the main tree and
-  # carry its loaded config and libraries (jolt/runtime's land, 2026-11-12), so it proves no landing until its run loads the
-  # branch whole as ruled.
-  nice -n 15 "$HERE/bin/prove" --out "$MAIN/target/land/$STAMP-run" --merge > "$LOG" 2>&1 & PJ=$!
+  # the route, by the one rule (owner, 2026-11-11: a run forks main and loads the branch; the fallback a binary built from the
+  # branch's source, its tests forked from it): the standing root's binary current for this tip by binary-current at :root
+  # scope (bin/test --route: what root runs from its binary; its agents load the rest) proves it live, through the standing
+  # system's test service, in a fork of main's agent with the branch's diff loaded (seon.system/prove-tree!); anything the
+  # binary bakes (a pin, native code, a config or schema resource, root's own code) or a root that answers no tree takes the
+  # checkout's own build and runner. LAND_LOCAL=1 bin/land ... forces the second
+  SPORT=$(tr -d ' \n' < "$MAIN/runs/root.port" 2>/dev/null)
+  RUNNING=$([[ -n $SPORT && -z ${LAND_LOCAL:-} ]] && print -r -- '{:op :eval :agent "root" :code "(get-in (seon.program/binary-program) [:inputs :tree])"}' \
+    | "$MAIN/bin/ask" "$SPORT" 2>/dev/null | sed -nE 's/.*:value "([0-9a-f]{40})"\}\}$/\1/p')
+  ROUTE=$([[ -n $RUNNING ]] && nice -n 15 "$HERE/bin/test" --route "$RUNNING" 2>/dev/null | grep '^route: ' | tail -1)
+  print -r -- "${ROUTE:-route: local (no standing root's binary tree${LAND_LOCAL:+: forced})}" | tee "$LOG.route"
+  if [[ $ROUTE == "route: live" ]]; then
+    nice -n 15 "$HERE/bin/prove" --merge > "$LOG" 2>&1 & PJ=$!
+  else
+    nice -n 15 "$HERE/bin/prove" --out "$MAIN/target/land/$STAMP-run" --merge > "$LOG" 2>&1 & PJ=$!
+  fi
 fi
 trap 'kill -TERM -$PJ 2>/dev/null || kill -TERM $PJ 2>/dev/null; fail "stopped: its proof was ended with it"' TERM INT HUP
 wait $PJ; st=$?; trap - TERM INT HUP
@@ -140,7 +152,7 @@ if [[ -n $CHANGED && -z $DOCS ]]; then LINE="bin/land: docs and tasks only: bin/
 else LINE=$(grep -E ' bin/prove --merge .*: MERGE (OK|FAILED)' "$LOG" | tail -1); fi
 (( st == 0 )) && [[ $(tail -1 "$LOG") == "MERGE OK" ]] || fail "the proof is red: $LOG"
 [[ $(git rev-parse HEAD) == $(git rev-parse "$B") ]] && git merge-base --is-ancestor "$OLD" HEAD || fail "the branch moved during its proof"
-{ if [[ -n $MSG ]]; then cat "$MSG"; else print "Merge $B"; fi; print; print "$LINE"; } > "$HERE/target/land-msg"
+{ if [[ -n $MSG ]]; then cat "$MSG"; else print "Merge $B"; fi; print; print "$LINE"; [[ -f $LOG.route ]] && cat "$LOG.route"; } > "$HERE/target/land-msg"
 # main moves to the proved tree; when another landing moved main during the proof, main is merged in and landed
 # without proving again: what main gained was proved when it landed, and chasing main under load could prove
 # forever (owner, 2026-11-08: "that's fucked"); the combination is the daily full run's to catch. Only a
