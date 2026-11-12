@@ -510,13 +510,14 @@
 ;; ---- recorded reads (docs/source.md#tests-run-by-reach) -----------------------------------
 
 (defn reads-key
-  "What a test's run read (raw: {:fns #{var} :entities #{schema key} :config #{key} :files #{path}}, its run's record) with
+  "What a test's run read (raw: {:fns #{var} :entities #{schema key} :config #{key} :files #{path} :keys #{read key}}, its run's
+  record, :keys the static reads its reach digest takes, seon.program/graph-index's :reads) with
   each read's digest in rd ({var digest, [:schema k] digest, [:config k] digest, [:file path] digest}: seon.program/read-digests
   of the program it ran): its verdict's :reads. A read rd holds nothing for is kept as nil, a miss: it moves when the thing
   appears."
   {:malli/schema [:=> [:cat :map :map] :map]}
-  [rd {:keys [fns entities config files]}]
-  (into {} (for [k (concat fns (map #(vector :schema %) entities) (map #(vector :config %) config) (map #(vector :file %) files))]
+  [rd {:keys [fns entities config files keys]}]
+  (into {} (for [k (concat fns (map #(vector :schema %) entities) (map #(vector :config %) config) (map #(vector :file %) files) keys)]
              [k (get rd k)])))
 
 (defn- covered?
