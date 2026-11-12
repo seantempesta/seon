@@ -237,7 +237,6 @@
           rd))))
 
 (defn- tests-of
-(defn- tests-of
   "{test digest} of the named test namespaces (or every one) on the checkout at root, the
   ones among them that reach a process of their own (:process, seon.program/graph-index), its
   program db (program-db, kept in store), inputs and reach graph (seon.program/reach-graph:
