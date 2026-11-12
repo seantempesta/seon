@@ -4,7 +4,6 @@
   outside src: the binary's -main (seon.main/-main) serves
   root and ports and loads this driver from the checkout's test/ for every other mode.
   usage: target/seon smoke        3 agents: define, test, transact; merge one; kill one mid-eval
-         target/seon scale N      N agents spawned at once, each eval + transact + test
          target/seon scale-work N N agents (10) that work: five evals and a prove of ~60 tests each
   A mode is its body: run-check boots root, runs it, prints its report and checks, stops
   root and ends on the one verdict line, NAME OK or NAME FAILED, and its exit status. Waits
@@ -189,12 +188,6 @@
 
 (defn- p1 "The response of forms evaluated in agent id, as [printed recorded]." [sys id forms]
   ((juxt printed :recorded) @(c/submit! sys id forms)))
-
-(defn- p1-ex
-  "The response of forms evaluated in agent id, as [printed recorded ex]: ex its error, nil when the eval answered, so a
-  check fails where its eval did (durable-write said OK with its evals failed: task seon.check/a-selection-derives-what-it-needs-from-its-steps)."
-  [sys id forms]
-  ((juxt printed :recorded :ex) @(c/submit! sys id forms)))
 
 ;; ---- the modes --------------------------------------------------------------------------
 
@@ -407,119 +400,6 @@
                 :its-evals-recorded (= "1" (printed n))
                 :its-defn-recorded (re-find #"f3" (str (printed src)))}}))))
 
-;; ---- problems (session D2): each class provoked, then read back from main ----------------
-
-(def ^:private problem-specs
-  "Two tasks the scripted model cannot make green in one turn: p1's proof wants 99 (the
-  reply adds 1), and p2's proof is a cost proof whose estimate allows half a call."
-  [{:var "p2-input" :ns 'app.par :stub "(defn p2-input [n] [n])"}
-   {:name "p1" :ns 'app.par :stub "(defn p1 {:malli/schema [:=> [:cat :int] :int]} [x] 0)"
-    :proof "(deftest p1-test (is (= 99 (app.par/p1 10))))"}
-   {:name "p2" :ns 'app.par :stub "(defn p2 {:malli/schema [:=> [:cat :int] :int]} [x] 0)"
-    :proof (str "(deftest p2-test (seon.cost/proof {:of 'app.par/p2 :input 'app.par/p2-input :n \"x\" :work \"one call\""
-                " :growth :constant :fixed {:calls 0.5} :sizes [1 10 100]}))")}])
-
-(defn- stalled-rows
-  "The open :stalled rows on main db: their one class's reader (seon.problems/stalled-agents, one AEVT range), never
-  the whole report, since a wait on main runs it in main's writer at every commit (seon.system/await-db's watch).
-  See docs/machine.md#builds-and-checks."
-  [db] (seon.problems/stalled-agents db (seon.problems/answers db)))
-
-(defn- provoked?
-  "await-provoked's test of main db: its quiescence report is at or after t. It reads one fact, never main's problems report."
-  [t] #(some-> (seon.reconcile/quiescent %) :t (>= t)))
-
-(defn- platform-defect?
-  "Does main hold the api's platform defect as a recorded error (:seon.error/class :platform, type :seon.system/proc-defect):
-  the api folds its throw into its errors and flushes them to main, a path the reconciler's quiet says nothing about. One
-  class's facts, never the whole report (a wait on main runs it at every commit). See docs/machine.md#builds-and-checks."
-  [db] (some? (d/q '[:find ?e . :where [?e :seon.error/type :seon.system/proc-defect] [?e :seon.error/class :platform]] db)))
-
-(defn- await-provoked
-  "Main at the reconciler's first quiet after main's t (p1 and p2 released at t, so judged by then: their red proof and
-  cost verdict; the platform defect and the death came before): its quiescence report at or after t, or the quiet
-  itself (:seon.system/quiet-before-true, when no later report was written). The problems are read once, after, from
-  the render proc's kept health (my.root/problems), and the step's :checks name a missing class: a predicate that read
-  main's whole problems report ran it in main's writer at every commit while p1 and p2's proofs committed (batches 32
-  and 38 overran on it). See docs/machine.md#builds-and-checks."
-  [sys t]
-  (seon.system/await-db sys (str "the reconciler's quiet at or after t " t ", p1 and p2 judged") (provoked? t)))
-
-(defn problems-check
-  "Provoke every class of problem through the paths agents and root use (:stall-ms 1000
-  for the stall, the eval held on a fifo until main holds it, so it comes at any load), then read my.root/problems: an eval error and a contract's error, an
-  effect's io error, a platform defect in the api, a stall, an agent's death with its exit
-  status and stderr, a red proof's assertions and a cost proof's verdict. It reads them
-  once root is quiet after their runs (await-provoked), from the render proc's kept health; it prints each wait as it
-  enters it. Its waits read one class each, never the whole report (docs/machine.md#builds-and-checks)."
-  []
-  (run-check "PROBLEMS" {:datoms 300 :max-running 2 :stall-ms 1000}
-   (fn [sys]
-    (let [t0 (System/currentTimeMillis)
-        [a b] (spawn-ready! sys "problems" "dies")
-        ;; one error each: a request stops at its first
-        r1 [@(c/submit! sys a "(/ 1 0)") @(c/submit! sys a "(defn sq {:malli/schema [:=> [:cat :int] :int]} [x] (* x x)) (sq \"x\")")
-            @(c/submit! sys a "(my.fx/call :file {:path \"/nonexistent-d2/x\" :text \"x\"})")]
-        ;; a stall (1,000 ms bound): an open :stalled problem while the eval is held, closed once it answers. Held on a
-        ;; fifo the step writes only once main holds the stall: a sleep let root's stall timer come after the eval
-        ;; answered under load (or its assert and retract share one commit), and the wait for a stall that never was
-        ;; ran 77 minutes (batch 9, load 26-32; task seon.check/the-problems-step-holds-its-stall-until-it-sees-it)
-        hold (str (System/getProperty "java.io.tmpdir") "/problems-stall-" (random-uuid) ".fifo")
-        made (clojure.java.shell/sh "mkfifo" hold)
-        _ (when-not (zero? (:exit made)) (throw (ex-info (str "mkfifo " hold ": " (:err made)) made)))
-        held (str "(slurp " (pr-str hold) ") :awake")
-        r2p (c/submit! sys a held)
-        ;; it ends, too, if the eval answers first (no stall came): the step then fails on :stalled, never waits on
-        _ (out! "PROBLEMS WAIT the stall on main (or the held eval's answer)")
-        during (seon.system/await-db sys #(or (seq (stalled-rows %)) (realized? r2p)))
-        stall (first (some-> during stalled-rows))
-        ;; the release, written here to the fifo itself (spit writes a file beside it and renames it over the fifo, which
-        ;; the reader never sees): the held eval is blocked opening the read end, so the write end opens at once; an eval
-        ;; that answered already (no stall came) reads nothing, and nothing is written
-        _ (when-not (realized? r2p) (with-open [w (java.io.FileOutputStream. ^String hold)] (.write w (.getBytes "go"))))
-        r2 @r2p
-        _ (clojure.java.shell/sh "rm" "-f" hold)
-        _ (out! "PROBLEMS WAIT the stall closed on main")
-        after (seon.system/await-db sys #(empty? (stalled-rows %)))
-        _ (a/>!! (:back sys) {:op :writer :tx-count 1 :batch-ms 1 :n-tx "not a number" :commits 1})
-        ;; its own fact, as the stall's: the api's defect reaches main through its fold and flush, which the reconciler's quiet
-        ;; (await-provoked) does not wait on; read before it under load, :platform failed a landing (runtime's, 2026-11-12)
-        _ (out! "PROBLEMS WAIT the api's platform defect on main")
-        ;; unnamed: a named wait also ends at the reconciler's quiet (:seon.system/quiet-before-true), and this defect is the
-        ;; api's fold, not the reconciler's work, so a named wait answered quiet before the fact and :platform read false
-        platform (seon.system/await-db sys platform-defect?)
-        r3 @(c/submit! sys b "(spit \"/dev/stderr\" \"D2 boom: the agent writes its last words\\n\" :append true) (seon.lib/c-exit 3)")
-        _ (doseq [tx (seon.fixtures/program-txs @(:conn sys) problem-specs)] @(c/transact-main! sys tx))
-        ds (mapv #(assoc % :seon.task/config {:seon.config.agent/max-turns 1})
-                 (remove #(= :merge (:seon.task/kind %)) (seon.fixtures/decls problem-specs 'problems nil)))
-        _ (my.root/create! sys ds)
-        _ (my.root/run! sys ["problems/p1" "problems/p2"])
-        ;; named: the report is made of what the reconciler writes (the judge's red and cost
-        ;; rows), so the wait ends when root goes quiet with a class missing (:seon.system/quiet-before-true)
-        ;; and the :checks below name which one, never a wait for a row that cannot come
-        _ (out! "PROBLEMS WAIT the reconciler's quiet after p1 and p2's release")
-        _ (await-provoked sys (:max-tx @(:conn sys)))
-        p (my.root/problems sys)
-        rows (fn [k] (get-in p [:classes k :rows]))
-        types (fn [k] (set (map :type (rows k))))
-        died (first (filter #(= :seon.agent/died (:type %)) (rows :agent)))
-        red (first (filter #(= 'app.proofs/p1-test (:test %)) (rows :red)))
-        cost-row (first (rows :cost))]
-      {:report {:replies (mapv short-items (conj r1 r2 r3))
-                :counts (into (sorted-map) (for [[k v] (:classes p)] [k (:n v)]))
-                :died (select-keys (:example died) [:exit :stderr :last-op])
-                :red (select-keys red [:task :test :assertions :evidence])
-                :cost (select-keys cost-row [:task :test :verdict])
-                :stalled (select-keys stall [:agent :message])
-                :ms (- (System/currentTimeMillis) t0)}
-       :checks {:eval (every? (types :eval) [:seon.agent/eval-error :seon.instrument/contract-error])
-                :effect (contains? (types :effect) :seon.fx/io-error)
-                :platform (and (not (contract/error? platform)) (contains? (types :platform) :seon.system/proc-defect))
-                :stalled (and (= a (:agent stall)) (clojure.string/includes? (str (:message stall)) "problems-stall-") (not (contract/error? after)))
-                :died (and died (= {:exit 3} (get-in died [:example :exit])) (re-find #"D2 boom" (str (get-in died [:example :stderr]))))
-                :red (and red (seq (:assertions red)) (= ['app.proofs/p1-test] (:proofs red)))
-                :cost (and cost-row (false? (get-in cost-row [:verdict :ok?])) (seq (:rows cost-row)))}}))))
-
 ;; ---- the mg/check gate (v1's survey of ~/src/seon, 2026-10-20) ------------------
 
 (defn mg-check
@@ -563,73 +443,6 @@
               (when-let [f (second more)]
                 (into {} (for [l (clojure.string/split-lines (slurp f)) :when (seq l)] (let [[s d] (clojure.string/split l #" ")] [(symbol s) d])))))
     (mg-check nil nil (not-empty (into {} (for [s (remove nil? (cons n more))] [(symbol s) nil]))))))
-
-;; ---- robustness ---------------------------------------------------------------------
-
-(defn robust []
-  (run-check "ROBUST" {:datoms 2000}
-   (fn [sys]
-    (let [[a b x] (spawn-ready! sys "exits" "misbehaves" "tests misbehave")
-        ev (c/events sys)
-        r1 @(c/submit! sys a "(+ 1 1) (System/exit 3) (+ 2 2)")
-        _ (await-agents ev [a] #{:dead})
-        r2 @(c/submit! sys b "(transact! [{:no/such-attr 1}])")
-        r3 [@(c/submit! sys b "(apply str (repeat 100000 \"x\"))") @(c/submit! sys b "(range)")]
-        r4 @(c/submit! sys b "(+ 1")
-        _ @(c/submit! sys x "(ns app.spin (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (deftest spins (loop [] (recur)))")
-        ;; the runner's tick bound, given here as root's run-tests! (the test service) does not take one
-        t5 (ts/value-of @(c/submit! sys x "(select-keys (seon.agent/run-tests-forked 100000000 #{} :judge) [:error :reports :ms])"))
-        r5 @(c/submit! sys x "(+ 1 1)")
-        _ @(c/submit! sys x "(in-ns 'app.spin) (ns-unmap 'app.spin 'spins) (deftest exits (System/exit 7))")
-        t6 @(c/run-tests! sys x)
-        r6 @(c/submit! sys x "(+ 1 2)")
-        r9 [@(c/submit! sys b "(count (vec (range 300000000)))") @(c/submit! sys b "(+ 5 5)")]
-        r11 [@(c/submit! sys b "(def kept 7) (loop [] (recur))" {:ticks 100000000}) @(c/submit! sys b "(+ kept 1)")]
-        p12 (c/submit! sys b "(reduce + (range)) :next")
-        ;; the interrupt arrives on the running eval: the agent said it began
-        _ (await-event ev (started b "(reduce + (range)) :next"))
-        _ (c/interrupt! sys b)
-        r12 @p12
-        r12b @(c/submit! sys b ":next")
-        r10 @(c/submit! sys x (str "(println \"hello from\" (:id (my.agent/whoami)))"
-                                     ;; the fork is asked once the future's thread runs: a future only submitted may hold no
-                                     ;; thread yet, and the fork then (rightly) goes ahead
-                                     " (def started (promise)) (def busy (future (deliver started true) (loop [] (recur)))) @started"))
-        t10 @(c/run-tests! sys x)
-        _ (lib/c-kill (get-in (c/state sys) [:fork-server :pid]) 9)
-        _ (await-event ev #(#{:fork-server-up :fork-server-lost} (:type %)))
-        r7 @(c/submit! sys b "(+ 3 4)")
-        [y] (spawn-ready! sys "after the fork server died")
-        r8 [@(c/submit! sys y "(count (q '[:find ?v :where [?v :var/name]]))") @(c/submit! sys y "(loop [] (recur))" {:ticks 100000000})
-            @(c/submit! sys y ":after")]]
-      {:report {:exit [r1 (select-keys (get-in (c/state sys) [:agents a]) [:status :exit])]
-                :refused (short-items r2) :printed-chars (mapv #(count (:text %)) r3) :read-error (short-items r4)
-                :spin (select-keys t5 [:error :reports :ms]) :test-exits (select-keys t6 [:error :reports :exit])
-                :oom (mapv short-items r9) :interrupt (short-items r12) :ticks (mapv short-items r11)
-                :out [(:out r10) t10] :fork-server [(:fork-server (c/state sys)) (short-items r7) (mapv short-items r8)]}
-       :checks {"agent calling System/exit mid-request dies alone, named by its exit status"
-                (and (= :seon.agent/died (:seon.error/type r1)) (= {:exit 3} (:exit r1))
-                     (= :dead (get-in (c/state sys) [:agents a :status])))
-                "a refused transaction is the response's :ex" (and (:ex r2) (re-find #"refused" (str (:text r2))))
-                "huge and infinite values print within the printer's budget" (let [chars (seon.print.select/estimate-chars (seon.config/value :seon.config.render.agent/token-budget))]
-                                                                 (every? #(and (string? (:text %)) (<= (count (:text %)) chars)) r3))
-                "a read error is the response's :ex" (= :read (get-in r4 [:ex :phase]))
-                "a test that never ends stops at its tick budget, naming the test; the agent lives"
-                (and (= 1 (:error t5)) (= "2" (printed r5))
-                     (= [:seon.test/ticks-spent "#'app.spin/spins"] ((juxt :seon.error/type :var) (first (:reports t5)))))
-                "a test that kills its process is an error; the agent lives" (and (= 1 (:error t6)) (= "3" (printed r6)))
-                "an agent past its heap bound gets OutOfMemoryError as its response's :ex and lives" (and (:ex (first r9)) (= "10" (printed (second r9))))
-                ;; nREPL's model (owner's choice): an interrupt stops the request; the agent goes on
-                "root's interrupt! stops the running request; the agent's next request runs"
-                (and (clojure.string/starts-with? (str (get-in r12 [:ex :seon.error/message])) "interrupted by root") (not (contains? r12 :value)) (= ":next" (printed r12b)))
-                "a form past its tick budget is stopped, a typed error naming its ticks; the agent keeps its state and goes on"
-                (and (= :seon.repl/ticks-spent (get-in (first r11) [:ex :seon.error/type]))
-                     (<= 100000000 (get-in (first r11) [:ex :ticks])) (= "8" (printed (second r11))))
-                "printed output comes back as :out; a busy thread blocks the test fork instead of breaking it"
-                (and (= (str "hello from " x "\n") (:seon.print/code (:out r10))) (= :seon.test/fork-refused (:seon.error/type t10)) (re-find #"Chez threads active" (:seon.error/message t10)))
-                "the fork server dies: agents keep working, a new server forks the next agent (whose tick budget works)"
-                (and (= "7" (printed r7)) (= "361" (printed (first r8)))
-                     (= :seon.repl/ticks-spent (get-in (second r8) [:ex :seon.error/type])) (= ":after" (printed (nth r8 2))))}}))))
 
 ;; ---- root's threads: a declared number (session THREADS) --------------------------------
 
@@ -679,13 +492,6 @@
   []
   {:roster (thread-roster) :gc-sweepers (lib/gc-sweepers! -1) :os (lib/nthreads)})
 
-(defn- settled-threads
-  "threads, read again until two readings in a row agree: the roster and the OS count of one moment, so a thread that
-  starts or ends between the two parts of a reading never counts as one over. A reading that never settles ends at the
-  step's own bound, a signal (bin/check), never a red. Read where nothing is starting."
-  {:malli/schema [:=> [:cat] :map]}
-  [] (loop [a (threads)] (let [b (threads)] (if (= a b) b (recur b)))))
-
 (defn thread-diff
   "Where measured threads (threads) differ from declared ones
   (declared-threads): {} when they are exactly what is declared, else each
@@ -699,104 +505,6 @@
     (cond-> roster
       (not= (:gc-sweepers decl) (:gc-sweepers got)) (assoc :gc-sweepers [(:gc-sweepers decl) (:gc-sweepers got)])
       (not= expect-os (:os got)) (assoc :os [expect-os (:os got)]))))
-
-;; ---- scale ------------------------------------------------------------------------
-
-(defn- fan
-  "(mapv f coll) on at most 32 threads of its own, all gone when it returns. A check that counts
-  root's threads fans out with this and not pmap: pmap's futures run on Jolt's solo pool, whose
-  idle workers live on for its keep-alive as the JVM's do, so the count would hold the check's
-  own workers (docs/checks.md#the-suites)."
-  {:malli/schema [:=> [:cat fn? [:sequential :any]] [:vector :any]]}
-  [f coll]
-  (let [ex (java.util.concurrent.Executors/newFixedThreadPool 32)]
-    (try (mapv deref (mapv (fn [x] (.submit ex ^Callable (fn [] (f x)))) coll))
-         (finally (.shutdown ex)
-                  (.awaitTermination ex Long/MAX_VALUE java.util.concurrent.TimeUnit/NANOSECONDS)))))
-
-(defn scale [n]
-  (run-check "SCALE" {:datoms 2000}
-   (fn [sys]
-    (let [;; with embedding on, main's texts embedded first (seon.system/await-db: nothing due), so
-          ;; the threads counted are the open model's steady ones, not its load's or an encode's
-          _ (when (pos? (seon.config/value :seon.config.vector/texts))
-              (seon.system/await-db sys #(empty? (seon.vector/due % (seon.vector/model-id (seon.config/value :seon.config.vector/model))))))
-          mem0 (lib/sysmem)
-        th-boot (thread-diff (declared-threads sys) (threads))
-        t0 (profile/now-ns)
-        ids (ready! sys #(fan (fn [i] (c/spawn! sys {:task (str "scale " i)})) (vec (range n))))
-        t-ready (profile/ms-since t0)
-        th-ready (thread-diff (declared-threads sys) (threads))
-        _ (out! "ready in " (lib/r2 t-ready) " ms: " (frequencies (map #(get-in (c/state sys) [:agents % :status]) ids)))
-        work (fn [id]
-               (let [;; a number for its code (the multiplier, its namespace): its place among the agents, since an id is a digest
-                     k (inc (.indexOf ids id))
-                     t1 (profile/now-ns)
-                     r @(c/submit! sys id (str "(ns app.s" k " (:require [clojure.test :refer [deftest is]] [my.db :refer [q transact!]])) (defn f {:malli/schema [:=> [:cat :int] :int]} [x] (* x " k "))
-                                                (deftest f-test (is (= (* 2 " k ") (f 2))))
-                                                (transact! [{:note/text \"hi from " k "\" :note/agent " id "}])
-                                                (f 21)"))
-                     t2 (profile/now-ns)
-                     tr @(c/run-tests! sys id)
-                     t3 (profile/now-ns)]
-                 (cond-> {:id id :ok (and (map? r) (not (:ex r)) (= 1 (:pass tr)) (zero? (+ (:fail tr) (:error tr))))
-                          :eval-ms (/ (- t2 t1) 1e6) :tests-ms (/ (- t3 t2) 1e6)}
-                   ;; a failed agent names itself: its eval's answer and its test run's whole answer but its
-                   ;; function costs (:error 2 with no reports, under load, said nothing of why)
-                   (not (and (map? r) (not (:ex r)) (= 1 (:pass tr)) (zero? (+ (:fail tr) (:error tr)))))
-                   (assoc :eval r :tests (dissoc tr :fns)))))
-        results (fan work ids)
-        t-done (profile/ms-since t0)
-        _ (doseq [r results :when (not (:ok r))] (out! "NOT OK: " (pr-str r)))
-        th-work (thread-diff (declared-threads sys) (settled-threads))
-        st (c/state sys)
-        mem1 (lib/sysmem)
-        agent-mb (keep #(get-in st [:agents % :mem-mb]) ids)
-        merged (mapv (fn [id] @(c/merge-main! sys id) (merge-in! sys id)) (take 10 ids)) ; as a merge task does: main first
-        notes (count (main-q sys '[:find ?n :where [?n :note/text]]))
-        fs @(c/call! sys {:op :fs :req {:op :stats}})
-        ;; kill! marks :killed at once; the :killed event says root has retired the process
-        ev (c/events sys)
-        _ (doseq [id ids] (c/kill! sys id))
-        _ (await-agents ev ids #{:killed})
-        mem2 (do (Thread/sleep (seon.config/value :seon.config.check/pages-ms)) (lib/sysmem))
-        th-end (thread-diff (declared-threads sys) (settled-threads))
-        ;; the target machine (a 16 GB M1, owner 2026-10-22): root, the fork server and the default
-        ;; number of agents at once fit :seon.config.machine/memory-mb, each agent charged what the
-        ;; machine's free plus inactive memory dropped per agent from before the agents started to their
-        ;; peak (its own written pages, its page tables, the kernel's share): never the sum of their
-        ;; footprints, which charges every inherited page an agent only reads (docs/cost.md#how-we-measure)
-        footprint-sum (reduce + agent-mb)
-        per-agent (/ (- (:available-mb mem0) (:available-mb mem1)) n)
-        need (+ (lib/real-mb) (:mem-mb fs) (* (seon.config/value :seon.config.agent/max-running) per-agent))
-        budget (seon.config/value :seon.config.machine/memory-mb)]
-      {:report {:agents n :all-ok (count (filter :ok results))
-                :spawn->all-ready-ms (lib/r2 t-ready) :end-to-end-ms (lib/r2 t-done)
-                :start-ms (lib/summ (keep #(get-in st [:agents % :forked-ms]) ids))
-                :server-fork-ms-p50 (get-in st [:fork-server :fork-ms-p50])
-                :eval+transact-ms (lib/summ (map :eval-ms results)) :tests-ms (lib/summ (map :tests-ms results))
-                :agent-real-mb (lib/summ agent-mb) :agent-real-mb-sum (lib/r2 footprint-sum)
-                :system-available-drop-mb-per-agent (lib/r2 per-agent)
-                :system-available-returned-mb-per-agent (lib/r2 (/ (- (:available-mb mem2) (:available-mb mem1)) n))
-                :footprint-need-mb (lib/r2 (+ (lib/real-mb) (:mem-mb fs) (* (seon.config/value :seon.config.agent/max-running) (/ footprint-sum n))))
-                :control-real-mb (lib/r2 (lib/real-mb)) :fork-server (select-keys fs [:mem-mb :os-threads :active-threads :mismatch :datoms])
-                :writer (:writer st) :merged (count (filter :merged? merged)) :main-notes notes
-                :all-ended (every? #(get-in (c/state sys) [:agents % :ended-ms]) ids)
-                :gc (lib/gc-stats) :gc-sweepers (lib/gc-sweepers! -1)
-                :memory-at-max-running {:agents (seon.config/value :seon.config.agent/max-running) :need-mb (lib/r2 need) :budget-mb budget}
-                :root-threads {:declared (declared-threads sys) :os (lib/nthreads)
-                               :diff {:boot th-boot :all-ready th-ready :after-work th-work :after-kill th-end}}}
-       ;; root's threads exactly as declared once agents run (at boot Jolt's io poller has not
-       ;; started yet: it starts at the first socket wait, an agent's). The model's threads (Metal's
-       ;; GCD workers) are the embedding helper's, not root's. The named roster is judged at every
-       ;; sample; the OS count only where nothing is starting (after the work and after the kills, each
-       ;; read after a wait on what it waited for, as one settled reading: settled-threads): all-ready is read as the agents finish spawning, and its
-       ;; roster and OS count are two reads at two instants, so a thread a spawn starts and ends between
-       ;; them counted one OS thread over (batch 73, 2026-11-11, :os [55 56] at load 25-30, the roster
-       ;; exact): a count load could turn red. Its :os stays in the report
-       :checks {:every-eval-and-test-passed (every? :ok results) :ten-merges-went-in (every? :merged? merged)
-                :root-threads-as-declared (every? empty? [(dissoc th-ready :os) th-work th-end])
-                :fits-the-machine (<= need budget)}}))))
 
 ;; ---- scale-work: agents that work --------------------------------------------------
 
@@ -891,14 +599,14 @@
 
 (defn scale-work
   "n agents (default 10; with search? false, the third eval, my.agent/tests-reaching, is left out:
-  what it alone costs an agent) that work, where scale's only evaluate and test one new test each: every
+  what it alone costs an agent) that work, where every
   agent does five evals (a namespace with a function and its test, a read of main's vars, a
   search of what reaches a function, five transactions, and an edit of seon.error/dirty?, a
   function some 60 tests reach, each agent's edit its own) and then proves (c/run-tests!, the judge's run: the
   tests its edit reaches, dealt across test children, none reused since each digest is its own).
   Evals run in one pass, proves in a second at once, so each is a phase of its own. A sampler
   reads the machine's available memory and every process under root's fork server every
-  :seon.config.check/sample-ms (sample); the cost is the machine's drop (as scale charges it)
+  :seon.config.check/sample-ms (sample); the cost is the machine's drop
   from before the agents to its lowest reading, plus root's and the fork server's footprints
   before it, against :seon.config.machine/memory-mb (docs/machine.md#ten-agents-at-once)."
   [n search?]
@@ -1079,112 +787,6 @@
 ;; ---- durability: the whole system restarts and recovers ------------------------------
 
 (defn- dir-bytes [path] (reduce + (map #(.length %) (filter #(.isFile %) (file-seq (java.io.File. path))))))
-
-(defn- main-data-datoms
-  "Main's datoms (a seq) but root's own facts (:seon.system/*: its boot, its quiescence report, its
-  collection record), the user (an agent with no process, seon.task/boot-tx: a new boot writes it again), root's link to the agents it started (:seon.agent/root: asserted on its own, the
-  durable check's :earlier-agents-stay-linked, seon.task/earlier-agents-tx) and every transaction
-  entity's own datoms (:db/txInstant, e = tx): a restarted root writes its facts anew in
-  transactions of its own (boot, quiescent, collected: three :db/txInstant datoms more), so what
-  a restart must give back exactly is the rest."
-  [sys]
-  (let [db @(:conn sys) users (set (d/q '[:find [?e ...] :where [?e]] db))]
-    (remove #(or (= "seon.system" (namespace (:a %))) (= :seon.agent/root (:a %)) (= (:e %) (:tx %)) (users (:e %)))
-            (d/datoms db :eavt))))
-
-(defn- by-attr
-  "The datoms main-data-datoms counts, per attribute: {attr n}, so a recovery that differs names
-  the attributes it differs in."
-  [datoms] (frequencies (map :a datoms)))
-
-(defn durable-write
-  "Phase 1 (a process of its own): boot on main branch nm of the one store (made from its
-  seed), then
-  a merges a new f1, b commits unmerged facts and a recorded defn on its branch,
-  c's clone commits on a branch of a branch. Root then exits WITHOUT stop! (SIGKILL of
-  itself): nothing but the store survives."
-  [nm]
-  (run-check "DURABLE-WRITE" {:main (keyword nm)}
-   (fn [sys]
-    (let [path (str (seon.db/agents-dir (:cfg sys)) "/durable")
-        [a b k] (spawn-ready! sys {:task "make f1 multiply" :branch :dur-a} {:task "unmerged work" :branch :dur-b} {:task "parent" :branch :dur-c})
-        ra (p1-ex sys a "(in-ns 'app.m0) (defn f1 {:malli/schema [:=> [:cat :int] :int]} [x] (* x 10)) (deftest f1-test (is (= 20 (f1 2)))) (f1 2)")
-        m (merge-in! sys a)
-        rb (p1-ex sys b "(in-ns 'app.m1) (defn f2 {:malli/schema [:=> [:cat :int] :string]} [x] (str \"b:\" x)) (deftest f2-test (is (= \"b:1\" (f2 1))))
-                             (in-ns 'agent.a2) (transact! [{:note/text \"b's unmerged note\" :note/agent :b}]) (app.m1/f2 1)")
-        cl (ready! sys #(deref (c/clone! sys k {:branch :dur-clone})))
-        ev (c/events sys)
-        rc (p1-ex sys (:id cl) "(transact! [{:note/text \"the clone's note\" :note/agent :clone}]) (count (q '[:find ?n :where [?n :note/text]]))")
-        ;; an agent's write is answered when applied, committed when the agent is idle (its
-        ;; run-ahead writer) and durable at root's next flush: the kill waits for the
-        ;; clone's commit event, then for a flush after it (a :flush? write's answer comes after
-        ;; its flush, which covers the commit the writer was told of first), rather than
-        ;; racing them (a kill in between loses the write by design)
-        _ (await-event ev #(and (= :commit (:type %)) (= (:id cl) (:agent %))))
-        _ @(c/transact-main! sys [] {:flush? true})
-        st (c/state sys {:datoms true})
-        md (main-data-datoms sys)
-        expect {:main-datoms (count md) :by-attr (by-attr md) :main-t (get-in st [:main :t]) :user (seon.config/value :seon.config.root/user-name)
-                :linked (vec (for [dt (d/datoms @(:conn sys) :aevt :seon.agent/root)] (:seon.agent/key (d/entity @(:conn sys) (:e dt)))))}]
-      (spit (str path ".expect.edn") (sedn/encode expect))
-      {:report {:store (:store st) :a ra :merge (dissoc m :ops) :b rb :clone [(:id cl) rc] :expect expect :store-bytes (dir-bytes (:store-path sys))}
-       :checks {:merged (:merged? m)
-                 ;; every write it makes durable was made: an eval that failed is red here, at its cause, not two phases later
-                 :evals-answered (every? #(nil? (nth % 2)) [ra rb rc])} :then :kill}))))
-
-(defn durable-read
-  "Phase 2 (a new process): reopen the same store on the same main and check main, the
-  program, the branches and agents' committed work came back; resume b and merge it now."
-  [nm]
-  (run-check "DURABLE" {:main (keyword nm)}
-   (fn [sys]
-    (let [expect-file (str (seon.db/agents-dir (:cfg sys)) "/durable.expect.edn")
-          ;; phase 2 reads what phase 1 wrote before it killed itself: run alone, it says so
-          _ (when-not (.exists (java.io.File. expect-file))
-              (out! "DURABLE FAILED (phase 1 left no " expect-file ": durable-read reopens what durable-write killed; run bin/check durable)")
-              (lib/c-exit 1))
-          expect (read-string (slurp expect-file))
-          ;; read once: phase 2 takes what phase 1 left (its report carries it), so a later run
-          ;; alone finds none rather than an earlier run's
-          _ (.delete (java.io.File. expect-file))
-        st (c/state sys {:datoms true})
-        data (main-data-datoms sys)
-        md (count data)
-        ba (by-attr data)
-        ;; this boot has started no agent yet: the agents linked to root are phase 1's, each kept by
-        ;; the boot (root's page holds every boot's sessions, seon.task/earlier-agents-tx)
-        linked (vec (for [dt (d/datoms @(:conn sys) :aevt :seon.agent/root)] (:seon.agent/key (d/pull @(:conn sys) [:seon.agent/key] (:e dt)))))
-        [n rb rc] (spawn-ready! sys "born after the restart" {:task "resume b" :branch :dur-b} {:task "resume the clone" :branch :dur-clone})
-        ;; each request's response is its last form's value: one vector of what each check reads
-        r-n (ts/value-of @(c/submit! sys n "[(app.m0/f1 2) (count (q '[:find ?n :where [?n :note/text]]))]"))
-        r-b (ts/value-of @(c/submit! sys rb "[(app.m1/f2 1) (q '[:find [?t ...] :where [?n :note/text ?t]]) (app.m0/f1 2)]"))
-        ;; its recorded f2-test; main's later f1-test is not on its branch
-        t-b @(c/run-tests! sys rb)
-        r-c (p1 sys rc "(sort (q '[:find [?t ...] :where [?n :note/text ?t]]))")
-        mmb @(c/merge-main! sys rb)
-        mb (merge-in! sys rb)
-        [n2] (spawn-ready! sys "after merging b")
-        r-n2 (ts/value-of @(c/submit! sys n2 "[(app.m1/f2 1) (q '[:find [?t ...] :where [?n :note/agent :b] [?n :note/text ?t]]) (app.m0/f1 2)]"))]
-      {:report {:store (:store st) :main (:main st) :main-data-datoms {:phase-1 (:main-datoms expect) :recovered md}
-                :attrs-that-differ (into {} (for [a (set (concat (keys (:by-attr expect)) (keys ba)))
-                                                  :let [x (get (:by-attr expect) a 0) y (get ba a 0)] :when (not= x y)]
-                                              [a [x y]]))
-                :agents-linked-at-boot linked
-                :born-after r-n :resumed-b r-b :b-tests (select-keys t-b [:pass :fail :error]) :resumed-clone r-c
-                :merge-b [(select-keys mmb [:ok :applied]) (dissoc mb :ops)] :after-merging-b r-n2}
-       :checks {:main-recovered (and (= (:main-datoms expect) md) (:recovered? (:store st)))
-                ;; what main-data-datoms leaves out, asserted: the boot kept phase 1's links
-                :earlier-agents-stay-linked (= (set (:linked expect)) (set linked))
-                ;; phase 1's root was SIGKILLed: it left no stop fact, so this boot found its end :unclean
-                ;; main-data-datoms leaves the user out: it is still main's
-                :phase-1s-user-recovered (some? (seon.db/eid @(:conn sys) :seon.agent/key (:user expect)))
-                :the-killed-root-ended-unclean (= :unclean (:cause (:seon.system/previous-end (d/pull @(:conn sys) [:seon.system/previous-end] [:seon.system/id :root]))))
-                :branches-recovered (= #{:dur-a :dur-b :dur-c :dur-clone} (set (get-in st [:store :recovered-branches])))
-                :main-runs-the-merged-f1 (= 20 (first r-n))
-                :b-resumes-its-work (and (= "b:1" (first r-b)) (re-find #"unmerged" (str (second r-b))))
-                :b's-tests-pass (and (not (contract/error? t-b)) (zero? (+ (:fail t-b) (:error t-b))) (pos? (:pass t-b)))
-                :the-clone-resumes (re-find #"clone's note" (str r-c))
-                :b-merges-now (and (:merged? mb) (= "b:1" (first r-n2)) (= 20 (nth r-n2 2)))}}))))
 
 (defn window-write
   "Phase 1 of the group-commit check (continuous, no window): main branch nm of the one
@@ -1614,110 +1216,6 @@
     (out! (sedn/encode {:sweepers (lib/gc-sweepers! -1) :collections (- (:count (lib/gc-stats)) c0) :gc-real-ms (- (:real-ms (lib/gc-stats)) r0)}))
     (lib/c-exit 0)))
 
-;; ---- delivery (session F2): main's commits to the reconciler, messages to agents ------
-
-(defn drain
-  "n agents each transact in a loop, and root's own writes stream in, when stop! is
-  called. Every request the server accepted is answered; every :ok write is in the
-  store afterwards (durable: reopened in a fresh connection), and nothing is left running."
-  [n]
-  (run-check "DRAIN" {:datoms 2000}
-   (fn [sys]
-    (let [ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "drain " i)})) (range n))))
-        pids (vec (keep #(get-in (c/state sys) [:agents % :pid]) ids))
-        fs-pid (get-in (c/state sys) [:fork-server :pid])
-        ;; each agent: one eval writing 50 notes, one transact! at a time
-        evals (mapv #(c/submit! sys % (str "(dotimes [i 50] (transact! [{:note/text (str \"d\" i) :note/agent " % "}])) :done")) ids)
-        write #(c/transact-main! sys [{:note/text (str "m" %) :note/agent :root}])
-        ;; the first half answered, then the second streams in as stop! is called
-        half (mapv write (range 150))
-        _ @(peek half)
-        mains (into half (map write) (range 150 300))
-        st (c/stop! sys)
-        ;; answered by the time stop! returns, or never: :hang
-        answer #(if (realized? %) @% :hang)
-        evr (mapv answer evals)
-        mr (mapv answer mains)
-        ok-main (count (filter :ok mr))
-        refused-main (count (filter #(= "root stopped" (:seon.error/message %)) mr))
-        conn (seon.db/connect (:cfg sys))
-        main-notes (d/q '[:find (count ?e) . :where [?e :note/agent :root]] @conn)
-        ;; the one rule of what a stop leaves (still-there): an orphan zombie launchd has not yet reaped ran nothing past the stop
-        ;; (batch 46: :left [88937], an agent killed with its server's group, its exit awaited, its reap launchd's)
-        left (still-there (cons fs-pid pids))]
-      (d/release conn)
-      {:report {:agents n :stop st :main {:ok ok-main :refused-after-close refused-main :stored main-notes}
-                :evals {:done (count (filter #(= ":done" (printed %)) evr))
-                        :other (frequencies (map #(if (and (map? %) (contains? % :text)) (printed %) %) evr))} :left (vec left)}
-       :checks {:every-request-answered (and (not-any? #{:hang} evr) (not-any? #{:hang} mr))
-                :main-ok-all-stored (= ok-main (or main-notes 0))
-                :main-answers-account (= 300 (+ ok-main refused-main))
-                :nothing-left-running (empty? left)
-                :graph-stopped (true? (:graph st))}}))))
-
-;; ---- writers (session F2): group commit at 1/8/32/256 concurrent writers --------------
-
-(defn backpressure
-  "1. Across the ring: an agent floods root with 20,000 messages while its proc is paused.
-     Its channel fills, the poller leaves the frames in the ring, the ring fills, and the
-     agent's own send waits: its proc takes nothing while paused (its count when the pause
-     arrived, read by the ping after it, is its count after the window), the flood is not
-     through, the agent is still busy,
-     and after resume all 20,000 arrive, in order, then its reply.
-  2. A paused writer: the writer proc is paused while n agents transact (their own
-     branches: all answered) and root writes main n times (held, none answered while
-     paused); resume completes every transaction. n = 8 by default: what is proved needs a few
-     agents, not 200 (pure-tests 2026-10-23: 200 spawns were most of the step's 31 s). Root's memory before/after is reported (a parked put is a parked
-     fiber)."
-  [n]
-  (run-check "BACKPRESSURE" {:datoms 2000}
-   (fn [sys]
-    (let [[a] (spawn-ready! sys "flood")
-        flood "(do (dotimes [i 20000] (#'seon.agent/send! {:op :noise :i i})) :flooded)"
-        ev (c/events sys)
-        p (c/submit! sys a flood)
-        ;; the flood began (the agent said so); then what arrives while paused is the measurement
-        _ (await-event ev (started a flood))
-        _ (flow/pause-proc (:graph sys) a)
-        ;; what its proc had taken when the pause arrived (the ping after it is FIFO), and after the window
-        p0 (ping sys a)
-        _ (Thread/sleep (seon.config/value :seon.config.check/hold-ms))
-        p1 (ping sys a)
-        [n0 n1] (map #(get-in % [:state :noise]) [p0 p1])
-        busy (get-in (c/state sys) [:agents a :status])
-        t0 (profile/now-ns)
-        _ (flow/resume-proc (:graph sys) a)
-        r @p
-        drain-ms (profile/ms-since t0)
-        st (:stats (c/state sys))
-        ids (ready! sys #(vec (pmap (fn [i] (c/spawn! sys {:task (str "bp " i)})) (range n))))
-        mb0 (lib/r2 (lib/real-mb))
-        _ (flow/pause-proc (:graph sys) :writer)
-        ;; agents own their branches' writes: a paused writer does not hold them
-        agents-ok (count (filter #(= ":ok" (printed %))
-                                 (mapv #(deref (c/submit! sys % "(do (transact! [{:note/text \"bp\" :note/agent :bp}]) :ok)")) ids)))
-        ;; root's own writes to main wait for it
-        mains (mapv #(c/transact-main! sys [{:note/text (str "bp" %) :note/agent :root}]) (range n))
-        _ (Thread/sleep (seon.config/value :seon.config.check/hold-ms))
-        answered-while-paused (count (filter realized? mains))
-        mb1 (lib/r2 (lib/real-mb))
-        t1 (profile/now-ns)
-        _ (flow/resume-proc (:graph sys) :writer)
-        rs (mapv deref mains)
-        resume-ms (profile/ms-since t1)
-        ok (count (filter :ok rs))]
-      {:report {:flood {:arrived (:noise st) :ordered (:noise-ordered st) :reply (printed r) :taken-before-the-pause n0 :taken-while-paused (when (and n0 n1) (- n1 n0)) :status-while-paused busy
-                        :blocked (filterv :blocked [p0 p1]) :drain-ms (lib/r2 drain-ms)}
-                :writer {:agents n :writer-buf (seon.config/value :seon.config.root/writer-buf) :answered-while-paused answered-while-paused
-                         :root-real-mb {:before mb0 :writer-saturated mb1} :resume->all-done-ms (lib/r2 resume-ms) :ok ok
-                         :agents-ok agents-ok :not-ok (frequencies (remove :ok rs))}}
-       :checks {:its-proc-answered (not-any? :blocked [p0 p1])
-                :ring-pushes-back (and n0 n1 (= n0 n1) (< n0 20000) (= :busy busy))
-                :flood-all-arrive-in-order (and (= 20000 (:noise st)) (true? (:noise-ordered st)) (= ":flooded" (printed r)))
-                :agents-write-past-a-paused-writer (= n agents-ok)
-                :writer-paused-holds-all (zero? answered-while-paused)
-                :writer-resumed-completes-all (= n ok)}}))))
-
 ;; ---- hot reload (session F2): a proc's step-fn var redefined in the built binary -----------
 
 (defn hotreload
@@ -1833,7 +1331,7 @@
         ;; the procs system.edn declares, and each effect kind's owner and workers: the declaration is the one list
         expect (into (set (keys (:procs decl)))
                      (mapcat (fn [[k spec]] (cons (keyword "fx" (name k))
-                                                  (for [i (range (if (number? (:workers spec)) (:workers spec) (seon.config/value :seon.config.ai/max-in-flight)))]
+                                                  (for [i (range (let [w (:workers spec)] (if (number? w) w (get (:bindings sys) (keyword (name w))))))]
                                                     (keyword (str "fx." (name k)) (str i))))))
                      (:fx decl))
         dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir
@@ -1951,30 +1449,6 @@
   "The OS threads of process pid (ps -M lists one line per thread after its header)."
   [pid]
   (dec (count (clojure.string/split-lines (:out (clojure.java.shell/sh "ps" "-M" "-p" (str pid)))))))
-
-(defn agent-tests
-  "A sample of the tests that reach no process (seon.proofs/agent-tests-sample), run as a Seon agent runs them: forked from one agent that has drawn its page, on a
-  root whose config is not bin/test's (docs/merging.md#a-test-child-is-a-fork-of-a-live-agent). Green under bin/test and
-  red here is a test reading its runner, or its agent's state leaking into it, which blocks a real agent's merge. It takes
-  its tests from seon.agent/test-plan, as an agent's own run does, and every one must report; bin/check gives it a verdict
-  cache of its own, kept across runs."
-  []
-  (run-check "AGENT-TESTS" {:datoms 2000 :source {:root (seon.config/checkout) :dirs (seon.config/value :seon.config.source/dirs) :branch :none}}
-   (fn [sys]
-    (let [[a] (spawn-ready! sys {:task "agent-tests" :branch :agent-tests1})
-          out (str (:agents-dir (:store (c/state sys))) "/agent-tests.edn")
-          _ @(c/submit! sys a (str "(do (seon.repl/page-walk)"
-                                   " (let [p (seon.agent/test-plan (seon.agent/db) nil #{} (seon.agent/heard-main))"
-                                   " ds (apply dissoc (:digests p) (:process p))"
-                                   " sample (seon.proofs/agent-tests-sample (seon.config/value :seon.config.proofs/agent-tests-sample) (apply dissoc ds (keys (seon.fx/slow-tests ds))))"
-                                   " r (seon.agent/run-tests-forked (seon.config/value :seon.config.agent/test-ticks) sample :turn)]"
-                                   " (spit " (pr-str out) " (pr-str (assoc (update r :reports (fn [rs] (filterv #(not= :pass (:type %)) rs)))"
-                                   " :sampled (count sample) :known (count ds))))))"))
-          r (read-string (slurp out))
-          reds (:reports r)]
-      {:report (assoc (select-keys r [:ran :reused :sampled :known :pass :fail :error]) :reds (mapv (juxt :var :message :actual) reds))
-       ;; each sampled test ran or was reused at its digest, so none is left unjudged; none sampled means the plan found no program
-       :checks {:tests-sampled (pos? (:sampled r 0)) :every-sampled-judged (= (:sampled r) (+ (:ran r 0) (:reused r 0))) :none-red (empty? reds)}}))))
 
 (defn threads-check
   "Session RC1's physics rule: the processes that fork (the fork server; an agent, for its
@@ -2229,15 +1703,10 @@
      "store" (fn [n more] (let [path (seon.config/value :seon.config.root/store-path)
                   c (seon.db/connect (seon.db/store-cfg :lmdb path))]
               (println path (quot (dir-bytes path) 1024) (count (d/branches c))) (d/release c) (lib/c-exit 0)))
-     "durable-write" (fn [n more] (durable-write n))
-     "durable-read" (fn [n more] (durable-read n))
      "window-write" (fn [n more] (window-write n))
      "window-read" (fn [n more] (window-read n))
-     "agent-tests" (fn [n more] (agent-tests))
-     "scale" (fn [n more] (scale (n-or n "100")))
      "spawn-phases" (fn [n more] (spawn-phases (parse-long (or n "1"))))
      "scale-work" (fn [n more] (scale-work (n-or n "10") (not= "no-search" (first more))))
-     "robust" (fn [n more] (robust))
      "lifecycle" (fn [n more] (lifecycle (n-or n "10")))
      "threads-declared" (fn [n more] (threads-declared (n-or n "3")))
      "lifecycle-cycle" (fn [n more] (lifecycle-cycle (n-or n "0")))
@@ -2246,8 +1715,6 @@
      "forks" (fn [n more] (forks n))
      "units" (fn [n more] (units n (first more)))
      "sweepers-held" (fn [n more] (sweepers-held))
-     "drain" (fn [n more] (drain (n-or n "8")))
-     "backpressure" (fn [n more] (backpressure (n-or n "8")))
      "contracts" (fn [n more] (contracts))
      "test-inputs" (fn [n more] (test-inputs))
      "mg-check" (fn [n more] (mg-check-mode n more))
@@ -2262,7 +1729,6 @@
      "fx" (fn [n more] (fx (n-or n "20")))
      "system" (fn [n more] (system-check))
      "config" (fn [n more] (config-check))
-     "problems" (fn [n more] (problems-check))
      "threads" (fn [n more] (threads-check))
      ;; this checkout's ports as the config resolves them, "SERVER WEB" (bin/ports)
      ;; bin/check's step names, the one list (seon.proofs/check-steps), space separated

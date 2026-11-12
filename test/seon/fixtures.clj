@@ -156,7 +156,7 @@
                                  "(def syms '[a b])"
                                  "(def ^:dynamic *depth* 0)"
                                  "(ns app.newns-test\n  (:require [clojure.test :refer [deftest is]]\n            [app.newns :refer [triple]]))"
-                                 "(deftest triple-test (is (= 9 (triple 3))))"
+                                 "(deftest ^{:seon.test/estimate {:ticks 100000}} triple-test (is (= 9 (triple 3))))"
                                  "(in-ns 'user)"
                                  "(def scratch-x 41)")]}}
    :loop {:specs [{:name "gen" :ns 'seon.generation :proofs #{'app.proofs/gen-test} :proof "(deftest gen-test (is (= 2 (seon.generation/generation))))"
@@ -186,31 +186,6 @@
            :check "(mapv #(% 10) [app.m/f1 app.m/f2 app.m/f3 app.m/f4])" :expect ["[11 12 13 14]"]
            :replies {"a" [(apply calls "Each fK adds K." "(in-ns 'app.m)" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ x " k ")"))))]
                      "b" [(apply calls "Each fK adds K, other way round." "(in-ns 'app.m)" (for [k [1 2 3 4]] (defn1 (str "f" k) (str "(+ " k " x)"))))]}}})
-
-(defn swarm-specs
-  "n tasks over 5 shared definitions: task sK rewrites app.sw/v(K mod 5) to add (K mod
-  5) in its own text (so two tasks on one var conflict) and proves it."
-  {:malli/schema [:=> [:cat pos-int?] [:vector :map]]}
-  [n]
-  (into (vec (for [j (range 5)] {:var (str "v" j) :ns 'app.sw :stub (defn1 (str "v" j) "0")}))
-        (for [k (range n) :let [j (mod k 5)]]
-          {:name (str "s" k) :ns 'app.sw :proofs #{(symbol "app.proofs" (str "s" k "-test"))}
-           :proof (str "(deftest s" k "-test (is (= " (+ 100 j) " (app.sw/v" j " 100))))")
-           :plan (str "Make `app.sw/v" j "` add " j "; its proof is `app.proofs/s" k "-test`.")})))
-
-(defn- swarm-reply
-  "Work task sK's scripted reply: a conflict main brought onto its branch (a work agent merges main
-  every turn it moved, seon.turn/work!) is resolved keeping its own side, as a work agent does
-  before it can be done, then its definition is written. Whether a conflict meets a task's work
-  agent or its merge agent is the order main's merges came in (swarm red once, 2026-10-31: sw/s5's
-  second run met s0's v0 and, never resolving it, ran to its cap); both resolve it."
-  {:malli/schema [:=> [:cat :string] [:maybe :seon.model/script-reply]]}
-  [nm]
-  (when-let [k (and (str/starts-with? nm "s") (parse-long (subs nm 1)))]
-    (let [j (mod k 5)]
-      (calls "Keep my side of a conflict main brought, then rewrite in my own words."
-             "(doseq [e (my.branch/unmerged)] (my.branch/resolve! (second (:key e)) :ours))"
-             "(in-ns 'app.sw)" (defn1 (str "v" j) (str "(+ x " j (str/join (repeat (quot k 5) " 0")) ")"))))))
 
 (def ^:private generic
   "The scripted model's reply by task kind (from the name): a merge agent takes main's side of
@@ -352,7 +327,7 @@
   (cond (or (str/ends-with? task "-implement") (str/ends-with? task "-merge")) (calls "Wait for a message." "(my.turn/wait)")
         (zero? turn) (calls "Write the proof, red, and say what implement changes."
                             "(in-ns 'app.stages-test)"
-                            "(clojure.test/deftest t (clojure.test/is (= 1 2)))"
+                            "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 2)))"
                             "(my.task/update! :seon.task/proofs conj 'app.stages-test/t)"
                             "(my.task/update! :seon.task/plan str \" Implement makes app.stages-test/t pass.\")")
         :else (says "The proof is written and red, and the plan says what implement changes.")))
@@ -372,7 +347,7 @@
   (if (zero? turn)
     (calls "Write the proof, and register it."
            "(in-ns 'app.whole-test)"
-           "(clojure.test/deftest t (clojure.test/is (= 1 1)))"
+           "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 1)))"
            "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)")
     (says "The proof passes.")))
 
@@ -386,7 +361,7 @@
   (if (zero? turn)
     (calls "Write the proof, register it, and change offsets."
            "(in-ns 'app.stray-test)"
-           "(clojure.test/deftest t (clojure.test/is (= 1 1)))"
+           "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 1)))"
            "(my.task/update! :seon.task/proofs conj 'app.stray-test/t)"
            "(in-ns 'seon.repl) (seon.contract/defn- offsets \"Finds nothing.\" {:malli/schema [:=> [:cat :string :string] [:vector nat-int?]]} [text s] [])")
     (says "The proof passes.")))
@@ -399,13 +374,13 @@
   (if (zero? turn)
     (calls "Write the proof, red, and register it."
            "(in-ns 'app.whole-test)"
-           "(clojure.test/deftest t (clojure.test/is (= 1 2)))"
+           "(clojure.test/deftest ^{:seon.test/estimate {:ticks 100000}} t (clojure.test/is (= 1 2)))"
            "(my.task/update! :seon.task/proofs conj 'app.whole-test/t)")
     (calls "Wait for a message." "(my.turn/wait)")))
 
 (defn reply
   "The scripted model: the scripted reply for the request's task and turn (the last one
-  repeats); a swarm task's reply is generated from its index; a merge or design task
+  repeats); a merge or design task
   without a script gets the generic reply of its kind; any other task, a message without a call."
   {:malli/schema [:=> [:cat :seon.model/request] :seon.model/script-reply]}
   [{:keys [task turn]}]
@@ -413,7 +388,6 @@
     (if-let [rs (or (get all-replies task) (get all-replies nm))]
       (nth rs (min turn (dec (count rs))))
       (or (some (fn [[suffix r]] (when (str/ends-with? nm suffix) r)) generic)
-          (swarm-reply nm)
           (says "No script for this task.")))))
 
 ;; the curated session is read from its own file once per call (small), never held

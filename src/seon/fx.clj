@@ -138,10 +138,11 @@
   "The `env -u` argv that gives a child process the tree's own environment (docs/source.md#the-next-generation):
   bin/env and bin/system export names for this root's checkout, runs and home, and a child inheriting
   SEON_SOURCE_ROOT listed its test namespaces from that checkout, not the tree it ran in (a full run's plan
-  named a test of the root's working tree that main does not hold, and its shard died at once). Used by build, run-tests
-  and the health step's base (test-runner/base-program)."
+  named a test of the root's working tree that main does not hold, and its shard died at once), and its ports (a check
+  step the :prove service ran took the standing system's SEON_WEB_PORT 7777 and its root failed on the port in use). Used
+  by build, run-tests, a check step and the health step's base (test-runner/base-program)."
   ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
-   "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"])
+   "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS" "-u" "SEON_WEB_PORT" "-u" "SEON_SERVER_PORT"])
 
 (defn source-file?
   "Is the file at relative path p one a read of the source takes, under a source dir: Clojure or EDN, or a kind the
@@ -457,7 +458,7 @@
          by-class (group-by first entries)]
      {:tree tree
       :code (lib/digest (str/join "\n" (filter #(let [p (second (str/split % #"\t" 2))] (or (str/starts-with? p "src/") (str/starts-with? p "resources/seon/config/"))) lines)))
-      :env (lib/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg) " " (:seon.config.agent/test-ticks-floor cfg) " " (:seon.config.agent/test-ticks-factor cfg))])))
+      :env (lib/digest (str/join "\n" (concat (map second (get by-class nil)) [(str "test-ticks " (:seon.config.agent/test-ticks cfg))])))
       ;; the config in force, and each class of files a test may read (env-class): named inputs
       ;; a test's digest takes by what its reach reads
       :config (into (config-input cfg checkout)
@@ -842,20 +843,24 @@
     (when (.isFile f) (parse-long (str/trim (slurp f))))))
 
 (defn- verdict-listing
-  "Every verdict file under dir as [file bytes mtime-ms]: the one count of the cache, by metadata
-  alone (a staged file or the .size ledger is not a verdict)."
+  "Every cached file under dir as [file bytes mtime-ms]: the one count of the cache, by metadata alone: a test's green or
+  red (<ns>/<name>/<digest>.pass.edn or .red.edn) and a green's recorded reads (reads.edn), evicted like a verdict (a missing
+  one only makes its test run); nothing else is (a staged file, the .size ledger, the last full run's record full-run.edn)."
   {:malli/schema [:=> [:cat :string] [:vector :any]]}
   [dir]
-  (vec (for [^java.io.File f (files-under dir) :when (str/ends-with? (.getName f) ".edn")]
+  (vec (for [^java.io.File f (files-under dir)
+             :let [n (.getName f)]
+             :when (or (str/ends-with? n ".red.edn") (str/ends-with? n ".pass.edn") (= n "reads.edn"))]
          [f (.length f) (.lastModified f)])))
 
 (defn- evict!
   "Keep the cache at dir within max-bytes after a write of added bytes (the files at kept, never
   removed). The size is kept in the cache's .size ledger, so a write that leaves the cache under the
   bound reads and rewrites one small file and counts nothing; past it (or with no ledger) the
-  verdict files are counted once, and the least recently used (the oldest mtime: seon.fx/stored-results
-  touches a verdict it reads) go first, greens and reds alike, until the cache is :seon.config.proofs/results-evict-percent
-  under the bound, so the writes after it count nothing, and the ledger is set to the true size. Other writers' additions and removals make the ledger a lower or
+  verdict files are counted once, and the least recently used (the oldest mtime: seon.fx/stored-results touches a verdict
+  it reads) go first, greens and reds alike (an LRU cache, the owner's ruling), until the cache is
+  :seon.config.proofs/results-evict-percent under the bound, so the writes after it count nothing, and the ledger is set to
+  the true size. A file that is no verdict (full-run.edn) is never counted or deleted. Other writers' additions and removals make the ledger a lower or
   higher guess, corrected by the next count. A file that would not delete stays (a cache a little
   over, never an error). Answers nil."
   {:malli/schema [:=> [:cat :string :int [:set :string] :int] :nil]}
@@ -953,24 +958,6 @@
                         ms (cond-> (keep first (history dir t)) own (conj own))]
                   :when (and (seq ms) (>= (apply min ms) bound))]
               [t (apply min ms)]))))
-
-(defn test-budgets
-  "{test ticks} of tests: the engine ticks each may run, min(cap, max(floor, factor x the median of the
-  ticks its green verdicts measured, at any digest)); a test with no green gets the floor. cap
-  (:seon.config.agent/test-ticks), floor (:seon.config.agent/test-ticks-floor) and factor
-  (:seon.config.agent/test-ticks-factor) are config; 0 cap: none (nil). The history is read once, here, by a run before it
-  runs anything. Work done, never time; derived data, so a missing or evicted history gives the floor.
-  docs/merging.md#a-tests-tick-budget."
-  {:malli/schema [:function [:=> [:cat [:sequential :qualified-symbol]] [:maybe [:map-of :qualified-symbol pos-int?]]]
-                  [:=> [:cat :string [:sequential :qualified-symbol] nat-int? pos-int? pos-int?] [:maybe [:map-of :qualified-symbol pos-int?]]]]}
-  ([tests] (test-budgets (cfg/value :seon.config.proofs/results-dir) tests (cfg/value :seon.config.agent/test-ticks)
-                         (cfg/value :seon.config.agent/test-ticks-floor) (cfg/value :seon.config.agent/test-ticks-factor)))
-  ([dir tests cap floor factor]
-   (when (pos? cap)
-     (into {} (for [t (distinct tests)
-                    :let [g (sort (keep second (history dir t)))
-                          med (if (seq g) (nth g (quot (count g) 2)) 0)]]
-                [t (min cap (max floor (* factor med)))])))))
 
 (defn details
   "What each test of cand ({test digest}, a tree's) spent in each contracted function, as its cached
@@ -1271,7 +1258,7 @@
     :step (do (spit (str dir "/steps") (str name "\n"))
               (spit (str dir "/steps.edn") (sedn/encode {:tree tree :digests {name digest}}))
               (when (false? binary?) (spit (str dir "/steps-binary") ""))
-              (when bound (spit (str dir "/step-bounds") (str name " " bound "\n"))))
+              (spit (str dir "/step-bounds") (str name " " bound "\n")))
     (:build :seed) nil)
   nil)
 
@@ -1345,7 +1332,7 @@
                 ;; max-bytes, the one caller that may remove it), so the items that clone it import nothing
                 :seed (let [prog (str "(require 'seon.test-store 'test-runner) (test-runner/program-db \\\"$PWD\\\" (seon.test-store/kept-program-store)"
                                       " (seon.fx/tree-id \\\"$PWD\\\") (seon.config/value :seon.config.proofs/program-store-max-bytes))"
-                                      (when (:binary? req) " (spit \\\"target/process-store.path\\\" (seon.test-store/make-process-store! \\\"$PWD\\\"))"))]
+                                      (when (:binary? req) " (seon.test-store/make-process-store! \\\"$PWD\\\")"))]
                         (when (:binary? req) (lib/remove-tree! store))
                         (sh "zsh" "-c" (str "ROOT=$PWD; . bin/env; "
                                             (when (:binary? req) "(cd target && ../bin/held ./seon seed 2000 --profile scripted 7>&- 3>&-) && ")
