@@ -122,7 +122,7 @@ Name things with Clojure's, its libraries', Jolt's and git's words: entity, attr
 - **Never flood it:** anything that makes threads or processes starts at n ≤ 100; one experiment at a time; never make load to reproduce something ([machine](docs/machine.md#processes)).
 - **Kill only verified PIDs:** read the full command and its cwd first; never `pkill`, `killall` or a `pgrep -f` pattern. A system's processes end with it.
 - **A hang is evidence:** capture it before killing the process ([machine](docs/machine.md#reading-a-hang)).
-- **Leave nothing running and no finished worktree:** remove yours with `bin/worktree --remove NAME` once it has landed or sat idle for 24 hours. Clean up garbage when you see it, after checking that nothing live uses it ([machine](docs/machine.md#disk-stays-bounded)).
+- **Clean up after yourself:** remove a finished worktree with `bin/worktree --remove NAME`; delete a merged branch (`git branch -d`, which refuses an unmerged one); delete a branch your work superseded (`git branch -D`) once your mail names what superseded it. Leave nothing running. Clean up garbage when you see it, after checking that nothing live uses it ([machine](docs/machine.md#disk-stays-bounded)).
 - **Git:** commit explicit paths; never bare `git stash`; never `checkout`, `restore` or `reset` on paths you didn't change; never `git submodule` in a worktree (`bin/worktree --sync NAME`); never push this repository's branches. A cause in a dependency is fixed on a `jolt/<topic>` branch of its fork (`seantempesta/<lib>`), pushed with no force and never to the fork's main.
 - **Secrets are never printed.** Paid model calls come from the owner's standing $50 budget, for productive work only ([model](docs/model.md#paid-runs)). Install nothing system-wide. Never write in `~/src/seon`.
 
@@ -137,7 +137,7 @@ Name things with Clojure's, its libraries', Jolt's and git's words: entity, attr
 - A swallowed error, a fake default, a clock standing in for a dependency.
 - A check that cannot fail, or one that nobody read.
 - A claim passed on unchecked, or the owner's sentence turned into a build before the code was read.
-- Dropping a store, a branch or history: that is the owner's act.
+- Dropping a store or rewriting history: that is the owner's act. A branch is not: its commits stay in git.
 
 ## 10. Done
 
