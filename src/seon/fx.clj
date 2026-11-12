@@ -138,10 +138,11 @@
   "The `env -u` argv that gives a child process the tree's own environment (docs/source.md#the-next-generation):
   bin/env and bin/system export names for this root's checkout, runs and home, and a child inheriting
   SEON_SOURCE_ROOT listed its test namespaces from that checkout, not the tree it ran in (a full run's plan
-  named a test of the root's working tree that main does not hold, and its shard died at once). Used by build, run-tests
-  and the health step's base (test-runner/base-program)."
+  named a test of the root's working tree that main does not hold, and its shard died at once), and its ports (a check
+  step the :prove service ran took the standing system's SEON_WEB_PORT 7777 and its root failed on the port in use). Used
+  by build, run-tests, a check step and the health step's base (test-runner/base-program)."
   ["env" "-u" "SEON_CHECKOUT" "-u" "JOLT_LMDB_LIB" "-u" "JOLT_PWD" "-u" "HOME"
-   "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS"])
+   "-u" "SEON_SOURCE_ROOT" "-u" "SEON_RUNS" "-u" "SEON_WEB_PORT" "-u" "SEON_SERVER_PORT"])
 
 (defn source-file?
   "Is the file at relative path p one a read of the source takes, under a source dir: Clojure or EDN, or a kind the

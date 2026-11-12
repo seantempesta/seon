@@ -53,8 +53,9 @@ export SEON_RESULTS_DIR=$CHECK_RESULTS
 trap 'rm -rf "$CHECK_RESULTS"' EXIT
 # a check's roots serve no dashboard: system.edn's :web :port 7777 is the owner's, and a
 # step's root that found it free took it (the owner's browser then showed a throwaway check
-# root). A run that wants one names its port: SEON_WEB_PORT=7790 bin/system
-export SEON_WEB_PORT=${SEON_WEB_PORT:-0}
+# root), whatever port the environment names: a check that the standing system's :prove service ran inherited its
+# SEON_WEB_PORT=7777, and smoke's root failed on the port in use (2026-11-12). A step that serves one names its own (idle).
+export SEON_WEB_PORT=0
 # every check root has a store of its own: its wiki's baseline from git (4 s) is not what a check asks
 export SEON_WIKI_BASELINE=${SEON_WIKI_BASELINE:-false}
 # idle watches a tab on its root's dashboard, so its root serves one: on this run's own port, in a
@@ -161,53 +162,63 @@ step() {
   local name=$1 filter=$2; shift 2
   local log=$OUT/$name.log expect=${EXPECT:-0}
   [[ $name == seed ]] || want ${${name%-write}%-read} || return 0
-  # its bound (bin/prove's plan, SEL/step-bounds: the step-end factor times its median measured ms; a step never measured has
-  # none): past it, its evidence is captured (bin/evidence, with its root's stall state from the port its root wrote beside its
-  # store), then it is ended and FAILED, STEP-OVERRAN: a step past its bound is a bug, recorded as an error and fixed (the owner,
-  # 2026-11-12: "A test killed for running too long is a bug and it should be recorded as an error and fixed"; the owner's
-  # fourth clock exception, 2026-11-10: docs/clocks.md#time-decides-the-owners-exceptions)
-  local bound= W=
-  [[ -n $SEL && -s $SEL/step-bounds ]] && bound=$(awk -v k="${${name%-write}%-read}" '$1 == k { print $2 }' "$SEL/step-bounds")
-  rm -f "$OUT/$name.overran"
+  # a unit past its bound (bounded, below) runs no more of its steps: bounded reports it, STEP-OVERRAN
+  [[ -n ${UNIT:-} && -e $OUT/$UNIT.overran ]] && return 0
   # its wall and CPU seconds kept beside its log (NAME.time: zsh's time, which keeps the exit
   # status); fd 7 (the starter fifo) and fd 3 (the run's token pool) stay bin/check's own
   { time (SEON_MAIN=check-$name "$@" > "$log" 2>&1 7>&- 3>&-) } 2> "$OUT/$name.time" 7>&- 3>&- & local sp=$!
-  if [[ -n $bound ]]; then
-    ( trap 'kill $S 2>/dev/null; exit 0' TERM; sleep $(( bound / 1000.0 )) 7>&- 3>&- & S=$!; wait $S || exit 0
-      "$ROOT/bin/evidence" "$OUT/$name-overran" $sp "$(cat "${SEON_STORE:-/nonexistent}/root.port" 2>/dev/null)" > /dev/null 2>&1
-      print -r -- "$bound" > "$OUT/$name.overran"
-      "$ROOT/bin/end-tree" $sp ) 7>&- 3>&- & W=$!
-  fi
   wait $sp; local st=$?
-  [[ -n $W ]] && { kill $W 2>/dev/null; wait $W 2>/dev/null }
   local r=$(sed -n 's/^real \([0-9.]*\).*/\1/p' "$OUT/$name.time" | head -1)
   [[ -n $SEL && -n $r ]] && printf "%s %.0f\n" "$name" $(( r * 1000 )) >> "$SEL/step-ms"
   # a red's message first, on its FAILED line and in the run's failed list: the log's first line that says what went wrong
   # (an unhandled exception, a FAILED or ERROR verdict), else its first line; never its last, which for a throw is a trace
   # frame (the rename's health red was read from its trace lines and misdiagnosed for 1.5 h, 2026-11-11)
   local msg=
-  if [[ ! -e $OUT/$name.overran ]] && (( st != expect )); then
+  [[ -n ${UNIT:-} && -e $OUT/$UNIT.overran ]] && return 0
+  if (( st != expect )); then
     msg=$(grep -m1 -E 'Unhandled exception|Exception|FAILED|FAIL |ERROR|[Ee]rror:' "$log" 2>/dev/null)
     [[ -n $msg ]] || msg=$(head -1 "$log" 2>/dev/null)
     msg=${msg:0:300}
     echo "FAILED $name: $msg (exit $st, expected $expect, $log)"
   fi
   if [[ -n $filter ]]; then grep -E "$filter" "$log"; else tail -1 "$log"; fi
-  if [[ -e $OUT/$name.overran ]]; then
-    # an error, one meaning of "past its bound" for a test and a step (the owner, 2026-11-12): the step was ended at its
-    # bound after its evidence, and it FAILED, with its CPU seconds (user + sys, zsh's time) beside its wall bound and the
-    # load, which say whether it was working or waiting on the machine; its store is kept, as any failed step's
-    local cpu=$(awk '{for (i = 1; i < NF; i++) { if ($i == "user") u = $(i+1); if ($i == "sys") y = $(i+1) }} END {sub(/s$/, "", u); sub(/s$/, "", y); printf "%.1f", u + y}' "$OUT/$name.time" 2>/dev/null)
-    msg="STEP-OVERRAN, ran past its bound of $(<$OUT/$name.overran) ms (:seon.config.check/step-end-factor times its median; CPU ${cpu:-?} s, load $(sysctl -n vm.loadavg | awk '{print $3}')); evidence in $OUT/$name-overran"
-    echo "FAILED $name: $msg"
-    failed "$name: $msg"
-  elif (( st != expect )); then failed "$name: $msg (exit $st, expected $expect, $log)"
+  if (( st != expect )); then failed "$name: $msg (exit $st, expected $expect, $log)"
   else green $name; fi
   return 0
 }
 
+# bounded NAME CMD...: CMD (a unit, every step and phase it runs) under NAME's bound (bin/prove's plan, SEL/step-bounds: the
+# step-end factor times its median measured ms; a step never measured takes the largest median, seon.proofs/step-bounds). Past
+# it, its evidence is captured (bin/evidence, with its root's stall state from the port its root wrote beside its store), what
+# it runs is ended, and it FAILED, STEP-OVERRAN: a step past its bound is a bug, recorded as an error and fixed (the owner,
+# 2026-11-12: "A test killed for running too long is a bug and it should be recorded as an error and fixed"; the owner's
+# fourth clock exception, 2026-11-10: docs/clocks.md#time-decides-the-owners-exceptions). The bound is the unit's, not one
+# step()'s: a phase a unit runs outside step() (orphan's held --drain, resume's first root) had none, and two of them
+# waited 75 min in a landing's prove, 2026-11-12.
+bounded() {
+  local name=$1 bound= W=; shift
+  [[ -n $SEL && -s $SEL/step-bounds ]] && bound=$(awk -v k="$name" '$1 == k { print $2 }' "$SEL/step-bounds")
+  rm -f "$OUT/$name.overran"
+  ( UNIT=$name; "$@" ) & local up=$!
+  if [[ -n $bound ]]; then
+    ( trap 'kill $S 2>/dev/null; exit 0' TERM; sleep $(( bound / 1000.0 )) 7>&- 3>&- & S=$!; wait $S || exit 0
+      "$ROOT/bin/evidence" "$OUT/$name-overran" $up "$(cat "${SEON_STORE:-/nonexistent}/root.port" 2>/dev/null)" > /dev/null 2>&1
+      print -r -- "$bound" > "$OUT/$name.overran"
+      "$ROOT/bin/end-tree" $up ) 7>&- 3>&- & W=$!
+  fi
+  wait $up
+  [[ -n $W ]] && { kill $W 2>/dev/null; wait $W 2>/dev/null }
+  if [[ -e $OUT/$name.overran ]]; then
+    # its store is kept, as any failed step's; the load says whether it waited on the machine
+    local msg="STEP-OVERRAN, ran past its bound of $(<$OUT/$name.overran) ms (:seon.config.check/step-end-factor times its median; load $(sysctl -n vm.loadavg | awk '{print $3}')); evidence in $OUT/$name-overran"
+    echo "FAILED $name: $msg"
+    failed "$name: $msg"
+  fi
+  return 0
+}
+
 if (( NEEDS )); then
-echo "== seed (the one store every step branches from: made when missing)"; step seed "" run seed 2000
+echo "== seed (the one store every step branches from: made when missing)"; bounded seed step seed "" run seed 2000
 # the store's path, size and branches: `seon store`'s own line, from stdout alone (a log line on stderr once read as the
 # path: konserve's deprecation warning, 2026-11-10, and every unit then seeded a store of its own instead of copying)
 store-line() { (cd "$ROOT/target" && "$ROOT/bin/held" ./seon store --profile scripted 2>/dev/null 7>&- 3>&-) | tail -1 }
@@ -351,7 +362,7 @@ unit() {
   export SEON_STORE=$OUT/stores/$1
   # a unit that cannot take its copy of the seeded store fails here, loudly: it never runs on a store its own root seeded
   (( NEEDS )) && { mkdir -p "$SEON_STORE" && cp -c "$STORE/data.mdb" "$SEON_STORE/data.mdb" || { failed "$1 (no copy of the seeded store $STORE)"; print "FAILED $1: no copy of the seeded store $STORE"; return 1 } }
-  { u-$1 } > "$OUT/$1.shown" 2>&1
+  bounded $1 u-$1 > "$OUT/$1.shown" 2>&1
   # a failed step's store stays to be read: failed's lines are "NAME: why", "NAME (why)" or "NAME-i ..." (it wanted "NAME " or
   # "NAME-" alone, so every red step's store was removed: Deep fixes, 2026-11-12)
   grep -q "^$1[ :-]" "$OUT/failed" || "$ROOT/bin/remove-tree" "$SEON_STORE"

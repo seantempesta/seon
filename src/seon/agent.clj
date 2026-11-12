@@ -1014,15 +1014,15 @@
   "The tests a test-plan runs (var symbols), by the one runner (seon.proofs/run-tests!, nothing
   stored: the parent holds the greens), with the branch's schemas in effect (malli's dynamic
   registry bound to seon.program/schema-registry, as the agent's REPL binds it), each test
-  within its budget of engine ticks of work of its own (the runner's: ticks at most, budgets per test): answers report data. Each
+  within its budget of engine ticks of work of its own (the runner's: ten times its stated estimate, ticks at most): answers report data. Each
   test var is written to w as it starts ({:seon.test/started v}), so the agent can name the test
   a death interrupted, and its reports as it ends ({:seon.test/ended v :reports [...]}), so a
   death loses the test it interrupted and no other (run-tests-forked runs the rest in a new
   child); a test past its ticks is an :error report of the typed
   :seon.test/ticks-spent naming it; a test its namespace's throw kept from reporting is an
   :error report carrying that throw (the runner reports it)."
-  {:malli/schema [:=> [:cat :int nat-int? [:maybe [:map-of :qualified-symbol pos-int?]] [:sequential :qualified-symbol]] :seon.test/result]}
-  [w ticks budgets tests]
+  {:malli/schema [:=> [:cat :int nat-int? [:sequential :qualified-symbol]] :seon.test/result]}
+  [w ticks tests]
   (let [reports (atom []) current (atom [])
         started (atom nil)
         note! (fn [x]
@@ -1039,7 +1039,7 @@
                       :else nil))
         ;; the branch's registry as the REPL binds it: the one held (branch-schemas), never derived again here
         _ (binding [mr/*registry* (:registry (branch-schemas))]
-            (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks budgets))
+            (proofs/run-tests! tests (zipmap tests (repeat nil)) note! ticks))
         reports @reports
         counts (frequencies (map :type reports))]
     {:pass (counts :pass 0) :fail (counts :fail 0) :error (counts :error 0) :test (count (distinct (keep :var reports)))
@@ -1190,8 +1190,8 @@
   :pid, :exit}, or the fork's refused answer. forked is told the child's pid; each test as it starts goes
   to root (what this agent waits on, which a stall names) through say, the loop's send! or what
   hands the loop a message to send."
-  {:malli/schema [:=> [:cat :map nat-int? [:maybe [:map-of :qualified-symbol pos-int?]] [:sequential :qualified-symbol] :seon.host/fn :seon.host/fn] [:or :map :seon.test/fork-refused]]}
-  [plan ticks budgets tests forked say]
+  {:malli/schema [:=> [:cat :map nat-int? [:sequential :qualified-symbol] :seon.host/fn :seon.host/fn] [:or :map :seon.test/fork-refused]]}
+  [plan ticks tests forked say]
   (let [lines (atom {:streamed [] :ended #{} :fns {} :heap {}})
         ;; what ran ahead is committed first, so the child's db is a commit it can make again through its own env (own-store!)
         _ (when (:dirty? @state) (commit!))
@@ -1237,7 +1237,7 @@
                                                                 (doseq [[t msg] unloaded]
                                                                   (sock/write-line! w (sedn/encode {:seon.test/ended (str "#'" t)
                                                                                                     :reports [{:type :error :var (str "#'" t) :message msg}]})))
-                                                                (run-tests-here w ticks budgets (vec (remove unloaded tests)))) true]
+                                                                (run-tests-here w ticks (vec (remove unloaded tests)))) true]
                                           (catch Throwable e [{:pass 0 :fail 0 :error 1 :reports [{:type :error :message (ex-message e)}]} false]))]
                  ;; a run's reports went as its tests ended: this line is its end and its counts; a run that threw
                  ;; streamed none, so its line keeps the throw's report (scale's agents read :error 2 and nothing else)
@@ -1434,8 +1434,6 @@
   (if unread
     unread
   (let [{:keys [plan judge deferred selected run reused digests reused-reports]} sel
-        ;; each test's budget from its own green history, read once for the run (seon.fx/test-budgets)
-        budgets (fx/test-budgets (cfg/value :seon.config.proofs/results-dir) run ticks (cfg/value :seon.config.agent/test-ticks-floor) (cfg/value :seon.config.agent/test-ticks-factor))
         t0 (profile/now-ns)
         ;; every selected test green at its digest (a turn's run of the same tree, a session's):
         ;; nothing to run, so no child is forked
@@ -1443,7 +1441,7 @@
         ;; rest of its todo run in a new child: the death of one test never costs the run its other results
         run-child (fn [todo say]
               (loop [todo todo reports [] fns {} heap {} measured {}]
-                (let [c (test-child plan ticks budgets todo forked say)]
+                (let [c (test-child plan ticks todo forked say)]
                   (if (contract/error? c)
                     c
                     (let [died (filter :exit (:reports (:answer c)))

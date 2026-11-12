@@ -242,7 +242,7 @@
   "{step bound-ms} for every one of steps: past it bin/check captures the step's evidence and ends it red (STEP-OVERRAN). The
   step-end factor (:seon.config.check/step-end-factor) times the step's median measured ms (ms: every check step's, seon.fx/
   typical-ms), floored at the stall bound (:seon.config.agent/stall-ms); a step never measured takes the largest median of
-  those measured, so no step is ever without one: two unmeasured steps (orphan, resume) hung a landing for 58 min. See
+  those measured, so no step is ever without one; bin/check holds a unit's whole run to it (bounded), every phase. See
   docs/clocks.md#time-decides-the-owners-exceptions."
   {:malli/schema [:=> [:cat [:sequential :string] [:map-of :string number?]] [:map-of :string number?]]}
   [steps ms]
