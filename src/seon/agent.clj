@@ -933,7 +933,13 @@
                   (update :selected into (keys removed))
                   (update :run into (keys removed))
                   (assoc :digests cd :base-digests bd :graph g :inputs in :removed removed
-                         :process (into (program/process-tests idx) removed-process)))
+                         :process (into (program/process-tests idx) removed-process)
+                         ;; what a green's run records it read beside the functions it called (seon.proofs/reads-key): each test's
+                         ;; reads besides code, and the digest of every read, the agent's one reads index a commit
+                         :static-reads (into {} (keep (fn [[t v]] (when (seq (:reads v)) [t (:reads v)]))) idx)
+                         :reads-rd (delay (let [at (pdb/point db)]
+                                            (or (when (= at (first (:reads-index @state))) (second (:reads-index @state)))
+                                                (let [rd (program/reads-index g in {})] (swap! state assoc :reads-index [at rd]) rd))))))
         unread (assoc :unread unread))))))
 
 (defn stored-results
@@ -1367,10 +1373,13 @@
 
 (defn- held-plan
   "What this agent keeps of its plan of a run (run-plan's sel) for the items the test service grants it: every digest, and
-  of the plan only what running a test reads (:removed, :process, :base-digests), not its graph. See docs/merging.md#the-test-service."
+  of the plan only what running a test reads (:removed, :process, :base-digests, :static-reads and the reads index made, so
+  each green is keyed by what it read), not its graph. See docs/merging.md#the-test-service."
   {:malli/schema [:=> [:cat :map] :map]}
   [sel]
-  {:digests (:digests sel) :plan (select-keys (:plan sel) [:removed :process :base-digests])})
+  {:digests (:digests sel)
+   :plan (cond-> (select-keys (:plan sel) [:removed :process :base-digests :static-reads])
+           (:reads-rd (:plan sel)) (assoc :reads-rd (force (:reads-rd (:plan sel)))))})
 
 (defn- item-selection
   "The selection that runs items ({test digest}, the test service's grant) as held (held-plan, this agent's last plan of a
@@ -1483,6 +1492,12 @@
       (-> res
         (as-> r (let [{:keys [ran failures]} (proofs/answer-ran (assoc r :digests digests))
                       ran (into {} (for [[t x] ran] [t (merge x (get-in r [:measured t]))]))
+                      ;; each green keyed by what it read: the functions it called, itself, its reads besides code (docs/source.md#tests-run-by-reach)
+                      ran (if-let [rd (some-> (:reads-rd plan) force)]
+                            (into {} (for [[t x] ran] [t (cond-> x (proofs/green? x)
+                                                           (assoc :reads (proofs/reads-key rd {:fns (conj (into #{} (map :var) (get-in r [:fns t])) t)
+                                                                                               :keys (get-in plan [:static-reads t])})))]))
+                            ran)
                       w (fx/write-verdicts! {:id (str (name (:id @state)) " " (random-uuid)) :branch (:branch @state) :agent (:id @state) :key (:key @state)} ran failures)]
                   ;; beside the cache, the same run's results as facts on this branch (the record shows them); an item the test service
                   ;; granted writes the cache only: its asker's answer writes the facts once (record-answer!)
