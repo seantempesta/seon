@@ -157,8 +157,10 @@
        ;; :db/txInstant stopped being a content attribute (this store's branch has one transaction; a branch of 18 evals
        ;; has 87, ~0.4M ticks more: docs/cost.md#a-diff-per-attribute-costs-a-descent-each). What it replaced per turn: this, plus divergence three or four times (453-678 KB each), so a turn's
        ;; diff reads went from ~2.5-3.3 MB to one of these
+       ;; 2026-11-12: seon.merge/content-attr? is a contracted defn- (the contracts check), so the predicate asked of each
+       ;; datom the keys' content reads is counted: ~900 calls at 10 forms on both sides, the same work as before (959 measured)
        :per-n {}
-       :fixed {:ticks 1400000.0 :bytes 5000000.0 :calls 59}
+       :fixed {:ticks 1400000.0 :bytes 5000000.0 :calls 1000}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 
@@ -176,8 +178,9 @@
        :n "forms main and the branch hold (the branch redefines one)"
        :work "one filter over the datoms that differ, by attribute; no datoms-diff, so no descent from the roots"
        :growth :constant
+       ;; one seon.merge/content-attr? a datom of the diff, counted since it is a contracted defn- (2026-11-12: 16 measured, 12 datoms)
        :per-n {}
-       :fixed {:ticks 6000.0 :bytes 8000.0 :calls 4}
+       :fixed {:ticks 6000.0 :bytes 8000.0 :calls 16}
        :sizes divergence-sizes})
     (finally (release-stores!))))
 

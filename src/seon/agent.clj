@@ -569,10 +569,10 @@
                                (throw e))))]
               (if (:seon.error/type cid)
                 (assoc cid :ok false :applied [] :t (:max-tx head))
-                ;; force-branch! moved the held connection to the new head with it (docs/storage.md#a-moved-head-moves-its-live-connection);
-                ;; this process connects anew for its new config
-                (let [_ (d/release (:store-conn @state))
-                      conn (pdb/connect (assoc (:cfg @state) :branch b))
+                ;; force-branch! moved the held connection to the new head with it (docs/storage.md#a-moved-head-moves-its-live-connection),
+                ;; so the connect answers that same connection, and the release after it leaves its count as it was
+                (let [conn (pdb/connect (assoc (:cfg @state) :branch b))
+                      _ (d/release (:store-conn @state))
                       db @conn
                       ;; what moved under this process: from its old head to main with its own work on top
                       ops (let [[gone added] (d/datoms-diff head db :eavt [])]
