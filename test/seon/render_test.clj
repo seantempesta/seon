@@ -1090,6 +1090,26 @@
     (is (= {} (:ran again)) "the same value again runs nothing")
     (is (identical? (:answers p) (:answers again)) "and answers what it answered")))
 
+;; See docs/render.md#a-page-is-a-kept-walk
+(deftest ^{:seon.test/estimate {:ticks 25000000}} a-page-drawn-by-walk-is-the-reactive-pages-units
+  ;; estimate: 4 cold reactive page draws (~3M each) and 4 walks (one cold ~2.5M, three moves ~1M each) over a session of 2 to 6 turns
+  ;; (the cost proof's world: an in-memory branch, no cited task to build); measured 18M on paged-dbs' world, whose 64M build it needs not
+  ;; the render proc's page as a walk value (seon.render/walk, :units true): at any value of the branch, forward, back and across turns,
+  ;; the units a cold reactive draw writes there, the page's rules among them
+  (let [[db0 ix _ at] (#'seon.render-cost-test/session-of 2)
+        vs (vec (reductions (fn [db i] (d/db-with db (#'seon.render-cost-test/session-eval (str "e" i) (inc i)))) db0 (range 2 7)))
+        opts (fn [db] (assoc (at db) :model-only false :units true))
+        cold (fn [db] (let [o (opts db) w (draw (:tree o) seon.ctx/changes db (:root o) {:index ix})]
+                        (try (mapv (juxt :id :html) (r/placed-units w)) (finally (r/dispose-walk! w)))))
+        p0 (r/walk nil (opts (nth vs 2)))]
+    (is (= (cold (nth vs 2)) (mapv (juxt :id :html) (:units p0))) "drawn cold")
+    (reduce (fn [[p db0] i]
+              (let [db (nth vs i) p' (r/walk p (assoc (opts db) :moved (seon.ctx/moved db0 db nil)))]
+                (is (= (cold db) (mapv (juxt :id :html) (:units p'))) (str "its units at " i))
+                [p' db]))
+            ;; forward one turn, back two, forward four
+            [p0 (nth vs 2)] [3 1 5])))
+
 (deftest a-record-of-another-turn-reads-nothing-this-turn-read
   ;; docs/render.md#the-page: an agent's page is a component for each turn number, each reading its records through the index by
   ;; that number: a new eval at turn n draws turn n's component and its eval, and no other turn's, nor the list's
