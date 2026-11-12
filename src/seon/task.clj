@@ -534,7 +534,8 @@
 (defn start-tx
   "Agent `agent` (its id; nil: root refused the spawn, and no agent exists) begins task id in root's boot, its turn budget raised by raise (a wake's allowance) turns: the task's
   outcome :running from what it was, naming the agent (its id's name is its key, so a session's agent that continues keeps it, seon.task/agent-key), the judged attributes cleared; the agent's entity (key, task, branch and the rest of its environment,
-  its boot and when it started, and who started the task now holding it, :seon.agent/agents), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
+  its boot and when it started, and who started it, its :seon.agent/parent: the task's starter, written with the agent and kept
+  when the agent continues), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
   A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :any]]
                   [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int nat-int?] [:vector :any]]]}
@@ -542,13 +543,15 @@
   ([db id boot agent {:keys [branch model max-turns holder]} start-ms raise]
    (let [k (when agent (name agent))
          ae (when k (d/entity db [:seon.agent/key k]))
-         from (:seon.task/outcome (d/entity db [:seon.task/id id]))]
+         from (:seon.task/outcome (d/entity db [:seon.task/id id]))
+         by (:db/id (:seon.task/started-by (d/entity db [:seon.task/id id])))]
      (into (outcome-tx db id from :running {})
            (filterv some?
                     [(when k {:seon.task/id id :seon.task/agent k})
-                     (when-let [by (when k (:db/id (:seon.task/started-by (d/entity db [:seon.task/id id]))))] [:db/add by :seon.agent/agents k])
                      (when k (cond-> {:db/id k :seon.agent/key k :seon.agent/task [:seon.task/id id]
                                       :seon.agent/branch branch :seon.agent/boot boot :seon.agent/started-ms start-ms}
+                               ;; its task's starter, none when nobody started it (never an invented one)
+                               (and (not (:seon.agent/parent ae)) by) (assoc :seon.agent/parent by)
                                model (assoc :seon.agent/model model)
                                holder (assoc :seon.agent/holder holder)
                                (not (:seon.agent/max-turns ae)) (assoc :seon.agent/max-turns max-turns)
@@ -1013,7 +1016,7 @@
 
 (defn refine-tx
   "Task id's refine and its review (`refine-decls`), written on db when id has just ended: the refine released, the review held
-  for a session. None when id is a refine itself, when a refine of it exists (a task citing it and `refine-section`), or when it
+  for a session; started by id's agent, so the refine's agent is its child. None when id is a refine itself, when a refine of it exists (a task citing it and `refine-section`), or when it
   continues another task's branch (it needs a task on its own branch: a merge step, whose work task has its own refine), so a
   refine and its review never loop. See docs/tasks.md#a-refine-curates-its-own-task."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe [:vector :any]]]}
@@ -1023,4 +1026,7 @@
     (when (and t (:seon.task/ns t) (not (refine? db id)) (not refined?) (not (continues-branch? db id)))
       (let [tx (create-tx db (refine-decls t))]
         (when (vector? tx)
-          (into tx (execution-tx [(task-id (:seon.task/ns t) (str (:seon.task/name t) "-refine"))] :running)))))))
+          (let [rid (task-id (:seon.task/ns t) (str (:seon.task/name t) "-refine"))]
+            ;; started by the agent whose run it refines: its agent is that one's child (:seon.agent/parent, start-tx)
+            (cond-> (into tx (execution-tx [rid] :running))
+              (:seon.task/agent t) (conj {:seon.task/id rid :seon.task/started-by (sender (:seon.task/agent t))}))))))))

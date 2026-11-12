@@ -63,7 +63,7 @@ Every page is the render of a ctx through the one walk (```seon.render/walker```
 
 A session's address is its key (`:seon.agent/key`, ```seon.render.ui/agent-address```), the one name that survives a restart, so every link is a bookmark. ```seon.render.proc/agent-named``` resolves the key, then the task's id, then its branch (the newest agent that worked it, of any boot), else a 404; ```seon.render.ui/focus-of``` keeps the address a page was asked by.
 
-The agents list (```seon.render.ui/agents-list```, `#c-side`) is the signed-in user's, the same on every page, from the user's walk (```seon.render.proc/user-sides```): root's line, then the agents the user started, each with those it started, read from each entry's `:seon.agent/agents` ([who started whom](users.md#who-started-whom)).
+The agents list (```seon.render.ui/agents-list```, `#c-side`) is the signed-in user's, the same on every page, from the user's walk (```seon.render.proc/user-sides```): root's line, then the agents the user started, each with those it started, read from each entry's `:seon.agent/_parent` ([who started whom](users.md#who-started-whom)).
 
 The head and the list read main, so they say what main judged; the task tile (```seon.render.ui/task-view```) reads the agent's branch and says how the agent's own end left it. An eval's `:out` and `:err` show beside its value, each cut only with the form that reads the rest.
 
