@@ -16,14 +16,16 @@
         ops [[:db/add 1 :seon.agent/key "boot-1/a1"] [:db/add 1 :seon.agent/boot "boot-1"]]]
     [(cond-> {:db db :graph (program/reach-graph db nil)} (program/moves-program? ops) (assoc :graph-moved true))]))
 
-(deftest a-spawns-commit-leaves-the-graph-and-a-program-commit-moves-it
+;; Estimate: spawned-of 10: branch-of 10 forms x 100k = 1M, its reach-graph 41k a form = 0.4M, two moves-program? checks: ~2M ticks.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-spawns-commit-leaves-the-graph-and-a-program-commit-moves-it
   (let [[st] (spawned-of 10)]
     (is (not (:graph-moved st)) "an agent's facts move no program")
     (is (identical? (:graph st) (:graph (fs/graph-at-fork st))) "so the fork hands on the graph it holds"))
   (is (program/moves-program? [[:db/add 7 :form/id "app.pc/f0-x"]]) "a form's facts move it")
   (is (program/moves-program? [[:db/retract 7 :var/form 9]]) "and so does a definition's pointer"))
 
-(deftest a-program-commit-moves-the-graph-to-the-new-program
+;; Estimate: spawned-of 10 = 1.5M; record-tx and d/with ~0.3M; reach-graph twice (fresh, and graph-at-fork's update) ~1M: ~4M ticks.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-program-commit-moves-the-graph-to-the-new-program
   ;; the graph a fork (or a standby: the self-review's finding, a standby forked before the next
   ;; fork kept the passed graph) hands on is the new program's, and the flag is cleared
   (let [[st] (spawned-of 10)
@@ -40,7 +42,8 @@
     (is (= (select-keys fresh [:live :schemas]) (select-keys (:graph moved) [:live :schemas])) "the graph is the new program's")
     (is (not (:graph-moved moved)) "and the flag is cleared")))
 
-(deftest a-fork-on-an-unmoved-program-costs-nothing-of-the-program
+;; Estimate: sizes 10+100+1000 = 1,110 forms: branch-of 111M + reach-graph 41k a form = 45M; 3 key lookups; over :seon.config.proofs/test-ticks-cap: ~200M ticks.
+(deftest ^{:seon.test/estimate {:ticks 200000000}} a-fork-on-an-unmoved-program-costs-nothing-of-the-program
   (cost/proof
     {:of 'seon.fork-server/graph-at-fork :input 'seon.fork-server-cost-test/spawned-of
      :n "forms in main's program"

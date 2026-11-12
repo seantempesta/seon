@@ -32,7 +32,8 @@
   ['[:find ?src ?o :in $ ?n :where [?v :var/name ?n] [?v :var/form ?f] [?f :form/src ?src] [?f :form/order ?o]]
    (first (branch-of n)) (symbol "app.pc" (str "f" (quot n 2)))])
 
-(deftest a-probed-entity-is-sought-not-scanned
+;; Estimate: sizes 30+100+300 = 430 forms x 100k setup (branch-of's n forms at ~100k ticks each (account-tx's seeks + a ~12-datom transaction, docs/cost.md: ~50k per 10 datoms)) = 43M; 3 measured calls ~50k each: ~40M ticks.
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-probed-entity-is-sought-not-scanned
   ;; a probed entity is sought, not scanned: 3.24M ticks became 55k at 10,000 forms (Datahike jolt/in-scalar)
   (cost/proof
     {:of 'datahike.api/q :input 'seon.program-cost-test/probed-of
@@ -48,7 +49,8 @@
      :fixed {:ticks 41000.0 :bytes 200000.0}
      :sizes [30 100 300]}))
 
-(deftest recording-a-form-is-flat-in-the-program
+;; Estimate: sizes 30+100+300 = 430 forms x 100k setup = 43M; 3 record-tx calls ~130k each: ~40M ticks.
+(deftest ^{:seon.test/estimate {:ticks 40000000}} recording-a-form-is-flat-in-the-program
   (cost/proof
     {:of 'seon.program/record-tx :input 'seon.program-cost-test/branch-of
      :n "forms the branch's db already holds"
@@ -78,7 +80,8 @@
   [n]
   (let [[db] (branch-of n)] [(filterv #(= 'app.pc (:ns %)) (program/live-forms db))]))
 
-(deftest load-order-is-one-pass-over-the-forms
+;; Estimate: 430 forms x 100k setup = 43M; load-order's n log n pass ~10k ticks a form = 4M: ~50M ticks.
+(deftest ^{:seon.test/estimate {:ticks 50000000}} load-order-is-one-pass-over-the-forms
   (cost/proof
     {:of 'seon.program/load-order :input 'seon.program-cost-test/program-of
      :n "live forms"
@@ -133,7 +136,8 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:set :keyword]]]}
   [n] (conj (on-disk-diverged-of n) #{}))
 
-(deftest a-turns-diff-reads-what-the-branch-changed
+;; Estimate: sizes 10+30+100 = 140 forms x 100k into 3 on-disk stores = 14M, 3 store opens and branches ~1M each, delta-changes 3 x 1.4M (its fixed estimate) = 4M: ~20M ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-turns-diff-reads-what-the-branch-changed
   ;; one diff a turn (root's audit, 2026-10-27: a turn read its base-to-head diff 4-6 times,
   ;; divergence three or four times beside delta-changes, ~2 MB of repeats): the turn reads
   ;; delta-changes once (seon.agent/branch-changes) and every reader projects it
@@ -173,7 +177,8 @@
   (let [[_ base] (on-disk-diverged-of n)]
     [(:store base) (first (remove nil? (seq (.-_addresses (.root ^org.replikativ.persistent_sorted_set.PersistentSortedSet (:eavt base))))))]))
 
-(deftest a-stored-node-reads-at-its-decode
+;; Estimate: 3 on-disk stores of 140 forms in all = 17M (as a-turns-diff-reads-what-the-branch-changed); 3 node reads x 5k ticks: ~20M ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-stored-node-reads-at-its-decode
   ;; deps 2026-11-12: 86 KB / 9.3k ticks a read in the morning, 46.5 KB / 5.8k with get-immutable, 24.2 KB / 4.9k
   ;; once a uuid holds its halves and no text, a keyword decodes from its bytes, uuid text and parse take no
   ;; rest list or bignum step, a digest is one block, a foreign byte move copies once and readAllBytes reads once (Jolt, konserve, crypto)
@@ -201,7 +206,8 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db :seon.host/db [:set :keyword] [:sequential :seon.host/datom]]]}
   [n] (let [[base head] (on-disk-diverged-of n)] [base head #{} (apply concat (d/datoms-diff base head :eavt []))]))
 
-(deftest content-datoms-given-a-diff-are-a-filter
+;; Estimate: 3 on-disk stores of 140 forms in all = 17M; 3 datoms-diffs of one redefinition ~0.5M each; 3 filters x 6k ticks: ~20M ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} content-datoms-given-a-diff-are-a-filter
   ;; docs/cost.md#a-diff-per-attribute-costs-a-descent-each: given the diff a caller read, no descent is made
   (try
     (cost/proof
@@ -215,7 +221,8 @@
        :sizes divergence-sizes})
     (finally (release-stores!))))
 
-(deftest a-turns-held-diff-is-a-lookup
+;; Estimate: 3 on-disk stores of 140 forms in all = 17M; 3 lookups x 1k ticks: ~20M ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-turns-held-diff-is-a-lookup
   ;; the proof above builds its stores at on-disk-path n and releases them; this one builds its own,
   ;; one set of stores at a time (a second build at a path a proof still holds is "Branch already exists")
   (try
@@ -237,7 +244,8 @@
   (let [leaves (vec (range 1 (inc n)))]
     [[0] (fn [x] (if (zero? x) leaves []))]))
 
-(deftest a-closure-is-one-visit-per-node-and-edge
+;; Estimate: sizes 100+300+1000+10000 = 11,400 nodes x (160 measured + ~20 input) ticks: ~2M ticks.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-closure-is-one-visit-per-node-and-edge
   (cost/proof
     {:of 'seon.program/closure :input 'seon.program-cost-test/fan
      :n "nodes reached (a root and its n leaves: the widest frontier)"
@@ -260,7 +268,8 @@
   [n]
   [(vec (range n)) (into {} (for [i (range n)] [i (cond-> (if (< (inc i) n) [(inc i)] []) (and (pos? i) (zero? (mod i 7))) (conj (max 0 (- i 5))))]))])
 
-(deftest the-strongly-connected-components-are-one-visit-per-node-and-edge
+;; Estimate: 11,400 nodes x (560 measured + ~100 input: a vector and a map of edges) ticks: ~8M ticks.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} the-strongly-connected-components-are-one-visit-per-node-and-edge
   (cost/proof
     {:of 'seon.program/components :input 'seon.program-cost-test/knotted
      :n "nodes (each with one or two edges)"
@@ -282,7 +291,8 @@
   (let [[db] (branch-of n)]
     [db {:env "e" :tree "t" :config {}} (into {} (for [i (range 0 n 10)] [(str "k" i) [(symbol "app.pc" (str "f" i))]]))]))
 
-(deftest the-reach-walk-is-one-pass-whatever-the-keys
+;; Estimate: sizes 10+30+100 = 140 forms x 100k setup = 14M; 3 reach-index calls x 3.6M fixed + 11.5k x 140 = 12.4M: ~30M ticks.
+(deftest ^{:seon.test/estimate {:ticks 30000000}} the-reach-walk-is-one-pass-whatever-the-keys
   (cost/proof
     {:of 'seon.test-store/reach-index :input 'seon.program-cost-test/keyed-chain
      :n "forms (and n/10 keys, each reaching the forms below it)"
@@ -312,7 +322,8 @@
         g (program/reach-graph db nil)]
     [g (d/db-with db (program/record-tx db (acct (dec n) "(dec x)")))]))
 
-(deftest a-change-re-folds-only-what-reaches-it
+;; Estimate: sizes 100+300+1000 = 1,400 forms: branch-of 140M + reach-graph 41k a form = 57M + 3 reach-updates (0.35M + 850 a form) = 2M; over :seon.config.proofs/test-ticks-cap: ~200M ticks.
+(deftest ^{:seon.test/estimate {:ticks 200000000}} a-change-re-folds-only-what-reaches-it
   ;; task seon.program/reach-index-reads-each-attribute-once: the proof's digest does not reach reach-update (named by a quoted symbol)
   (cost/proof
     {:of 'seon.program/reach-update :input 'seon.program-cost-test/changed-top
@@ -358,7 +369,8 @@
   [n]
   (let [[g db] (indexed-top n)] [(program/reach-update g db) {:env "e" :tree "t" :config {}}]))
 
-(deftest an-update-holding-an-index-costs-what-moved
+;; Estimate: sizes 10+30+100 = 140 forms: branch-of 14M + reach-graph 41k a form = 6M + 17 tests' account-tx 2M + reach-indexed 1M + 3 updates ~0.4M each: ~30M ticks.
+(deftest ^{:seon.test/estimate {:ticks 30000000}} an-update-holding-an-index-costs-what-moved
   ;; task seon.agent/an-agents-reach-index-is-incremental: a graph holding its index drops the answers a change can move
   ;; (its test, here) in the update itself: the scans are the update's, the invalidation is the change's
   (cost/proof
@@ -373,7 +385,8 @@
      :fixed {:ticks 350000 :bytes 2000000 :calls 55}
      :sizes [10 30 100]}))
 
-(deftest an-index-is-recomputed-for-what-moved-only
+;; Estimate: sizes 30+100+300 = 430 forms: branch-of 43M + reach-graph 41k a form = 18M + 46 tests' account-tx 5M + 3 updates ~0.5M each + 3 re-indexes ~3k: ~70M ticks.
+(deftest ^{:seon.test/estimate {:ticks 70000000}} an-index-is-recomputed-for-what-moved-only
   (cost/proof
     {:of 'seon.program/reach-indexed :input 'seon.program-cost-test/moved-top
      :n "forms the graph holds (and a test for every tenth)"
@@ -410,7 +423,8 @@
   (let [nsx (app-acct)]
     [(binding [*ns* nsx] (jolt.analyzer/analyze (jolt.host/ctx-for-ns "app.acct") (calls-form n)))]))
 
-(deftest a-scalar-constant-costs-no-walk
+;; Estimate: 11,400 steps: analysis ~1.5k ticks a step (~8 IR nodes) = 17M + unit-account 750 a step = 9M: ~30M ticks.
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-scalar-constant-costs-no-walk
   ;; task seon.program/an-import-reads-each-form-once
   (cost/proof
     {:of 'seon.program/unit-account :input 'seon.program-cost-test/calls-node-of
@@ -445,7 +459,8 @@
   (let [nsx (app-acct)]
     [(binding [*ns* nsx] (jolt.analyzer/analyze (jolt.host/ctx-for-ns "app.acct") (keyword-form n)))]))
 
-(deftest a-keyword-a-form-names-costs-one-conj
+;; Estimate: 11,400 steps: analysis ~1.5k a step = 17M + unit-account 760 a step = 9M: ~30M ticks.
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-keyword-a-form-names-costs-one-conj
   ;; root's gate (approved), :form/keywords: the analyzer records each qualified keyword its
   ;; constants name with one set conj, no walk; the rest of the step as a-scalar-constant-costs-no-walk
   (cost/proof
@@ -471,7 +486,8 @@
         src (str "(defn g [m]" (apply str (for [s (drop 3 form)] (str "\n  ;; a step\n  " (pr-str s)))) ")")]
     [{:units [(program/unit-account node)] :src src :form form :ns 'app.acct :ns-after 'app.acct :order 0 :k 0}]))
 
-(deftest an-account-reads-its-form-once
+;; Estimate: 11,400 steps: analysis 1.5k = 17M, unit-account 750 = 9M, the text printed (pr-str) ~1k a step = 11M, account 1.4k a step = 16M, 4 sizes x 125k fixed: ~50M ticks.
+(deftest ^{:seon.test/estimate {:ticks 50000000}} an-account-reads-its-form-once
   ;; task seon.program/an-import-reads-each-form-once
   (cost/proof
     {:of 'seon.program/account :input 'seon.program-cost-test/account-of
@@ -494,7 +510,8 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :any]]}
   [n] [(list 'defn 'literals-probe '[x] (vec (for [i (range n)] (list 'fn '[y] (list '+ 'x 'y i)))))])
 
-(deftest a-defn-compiles-within-its-estimate
+;; Estimate: 10+30+100 = 140 literals x 55k ticks (analysis, lambda and Chez compile): ~8M ticks.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-defn-compiles-within-its-estimate
   ;; task jolt.backend/image-registration-is-opt-in: Seon writes no state image, so its compiles
   ;; register no fn literal's source for one (bin/env's JOLT_COMPILER_OPTIONS {:image-fn-forms
   ;; false}); registering rendered each literal's source, read it back, and wrapped it in a maker
@@ -524,7 +541,8 @@
 
 ;; docs/sharing.md#where-a-fact-lives: a merge reads the schema once. It read (d/schema src) per carried datom, which rebuilds the whole schema map:
 ;; 418 M ticks a real merge of about 60 keys, 24 M since
-(deftest a-merge-costs-what-it-carries
+;; Estimate: sizes 3+10+30 = 43 forms: each its own ns+defn tx ~300k setup = 13M; delta-three-way ~0.2M a form = 9M; 3 merge-tx calls, the schema read once each ~2M: ~30M ticks.
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-merge-costs-what-it-carries
   (cost/proof
     {:of 'seon.merge/merge-tx :input 'seon.program-cost-test/carried-of
      :n "forms the branch added"
@@ -540,7 +558,8 @@
   {:malli/schema [:=> [:cat pos-int?] [:tuple :seon.host/db]]}
   [n] [(first (branch-of n))])
 
-(deftest the-program-digest-is-one-read-of-the-program
+;; Estimate: sizes 100+300+1000 = 1,400 forms x 100k setup = 140M (rounds to 1e8, the cap; 3 digests are ~0.3M): ~100M ticks.
+(deftest ^{:seon.test/estimate {:ticks 100000000}} the-program-digest-is-one-read-of-the-program
   (cost/proof
     {:of 'seon.program/program-digest :input 'seon.program-cost-test/digested-of
      :n "forms the db holds"
@@ -560,7 +579,8 @@
             db (d/db-with db0 (vec (for [i (range n)] {:var/name (symbol "app" (str "f" i)) :var/doc (str "Doc " i ".")})))]
         [db (vec (for [i (range n)] {:var/name (symbol "app" (str "f" i)) :var/doc (str "Doc " i ", changed.")}))]))
 
-(deftest meaning-changes-cost-what-the-eval-wrote
+;; Estimate: sizes 10+100+300 = 410 vars: a 2-datom db-with ~30k each = 12M; meaning-changes one entity read + one seek ~20k each = 8M: ~20M ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} meaning-changes-cost-what-the-eval-wrote
   (cost/proof {:of 'seon.program/meaning-changes :input 'seon.program-cost-test/meaning-input
                :n "vars the eval redefined, each with a changed docstring"
                :work "the tx-data walked once, then per var one entity read and one index seek of its citations"
@@ -582,7 +602,8 @@
     (runner/reach-graph-of db nil dir)
     [(d/db-with db (program/record-tx db (acct (dec n) "(dec x)"))) nil dir]))
 
-(deftest a-plan-reads-the-stored-reach-and-pays-for-what-moved
+;; Estimate: sizes 10+30+100 = 140 forms: branch-of 14M + reach-graph-of built and stored once 41k a form = 6M; 3 plans (0.58M fixed + 1.9k a form) = 2M: ~20M ticks.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-plan-reads-the-stored-reach-and-pays-for-what-moved
   (cost/proof
     {:of 'test-runner/reach-graph-of :input 'seon.program-cost-test/stored-of
      :n "forms the stored graph holds (one redefined since)"
@@ -621,7 +642,8 @@
   (seon.doc/carry-index! (:db @seon.agent/state) db (map (juxt :e :a) (get-in @seon.agent/state [:tx :tx-data])))
   nil)
 
-(deftest a-definition-costs-the-form-never-the-program
+;; Estimate: sizes 30+100+300 = 430 forms: branch-of 43M + the text index read ~20k a form = 9M; 3 definitions at ~0.34M each, a few samples: ~60M ticks.
+(deftest ^{:seon.test/estimate {:ticks 60000000}} a-definition-costs-the-form-never-the-program
   ;; docs/vector.md#search: a definition is one form's facts and one row of the search's index. Replacing every
   ;; form's row at each definition cost 1.5 s on Seon's own program, nearly all of it inside SQLite, where no tick or byte
   ;; is counted: the reading and binding of each text are what a proof can count of it

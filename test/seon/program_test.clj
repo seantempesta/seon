@@ -49,7 +49,8 @@
 
 (defn- var-row [db sym] (d/pull db '[:var/meta :var/contract :var/doc {:var/form [:form/src :form/order]}] [:var/name sym]))
 
-(deftest a-new-namespace-is-program-with-its-ns-form-as-written
+;; Estimate: 5 records (ns, defn, contracted defn, defn, defn) x 0.3M = 1.5M + 4 queries 0.3M + 2 eval-accounts. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-new-namespace-is-program-with-its-ns-form-as-written
   (let [src "(ns app.pt-new\n  (:require [clojure.string :as s :refer [join]]))"
         db (record (empty-db) 'user src)]
     (is (= src (d/q '[:find ?s . :where [?n :ns/name app.pt-new] [?n :ns/form ?f] [?f :form/src ?s]] db)) "the ns form, byte for byte")
@@ -80,7 +81,8 @@
     (testing "in-ns alone is no program: nothing was defined"
       (is (nil? (eval-account 'user "(in-ns 'app.pt-other)"))))))
 
-(deftest user-and-scratch-namespaces-stay-scratch
+;; Estimate: 4 eval-accounts of one-line defs x 0.1M (no record is made for them). Estimated 400,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 400000}} user-and-scratch-namespaces-stay-scratch
   (is (nil? (eval-account 'user "(def scratch-x 1)")))
   (is (nil? (eval-account 'user "(ns ^:scratch app.pt-scratch)")))
   (alter-meta! (the-ns 'app.pt-scratch) assoc :scratch true)
@@ -89,7 +91,8 @@
     (alter-meta! own assoc :scratch true)
     (is (nil? (eval-account 'agent.pt-a1 "(def y 2)")) "the agent's own namespace")))
 
-(deftest a-form-records-exactly-what-the-compiler-defined
+;; Estimate: 13 evals of small forms x 0.15M each = 2M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-form-records-exactly-what-the-compiler-defined
   (let [a (fn [src] (eval-account 'app.pt-kinds src))
         defs (fn [acct] (into {} (map (juxt :var :meta)) (:defs acct)))]
     (is (= '{app.pt-kinds/a #{} app.pt-kinds/g #{:arglists}} (defs (a "(do (def a 1) (defn g [] a))"))) "do-nested defs")
@@ -108,13 +111,15 @@
     (is (nil? (a "(+ 1 2)")) "an expression is no program")
     (is (:env? (program/unit-account (jolt.analyzer/analyze (jolt.host/ctx-for-ns "app.pt-kinds") '(require '[clojure.set :as set])))))))
 
-(deftest banned-calls-and-inline-definitions-are-recorded
+;; Estimate: 3 eval-accounts of one-line defns x 0.2M. Estimated 600,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 600000}} banned-calls-and-inline-definitions-are-recorded
   (let [acct (eval-account 'app.pt-ban "(defn sneaky [] (alter-var-root #'clojure.core/*print-length* (constantly 3)) (def inner 1))")]
     (is (= '#{clojure.core/alter-var-root} (:banned acct)) "a reference to alter-var-root, by resolved var")
     (is (= '#{app.pt-ban/inner} (:inline-defs acct)) "a def inside a function body"))
   (is (empty? (:banned (eval-account 'app.pt-ban "(defn fine [m] (assoc m :intern 1))"))) "a keyword named like it is nothing"))
 
-(deftest the-keywords-a-form-names-are-recorded
+;; Estimate: 6 eval-accounts x 0.25M = 1.5M + 2 records 0.6M + callers 0.2M + schema-dependents 0.3M + 2 queries 0.2M. Estimated 3,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} the-keywords-a-form-names-are-recorded
   ;; root's gate (approved): :form/keywords, the data a function operates on, recorded by the
   ;; analyzer from the read it already does: its code's qualified keywords and its contract's
   (let [src "(defn kw-user {:malli/schema [:=> [:cat [:map [:app.kw/thing :int]]] :app.kw/count]} [m] (assoc m :app.kw/count (:app.kw/thing m) :plain 1 :listed '[:app.kw/listed]))"
@@ -136,7 +141,8 @@
     (is (= [src] (mapv :src (program/schema-dependents db #{:app.kw/count}))) "the form that re-arms when a key it names changes")
     (is (empty? (:keywords (eval-account 'app.pt-kw "(defn plain [m] (:x m))"))) "no qualified keyword, nothing recorded")))
 
-(deftest a-branch-cut-before-form-keywords-gains-them-on-resume
+;; Estimate: a memory store made + schema transact 0.3M; 2 small txs 0.2M; 2 install-missing! (schema compare, one attribute tx) 1.5M; 3 gained-tx and 3 schema-dependents scans 0.6M. Estimated 3,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-branch-cut-before-form-keywords-gains-them-on-resume
   ;; root, 2026-10-25 (ctx-atom's finding): a branch cut before :form/keywords killed its agent at
   ;; resume, schema-dependents reading an attribute its schema lacks (now it reads none of its
   ;; datoms, docs/forks.md). A branch keeps the schema it
@@ -162,7 +168,8 @@
       (is (= #{} (pdb/install-missing! conn)) "a second resume installs nothing")
       (is (= [] (program/gained-tx @conn)) "and derives nothing: a form holds keywords now"))))
 
-(deftest a-base-cut-before-an-attribute-has-a-reach-graph
+;; Estimate: a memory store made + schema transact 0.3M; 2 txs 0.1M; 1 graph 0.1M; 1 db-with + reach-update 0.15M. Estimated 700,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 700000}} a-base-cut-before-an-attribute-has-a-reach-graph
   ;; test-audit, 2026-10-27, on a store kept from before 7177cc5899: a resumed agent's base (its
   ;; merge base with main) was cut before :form/ops, and its :context died reading the base's reach
   ;; graph (Bad entity attribute :form/ops, not defined in current schema). A db that does not
@@ -181,7 +188,8 @@
                                                                        :form/order 1 :form/defines #{"v"}} {:db/id "v" :var/name 'app.old/g :var/form "f" :var/meta #{:arglists}}]))))))
         "and a form added on it is read too, entity by entity")))
 
-(deftest catches-and-clocks-are-recorded
+;; Estimate: 1 eval-account of a 4-line defn with a try 0.25M + a read of the catches. Estimated 300,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 300000}} catches-and-clocks-are-recorded
   ;; for the guard detectors (session PATTERNS): a hiding guard is a catch answering a constant;
   ;; a sleep is a reference like any other
   (let [a (eval-account 'app.pt-guard (str "(defn guarded [f p] (Thread/sleep 1) (deref p 10 :late)"
@@ -190,7 +198,8 @@
            (set (map read-string (:catches a)))) "each clause: its class, and what its handler answers")
     (is (contains? (:refs a) 'Thread/sleep) "a host static is a reference")))
 
-(deftest a-redefinition-supersedes-the-form-it-replaces
+;; Estimate: 5 records 1.5M + 3 in-ns-forms (live-forms of ~35 forms 0.3M) 0.9M + 2 var-row pulls. Estimated 3,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-redefinition-supersedes-the-form-it-replaces
   (let [db (record (empty-db) 'app.pt-re "(defn f [x] x)" 'app.pt-re "(defn g [x] (f x))")
         order-f (get-in (var-row db 'app.pt-re/f) [:var/form :form/order])
         db2 (record db 'app.pt-re "(defn f [x] (inc x))")]
@@ -203,12 +212,14 @@
         (is (= ["(do (def a 1) (def b 2))" "(def a 3)"] (map :src (program/load-order (in-ns-forms db 'app.pt-re2)))))))))
 
 ;; docs/source.md#tests-run-by-reach: a config entry is what a run reads, so a branch's edit of one is a new run, never answered from the one before
-(deftest a-config-entry-moves-the-program-digest
+;; Estimate: the world (cached) + 2 db-withs 0.1M + 2 program-digests of ~35 forms 0.2M. Estimated 300,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-config-entry-moves-the-program-digest
   (let [db (my.test/world)
         with (fn [form] (d/db-with db [{:config/key :seon.config.agent/test-ticks :config/form form :config/file "resources/seon/config/default.edn"}]))]
     (is (not= (program/program-digest (with "1")) (program/program-digest (with "2"))))))
 
-(deftest the-program-digest-moves-with-the-program-and-not-with-data
+;; Estimate: 3 records 0.9M; 6 program-digests of ~35 forms x 30k = 0.2M; 3 db-withs 0.3M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} the-program-digest-moves-with-the-program-and-not-with-data
   (let [db (record (empty-db) 'app.pt-pd "(defn f [x] x)")
         dg (program/program-digest db)]
     (is (= dg (program/program-digest (d/db-with db [{:seon.message/id "m1" :seon.message/from {:seon.system/id :root} :seon.message/body "hello"}])))
@@ -218,7 +229,8 @@
     (is (not= dg (program/program-digest (d/db-with db [{:schema/key :app.pt-pd/s :schema/form ":int"}]))) "a schema entry moves it")
     (is (not= dg (program/program-digest (d/db-with db [{:ns/name 'app.pt-pd :ns/tail "(def tail 1)"}]))) "a namespace's tail moves it")))
 
-(deftest a-runs-digest-moves-with-a-tasks-proofs
+;; Estimate: 2 records (one a two-form file) 0.6M; 5 run-digests ~0.2M; 4 db-withs 0.2M. Estimated 1,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-runs-digest-moves-with-a-tasks-proofs
   ;; bench-scope-5: a design registered three proofs and its prove answered the run from before
   ;; them, "green: ran 0"; a run selects the task's proofs, so its key moves with them
   (let [db (d/db-with (record (empty-db) 'app.pt-rd "(defn f [x] x)\n(defn g [x] x)") [{:seon.task/id "app.pt-rd/t"}])
@@ -231,7 +243,8 @@
       (is (not= (program/run-digest proved) (program/run-digest (d/db-with proved [{:seon.task/id "app.pt-rd/t" :seon.task/proofs ['app.pt-rd/g]}])))
           "and another"))))
 
-(deftest load-order-follows-the-real-references
+;; Estimate: 7 records 2.1M + 2 in-ns-forms (live-forms 0.3M) 0.6M + 2 load-orders small. Estimated 3,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} load-order-follows-the-real-references
   (testing "a helper defined after its caller loads first (T5b's sibling: g replaced the stub in place, h3 came after)"
     (let [db (record (empty-db) 'app.pt-s "(defn g [x] 0)" 'app.pt-s "(defn other [x] x)"
                      'app.pt-s "(defn h3 [x] (* 3 x))" 'app.pt-s "(defn g [x] (h3 x))")]
@@ -244,7 +257,8 @@
 ;; 2026-10-25): a quoted name is data, recorded by name, never a reference: whether its namespace
 ;; existed depended on what the process had analyzed, so a refresh (only the changed files) dropped
 ;; what a whole import kept (240 against 250 tests left out on one tree)
-(deftest a-quoted-name-is-data-whatever-the-process-analyzed
+;; Estimate: whole import of 2 tiny files 1M + the one-file import 0.5M + 2 db-withs + 4 refs lookups 0.2M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-quoted-name-is-data-whatever-the-process-analyzed
   (let [srcs {"src/app/pt_qa.clj" "(ns app.pt-qa)\n(defn f [] (list 'app.pt-qb/g 1))\n(defmacro m [x] `(app.pt-qb/g ~x))\n"
               "src/app/pt_qb.clj" "(ns app.pt-qb)\n(defn g [x] x)\n"}
         refs (fn [db v] (set (:form/refs (:var/form (d/entity db [:var/name v])))))
@@ -274,7 +288,8 @@
   [here]
   (runner/reach-graph-of (runner/program) (data-refs here) (ts/kept-program-store)))
 
-(deftest a-name-a-test-hands-over-quoted-is-what-it-reaches
+;; Estimate: 3 tiny-file imports 3M + 3 graphs 0.6M + 2 updates + 2 reach-digests 0.8M + 1 record 0.3M; kept-graph 10M + a reverse walk over it 4M. Estimated 20,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-name-a-test-hands-over-quoted-is-what-it-reaches
   ;; root, 2026-10-27: (cost/proof {:of 'seon.program/reach-update ...}) did not reach reach-update,
   ;; so its digest stayed when reach-update changed and a stored green hid a red (17 calls against
   ;; 16). A name quoted in a test's namespace is one the test hands to what runs it by name: a reach
@@ -297,7 +312,8 @@
               (program/tests-reaching (kept-graph (seon.config/checkout)) 'seon.program/reach-update))
         "Seon's own cost proof reaches the function it names")))
 
-(deftest a-namespace-gaining-its-first-test-is-updated-not-rebuilt
+;; Estimate: 1 import 1M; 2 records 0.6M; 3 graphs 0.6M; 7 updates x 0.1M = 0.7M; 4 comparisons of 2 graph-indexes + 15 keys 0.6M. Estimated 4,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-namespace-gaining-its-first-test-is-updated-not-rebuilt
   ;; docs/source.md#tests-run-by-reach: an agent that adds a deftest to a namespace src already holds (or writes
   ;; a new test namespace) used to have its graph built from nothing (720 MB, 0.6 s on Seon's program, 114 MB of
   ;; footprint); the forms the namespace already held are now re-edged as added. The rows the update leaves equal a rebuild's.
@@ -317,7 +333,8 @@
     (is (= [] (same? (program/reach-graph t3 nil) (program/reach-update (program/reach-update g0 t2) t3))) "and a later edit")
     (is (= [] (same? g0 (program/reach-update (program/reach-update g0 t2) db))) "losing its last test: rebuilt, so the same")))
 
-(deftest load-order-reads-no-quoted-name
+;; Estimate: 2 records 0.6M + 1 in-ns-forms (live-forms 0.3M). Estimated 1,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} load-order-reads-no-quoted-name
   ;; task seon.program/load-dependencies-leave-quoted-names-out: a form recorded at a REPL that
   ;; quotes a later var (an error's data naming it) is not ordered after it
   (let [db (record (empty-db) 'app.pt-lq "(defn a [] (ex-info \"no\" {:see 'app.pt-lq/b}))" 'app.pt-lq "(defn b [] (a))")]
@@ -333,7 +350,8 @@
    'app.pt-calc-test "(deftest add-test (is (= 3 (add 1 2))))"
    'app.pt-calc-test "(deftest sum3-test (is (= 6 (app.pt-calc/sum3 1 2 3))))"])
 
-(deftest main-loads-the-live-forms-in-dependency-order
+;; Estimate: 7 records 2.1M; live-forms + load-order 0.5M; load-all! of ~35 live forms x 0.1M (re-eval) 3.5M less shared; test-ns of 2 tests 0.5M. Estimated 5,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} main-loads-the-live-forms-in-dependency-order
   (let [db (apply record (empty-db) calc-srcs)
         srcs (map :src (program/load-order (program/live-forms db)))]
     (is (< (.indexOf srcs "(ns app.pt-calc)") (.indexOf srcs "(defn add [a b] (+ a b))")))
@@ -351,7 +369,8 @@
   (let [in {:env "e" :tree "t" :config {}}]
     (set (:selected (proofs/plan (ts/reach-digests db in) (ts/reach-digests db' in) {} #{})))))
 
-(deftest a-test-reaches-what-it-calls
+;; Estimate: calc-db 2.4M; 2 selected x (record 0.3M + 2 reach-digests 0.6M + plan 0.3M) = 2.4M; 1 graph 0.2M. Estimated 5,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-test-reaches-what-it-calls
   (let [db (apply record (empty-db) calc-srcs)]
     (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/sum3-test} (selected db (record db 'app.pt-calc "(defn add [a b] (+ b a))")))
         "add-test calls add through its :refer; sum3-test reaches add through sum3")
@@ -359,7 +378,8 @@
     (is (= [] (program/tests-reaching (program/reach-graph db nil) 'app.pt-calc/no-such)) "a var the graph holds no form of reaches none")))
 
 ;; jolt.analyzer/a-missing-var-through-an-alias-says-no-such-var-in-any-namespace
-(deftest a-test-recorded-before-what-it-calls-moves-when-that-is-defined
+;; Estimate: 4 records 1.2M; 1 graph 0.2M; 2 updates 0.2M + 2 indexes 0.1M; 1 query 0.1M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-test-recorded-before-what-it-calls-moves-when-that-is-defined
   (let [in {:env "e" :tree "t" :config {}}
         base (record (empty-db) 'app.pt-late "(ns app.pt-late)"
                      'app.pt-late-test "(ns app.pt-late-test (:require [clojure.test :refer [deftest is]] [app.pt-late :as late]))")
@@ -373,7 +393,8 @@
     (is (not= (digest before) (digest after)) "defining what it calls moves its digest, with no second record of the test")
     (is (= '[app.pt-late-test/t] (program/tests-reaching (program/reach-update g after) 'app.pt-late/h)))))
 
-(deftest a-file-analyzed-gives-the-repl-facts
+;; Estimate: read-forms 0.1M; accounts of 5 forms (analysis, no eval) x 0.15M = 0.75M; 1 eval-account 0.15M (about 1M). Estimated 900,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 900000}} a-file-analyzed-gives-the-repl-facts
   (let [text "(ns app.pt-file\n  (:require [clojure.string :as s]))\n\n;; doubles\n(defn twice [x] (* 2 x))\n\n(comment (twice 2))\n(defmulti m :k)\n(defmethod m :a [_] (s/join [\"a\"]))\n"
         {:keys [forms tail]} (source/read-forms 'user text)]
     (is (= text (str (apply str (mapcat (juxt :lead :src) forms)) tail)) "lead + text of every form + tail is the file, byte for byte")
@@ -388,7 +409,8 @@
              (select-keys (by-src "(defn twice [x] (* 2 x))") [:id :defs :refs]))
           "the REPL's facts for the same text"))))
 
-(deftest a-file-analyzed-keeps-its-own-docstring
+;; Estimate: 1 eval-account 0.15M + 1 source/accounts 0.15M. Estimated 300,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-file-analyzed-keeps-its-own-docstring
   ;; docs/source.md#another-trees-program-analyzed-beside-this-image: a file read without running (another
   ;; tree's, an old commit's) records the docstring its text holds, not the one the running image's var has
   (eval-account 'app.pt-doc "(defn told \"the image's doc, written later\" [x] x)")
@@ -397,7 +419,8 @@
     (is (= [{:var 'app.pt-doc/told :meta #{:arglists} :doc "the file's own doc"}] (:defs (first accounts)))
         "the account of the file's form holds the file's docstring")))
 
-(deftest a-namespace-holds-its-docstring
+;; Estimate: 4 records 1.2M; text-tx 0.4M, accounts 0.4M, account-diff-tx 0.2M; 3 pm/program reads 0.9M; merge-tx 0.5M; 6 lookups small. Estimated 4,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-namespace-holds-its-docstring
   ;; a namespace's docstring was never written: readers (seon.ref's help, seon.render.ui/cite-model) answered nil. It is
   ;; written where a var's is, from the ns form as it reads: an agent's eval and an import, and it moves with the form
   (let [doc (fn [db n] (some->> (seon.db/eid db :ns/name n) (d/entity db) :ns/doc))
@@ -421,7 +444,8 @@
           main (d/db-with base (pm/merge-tx base base db1 (keys (:ours r)) #{}))]
       (is (= "First words." (doc main 'app.pt-nd)) "merged, with its form"))))
 
-(deftest defmethod-extend-and-defrecord-merge-and-load-on-main
+;; Estimate: 7 records x 0.4M = 2.8M; 5 program reads x 0.3M = 1.5M; merge-tx 0.5M; load-all! of ~35 live forms x 0.2M = 7M. Estimated 10,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} defmethod-extend-and-defrecord-merge-and-load-on-main
   (let [base (empty-db)
         branch (record base
                        'user "(ns app.pt-mm)"
@@ -444,7 +468,8 @@
     (is (= [16 27] [((resolve 'app.pt-mm/area) {:shape :square :s 4}) ((resolve 'app.pt-mm/area) {:shape :circle :r 3})]))
     (is (= ["s:x" "circle 2"] [((resolve 'app.pt-mm/label) "x") ((resolve 'app.pt-mm/label) ((resolve 'app.pt-mm/->Circle) 2))]))))
 
-(deftest a-program-calling-alter-var-root-is-refused-naming-it
+;; Estimate: 2 records 0.6M; 3 pm/program reads 0.9M; 1 three-way 0.2M; 2 pm/mutations 0.3M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-program-calling-alter-var-root-is-refused-naming-it
   (let [base (empty-db)
         branch (record base 'app.pt-mut "(defn fine [m] (assoc m :intern 1))"
                        'app.pt-mut "(defn sneaky [] (alter-var-root #'app.pt-mut/fine (constantly 3)))")
@@ -456,7 +481,8 @@
       (let [main (d/db-with base [{:ns/name 'app.pt-mut :ns/file "src/app/pt_mut.clj"}])]
         (is (= [] (pm/mutations main (:ours r))))))))
 
-(deftest a-def-inside-a-fn-body-is-refused
+;; Estimate: 2 records 0.6M; 6 pm/program reads of the small program x 0.3M = 1.8M; 2 three-ways 0.4M; 2 pm/mutations 0.2M. Estimated 3,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-def-inside-a-fn-body-is-refused
   (let [base (empty-db)
         branch (record base 'app.pt-inl "(defn setup! [] (def config {:a 1}))")
         r (pm/three-way (pm/program base #{}) (pm/program branch #{}) (pm/program base #{}))]
@@ -497,7 +523,8 @@
     (sh/sh "zsh" "-c" (str "tar -c -C '" here "' -T '" listing "' -f - | tar -x -C '" d "' && git -C '" d "' init -q"))
     d))
 
-(deftest a-changed-function-changes-the-digests-of-exactly-the-tests-reaching-it
+;; Estimate: calc-db 2.4M + 1 record 0.3M + 3 reach-digests x 0.3M = 0.9M. Estimated 4,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-changed-function-changes-the-digests-of-exactly-the-tests-reaching-it
   (let [db (calc-db)
         before (select-keys (ts/reach-digests db {:env "e" :tree "t" :config {}}) calc-tests)
         db' (record db 'app.pt-calc "(defn add [a b] (+ b a))")
@@ -510,7 +537,8 @@
     (is (not= before (select-keys (ts/reach-digests db {:env "e2" :tree "t" :config {}}) calc-tests))
         "the inputs without program facts are in every digest")))
 
-(deftest a-digest-is-the-content-reached-whatever-recorded-it
+;; Estimate: 2 calc-dbs 4.8M + 3 records 0.9M + 4 reach-digests 1.2M + the walk's rows (~40 forms x 10k x 2 + form-row of each + form-ids) 1M. Estimated 8,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 8000000}} a-digest-is-the-content-reached-whatever-recorded-it
   ;; task seon.program/reach-index-reads-each-attribute-once: a form's own digest is its :form/id
   ;; (its content's hash), no longer a hash of the text read back
   (let [in {:env "e" :tree "t" :config {}}
@@ -534,7 +562,8 @@
                   (vals (rows true)))
           "a form's own digest is its namespace's and its code text's, or its id when it was stored without (seeded)"))))
 
-(deftest a-stored-reach-gives-the-digests-a-rebuild-gives
+;; Estimate: calc-db 2.4M + 1 record 0.3M; 1 build + jfasl write of ~40 forms 0.75M; 3 reads+updates x 0.6M = 1.8M; 4 rebuilds 0.8M; 7 graph-indexes 0.35M. Estimated 6,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-stored-reach-gives-the-digests-a-rebuild-gives
   ;; task seon.program/reach-graph-is-stored: a plan reads the graph the last one stored (jfasl in the
   ;; program store) and folds what moved (reach-update); its digests are a rebuild's, and a store
   ;; written under other code or other data-refs is built over
@@ -559,7 +588,8 @@
       (let [refs {'seon.graph/read-decl #{'app.pt-calc/add}}]
         (is (= (digests (program/reach-graph db' refs)) (digests (runner/reach-graph-of db' refs dir))))))))
 
-(deftest a-types-method-is-in-the-reach-of-what-constructs-it
+;; Estimate: 7 cases x (4 records of types ~0.4M = 1.6M + 3 reach-digests x 0.25M = 0.75M) = 17M. Estimated 20,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-types-method-is-in-the-reach-of-what-constructs-it
   ;; task seon.proofs/a-types-method-moves-the-reach-of-what-uses-it: a change inside a type's method (a method of
   ;; the type's own protocol, of a host interface, of a record, of a protocol extended to a type) moves the digest of a
   ;; test that reaches the function using the type: 2026-11-03, seon.ratom's Reaction changed and a stale green was reused
@@ -581,7 +611,8 @@
         (is (some? (digest db t)) (str label ": the test has a digest"))
         (is (not= (digest db t) (digest db' t)) (str label ": the method's change moves the test's digest"))))))
 
-(deftest a-types-method-moves-the-digest-on-an-import
+;; Estimate: 3 cases x (2 tiny-file imports 1M + refresh 0.5M + whole import 1M + 3 reach-graphs/indexes 0.75M) = 10M; the other-namespace case 3 files 1.5M + refresh + 2 digests ~2.5M (about 12M, rounded). Estimated 10,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-types-method-moves-the-digest-on-an-import
   ;; the same, on the path bin/test and root read a program by: analyzed, never run, so the type is in no image and
   ;; its ctor's class is the bare name as written. The answer does not depend on what the process has loaded
   (let [in {:env "e" :tree "t" :config {}}
@@ -610,7 +641,8 @@
             db' (d/db-with db (source/refresh-tx db {path (text 2)}))]
         (is (not= (digest db t) (digest db' t)))))))
 
-(deftest an-update-gives-the-digests-a-rebuild-gives
+;; Estimate: calc-db 2.4M; 1 graph 0.2M; 2 records 0.6M; 4 reach-index rebuilds 1M; 4 updates 0.4M; 8 graph-indexes 0.4M. Estimated 5,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} an-update-gives-the-digests-a-rebuild-gives
   (let [db (calc-db)
         in {:env "e" :tree "t" :config {}}
         g (program/reach-graph db nil)
@@ -626,7 +658,8 @@
     (is (= (ts/reach-index db in) (program/graph-index (program/reach-update (program/reach-update g db'') db) in nil))
         "and back: a later value's graph updated to an older one (a resumed branch's base) is the older one's")))
 
-(deftest an-index-held-by-the-graph-moves-with-it
+;; Estimate: calc-db 2.4M + 4 records 1.2M; 7 rebuilds x 0.25M = 1.75M; 5 reach-update steps x 0.1M + indexing 5 x 0.05M = 0.75M; g0 0.25M. Estimated 6,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} an-index-held-by-the-graph-moves-with-it
   ;; task seon.agent/an-agents-reach-index-is-incremental: the index a graph holds (reach-indexed) after reach-update
   ;; steps is a rebuild's at every step (a redefinition, a test added, a namespace's plain form changed, a
   ;; test removed, back to the first program), and only the tests a step can move are :stale
@@ -674,7 +707,8 @@
   "Cache ran ({test result}) at dir as bin/test does."
   [dir ran] (seon.fx/write-verdicts! dir {:id "program-test"} ran {}))
 
-(deftest a-second-run-with-nothing-changed-runs-nothing
+;; Estimate: calc-db 2.4M + 1 reach-digests 0.3M + 2 plans 0.6M + running 3 tests 1.5M + 1 verdict write 0.3M. Estimated 5,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-second-run-with-nothing-changed-runs-nothing
   (with-dir
    (fn [conn]
   (let [db (calc-db)
@@ -698,7 +732,8 @@
     (sh/sh "git" "-C" d "add" ".")
     d))
 
-(deftest a-result-recorded-in-one-checkout-is-reused-in-another
+;; Estimate: 2 checkouts (git) 0.3M; calc-db 2.4M; 8 fx/inputs x 0.1M = 0.8M; 2 reach-digests 0.6M; running 3 tests 1.5M; verdicts and 2 plans 0.6M. Estimated 6,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-result-recorded-in-one-checkout-is-reused-in-another
   (with-dir (fn [conn]
   (let [files {"deps.edn" "{}" "resources/seon/schemas/x.edn" "{:x :int}" "src/app/a.clj" "(ns app.a)" "docs/a.md" "# a"}
         a (checkout! "a" files)
@@ -753,7 +788,8 @@
     (spit (str b "/native/x.c") "int x;")
     (is (not= (:env in-a) (:env (fx/inputs b))) "native/, the pins and the fixtures are every test's")))))
 
-(deftest a-test-takes-only-the-file-classes-its-reach-reads
+;; Estimate: 14 record-tx x 40k = 0.6M (the world is cached); 1 graph 0.2M; 13 graph-indexes x 0.05M = 0.65M; checks small. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-test-takes-only-the-file-classes-its-reach-reads
   ;; root, 2026-10-27: :env moved in 8 of 12 batches, and with it every digest. bin/, web/, system.edn,
   ;; deps.edn and the schema resources are classes (seon.fx/inputs' :seon.env/* entries of
   ;; :config); a test takes a class when its reach reads it (seon.program/env-class-readers), and
@@ -825,7 +861,8 @@
       (is (m reader) (str reader " takes the " c " class"))
       (is (= #{reader 'starts-a-process} m) (str "and only it and the process test take " c ": " (pr-str m))))))
 
-(deftest a-schema-key-a-test-names-is-an-edge-to-its-entry
+;; Estimate: 4 records 1.2M + 6 schema writes 0.6M + 3 reach-digests 0.9M. Estimated 3,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-schema-key-a-test-names-is-an-edge-to-its-entry
   ;; root, 2026-10-27: 896 tests took the schema resources on every schema edit. A schema key a form
   ;; names as a literal keyword (a valid? or a registered error variant) is an edge to that entry:
   ;; an edit moves the tests that reach it, and the tests that name no entry keep their digest
@@ -842,7 +879,8 @@
     (is (= (before 'app.pt-sk-test/other-test) (changed 'app.pt-sk-test/other-test)) "a test naming no entry keeps its digest")
     (is (= (before 'app.pt-sk-test/names-test) (other-entry 'app.pt-sk-test/names-test)) "and an edit to another entry moves neither")))
 
-(deftest a-render-a-schema-entry-declares-is-in-its-tests-reach
+;; Estimate: 5 records 1.5M + 1 schema write 0.1M + 2 reach-digests 0.6M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-render-a-schema-entry-declares-is-in-its-tests-reach
   ;; a schema entry's properties name its renders (:seon.render/hiccup): a test reaching the entry reaches
   ;; them, so a render's body edited moves the test (it kept its digest, and a red recorded while the render
   ;; was unfinished was later marked flaky at the same digest)
@@ -858,7 +896,8 @@
     (is (not= (before 'app.pt-sr-test/names-test) (edited 'app.pt-sr-test/names-test)) "the test reaching the entry moves with its render")
     (is (= (before 'app.pt-sr-test/other-test) (edited 'app.pt-sr-test/other-test)) "a test reaching neither keeps its digest")))
 
-(deftest a-schema-entry-added-changed-or-removed-is-updated-not-rebuilt
+;; Estimate: 6 records 1.8M + 7 schema writes 0.7M; 9 reach-index rebuilds x 0.25M = 2.3M; 4 reach-updates 0.4M; index-of and reach-indexed 0.5M; 1 graph 0.2M. Estimated 6,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-schema-entry-added-changed-or-removed-is-updated-not-rebuilt
   ;; task seon.program/reach-update-takes-schema-entries: a merge that adds a schema entry rebuilt the graph (154M
   ;; ticks, 892 MB on Seon's program, 4,702 forms). The update is a rebuild's at every step: an entry added that a
   ;; contract, another entry and a form's keyword already name (they gain the edge), changed, removed, and back
@@ -901,7 +940,8 @@
           (let [st (for [id fr w (adj id) :when (not (contains? from w))] [w id])]
             (recur (vec (distinct (map first st))) (reduce (fn [m [w id]] (if (contains? m w) m (assoc m w id))) from st))))))))
 
-(deftest a-test-that-starts-a-process-reaches-the-program-it-runs
+;; Estimate: kept-graph 10M + whole-suite graph-index 8M + tests-reaching 4M + 2 driving reverse walks 6M + 61 breadth-first paths x ~200 forms x 6 edges x 150 ticks = 12M. Estimated 40,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-test-that-starts-a-process-reaches-the-program-it-runs
   ;; ctx-atom, 2026-10-27: seon.server-test's in-agent tests kept one reach digest across two fixes to
   ;; code their agent runs (seon.turn/observe, seon.merge/changed-vars), so a stored red and a later
   ;; green shared it and bin/test listed them flaky. The agent's code is reached over a socket and as
@@ -938,7 +978,8 @@
       (is (< 0 (count done) (count process)) (str (count done) " of " (count process) " process tests send :done"))
       (is (evals 'seon.server-test/an-agent-reads-its-task-running) "every in-agent test sends :eval (in-agent does) and reaches its method"))))
 
-(deftest a-var-an-eval-string-names-moves-the-test-that-sends-it
+;; Estimate: db0 4 records 1.2M; db1 and db2 8 records each x 0.3M = 4.8M less the shared; 1 graph + 2 updates 0.4M; 3 rebuilds 0.75M; ~13 graph-indexes 0.7M (about 7M, rounded down). Estimated 6,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-var-an-eval-string-names-moves-the-test-that-sends-it
   ;; root, 2026-10-27: code a test sends a process as a string (in-agent's evals) is read by the one
   ;; reader at analysis (seon.program/unit-account), its names an edge in a test's namespace as a
   ;; quoted form's are; a string of fragments (str "(f " x ")") reads once its delimiters are
@@ -961,7 +1002,8 @@
     (is (not= ((dg g1) 'app.pt-pe-test/built-test) ((dg g2) 'app.pt-pe-test/built-test)) "and so does one whose string is built from fragments")
     (is (= ((dg g1) 'app.pt-pe-test/pure-test) ((dg g2) 'app.pt-pe-test/pure-test)) "a pure test does not")))
 
-(deftest an-op-answer-redefined-moves-the-tests-that-send-it-by-an-update-too
+;; Estimate: 12 records x 0.3M = 3.6M; 1 graph + 2 updates 0.4M; 3 rebuilds 0.75M; ~10 graph-indexes 0.5M. Estimated 5,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} an-op-answer-redefined-moves-the-tests-that-send-it-by-an-update-too
   ;; a form that starts a process, or sends an op from a test's namespace, has an edge to
   ;; seon.server/op-answer's method of each op it sends (its :form/ops): an update after a method
   ;; is added, redefined or removed agrees with a rebuild, and moves only the tests sending its op
@@ -986,7 +1028,8 @@
       (is (= ((dg g1) 'app.pt-op-test/a-test) ((dg g2) 'app.pt-op-test/a-test)) "the one sending only :pt-a does not")
       (finally (remove-method seon.server/op-answer :pt-a) (remove-method seon.server/op-answer :pt-b)))))
 
-(deftest a-test-takes-the-pins-of-the-libraries-its-reach-runs-on
+;; Estimate: 5 sampled files (first, 4 named) x ~520 lines x 40k ticks a line imported (3.4G over src+test's 86k lines) = 100M; sampled-repo listing of 229 files 1M, fx/inputs 3M, graph 1M, 5 graph-indexes 2.5M. Estimated 100,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 100000000}} a-test-takes-the-pins-of-the-libraries-its-reach-runs-on
   ;; root, 2026-10-27: a pin bump moved every digest in 3 of the last 12 batches (datahike 3, konserve
   ;; 2, jolt 2). A pin named by :seon.config.source/pin-namespaces is a :seon.pin/NAME entry of
   ;; :config, taken by a test whose reach references a namespace its library provides (or runs on),
@@ -1013,7 +1056,8 @@
     (is (< (count (moved :seon.pin/lmdb)) (* 0.5 (count all-tests))) "an lmdb bump moves under half the tests")
     (is (< (count (moved :seon.pin/crypto)) (count (moved :seon.pin/datahike))) "fewer tests run on the crypto library than on datahike")))
 
-(deftest an-uncommitted-edit-in-a-submodule-is-an-input
+;; Estimate: checkout .15M + 3 git shells .15M + 3 fx/inputs (tree-id, one pin) x 0.1M = 0.3M. Estimated 700,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 700000}} an-uncommitted-edit-in-a-submodule-is-an-input
   ;; pure-tests 2026-10-23: tree-id stages a submodule at its HEAD, while bin/build copies and
   ;; the test runtime loads its files as they are: a dependency edit not yet committed left
   ;; every digest as it was, so a green proven on the old files was reused on the new. A submodule
@@ -1034,7 +1078,8 @@
       (spit core "(ns lib.core)")
       (is (= before (lib)) "its files back as committed: the same input as before"))))
 
-(deftest a-runtime-pin-moves-every-digest
+;; Estimate: 3 sampled files (first, reader_test, reader) of ~200 lines each x 40k a line = 25M; 2 checkouts' 4 shells 0.8M; 5 fx/inputs x 0.1M; sampled-repo listing 1M; graph + 6 graph-indexes 1M. Estimated 30,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 30000000}} a-runtime-pin-moves-every-digest
   ;; 2026-10-29: seon.cost-test/the-unit-table-is-current stayed green across a Jolt pin that moved
   ;; its numbers, since the runtime core took no pin (root's ruling D, 2026-10-27). The gitlinks of
   ;; :seon.config.source/runtime-pins (Jolt, Chez) are in every test's and every contract key's :env;
@@ -1089,7 +1134,8 @@
 (defn- refs-of [db sym]
   (set (d/q '[:find [?r ...] :in $ ?s :where [?v :var/name ?s] [?v :var/form ?f] [?f :form/refs ?r]] db sym)))
 
-(deftest a-quoted-name-is-no-reference-but-in-a-macros-template
+;; Estimate: 5 records x 0.3M = 1.5M + 3 refs-of 0.1M + callers 0.2M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-quoted-name-is-no-reference-but-in-a-macros-template
   ;; root's ruling, 2026-10-25: the reach follows calls; a quoted name is data, but what a
   ;; macro's template quotes is its expansion's code
   (let [db (record (empty-db) 'user "(ns app.pt-q)" 'app.pt-q "(defn g [] 1)"
@@ -1101,7 +1147,8 @@
     (is (contains? (refs-of db 'app.pt-q/t) 'app.pt-q/g) "and a name a macro's template quotes, which its expansion calls")
     (is (= '[app.pt-q/c app.pt-q/f app.pt-q/t] (seon.doc/callers db 'app.pt-q/g)) "who calls or names g: f names it as data")))
 
-(deftest a-macro-use-is-a-ref
+;; Estimate: 5 records of macros and an expansion x 0.35M = 1.8M + 3 refs-of queries 0.1M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-macro-use-is-a-ref
   (let [db (record (empty-db) 'user "(ns app.pt-qm)" 'app.pt-qm "(defmacro m [x] x)"
                    'app.pt-qm "(defn u [] (m 1))"
                    'app.pt-qm "(defmacro mdo [] `(do (defn ~'w [] 1) (defn ~'w2 [] 2)))"
@@ -1111,7 +1158,8 @@
     (is (contains? (refs-of db 'app.pt-qm/w) 'app.pt-qm/mdo) "a top-level macro call that expands to a do: each unit's form names it")
     (is (contains? (refs-of db 'app.pt-qm/m2) 'app.pt-qm/m) "a macro whose template names another: the expansion chain is closed")))
 
-(deftest a-changed-macro-moves-the-digest-of-each-test-that-expands-it
+;; Estimate: 6 records 1.8M (macro) + 2 reach-digests 0.6M + 1 selected 1.2M. Estimated 4,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-changed-macro-moves-the-digest-of-each-test-that-expands-it
   (let [db (record (empty-db) 'user "(ns app.pt-mac)" 'app.pt-mac "(defmacro m [x] `(inc ~x))"
                    'user "(ns app.pt-mac-test (:require [clojure.test :refer [deftest is]] [app.pt-mac :as a]))"
                    'app.pt-mac-test "(deftest m-test (is (= 2 (a/m 1))))"
@@ -1124,7 +1172,8 @@
     (is (= (before 'app.pt-mac-test/plain-test) (after 'app.pt-mac-test/plain-test)) "a test not expanding it kept its digest")
     (is (= '#{app.pt-mac-test/m-test} (selected db db')) "and every run's selection finds exactly it")))
 
-(deftest a-var-a-test-resolves-at-run-time-moves-its-digest
+;; Estimate: 8 records 2.4M + 2 records 0.6M + 3 reach-digests x 0.3M = 0.9M. Estimated 4,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-var-a-test-resolves-at-run-time-moves-its-digest
   ;; a constant symbol passed to resolve, ns-resolve or requiring-resolve is a reference (the
   ;; compiler's facts): a green at a digest that left the var out was reused after it changed,
   ;; and a task whose proof resolves a var it defines closed with no turn (app.proofs/gens-test)
@@ -1152,7 +1201,8 @@
     ;; (seon.program-test/a-name-a-test-hands-over-quoted-is-what-it-reaches): a rerun, never a stale green
     (is (not= (before 'app.pt-res-test/data-test) (changed 'app.pt-res-test/data-test)) "a name a test's namespace quotes is what it reaches")))
 
-(deftest a-changed-contract-schema-moves-the-digest-of-tests-reaching-the-contracted-var
+;; Estimate: 5 records 1.5M + 4 schema writes 0.4M + 3 reach-digests 0.9M. Estimated 3,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} a-changed-contract-schema-moves-the-digest-of-tests-reaching-the-contracted-var
   (let [schema (fn [db k form] (d/db-with db [{:schema/key k :schema/form form}]))
         db (-> (record (empty-db) 'user "(ns app.pt-sc)"
                        'app.pt-sc "(defn h {:malli/schema [:=> [:cat :app.pt-sc/n] :app.pt-sc/n]} [x] x)"
@@ -1171,7 +1221,8 @@
     (is (= (before 'app.pt-sc-test/plain-test) (after 'app.pt-sc-test/plain-test) (after-base 'app.pt-sc-test/plain-test))
         "a test not reaching h kept its digest")))
 
-(deftest the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
+;; Estimate: 2 tiny trees (9 files) written and git-added 2M; 4 imports of 8 files x 1M = 32M less the one read from the kept branch (-8M); 2 stores of their own x S 10M = 20M; 4 reach-digests 1.2M; verdict write and plan 1M. Estimated 50,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 50000000}} the-same-tree-gives-the-same-digests-in-any-checkout-and-any-run
   ;; a quoted name counted as a ref only when its var existed yet (then by namespace, now by name: seon.program/quoted-names), so
   ;; the digests followed what the process had analyzed before: 43 of 387 equal on a second
   ;; import of the same tree. The same commit, imported twice and from a copy at another path,
@@ -1218,7 +1269,8 @@
        (record-ran! rconn (into {} (for [[t dg] r :when (a t)] [t {:test t :digest dg :pass 1 :fail 0 :error 0}])))
        (is (= [] (:run (run-plan a rconn))) "with each green root's run stored, bin/test's plan of the tree runs nothing")))))
 
-(deftest a-test-digest-takes-only-the-config-keys-it-reads
+;; Estimate: kept-graph 10M + 3 whole-suite graph-indexes x 8M = 24M + 1 reverse walk 1M + the computed-config-reader checks, small. Estimated 40,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 40000000}} a-test-digest-takes-only-the-config-keys-it-reads
   ;; every digest took the whole config in force (seon.fx/config-input), so a key no test reads
   ;; (an agent's max-running a root was --set with) moved all 917 and none was reused: a test's
   ;; digest takes the values of the keys its reach names (seon.program/config-reads)
@@ -1250,7 +1302,8 @@
     (is (false? (#'program/computed-config-reader? '{:ns seon.config :refs #{seon.config/resolve} :keywords #{}})) "seon.config's own readers name none")
     (is (= [] (remove window readers)) "a key read through a computed keyword moves every test reaching its reader, found by its facts")))
 
-(deftest no-test-takes-the-tree-in-its-digest
+;; Estimate: kept-graph decode of ~4,700 rows x 2k = 10M; 4 whole-suite graph-indexes (~1,900 tests x 4k) x 8M = 32M; 2 step-root indexes 2M; 4 moved sets 2M. Estimated 50,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 50000000}} no-test-takes-the-tree-in-its-digest
   ;; owner, 2026-10-27: "no tests should include all of src". A test that reads files (a test of the
   ;; docs, of the task files) or runs the binary was digested by the whole tree, so any edit reran its
   ;; 286; it is digested by what it reaches, like any other test, and a file or a binary outside its
@@ -1288,7 +1341,8 @@
       (is (not (contains? docs-moved 'seon.task-files-test/no-shipped-task-is-merged-work)) "and a wiki edit does not move it")
       (is (< (* 10 (count docs-moved)) (count a)) (str (count docs-moved) " of " (count a) " tests read the wiki: a few")))))
 
-(deftest a-test-naming-another-test-does-not-reach-it
+;; Estimate: calc-db 2.4M + 3 records 0.9M; 2 reach-digests 0.6M; 1 selected (record + 2 reach-digests + plan) 1.2M. Estimated 5,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-test-naming-another-test-does-not-reach-it
   ;; seon.agent-test's tests quote the proofs they ask for: data, never a call, so a change the
   ;; named test reaches selects it alone (with quoted names by namespace, the naming tests
   ;; selected themselves and booted roots in the agent's test fork)
@@ -1304,7 +1358,8 @@
 
 ;; ---- inputs the reach digest must hold (review 2026-10-22: each let a stale green be reused)
 
-(deftest a-proc-named-only-in-system-edn-is-reached
+;; Estimate: 6 records 1.8M + 1 record 0.3M + 4 reach-digests 1.2M + the system.edn slurp and parse 0.3M. Estimated 4,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-proc-named-only-in-system-edn-is-reached
   ;; root's procs are named in resources/seon/system.edn and resolved by name at boot, so no
   ;; code refers to them: a test booting root reaches them only through the declaration's reader
   (let [db (record (empty-db) 'user "(ns app.pt-sys)" 'app.pt-sys "(defn read-decl [] :decl)" 'app.pt-sys "(defn start [] (read-decl))"
@@ -1318,7 +1373,8 @@
     (is (contains? (get (fx/declared-refs (slurp (str (seon.config/checkout) "/resources/seon/system.edn"))) 'seon.graph/read-decl) 'seon.writer/writer-proc)
         "the shipped declaration's procs are the reader's data refs")))
 
-(deftest the-config-in-force-is-an-input
+;; Estimate: checkout .15M + tree-id .05M + 13 config-input calls x 20k = 0.3M. Estimated 500,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 500000}} the-config-in-force-is-an-input
   ;; config/local.edn is gitignored and #env values are no files: a result proven under one
   ;; checkout's config was reused in another's
   ;; the claims are of the config, never of the files: a checkout of one file, its tree-id once (the checkout's own
@@ -1350,7 +1406,8 @@
     (is (= (:env (inputs cfg here)) (:env (inputs (assoc cfg :seon.config.ai/model "b") here)))
         "any other key is only the input of the tests that read it (a-test-digest-takes-only-the-config-keys-it-reads)")))
 
-(deftest an-eval-that-changes-a-contract-or-docstring-says-so
+;; Estimate: test-db + 2 db-withs 0.2M; doc load-tx of one page 0.3M; 7 meaning-changes (a pull and a query each) x 0.1M = 0.7M. Estimated 1,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} an-eval-that-changes-a-contract-or-docstring-says-so
   ;; owner, 2026-10-25 (DECISIONS: a change to a schema is an explicit fact the eval shows): what an
   ;; eval's definitions change of an existing var's contract or docstring, read from its own tx-data,
   ;; with the wiki sections citing the var and the form that reads each
@@ -1377,7 +1434,8 @@
    :defs [{:var (symbol "app.pc" (str "f" i)) :meta #{:arglists}}] :declares #{} :methods [] :impls []
    :refs (if (pos? i) #{(symbol "app.pc" (str "f" (dec i)))} #{}) :requires #{} :banned #{} :inline-defs #{}})
 
-(deftest the-tests-reaching-a-var-are-what-its-change-selects
+;; Estimate: 13 account-tx x 0.1M (docs/cost.md: 50k per 10 datoms, plus seeks) = 1.3M; 1 graph 0.2M; 3 changes x (record-tx 0.15M + index 0.05M + update 0.1M + index 0.05M) = 1M; 5 reverse walks 0.5M. Estimated 3,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 3000000}} the-tests-reaching-a-var-are-what-its-change-selects
   ;; root's ruling (audit 2, item 2): (my.agent/tests-reaching 'v) answers from the reach graph by
   ;; the one reverse walk a change re-folds by (seon.program/reached-by), so its tests are exactly
   ;; those whose reach digest moves when v changes, the tests prove then runs; nearest first
@@ -1397,7 +1455,8 @@
     (is (= '[app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f5)) "nearest first: tb calls f7, tc f9")
     (is (= '[app.pc-test/ta app.pc-test/tb app.pc-test/tc] (program/tests-reaching g 'app.pc/f0)) "every test reaches f0")))
 
-(deftest a-program-with-no-schema-change-declares-nothing-new
+;; Estimate: schema-declarations compares ~400 registry entries to the db's attributes at ~5k each = 2M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-program-with-no-schema-change-declares-nothing-new
   ;; THE PLAN 0.7's first merge through Seon (2026-10-27): (my.branch/merge-main!) on a branch whose
   ;; merge carried no schema change failed with seon.schema.datahike/declarations invalid-input {}:
   ;; schema-registry answered {} for "nothing changed", and seon.merge handed that to
@@ -1406,7 +1465,8 @@
     (is (= [] (program/schema-declarations db (program/schema-registry {}))) "the built schema, all declared already")
     (is (identical? seon.contract/registry (program/schema-registry {})))))
 
-(deftest a-comment-or-whitespace-edit-moves-no-test
+;; Estimate: 7 records 2.1M + 6 selected (record 0.3M + 2 reach-digests 0.6M + plan 0.3M = 1.2M) = 7M + 2 reach-digests 0.6M. Estimated 10,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-comment-or-whitespace-edit-moves-no-test
   ;; owner, 2026-11-06: "make sure test reuse is working": a form's own digest was its text's, so a reflowed body or a
   ;; comment reran every test reaching the form. It is the read text less comments and whitespace runs
   ;; (seon.program/form-ids). A docstring is left out too (owner, 2026-11-10: a test's digest takes code, not docstrings):
@@ -1430,7 +1490,8 @@
     (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn add \"Adds.\" [a b] (+ a \"x;y\"))"))) "a string literal holding a ; and spaces is code")
     (is (= '#{app.pt-calc-test/add-test app.pt-calc-test/docs-test} (selected db (record db 'app.pt-calc "(defn ^:private add \"Adds.\" [a b] (+ a b))"))) "a visibility")))
 
-(deftest a-forms-code-is-what-the-reader-read-less-its-docstring
+;; Estimate: 20 calls x (read-string 5k + form-ids 10k) = 0.3M. Estimated 300,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 300000}} a-forms-code-is-what-the-reader-read-less-its-docstring
   ;; seon.program/form-ids case by case: what a form's code digest holds (docs/source.md#what-a-test-takes-of-a-forms-text)
   (let [code #(second (program/form-ids 'app.x % 0 (read-string %)))]
       (is (= (code "(def x \"Doc.\" 5)") (code "(def x \"Other.\" 5)")) "a def's docstring")
@@ -1444,7 +1505,8 @@
       (is (not= (code "(defn ^:private f [] 1)") (code "(defn f [] 1)")) "the name's metadata is part of the code")
       (is (not= (code "(def x 5)") (second (program/form-ids 'app.y "(def x 5)" 0 '(def x 5)))) "a namespace is part of the digest")))
 
-(deftest a-config-key-added-moves-no-test-that-does-not-name-it
+;; Estimate: 5 records 1.5M + 3 schema writes 0.3M; 6 reach-digests (before + 5 moved) x 0.3M = 1.8M; 5 schema db-withs 0.5M. Estimated 4,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 4000000}} a-config-key-added-moves-no-test-that-does-not-name-it
   ;; owner, 2026-11-06: a branch adding one config key reran 1,118 of 1,154 keys, the config map's entry (which lists
   ;; every key) being in the reach of every reader of seon.config/value. A test takes the values of the keys it reads
   ;; (seon.program/config-reads), so the key list is no input of its own: a key's entry is, for a test naming the key
@@ -1470,14 +1532,16 @@
 
 (defmulti pt-by-vector first)
 
-(deftest a-removed-method-with-a-vector-dispatch-is-gone
+;; Estimate: 1 defmethod + 1 remove-definition! (an edn decode) + 3 methods reads, ~50k each. Estimated 100,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 100000}} a-removed-method-with-a-vector-dispatch-is-gone
   ;; seon.program/remove-definition!: a method's dispatch reads back through seon.edn, as its key was written
   (defmethod pt-by-vector [:a 1] [_] :hit)
   (is (contains? (methods pt-by-vector) [:a 1]))
   (#'program/remove-definition! [:method 'seon.program-test/pt-by-vector (seon.edn/encode [:a 1])])
   (is (not (contains? (methods pt-by-vector) [:a 1])) "the method is gone"))
 
-(deftest a-vars-history-names-each-definition-it-had
+;; Estimate: the history world built once 0.6M + 3 mt/code x 0.15M + 1 history read 0.3M + 3 includes small. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-vars-history-names-each-definition-it-had
   ;; task seon.program/a-vars-history-is-read-at-the-repl; docs/storage.md#history: a var's past definitions
   ;; are its :var/form datoms in the db's history, read by seon.db/history
   (let [def-of #(mt/code 'app.h (str "(ns app.h)\n(defn f [x] (+ x " % "))\n"))
@@ -1490,7 +1554,8 @@
     (is (= 2 (count (remove :added? rows))) "the two replaced forms were each retracted")))
 
 ;; docs/merging.md#a-merge-runs-what-the-change-reaches: a step runs the whole program, so its key moves with the code; a test that reads a file stays by the tree
-(deftest a-step-is-keyed-by-the-code-not-the-whole-tree
+;; Estimate: 1 record-tx 0.2M; 1 graph 0.2M; 5 graph-indexes with a root x 0.1M = 0.5M. Estimated 1,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-step-is-keyed-by-the-code-not-the-whole-tree
   (let [db (d/db-with (ts/test-db) [{:ns/name 'app.k :ns/file "src/app/k.clj"}])
         db (d/db-with db (program/record-tx db {:id "app.k/f" :src "(defn f [] (slurp \"x\"))" :ns 'app.k :ns-form? false
                                                 :defs [{:var 'app.k/f :meta #{:arglists}}] :declares #{} :methods [] :impls [] :refs #{'clojure.core/slurp} :requires #{} :banned #{} :inline-defs #{}}))
@@ -1504,13 +1569,15 @@
 
 ;; docs/merging.md#verdicts-are-a-cache: on one tree, 46 of 1,452 of an agent's digests matched a checkout's and no process test's, as nearly every test
 ;; reaches a key its root's profile sets. A verdict reused across agents and checkouts takes no key that says who is running it
-(deftest the-profile-a-root-runs-under-moves-no-digest
+;; Estimate: 3 config-input calls x 30k. Estimated 100,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 100000}} the-profile-a-root-runs-under-moves-no-digest
   (let [in (fn [m] (fx/config-input (merge {:seon.config.proofs/jobs 4} m) "/x"))]
     (is (= (in {}) (in {:seon.config.ai/provider :openai-compat :seon.config.ai/script 'a/b :seon.config.root/profile :deepseek :seon.config.store/sole-writer? true})))
     (is (not= (in {}) (in {:seon.config.proofs/jobs 5})) "a key that is no one's place still does")))
 
 
-(deftest a-var-a-string-names-moves-the-test-holding-it
+;; Estimate: 2 x (2 + 6 records) x 0.3M = 4.8M; 2 reach-digests 0.5M; the remaining checks small. Estimated 6,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 6000000}} a-var-a-string-names-moves-the-test-holding-it
   ;; Context, 2026-11-10: (in-agent ["(my.agent/tests-reaching 'x)"]) names a var only inside a
   ;; string in a vector, and a change to it left the test's digest and a stored green. In a test
   ;; namespace every string constant that reads as forms names the vars of those forms
@@ -1536,7 +1603,8 @@
 ;; change to any other attribute; opening it checks every attribute's value type (seon.db/install-missing!), so a change of one that is
 ;; not the program's (two message attributes made refs, 2026-11-10) left every checkout's store refusing until removed by hand. A store
 ;; whose schema the open refuses is output to make again: removed and imported fresh, never a refusal
-(deftest a-kept-program-store-another-schema-refuses-is-made-again
+;; Estimate: the store made again by program-db: S 10M + 1 file import 1M; the old store's create + schema transact 0.3M; checkout and tree-id 0.5M (rounded). Estimated 10,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 10000000}} a-kept-program-store-another-schema-refuses-is-made-again
   (let [d (checkout! "kept-types" {"deps.edn" "{}" "src/app/kt.clj" "(ns app.kt)\n(defn f [x] x)\n"})
         store (scratch-dir "kept-types-store")
         made (pdb/made-cfg (pdb/store-cfg :lmdb store))
@@ -1547,7 +1615,8 @@
     (is (some? (d/entity db [:var/name 'app.kt/f])) "the tree is read: the store was made again and the program imported")
     (is (= :db.type/data (get-in (:schema db) [:seon.model-call/basis :db/valueType])) "on a store of this schema")))
 
-(deftest a-kept-tree-is-read-whatever-its-stores-size
+;; Estimate: 2 stores made by program-db (the first import and the bound's restart) x S 10M = 20M; 3 one-file imports 3M; 1 kept read 0.5M; 4 git children and 3 tree-ids ~1M. Estimated 20,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-kept-tree-is-read-whatever-its-stores-size
   ;; found 2026-11-10 (Context, the Tests session): the plan imported a tree past the store's bound,
   ;; then a shard found the store over it, removed it, and its first program reader imported the tree again inside its own
   ;; tick budget (1.57 G of 4 G: red, then green on a rerun). The bound is the write's (a tree to import), never a read's
@@ -1568,7 +1637,8 @@
     (runner/program-db d store (fx/tree-id d) 1)
     (is (not (.isFile marker)) "the plan's bound, at a new tree, starts the store again")))
 
-(deftest a-change-to-what-root-runs-moves-every-test-that-starts-a-root
+;; Estimate: 4 record-tx 0.2M (the world is cached); 3 graph+index builds x 0.25M = 0.75M; 2 with-db-withs 0.2M; 1 held index + update 0.5M. Estimated 2,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-change-to-what-root-runs-moves-every-test-that-starts-a-root
   ;; owner, 2026-11-10, reversing 2026-10-27's "a root's boot is no entry": a change to root's writer reused the greens of
   ;; 226 of 233 process tests (7 reached seon.writer/commit-batch), five of them red in the batch. A test that starts a root
   ;; takes what root runs (seon.program/root-digest over root-forms: root-roots' closure, here a proc system.edn names)
@@ -1597,7 +1667,8 @@
                 (get-in (program/index-of (program/reach-indexed g' in)) ['app.rt-test/boots :digest]))
           "and a held index answers it anew, though the test reaches nothing that changed"))))
 
-(deftest a-change-to-a-check-mode-moves-every-test-that-runs-the-binary
+;; Estimate: 4 record-tx 0.2M (the world is cached); 2 graph+index builds x 0.25M = 0.5M; 1 with 0.05M. Estimated 1,000,000 ticks, worked from the work, never from a run.
+(deftest ^{:seon.test/estimate {:ticks 1000000}} a-change-to-a-check-mode-moves-every-test-that-runs-the-binary
   ;; seon.lib-test/a-wait-for-a-line-parks-the-fiber runs `./seon forks line-parks` (seon.test-store/binary-sh): the mode's
   ;; code (seon.check/fork-cases) is the binary's, which no reach of the test names, and its flaky verdict kept its digest
   ;; across the fix (batch 13). A test that runs the binary takes its check driver's reach (index-answer)
