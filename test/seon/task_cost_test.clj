@@ -190,7 +190,7 @@
     [(mt/world) (reduce (fn [m i] (let [e (entry i)] (update m (:seon.task/ns e) (fnil conj []) e))) {} (range n))]))
 
 (deftest a-load-costs-each-new-entry-its-text-and-its-cites
-  ;; docs/references.md#an-entity-cites: the shipped task files' load (seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal)
+  ;; docs/references.md#an-entity-cites: the shipped task files' load (test-runner/health!, through with-wiki, on every land)
   (cost/proof
     {:of 'seon.task/load-tx :input 'seon.task-cost-test/shipped-shaped
      :n "new task entries, each a production-shaped declaration (a 1.5 KB plan citing five things)"
