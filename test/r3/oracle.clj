@@ -42,10 +42,10 @@
   (boolean (and (= :running (get-in v [:tasks id :seon.task/outcome])) (= (:boot (:root v)) (:seon.agent/boot (agent-of v id))))))
 
 (defn- idle?
-  "Is task id's work parked on its live process in this boot (parked, or at its cap)?"
+  "Is task id's work parked on its live process in this boot (parked; a cap is an end, nothing parks on it)?"
   {:malli/schema [:=> [:cat :map :seon.task/id] :boolean]}
   [v id]
-  (boolean (and (#{:parked :cap} (get-in v [:tasks id :seon.task/outcome])) (= (:boot (:root v)) (:seon.agent/boot (agent-of v id))))))
+  (boolean (and (= :parked (get-in v [:tasks id :seon.task/outcome])) (= (:boot (:root v)) (:seon.agent/boot (agent-of v id))))))
 
 (defn- done-in?
   "Is task id done: a merge task merged into main (:merged), another accepted on its
@@ -75,7 +75,7 @@
 
 (defn- ready?
   "Should task t have an agent working: released, not done, every need done, none live or awaiting its merge,
-  and, parked, told or at its cap, woken (none here: the generated histories wake none)."
+  and, parked or told, woken (none here: the generated histories wake none)."
   {:malli/schema [:=> [:cat :map :seon.task/task] :boolean]}
   [v t]
   (let [id (:seon.task/id t) o (:seon.task/outcome t)]
@@ -84,7 +84,7 @@
          (empty? (blocked-in v id))
          (not (live? v id))
          (not (#{:ready :gate} o))
-         (not (#{:parked :told :cap} o)))))
+         (not (#{:parked :told} o)))))
 
 (defn- should-run-in
   {:malli/schema [:=> [:cat :map] [:vector :seon.task/id]]}
