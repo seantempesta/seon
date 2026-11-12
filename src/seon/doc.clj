@@ -755,15 +755,18 @@
   word scoring 0). Only the texts with z >= z-min are answered, each with :in, where its text is, from which `line-of`
   reads its line for a hit that is shown. Cost: the index (built once a change of the store, not a query), one FTS5
   query, and per hit its names; the one text ranking of
-  my.agent/search (relevance's pool is `bm25`). See docs/vector.md#search."
-  {:malli/schema [:=> [:cat :seon.host/db :string [:set :keyword] :double] [:vector :map]]}
-  [db s kinds z-min]
+  my.agent/search (relevance's pool is `bm25`). Given limit, the best limit texts: a caller that reads k asks k, and the
+  rest are never named. See docs/vector.md#search."
+  {:malli/schema [:function [:=> [:cat :seon.host/db :string [:set :keyword] :double] [:vector :map]]
+                  [:=> [:cat :seon.host/db :string [:set :keyword] :double [:maybe pos-int?]] [:vector :map]]]}
+  ([db s kinds z-min] (tokens db s kinds z-min nil))
+  ([db s kinds z-min limit]
   (let [ws (words s)
         numbers (attr-numbers kinds)
         ;; the moments, the z filter and the order are SQLite's (seon.sqlite/fts-ranked): only the hits cross
         rows (when (and (seq ws) (seq numbers))
                (with-index db (fn [ix] (let [n (reduce + (map #(get (sqlite/counts ix) % 0) numbers))]
-                                         (when (pos? n) (sqlite/fts-ranked ix (match-query ws) numbers n (double z-min)))))))
+                                         (when (pos? n) (sqlite/fts-ranked ix (match-query ws) numbers n (double z-min) limit))))))
         [_ _ _ mu m2] (first rows)
         sd (when mu (Math/sqrt (max 0.0 (- m2 (* mu mu)))))]
     (if (or (empty? rows) (zero? sd))
@@ -776,7 +779,7 @@
         (->> (vec hits) (map-indexed (fn [i h] [(- (:z h)) (str (:name h)) i h])) (sort-by pop) (map peek)
              (reduce (fn [[seen out :as acc] h] (let [k ((juxt :kind :name) h)] (if (seen k) acc [(conj seen k) (conj out h)])))
                      [#{} []])
-             second)))))
+             second))))))
 
 (defn resolve-ref
   "Var sym as its citation's depth shows it (docs/references.md#resolving-and-showing):
