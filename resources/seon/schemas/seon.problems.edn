@@ -41,8 +41,6 @@
  :seon.system/quiet-before-true [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/quiet-before-true]] [:t :int] [:waits-on :string]]]
  ;; a request to an agent after it ended (root stopped it, or it died): not gone, it was
  :seon.system/ended [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/ended]] [:agent :keyword]]]
- ;; the catch-up could not read every file of the checkout (seon.system/prove-tree!), so none is proved: each file and why
- :seon.system/catch-up-skipped [:and :seon.error/base [:map [:seon.error/type [:= :seon.system/catch-up-skipped]] [:skipped [:sequential [:map [:path :string] [:reason :string]]]]]]
  :seon.agent/last-op [:map [:kind :keyword] [:form {:optional true} [:maybe :string]] [:since-ms {:optional true} [:maybe :int]]]
  :seon.agent/died [:and :seon.error/base [:map [:seon.error/type [:= :seon.agent/died]] [:agent :keyword]
                                           [:pid {:optional true} [:maybe :int]] [:exit {:optional true} [:maybe :seon.lib/exit-status]]
