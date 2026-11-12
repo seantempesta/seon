@@ -450,6 +450,28 @@
   (let [[_ outs] (prove/ask-items (items-st 2) 1 :batch {['app.x-test/a "da"] {:agent :a1 :ms 5} ['app.x-test/b "db"] {:agent :a1 :ms 5}})]
     (is (= [1 1] (mapv #(count (get-in % [:req :names])) (batches outs))) "two workers, one item each, though both are app.x-test's")))
 
+;; docs/merging.md#the-test-service: of the askers waiting, the one nearest done is served first (shortest remaining work first), so
+;; ten askers finish one by one rather than all late together; an older asker with more left waits, though it came first
+(deftest the-asker-nearest-done-is-served-first
+  (let [it {:agent :a1 :ms 10}
+        [st _] (prove/ask-items (items-st 0) 1 :batch {['app.b-test/x "dx"] it ['app.b-test/y "dy"] it ['app.b-test/z "dz"] it})
+        [st _] (prove/ask-items st 2 :batch {['app.a-test/t "dt"] (assoc it :agent :a2)})
+        [_ o] (#'prove/grant (assoc st :workers 1))]
+    (is (= ['#{app.a-test/t}] (mapv #(get-in % [:req :names]) (batches o))) "the one-item asker first, though asked second")))
+
+;; docs/merging.md#the-test-service: an asker's new request for the same slot at another digest supersedes its run in flight: its
+;; waiter is answered :seon.prove/superseded, what only it queued leaves the queue, and the new digest is planned
+(deftest a-newer-ask-of-a-slot-supersedes-the-run-in-flight
+  (let [[st o] (feed (items-st 0) [[:req {:rid 1 :branch :b :digest "d1" :agent :a1}]])
+        [st _] (feed st [(answer-of (first (asks o :tests)) {:items {'app.x-test/t "dt"} :selected ['app.x-test/t]})])
+        _ (is (seq (:items st)) "the first run's item is queued")
+        [st o2] (feed st [[:req {:rid 2 :branch :b :digest "d2" :agent :a1}]])
+        r1 (:r (first (filter #(and (= :prove-answer (:op %)) (= 1 (:rid %))) o2)))]
+    (is (= :seon.prove/superseded (:seon.error/type r1)) (pr-str r1))
+    (is (= {} (:items st)) "its item no one else waited on left the queue")
+    (is (= 1 (count (filter #(get-in % [:req :plan?]) (asks o2 :tests)))) "and the new digest is planned")
+    (is (empty? (filter #(= :problem (:op %)) o2)) "a superseded run is no platform problem")))
+
 (deftest a-batch-that-died-answers-its-askers-with-the-error
   (let [[st o1] (prove/ask-items (items-st 1) 7 :batch {['app.x-test/t "d1"] {:agent :a1 :ms 5}})
         b (first (batches o1))
@@ -498,13 +520,14 @@
   (seon.cost/proof
     {:of 'seon.prove/grant :input 'seon.prove-test/queue-of
      :n "items queued, one worker free"
-     :work "one pass over the queued items for the most valuable (item-value, its age read from the grant it was queued at, and its waiters read only when an asker is a turn's), and its batch (batch-of): one worker free, its share is every queued item, so two passes more (count, take) and each item's status, its place in the batch and in the request written (linear in reads and writes)"
+     :work "one pass over the queued items for the most valuable (item-value, its age read from the grant it was queued at, and its waiters read only when an asker is a turn's), and its batch (batch-of): one worker free, its share is every queued item, so two passes more (count, take) and each item's status, its place in the batch and in the request written; with two askers or more, one pass summing each asker's work left (an update a waiter) (linear in reads and writes)"
      :growth :linear
      ;; measured 2026-11-11 at 100 queued: 6,261 ticks and 19.0 KB a grant of one item, where aging every item it passed over, by
      ;; a lazy filter and apply max-key, took 43.2k ticks and 355.9 KB. A grant of a batch (2026-11-12) writes each item it takes
      ;; (its status, its place in the batch and the request: ~1.5 KB) and walks the queue twice more (a filter's seq, then a
-     ;; destructured seq of entries: ~1.5 KB); measured 465 ticks and 3.2 KB an item at 100
-     :per-n {:ticks 400 :bytes 3000}
+     ;; destructured seq of entries: ~1.5 KB), and the askers' work left (one map update a waiter, ~1 KB); measured 588 ticks and
+     ;; 4.2 KB an item at 100
+     :per-n {:ticks 500 :bytes 4000}
      :fixed {:ticks 2000 :bytes 2000}
      :sizes [100 300 1000]}))
 
