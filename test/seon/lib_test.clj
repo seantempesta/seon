@@ -1,7 +1,7 @@
 (ns seon.lib-test
   "The native probes (native/probe.c through seon.lib): what they answer."
   (:require [clojure.test :refer [deftest is]] [seon.lib :as lib] [seon.sock :as sock] [jolt.scheme :as scm]
-            [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str] [clojure.core.async]))
+            [seon.test-store :as ts] [seon.config :as config] [clojure.edn :as edn] [clojure.string :as str] [clojure.core.async] [jolt.io-poller]))
 
 (deftest a-fork-beside-a-running-thread-is-refused-and-says-how-many-run
   ;; lib/fork! is the one spawning skeleton: a second active Chez thread breaks a forked
@@ -155,3 +155,24 @@
         (str "every child of 10 reset itself and ran only its own code (exit 7: one ran a parent's fiber; before the fix all of them, 50 of 50 when it forked 50, did): " (pr-str r)))
     (is (= {"own" 10} doubles) (str "each of 10 grandchildren of a double fork ran its own code and nothing of the parent's: " (pr-str r)))))
 
+
+(deftest a-forked-child-holds-only-what-it-is-given
+  ;; docs/processes.md#the-agent-process: a forked child closes every descriptor but 0-2 and what it is given (:fd, :keep), once, in
+  ;; lib/fork! (ProcessBuilder's rule). An agent ran two test runs at once (the test service's items): one run's child kept the
+  ;; other's pipe end, opened between that run's socketpair and its close, so the other's end of file never came and it answered
+  ;; a :pipe-held error (bin/check agent-checks, 2026-11-12). Red before: the child held the other pair too
+  (let [[r w] (sock/socketpair)
+        [xr xw] (sock/socketpair)
+        [kr kw] (sock/socketpair)
+        open (fn [] (set (keep parse-long (.list (java.io.File. "/dev/fd")))))
+        pid (lib/fork! {:fd w :keep #{kw} :refused (fn [n] {:refused n}) :parent identity
+                        :child (fn [] (sock/write-line! w (pr-str (vec (sort (filter #(< 2 %) (open)))))))})]
+    (try
+      (let [rd (sock/line-reader r (fn [] (clojure.core.async/<!! (jolt.io-poller/ready-chan r :read))))
+            line (loop [] (let [ls (rd)] (cond (= ls :eof) nil (seq ls) (first ls) :else (recur))))
+            held (set (edn/read-string line))]
+        (is (= {:exit 0} (lib/wait-status pid)))
+        (is (contains? held w) "its own :fd")
+        (is (contains? held kw) "and what it was given to keep")
+        (is (not-any? held [r xr xw kr]) (str "and none of its parent's other descriptors: held " (pr-str held))))
+      (finally (run! lib/c-close [r xr xw kr kw])))))
