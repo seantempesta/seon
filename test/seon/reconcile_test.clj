@@ -9,7 +9,7 @@
             [seon.reconcile :as r] [my.root]
             [seon.template :as tpl] [seon.problems :as problems] [seon.merge :as pm] [seon.sock :as sock] [clojure.edn] [seon.contract :as contract]
             [clojure.string :as str] [clojure.set] [seon.config :as cfg] [seon.edn :as sedn]
-            [seon.program :as program] [seon.writer :as writer] [seon.source :as source] [clojure.java.shell :as sh] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost]))
+            [seon.program :as program] [seon.writer :as writer] [seon.source :as source] [clojure.java.shell :as sh] [seon.turn :as turn] [clojure.core.async :as a] [seon.cost :as cost] [seon.reader :as reader]))
 
 (defn- empty-db [] (ts/test-db))
 (defn- booted-tx
@@ -1884,7 +1884,7 @@
     (is (= :work (:seon.task/kind r)) "a task like any: judged by its proofs")
     (is (= #{"demo/a"} (:seon.task/after r)) "after the task it refines: it starts when that one has ended")
     (is (empty? (:seon.task/needs r)) "it needs nothing: no result of the task is wanted")
-    (is (= #{'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal} (set (:seon.task/proofs r)))
+    (is (= #{'seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves} (set (:seon.task/proofs r)))
         "proved by what it edits alone: it changes no code, so the task's red proofs could never pass on its branch (loop 2, 2026-11-12)")
     (is (not= (:seon.task/branch (task/task db1 "demo/a")) (:seon.task/branch r)) "on a branch of its own: a new agent works it")
     (is (= :running (:seon.task/execution r)) "released")
@@ -1954,13 +1954,23 @@
         ;; its refine started, as root records a start
         db1 (d/db-with db1 (work "a-refine" :running))
         why "The run read what its plan cited; nothing it lacked."
-        found (judge! db1 "a-refine" {:outcome :green} :results {'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal :pass}
+        found (judge! db1 "a-refine" {:outcome :green} :results {'seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves :pass}
                       :on-branch [{:seon.task/id "demo/a-refine" :seon.task/found-nothing why}])
-        silent (judge! db1 "a-refine" {:outcome :green} :results {'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal :pass})]
+        silent (judge! db1 "a-refine" {:outcome :green} :results {'seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves :pass})]
     (is (not-any? #{:no-change-site} (map :reason (:seon.task/reasons (task/task (:db found) "demo/a-refine")))) "found nothing: done")
     (is (#{:ready :gate :done} (:outcome found)) (str "judged done, its review next, not told again: " (:outcome found)))
     (is (= why (:seon.task/found-nothing (d/entity (:db found) [:seon.task/id "demo/a-refine"]))) "its reason on main, for the review")
     (is (some #{:no-change-site} (map :reason (:seon.task/reasons (task/task (:db silent) "demo/a-refine")))) "silent: still refused")))
+
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-refines-proofs-are-tests-the-tree-holds
+  ;; docs/tasks.md#a-refine-curates-its-own-task: a refine's proofs are named in src (seon.task/refine-proofs), and a name nothing
+  ;; checks goes stale: the task-files test it named was deleted (219aea54d5), so every refine's proof had no verdict and it capped
+  ;; whatever it did. Each proof a refine declares is a deftest of the checkout's test tree, read from its file. Estimate: one file read
+  ;; and parsed a proof
+  (doseq [p (:seon.task/proofs (first (task/refine-decls {:seon.task/id "demo/a" :seon.task/ns 'demo :seon.task/name "a"})))
+          :let [f (java.io.File. (str (cfg/checkout) "/test/" (-> (namespace p) (str/replace "." "/") (str/replace "-" "_")) ".clj"))
+                tests (when (.exists f) (set (for [x (reader/read-text (slurp f) 'user) :when (and (seq? x) (= "deftest" (name (first x))))] (second x))))]]
+    (is (contains? tests (symbol (name p))) (str p " names no test the tree holds"))))
 
 (deftest a-cap-ends-the-run-held-and-gets-its-refine
   ;; docs/tasks.md#a-refine-curates-its-own-task (Optimization's restated claim, 2026-11-12): a cap ends the run, failed in its number

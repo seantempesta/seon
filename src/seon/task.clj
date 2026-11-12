@@ -1017,9 +1017,10 @@
   (boolean (some #(= refine-section (get-in % [:seon.cite/target :seon.doc/address])) (cites-of db (pdb/eid db :seon.task/id id)))))
 
 (def ^:private refine-proofs
-  "What every refine proves: the task files and the wiki's pages still load with no refusal,
-  which is what a refine edits (the checks of a docs-and-tasks change, AGENTS.md section 3)."
-  #{'seon.task-files-test/the-trees-task-files-and-pages-load-with-no-refusal})
+  "What every refine proves: the shipped task files are still whole tasks, what a refine's edit of a task reaches at its
+  write-back. Its done is its write (names-new-site?); this proof is green before it starts. A test of the tree, checked so
+  (seon.reconcile-test/a-refines-proofs-are-tests-the-tree-holds): the load test it named before was deleted, and every refine capped."
+  #{'seon.task-files-test/the-shipped-task-files-are-whole-tasks-that-merge-themselves})
 
 (defn names-new-site?
   "Whether refine rid's work is done, read on db (its branch) against base (its merge base): the plan of the task it refines cites a
