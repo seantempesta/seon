@@ -1658,3 +1658,13 @@
     (let [db2 (mt/with db (mt/code 'app.kind-test (test-ns-text [nil])))]
       (is (nil? (:seon.test/estimate (ent db2 0))) "taken off the deftest, retracted")
       (is (= :seon.db/var-fact (named db2 0))))))
+
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-def-computed-from-a-schema-is-evaluated-again-when-it-moves
+  ;; docs/source.md#schemas-at-the-repl. Found 2026-11-12 (jolt/tests's land through the system): seon.problems/caused-classes, a
+  ;; def of (contract/properties :seon.problems/class), kept main's value in an agent whose branch moved that entry: its text was
+  ;; unchanged, and only forms defining a contracted var re-armed. A form's inputs include the schema entries it names, so every
+  ;; live form naming a moved key is evaluated again, a def as a contracted defn
+  (let [src "(def classes (:app.sd/set (seon.contract/properties :app.sd/class)))"
+        db (record (empty-db) 'app.pt-sd src)]
+    (is (= [src] (mapv :src (program/schema-dependents db #{:app.sd/class})))
+        "a def naming the moved key is among what loads again")))

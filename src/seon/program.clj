@@ -1069,10 +1069,10 @@
            [:db/add fe :form/keywords k]))))
 
 (defn schema-dependents
-  "The live forms of db defining a contracted var whose form names one of keys (its contract
-  or its code, :form/keywords: one AVET seek a key), or a schema that names one, and on (the
-  binary's schema forms with db's changes): the forms that re-arm against the changed schemas
-  (a form whose code alone names one re-arms too, unchanged). Nothing when keys is empty."
+  "The live forms of db whose form names one of keys (its contract or its code, :form/keywords: one AVET seek a key), or a
+  schema that names one, and on (the binary's schema forms with db's changes): the forms to evaluate again against the changed
+  schemas, unchanged in text: a contract re-arms, and a value computed from a schema at load (a def of contract/properties)
+  takes the moved entry. A form's inputs include the schema entries it names. Nothing when keys is empty."
   {:malli/schema [:=> [:cat :seon.host/db [:set :qualified-keyword]] [:vector :map]]}
   [db keys]
   (if (empty? keys)
@@ -1084,7 +1084,9 @@
             (distinct (for [k reached
                             dt (d/datoms db :avet :form/keywords k)
                             :let [fe (:e dt)]
-                            :when (and (live? db fe) (some :var/contract (:form/defines (d/entity db fe))))]
+                            ;; every form naming one: a contract re-arms, and a def computed from the schema at load
+                            ;; (contract/properties of it) takes the moved entry; its text unchanged, it kept the old
+                            :when (live? db fe)]
                         fe))))))
 
 (defn ensure-ns!
@@ -1236,7 +1238,7 @@
                        {} (merge contract/forms (schema-changes db)))
         reached (into (set keys) (closure keys naming))]
     (binding [mr/*registry* (schema-registry (schema-changes db))]
-      (vec (for [n (all-ns) v (vals (ns-interns n))
+      (into (vec (for [n (all-ns) v (vals (ns-interns n))
                  :let [c (contract/contract v)]
                  :when (and c (some reached (names c)))
                  :let [sym (symbol v)
@@ -1249,7 +1251,11 @@
                                 (catch Throwable e {:var sym :message (or (ex-message e) (str e))}))
                            (let [r (contract/rearm! v)] (when (contract/error? r) r)))]
                  :when r]
-             r)))))
+             r))
+            ;; and the forms that define no contracted var but name a reached key (a def computed from the schema at load):
+            ;; evaluated again, as a load does, so they take the registered entry (schema-dependents)
+            (load-forms! db (filterv (fn [f] (not-any? :var/contract (:form/defines (d/entity db [:form/id (:id f)]))))
+                                     (schema-dependents db keys)))))))
 
 (defn- required!
   "Of form rows forms, the test namespaces whose every live form is its file's as imported
