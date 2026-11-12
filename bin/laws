@@ -15,6 +15,9 @@
 #   transactions a Datahike transaction: d/with, d/db-with, d/transact,
 #               the writer's apply!/transact-batch!: every one passes the
 #               one path (seon.db/with, the writer's checked 'transact!)    docs/storage.md "## The write checks every entity it touches"
+#   dates       an ISO date inside a src string (a docstring says what a var or namespace is now; when a ruling was made and
+#               what a day measured are git's and docs/decisions.md's): no site is sanctioned. A text read, seconds, so a dated
+#               docstring stops a landing before its prove (a test of the compiler's docstring facts found it 8-10 min in, and went)
 # bin/laws growth [BASE]: not a gate; net src lines since BASE (default main) and the
 # top-level definitions on its added lines (ns/name; a moved one counts).
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -52,9 +55,23 @@ sites() { # KIND PATTERN DOC [SECTION]
   fi
   [ $kb = 0 ] || bad=1
 }
+dates() { # every src string holding an ISO date, by ns/var: none may
+  for f in $(find src -name '*.clj' | sort); do
+    ns=$(sed -n 's/^(ns \([^ ]*\).*/\1/p' "$f" | head -1)
+    awk -v ns="$ns" '
+      /^\((defn-?|defchecked|defmacro|def|defonce) /{split($0,a," "); n=a[2]; if (n ~ /^\^/) n=a[3]}
+      { t=""; for (i=1; i<=length($0); i++) { ch=substr($0,i,1)
+          if (s) { if (ch=="\\") { i++; continue } if (ch=="\"") { s=0; continue } t=t ch; continue }
+          if (ch=="\\") { i++; continue } if (ch=="\"") { s=1; continue } if (ch==";") break }
+        if (t ~ /(^|[^0-9])20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]([^0-9]|$)/) print "DATED    " ns "/" n ": " substr(t,1,100) }' "$f"
+  done > target/dates-sites.txt
+  cat target/dates-sites.txt
+  if [ -s target/dates-sites.txt ]; then echo "dates FAILED (a src string holds a date: say what is true now; the day is git's)"; bad=1
+  else echo "dates OK (no src string holds a date)"; fi
+}
 # catch is the health step's :unnamed-site (bin/check health), run by name only: a default run
 # here would run the whole health a second time beside the step that runs it
-kinds=${*:-clocks measures resolution transactions}
+kinds=${*:-clocks measures resolution transactions dates}
 for k in $kinds; do
   [ "$k" = catch ] || echo "== $k"
   case $k in
@@ -65,6 +82,7 @@ for k in $kinds; do
     measures) sites measures 'currentTimeMillis|nanoTime|now-ns|now-ms' docs/clocks.md ;;
     resolution) sites resolution "[(](requiring-resolve|ns-resolve|resolve '|intern|alter-var-root|with-redefs)[ )]" docs/resolution.md ;;
     transactions) sites transactions '[(](d|datahike[.]api|datahike[.]core|dc|dw|datahike[.]writer|datahike[.]writing|w)/(with|db-with|transact!?|transact-batch!|apply!|connect)[ )]' docs/storage.md "## The write checks every entity it touches" ;;
+    dates) dates ;;
     *) echo "laws: no kind $k"; bad=1 ;;
   esac
 done
