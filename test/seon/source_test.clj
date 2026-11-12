@@ -107,7 +107,13 @@
         tx (source/refresh-tx db {"src/app/hd.clj" (text "(inc (helper))")})
         after (d/db-with db tx)]
     (is (= "(defn user-fn [] (inc (helper)))" (:form/src (:var/form (d/entity after [:var/name 'app.hd/user-fn])))) "the edit is the var's form")
-    (is (contains? (set (:form/refs (:var/form (d/entity after [:var/name 'app.hd/user-fn])))) 'app.hd/helper) "and it names the held var it calls")))
+    (is (contains? (set (:form/refs (:var/form (d/entity after [:var/name 'app.hd/user-fn])))) 'app.hd/helper) "and it names the held var it calls"))
+    ;; and a var a held (declare ...) names, defined later in the file (render_test.clj's sessions-db; the landing's build, 2026-11-12)
+    (let [text (fn [body] (str "(ns app.hd2)\n\n(declare later)\n\n(defn user-fn [] " body ")\n\n(defn later [] 1)\n"))
+          db (d/db-with (ts/test-db) (source/import-tx (ts/test-db) {"src/app/hd2.clj" (text "(later)")}))
+          _ (remove-ns 'app.hd2)
+          after (d/db-with db (source/refresh-tx db {"src/app/hd2.clj" (text "(inc (later))")}))]
+      (is (= "(defn user-fn [] (inc (later)))" (:form/src (:var/form (d/entity after [:var/name 'app.hd2/user-fn])))) "a declared var resolves too")))
 
 (deftest importing-src-records-every-form-exactly
   (let [files (src-files)

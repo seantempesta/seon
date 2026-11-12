@@ -132,7 +132,7 @@
                                              (if-let [h (and held (held n src k @ns-src form))]
                                                ;; its vars declared here, as its analysis would have: a later form calling one is
                                                ;; analyzed in a process that may never have loaded the namespace
-                                               (do (doseq [{v :var} (:defs h) :when (and (find-ns n) (= (namespace v) (str n)))]
+                                               (do (doseq [v (concat (map :var (:defs h)) (:declares h)) :when (and (find-ns n) (= (namespace v) (str n)))]
                                                      (intern (find-ns n) (symbol (name v))))
                                                    (assoc f :held h))
                                                (merge f (analyze-form n form private?))))))
@@ -426,6 +426,8 @@
               {:id (:form/id x) :seon.source/held? true :inline-defs (vec (:form/inline-defs x))
                :defs (vec (for [d (:form/defines x) :when (and (:var/name d) (= fe (:db/id (:var/form d))))]
                             {:var (:var/name d) :meta (vec (:var/meta d))}))
+               ;; the vars it declares ((declare f ...)), so a later form naming one resolves as when it was analyzed
+               :declares (vec (keep :var/name (:form/declares x)))
                :seon.source/made (vec (for [d (concat (:form/defines x) (:form/declares x))
                                            :let [kv (some #(when-some [v (get d %)] [% v]) identities)] :when kv] kv))})))))))
 
