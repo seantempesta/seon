@@ -1051,19 +1051,37 @@
     (boolean (some #(= br (or (:seon.task/branch %) (default-branch (:seon.task/id %))))
                    (:seon.task/needs (d/pull db [{:seon.task/needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id]))))))
 
+(defn- unacted?
+  "Whether refine rid is one nobody acted on, read from its own facts: cancelled, or ended with no change (held with an outcome that
+  is no :done or :merged: its cap, its death, a refusal). A refine in flight, or one done with a change its review may merge, is
+  acted on. See docs/tasks.md#a-refine-curates-its-own-task."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
+  [db rid]
+  (let [e (d/entity db [:seon.task/id rid]) x (:seon.task/execution e) o (:seon.task/outcome e)]
+    (boolean (or (= :cancelled x) (and (= :held x) (some? o) (not (#{:done :merged} o)))))))
+
 (defn refine-tx
   "Task id's refine and its review (`refine-decls`), written on db when id has just ended: the refine released, the review held
-  for a session; started by id's agent, so the refine's agent is its child. None when id is a refine itself, when a refine of it exists (a task citing it and `refine-section`), or when it
+  for a session; started by id's agent, so the refine's agent is its child. A refine of it that nobody acted on (`unacted?`) is
+  declared again on a fresh branch, its end's facts gone. None when id is a refine itself, when a refine of it is in flight or acted on, or when it
   continues another task's branch (it needs a task on its own branch: a merge step, whose work task has its own refine), so a
   refine and its review never loop. See docs/tasks.md#a-refine-curates-its-own-task."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:maybe [:vector :any]]]}
   [db id]
   (let [t (task db id)
-        refined? (some #(refine? db %) (citing-tasks db (pdb/eid db :seon.task/id id)))]
-    (when (and t (:seon.task/ns t) (not (refine? db id)) (not refined?) (not (continues-branch? db id)))
-      (let [tx (create-tx db (refine-decls t))]
+        prior (first (filter #(refine? db %) (citing-tasks db (pdb/eid db :seon.task/id id))))]
+    (when (and t (:seon.task/ns t) (not (refine? db id)) (or (nil? prior) (unacted? db prior)) (not (continues-branch? db id)))
+      (let [rid (task-id (:seon.task/ns t) (str (:seon.task/name t) "-refine"))
+            vid (str rid "-review")
+            ;; one nobody acted on is declared again on a fresh branch, its end's facts gone: a new agent, none of the old one's records
+            fresh (when prior (keyword (str (name (default-branch rid)) "-r" (lib/unique-id))))
+            decls (cond->> (refine-decls t) fresh (mapv #(assoc % :seon.task/branch fresh)))
+            tx (create-tx db decls)]
         (when (vector? tx)
-          (let [rid (task-id (:seon.task/ns t) (str (:seon.task/name t) "-refine"))]
-            ;; started by the agent whose run it refines: its agent is that one's child (:seon.agent/parent, start-tx)
-            (cond-> (into tx (execution-tx [rid] :running))
-              (:seon.task/agent t) (conj {:seon.task/id rid :seon.task/started-by (sender (:seon.task/agent t))}))))))))
+          ;; started by the agent whose run it refines: its agent is that one's child (:seon.agent/parent, start-tx)
+          (cond-> (-> tx
+                      (into (when prior (for [x [rid vid] a [:seon.task/outcome :seon.task/reason :seon.task/reasons :seon.task/agent]]
+                                          [:db.fn/retractAttribute [:seon.task/id x] a])))
+                      (into (execution-tx [rid] :running))
+                      (into (when prior (execution-tx [vid] :held))))
+            (:seon.task/agent t) (conj {:seon.task/id rid :seon.task/started-by (sender (:seon.task/agent t))})))))))

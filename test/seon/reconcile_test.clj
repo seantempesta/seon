@@ -1892,6 +1892,28 @@
     (is (nil? (task/refine-tx db1 "demo/a-refine")) "a refine gets none")
     (is (nil? (task/refine-tx db1 "demo/a-refine-review")) "nor its review, a merge step")))
 
+;; docs/tasks.md#a-refine-curates-its-own-task: a refine nobody acted on (cancelled, or ended with no change: held at its cap, dead)
+;; is superseded by the next end's, read from its own facts: one stale refine wrote none again for a task, ever (root, 2026-11-13: a
+;; refine capped with the old proofs blocked every later end of seon.ctx/a-require-at-the-repl-says-the-form-that-records-it)
+(deftest ^{:seon.test/estimate {:ticks 20000000}} a-refine-nobody-acted-on-is-superseded-by-the-next-ends
+  (let [db (with-refine-section (db-of [(decl "a")]))
+        db1 (d/db-with db (task/refine-tx db "demo/a"))
+        branch0 (:seon.task/branch (task/task db1 "demo/a-refine"))
+        ;; what a cancel writes (my.root/cancel-tx): each held or running task :cancelled
+        cancelled (d/db-with db1 [{:seon.task/id "demo/a-refine" :seon.task/execution :cancelled} {:seon.task/id "demo/a-refine-review" :seon.task/execution :cancelled}])
+        capped (d/db-with db1 [{:seon.task/id "demo/a-refine" :seon.task/execution :held :seon.task/outcome :cap}])]
+    (is (nil? (task/refine-tx db1 "demo/a")) "a refine in flight is not superseded")
+    (doseq [[how db2] [["cancelled" cancelled] ["ended at its cap" capped]]]
+      (let [tx (task/refine-tx db2 "demo/a")
+            db3 (when (seq tx) (d/db-with db2 tx))
+            r (some-> db3 (task/task "demo/a-refine"))]
+        (is (seq tx) (str "the next end writes its refine over one " how))
+        (is (= :running (:seon.task/execution r)) (str "released again over one " how))
+        (is (nil? (:seon.task/outcome r)) "with no outcome of the one it supersedes")
+        (is (not= branch0 (:seon.task/branch r)) "on a fresh branch: a new agent, none of the old one's records")
+        (is (= (:seon.task/branch r) (:seon.task/branch (task/task db3 "demo/a-refine-review"))) "its review on its branch")
+        (is (= :held (:seon.task/execution (task/task db3 "demo/a-refine-review"))) "the review held again")))))
+
 (deftest a-cap-ends-the-run-held-and-gets-its-refine
   ;; docs/tasks.md#a-refine-curates-its-own-task (Optimization's restated claim, 2026-11-12): a cap ends the run, failed in its number
   ;; of turns; nothing parks at a cap; it is held, its release runs it again from its branch's head, and it gets its refine as any end
