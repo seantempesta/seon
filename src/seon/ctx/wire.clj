@@ -89,13 +89,15 @@
             :else at))))))
 
 (defn- db-at
-  "The db of point p ({:branch :commit :t}) on db's store: db itself when p is db's own point (its commit and t: a value not yet
-  committed, as the judge's speculated agent, d/with, is held by no stored commit), else its commit, else (a commit past what
-  collection kept, docs/storage.md#collection) db as of its t."
+  "The db of point p ({:branch :commit :t}) on db's store, the db it names: db itself when p is db's own point (its commit and t: a
+  value not yet committed, as the judge's speculated agent, d/with, is held by no stored commit); else its commit when the commit
+  holds its t (or p names no t); else db as of its t: a world written without commits (d/db-with) names its store's commit at every
+  point, and a commit past what collection kept is gone (docs/storage.md#collection)."
   {:malli/schema [:=> [:cat :seon.host/db :map] :seon.host/db]}
   [db p] (if (and (= (:commit p) (d/commit-id db)) (= (:t p) (:max-tx db)))
            db
-           (or (d/commit-as-db (pdb/store-of db) (:commit p)) (d/as-of db (:t p)))))
+           (let [c (some->> (:commit p) (d/commit-as-db (pdb/store-of db)))]
+             (if (and c (or (nil? (:t p)) (= (:t p) (:max-tx c)))) c (d/as-of db (:t p))))))
 
 (declare page-diff-msgs example-msgs reply-of)
 

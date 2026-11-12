@@ -2499,3 +2499,18 @@
 (deftest presentation-leaves-a-maps-entries
   (is (= [:div [:pre {:task {:plan "p"} :opts {} :n 1}]]
          (#'wire/presentation-free [:div {:class "x"} [:pre {:class "y" :data-n 1} {:task {:plan "p"} :opts {} :n 1}]]))))
+
+;; docs/render.md#a-page-is-a-kept-walk: a point is read as the db it names: its own db, its commit when the commit holds its t, else
+;; the db as of its t. A world written without commits (d/db-with on a store's db, as a speculated or a test world is) names its
+;; store's commit at every point; read as that commit, each past point was the world before any of it, and its page showed nothing
+(deftest a-point-is-read-at-its-own-t
+  (let [db0 (ts/test-db)
+        db1 (d/db-with db0 [{:seon.agent/key "pt-a1"}])
+        db2 (d/db-with db1 [{:seon.agent/key "pt-a2"}])
+        at (fn [db p] (set (keep #(:seon.agent/key (d/entity db (:e %))) (d/datoms (#'wire/db-at db2 p) :aevt :seon.agent/key))))
+        p1 {:commit (d/commit-id db2) :t (:max-tx db1)}
+        p2 {:commit (d/commit-id db2) :t (:max-tx db2)}]
+    (is (= (d/commit-id db0) (d/commit-id db2)) "the world's points all name its store's commit")
+    (is (contains? (at db2 p1) "pt-a1") "a past point holds what was written by its t")
+    (is (not (contains? (at db2 p1) "pt-a2")) "and nothing after it")
+    (is (contains? (at db2 p2) "pt-a2") "the db's own point is the db")))
