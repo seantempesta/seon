@@ -96,11 +96,10 @@
 (defn- present [dir ks dgs]
   (set (for [k ks dg dgs :when (or (.exists (file-of dir k dg :pass)) (.exists (file-of dir k dg :red)))] dg)))
 
-;; See docs/merging.md#verdicts-are-a-cache: past the bound the least recently used green goes; a red is never deleted (the
-;; owner's ruling: the fix of a red is a new digest), and a file beside the verdicts (full-run.edn, the last full run's record) is
-;; no verdict. Red before: the oldest file went whatever it was, the red and the full run's record among them, and every landing
-;; since batch 87 said "full run: none recorded"
-(deftest past-capacity-the-least-recently-used-green-goes
+;; See docs/merging.md#verdicts-are-a-cache: past the bound the least recently used verdict goes, green or red (an LRU cache), and a
+;; file beside the verdicts (full-run.edn, the last full run's record) is no verdict and stays. Red before: every .edn was counted
+;; and the oldest went, the full run's record among them, and every landing since batch 87 said "full run: none recorded"
+(deftest past-capacity-the-least-recently-used-goes
   (with-dir
    (fn [dir]
      (let [red {'a/r {:test 'a/r :digest "old-red" :pass 0 :fail 1 :error 0}}
@@ -113,13 +112,13 @@
            _ (spit full-run "{:tree \"t\" :exit 0}")
            _ (.setLastModified full-run (- 1700000000000 (* 1000 500)))
            ;; a bound whose low water (results-evict-percent under it) the new green (about g3's size) fits under only once two
-           ;; greens are evicted: g1 (the oldest green), then g3; the red, older than both, stays
-           cap (inc (quot (* 100 (+ r g2 g3 4)) (- 100 (cfg/value :seon.config.proofs/results-evict-percent))))
+           ;; are evicted: the red (oldest), then g1
+           cap (inc (quot (* 100 (+ g2 g3 g3 4)) (- 100 (cfg/value :seon.config.proofs/results-evict-percent))))
            _ (is (= (+ r g1 g2 g3) (bytes-in dir)) "the four verdicts are all the cache holds")
            w (fx/write-verdicts! dir {:id "w" :tree "t"} {'a/t {:test 'a/t :digest "new" :pass 1 :fail 0 :error 0}} {} cap)
            held (present dir ['a/t 'a/r] ["old-red" "g1" "g2" "g3" "new"])]
        (is (= {:recorded 1} w))
-       (is (= #{"old-red" "g2" "new"} held) "the oldest greens went first; the red, older still, stays; the one just written stays")
+       (is (= #{"g2" "g3" "new"} held) "the oldest went first, a red among them; the one just written stays")
        (is (.exists full-run) "the full run's record, the oldest file of all, is no verdict and stays")
        (is (<= (bytes-in dir) cap) "and the cache is under its bound")))))
 
