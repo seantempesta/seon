@@ -669,7 +669,7 @@
   ;; functions it called and itself, at the digests of the agent's reads index, beside its verdict as reads.edn, so a later plan
   ;; reuses it while none of those moved (seon.proofs/read-digests). Red before: an agent's run wrote no reads
   (let [[_ green reads] (in-agent ["(ns reads-test (:require [clojure.test :refer [deftest is]])) (defn f [x] (inc x)) (deftest r (is (= 2 (f 1))))"
-                                   "(select-keys (my.agent/prove) [:results])"
+                                   "(select-keys (my.agent/prove 'reads-test/r) [:results])"
                                    "(some-> (get (seon.fx/held-reads ['reads-test/r]) 'reads-test/r) first :reads keys set)"]
                                   {:proofs #{'reads-test/r}})]
     (is (= {:results '{reads-test/r :pass}} (:value green)) (pr-str green))
