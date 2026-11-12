@@ -1972,6 +1972,15 @@
   {:malli/schema [:=> [:cat [:maybe :map] :any] [:vector :any]]}
   [ix e] (if ix (tiles ix e (render/page-pattern ix (or (render/entity-pattern ix (ratom/untracked e)) []))) []))
 
+(defn- person-of
+  "The person agent view c works for, as an entry the walk draws by its schema's render (seon.render.ui/agent nested): the starter of its
+  own task, only where c's pull holds that person's sessions (:seon.task/_started-by, root's session's pattern joins it so); else nil, so
+  the pull decides where a person is drawn. See docs/users.md#roots-agent."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [c]
+  (let [u (get-in c [:seon.agent/task :seon.task/started-by])]
+    (when (and (map? (ratom/untracked u)) (contains? (ratom/untracked u) :seon.task/_started-by)) u)))
+
 (defn agent-parts
   "Agent pull c's page parts, all of its page but its conversation (p-task, read by the model as parts: seon.render/page-lists): the
   tiles of what its pull joins (`tiles`, by the agent's own pattern less its conversation, seon.render/page-pattern: no part named here;
@@ -1985,6 +1994,8 @@
   [:div {:id "p-task"}
    ;; what its pull joins, each by its own render, in the pull's order: its task first, as the agent's pattern joins it first
    (seq (own-tiles ix c))
+   ;; the person it works for, with their sessions, where its pull holds them so (root's session's pattern, `person-of`)
+   (person-of c)
    [#'eval-tiles {} c]
    ;; then the agent's own state, from its own attributes
    (when (:seon.agent/task c) [#'status {:at [:seon.agent/task :proved]}])
