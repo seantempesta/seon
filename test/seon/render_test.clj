@@ -1516,15 +1516,29 @@
     (is (str/includes? html "deepseek-chat · 2345 ms") html)))
 
 (deftest roots-context-is-its-debug-page
-  ;; root, 2026-10-26: root's page and an agent's both toggle to what their model reads; root has no
-  ;; model turn, so its debug page is the context the render proc holds (its :context, the system's
-  ;; value printed), shown whole, never computed again for the page
+  ;; root, 2026-10-26: root's page and an agent's both toggle to what their model reads; root's debug page shows the
+  ;; context the render proc holds (its :context, the system's value printed), shown whole, never computed again for the page
   (let [l (#'p/debug-value {:context {:text "{:seon-root \"the whole system\"}" :tokens 7}} [:debug :root])
         u (some #(when (= "d-context" (:id %)) %) (:seon.render/units l))]
     (is (= :seon.render/root-context (:schema u)))
     (is (str/includes? (h/html (r/hiccup {:seon.render/index (seon.db/index) :schema (:schema u) :unit "d-context"} (:input u))) "the whole system"))
     (is (str/includes? (h/html (:seon.render/hiccup l)) "href=\"/\"") "the toggle back to its conversation")
     (is (nil? (#'p/debug-value {} [:debug :root])) "nothing held yet: no page")))
+
+;; docs/render.md#the-debug-page-is-the-wire-request: root's session is an agent with model turns, so its debug page is the
+;; timeline of its requests as any agent's is, beside the system's context; before, it drew the context alone
+;; (a real turn, 2026-11-12: ten requests no page showed)
+(deftest roots-debug-page-shows-its-sessions-requests
+  (ts/test-branch!
+    (fn [_ conn]
+      (let [[st _ [e0 e1]] (debug-state conn)
+            db (d/db-with (:main-db st) [{:seon.agent/key "root" :seon.agent/branch :main/task-request-root}])
+            st (assoc st :main-db db :branches {[:debug :root] {:db db}} :context {:text "{:seon-root \"the whole system\"}" :tokens 7})
+            l (#'p/debug-value st [:debug :root])
+            ids (set (map :id (:seon.render/units l)))]
+        (is (contains? ids "d-context") "the system's context, as before")
+        (is (contains? ids "d-turn") "and its session's request, as any agent's")
+        (is (= [e0 e1] (mapv :e (:turns (:input (some #(when (= "d-steps" (:id %)) %) (:seon.render/units l)))))) "each of its requests, in order")))))
 
 (deftest roots-page-reads-in-words
   ;; root, 2026-10-24: root is an agent; its head, problems and work read as a person reads them,

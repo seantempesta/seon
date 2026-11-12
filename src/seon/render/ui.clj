@@ -2419,8 +2419,8 @@
   "The debug page of id (an agent's id, :root) laid out: what its model is sent. An agent's is a timeline
   of its requests, live on latest or fixed on a turn chosen: steps, each request a button (strip: {:turns [{:e :turn
   :origin}] :at e-or-:latest :to-come? b :gone e-chosen-but-no-request-of-the-branch}), previous, next and latest moving the view (/at), and the one
-  request shown (turn: a unit, :seon.render/debug-turn); for root, which has no model turn, the context it
-  reads now (context: a unit, :seon.render/root-context). See docs/render.md#the-debug-page-is-the-wire-request."
+  request shown (turn: a unit, :seon.render/debug-turn); for root, besides its session's requests, the context the
+  system reads now (context: a unit, :seon.render/root-context). See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :any [:maybe :map] [:maybe :map] [:maybe :map]] [:map [:seon.render/hiccup :any] [:seon.render/units [:vector :map]]]]}
   [focus strip turn context]
   (let [{:keys [label] :as id} (focus-of focus)
@@ -2445,10 +2445,10 @@
       (when context (slot (:id context)))
       ;; an agent's: its strip and its turn are units, so its layout never moves: a step, a turn added or the first
       ;; turn patches them in place (a patch reaches only the elements the tab holds)
-      (when-not context (list (slot "d-steps") (slot "d-turn")))]
+      (when (or strip (not context)) (list (slot "d-steps") (slot "d-turn")))]
      :seon.render/units
      (cond-> []
-       (not context)
+       (or strip (not context))
        (conj {:id "d-steps" :input strip
               :html (h/html [:nav {:id "d-steps" :class "flex flex-wrap items-center gap-1 text-xs"}
                              (when (seq turns)

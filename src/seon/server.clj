@@ -348,14 +348,17 @@
   (let [ag (or ag (when-let [t (:task req)]
                     (or (:agent (first (live-run sys @(:conn sys) t)))
                         (:agent (attach! sys t {:client (:client req)})))))]
-    (if-let [{:keys [task env key]} (when ag (work-of sys ag))]
+    ;; an agent whose task is not running (parked, waiting for a message: root's session between requests) is read from its branch too
+    (if-let [{:keys [task env key parked? branch]} (when ag (or (work-of sys ag)
+                                                       (let [e (d/pull @(:conn sys) [:seon.agent/key :seon.agent/branch {:seon.agent/task [:seon.task/id]}] [:seon.agent/key (name ag)])]
+                                                         (when-let [t (get-in e [:seon.agent/task :seon.task/id])] {:task t :key (:seon.agent/key e) :branch (:seon.agent/branch e) :parked? true}))))]
       (let [a (get-in (c/state sys) [:agents ag])]
-        (if (= :busy (:status a))
+        (if (or parked? (= :busy (:status a)))
           ;; its one REPL is in an eval, which may never end (a test blocked on nothing): a read waits on no one, so root reads its branch
-          (let [db (:db @(c/branch-db sys (:branch a)))
+          (let [db (:db @(c/branch-db sys (or (:branch a) branch)))
                 basis {:commit (d/commit-id db) :task task :turn (inc (or (:seon.agent/turn (d/pull db [:seon.agent/turn] [:seon.agent/key key])) 0)) :max-turns 1 :origin :outside :agent key}
                 {:keys [messages]} (wire/render db basis)]
-            {:agent ag :task task :context (str (name ag) " is still running an eval" (when-let [t (:form (:last-op a))] (str ", at " t)) ": this is its branch as last committed, and nothing was taken.\n\n"
+            {:agent ag :task task :context (str (name ag) (if parked? " waits for a message" (str " is still running an eval" (when-let [t (:form (:last-op a))] (str ", at " t)))) ": this is its branch as last committed, and nothing was taken.\n\n"
                            (wire/read-text db basis messages (true? (:wire req))))})
           ;; an outside model's read is its turn, and takes its messages; anyone
           ;; else's read of an agent its model drives only looks
