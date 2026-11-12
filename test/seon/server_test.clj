@@ -626,7 +626,7 @@
   ;; alone, so each answer is one namespace's. Its target/ holds links to this checkout's binary, libraries and home, what bin/prove --root runs
   (let [here (seon.config/checkout)
         root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str here))])
-        tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-prove-client-" (random-uuid))) (.mkdirs)))
+        tmp (.getCanonicalPath (doto (java.io.File. (ts/mark-of (str (System/getProperty "java.io.tmpdir") "/seon-prove-client"))) (.mkdirs)))
         wt (str tmp "/wt")
         run (str (random-uuid))
         git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" here "-c" "user.name=t" "-c" "user.email=t@t" args)]
@@ -680,7 +680,7 @@
   ;; worktree of this tree with one test namespace of two green tests added (a run id in it, so no verdict is reused)
   (let [here (seon.config/checkout)
         root (ts/shared-root! ["--set" (str ":seon.config.source/root=" (pr-str here))])
-        tmp (.getCanonicalPath (doto (java.io.File. (str (System/getProperty "java.io.tmpdir") "/seon-two-askers-" (random-uuid))) (.mkdirs)))
+        tmp (.getCanonicalPath (doto (java.io.File. (ts/mark-of (str (System/getProperty "java.io.tmpdir") "/seon-two-askers"))) (.mkdirs)))
         wt (str tmp "/wt")
         run (str (random-uuid))
         git (fn [& args] (let [r (apply clojure.java.shell/sh "git" "-C" here "-c" "user.name=t" "-c" "user.email=t@t" args)]

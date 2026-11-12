@@ -196,6 +196,9 @@ remotechan
 remotedefaultpump
 remotefork
 flowerrorkept
+flowupdate
+flowreportdropped
+fiberquiescent
 hashsetbulkcost
 aotcachebudget
 providerfirstuse
