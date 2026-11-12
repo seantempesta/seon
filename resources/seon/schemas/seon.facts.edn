@@ -262,6 +262,14 @@
  ;; none of it, root's note of an agent's status on each eval, changes no answer it gives (docs/render.md#how-the-work-stands)
  :seon.agent/main-program [:uuid {:description "The newest commit of main whose program changed, as the agent last heard it; its status reads it. See docs/render.md#how-the-work-stands."}]
  :seon.agent/base-commit [:uuid {:description "The agent branch's merge base as it last heard it."}]
+ ;; its env and options, written by the fork that makes it and never changed (the one-unit spec, section 1): the point of its parent it
+ ;; was forked at, which with :seon.agent/branch is its kept reference {:branch :commit :t}, and what its process runs
+ :seon.agent/commit [:uuid {:description "The commit of its parent's branch the agent was forked at: its parent's state exactly, its writes committed first."}]
+ :seon.agent/t [:int {:description "The t of its parent's db the agent was forked at."}]
+ :seon.agent/model-turns [:boolean {:description "An option of the fork: true when the agent runs model turns (false for a test child)."}]
+ :seon.agent/render-walk [:boolean {:description "An option of the fork: true when the agent keeps a render walk over its ctx."}]
+ :seon.agent/interrupts [:boolean {:description "An option of the fork: true when an interrupt ends its running eval at a safe point; false, its parent kills it on stop."}]
+ :seon.agent/keeps-branch [:boolean {:description "An option of the fork: true when its branch outlives it; false for a test child, whose own branch, made at its parent's commit, is dropped at its stop."}]
  ;; the namespace its REPL is in, as its newest eval left it (seon.repl/record-tx: a datom when it moved), so a cold
  ;; build draws what the live page does; before any, where the REPL starts (seon.ctx/current-ns)
  :seon.agent/ns [:symbol {:description "The namespace the agent's REPL is in, as its newest eval left it."}]
@@ -314,6 +322,9 @@
                        [:seon.agent/ended-turn {:optional true} :seon.agent/ended-turn]
                        [:seon.agent/error {:optional true} :seon.agent/error] [:seon.agent/waste {:optional true} :seon.agent/waste]
                        [:seon.ctx/pattern {:optional true} :seon.ctx/pattern] [:seon.render/hiccup {:optional true} :seon.render/hiccup] [:seon.agent/opened {:optional true} :seon.agent/opened]
+                       [:seon.agent/commit {:optional true} :seon.agent/commit] [:seon.agent/t {:optional true} :seon.agent/t]
+                       [:seon.agent/model-turns {:optional true} :seon.agent/model-turns] [:seon.agent/render-walk {:optional true} :seon.agent/render-walk]
+                       [:seon.agent/interrupts {:optional true} :seon.agent/interrupts] [:seon.agent/keeps-branch {:optional true} :seon.agent/keeps-branch]
                        [:seon.agent/main-commit {:optional true} :seon.agent/main-commit] [:seon.agent/main-program {:optional true} :seon.agent/main-program] [:seon.agent/base-commit {:optional true} :seon.agent/base-commit]
                        [:seon.agent/ns {:optional true} :seon.agent/ns]]
  ;; a user: an agent with a person's name (docs/users.md#what-each-thing-is), its own schema by extending the agent's, so its
@@ -331,7 +342,7 @@
  ;; :seon.config.render/agent-tree-depth levels (a depth join), and below the last only their ids (its :seon.ctx/below option), so an entry says how
  ;; many are below it (docs/ctx.md#the-pattern)
  :seon.agent/entry [:map {:description "What an agent's entry reads where a user's pull joins the agents it started, to the configured depth (a depth join), and below the last level their ids alone (its :seon.ctx/below option). See docs/users.md#whats-on-screen." :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.agent/status :seon.agent/branch :seon.agent/turn :seon.agent/outcome :seon.agent/ended-turn :seon.agent/started-ms {:seon.agent/task [:seon.task/id :seon.task/plan :seon.task/outcome :seon.task/reason {:seon.task/started-by [:seon.user/name]}]} {[:seon.agent/_parent :seon.ctx/below [:db/id]] :seon.config.render/agent-tree-depth}]}]
- :seon.db/user-fact [:and {:seon.db/attributes true :seon.ctx/required {:seon.agent/_parent "the sessions you started"} :seon.render/hiccup seon.render.ui/agent :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.render/hiccup {:seon.agent/_parent :seon.agent/entry}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
+ :seon.db/user-fact [:and {:seon.db/attributes true :seon.ctx/required {:seon.task/_started-by "the tasks you started"} :seon.render/hiccup seon.render.ui/agent :seon.ctx/pattern [:seon.agent/key :seon.user/name :seon.render/hiccup {:seon.task/_started-by [:db/id {:seon.task/agent :seon.agent/entry}]}]} :seon.db/agent-fact [:map [:seon.user/name :seon.user/name] [:seon.user/focus {:optional true} :seon.user/focus]]]
  ;; ---- a citation: what an entity cites, an entity of its own (docs/references.md#an-entity-cites) ----
  ;; its content id, "<of> <target>": the citing entity's identity value (a task's :seon.task/id, an agent's
  ;; :seon.agent/key) and its target's (seon.ref/target-value: an address, a name, an id, a key or a path)
@@ -647,6 +658,8 @@
  :seon.process/running :string
  :seon.process/forked-ms :double
  :seon.process/ended-ms :int
+ ;; its OS exit status, written by its parent's proc from the process's end (:seon.process/end); why the agent ended is :seon.agent/error
+ :seon.process/exit [:int {:description "The OS exit status the process ended with, as its parent read it."}]
  ;; root observed it stalled (seon.agent-proc's stall check: a request in flight, no frame past the bound), with
  ;; what it waits on (the request root last sent it: its kind and form, a test run's test); retracted when its
  ;; next frame arrives or it ends. An open :stalled problem while it holds (seon.problems/stalled-agents)
@@ -656,6 +669,7 @@
                           [:seon.process/pid {:optional true} :seon.process/pid]
                           [:seon.process/running {:optional true} :seon.process/running]
                           [:seon.process/forked-ms {:optional true} :seon.process/forked-ms] [:seon.process/ended-ms {:optional true} :seon.process/ended-ms]
+                          [:seon.process/exit {:optional true} :seon.process/exit]
                           [:seon.process/stall {:optional true} :seon.process/stall]]
  ;; ---- a model call: one request to the model, on its own entity pointing at its agent (the turn is a
  ;; number on each record, docs/turn.md#the-turn-is-a-number: what a turn entity held is the model call's). Its reply, its

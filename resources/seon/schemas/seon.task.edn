@@ -137,13 +137,15 @@
                              ;; the process tests the work left to root's gate (neither red nor unknown)
                              [:deferred {:optional true} [:set :qualified-symbol]]
                              ;; the red tests that are main's, not this branch's change (red as base holds them): never a stray red
-                             [:main-red {:optional true} [:set :qualified-symbol]]]
+                             [:main-red {:optional true} [:set :qualified-symbol]]
+                             ;; whether the branch changed a program key or carried task content since its merge base (absent: not measured)
+                             [:changed? {:optional true} :boolean]]
  :seon.reconcile/reason [:enum {:description "Why the done rule says a task is not done (seon.reconcile/done-explain), one reason of :seon.reconcile/not-done; each read by a person and the model in its :seon.status/title words (docs/render.md#how-the-work-stands)."
                                 :seon.status/title {:open "still open" :no-proofs "no proof registered" :proof-red "proof red" :proof-unknown "proof has no verdict"
                                                     :regression "green on main, red here" :stray-red "red test that is no proof" :contract-gap "functions without a contract"
                                                     :unmerged "unmerged entries" :no-design "plan unchanged since the run began" :open-problem "problems to clear"
-                                                    :behind "judged before main moved"}}
-                         :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind]
+                                                    :behind "judged before main moved" :no-change "nothing changed on its branch since it began"}}
+                         :open :no-proofs :proof-red :proof-unknown :regression :stray-red :contract-gap :unmerged :no-design :open-problem :behind :no-change]
  :seon.reconcile/not-done [:map {:closed true :description "One reason a judged task is not done, as its :seon.task/reasons holds them: the reason, and what it is about (the test or var, the key of an unmerged entry, how many transactions main moved). See docs/tasks.md#the-done-rule."}
                           [:reason :seon.reconcile/reason]
                           [:symbol {:optional true} :qualified-symbol] [:key {:optional true} :string] [:behind {:optional true} pos-int?]]
@@ -211,4 +213,13 @@
  :seon.turn/end [:map {:closed true}
                  [:outcome :seon.agent/outcome] [:turns {:optional true} :int] [:model-calls {:optional true} :int] [:tokens {:optional true} :int]
                  [:results :seon.proof/results] [:uncontracted [:set :qualified-symbol]]
-                 [:reason {:optional true} :string] [:ms {:optional true} number?]]}
+                 [:reason {:optional true} :string] [:ms {:optional true} number?]]
+ ;; keys-schemas sweep
+ :seon.turn/next [:= {:description "The tag of a turn's answer that goes on: [:seon.turn/next state]; its end is [:seon.turn/end state outcome reason error]."} :seon.turn/next]
+ :seon.model/at [:tuple {:description "Where a tool call sits in a model's reply: [call-index part], by which its output streams to its place."} :int :int]
+ ;; keys-schemas sweep
+ :seon.task/accumulated [:map {:description "A task's plan and proofs accumulated along its needs, theirs first: what its agent works from."} [:plan :string] [:proofs :seon.task/proofs]]
+ :seon.task/blocked-by [:set {:description "On a task's summary, the needs of the task that are not done."} :seon.task/id]
+ :seon.task/eof [:= {:description "What a read of a tasks file answers at its end."} :seon.task/eof]
+ :seon.task/refused [:and {:description "The error a task file or a need refused with: the operation, and a message saying why."} :seon.error/base [:map [:seon.error/type [:= :seon.task/refused]]]]
+}

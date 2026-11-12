@@ -77,4 +77,6 @@
                      [:accepted {:optional true} [:map [:task :string] [:over [:vector {:gen/max 3} :seon.cost/over]] [:steeper [:vector {:gen/max 3} :seon.cost/fit]]]]
                      ;; a broken waiver, red: its :overrun names no task entry (:no-task), states no size (:no-size) or one
                      ;; that is not the proof's largest (:wrong-size, :largest the size measured)
-                     [:waiver-fault {:optional true} [:map [:fault [:enum :no-task :no-size :wrong-size]] [:task :string] [:n {:optional true} pos-int?] [:largest {:optional true} pos-int?]]]]}
+                     [:waiver-fault {:optional true} [:map [:fault [:enum :no-task :no-size :wrong-size]] [:task :string] [:n {:optional true} pos-int?] [:largest {:optional true} pos-int?]]]]
+ ;; keys-schemas sweep
+ :seon.cost/bound [:and {:description "In a function's metadata beside its :malli/schema, the cost bound of one call: a function of the same arguments answering {:ticks :bytes :calls} and :out. See docs/cost.md#a-bound-in-the-contract."} :seon.host/fn]}
