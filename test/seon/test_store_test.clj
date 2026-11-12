@@ -212,3 +212,22 @@
         (spit (str co "/target/process-store.path") other)
         (is (= other (ts/process-store co)) "a reader takes the recorded path, never one it derives"))
       (finally (seon.lib/remove-tree! co)))))
+
+;; docs/merging.md#verdicts-are-a-cache: the repository's program store is shared by checkouts at other keys at once (another
+;; Jolt build, another program schema), so another key's store is kept, never removed for being another's (a plan opening one
+;; failed "LMDB store does not exist" when each checkout removed the others', 2026-11-12); past
+;; :seon.config.proofs/program-stores-kept by use, the least recently used goes. T1: directories in a scratch dir.
+(deftest ^{:seon.test/estimate {:ticks 2000000}} the-shared-program-store-keeps-other-keys-stores
+  (let [dir (str (seon.config/checkout) "/target/tmp/shared-ps-" (random-uuid))
+        base (str dir "/ps")
+        mk (fn [k age] (let [f (java.io.File. (str base "-" k))] (.mkdirs f) (.setLastModified f (- (System/currentTimeMillis) (* age 60000))) f))
+        there? (fn [k] (.isDirectory (java.io.File. (str base "-" k))))]
+    (try
+      (mk "aaaaaaaa" 30) (mk "bbbbbbbb" 20)
+      (is (= (str base "-cccccccc") (ts/shared-program-store! base "cccccccc")) "its own path, base-<key>")
+      (is (and (there? "aaaaaaaa") (there? "bbbbbbbb")) "two other keys: both kept")
+      (mk "cccccccc" 10)
+      (ts/shared-program-store! base "dddddddd")
+      (is (not (there? "aaaaaaaa")) "a fourth key: the least recently used other store goes")
+      (is (and (there? "bbbbbbbb") (there? "cccccccc")) "the two most recently used others stay")
+      (finally (seon.lib/remove-tree! dir)))))
