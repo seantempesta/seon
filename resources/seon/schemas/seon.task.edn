@@ -211,4 +211,7 @@
  :seon.turn/end [:map {:closed true}
                  [:outcome :seon.agent/outcome] [:turns {:optional true} :int] [:model-calls {:optional true} :int] [:tokens {:optional true} :int]
                  [:results :seon.proof/results] [:uncontracted [:set :qualified-symbol]]
-                 [:reason {:optional true} :string] [:ms {:optional true} number?]]}
+                 [:reason {:optional true} :string] [:ms {:optional true} number?]]
+ ;; keys-schemas sweep
+ :seon.turn/next [:= {:description "The tag of a turn's answer that goes on: [:seon.turn/next state]; its end is [:seon.turn/end state outcome reason error]."} :seon.turn/next]
+ :seon.model/at [:tuple {:description "Where a tool call sits in a model's reply: [call-index part], by which its output streams to its place."} :int :int]}
