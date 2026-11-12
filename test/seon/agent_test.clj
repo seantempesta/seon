@@ -423,19 +423,20 @@
                 (lib/c-close w) (lib/c-close gr)
                 (try (agent/read-to-exit r pid)
                      (finally (lib/c-close r) (lib/c-close gw)))))]
-    (let [held (run false)
-          answer (agent/test-run-answer (:line held) (:status held) true (:held-by held))
-          [rep] (filter :seon.error/type (:reports answer))]
-      (is (= {:line result :held? true} (dissoc held :status :held-by)) "the child's exit ends the read though a process it forked holds the pipe")
+    (let [held (run false)]
+      (is (= {:line result :held? true} (dissoc held :status)) "the child's exit ends the read though a process it forked holds the pipe")
       (is (= {:exit 0} (:status held)) "and the child exited, not killed")
-      ;; 2026-11-12: agent-checks' first prove read {:error 1} with no report saying why, and no holder named
-      (is (= 1 (count (:held-by held))) (str "the one process holding the pipe is named: " (pr-str (:held-by held))))
-      (is (= :seon.test/pipe-held (:seon.error/type rep)) "and the run's answer names the held pipe beside what the child wrote")
-      (is (str/includes? (:message rep) (first (:held-by held))) "naming its holder")
-      (is (str/includes? (:seon.print/code (my.agent/prove-summary {} (assoc answer :pass 2 :reports (into [{:type :pass :var "#'a-test/t"}] (:reports answer)))))
-                         "✗ the run: ")
-          "and the prove's line says the run's error, never a red with no reason"))
+      (is (= [:seon.test/pipe-held] (keep :seon.error/type (:reports (agent/test-run-answer (:line held) (:status held) true))))
+          "and the run's answer names the held pipe beside what the child wrote"))
     (is (= {:line result :held? false} (dissoc (run true) :status)) "with FD_CLOFORK on its end, the child's exit is the pipe's end of file")))
+
+(deftest a-run-error-that-names-no-test-is-said-in-the-proves-line
+  ;; 2026-11-12: agent-checks' first prove read {:error 1} and printed no reason: a run's report naming no test (a child that
+  ;; died before a test began, a held pipe) is no test's failure, and the line said "red: 0 of 2 failed" with nothing under it
+  (let [run {:pass 2 :fail 0 :error 1 :reports [{:type :pass :var "#'a-test/t"} {:type :pass :var "#'a-test/u"}
+                                               {:type :error :exit {:signal 9} :message "test process died: {:signal 9}"}]}]
+    (is (str/includes? (:seon.print/code (my.agent/prove-summary {} run)) "✗ the run: test process died")
+        "the run's error is said")))
 
 (deftest a-test-childs-read-lets-the-agents-other-fibers-run
   ;; the recipe hang of 2026-10-28 (the scratch paper hang-2026-10-28-a1-prove (git history)): agent a1's test child

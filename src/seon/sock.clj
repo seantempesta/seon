@@ -74,22 +74,6 @@
         (c-fcntl fd F-SETFD (bit-or FD-CLOEXEC (c-fcntl fd F-GETFD 0))))
       [a b])))
 
-(defn holders
-  "The processes, other than this one, holding the peer end of socket fd: each as \"pid command\", read from lsof (a unix
-  socket's peer address, then every process with an fd at that address; ~75 ms, so only where a pipe is found held:
-  seon.agent/read-to-exit). Empty when lsof names none. See docs/machine.md#processes."
-  {:malli/schema [:=> [:cat :seon.lib/fd] [:vector :string]]}
-  [fd]
-  (let [me (str (lib/c-getpid))
-        peer (some #(when (str/starts-with? % "n->") (subs % 3))
-                   (str/split-lines (:out (lib/sh "lsof" "-n" "-P" "-a" "-p" me "-d" (str fd) "-F" "n"))))
-        pids (when peer
-               (first (reduce (fn [[acc p] l] (cond (str/starts-with? l "p") [acc (subs l 1)]
-                                                    (and (= l (str "d" peer)) (not= p me)) [(conj acc p) p]
-                                                    :else [acc p]))
-                              [[] nil] (str/split-lines (:out (lib/sh "lsof" "-n" "-P" "-U" "-F" "pd"))))))]
-    (into [] (comp (distinct) (map #(str % " " (str/trim (:out (lib/sh "ps" "-o" "command=" "-p" %)))))) pids)))
-
 (defn clofork!
   "Close fd in every child this process forks from now on."
   {:malli/schema [:=> [:cat :seon.lib/fd] :int]}
