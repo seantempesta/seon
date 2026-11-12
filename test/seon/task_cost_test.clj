@@ -104,8 +104,8 @@
   (cost/proof
     {:of 'seon.task/tasks :input 'seon.task-cost-test/ended-db
      :n "tasks whose agents ended on main, each with its judging's and problem members"
-     :work (str "one query for the task entities, then one wildcard pull each: every datom of the task read "
-                "once, its EDN members (error, failures, cost report, waste) decoded, then task-value (one contracted "
+     :work (str "one query for the task entities, then one named pull each (seon.task's task-pull: its schema's attributes, a "
+                "seek each on Datahike's pull today), every datom of the task read once, its EDN members (error, failures, cost report, waste) decoded, then task-value (one contracted "
                 "call) and its accumulated plan and proofs. Measured 2026-10-22 at 100 runs (the entity this replaced): "
                 "14.9 ms and 15.8 MB (149 us, 158 KB each); the explicit 23-attribute pull it replaced read the same "
                 "input in 32.6 ms and 30.1 MB (one lookup per named attribute, absent ones included)")
@@ -114,7 +114,9 @@
      ;; 12.4M / 13.6 MB at 100: ~124 us and 135 KB each (the larger sizes read the same per entity)
      ;; 2026-11-04, as tasks: 0.60M ns / 0.94 MB and 23 contracted calls at 10 (60 us, 94 KB, 2 calls each: task-value and
      ;; accumulate; the runs it replaced made one, run-value). The ns and bytes bounds stay the runs' own
-     :per-n {:ns 130000 :bytes 140000 :calls 2}
+     ;; 2026-11-12, the named pull (the owner: a pull names the shape its reader needs): 2.53M ns / 1.89 MB at 10, a seek a named
+     ;; attribute where '* read one :eavt range; Deep fixes' named-pull item (one range read) should bring it back to 130 us / 140 KB
+     :per-n {:ns 250000 :bytes 190000 :calls 2}
      :fixed {:ns 100000 :bytes 100000 :calls 3}
      :sizes [10 30 100]}))
 

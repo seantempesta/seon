@@ -22,7 +22,10 @@
           (into (task/create-tx db [(cond-> {:seon.task/ns 'r3 :seon.task/name nm :seon.task/plan "p"
                                              :seon.task/proofs #{(symbol "app.proofs" (str "p" (.nextInt rng 30) "-test"))}}
                                       (seq needs) (assoc :seon.task/needs needs)
-                                      (zero? (.nextInt rng 3)) (assoc :seon.task/kind :merge))])
+                                      ;; a merge task is on the branch of a task it needs (a merge step is read from data, never the kind)
+                                      (zero? (.nextInt rng 3))
+                                      (-> (assoc :seon.task/kind :merge)
+                                          (cond-> (seq needs) (assoc :seon.task/branch (let [n (first needs)] (or (:seon.task/branch (d/pull db [:seon.task/branch] [:seon.task/id n])) (task/default-branch n)))))))])
                 (task/execution-tx [(str "r3/" nm)] :running)))
       4 (when t (task/env-tx t {:max-turns (inc (.nextInt rng 9))}))
       5 (seon.test-store/root-tx {:seon.config.agent/max-running (inc (.nextInt rng 40)) :seon.config.merge/max-running 1})

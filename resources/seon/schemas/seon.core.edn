@@ -139,7 +139,7 @@
  :seon.graph/decl [:map [:procs [:map-of :keyword [:map [:proc :qualified-symbol] [:args {:optional true} :map] [:chan-opts {:optional true} :map]]]]
                     [:fx {:optional true} [:map-of :keyword :map]] [:conns [:vector [:tuple [:tuple :keyword :keyword] [:tuple :keyword :keyword]]]]]
  :seon.system/spawn-opts [:maybe [:map [:branch {:optional true} :seon.db/branch] [:task {:optional true} [:maybe :string]] [:run {:optional true} [:maybe :string]]
-                                     ;; the session's agent the process continues (seon.task/session-key)
+                                     ;; the session's agent the process continues (seon.task/agent-key)
                                      [:key {:optional true} :string]
                                      ;; evals run on its REPL queue before anything else, intent and code each, recorded as evals any
                                      ;; reader reads (docs/turn.md#an-eval-can-be-inserted)

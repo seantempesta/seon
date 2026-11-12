@@ -1130,12 +1130,11 @@
   [db] (pdb/index-of {:forms (schema-changes db)}))
 
 (defn schema-registry
-  "The registry an evaluation on db binds as malli.registry/*registry*: the binary's forms
-  with changes (schema-changes) recompiled whole, since a schema naming a changed key keeps
-  the old one compiled in; the built registry itself when nothing changed (what a binding of it
-  answers, and what a merge's declarations are read from: seon.merge/merge-tx)."
+  "The registry an evaluation on db binds as malli.registry/*registry*: the binary's registry with changes (schema-changes)
+  and the forms that name them compiled again (contract/registry-with); the built registry itself when nothing changed (what a
+  binding of it answers, and what a merge's declarations are read from: seon.merge/merge-tx)."
   {:malli/schema [:=> [:cat [:map-of :qualified-keyword :any]] :seon.host/registry]}
-  [changes] (if (empty? changes) contract/registry (contract/registry-of (merge contract/forms changes))))
+  [changes] (if (empty? changes) contract/registry (contract/registry-with changes)))
 
 (defn schema-declarations
   "The Datahike declarations registry reg derives that db does not hold as declared (a

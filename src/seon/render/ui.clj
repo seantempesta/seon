@@ -338,7 +338,7 @@
   "A page's focus as its bar and its head name it: {:address :label :view}. Root's is :root. An agent's is a map of its address
   (its key, boot/id, the one name of a session that survives a root's restart: every link of its pages is /agent/<address>), its label
   (what a person calls it) and the view's own address (the name this page was asked by, which its feed and toggles name); anything
-  else is its name for each. See docs/render.md#a-sessions-address-and-the-agents-list."
+  else is its name for each. See docs/render.md#an-agents-address-and-the-agents-list."
   {:malli/schema [:=> [:cat :any] [:map [:address :string] [:label :string]]]}
   [focus]
   (cond (map? focus) (merge {:view (keyword (:address focus))} focus)
@@ -1554,15 +1554,15 @@
 (defn system-message
   "The agent's system message (a component over ctx and the db): the doc sections it links (:seon.agent/system), else the system prompt (seon.ctx.wire/agent-system-text), for the person a fold. See
   docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
-  {:seon.render/style ":is(.system-message, .example-session, .proof-story) {font-size: 0.75rem; line-height: 1rem; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
+  {:seon.render/style ":is(.system-message, .example, .proof-story) {font-size: 0.75rem; line-height: 1rem; }" :malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   [:details {}
    [:summary {:class "muted" :wire/for "page"} "system message"]
    [#'markdown (wire/agent-system-text db c)]])
 
-(defn example-session
+(defn example
   "Example session k (a component over the db, named by its key), as the model reads it and, folded, the person: its opening, what it asked, its records by the same hiccup as the agent's own, drawn as of its last t (the session never changes after it). See
-  docs/tasks.md#a-task-names-example-sessions."
+  docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.db/db :seon.host/db] [:key :string]]]] :any]}
   [{db0 :seon.db/db k :key ix :seon.render/index}]
   (let [t (session/example-t db0 k)
@@ -1586,16 +1586,16 @@
                             (map step (remove model? evals)))))
             [[:p {} "</session>"]]))))
 
-(defn session-examples
-  "The example sessions the agent reads before its own (a component over ctx and the db), each a component: `example-session`. See docs/tasks.md#a-task-names-example-sessions."
+(defn examples
+  "The example sessions the agent reads before its own (a component over ctx and the db), each a component: `example`. See docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat [:and :seon.render/opts [:map [:seon.ctx/ctx :map] [:seon.db/db :seon.host/db]]]] :any]}
   [{c :seon.ctx/ctx db :seon.db/db}]
   (when-let [ks (seq (session/session-examples db c))]
-    (into [:div] (for [k ks] [#'example-session {:key k}]))))
+    (into [:div] (for [k ks] [#'example {:key k}]))))
 
 (declare agent-parts conversation-list tiles)
 
-(declare standing task-name session-address tone-class members started-agents agents-list)
+(declare standing task-name agent-address tone-class members started-agents agents-list)
 
 (defn- last-exchange
   "The newest message a person sent agent e (a seek of :seon.message/to, the newest by eid, from a :seon.user/name) and its task
@@ -1646,7 +1646,7 @@
         kids (members as)
         [shown below] ((juxt filter remove) #(some? (:seon.agent/key (ratom/untracked %))) kids)]
     [:section {:wire/for "page" :data-standing (name (where-stands stands))}
-     [:a {:href (str "/agent/" (session-address a)) :title (str/join " · " (remove nil? [(:seon.agent/key a) (:text stands) (:seon.task/id t)]))}
+     [:a {:href (str "/agent/" (agent-address a)) :title (str/join " · " (remove nil? [(:seon.agent/key a) (:text stands) (:seon.task/id t)]))}
       [:span {:class "flex items-baseline gap-2"}
        [:span {:class (if (:lit? stands) "text-signal" "muted")} (if (:lit? stands) "●" "○")]
        [:span {:class "min-w-0 flex-1 truncate font-semibold text-text-100"}
@@ -1712,7 +1712,7 @@
     ;; holds :seon.user/name, and nothing starts one: root's sessions hold it, as root holds every agent) is the person Seon works for
     (if-let [n (get c :seon.user/name)]
       [:section {:wire/for "page" :data-standing "person"}
-       [:a {:href (str "/agent/" (session-address {:seon.agent/key (get c :seon.agent/key)})) :title (str (get c :seon.agent/key))}
+       [:a {:href (str "/agent/" (agent-address {:seon.agent/key (get c :seon.agent/key)})) :title (str (get c :seon.agent/key))}
         [:span {:class "flex items-baseline gap-2"} [:span {:class "min-w-0 flex-1 truncate font-semibold text-text-100"} n]
          [:span {:class "shrink-0 text-2xs muted"} "the person Seon works for"]]]
        ;; the agents it started, each by its own entry (root's session is the page itself, not listed)
@@ -1940,7 +1940,7 @@
 
 (defn- started-agents
   "The agents join value v holds (`members`), root's session left out: root's own line (`root-side`) is its entry in the agents list, and
-  the page it is on needs no entry of itself. Its key is the reserved one root's page names (seon.render.proc/location). See docs/users.md#roots-session."
+  the page it is on needs no entry of itself. Its key is the reserved one root's page names (seon.render.proc/location). See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :any] [:sequential :any]]}
   [v] (remove #(= "root" (:seon.agent/key (ratom/untracked %))) (members v)))
 
@@ -2035,7 +2035,7 @@
         turn (or (:seon.agent/turn plain) 0)]
     [:ol {:id "c-rows"}
      [#'system-message {}]
-     [#'session-examples {}]
+     [#'examples {}]
      (when (:seon.agent/task plain) [#'chat-ask {:wire/for "page"}])
      ;; one past the turn in force: what was taken for the turn that reads it comes before that turn begins (seon.turn/take!, tell-error!); a turn no record names draws nothing
      (for [n (range 0 (+ 2 turn))] [#'conversation-turn (let [ms (get placed n (when (= n (inc turn)) (:pending placed)))] (cond-> {:key n} ms (assoc :messages ms)))])
@@ -2069,7 +2069,7 @@
   message); else the agent's own end (:seon.agent/outcome, counted while the agent is at the turn it ended on); else its
   process's status (an agent with none of them, a person's like the user, reads nothing: its state is :status/none). A process that is
   gone is never working, and a message starts one that waits. {:state :text :detail :reason :tone :lit?}: the state (:task/cap, :end/green, :status/idle), the words, the
-  turns a cap spent, the reason (the task's, else the agent's end's) and the tone (tone-class); lit while it works. See docs/render.md#a-sessions-address-and-the-agents-list."
+  turns a cap spent, the reason (the task's, else the agent's end's) and the tone (tone-class); lit while it works. See docs/render.md#an-agents-address-and-the-agents-list."
   {:malli/schema [:=> [:cat [:maybe :map] [:maybe :map]] [:map [:state :keyword] [:text :string] [:tone :keyword] [:lit? :boolean]
                                                            [:detail {:optional true} :string] [:reason {:optional true} :string]]]}
   [a t]
@@ -2189,9 +2189,9 @@
   (cond (:seon.task/id t) (task-title t)
         (:seon.agent/branch a) (kname (:seon.agent/branch a))))
 
-(defn session-address
+(defn agent-address
   "The name of an agent's page: its key (:seon.agent/key, its id's name), the one name of a session that survives a root's restart,
-  so a link to it is a bookmark. An agent without a key (a map the page is shown) is nothing to link. See docs/render.md#a-sessions-address-and-the-agents-list."
+  so a link to it is a bookmark. An agent without a key (a map the page is shown) is nothing to link. See docs/render.md#an-agents-address-and-the-agents-list."
   {:malli/schema [:=> [:cat :map] :string]}
   [a] (:seon.agent/key a))
 
@@ -2536,7 +2536,7 @@
                     example (some (fn [[k x]] (when (= :example k) x)) rs)
                     border (get role-looks role)]
                 [:details (cond-> {:class (str "group rounded-sm border-l-4 bg-base-950 px-2 py-1 " border)
-                                   :data-role role :data-new (str new?) :data-session (when example example)
+                                   :data-role role :data-new (str new?) :data-example (when example example)
                                    (keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" u "&open=' + el.open)")}
                             open? (assoc :open true))
                  [:summary {:class "flex cursor-pointer items-baseline gap-2"}

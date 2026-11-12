@@ -12,7 +12,7 @@
 
 (defn examples-of
   "The keys of the example sessions task id names (:seon.task/examples, agents keyed \"example/<id>\") on db, in key order; none
-  when the task names none. See docs/tasks.md#a-task-names-example-sessions."
+  when the task names none. See docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:vector :string]]}
   [db id]
   (vec (sort (d/q '[:find [?k ...] :in $ ?id :where [?t :seon.task/id ?id] [?t :seon.task/examples ?x] [?x :seon.agent/key ?k]] db id))))
@@ -30,13 +30,13 @@
                                          [:find (max ?tx) . :in $ ?a :where [?m :seon.model-call/agent ?a] [?m :seon.model-call/reply _ ?tx]]]))))
 
 (defn session-open
-  "What opens the agent's own session, id: every conversation opens on a user message, never on a blank assistant one. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
+  "What opens agent id's own work: every conversation opens on a user message, never on a blank assistant one. See docs/render.md#the-models-context-a-cached-prefix-then-the-turn."
   {:malli/schema [:=> [:cat :string] :string]}
-  [id] (str "<session id=\"" id "\" from=\"seon\">\nYour own session: the work you are asked to do."))
+  [id] (str "<agent id=\"" id "\" from=\"seon\">\nYour own work: the work you are asked to do."))
 
 (defn task-begins
   "What an agent reads where its calls change task, at the first call of task id after the calls of task before: the task before
-  has ended, and which is its task now, on its page (seon.task/session-key: a task needing the one it finished, on its branch, is
+  has ended, and which is its task now, on its page (seon.task/agent-key: a task needing the one it finished, on its branch, is
   worked by the same agent). See docs/tasks.md#a-refine-curates-its-own-task."
   {:malli/schema [:=> [:cat :string :string] :string]}
   [before id] (str "<task id=\"" id "\" from=\"seon\">\nYour task " before " has ended. Your task is now " id ": its plan is on your page."))
@@ -49,7 +49,7 @@
 
 (defn session-examples
   "The keys of the example sessions agent record c reads: those of the task its first model turn worked (a later stage of the session keeps the examples it began with), else of its task now. See
-  docs/tasks.md#a-task-names-example-sessions."
+  docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat :seon.host/db :map] [:vector :string]]}
   [db c]
   (let [first-turn (some->> (ratom/realize (:seon.agent/key c)) (ctx/call-of db 1))
@@ -62,19 +62,19 @@
 
 (def ^:private session-kinds
   "The kinds of record `session-records` answers, each with the attributes that name it, its agent and its model call. See
-  docs/tasks.md#a-task-names-example-sessions."
+  docs/tasks.md#a-task-names-examples."
   {:seon.db/eval-fact [:seon.eval/id :seon.eval/agent :seon.eval/call]
    :seon.message/fact [:seon.message/id :seon.message/to nil]
    :seon.model-call/fact [:seon.model-call/id :seon.model-call/agent nil]})
 
 (defn- in-example
   "Id x of a record as example ek keeps it: the content id of the two (seon.lib/id), so two examples of one session keep
-  their ids apart and every id stays one any Clojure reader and any provider takes. See docs/tasks.md#a-task-names-example-sessions."
+  their ids apart and every id stays one any Clojure reader and any provider takes. See docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat :string :string] :string]}
   [ek x] (lib/id (lib/digest (str ek "/" x))))
 
 (defn- example-record
-  "An eval m as example ek keeps it: its call id in the example's (`in-example`; a handle names its answer: it stays). See docs/tasks.md#a-task-names-example-sessions."
+  "An eval m as example ek keeps it: its call id in the example's (`in-example`; a handle names its answer: it stays). See docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat :string :map] :map]}
   [ek m]
   (cond-> m
@@ -83,14 +83,14 @@
 (defn- who
   "The agent key a sender or evaluator x names, as a record holds it: the joined entity's :seon.agent/key; a string, as a session
   recorded before senders were refs holds it (a store kept from then: an example exported from it), the key it is, but \"root\" and
-  \"seon\", which were the system's names; nil for the system. See docs/tasks.md#a-task-names-example-sessions."
+  \"seon\", which were the system's names; nil for the system. See docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat :any] [:maybe :string]]}
   [x] (cond (string? x) (when-not (#{"root" "seon"} x) x) (map? x) (:seon.agent/key x) :else nil))
 
 (defn- example-rekey
   "Record m of one of `session-kinds` (its id, agent and model call attributes id-k, agent-k and call-k) as example ek keeps it: its db
   attributes dropped, its id the example's (`in-example`; a model call's seon.lib/call-id of ek and its turn), its agent ek's, its model call ek's of its turn, an eval as `example-record` has it. See
-  docs/tasks.md#a-task-names-example-sessions. Its sender or evaluator (:seon.message/from, :seon.eval/by, as its pull joins them) is that entity by its identity (seon.task/sender, an upsert, so it resolves where the example is loaded): the
+  docs/tasks.md#a-task-names-examples. Its sender or evaluator (:seon.message/from, :seon.eval/by, as its pull joins them) is that entity by its identity (seon.task/sender, an upsert, so it resolves where the example is loaded): the
   original agent itself, orig, is ek; another agent (a user) keeps its key; the system stays the system; a string, from a session recorded before
   senders were refs, is read by `who`."
   {:malli/schema [:=> [:cat :string :string :map [:tuple :qualified-keyword :qualified-keyword [:maybe :qualified-keyword]]] :map]}
@@ -108,7 +108,7 @@
   "The conversation of agent record c on db, [record kind] in its order (turn by turn: the members it took, its reply, its evals). A record keeps the turn it names as :turn.
   A member the turn took (seon.ctx/placed-messages: a message, or any other history join's member) is recorded as the entity it is: its own
   attributes less :db/id and :at, its kind its entity schema as the entity index ix reads it (seon.render/entity-schema), so one of a kind an
-  example does not hold is `session-tx`'s refusal naming it, never a message. See docs/tasks.md#a-task-names-example-sessions."
+  example does not hold is `session-tx`'s refusal naming it, never a message. See docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat :map :map :seon.host/db] [:vector [:tuple :map [:maybe :qualified-keyword]]]]}
   [ix c db]
   (let [placed (ctx/placed-messages ix c)]
@@ -130,7 +130,7 @@
 
 (defn- session-request
   "The request agent a answered, for an example: its task's plan, else its own description; nil when it has neither
-  (a blank one is none). See docs/tasks.md#a-task-names-example-sessions."
+  (a blank one is none). See docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat :seon.host/db :int] [:maybe :string]]}
   [db a]
   (->> [(:seon.task/plan (:seon.agent/task (d/pull db [{:seon.agent/task [:seon.task/plan]}] a)))
@@ -147,7 +147,7 @@
   are kept, an eval the harness made in the agent is not; each other holds one record,
   re-keyed under the example's key (`example-rekey`: ids and call ids,
   so none meets a live agent's, nor another example's). Pure data: written with pr-str, read back,
-  `my.root/load-example!` transacts it. See docs/tasks.md#a-task-names-example-sessions."
+  `my.root/load-example!` transacts it. See docs/tasks.md#a-task-names-examples."
   {:malli/schema [:=> [:cat :seon.host/db :string :string]
                   [:or [:vector [:vector :map]] :seon.ctx/session-refused]]}
   [db key id]

@@ -239,3 +239,16 @@
                (catch clojure.lang.ExceptionInfo e (:seon.error/message (ex-data e))))]
     (is (clojure.string/includes? (str m) ":no-such-reason") "the value it refused")
     (is (clojure.string/includes? (str m) ":unreadable") "and what it was held to")))
+
+;; docs/checks.md#contracts-armed-at-definition: a branch that changes a schema gets the binary's registry with that key and the
+;; forms naming it compiled again, every other form read from the built registry as it is; a whole rebuild compiled all ~811
+;; forms for one change (2.2M ticks, 16.7 MB; :seon.task/kind's change is 40 forms, 253k ticks, measured 2026-11-12)
+(deftest a-changed-schema-recompiles-only-what-names-it
+  (let [kind [:enum :work :merge :whole :design :implement :user :probe]
+        reg (contract/registry-with {:seon.task/kind kind})
+        kind-err? (fn [r] (boolean (some #(= [:seon.task/kind] (:in %)) (:errors (m/explain :seon.task/own {:seon.task/kind :probe} {:registry r})))))]
+    (is (m/validate :seon.task/kind :probe {:registry reg}) "the changed key takes its new form")
+    (is (and (kind-err? contract/registry) (not (kind-err? reg))) "a form naming it sees the new form, as a whole rebuild's would")
+    (is (identical? (malli.registry/schema contract/registry :seon.render/hiccup) (malli.registry/schema reg :seon.render/hiccup))
+        "a form that names nothing changed is the built registry's own, never compiled again")
+    (is (thrown? clojure.lang.ExceptionInfo (contract/registry-with {:seon.task/kind [:enum-no-such :a]})) "a changed form that does not compile throws, as registry-of does")))

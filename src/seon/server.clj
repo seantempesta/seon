@@ -161,7 +161,7 @@
                   fresh? (assoc :branch (keyword (str (name (task/default-branch id)) "-r" (random-uuid))))
                   client (assoc :holder client))
             ;; the session's agent continues (docs/turn.md#parked)
-            k (when-not (or fresh? clone-of) (task/session-key db id))
+            k (when-not (or fresh? clone-of) (task/agent-key db id))
             opts (cond-> {:branch (:branch env) :task id} k (assoc :key k))
             r (if clone-of @(c/clone! sys clone-of opts) @(c/call! sys (c/request 'spawn! nil opts nil)))
             ag (:id r)]

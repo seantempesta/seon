@@ -350,7 +350,7 @@
                                                             {:seon.process/id "b0/a1/5" :seon.process/agent [:seon.agent/key "b0/a1"] :seon.process/running "(work!)"}])
           db (d/db-with db (seon.task/earlier-agents-tx db))]
       (is (= [:dead nil] [(:seon.agent/status (d/entity db [:seon.agent/key "b0/a1"])) (:seon.process/running (d/entity db [:seon.process/id "b0/a1/5"]))]))))
-  ;; docs/users.md#roots-session: root's own session (key "root") outlives a boot and keeps its link to root, as the user does, so root's
+  ;; docs/users.md#roots-agent: root's own session (key "root") outlives a boot and keeps its link to root, as the user does, so root's
   ;; pull through it (:seon.agent/root, then :seon.agent/_root) reaches its agents after a restart, an earlier boot's among them (root's page holds every boot's).
   ;; Red before: every agent but a user lost the link, root's session too, and an earlier boot's sessions were reached only by a scan
   (testing "a new boot keeps root's session and an earlier boot's agent linked to root"

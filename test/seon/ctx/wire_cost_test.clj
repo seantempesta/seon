@@ -17,7 +17,7 @@
                                     :ms 0.5 :ticks 1000 :bytes 4096}}
      :seon.db/eval-fact (inc i)]))
 
-(defn session-of
+(defn agent-named
   "The input at n: a main db holding a session of n evals by agent b/a1 (as a
   woken or loaded session's first request reads it cold), each record production-shaped (item),
   and the agent's entity id."
@@ -31,7 +31,7 @@
     [db (:db/id (d/entity db [:seon.agent/key "b/a1"]))]))
 
 (defn- turn-tx
-  "Turn t of session-of's agent as production writes it: its eval i's model call with the reply that holds it, and a message taken at every other turn, delivered in the same transaction as the call (so it reads at that turn)."
+  "Turn t of agent-named's agent as production writes it: its eval i's model call with the reply that holds it, and a message taken at every other turn, delivered in the same transaction as the call (so it reads at that turn)."
   {:malli/schema [:=> [:cat nat-int?] [:vector :map]]}
   [i]
   (let [t (inc i) call #(seon.task/call-ref "b/a1" t)]
@@ -39,9 +39,9 @@
       (even? i) (conj {:seon.message/id (str "m" i) :seon.message/to [{:seon.agent/key "b/a1"}] :seon.message/from {:seon.agent/key "owner"} :seon.message/body (str "How is part " i "?")}))))
 
 (defn records-of
-  "The input at n of seon.ctx.wire/request: the agent's ctx value over session-of's db, as a request reads it, each turn production-shaped (`turn-tx`)."
+  "The input at n of seon.ctx.wire/request: the agent's ctx value over agent-named's db, as a request reads it, each turn production-shaped (`turn-tx`)."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map :seon.host/db]]}
-  [n] (let [[db e] (session-of n)
+  [n] (let [[db e] (agent-named n)
             db (reduce (fn [db i] (d/db-with db (turn-tx i))) db (range n))]
         [(:tree (seon.ctx/build (seon.db/index) db e :b)) db]))
 
@@ -131,7 +131,7 @@
   so the proof's request prints that one new record against the n read before, as a turn's does."
   {:malli/schema [:=> [:cat pos-int?] [:tuple :map]]}
   [n]
-  (let [[db0 a] (session-of (inc n))
+  (let [[db0 a] (agent-named (inc n))
         db (reduce (fn [db i] (d/db-with db (turn-tx i))) db0 (range n))
         cell (volatile! db)
         c (seon.ctx/build (seon.db/index) db a :b)

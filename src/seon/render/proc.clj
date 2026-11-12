@@ -268,12 +268,12 @@
   {:malli/schema [:=> [:cat :keyword] :string]}
   [k] (str/replace-first (str k) ":" ""))
 
-(defn- session-of
+(defn- agent-named
   "The newest agent entity on main db that address names, nil when it names none: the one resolver of an agent's page,
   by whichever name a person holds, the stable one first. Its key (:seon.agent/key, boot/id: the session, which stays
   when a root restarts), its id in this boot (:a3, or the session's agent a process of this boot continues), its task's id, its
   branch (:task-x, or main/task-x), else, as an id on main (the link /agent/main/<name>), the agent of that id that has no
-  branch: its record is main's. Entity ids are issued in the order written, so the newest is the largest. See docs/render.md#a-sessions-address-and-the-agents-list."
+  branch: its record is main's. Entity ids are issued in the order written, so the newest is the largest. See docs/render.md#an-agents-address-and-the-agents-list."
   {:malli/schema [:=> [:cat :seon.host/db :string] [:maybe pos-int?]]}
   [db address]
   (let [newest (fn [q & args] (apply d/q q db args))
@@ -289,7 +289,7 @@
           (when-let [e (eid [:seon.agent/key n])] (when (nil? (:seon.agent/branch (d/entity db e))) e))))))
 
 (defn- location
-  "The entity view names on main db: root's for :root, the agent a keyword address names for an agent's page (session-of), else the entity
+  "The entity view names on main db: root's for :root, the agent a keyword address names for an agent's page (agent-named), else the entity
   id it is; nil when main names none (no boot fact yet, or no agent of that address). See docs/render.md#the-page."
   {:malli/schema [:=> [:cat :seon.host/db :any] [:maybe pos-int?]]}
   [db view]
@@ -301,7 +301,7 @@
         (= :home view) (let [u (:seon.system/signed-in (d/entity db [:seon.system/id :root])) f (:seon.user/focus u)]
                          ;; a focused task is its agent's page once its agent exists
                          (when u (or (:db/id (if (:seon.task/id f) (:seon.task/agent f) f)) (location db :root))))
-        (keyword? view) (session-of db (address-of view))
+        (keyword? view) (agent-named db (address-of view))
         :else view))
 
 (defn- focus-tx

@@ -30,13 +30,13 @@
 (defn request-sentence
   "A person's request text as its first sentence, as written: up to a . ! or ? before a space or the end (a dot inside a name,
   demo.math/half, is part of it), else the first line. What a request task is named by (`request-words`) and titled by. See
-  docs/users.md#roots-session."
+  docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :string] :string]}
   [text] (str/trim (re-find #"(?:[^.!?\n]|[.!?](?=[^\s.!?]))*" (str/triml text))))
 
 (defn request-words
   "The name a request's text gives its task: its first sentence's words (`request-sentence`), lower case, joined by -; \"work\" for none.
-  seon.system/request-name numbers it when the name is taken. See docs/users.md#roots-session."
+  seon.system/request-name numbers it when the name is taken. See docs/users.md#roots-agent."
   {:malli/schema [:=> [:cat :string] :string]}
   [text] (str/join "-" (or (seq (re-seq #"[a-z0-9]+" (str/lower-case (request-sentence text)))) ["work"])))
 
@@ -64,6 +64,27 @@
   [db id]
   (let [t (d/pull db [:seon.task/id :seon.task/branch {:seon.task/_needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id])]
     (merges? (assoc t :seon.task/id id) (vec (:seon.task/_needs t)))))
+
+(defn merge-step?
+  "Whether task t is the merge step of a task it needs, by data, never its kind: when one of needs, the tasks t needs (each
+  {:seon.task/id :seon.task/branch}, a branch its own, else `default-branch` of its id), is on t's own branch, and none of needers,
+  the tasks that need t, is (`merges?`): the last task on its branch, after another. `merges?` says a task merges its branch; this
+  says the branch holds another task's work. A task between two on its branch (a staged request's implement, after its design and
+  before its merge) is neither: it leaves the merge to the one that follows. See docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat [:map [:seon.task/id :seon.task/id]] [:sequential [:map [:seon.task/id :seon.task/id]]]
+                       [:sequential [:map [:seon.task/id :seon.task/id]]]] :boolean]}
+  [t needs needers]
+  (let [br (fn [x] (or (:seon.task/branch x) (default-branch (:seon.task/id x))))]
+    (boolean (and (merges? t needers) (some #(= (br %) (br t)) needs)))))
+
+(defn merge-step-on?
+  "`merge-step?` of task id as db holds it: its branch, the tasks it needs and the tasks that need it, one pull. See
+  docs/merging.md#a-branch-lands-with-binland."
+  {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] :boolean]}
+  [db id]
+  (let [t (d/pull db [:seon.task/id :seon.task/branch {:seon.task/needs [:seon.task/id :seon.task/branch]}
+                      {:seon.task/_needs [:seon.task/id :seon.task/branch]}] [:seon.task/id id])]
+    (merge-step? (assoc t :seon.task/id id) (vec (:seon.task/needs t)) (vec (:seon.task/_needs t)))))
 
 (defn default-branch
   "The branch a task's runs check out when it names none: task-<ns>-<name>."
@@ -127,13 +148,14 @@
 
 (defn task-cites
   "What task id's page draws of what it cites, read on db: its own cites, then each need's (one level, a
-  merge task's left out, as the task-fact's :needs join holds them), each target once at the strongest depth
+  merge step's left out, as the task-fact's :needs join holds them), each target once at the strongest depth
   it is cited at, in that order. What a reader that is no draw takes (my.task/data, the turn's waste log);
   the page reads the same from @ctx. See docs/references.md#task-references."
   {:malli/schema [:=> [:cat :seon.host/db :seon.task/id] [:vector :map]]}
   [db id]
   (let [e (pdb/eid db :seon.task/id id)
-        needs (when e (sort-by :seon.task/id (remove #(= :merge (:seon.task/kind %)) (map #(d/pull db [:db/id :seon.task/id :seon.task/kind] (:v %)) (d/datoms db :eavt e :seon.task/needs)))))
+        pull-need #(d/pull db [:db/id :seon.task/id :seon.task/branch {:seon.task/needs [:seon.task/id :seon.task/branch]} {:seon.task/_needs [:seon.task/id :seon.task/branch]}] (:v %))
+        needs (when e (sort-by :seon.task/id (remove #(merge-step? % (vec (:seon.task/needs %)) (vec (:seon.task/_needs %))) (map pull-need (d/datoms db :eavt e :seon.task/needs)))))
         cs (concat (cites-of db e) (mapcat #(cites-of db (:db/id %)) needs))
         target #(get-in % [:seon.cite/target :db/id])
         by (group-by target cs)]
@@ -342,7 +364,7 @@
   {:malli/schema [:=> [:cat [:maybe [:sequential :any]]] [:maybe :any]]}
   [ps] (some->> (seq (filter :seon.process/forked-ms ps)) (apply max-key :seon.process/forked-ms)))
 
-(defn session-key
+(defn agent-key
   "The agent key of task id's session on db, or nil when none of its chain has had an agent: the
   session is id and the tasks on its branch it needs, transitively (a request's stages, a work
   task and its merge: design agent-loop section 1a), and its agent is the newest started among
@@ -510,7 +532,7 @@
 
 (defn start-tx
   "Agent `agent` (its id; nil: root refused the spawn, and no agent exists) begins task id in root's boot, its turn budget raised by raise (a wake's allowance) turns: the task's
-  outcome :running from what it was, naming the agent (its id's name is its key, so a session's agent that continues keeps it, seon.task/session-key), the judged attributes cleared; the agent's entity (key, task, branch and the rest of its environment,
+  outcome :running from what it was, naming the agent (its id's name is its key, so a session's agent that continues keeps it, seon.task/agent-key), the judged attributes cleared; the agent's entity (key, task, branch and the rest of its environment,
   its boot and when it started, and who started the task now holding it, :seon.agent/agents), its turn budget set when it is new (a raised budget stays, docs/turn.md#the-cap) and raised by raise in the same write.
   A refused spawn is the task's outcome :refused with root's reason and error, and no agent."
   {:malli/schema [:function [:=> [:cat :seon.host/db :seon.task/id :string [:maybe :keyword] :seon.task/env :int] [:vector :any]]
@@ -620,7 +642,20 @@
 
 ;; ---- the reader ------------------------------------------------------------------
 
-(def ^:private task-pull '[* {:seon.task/needs [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}])
+(def ^:private stated-attributes
+  "The task attributes a declaration states (its members, config flattened), as stored."
+  [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
+   :seon.task/kind :seon.task/evidence :seon.task/examples
+   :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
+
+(def ^:private task-pull
+  "What a reader of a task pulls: the task schema's own attributes as the binary's entity index names them and the config keys a
+  declaration states on the task (`stated-attributes`: its max-turns, which a raised budget writes, belongs to the config's schema),
+  but the declaration its file stated (:seon.task/declared, which only load-tx compares), and its needs and agent by their identities.
+  A named pull, as every pattern is: the shape the reader needs and nothing more. See docs/ctx.md#the-pattern."
+  (into (vec (remove #{:seon.task/declared :seon.task/needs :seon.task/agent}
+                     (distinct (concat (pdb/attributes-of (pdb/index) :seon.task/task-fact) stated-attributes))))
+        [{:seon.task/needs [:seon.task/id]} {:seon.task/agent [:seon.agent/key]}]))
 
 (defn- task-value
   "A pulled task's own members (needs as a set of ids, proofs and references sets), without
@@ -629,7 +664,7 @@
   {:malli/schema [:=> [:cat :seon.task/pulled] :seon.task/own]}
   [t]
   (cond-> (-> t
-              (dissoc :db/id :seon.task/declared)
+              (dissoc :db/id)
               (update :seon.task/needs #(set (map :seon.task/id %)))
               (update :seon.task/proofs set)
               (update :seon.task/kind #(or % :work)))
@@ -790,15 +825,16 @@
   [:task own-value] (no accumulation), [:agent agent-value], [:root (root db)], or nil
   when e is none of them (retracted, another kind, an agent root never started, or root
   before its first boot: (root db) is nil then, as on a store an earlier build left with
-  a quiescent fact and no boot). One pull of e."
+  a quiescent fact and no boot). One seek of e's identity per kind, then one pull (a probe pull first pulled twice: 56.8 MB
+  and 12.8M ticks over 539 tasks, against 42.8 MB and 8.9M)."
   {:malli/schema [:=> [:cat :seon.host/db :int]
                   [:maybe [:or [:tuple [:= :task] :seon.task/own] [:tuple [:= :agent] :seon.reconcile/agent] [:tuple [:= :root] :map]]]]}
   [db e]
-  (let [k (d/pull db [:seon.task/id :seon.agent/boot :seon.system/id] e)]
-    (cond (:seon.task/id k) [:task (task-value (d/pull db task-pull e))]
+  (let [has? (fn [a] (some? (first (d/datoms db :eavt e a))))]
+    (cond (has? :seon.task/id) [:task (task-value (d/pull db task-pull e))]
           ;; an agent its start recorded: a branch's record of its own agent, with no boot, is none
-          (:seon.agent/boot k) [:agent (indexed-agent db e)]
-          (:seon.system/id k) (some->> (root db) (vector :root)))))
+          (has? :seon.agent/boot) [:agent (indexed-agent db e)]
+          (has? :seon.system/id) (some->> (root db) (vector :root)))))
 
 (defn tasks-of-agent
   "The task entities db names agent entity e as their agent (:seon.task/agent): the tasks whose state an agent's boot moves.
@@ -823,12 +859,6 @@
 ;; retracts what it dropped; an entry no file declares any more is cancelled and forgets its
 ;; declaration, so declaring it again revives it. Execution is root's (my.root/run!), except
 ;; that revival.
-
-(def ^:private stated-attributes
-  "The task attributes a declaration states (its members, config flattened), as stored."
-  [:seon.task/plan :seon.task/instructions :seon.task/proofs :seon.task/branch :seon.task/model
-   :seon.task/kind :seon.task/evidence :seon.task/examples
-   :seon.config.agent/max-turns :seon.config.merge/max-conflicts :seon.config.merge/max-merge-turns])
 
 (defn- file-refused
   {:malli/schema [:=> [:cat :symbol :string] :map]}

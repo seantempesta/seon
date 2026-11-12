@@ -497,11 +497,11 @@
   (let [gone "docs/nowhere.md#never-written"]
     (testing "its hello carries the addresses, and each is a recorded problem of that agent"
       (let [ap0 (#'ap/agent-proc {:id :a1 :end {:out (a/chan 4) :in (a/chan)} :branch :agent-1 :to-writer (a/chan 4) :back (a/chan 4) :events (a/chan 4)})
-            [_ outs] (step #'ap/agent-proc ap0 :from {:op :hello :t 1 :start-ms 1.0 :mem-mb 1.0 :interrupt-ok true :missing-cites [gone]})
+            [_ outs] (step #'ap/agent-proc ap0 :from {:op :hello :t 1 :start-ms 1.0 :mem-mb 1.0 :interrupt-ok true :seon.agent/missing-cites [gone]})
             pr (filter #(= :problem (:op %)) (:to-api outs))]
-        (is (= [[:a1 :seon.agent/cite-missing gone]] (mapv (juxt :agent (comp :seon.error/type :error) (comp :address :error)) pr)))
+        (is (= [[:a1 :seon.agent/cite-missing gone]] (mapv (juxt :agent (comp :seon.error/type :error) (comp :seon.doc/address :error)) pr)))
         (is (clojure.string/includes? (:seon.error/message (:error (first pr))) "erases the store") "and says what a reindexing start does")
-        (is (some #(and (map? %) (= [gone] (:missing-cites %))) (tree-seq coll? seq (:to-api outs))) "its status carries them to root")))
+        (is (some #(and (map? %) (= [gone] (:seon.agent/missing-cites %))) (tree-seq coll? seq (:to-api outs))) "its status carries them to root")))
     (testing "root answers its spawn naming them, and the agent runs"
       (ts/test-branch!
        (fn [_ conn]
@@ -510,8 +510,8 @@
                                         :view {:agents {}} :graph (promise) :system (doto (promise) (deliver {:procs {} :conns []}))})
                       (assoc :conn conn)
                       (assoc-in [:view :agents :a1] {:status :spawning}) (assoc-in [:seon.system/spawning :a1] p))
-               st' (#'root/set-agent st o :a1 {:ready true :missing-cites [gone]})]
-           (is (= [gone] (:missing-cites (deref p 0 ::unanswered))) (pr-str (deref p 0 ::unanswered)))
+               st' (#'root/set-agent st o :a1 {:ready true :seon.agent/missing-cites [gone]})]
+           (is (= [gone] (:seon.agent/missing-cites (deref p 0 ::unanswered))) (pr-str (deref p 0 ::unanswered)))
            (is (= :idle (get-in st' [:view :agents :a1 :status])) "the agent runs")))))))
 
 (deftest fork-server-events

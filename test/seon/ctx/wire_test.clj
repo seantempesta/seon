@@ -1789,13 +1789,13 @@
         (is (= ["assistant" "tool" "user" "assistant"] (mapv :role example)) "an eval's pair, a message, a reply")
         (is (= (seon.lib/id (seon.lib/digest "example/abc/s1")) (get-in example [0 :tool-calls 0 :id]) (:tool-call-id (second example))) "every call is followed by its tool message")
         (is (= {:role "user" :content "</session>"} (nth more close-at)))
-        (is (= {:role "user" :content "<session id=\"a1\" from=\"seon\">\nYour own session: the work you are asked to do."} (nth more (inc close-at))) "then the agent's own session")
+        (is (= {:role "user" :content "<agent id=\"a1\" from=\"seon\">\nYour own work: the work you are asked to do."} (nth more (inc close-at))) "then the agent's own session")
         (is (str/includes? (:content (peek (:messages r0))) "Make g.") "then the page, as Seon's message")
         (is (= ms (subvec (:messages r1) 0 (count ms))) "the second request starts with the first, examples included")
         (is (= [:example "example/abc"] (vec (take 2 (first (second (:parts r0)))))) "the example is a ref of the request")))))
 
 (deftest an-example-sends-a-cut-reply-as-cut
-  ;; docs/tasks.md#a-task-names-example-sessions: a reply the provider cut at its limit reads so in the session and in its example alike
+  ;; docs/tasks.md#a-task-names-examples: a reply the provider cut at its limit reads so in the session and in its example alike
   (ts/test-branch!
     (fn [_ conn]
       (source-session! conn)
@@ -1822,7 +1822,7 @@
         (is (not-any? #(= :example (ffirst %)) (:parts none)))))))
 
 (deftest an-example-of-a-session-recorded-with-string-senders-writes-refs
-  ;; docs/tasks.md#a-task-names-example-sessions: a store kept from before senders were refs holds them as strings; an example
+  ;; docs/tasks.md#a-task-names-examples: a store kept from before senders were refs holds them as strings; an example
   ;; exported from it writes each as the ref it names (seon.ctx.session's who): an agent's key that agent, "root" and "seon" the system,
   ;; the session's own agent the example's
   (let [rekey #'seon.ctx.session/example-rekey
@@ -1922,7 +1922,7 @@
         (is (not-any? #(and (map? %) (contains? % :db/id)) (tree-seq coll? seq (session/session-tx @conn "b/src" "x"))) "no :db/id anywhere in what it answers")))))
 
 (deftest an-example-refuses-a-history-record-of-a-kind-it-does-not-hold-naming-its-schema
-  ;; docs/tasks.md#a-task-names-example-sessions: a member the conversation places (seon.ctx/placed-messages) is recorded as the entity it is,
+  ;; docs/tasks.md#a-task-names-examples: a member the conversation places (seon.ctx/placed-messages) is recorded as the entity it is,
   ;; by its schema, never as a message; one of a kind an example does not hold (the note of seon.render-test's registered-schema world) is refused, naming its schema, never dropped
   (ts/test-branch!
     (fn [_ conn]
@@ -2415,7 +2415,7 @@
           (is (= held (wire/page-edits-between db ix a collected p1)) "from the collected basis: the same edits"))))))
 
 (deftest a-new-task-begins-where-the-agent-s-calls-change-task
-  ;; docs/tasks.md#a-refine-curates-its-own-task: an agent that goes on with a task needing the one it finished (seon.task/session-key) reads, at
+  ;; docs/tasks.md#a-refine-curates-its-own-task: an agent that goes on with a task needing the one it finished (seon.task/agent-key) reads, at
   ;; the call whose basis names the new task, a message saying the task before ended and which is its task now, before that turn's page;
   ;; drawn from the calls' bases alone, so every later request holds it in the same place
   (ts/test-branch!
