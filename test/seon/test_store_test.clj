@@ -165,3 +165,33 @@
       @f (.close ss))
     (let [port (let [ss (java.net.ServerSocket. 0 1 (java.net.InetAddress/getByName "127.0.0.1")) p (.getLocalPort ss)] (.close ss) p)]
       (is (= {:error :refused} (ts/ask {:port port} {:op :agents})) "no one listening"))))
+
+(deftest ^{:seon.test/estimate {:ticks 80000000}} what-a-dead-test-process-made-is-reclaimed-and-a-live-ones-is-kept
+  ;; docs/testing.md#a-root-costs-what-it-boots. Killed shards left 30 merges branches and 8 fixture worktrees (2026-11-12): their
+  ;; shutdown hooks and finally blocks never ran. What a test process makes outside itself is named with its pid (ts/mark-of), and
+  ;; reclaim! removes it once that pid is gone. Cost: a git repository, one worktree, a scratch store and two forks (~80M ticks)
+  (let [repo (str (seon.config/checkout) "/target/tmp/reclaim-" (random-uuid))
+        git (fn [& args] (:out (apply sh/sh "git" "-C" repo "-c" "user.name=t" "-c" "user.email=t@t" args)))
+        dead (let [p (seon.lib/fork! {:child (fn [] nil) :refused (fn [n] {:refused n}) :parent identity})] (seon.lib/wait-status p) p)
+        named (fn [label pid] (clojure.string/replace (ts/mark-of label) (str "-" (seon.lib/c-getpid) "-") (str "-" pid "-")))
+        [db live] [(named "jolt/seon-merges-x-shard" dead) (ts/mark-of "jolt/seon-merges-x-shard")]
+        wt-dead (str (named (str repo "-fix/seon-fixture") dead) "/wt")
+        wt-live (str (ts/mark-of (str repo "-fix/seon-fixture")) "/wt")
+        store (str repo "-store")
+        cfg (pdb/made-cfg (pdb/store-cfg :lmdb store))]
+    (try
+      (.mkdirs (java.io.File. repo))
+      (git "init" "-q") (spit (str repo "/a") "a") (git "add" "a") (git "commit" "-q" "-m" "one")
+      (git "branch" db) (git "branch" live)
+      (git "worktree" "add" "-q" "--detach" wt-dead) (git "worktree" "add" "-q" "--detach" wt-live)
+      (d/create-database cfg)
+      (let [r (ts/reclaim! repo store)
+            heads (set (clojure.string/split-lines (git "for-each-ref" "--format=%(refname:short)" "refs/heads/jolt/")))
+            wts (git "worktree" "list" "--porcelain")]
+        (is (= {:branches 1 :worktrees 1 :mains 0} r) (pr-str r))
+        (is (not (heads db)) "the dead process's merges branch is gone")
+        (is (heads live) "this live process's is kept")
+        (is (not (clojure.string/includes? wts wt-dead)) "the dead process's fixture worktree is gone")
+        (is (clojure.string/includes? wts wt-live) "this live process's is kept"))
+      (finally (git "worktree" "remove" "--force" wt-live)
+               (seon.lib/remove-tree! repo (str repo "-fix") store)))))
