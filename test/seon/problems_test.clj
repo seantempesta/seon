@@ -462,13 +462,13 @@
       (is (true? (open (red cancelled) "t/r1")) "another task's stays open"))))
 
 (defn- measured-health [db]
-  (let [m (volatile! nil) h (profile/measure! #(problems/health db) #(vreset! m %))]
-    [h @m]))
+  (let [m (profile/measure! #(problems/health db))]
+    [(:value m) (dissoc m :value)]))
 
 (defn- calls-of
   "The contracted calls of thunk f."
   [f]
-  (let [m (volatile! nil)] (profile/measure! f #(vreset! m %)) (:calls @m)))
+  (:calls (profile/measure! f)))
 
 (deftest ^{:seon.test/estimate {:ticks 10000000}} health-reads-each-part-once
   (let [db0 (seeded 3 2)
