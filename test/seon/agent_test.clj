@@ -2993,7 +2993,11 @@
                    "(+ 1 1)"
                    "(do (seon.agent/transact! [{:note/text \"after\" :note/agent :t}]) (my.db/q '[:find [?t ...] :where [_ :note/text ?t]]))"
                    "(let [db (my.db/db)] {:ctx-t (:t @seon.ctx/ctx) :t (:max-tx db) :notes (sort (my.db/q '[:find [?t ...] :where [_ :note/text ?t]]))})"])
-        u (:unrecorded r3)]
+        u (:unrecorded r3)
+        ;; the notes this test wrote: main is shared with the shard's other tests, and one that writes main
+        ;; (a-wait-on-main-whose-test-throws-answers-the-throw-and-the-write-stands) leaves its note in every
+        ;; agent forked after it, so the assertions read only what this test caused
+        own (partial filter #{"kept before" "poison" "after"})]
     (is (nil? (:ex r1)) (pr-str r1))
     (is (nil? (:ex r2)) (pr-str r2))
     (is (= :written (:value r3)) "the eval's value is still its answer")
@@ -3004,9 +3008,9 @@
     (is (nil? (:ex r4)) (pr-str r4))
     (is (= 2 (:value r4)) "the next eval answers as any")
     (is (nil? (:unrecorded r4)) (pr-str r4))
-    (is (= #{"kept before" "after"} (set (:value r5))) "what was committed before is intact, and a later commit holds")
+    (is (= #{"kept before" "after"} (set (own (:value r5)))) "what was committed before is intact, and a later commit holds")
     (is (nil? (:unrecorded r5)) (pr-str r5))
-    (is (= ["after" "kept before"] (:notes (:value r6))) "the refused write is not on the branch")
+    (is (= ["after" "kept before"] (own (:notes (:value r6)))) "the refused write is not on the branch")
     (is (= (:t (:value r6)) (:ctx-t (:value r6))) "@ctx agrees with the committed db")))
 
 (deftest the-reader-is-the-processs-own
