@@ -328,9 +328,8 @@
   {:malli/schema [:=> [:cat :seon.host/db pos-int? :seon.ctx/spec [:vector :any] :seon.ctx/ix [:maybe :map] [:map-of :any [:vector :any]]] [:tuple :map :seon.ctx/ix]]}
   [db e s p r old touched]
   (if (and (not (:star? s)) (= #{:db/id} (:attrs s)) (empty? (:joins s)))
-    ;; a join of `[:db/id]` names its members and holds none of them (agent -> call -> its evals, which the agent's :seon.eval/_agent join holds):
-    ;; nothing to place (no contracted call: this runs for every member built). One holding a join of its own is a path to it
-    ;; ([:db/id {:seon.task/agent ...}]: a user's agents through its tasks, seon.render.ui/members), and is built
+    ;; a join of `[:db/id]` alone names its members and holds none of them (one with joins of its own holds them, as d/pull does) (agent -> call -> its evals, which the agent's :seon.eval/_agent join holds):
+    ;; nothing to place (no contracted call: this runs for every member built)
     [(if (stub? old) old {:db/id e}) r]
     (let [r (-> r (update-in [:at e] (fnil conj #{}) p) (assoc-in [:spec p] s))
           old (when-not (stub? old) old)
