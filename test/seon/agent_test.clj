@@ -401,27 +401,37 @@
     (is (= 42 (ts/value-of (ts/value-of (:response answered)))) (str "the agent answered while its test held: " (pr-str answered)))
     (is (= {:pass 1 :fail 0 :error 0} result) (str "and the run answered green once let go: " (pr-str result)))))
 
-(deftest a-test-childs-run-ends-at-its-exit-though-it-forked-a-grandchild
-  ;; agent a3 waited 3.5 h on main (2026-10-26) reading its test child's pipe to an end of file
-  ;; that never came: root's :tests in flight, the agent at 0% CPU. A process the test child forked
-  ;; held the write end past the child's exit. A forked child holds only what it is given
-  ;; (docs/processes.md#a-child-holds-what-it-is-given), so the grandchild here, given a pipe of its own
-  ;; to wait on, holds no copy of the child's, and the child's exit is the read's end of file. A
-  ;; regression waits for ever (no clock may end it): a hang is this test's red. The result line,
-  ;; longer than the reader's 1 MB read, is read whole
-  (let [result (pr-str {:pass 1 :fail 0 :error 0 :reports [] :pad (apply str (repeat 1200000 "x"))})
-        [r w] (sock/socketpair)
-        [gr gw] (sock/socketpair)
-        pid (lib/fork! {:fd w :keep #{gr} :refused (fn [n] {:refused n}) :parent identity
-                        :child (fn []
-                                 (lib/fork! {:keep #{gr} :refused (fn [_] nil) :parent (fn [_] nil)
-                                             :child (fn [] (let [rd (sock/line-reader gr)] (loop [] (when-not (= :eof (rd)) (recur)))))})
-                                 (sock/write-line! w result))})]
-    (lib/c-close gr)
-    (let [read (try (agent/read-to-exit r pid)
-                    (finally (lib/c-close r) (lib/c-close gw)))]
-      (is (= {:line result :status {:exit 0}} read) "the child's exit is the end of file, its grandchild still waiting"))))
+;; See docs/merging.md#a-test-child-is-a-fork-of-a-live-agent
+(deftest a-test-child-is-a-proc-of-the-agents-graph
+  ;; the one-unit spec, fork-one step 2: a test child is forked by jolt.async.remote.flow/fork! as a proc of the agent's own
+  ;; Flow graph, its values folded by a proc of that graph, never read from a hand-made pipe. The graph's procs are read
+  ;; when the child's pid is told (forked: the child is running) and after the run: the child and its run's fold are
+  ;; procs of the graph while the run is in flight, and both are gone once it has answered
+  (let [[_ r] (in-agent ["(ns app.proc-test (:require [clojure.test :refer [deftest is]])) (deftest a (is (= 1 1)))"
+                         (str "(let [procs #(set (keys (:procs (clojure.datafy/datafy (:flow @seon.agent/state)))))"
+                              "      before (procs) during (atom nil)"
+                              "      r (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] (reset! during (procs))) '#{app.proc-test})]"
+                              "  (pr-str {:pass (:pass r) :added (count (remove before @during)) :after (= before (procs))}))")])
+        v (some-> (:value r) clojure.edn/read-string)]
+    (is (= {:pass 1 :added 2 :after true} v) (str "the child and its fold were procs while it ran, gone after: " (pr-str r)))))
 
+(deftest a-test-childs-run-ends-at-its-exit-though-it-forked-a-grandchild
+  ;; agent a3 waited 3.5 h on main (2026-10-26) for its test child's end, which never came: root's :tests in flight,
+  ;; the agent at 0% CPU. A process the test child forked held the child's end of its link past the child's exit. A
+  ;; forked child holds only what it is given (docs/processes.md#a-child-holds-what-it-is-given), so the grandchild
+  ;; here, a command started by the test (tail -f /dev/null, which waits for good) holds no copy of the child's link,
+  ;; and the child's exit ends the run. A regression waits for ever (no clock may end it): a hang is this test's red
+  (let [pidf (str (seon.config/checkout) "/target/runs/grandchild-" (random-uuid))
+        [_ r] (in-agent [(str "(ns app.gc-test (:require [clojure.test :refer [deftest is]]))"
+                              " (deftest forks (let [pid (.pid (.start (ProcessBuilder. ^java.util.List [\"tail\" \"-f\" \"/dev/null\"])))]"
+                              "                  (spit " (pr-str pidf) " (str pid)) (is (pos-int? pid))))")
+                         "(pr-str (select-keys (seon.agent/run-tests-forked 100000000 #{} :main (fn [_] nil) '#{app.gc-test}) [:pass :fail :error]))"])
+        gc (some-> (ts/output pidf) parse-long)
+        alive (when gc (lib/kill! gc 0))]
+    (when gc (lib/kill! gc (jolt.host/signal-number "KILL")))
+    (.delete (java.io.File. ^String pidf))
+    (is (= {:pass 1 :fail 0 :error 0} (some-> (:value r) clojure.edn/read-string)) (pr-str r))
+    (is (true? alive) "the grandchild was still waiting when the run answered")))
 (deftest two-test-runs-at-once-each-read-their-child-to-its-end
   ;; docs/processes.md#a-child-holds-what-it-is-given: an agent runs the test service's items at once, each a run of its own
   ;; (seon.repl/serve-item!); a child of one run kept the other run's pipe end, so that run's end of file waited on the
@@ -443,33 +453,6 @@
             :b {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'app.twb-test/runs"}]}}
            (some-> v (update-vals #(update % :reports (partial mapv (fn [x] (select-keys x [:type :var])))))))
         (pr-str two))))
-
-(deftest a-test-childs-read-lets-the-agents-other-fibers-run
-  ;; the recipe hang of 2026-10-28 (the scratch paper hang-2026-10-28-a1-prove (git history)): agent a1's test child
-  ;; asked a1 something mid-run, and a1, reading the child's pipe, was blocked in a native kevent on
-  ;; its one main carrier, so the fiber that would answer never ran. The poller's ready is a hint:
-  ;; a stale one, left by the read before, ends the next park at once, and the read's wait then
-  ;; blocked. The reader here is a main carrier, as an agent is (a pool's other carriers would run
-  ;; the fiber and hide it); its writer writes one line, then waits for a go that another fiber of
-  ;; the reader sends when it sees that line. A regression waits for ever (no clock may end it): a
-  ;; hang is this test's red
-  (let [reader (fn []
-                 (let [[r w] (sock/socketpair)
-                       [gr gw] (sock/socketpair)
-                       pid (lib/fork! {:keep #{w gr} :refused (fn [n] {:refused n}) :parent identity
-                                       :child (fn []
-                                                (sock/write-line! w "1")
-                                                (let [rd (sock/line-reader gr)] (loop [] (when (= [] (rd)) (recur))))
-                                                (sock/write-line! w "2"))})
-                       _ (do (lib/c-close w) (lib/c-close gr))
-                       sent (promise)
-                       res (agent/read-to-exit r pid #(when (= "1" %)
-                                                        (clojure.core.async/go (deliver sent (sock/write-line! gw "go")))))]
-                   (lib/c-exit (if (and (= {:line "2"} (dissoc res :status)) (= true @sent) (= {:exit 0} (:status res))) 0 3))))
-        pid (lib/fork! {:refused (fn [n] {:refused n}) :parent identity
-                        :child (fn [] (jolt.host/main-carrier-run! reader))})]
-    (is (= {:exit 0} (lib/wait-status pid))
-        "the reader, a main carrier, read both lines: the go came from its other fiber while the read waited")))
 
 (deftest root-interrupts-a-blocked-take
   ;; root's interrupt! stops an eval blocked in a
@@ -1450,20 +1433,21 @@
     (is (= (:value pid) (:value pid')) "in the same process")
     (is (re-find #":on-main" (pr-str on-main)) (str "and the defect is on main as a :platform problem: " (pr-str on-main)))))
 
-(defn- started "The line the child writes as test var v starts." {:malli/schema [:=> [:cat :string] :string]}
-  [v] (pr-str {:seon.test/started v}))
-
 (deftest a-killed-test-run-names-the-test-that-was-running
   (testing "a child killed while running app-test/slow: that test has no verdict (proofs/results), and its death is named with how the child ended"
-    (let [run (agent/test-run-answer (started "#'app-test/slow") {:signal 9})]
+    (let [acc (agent/take-value {:streamed [] :ended #{}} {:seon.test/started "#'app-test/slow"})
+          run (agent/test-run-answer acc {:signal 9})]
       (is (= {} (proofs/results run)) "a death is no verdict")
       (is (= [] (proofs/test-run-errors run)) "the death is the running test's, not an anonymous run error")
       (is (= ["#'app-test/slow" {:signal 9}] ((juxt :var :exit) (first (:reports run)))))))
-  (testing "a child that wrote its result last: the result"
+  (testing "a child that put its answer last: the answer"
     (let [res {:pass 1 :fail 0 :error 0 :test 1 :reports [{:type :pass :var "#'app-test/fast" :message nil}]}]
-      (is (= res (agent/test-run-answer (pr-str res) {:exit 0})))))
+      (is (= res (agent/test-run-answer (agent/take-value {:streamed [] :ended #{}} res) {:exit 0})))))
+  (testing "a child that died once its test had ended: a run error, never the ended test's"
+    (let [acc (reduce agent/take-value {:streamed [] :ended #{}} [{:seon.test/started "#'app-test/a"} {:seon.test/ended "#'app-test/a" :reports []}])]
+      (is (nil? (:var (first (:reports (agent/test-run-answer acc {:exit 1}))))))))
   (testing "a child that died before any test started: one run error naming its exit"
-    (let [run (agent/test-run-answer nil {:exit 1})]
+    (let [run (agent/test-run-answer {:streamed [] :ended #{}} {:exit 1})]
       (is (= {} (proofs/results run)))
       (is (= 1 (count (proofs/test-run-errors run)))))))
 
@@ -2836,36 +2820,34 @@
     (is (= (inc (:value before)) (:value after)) "the drawing recorded no eval: only the count before it is new")
     (is (= :seon.system/no-agent (:seon.error/type (:value gone))) (pr-str gone))))
 
-(deftest a-line-that-does-not-read-ends-its-test-and-the-run-goes-on
+(deftest a-value-that-does-not-read-ends-its-test-and-the-run-goes-on
   ;; task seon.agent/a-test-childs-line-always-reads (root, 2026-10-27): a report holding a value
-  ;; that prints as no EDN (an exception's #error {\n splits the line, a var's #'v does not read)
-  ;; killed its agent with exit 70. The line is that test's :error, once, and the next test's lines
-  ;; are taken as before
-  (let [enc seon.edn/encode
-        bad (enc {:seon.test/ended "#'app.t/b" :reports [{:type :fail :actual [(ex-info "boom" {:a 1}) #'clojure.core/inc]}]})
-        lines (concat [(enc {:seon.test/started "#'app.t/a"}) (enc {:seon.test/ended "#'app.t/a" :reports [{:type :pass :var "#'app.t/a"}]})
-                       (enc {:seon.test/started "#'app.t/b"})]
-                      (str/split-lines bad)
-                      [(enc {:seon.test/started "#'app.t/c"}) (enc {:seon.test/ended "#'app.t/c" :reports [{:type :pass :var "#'app.t/c"}]})])
-        acc (reduce agent/take-line {:streamed [] :ended #{} :fns {}} lines)
+  ;; that prints as no EDN (an exception's #error {, a var's #'v) killed its agent with exit 70. Read through the
+  ;; link's codec (seon.agent/child-codec) it is that test's :error, once, and the next test's values are taken as before
+  (let [{:keys [encode decode]} (#'agent/child-codec :seon.test/c1)
+        read #(decode (encode %))
+        bad {:seon.test/ended "#'app.t/b" :reports [{:type :fail :actual [(ex-info "boom" {:a 1}) #'clojure.core/inc]}]}
+        vs [{:seon.test/started "#'app.t/a"} {:seon.test/ended "#'app.t/a" :reports [{:type :pass :var "#'app.t/a"}]}
+            {:seon.test/started "#'app.t/b"} bad bad
+            {:seon.test/started "#'app.t/c"} {:seon.test/ended "#'app.t/c" :reports [{:type :pass :var "#'app.t/c"}]}]
+        read-vs (mapv read vs)
+        acc (reduce agent/take-value {:streamed [] :ended #{} :fns {}} read-vs)
         errors (filter #(= :error (:type %)) (:streamed acc))]
-    (is (< 1 (count (str/split-lines bad))) "the exception's raw newline splits the line")
-    (is (= 1 (count errors)) "the unreadable line is one :error")
+    (is (every? #(= :seon.test/c1 (:clojure.core.async.flow/pid %)) read-vs) "each value read names its child")
+    (is (= 1 (count errors)) "the unreadable value is one :error, though it came twice")
     (is (= "#'app.t/b" (:var (first errors))) "on the test that was running")
     (is (= :seon.test/unreadable-line (:seon.error/type (first errors))))
-    (is (= #{"#'app.t/a" "#'app.t/c"} (:ended acc)) "the tests around it are taken as before")
-    (is (= :error (get-in (agent/test-run-answer (enc {:a #'clojure.core/inc}) {:exit 0}) [:reports 0 :type]))
-        "a last line that does not read is the run's :error, not the agent's death")))
+    (is (= #{"#'app.t/a" "#'app.t/c"} (:ended acc)) "the tests around it are taken as before")))
 
-(deftest a-tests-ended-line-keeps-the-live-heap-it-left
+(deftest a-tests-ended-value-keeps-the-live-heap-it-left
   ;; docs/cost.md#what-a-test-run-measures (root, 2026-10-28): 23 of 191 tests of a forked run ran
   ;; out of memory at the agent's heap ceiling with no stack; the heap each test leaves, after a
-  ;; collection, is on its ended line and kept per test, so the one that holds memory is named
-  (let [enc seon.edn/encode
-        acc (reduce agent/take-line {:streamed [] :ended #{} :fns {} :heap {}}
-                    [(enc {:seon.test/started "#'app.t/a"}) (enc {:seon.test/ended "#'app.t/a" :reports [] :heap 1200})
-                     (enc {:seon.test/started "#'app.t/b"}) (enc {:seon.test/ended "#'app.t/b" :reports [] :heap 900000})])]
-    (is (= {'app.t/a 1200 'app.t/b 900000} (:heap acc)))))
+  ;; collection, is on its ended value and kept per test, so the one that holds memory is named
+  (let [acc (reduce agent/take-value {:streamed [] :ended #{} :fns {} :heap {}}
+                    [{:seon.test/started "#'app.t/a"} {:seon.test/ended "#'app.t/a" :reports [] :heap 1200}
+                     {:seon.test/started "#'app.t/b"} {:seon.test/ended "#'app.t/b" :reports [] :heap 900000}])]
+    (is (= {'app.t/a 1200 'app.t/b 900000} (:heap acc)))
+    (is (nil? (:running acc)) "no test runs once the last has ended")))
 
 ;; docs/references.md#an-entity-cites: an agent is made citing what every agent cites (its own cite entities, written when
 ;; root makes it), and changes its own at its REPL; its page draws each as a task's cite is drawn
