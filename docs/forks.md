@@ -67,7 +67,7 @@ The open work is tasks `jolt.host/a-fibers-own-state-lives-in-its-slice`, `jolt.
 
 ## datahike
 
-`reference-code/datahike` at `61f03e49`, on ``jolt/deps``: upstream ``replikativ/datahike`` history with our changes as fresh commits on top. The fork's ``jolt/main`` (`fde9f89`) is the old pre-rebuild line and is not under the pin.
+`reference-code/datahike` at `fc14544b`, on ``jolt/deps``: upstream ``replikativ/datahike`` history with our changes as fresh commits on top. The fork's ``jolt/main`` (`fde9f89`) is the old pre-rebuild line and is not under the pin.
 
 - **The `:sync` writer** (Jolt, our design): group commit by `transact-batch!`; run-ahead writes (`apply!`, `commit-pending!`, `abandon-pending!`), a run-ahead value shown on the connection ([storage](storage.md#a-run-ahead-value-shown-on-the-connection)); a streaming writer's deref reads no store; merges go through the writer's own transact, so Seon's `transact-checked` sees every one ([storage](storage.md#the-write-checks-every-entity-it-touches)); a writer waits for its connection on a watch; a released connection says `:connection-has-been-released`; `force-branch!` moves a live `:sync` connection to the new head ([storage](storage.md#a-moved-head-moves-its-live-connection)).
 - **Ids** (Generic): entity and transaction ids issued once across every branch; content entity ids (`:db/contentId`) partitioned from counter and tx ids; a compact branch head carries its ids ([storage](storage.md#ids)).
