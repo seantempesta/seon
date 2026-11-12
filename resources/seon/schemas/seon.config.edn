@@ -200,7 +200,6 @@
   [:seon.config.render/line-budget {:optional true} :seon.config.render/line-budget]
   [:seon.config.render/cell-budget {:optional true} :seon.config.render/cell-budget]
   [:seon.config.render.list/stream {:optional true} :seon.config.render.list/stream]
-  [:seon.config.render.list/history {:optional true} :seon.config.render.list/history]
   ;; the web, instrumentation, the native probe
   [:seon.config.web/port {:optional true} :seon.config.web/port]
   [:seon.config.root/server-port {:optional true} :seon.config.root/server-port]
