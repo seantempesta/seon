@@ -608,21 +608,6 @@
     (is (= 5000 (:bound (reqs 'a.p-test/t))) (pr-str reqs))
     (is (nil? (:bound (reqs 'a.p-test/u))) "never measured: no bound")))
 
-;; a step past its bound is a signal (docs/clocks.md#time-decides-the-owners-exceptions), never a verdict: its asker is answered
-;; on the rest, and the answer names it
-(deftest a-step-that-overran-is-a-signal-not-a-red
-  (let [[st o] (seeded-run 4 {:items {'a.b-test/t "dt"} :steps {"laws" {:digest "dl" :binary? false :bound 100}} :build {:tree "T" :needed? false}})
-        [s] (fx-asks o)
-        [t] (remove #(get-in % [:req :plan?]) (asks o :tests))
-        [st o2] (feed st [(answer-of s {:value {:signal :overran :ms 150}})])
-        [_ o3] (feed st [(answer-of t {:pass 1 :fail 0 :error 0 :reports [{:type :pass :var "#'a.b-test/t"}]})])
-        [r] (run-answers o3)]
-    (is (= {:kind :step :name "laws" :bound 100 :binary? false} (select-keys (get-in s [:req :req]) [:kind :name :bound :binary?])) "no build: none is needed")
-    (is (empty? (run-answers o2)) "the signal answers no one")
-    (is (= [:signal] (mapv :status (filter #(= :prove-verdict (:op %)) o2))) "it streams as a signal")
-    (is (= [[] 1 0] ((juxt :red :pass :fail) r)) (pr-str r))
-    (is (= [{:test "laws" :digest "dl" :kind :step :signal :overran :ms 150}] (:signals r)))))
-
 ;; docs/merging.md#the-test-service: a step on the binary needs its tree's seeded store, made once a tree after the build; a red seed is its steps'
 (deftest a-binary-step-waits-for-the-seed-and-a-red-seed-is-its-error
   (let [[st o] (tree-run 4 {:items {} :process {'a.p-test/t "dp"} :steps {"smoke" {:digest "ds" :binary? true :bound 5000}} :build {:tree "T" :needed? true}})

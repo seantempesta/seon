@@ -1276,10 +1276,11 @@
   "The :item effect: one item of a session's prove that the test service (seon.prove) granted, run on the session's
   checkout at tree, niced: :build is bin/build seon there; :seed brings the checkout's program store to the tree and, :binary?,
   seeds its check store fresh, once a tree (each binary step takes a clone of it, as bin/check's steps do); :process is one test as a shard of one (bin/test --shard,
-  whose runner stores its verdict; with a :bound, through bin/bounded, and past it the :signal :overran a step's is); :step is one check step (bin/check --steps, then bin/test --store-steps, which
-  stores it green at its digest). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the
-  cache by its digest, so an item asked again is reused there; a step bin/check ended past its bound (its DIR/overran) is
-  :signal :overran, never a verdict. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
+  whose runner stores its verdict; with a :bound, through bin/bounded, and past it stored as an error at its digest by
+  bin/test --overran, as a test bin/stalls ended is: docs/clocks.md#time-decides-the-owners-exceptions); :step is one check
+  step (bin/check --steps, then bin/test --store-steps, which stores it green at its digest; past its bound bin/check fails
+  it). Its answer {:value {:pass :fail :error :failures :ms}}, the verdict read back from the cache by its digest, so an
+  item asked again is reused there. A checkout whose files are no longer tree is refused (:seon.fx/io-error, :tree-moved): a verdict would be
   stored under a digest of files that are not there. A green already stored is answered at once, :reused, with no process
   started. See docs/merging.md#a-session-proves-through-root."
   {:malli/schema [:=> [:cat :map] :map]}
@@ -1333,22 +1334,22 @@
                                             (when (:binary? req) " && bin/system seed \"$(<target/process-store.path)\""))))
                 ;; with a :bound (seon.prove's plan-items, from its measured ms) it runs through bin/bounded: past the bound its
                 ;; evidence is kept and its whole process group ended, never left to hold a worker
-                :process (apply sh (concat (when bound ["bin/bounded" (str bound) (str dir "/evidence")])
-                                           ["bin/test" "--shard" (str dir "/shard-0.edn") "--set" (str ":seon.config.proofs/program-store=" (sedn/encode pstore))]))
+                ;; past it, the shard's log gets the line bin/stalls writes, and bin/test --overran stores the test as an error
+                ;; at its digest with that line (test-runner/overran!, the one recorder of an ended test)
+                :process (let [shard (str dir "/shard-0.edn")
+                               r (apply sh (concat (when bound ["bin/bounded" (str bound) (str dir "/evidence")])
+                                                   ["bin/test" "--shard" shard "--set" (str ":seon.config.proofs/program-store=" (sedn/encode pstore))]))]
+                           (if (.isFile (java.io.File. (str dir "/evidence/overran")))
+                             (do (spit (str dir "/shard-0.log") (str "OVERRAN " name " " bound " ms (past the item's bound; evidence in " dir "/evidence)\n") :append true)
+                                 (sh "bin/test" "--overran" shard))
+                             r))
                 :step (let [c (sh "bin/check" "--steps" dir)] (sh "bin/test" "--store-steps" dir) c))
             ms (profile/ms-since t0)
             stored (when-not (#{:build :seed} kind) (stored-results {name digest}))
             _ (when pstore (doseq [^java.io.File d (some-> (java.io.File. ^String dir) .listFiles seq)
                                    :when (str/starts-with? (.getName d) "program-store")]
                              (lib/remove-tree! (.getPath d))))
-            v (when (map? stored) (get stored digest))
-            ;; bin/check's own judgement of the step's bound, a signal it writes (DIR/overran): this measures nothing itself
-            ;; and bin/bounded's, a process item's (DIR/evidence/overran)
-            overran? (case kind
-                       :step (let [f (java.io.File. (str dir "/overran"))]
-                               (and (.isFile f) (contains? (set (str/split-lines (slurp f))) name)))
-                       :process (.isFile (java.io.File. (str dir "/evidence/overran")))
-                       false)]
+            v (when (map? stored) (get stored digest))]
         (cond
           (contract/error? stored) stored
           (= :build kind) (if (zero? (:exit r))
@@ -1357,9 +1358,6 @@
           (= :seed kind) (if (and (zero? (:exit r)) (or (not (:binary? req)) (.isFile (java.io.File. (str store "/data.mdb")))))
                            {:value {:pass 1 :fail 0 :error 0 :failures [] :ms ms}}
                            (error #'seon.fx/run-item :seon.fx/io-error (str "the seed of " store " failed (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log) {:path checkout}))
-          ;; a step that ended red with no verdict stored, over its bound: the overrun is a signal, its verdict none
-          (and overran? (not (proofs/green? v)))
-          {:value {:signal :overran :ms ms}}
           v {:value (assoc (select-keys v [:pass :fail :error :failures]) :ms ms)}
           (= :step kind) {:value {:pass 0 :fail 1 :error 0 :failures [{:type :fail :message (str "bin/check --steps " name ": " (runner-end (str (:out r) (:err r))))}] :ms ms}}
           :else (error #'seon.fx/run-item :seon.fx/io-error (str "the shard stored no verdict for " name " (exit " (:exit r) "): " (runner-end (str (:out r) (:err r))) "; its log: " log)

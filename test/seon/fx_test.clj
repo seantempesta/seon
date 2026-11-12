@@ -640,18 +640,18 @@
 
 ;; a test that hangs only when its fixture asks it to: run as a test-service item (its program store is an item's clone,
 ;; seon.fx/run-item's target/prove/items/...), it reads the fifo target/prove/hang.fifo of its checkout when one is there, which with
-;; no writer never ends (a-process-item-past-its-bound-is-a-signal-and-nothing-of-it-runs-on makes it); run any other way, a shard of
+;; no writer never ends (a-process-item-past-its-bound-is-an-error-stored-at-its-digest makes it); run any other way, a shard of
 ;; a prove beside that test included, it passes at once (a shard beside it read the fifo and hung 300 s, 2026-11-11)
 (deftest a-test-that-hangs-while-its-fifo-is-there
   (let [f (java.io.File. (str (cfg/checkout) "/target/prove/hang.fifo"))
         item? (clojure.string/includes? (str (cfg/value :seon.config.proofs/program-store)) "/target/prove/items/")]
     (is (or (not item?) (not (.exists f)) (string? (slurp f))))))
 
-;; docs/merging.md#a-session-proves-through-root: a process item past its bound is ended whole and answers the signal a step past
-;; its bound does, :overran with no verdict, never a red and never a worker held (f1 sets :bound, f2 honors it). The item is a test
-;; that hangs (a-test-that-hangs-while-its-fifo-is-there, its fifo made here). Red before: the bound was not read, and the item held
-;; its worker until the fifo went
-(deftest a-process-item-past-its-bound-is-a-signal-and-nothing-of-it-runs-on
+;; docs/clocks.md#time-decides-the-owners-exceptions: a process item past its bound is ended whole and recorded as an error at its
+;; digest, as bin/test records a test bin/stalls ended (the owner, 2026-11-12: "A test killed for running too long is a bug and it
+;; should be recorded as an error and fixed"), never a worker held (f1 sets :bound, f2 honors it). The item is a test that hangs
+;; (a-test-that-hangs-while-its-fifo-is-there, its fifo made here). Red before: the item answered {:signal :overran} and stored nothing
+(deftest a-process-item-past-its-bound-is-an-error-stored-at-its-digest
   (let [co (str (cfg/checkout)) tree (fx/tree-id co)
         dg (subs (str (random-uuid)) 0 16)
         fifo (str co "/target/prove/hang.fifo")
@@ -661,11 +661,12 @@
     (try
       (let [;; 3 s: past the shard's start, so the test is running (hung) when it is reached
             r (fx/run-item {:req {:kind :process :tree tree :checkout co :name t :digest dg :binary? false :bound 3000}})
-            ev (str co "/target/prove/items/process-" dg "/evidence")]
-        (is (= :overran (get-in r [:value :signal])) (pr-str r))
-        (is (nil? (get-in r [:value :pass])) "no verdict")
+            ev (str co "/target/prove/items/process-" dg "/evidence")
+            stored (get (fx/stored-results {t dg}) dg)]
+        (is (= {:pass 0 :fail 0 :error 1} (select-keys (:value r) [:pass :fail :error])) (pr-str r))
+        (is (re-find #"OVERRAN" (pr-str (:failures (:value r)))) "its failure names the overrun")
         (is (.isFile (java.io.File. (str ev "/ps.txt"))) "its evidence was kept")
-        (is (not (proofs/green? (get (fx/stored-results {t dg}) dg))) "nothing stored at its digest"))
+        (is (= 1 (:error stored)) (str "an error stored at its digest: " (pr-str stored))))
       (finally (.delete (java.io.File. fifo))))))
 ;; docs/merging.md#a-merge-runs-what-the-change-reaches: the fallback route of a branch's run: a checkout of its commit, the tree's
 ;; own binary built there (bin/build seon: current already when the tree is the running one's, so here it is a check), and the
