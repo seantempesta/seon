@@ -1814,7 +1814,7 @@
         ;; the procs system.edn declares, and each effect kind's owner and workers: the declaration is the one list
         expect (into (set (keys (:procs decl)))
                      (mapcat (fn [[k spec]] (cons (keyword "fx" (name k))
-                                                  (for [i (range (if (number? (:workers spec)) (:workers spec) (seon.config/value :seon.config.ai/max-in-flight)))]
+                                                  (for [i (range (let [w (:workers spec)] (if (number? w) w (get (:bindings sys) (keyword (name w))))))]
                                                     (keyword (str "fx." (name k)) (str i))))))
                      (:fx decl))
         dir (str (:agents-dir (:store (c/state sys))) "/system") ; this root's own run dir

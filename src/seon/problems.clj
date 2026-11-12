@@ -428,15 +428,14 @@
 
 (defn unestimated-tests
   "Each of the named vars (a set of symbols, the vars a branch changed) that is a test stating no estimate on its deftest
-  (seon.source/stated-estimate), as an :unestimated-test row: a new or changed test states what it should cost, worked from
+  (no :seon.test/estimate fact on its var: docs/testing.md#test-kinds), as an :unestimated-test row: a new or changed test states what it should cost, worked from
   what it must do, and runs under the cap until it does (docs/merging.md#a-tests-tick-budget). Closed by stating
-  ^{:seon.test/estimate {:ticks n}}. Cost: one seek per named var and its form's text for a test."
+  ^{:seon.test/estimate {:ticks n}}. Cost: one seek per named var."
   {:malli/schema [:=> [:cat :seon.host/db :map [:set :symbol]] [:vector :seon.problems/row]]}
   [db ans names]
   (vec (for [v (sort names)
-             :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e)) nsym (some-> (namespace v) symbol)
-                   src (some-> ent :var/form :form/src)]
-             :when (and ent src (contains? (set (:var/meta ent)) :test) (nil? (source/stated-estimate nsym src)))
+             :let [e (pdb/eid db :var/name v) ent (when e (d/entity db e)) nsym (some-> (namespace v) symbol)]
+             :when (and ent (contains? (set (:var/meta ent)) :test) (nil? (:seon.test/estimate ent)))
              :let [s (str "unestimated-test " v)]]
          (derived-row ans s nsym (str v " states no estimate: state ^{:seon.test/estimate {:ticks n}} on its deftest, worked from what it must do")
                       {:kind :unestimated-test :var v} {:var v}))))
