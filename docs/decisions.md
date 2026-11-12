@@ -6,6 +6,10 @@ The owner's standing rulings, one entry each: his words and date, and where the 
 
 The owner's rulings of this day, each with his words and where it is now stated.
 
+### One branch and one worktree per session, never more
+
+"I was serious before about only one worktree per agent ... I will not allow us to create hundreds of tiny change branches all queued up to run the same tests over and over again for tiny bullshit. It's the same agent working on the same files it can build and debug several solutions in the same branch." Helpers work in their session's worktree; nothing branches per change, fix, helper, experiment, bisect or landing; a second branch needs his yes. Stated in [AGENTS.md §3](../AGENTS.md) and [sessions](sessions.md#helpers).
+
 ### One unit: everything stateful that runs is a Flow agent
 
 "If it's stateful and it's like a running process that we need to keep track of it should be a separate flow properly wired up to the system for communication, repl for debugging, errors, topology, etc." And: "It's the docker rule. If you make everything the same and make that unit (the container for docker, the flow agent for us) fast and finely tuned and extensible we have a building block we can standardize on." A test child and a clone are agents: "Tests should have the agent env too." A difference is an option of the one unit, never a second path. And: "If you see atoms being used it likely needs to be ported to flow." The only processes that are not agents are the fork server, which makes them, and exec'd programs, which are effects through their owner. Stated in [AGENTS.md §3](../AGENTS.md), [flow](flow.md#the-step-fn-contract-every-proc-follows) and [processes](processes.md#the-agent-process).

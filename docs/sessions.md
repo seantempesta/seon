@@ -18,14 +18,14 @@ Each named session owns one area and knows all of it:
 - A fix that adds, moves or reads an attribute, ref or pattern clause goes to Data model first, with the pull form wanted.
 - A session reads the code a helper changes, takes the measurements that decide a design itself, and never answers for code it has not read.
 - Taking over an area starts with a list of what exists: each piece with its file and line, and whether to keep, extend or delete it.
-- Whoever proves a change mails it to Point to land. A session says by mail what it is taking, so nothing is done twice.
+- A session lands its own change and tells root the sha. What a session takes is on the schedule, so nothing is done twice.
 
 ## The managing session
 
-One session, Point, manages the others and owns no code.
+One session, root, manages the others and owns no code.
 
 - **It keeps the schedule:** what is on main, each session's next items in order, the rulings it made and the decisions waiting on the owner. Every recommendation becomes an item with an owner the same turn.
-- **It lands each proved tip alone,** as soon as it arrives ([merging](merging.md#the-managing-session-lands-a-batch)). It never batches tips.
+- **It reads each landed diff** within the hour and files what it finds; each session lands its own branch.
 - **It asks what the work should cost before it accepts a number.** Every plan carries an estimate worked from what must be done ([AGENTS.md §3](../AGENTS.md)). An absurd number is the finding, and a measurement 10 times over the estimate stops the work.
 - **It asks whether a process is dumb before following it.** A step that reruns work, waits on a person for no decision, or exists to work around another step is changed at once, and the old text is deleted.
 - **It rules what is reversible and asks the owner the rest,** one question at a time. While he is away it decides, and lists each ruling for him to reverse.
@@ -34,7 +34,7 @@ One session, Point, manages the others and owns no code.
 
 ### What it reads itself, and what it hands off
 
-It hands off what has one right answer and a long output: a long read, a sweep of files, a bisect. It reads itself what a ruling rests on: the diff of each tip it lands, a design note, a mail that asks for a ruling. A ruling that rests on what the code holds waits for the session that owns that code to answer.
+It hands off what has one right answer and a long output: a long read, a sweep of files. It reads itself what a ruling rests on: each landed diff, a design note, a message that asks for a ruling. Nobody bisects history to find a bug: the live failure is read and probed. A ruling that rests on what the code holds waits for the session that owns that code to answer.
 
 ## The way improves
 
@@ -50,13 +50,9 @@ A lesson kept only in a session's memory is lost at its next compaction. Before 
 
 A session runs Seon agents on real tasks to find what in the system cost the agents turns, never to make one task go green. For each stretch where the agent lost turns, it names what allowed it and mails the owner of the cause. A fix is never for the run's task alone. What the agent refined reaches disk by review ([source](source.md#a-merged-task-reaches-mains-files)).
 
-## The mailbox
+## Messages
 
-Sessions reach each other through files in the managing session's notes folder: `mail/to-<session>/`, through its `mail.py`.
-- **A message is one file of 10 lines or fewer.** Line 1 says what is needed: a tip to land (`LAND <branch> <sha>`), a ruling with the sender's pick, or a fact.
-- **Each session watches its own inbox** with a background command that exits when a file arrives, then reads it and starts the watcher again.
-- **The mailbox is the home of no fact:** what a message teaches goes into the wiki section or task entry that owns it.
-- **`mail/PROVING`** lists the proves running, for information; nothing waits on it.
+Sessions talk to root only, through the app's session messages, and rarely: to say a branch landed, when blocked, or with a finding another area owns. They never talk to each other (owner, 2026-11-12: agents "spent more time talking to each other than working"). A message is 10 lines or fewer: the evidence read, the hypothesis, the one decision needed. A message is the home of no fact: what it teaches goes into the wiki section or task entry that owns it.
 
 ## No fan-out
 
@@ -71,7 +67,7 @@ The owner makes the rulings, and a session brings him one decision at a time wit
 
 ## Helpers
 
-A helper is hands for a well-specified piece. It works in a worktree of its own, branched from the session's one branch (`bin/worktree NAME jolt/<session>`), commits there and stops, and the session merges it into its branch: it never lands, never pushes and never works in the main tree. A helper that edits only docs runs no `bin/` command. A brief states:
+A helper is hands for a well-specified piece. It works in the session's one worktree, on files nobody else is editing, commits there on the session's branch and stops: it never lands, never pushes and never works in the main tree. A helper that edits only docs runs no `bin/` command. A brief states:
 1. the question, and which step of THE PLAN it serves;
 2. what is known, as paths;
 3. the scope: what it may run and which files it owns;
