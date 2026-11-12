@@ -1060,6 +1060,8 @@
              (str ": its place is its ns form, and no definition of " nsym " holds it either. A new definition has no place in a file"
                   " to insert it: evaluate it in its namespace, (in-ns '" nsym ") then (defn- f ...), and it is recorded as program"))}))
 
+(declare edit-answer)
+
 (defn edit!
   "Change the text at a place by replacing old, exact text that occurs once in it, with new: a
   definition var sym names (`(source sym)`), a doc's address (its own block) or any other path (the file on disk), place being the one edge
@@ -1067,18 +1069,25 @@
   so and all are applied together, then written once: a change that must reach several places at
   once (a loop's bindings and each of its recurs) is one edit, since any of them alone does not
   compile. Answers what the place's write answered with :edited, the place and the lines
-  around each change; throws the evaluation's error when a new definition does not compile or load,
-  its message saying nothing changed, so the eval it is called in answers it as its own :ex (an error nested in an edit's value
-  could be cut from sight and read as a change that held; a caller
-  outside an eval catches it, its ex-data the error map); or
-  :seon.repl/edit-refused, nothing changed: no such place, an old not in it (with the lines that
+  around each change. Every way it changes nothing is thrown, its ex-data the error map, so the eval it is called in answers
+  it as its own :ex (an error nested in an edit's value is cut from sight or read past: (:edited (edit! ...)) of a refusal
+  read nil, and an agent took eight turns to find why, 2026-11-12; a caller outside an eval catches it): the evaluation's
+  error when a new definition does not compile or load, its message saying nothing changed; no such place (my.agent/no-var);
+  a write that failed; or :seon.repl/edit-refused: no such place, an old not in it (with the lines that
   hold its first line, ignoring indentation), an old there more than once (each candidate's line), two olds that overlap (:overlap), or an empty old (:empty). Exact text and one occurrence, as file editors converged
   on (docs/agent.md#changing-a-definition, docs/agent.md#changing-a-doc, docs/agent.md#changing-a-file)."
   {:malli/schema [:function
-                  [:=> [:cat [:or :symbol :string] :string :string] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.text/edited :seon.fx/io-error [:map [:unchanged :any]]]]
-                  [:=> [:cat [:or :symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/edit-refused :my.agent/no-var :seon.repl/answer :seon.text/edited :seon.fx/io-error [:map [:unchanged :any]]]]]}
+                  [:=> [:cat [:or :symbol :string] :string :string] [:or :seon.repl/answer :seon.text/edited [:map [:unchanged :any]]]]
+                  [:=> [:cat [:or :symbol :string] [:vector {:min 1} [:tuple :string :string]]] [:or :seon.repl/answer :seon.text/edited [:map [:unchanged :any]]]]]}
   ([sym old new] (edit! sym [[old new]]))
   ([sym changes]
+   (let [r (edit-answer sym changes)]
+     (if (:seon.error/type r) (throw (ex-info (str (:seon.error/message r)) r)) r))))
+
+(defn- edit-answer
+  "What edit! of sym by changes answers, a refusal or a failed write as its error map (`edit!` throws it)."
+  {:malli/schema [:=> [:cat [:or :symbol :string] [:vector {:min 1} [:tuple :string :string]]] :map]}
+  [sym changes]
    (let [p (place sym)]
      (if-not (:seon.text/at p)
        p
@@ -1132,7 +1141,7 @@
                                                (conj acc [(+ (line-of at) shift) new])])
                                             [0 []] ordered))]
                  (-> (dissoc r :seon.text/text)
-                     (assoc-in [:edited :lines] (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts))))))))))))
+                     (assoc-in [:edited :lines] (into [] (comp (mapcat (fn [[from new]] (numbered text (- from k) (+ from (count (filter #{\newline} new)) k)))) (distinct)) starts)))))))))))
 
 (defn unrun
   "A model's eval call that never ran, recorded as an eval whose response is error e, why
