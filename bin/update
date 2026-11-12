@@ -17,6 +17,9 @@
 # Every step's exit status counts; the last line is UPDATE OK or UPDATE FAILED (UPDATE FAILED: ROOT STALE BINARY ... when the
 # restarted root's binary is another program than its store's main: it runs, forks no agent, and the line names the acts).
 setopt pipefail
+# the restart's background job keeps this run's nice: zsh's BG_NICE renices it by 5 more, which a run already niced to 15
+# (bin/land runs it so) may not do ("nice(5) failed: operation not permitted"), as bin/test and bin/check say
+setopt NO_BG_NICE
 MAIN=$(cd "$(dirname "$0")/.." && pwd)
 fail() { print -u2 "update: $*"; print "UPDATE FAILED"; exit 1 }
 # main brought into the write-back tree $1. Its index and files must agree with its HEAD before the merge: a change staged
