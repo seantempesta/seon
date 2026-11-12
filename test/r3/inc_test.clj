@@ -43,44 +43,65 @@
   [tx]
   (boolean (some #(or (and (map? %) (contains? % :seon.task/needs)) (and (vector? %) (= :seon.task/needs (nth % 2 nil)))) tx)))
 
+(defn- agrees
+  "After commit rep (a transact's report), the incremental reconciler (idx observed) against the oracle's full one:
+  [ok idx' full incr]."
+  [idx rep]
+  (let [idx' (r/observe idx (:db-after rep) (pdb/report->tx rep))
+        full (oracle/reconcile-view (oracle/view (:db-after rep)))
+        incr (r/actions idx')
+        merges (filterv #(= :merge (:op %)) full)
+        octopus (first (filter #(= :octopus-merge (:op %)) incr))
+        live-merge? (some (:live idx') (:merging idx'))
+        ok (and (= (remove #(= :merge (:op %)) full) (remove #(= :octopus-merge (:op %)) incr))
+                (if octopus
+                  (= (mapv #(select-keys % [:task]) merges) (:members octopus))
+                  (or (empty? merges) live-merge?)))]
+    [ok idx' full incr]))
+
 (defn- equals-full
-  "A random history from seed, 150 commits: after each, the incremental reconciler's actions
-  against the oracle's."
-  [seed]
-  (fx/load! 30 6 (fn [conn] (let [rng (java.util.Random. seed)
-                    ;; one merge at a time: the octopus merge degenerates to M1's merge queue, the oracle's rule
-          _ (d/transact conn {:tx-data (seon.test-store/root-tx {:seon.config.merge/max-running 1})})]
-      (loop [k 0 idx (r/index @conn) bad 0]
-        (if (= k 150)
-          (is (zero? bad) (str "seed " seed))
-          (let [tx (rand-step @conn rng k)
-                rep (when (seq tx) (try (d/transact conn {:tx-data (vec tx)}) (catch Throwable _ nil)))]
-            (if (or (nil? rep) (and (adds-need? tx) (not (acyclic? @conn))))
-              (recur (inc k) (r/index @conn) bad)
-              (let [_ (is (< (:max-tx (:db-before rep)) (:max-tx (:db-after rep))) "main's t moves forward with each commit")
-                    idx' (r/observe idx (:db-after rep) (pdb/report->tx rep))
-                    full (oracle/reconcile-view (oracle/view (:db-after rep)))
-                    incr (r/actions idx')
-                    merges (filterv #(= :merge (:op %)) full)
-                    octopus (first (filter #(= :octopus-merge (:op %)) incr))
-                    live-merge? (some (:live idx') (:merging idx'))
-                    ok (and (= (remove #(= :merge (:op %)) full) (remove #(= :octopus-merge (:op %)) incr))
-                            (if octopus
-                              (= (mapv #(select-keys % [:task]) merges) (:members octopus))
-                              (or (empty? merges) live-merge?)))]
-                (when-not ok
-                  (println :seed seed :k k :tx (pr-str tx))
-                  (println :full (pr-str (remove (set incr) full)))
-                  (println :inc (pr-str (remove (set full) incr))))
-                (recur (inc k) idx' (if ok bad (inc bad))))))))))))
+  "A random history from seed, 150 commits, in a world of n work tasks (r3.fx/world, a value in memory): after each, the
+  incremental reconciler's actions against the oracle's."
+  [n seed]
+  (let [rng (java.util.Random. seed)
+        ;; one merge at a time: the octopus merge degenerates to M1's merge queue, the oracle's rule
+        db0 (d/db-with (fx/world n 6) (vec (seon.test-store/root-tx {:seon.config.merge/max-running 1})))]
+    (loop [k 0 db db0 idx (r/index db0) bad 0]
+      (if (= k 150)
+        (is (zero? bad) (str "seed " seed))
+        (let [tx (rand-step db rng k)
+              rep (when (seq tx) (try (d/with db (vec tx)) (catch Throwable _ nil)))
+              db' (if rep (:db-after rep) db)]
+          (if (or (nil? rep) (and (adds-need? tx) (not (acyclic? db'))))
+            (recur (inc k) db' (r/index db') bad)
+            (let [_ (is (< (:max-tx (:db-before rep)) (:max-tx (:db-after rep))) "main's t moves forward with each commit")
+                  [ok idx' full incr] (agrees idx rep)]
+              (when-not ok
+                (println :seed seed :k k :tx (pr-str tx))
+                (println :full (pr-str (remove (set incr) full)))
+                (println :inc (pr-str (remove (set full) incr))))
+              (recur (inc k) db' idx' (if ok bad (inc bad))))))))))
 
-(deftest incremental-equals-full
-  ;; one seed in the automatic run, five in the full one (:seon.config.proofs/seeds)
+(deftest ^{:seon.test/estimate {:ticks 100000000}} incremental-equals-full
+  ;; one seed in the automatic run, five in the full one (:seon.config.proofs/seeds). The world is the fewest tasks every step kind
+  ;; reaches: 2 work tasks (4 with their merges; kind 7 needs a plain work task and one that is not), in memory (r3.fx/world),
+  ;; growing by kind 3 to ~20 at commit 150. Estimate: 150 commits x the oracle's full reconcile at ~80k ticks a task (measured:
+  ;; 144M, where 45k a task was assumed) x ~12 tasks on average = ~1.4e8, held at the 1e8 cap while the owner decides the depth:
+  ;; 150 commits keep histories as deep as a bug has needed (140)
   (doseq [seed (let [s (proofs/test-seed)] (map #(+ s %) (range (config/value :seon.config.proofs/seeds))))]
-    (equals-full seed)))
+    (equals-full 2 seed)))
 
-(deftest a-refused-work-end-gets-its-verdict-in-both
-  ;; the seed whose history first held what slice 6' changed: a task ended :green with a
-  ;; regression, which judging (seon.reconcile/judgment) sends back to its session and stores on the task, where both
-  ;; reconcilers read it; 23 of its 140 commits disagreed when one derived it and the other did not
-  (equals-full 913731333918154371))
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-refused-work-end-gets-its-verdict-in-both
+  ;; what slice 6' changed (pinned once by seed 913731333918154371 of a 30-task world, 140 commits): a work task that ended :green
+  ;; with a regression is judged :told, its reasons stored on the task (seon.reconcile/judgment), and its agent waits for a message;
+  ;; both reconcilers read the stored answer, so neither starts it again, where one that derived it disagreed (23 of 140 commits).
+  ;; Estimate: the 4-task world and one commit compared, ~5M ticks of its own
+  (let [db (fx/world 2 6)
+        idx (r/index db)
+        id (task/task-id 'r3 "p0")
+        rep (d/with db [{:seon.task/id id :seon.task/outcome :told
+                         :seon.task/reasons [{:reason :regression :symbol 'app.proofs/p1-test}]}])
+        [ok _ full incr] (agrees idx rep)]
+    (is (= :told (:seon.task/outcome (d/pull (:db-after rep) [:seon.task/outcome] [:seon.task/id id]))) "the verdict is stored on the task")
+    (is ok (str "both reconcilers read the stored verdict: full " (pr-str full) " incremental " (pr-str incr)))
+    (is (not-any? #(= id (:task %)) incr) "and neither starts the told task again: its agent waits for a message")))
