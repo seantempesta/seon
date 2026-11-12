@@ -6,7 +6,8 @@
 (def ^:private k "learn-a1")
 
 (defn- run-db
-  "A test db holding agent k's run: turn n's evals, each [code result] with result {:value v} or {:ex error-map}."
+  "A test db holding agent k's run: turn n's evals, each [code result] with result {:value v} or {:ex error-map}, and :response, what
+  the eval's answer says it wrote."
   [turns]
   (let [db0 (ts/test-db)]
     (:db-after
@@ -14,12 +15,14 @@
                        (for [[n evals] (map-indexed (fn [i es] [(inc i) es]) turns)
                              tx (into [{:seon.model-call/id (str "c" n) :seon.model-call/agent [:seon.agent/key k] :seon.model-call/n n :seon.model-call/origin :model}]
                                       (for [[j [code r]] (map-indexed vector evals)]
-                                        {:seon.eval/id (str "e" n "-" j) :seon.eval/agent [:seon.agent/key k] :seon.eval/code code
+                                        (cond-> {:seon.eval/id (str "e" n "-" j) :seon.eval/agent [:seon.agent/key k] :seon.eval/code code
                                          :seon.eval/call [:seon.model-call/id (str "c" n)]
                                          :seon.eval/result (cond-> {:seon.result/hash (str "h" n "-" j)}
                                                              (some? (:value r)) (assoc :seon.result/value (:value r))
                                                              (:ex r) (assoc :seon.result/ex (:ex r))
-                                                             (:out r) (assoc :seon.result/out {:seon.print/code (:out r)}))}))]
+                                                             (:out r) (assoc :seon.result/out {:seon.print/code (:out r)}))}
+                                          ;; what the eval says it wrote (seon.repl's answer: :recorded, :edited), as wrap-record stores it
+                                          (:response r) (assoc :seon.eval/response (:response r)))))]
                          tx))))))
 
 (def ^:private refused
@@ -49,12 +52,28 @@
   ;; docs/tasks.md#a-refine-curates-its-own-task: a refine reads the run it refines in one call. The loop task's refine (2026-11-13) spent
   ;; 24 of its 40 turns writing queries over the eval records to read its run, and never wrote the plan. Estimate: a 3-turn run-db, one
   ;; pull an eval, as turns-of
-  (let [db (run-db [[["(source seon.repl/place)" {:value nil :out "(defn place [n] n)"}]]
-                    [["(grep \"nothing here\")" {:value []}]]
-                    [["(defn f [] (seon.repl/place 'x))" {:value 'app.x/f}]]])
+  (let [db (d/db-with (run-db [[["(source seon.repl/place)" {:value nil :out "(defn place [n] n)"}]]
+                               [["(grep \"nothing here\")" {:value []}]]
+                               [["(defn f [] (seon.repl/place 'x))" {:value 'app.x/f :response {:recorded ['app.x/f]}}]]])
+                     [{:form/id "app.x/f" :form/refs #{'seon.repl/place}} {:var/name 'app.x/f :var/form [:form/id "app.x/f"]} {:var/name 'seon.repl/place}])
         r (learn/run db k)]
     (is (= [{:n 1 :reads #{'seon.repl/place}} {:n 2 :reads #{}} {:n 3 :reads #{'seon.repl/place}}] (:turns r)) "each turn with what it read")
-    (is (= #{'seon.repl/place} (:final r)) "the vars its final definitions used: the change site")
+    (is (= #{'app.x/f 'seon.repl/place} (:final r)) "the vars it wrote and what they use: the change site")
     (is (= [{:turn 1 :rule :missing :producer :template} {:turn 2 :rule :empty :producer 'grep}] (mapv #(select-keys % [:turn :rule :producer]) (:waste r)))
         "and what was lost: turn 1 read the change site nothing had shown it (:missing), turn 2 a look-up that answered nothing")
     (is (= {:template {:forms 1 :turns 1} 'grep {:forms 1 :turns 1}} (:summary r)))))
+
+(deftest ^{:seon.test/estimate {:ticks 2000000}} a-runs-change-site-is-what-its-evals-wrote
+  ;; docs/tasks.md#a-refine-curates-its-own-task: the change site is read from what the run's evals wrote, the vars their answers
+  ;; recorded or edited and what those vars' forms use, never from form text. The loop task's run defined its helpers as
+  ;; "(in-ns 'seon.repl)\n(defn- read-spans ..)": a text read kept only forms starting "(def", so the change site was #{} and its 19
+  ;; exploring turns read as :search. Estimate: a 3-turn run-db and two var facts, one seek a written var
+  (let [db0 (run-db [[["(source app.y/h)" {:value nil :out "(defn h [] 1)"}]]
+                     [["(in-ns 'app.x)\n(defn- g [] (app.y/h))" {:value 'app.x/g :response {:recorded ['app.x/g]}}]]
+                     [["(seon.repl/edit! 'app.x/f \"(defn f [] 2)\")" {:value :ok :response {:edited {:var 'app.x/f :lines []}}}]]])
+        db (d/db-with db0 [{:form/id "app.x/g" :form/refs #{'app.y/h}} {:var/name 'app.x/g :var/form [:form/id "app.x/g"]} {:var/name 'app.y/h}
+                           {:var/name 'app.x/f}])
+        r (learn/run db k)]
+    (is (= #{'app.x/g 'app.x/f 'app.y/h} (:final r)) "what its evals wrote, an in-ns'd defn- and an edit, and what they use")
+    (is (= [{:turn 1 :rule :missing :producer :template}] (mapv #(select-keys % [:turn :rule :producer]) (:waste r)))
+        "so a turn reading the change site before nothing showed it is :missing, not :search")))
