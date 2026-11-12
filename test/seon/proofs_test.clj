@@ -447,19 +447,19 @@
     (is (contains? (:digests (runner/plan-of d "tests" false nil store)) 'app.tr-calc-test/adds) "a plan reads it")
     (finally (d/release conn) (close-stores! store)))))
 
-(deftest a-process-plans-on-more-scratch-stores-than-its-undo-entries
+(deftest ^{:seon.test/estimate {:ticks 50000000}} a-process-plans-on-more-scratch-stores-than-its-undo-entries
   ;; docs/failure-points.md#lmdb-crash-safety: a test's own store ends with the test (program-db keeps its
   ;; branch's connection, so close-stores! closes it), and a process plans on any number of stores in turn.
   ;; No system-wide limit stands behind the count any more (docs/failure-points.md#lmdb-locks: no semaphore),
-  ;; so eleven passes with or without the close: task seon.proofs/the-scratch-stores-proof-has-a-mutation
-  ;; (each store made costs ~20 M ticks, its seed)
+  ;; so two stores in turn show the claim at the smallest n (eleven was the old semaphore's count: 220M ticks of the same
+  ;; proof); each store made costs ~20 M ticks, its seed. Its mutation is still owed: task seon.proofs/the-scratch-stores-proof-has-a-mutation
   (let [d (checkout! {"deps.edn" "{}" "src/app/ps_calc.clj" "(ns app.ps-calc)\n(defn add [a b] (+ a b))\n"
                       "test/app/ps_calc_test.clj" "(ns app.ps-calc-test (:require [clojure.test :refer [deftest is]]))\n(deftest adds (is true))\n"})
-        planned (vec (for [_ (range 11)
+        planned (vec (for [_ (range 2)
                            :let [store (str (scratch-dir) "/store")]]
                        (try (contains? (:digests (runner/plan-of d "tests" false nil store)) 'app.ps-calc-test/adds)
                             (finally (close-stores! store)))))]
-    (is (= (repeat 11 true) planned) "eleven stores in turn, each planned")))
+    (is (= (repeat 2 true) planned) "two stores in turn, each planned")))
 
 (deftest a-plan-reads-the-kept-program-db-of-its-tree
   ;; task seon.proofs/a-plan-keeps-a-program-db-per-tree: the program db is a function of the

@@ -156,19 +156,19 @@
     (is (= [[{:type :probe :tag "one" :got 1}] [{:type :probe :tag "one" :got 2}]]
            (map #(mapv (fn [e] (dissoc e :at-ms)) (:events %)) [o1 o2])))))
 
-(deftest ^{:seon.test/estimate {:ticks 50000000}} every-test-root-starts-through-start-root!
+(deftest ^{:seon.test/estimate {:ticks 5000000} :seon.test/execs ["git"]} every-test-root-starts-through-start-root!
   ;; read from the program of test/ (the
   ;; compiler's references, not a text search over files), no test var but the helper's one
   ;; launcher runs bin/system or `./seon root` through binary-sh, so every test root names its
   ;; store and main and waits on its listening line
-  ;; only the files that name the primitive are analyzed (a launcher's source holds its name, in a call or a
-  ;; refer): the analysis of the whole of test/ was most of this test's time
-  (let [files (into {} (for [^java.io.File f (file-seq (java.io.File. (seon.config/checkout) "test")) :when (.endsWith (.getName f) ".clj")
-                             :let [text (slurp f)] :when (clojure.string/includes? text "binary-sh")]
-                         [(.getPath f) text]))
-        db (d/db-with (ts/test-db) (seon.source/import-tx (ts/test-db) files))
-        launchers (set (for [[v src] (d/q '[:find ?v ?s :where [?e :var/name ?v] [?e :var/form ?f]
-                                             [?f :form/refs seon.test-store/binary-sh] [?f :form/src ?s]] db)
+  ;; read from the program the run already holds (runner/program: src and test as facts, each form's :form/refs), never by
+  ;; importing the files again: re-importing every file naming binary-sh was 387M ticks of the test's own work
+  (let [db (test-runner/program)
+        files (d/q '[:find [?file ...] :where [?f :form/refs seon.test-store/binary-sh] [?f :form/ns ?ns] [?ns :ns/file ?file]] db)
+        ;; the selective clause first (the forms that name binary-sh, an index seek), then their vars: begun at every var, the
+        ;; join was most of the test's work
+        launchers (set (for [[v src] (d/q '[:find ?v ?s :where [?f :form/refs seon.test-store/binary-sh] [?e :var/form ?f]
+                                             [?e :var/name ?v] [?f :form/src ?s]] db)
                              ;; binary-sh is the primitive the one launcher calls; this test names both in its query
                              :when (not (#{'seon.test-store/binary-sh 'seon.check-test/every-test-root-starts-through-start-root!} v))
                              ;; the launch is a literal argument ("bin/system", or "./seon" "root"), never text that
@@ -340,7 +340,7 @@
 ;; docs/references.md#task-references: a task's citation of nothing is refused at its write (owner, 2026-11-09); the health step loads
 ;; the tree's tasks through that one checked write, so a task citing a key no program holds is health's typed refusal, never a lookup
 ;; Datahike throws (batch 15: a plan citing :db/contentId in one backtick threw out of health before any row)
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-task-citing-nothing-is-the-health-steps-typed-refusal
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-task-citing-nothing-is-the-health-steps-typed-refusal
   (let [dir (str (System/getProperty "java.io.tmpdir") "/health-cite-" (random-uuid))
         tasks (str dir "/" (#'test-runner/tasks-dir))
         _ (clojure.java.shell/sh "mkdir" "-p" tasks (str dir "/docs"))
@@ -351,7 +351,7 @@
     (is (= {:seon.error/type :seon.db/no-target :target [:schema/key :no.such/key] :by "zz/t"} (select-keys r [:seon.error/type :target :by])) (pr-str r))
     (is (str/includes? (str (:seon.error/message r)) "two backticks") "its message says what to write for a name that is no citation")))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-problem-the-base-had-is-not-the-branchs
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-problem-the-base-had-is-not-the-branchs
   (let [[base] (catch-db (ts/test-db) 1)
         h (test-runner/branch-health base base nil)]
     (is (pos? (get-in (seon.problems/health base) [:classes :unnamed-site :n])) "the base has an open problem")
@@ -370,14 +370,14 @@
     (testing "a class no verdict judges (an attention class never fails a branch) is refused, never a green"
       (is (thrown? Exception (test-runner/branch-health base head [:stale-section]))))))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} a-class-the-health-step-does-not-read-is-refused
+(deftest ^{:seon.test/estimate {:ticks 5000000}} a-class-the-health-step-does-not-read-is-refused
   (let [[base] (catch-db (ts/test-db) 1)
         [head] (catch-db base 2)]
     ;; the running system's state is no branch's content: no verdict of caused-split judges it
     (doseq [c [:stalled :stale-pin :stale-binary :unsynced :problem-unlinked]]
       (is (thrown? Exception (test-runner/branch-health base head [c])) (str (name c) " is no verdict of caused-split")))))
 
-(deftest ^{:seon.test/estimate {:ticks 10000000}} the-health-steps-checks-are-the-classes-caused-reads
+(deftest ^{:seon.test/estimate {:ticks 5000000}} the-health-steps-checks-are-the-classes-caused-reads
   (let [[base] (catch-db (ts/test-db) 1)
         attention? (:seon.problems/attention (contract/properties :seon.problems/class))]
     (is (= (into #{} (comp (remove attention?) (map #(keyword (str "no-" (name %))))) seon.problems/caused-classes)
