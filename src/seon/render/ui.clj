@@ -52,12 +52,6 @@
   {:malli/schema [:=> [:cat :any] :string]}
   [n] (if (number? n) (format "%,d" (long n)) "–"))
 
-(defn bytes-str {:malli/schema [:=> [:cat :any] :string]}
-  [b] (emit/bytes-text b))
-
-(defn ms-str {:malli/schema [:=> [:cat :any] :string]}
-  [ms] (emit/ms-text ms))
-
 (defn plain
   "Text on the page as the one printer's text (seon.print/plain) under budget tokens: whole,
   or its shown part and the cut, which says what it omitted and where the rest is: a link
@@ -309,9 +303,9 @@
     :reply (let [r (:response ev)]
              (str (when (:ex r) "error · ")
                   (print/line (:text r) (cell))
-                  (when (:ms r) (str " · " (ms-str (:ms r))))))
+                  (when (:ms r) (str " · " (emit/ms-text (:ms r))))))
     :commit (str (kname (:branch ev)) " t " (:t ev) (when (:txs ev) (str " · " (:txs ev) " tx")))
-    :tests (str (run-words ev) (when (:ms ev) (str " · " (ms-str (:ms ev)))))
+    :tests (str (run-words ev) (when (:ms ev) (str " · " (emit/ms-text (:ms ev)))))
     :merged-main (let [r (:result ev)]
                    (if-not (contract/error? r) (str "main → branch · " (count (:applied r)) " applied · " (count (:conflicts r)) " conflicts")
                        (str "refused: " (print/line (:seon.error/message r) (cell)))))
@@ -319,8 +313,8 @@
     :fork-server-up (str "root forked a new fork server · pid " (:pid ev))
     :spawned (if (:cloned-from ev)
                (str "cloned from " (kname (:cloned-from ev)) " · pid " (:pid ev))
-               (str "forked in " (ms-str (:fork-ms ev)) (when (:pid ev) (str " · pid " (:pid ev)))))
-    :ready (str "ready" (when (:start-ms ev) (str " in " (ms-str (:start-ms ev)))))
+               (str "forked in " (emit/ms-text (:fork-ms ev)) (when (:pid ev) (str " · pid " (:pid ev)))))
+    :ready (str "ready" (when (:start-ms ev) (str " in " (emit/ms-text (:start-ms ev)))))
     :started (str "began " (print/line (or (:form ev) "") 30))
     :tests-started (str "test child forked · pid " (:pid ev))
     :killed (if (:ended-as ev) (str "stopped by root after its run ended " (kname (:ended-as ev))) "KILLED")
@@ -891,12 +885,6 @@
   {:malli/schema [:=> [:cat :any] :any]}
   [src] [:pre [:code src]])
 
-(defn- names-line
-  "A line naming every symbol of xs, `Called by: a, b, c`; nothing for none, named by its label so a change of a name sends this line, not the part (docs/render.md#a-change-is-edits-by-name). Which names there are is the pull's (ctx's callers window)."
-  {:malli/schema [:=> [:cat :string [:sequential :any]] :any]}
-  [label xs]
-  (when (seq xs) [:p {:key label} (str label ": " (str/join ", " (map str xs)))]))
-
 (defn call-in
   "One real call of sym in source src: the first form opening `(sym ` or `(name `, as written (`seon.ctx.status/form-at`), that is a call
   an agent can evaluate, or nil when src has none: one that is only the function's name and bare symbols is its arglist, which the
@@ -1421,7 +1409,7 @@
        [:div {:class "flex items-baseline justify-end gap-2 text-2xs text-text-500"}
         ;; who ran it: the agent's own turn, or the sender who did (`ran-by`)
         (ran-by e)
-        (when ms [:span {:class "seon-ms"} (ms-str ms)])
+        (when ms [:span {:class "seon-ms"} (emit/ms-text ms)])
         [:span (emit/tokens-text (+ (render/tokens-of ix (:seon.eval/code e)) (render/tokens-of ix (:seon.eval/response e))))]
         [:code {:class "seon-handle"} (str handle)]]
        ;; each by the one render under the value's budget; a cut reads the rest through its key of the handle
@@ -1466,12 +1454,6 @@
      (for [[t fs] (sort-by (comp str key) failures) :when (not (died t))]
        [:div [:p [:code (str t)]] (render/hiccup {:seon.render/index (:seon.render/index opts) } (first fs))])
      (when (seq died) [:p "died: " (for [t died] [:code (str t) " "])])]))
-
-(defn- id-set
-  "The keys of join m (a member map of ctx, read through its view) as a set: one read of its key set, its
-  members not each made a view as a walk of its entries makes them (seon.ratom)."
-  {:malli/schema [:=> [:cat [:maybe :map]] [:set :any]]}
-  [m] (cond (nil? m) #{} (instance? java.util.Map m) (set (.keySet ^java.util.Map m)) :else (set (keys m))))
 
 (defn stream-part
   "One part of an effect's in-flight text, part one of reasoning, content, message, intent, code, out or err: the element the
@@ -2207,14 +2189,6 @@
   (cond (:seon.task/id t) (task-title t)
         (:seon.agent/branch a) (kname (:seon.agent/branch a))))
 
-(def ^:private session-attrs
-  "What an entry of the agents list reads of an agent on main: its identity, its process's status, its branch and turns, and its task."
-  [:seon.agent/key :seon.agent/started-ms :seon.agent/status :seon.agent/branch :seon.agent/max-turns
-   {:seon.agent/task [:seon.task/id :seon.task/outcome :seon.task/reason :seon.task/failure :seon.task/plan {:seon.task/started-by [:seon.user/name]}]}
-   ;; the agents it started (a request's work agents), shown under its tile and its entry: :seon.agent/agents, the one path, read
-   ;; forward from the agent (seon.task's agent-tx writes it from the task's :seon.task/started-by)
-   {:seon.agent/agents [:db/id :seon.agent/key]}])
-
 (defn session-address
   "The name of an agent's page: its key (:seon.agent/key, its id's name), the one name of a session that survives a root's restart,
   so a link to it is a bookmark. An agent without a key (a map the page is shown) is nothing to link. See docs/render.md#a-sessions-address-and-the-agents-list."
@@ -2299,8 +2273,8 @@
     [:section [:h2 "root's process"]
      [:p {:class "text-xs text-text-400"} (str/join " · " (remove nil? [(some->> (ratom/realize (:seon.system/boot c)) (str "boot ")) (some->> (ratom/realize (:seon.system/generation c)) :commit (str "generation "))]))]
      [:p {:class "flex flex-wrap gap-x-3 text-xs tabular-nums"}
-      (stat "batch p50" (some-> (:batch-p50-ms writer) ms-str)) (stat "tx/commit" (:tx-per-commit writer)) (stat "commits" (:commits writer))
-      (stat "fork p50" (some-> (:fork-ms-p50 fork-server) ms-str)) (stat "fork lag" (some-> (:lag-ms fork-server) ms-str)
+      (stat "batch p50" (some-> (:batch-p50-ms writer) emit/ms-text)) (stat "tx/commit" (:tx-per-commit writer)) (stat "commits" (:commits writer))
+      (stat "fork p50" (some-> (:fork-ms-p50 fork-server) emit/ms-text)) (stat "fork lag" (some-> (:lag-ms fork-server) emit/ms-text)
             "how long a commit takes to reach the fork server, the middle of its last 200; on an idle system it stays at the boot's own backlog")
       (stat "defects" root-errors-total)]
      [:p {:class "text-xs text-text-400"}
@@ -2522,24 +2496,13 @@
     :example (str "example session " x " as of t " t)
     :session (str "the opening of session " x)))
 
-;; a role's band: the wire's own types, in the order the bar lists them. See docs/render.md#the-debug-page-is-the-wire-request
+;; a row's border by the wire's own role. See docs/render.md#the-debug-page-is-the-wire-request
 (def ^:private role-looks
-  "Each wire role's {role [border band]}."
-  (array-map "system" ["border-info" "bg-info"]
-             "user" ["border-signal" "bg-signal"]
-             "assistant" ["border-eval" "bg-eval"]
-             "tool" ["border-text-500" "bg-text-500"]))
+  "Each wire role's border class."
+  {"system" "border-info" "user" "border-signal" "assistant" "border-eval" "tool" "border-text-500"})
 
 (defn debug-turn
-  "One request of the debug timeline as it went on the wire (the declared html render of
-  :seon.render/debug-turn), nothing re-rendered or summarized (owner: \"I don't want to find out later
-  that the envelope was different and you just made a fake page for me\"; \"I want the wire format types as they are\"): a bar of
-  its tokens by role, then each message of its body in order, one row: its role, a line of its text, its size against
-  :seon.config.render/tokens-warn and tokens-over. Open, the row's fields as sent replace its line, drawn only then (/open):
-  its records' refs, content as Markdown or a tool's highlighted, each tool call's function, id and arguments, whole. The line where the provider's cached
-  prefix ends (placed by its cache-hit count over the sizes, an estimate, said so), or, with none recorded, where
-  the messages the request before sent the same way end; the envelope (every field but the messages) and,
-  while opened, the whole body's JSON as sent. input as `debug-input` answers it. See docs/render.md#the-debug-page-is-the-wire-request. It reads schemas in the walk's entity index (:seon.render/index) for the values it draws through render/hiccup: one render running another, the interim stage 2a of docs/users.md removes."
+  "One request of the debug timeline as it went on the wire, each message a row in order, opened whole on /open. See docs/render.md#the-debug-page-is-the-wire-request."
   {:malli/schema [:=> [:cat :seon.render/opts :map] :any]}
   [opts {:keys [view to-come? turn agent origin body sources new raw? error differs? opened swept?]
          {:seon.model-call/keys [tokens cache-hit-tokens cache-miss-tokens] call-ms :seon.model-call/ms call-model :seon.model-call/model} :usage}]
@@ -2551,17 +2514,13 @@
         scale (if (and prompt (pos? est)) (/ (double prompt) est) 1.0)
         cached (when (and cache-hit-tokens (pos? cache-hit-tokens))
                  (count (take-while #(<= % cache-hit-tokens) (reductions + (map #(* scale %) sizes)))))
-        ;; with no cache count recorded (a turn to come, a provider that reports none): where the messages the
-        ;; request before sent the same way end, the prefix a provider's cache can serve
-        same (when (nil? cached) (first (keep-indexed (fn [i n?] (when n? i)) new)))
-        upto (vec (reductions + 0 sizes))
         line-budget (config/value :seon.config.render/line-budget)
         opened (or opened #{})
-        ;; each limit read once: a size reads quiet, amber or red, and only its colour changes at a bound
-        size-class (let [warn (config/value :seon.config.render/tokens-warn) over (config/value :seon.config.render/tokens-over)]
-                     (fn [n] (cond (>= n over) "font-semibold text-error" (>= n warn) "font-semibold text-warning" :else "text-text-400")))
-        request-class (let [warn (config/value :seon.config.render/request-tokens-warn) over (config/value :seon.config.render/request-tokens-over)]
-                        (fn [n] (cond (>= n over) "font-semibold text-error" (>= n warn) "font-semibold text-warning" :else "text-text-400")))
+        ;; a size reads quiet, amber or red: only its colour changes at a bound
+        size-of (fn [warn over] (let [warn (config/value warn) over (config/value over)]
+                                  (fn [n] (cond (>= n over) "font-semibold text-error" (>= n warn) "font-semibold text-warning" :else "text-text-400"))))
+        size-class (size-of :seon.config.render/tokens-warn :seon.config.render/tokens-over)
+        request-class (size-of :seon.config.render/request-tokens-warn :seon.config.render/request-tokens-over)
         line (fn [cls text] [:div {:class (str "my-1 flex items-center gap-2 text-2xs " cls)}
                              [:span {:class "h-px flex-1 bg-current opacity-40"}] text [:span {:class "h-px flex-1 bg-current opacity-40"}]])
         field (fn [k v] [:div {:class "flex flex-col"} [:span {:class "seon-note"} k] v])
@@ -2575,7 +2534,7 @@
         row (fn [i {:keys [role content tool_calls tool_call_id reasoning_content] :as m}]
               (let [rs (get sources i) new? (get new i) u (str unit "-o" i) open? (contains? opened u)
                     example (some (fn [[k x]] (when (= :example k) x)) rs)
-                    [border] (get role-looks role)]
+                    border (get role-looks role)]
                 [:details (cond-> {:class (str "group rounded-sm border-l-4 bg-base-950 px-2 py-1 " border)
                                    :data-role role :data-new (str new?) :data-session (when example example)
                                    (keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" u "&open=' + el.open)")}
@@ -2600,11 +2559,7 @@
                                                 ;; the call's own fields by their wire names
                                                 (map (fn [[k v]] (field (str "arguments." k) (if (= "code" k) (highlighted (str v)) (verbatim (str v)))))
                                                      (args c)))))
-                                 tool_calls)])]))
-        shares (for [[r [_ band]] role-looks
-                     :let [n (reduce + 0 (keep-indexed (fn [i m] (when (= r (:role m)) (get sizes i))) ms))]
-                     :when (pos? n)]
-                 {:role r :band band :n n})]
+                                 tool_calls)])]))]
     [:section {:id unit :class "flex flex-col gap-2 rounded-md bg-base-900 p-3 text-xs"}
      [:div {:class "flex flex-wrap items-baseline gap-3"}
       [:b {:class "text-signal"} (if to-come? (str "turn " turn ", to come: what it would send now") (str "turn " turn))]
@@ -2619,14 +2574,6 @@
       (cond (= :outside origin) [:span {:class "muted"} "an outside read: no model call"]
             to-come? [:span {:class "muted"} "redrawn as the branch moves"]
             (not (or tokens error)) [:span {:class "muted"} "the call is in flight"])]
-     (when (seq shares)
-       [:div {:class "flex flex-col gap-1"}
-        [:div {:class "flex h-2 overflow-hidden rounded-sm bg-base-800"}
-         (for [{:keys [band n]} shares] [:span {:class band :style (str "width:" (/ (* 100.0 n) (max 1 est)) "%")}])]
-        [:div {:class "flex flex-wrap gap-x-4 gap-y-1 text-text-200"}
-         (for [{:keys [role band n]} shares]
-           [:span {:class "inline-flex items-center gap-1.5 tabular-nums"} [:span {:class (str "inline-block h-2.5 w-2.5 " band)}]
-            (str role " " (long (Math/round (/ (* 100.0 n) (max 1 est)))) "% " (emit/tokens-text n))])]])
      (when error [:div {:class "rounded border border-error p-2"} (render/hiccup {:seon.render/index (:seon.render/index opts) } error)])
      (when swept?
        [:p {:class "text-warning"} "This turn's commit is gone from the store (seon.db/retain!), so this is drawn from the branch as it is now, not as it was sent."])
@@ -2637,10 +2584,7 @@
      (into [:div {:class "flex flex-col gap-1"}]
            (mapcat (fn [i m]
                      (cond-> [(row i m)]
-                       (= (inc i) cached) (conj (line "text-info" (str "the provider's cache ends here: " (group3 cache-hit-tokens) " tokens served from cache (placed by estimate)")))
-                       (and same (pos? same) (= (inc i) same))
-                       (conj (line "text-info" (str "sent the same by the request before down to here: " (group3 (long (nth upto same)))
-                                                    " tokens a provider's prefix cache can serve (none recorded for this request)")))))
+                       (= (inc i) cached) (conj (line "text-info" (str "the provider's cache ends here: " (group3 cache-hit-tokens) " tokens served from cache (placed by estimate)")))))
                    (range) ms))
      [:details (cond-> {(keyword "data-on:toggle") (str "@post('/open?view=" view "&unit=" unit "-raw&open=' + el.open)")} raw? (assoc :open true))
       [:summary {:class "cursor-pointer text-text-400"} "the body's JSON, whole, as sent"]
