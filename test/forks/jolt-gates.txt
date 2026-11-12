@@ -192,6 +192,10 @@ maskedacquire
 ioerrno
 cas
 flow
+remotechan
+remotedefaultpump
+remotefork
+flowerrorkept
 hashsetbulkcost
 aotcachebudget
 providerfirstuse

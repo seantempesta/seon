@@ -24,4 +24,16 @@
              "Reproduction (prototype e3_failure): update! restarting a proc whose state held a failed message lost that message, and the report said :lost {} (only dropped in-chans are counted). Correct: a proc's ::flow/stop transition may answer messages it held under ::flow/held, which update! puts back at the front of the new proc's in-chan (or counts in :lost when the in-port is gone).",
              :kind :work,
              :proofs
-             #{jolt.flow-test/a-restart-keeps-the-held-message}}]
+             #{jolt.flow-test/a-restart-keeps-the-held-message}}
+ {:seon.task/name "update-is-one-owners-message"
+  :seon.task/plan "Owner: deps (root 2026-11-12, not urgent). Jolt's flow/update! (lane F2) serializes updates with a ReentrantLock around apply!, which stops and starts procs: effects a swap! retry would repeat, so a compare-and-set cannot replace it. The Flow way is one owner fiber of the graph taking update requests on a channel, applying each in order and answering on the request's promise-chan; update! puts and waits on that answer, and the lock goes. Same answers and ordering as today; gates flow and remotefork stay green, and a gate shows two concurrent update! fns compose with no lock held. See `docs/forks.md#jolt`."
+  :seon.task/kind :work
+  :seon.task/proofs #{jolt.flow-test/concurrent-updates-compose-through-the-owner}}
+ {:seon.task/name "update-costs-what-changed"
+  :seon.task/plan "Owner: deps (jolt-flow 4). flow/update! fingerprints by identity and replans only touched procs, but any change of :conns rebuilds the whole conn-map and routes (stdlib/clojure/core/async/flow/impl.clj apply!), so adding n children one by one is O(n^2). Measured with test/chez/flow-update-test.clj (no make target, so no gate today): 1,000 procs, adding one 1.4-2.1 ms wall. Estimate the lower bound (the touched coords' routes only), measure ticks at n=10/100/1000, patch routes for touched coords only, and make flow-update-test a gate. See `docs/forks.md#jolt`."
+  :seon.task/kind :work
+  :seon.task/proofs #{jolt.flow-test/adding-a-proc-costs-what-it-touches}}
+ {:seon.task/name "report-drops-are-counted"
+  :seon.task/plan "Owner: deps (root's ruling 2026-11-12). ::flow/report is status and may drop (a sliding buffer, as upstream), but each drop is counted where ping shows it. Jolt's channels are Scheme records (host/chez/java/async.ss async-chan) whose sliding and dropping buffers drop silently: add a drop count to the channel (ac-qdrop-oldest! and the dropping branch), read by a clojure.core.async extension, and ping's report includes the report chan's count. A gate: 150 reports with nobody reading, ping shows 50 dropped. See `docs/forks.md#jolt`."
+  :seon.task/kind :work
+  :seon.task/proofs #{jolt.flow-test/a-flows-report-drops-are-counted-in-ping}}]
