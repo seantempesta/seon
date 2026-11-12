@@ -144,6 +144,22 @@
     (.mkdirs (java.io.File. d))
     d))
 
+(deftest bin-env-publishes-its-git-link-by-rename-and-keeps-a-right-one
+  ;; docs/machine.md#processes. Found 2026-11-12 (tests): every script sourcing bin/env re-made target/git-bin/git with
+  ;; ln -sf (unlink, then symlink), so a git spawn that resolved it from PATH in that gap failed "posix_spawn failed
+  ;; (errno 2)": seon.program-test/a-kept-program-store-another-schema-refuses-is-made-again went red inside a full run,
+  ;; where check steps source bin/env beside the shards, and never alone. Cost: three zsh starts, ~0.1 s.
+  (let [d (scratch-dir)
+        env (str (cfg/checkout) "/bin/env")
+        link (str d "/target/git-bin/git")
+        src #(clojure.java.shell/sh "zsh" "-c" "ROOT=$1 . $2 >/dev/null 2>&1; stat -f '%i %Y' $3 2>/dev/null" "x" d env link)]
+    (.mkdirs (java.io.File. (str d "/target/git-bin")))
+    (clojure.java.shell/sh "ln" "-s" "/nonexistent/git" link)
+    (let [a (clojure.string/trim (:out (src))) b (clojure.string/trim (:out (src)))]
+      (when (seq a)   ; a machine whose git on PATH is already the binary makes no link
+        (is (not (clojure.string/ends-with? a "/nonexistent/git")) (str "a wrong link is replaced: " a))
+        (is (= a b) "a right link is left as it is: the same inode, never unlinked under a running spawn")))))
+
 (deftest a-file-the-program-loads-reads
   ;; docs/source.md#a-program-file: seen 2026-11-07, edamame refused three files Jolt loads (a #() inside a #(), a symbol with two slashes in EDN), so a write-back naming them was refused; the check reads as the loader does
   (is (nil? (fx/unread-text "src/x.clj" "(ns x)\n(def f #(do (g #(h %)) %))\n")) "a fn literal inside one reads, as Jolt's reader loads it")
