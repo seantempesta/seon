@@ -2205,7 +2205,9 @@
   (merge (var-digests g (vec (keys defs)))
          (into {} (for [k (keys schemas) :let [d (get own (str "schema " k))] :when d] [[:schema k] d]))
          (into {} (for [[k v] (:config inputs)] [[:config k] v]))
-         (into {} (for [[p b] blobs] [[:file p] b]))))
+         (into {} (for [[p b] blobs] [[:file p] b]))
+         ;; the kinds it holds whole: a read of a file it has no blobs for is never a miss (seon.proofs/read-digests)
+         {:seon.proofs/covers (cond-> #{:var :schema :config} (seq blobs) (conj :file))}))
 
 (defn index-of
   "{test {:digest :process? :binary?}} the graph g holds (reach-indexed): graph-index's of its tests, or {} when it holds none. See docs/source.md#tests-run-by-reach."

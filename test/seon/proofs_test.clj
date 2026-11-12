@@ -756,7 +756,7 @@
 ;; docs/source.md#tests-run-by-reach: a test is keyed by what its run read (recorded reads, ninja's depfiles): its verdict
 ;; holds each read's digest, and it is reused while every one still has it, whatever else moved
 (deftest a-verdict-is-reused-while-everything-its-run-read-is-unchanged
-  (let [rd {'a/f "f1" 'a/g "g1" 'a/h "h1" [:schema :a/e] "e1"}
+  (let [rd {'a/f "f1" 'a/g "g1" 'a/h "h1" [:schema :a/e] "e1" :seon.proofs/covers #{:var :schema :config}}
         raw {:fns #{'a/f 'a/g} :entities #{:a/e :a/missing}}
         k (seon.proofs/reads-key rd raw)
         held {'a.b-test/t [{:digest "old" :pass 1 :fail 0 :error 0 :reads k}]}
@@ -768,4 +768,6 @@
     (is (= "static" (get (seon.proofs/read-digests static (assoc rd 'a/g "g2") held) 'a.b-test/t)) "a var it called moved: it runs")
     (is (= "static" (get (seon.proofs/read-digests static (assoc rd [:schema :a/missing] "m1") held) 'a.b-test/t)) "a schema it missed now exists: it runs")
     (is (= "static" (get (seon.proofs/read-digests static rd {'a.b-test/t [{:digest "old" :pass 1 :fail 0 :error 0}]}) 'a.b-test/t))
-        "a verdict with no record of its reads is never reused by them")))
+        "a verdict with no record of its reads is never reused by them")
+    (is (= "static" (get (seon.proofs/read-digests static rd {'a.b-test/t [{:digest "old" :reads {'a/f "f1" [:file "x.md"] nil}}]}) 'a.b-test/t))
+        "a read of a kind the index does not hold whole (files, in an agent's plan) is never taken for a miss")))

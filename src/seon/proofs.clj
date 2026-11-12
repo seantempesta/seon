@@ -519,6 +519,12 @@
   (into {} (for [k (concat fns (map #(vector :schema %) entities) (map #(vector :config %) config) (map #(vector :file %) files))]
              [k (get rd k)])))
 
+(defn- covered?
+  "Does rd (a reads index) hold every input of read key k's kind (a var, [:schema k], [:config k], [:file p]; rd's
+  :seon.proofs/covers), so that k missing from it is a miss, not an input it cannot see?"
+  {:malli/schema [:=> [:cat :map :any] :boolean]}
+  [rd k] (contains? (:seon.proofs/covers rd) (if (vector? k) (first k) :var)))
+
 (defn read-digests
   "Each test of static ({test digest}, its reach digest) at the digest of its newest verdict in held ({test [verdict]}) whose
   :reads (reads-key) all still have their digest in rd, the program now: so a run looks it up there and reuses it while
@@ -527,7 +533,7 @@
   {:malli/schema [:=> [:cat [:map-of :any :string] :map [:map-of :any [:sequential :map]]] [:map-of :any :string]]}
   [static rd held]
   (into {} (for [[t d] static]
-             [t (or (some (fn [v] (when (and (seq (:reads v)) (every? (fn [[k dg]] (= dg (get rd k))) (:reads v))) (:digest v)))
+             [t (or (some (fn [v] (when (and (seq (:reads v)) (every? (fn [[k dg]] (and (= dg (get rd k)) (or (some? dg) (covered? rd k)))) (:reads v))) (:digest v)))
                           (get held t))
                     d)])))
 
