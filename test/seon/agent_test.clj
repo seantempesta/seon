@@ -981,8 +981,10 @@
     (is current-after "and still the one held for its db")
     (is (pos? rows) "the query of the index it inherited answers in the forked child")))
 
-;; Estimate: 1 agent setup (5 requests and files ~200k each) + 1 requests at ~30k = ~200000.
-(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 200000 :asks 1}} a-resumed-branchs-agent-is-this-boots
+;; Estimate: in-agent's own setup and teardown in this process (a task file, the attach, the kill and its branches' deletes: ~6 asks
+;; and their replies decoded, ~1.5M) + one root eval spawning onto a kept branch, its answer three claims' facts (~0.5M) = ~2M:
+;; 3,000,000 ticks (it was estimated at 200k from 30k an ask; measured 1.98M and 2.04M, past the 2M budget at the land of 03:04)
+(deftest ^{:seon.test/root [] :seon.test/estimate {:ticks 3000000 :asks 7}} a-resumed-branchs-agent-is-this-boots
   ;; one kept branch, one spawn, three claims about an agent resumed onto it.
   ;; found by session global-ids, 2026-10-23: an agent spawned with no task onto a branch the
   ;; store already holds (a kept branch; e2e's fresh agent on a store an earlier run left)
