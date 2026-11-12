@@ -448,6 +448,8 @@
  :seon.task/failure [:map {:description "The failure the task was held or marked failed with: its reason, counterexample, agent and turn."} [:reason :string] [:counterexample {:optional true} :string] [:agent {:optional true} :string] [:turn {:optional true} :int]]
  ;; the declaration a task file last stated for this task (seon.task/load-tx), as EDN
  :seon.task/declared [:string {:description "The declaration that a task file last stated for this task, as EDN."}]
+ ;; the citation reader's code its cites were read by (seon.task/reader-digest): a reader change reads every task again; a text change is its declaration's
+ :seon.task/cites-digest [:string {:description "The digest of the code that read this task's cites (seon.task/reader-digest): load-tx reads its cites again when the reader's code moved. See docs/data-modeling.md#derived-data-is-a-cache-never-relied-on."}]
  ;; a task may hold config keys as its overrides, by their own names; each key is defined once, by its own schema
  ;; (seon.config.agent.edn, seon.config.merge.edn), never listed here (an attribute is named by one entity schema)
  :seon.task/task-fact [:map {:seon.db/attributes true
@@ -491,7 +493,7 @@
                           [:seon.task/conflicts {:optional true} :seon.task/conflicts] [:seon.task/unmerged {:optional true} :seon.task/unmerged]
                           [:seon.task/task-conflicts {:optional true} :seon.task/task-conflicts] [:seon.task/failures {:optional true} :seon.task/failures]
                           [:seon.task/costs {:optional true} :seon.task/costs] [:seon.task/waste {:optional true} :seon.task/waste]
-                          [:seon.task/declared {:optional true} :seon.task/declared]]
+                          [:seon.task/declared {:optional true} :seon.task/declared] [:seon.task/cites-digest {:optional true} :seon.task/cites-digest]]
  ;; ---- how a task's work stands and ended: attributes of the task, on main, written when root starts and judges it ----
  ;; (docs/reconcile.md#a-task-holds-how-its-work-ended). A task's history is its attributes' previous values (d/history).
  ;; the agent that works it now (an agent moves between a session's tasks, seon.reconcile/stage-boundary)
