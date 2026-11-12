@@ -91,7 +91,7 @@
 ;; local here. Each case: the binary's tree made from this checkout's with one change (a git index of its own; the repository
 ;; is not touched). Estimate: the kept program and reach graph brought to date ~20M, five routes ~1M each (a tree diff, a
 ;; reach walk), five trees by git ~0.5M: 30M ticks.
-(deftest ^{:seon.test/estimate {:ticks 30000000}} a-landing-routes-live-only-for-what-an-agent-loads
+(deftest ^{:seon.test/estimate {:ticks 30000000} :seon.test/execs ["git"]} a-landing-routes-live-only-for-what-an-agent-loads
   (let [here (seon.config/checkout)
         db (test-runner/program)
         tree (seon.fx/tree-id here)
