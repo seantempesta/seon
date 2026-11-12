@@ -1,14 +1,14 @@
 (ns seon.ctx.wire
   "The model's request read from the agent's one render tree (seon.render/wire), its system text, and a past turn's request made again at its basis (docs/render.md#the-models-context-a-cached-prefix-then-the-turn)."
   (:refer-clojure :exclude [defn defn-])
-  (:require [seon.contract :as contract :refer [defn defn-]]
+  (:require [seon.print.emit :as emit] [seon.contract :as contract :refer [defn defn-]]
             [clojure.string :as str] [clojure.walk]
             [datahike.api :as d]
             [seon.render :as render] [seon.program :as program]
             [clojure.data.json :as json]
             [seon.db :as pdb] [seon.task :as task]
             [seon.print :as print]
-            [seon.print.select :as select]
+            
             [seon.doc :as doc]
             [seon.config :as cfg]
             [seon.model :as model]
@@ -143,7 +143,7 @@
   cache check (seon.turn/cache-miss) apportion a request. It reads each part's length and copies
   no text, so it costs its parts, not their characters."
   {:malli/schema [:=> [:cat [:sequential :map]] nat-int?]}
-  [ms] (select/chars-tokens (transduce (comp (mapcat (fn [m] (cons (:content m) (map :code (:tool-calls m))))) (map #(count (str %)))) + 0 ms)))
+  [ms] (emit/chars-tokens (transduce (comp (mapcat (fn [m] (cons (:content m) (map :code (:tool-calls m))))) (map #(count (str %)))) + 0 ms)))
 
 (defn render
   "What a turn's reader got, from its basis b (seon.turn records it on the turn's model call, :seon.model-call/basis) on db,
