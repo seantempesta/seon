@@ -1,0 +1,3 @@
+;; The dashboard's own values: what its routes refuse (seon.web), as errors are data (docs/errors.md#unknown-is-never-a-default).
+{:seon.web/unread-form [:and {:description "A toggled unit's text after its row's id (the browser's) that does not read as EDN, so no form was opened (seon.web/open-form): the page answers it, never a guess."}
+                        :seon.error/base [:map [:seon.error/type [:= :seon.web/unread-form]] [:seon.web/unit :string]]]}

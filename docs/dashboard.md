@@ -17,7 +17,7 @@ Health is what flows: a proc is healthy unless a problem was recorded of it, and
 The web proc owns the HTTP listener and each tab's server-sent-events channel: `seon.web/web-proc`.
 
 `seon.web/handler` is the edge in front of it; its routes:
-- `/`: the chat home; `/root`: root's page; `/root/debug`: what root reads;
+- `/`: the chat home; `/root`: root's page; `/root/debug`: root's session's requests, as any agent's, beside what the system reads;
 - `/agent/<id>`, `/user/<name>`: an agent's page (with `/ctx`, its `@ctx` printed, and `/debug`, what its model was sent);
 - `/open`, `/at`: a POST naming which cut is open and which turn a page shows;
 - `/feed?view=`: a tab's event stream;

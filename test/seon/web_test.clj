@@ -153,7 +153,9 @@
   (let [open-form @#'seon.web/open-form]
     (is (nil? (open-form "c12-chat")) "a row's own toggle names no form")
     (is (= '(drop 1 (get-in result/e5 [:value :proofs])) (open-form "c12-chat/(drop 1 (get-in result/e5 [:value :proofs]))")) "a form's symbols hold a slash")
-    (is (= :seon.web/unread (open-form "c12-chat/(drop 1")) "unreadable text")))
+    (let [e (open-form "c12-chat/(drop 1")]
+      (is (= :seon.web/unread-form (:seon.error/type e)) "unreadable text: a typed error, never a guess")
+      (is (= "c12-chat/(drop 1" (:seon.web/unit e)) "naming the unit the browser sent"))))
 
 (clojure.test/deftest a-cross-origin-post-is-refused
   ;; seon.web/handler's edge: a POST from a page of another origin is refused before it reaches the proc, whichever route it names
