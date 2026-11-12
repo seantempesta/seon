@@ -1462,6 +1462,11 @@
       :clone {:op :clone-failed :k (:k m) :error em}
       nil)))
 
+(def agent-steps
+  "The step-fns of an agent's graph, by proc id (serve! builds the graph from them): every one :workload :io, since an agent forks
+  its children and a fork needs one active thread (docs/processes.md#what-a-fork-inherits; the one-unit spec's law 1)."
+  {:transport #'transport-step :repl #'agent-step :tests #'tests-step})
+
 (defn serve!
   "The agent's loop: a Flow graph of three :io procs on its one thread (docs/flow.md): the
   :transport proc, the one reader of root's socket, hands the :repl proc root's requests in
@@ -1474,9 +1479,7 @@
   ;; the :repl and :tests in-ports each hold what root may have queued for the agent, as root's end of the
   ;; socket does: at the bound the transport waits to hand on the next (docs/flow.md#flow-inside-an-agent)
   (let [in {:in {:buf-or-n (cfg/value :seon.config.agent/inbox-size)}}
-        g (flow/create-flow {:procs {:transport {:proc (flow/process #'transport-step)}
-                                     :repl {:proc (flow/process #'agent-step) :chan-opts in}
-                                     :tests {:proc (flow/process #'tests-step) :chan-opts in}}
+        g (flow/create-flow {:procs (update-vals agent-steps (fn [step] (cond-> {:proc (flow/process step)} (not= step #'transport-step) (assoc :chan-opts in))))
                              :conns [[[:transport :repl] [:repl :in]] [[:transport :tests] [:tests :in]]]})
         {:keys [error-chan]} (flow/start g)]
     (swap! agent/state assoc :flow g)
