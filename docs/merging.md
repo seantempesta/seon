@@ -20,7 +20,7 @@ Point lands each proved tip with `bin/land [-F MSGFILE]` run in a worktree of it
 3. moves main to a merge commit whose tree is the proved tip's (`git commit-tree`, then `git update-ref` against main's old value: no checkout of main). If another landing moved main meanwhile, it merges main in and lands without proving again, saying so in the message; only a conflict stops it, and the daily full run covers the combination;
 4. brings the change into the standing root's main as data (the bridge, ```seon.system/landed-tx```, [source](source.md#a-landing-enters-main-as-data)), then runs the main tree's `bin/update`, which keeps root running when ```my.root/landed!``` allows it and otherwise builds and restarts it on main, printing why. The `bin/update` that runs is the one from before the landing, so a change to it takes effect at the next landing;
 5. prints how far main is past the last full run (`bin/full-run`, [below](#the-full-run-is-the-net));
-6. removes the landed worktree and its branch, unless something in it is uncommitted or untracked or another process works there (it says which), then `bin/worktree --prune`s every other finished worktree.
+6. keeps the session's worktree and branch, the branch fast-forwarded to the landed main, where its next change starts. A diff of docs and tasks only runs `bin/check health` and `seon.doc-test` in place of step 2; the log and the run's directory are kept in the main tree's `target/land/`.
 
 It ends on `LANDED` or `LAND FAILED`; a TERM, INT or HUP ends its whole prove group. The message is MSGFILE plus `bin/prove`'s merge line.
 
